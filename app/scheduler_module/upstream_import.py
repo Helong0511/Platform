@@ -78,6 +78,7 @@ async def finalize_upstream_import(
     inserted_count = result.get("inserted_count", 0)
     updated_count = result.get("updated_count", 0)
     skipped_count = result.get("skipped_count", 0)
+    zero_skipped_count = result.get("zero_skipped_count", 0)
     error_count = result.get("error_count", 0)
     assignment_gaps = result.get("assignment_gaps") or []
     assignment_orphan_total = int(result.get("assignment_orphan_total") or 0)
@@ -87,6 +88,7 @@ async def finalize_upstream_import(
         updated=updated_count,
         skipped=skipped_count,
         error=error_count,
+        zero_skipped=zero_skipped_count,
     )
     logger.info(f"数据导入完成: {result_summary}")
 
@@ -102,6 +104,8 @@ async def finalize_upstream_import(
         )
         if skipped_count > 0:
             telegram_msg += f"\n⏭️ 跳过重复: {skipped_count} 条"
+        if zero_skipped_count > 0:
+            telegram_msg += f"\n⏭️ 跳过全零: {zero_skipped_count} 条"
         if error_count > 0:
             telegram_msg += f"\n❌ 错误: {error_count} 条"
         try:

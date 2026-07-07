@@ -198,7 +198,7 @@ if __name__ == '__main__':
     # print("产品列表:", json.dumps(products_result, indent=2, ensure_ascii=False))
 
     # 获取详细广告数据（按国家维度，推荐）  country / ad_unit / ad_unit_country
-    ad_data_result = get_all_ad_data(data_type='day', dimension='country', start_date=start_date, end_date=end_date)
+    ad_data_result = get_all_ad_data(data_type='all', dimension='ad_unit_country', start_date=start_date, end_date=end_date)
     # ad_data_result = get_all_ad_data(data_type='all', start_date=start_date, end_date=end_date)
     print(f"共获取 {len(ad_data_result.get('data', []))}/{ad_data_result.get('total', '?')} 条")
     # print(json.dumps(ad_data_result, indent=2, ensure_ascii=False))

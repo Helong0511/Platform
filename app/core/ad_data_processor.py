@@ -36,6 +36,54 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _metric_is_zero_int(value: Any) -> bool:
+    return int(value or 0) == 0
+
+
+def _metric_is_zero_float(value: Any) -> bool:
+    return abs(float(value or 0.0)) < 1e-9
+
+
+def is_empty_ad_metrics(
+    *,
+    request_count: int = 0,
+    match_count: int = 0,
+    display_count: int = 0,
+    click_count: int = 0,
+    revenue: float = 0.0,
+    pageviews: int = 0,
+    viewability_rate: float = 0.0,
+    cpc: float = 0.0,
+    ecpm: float = 0.0,
+) -> bool:
+    """所有可入库数值指标均为 0 时视为无有效数据；任一非零则保留。"""
+    return (
+        _metric_is_zero_int(request_count)
+        and _metric_is_zero_int(match_count)
+        and _metric_is_zero_int(display_count)
+        and _metric_is_zero_int(click_count)
+        and _metric_is_zero_int(pageviews)
+        and _metric_is_zero_float(revenue)
+        and _metric_is_zero_float(viewability_rate)
+        and _metric_is_zero_float(cpc)
+        and _metric_is_zero_float(ecpm)
+    )
+
+
+def _grouped_data_is_empty(grouped_data: Dict[str, Any]) -> bool:
+    return is_empty_ad_metrics(
+        request_count=grouped_data.get("request_count", 0),
+        match_count=grouped_data.get("match_count", 0),
+        display_count=grouped_data.get("display_count", 0),
+        click_count=grouped_data.get("click_count", 0),
+        revenue=grouped_data.get("revenue", 0.0),
+        pageviews=grouped_data.get("pageviews", 0),
+        viewability_rate=grouped_data.get("viewability_rate", 0.0),
+        cpc=grouped_data.get("cpc", 0.0),
+        ecpm=grouped_data.get("ecpm", 0.0),
+    )
+
+
 def _ad_data_identity_filters(
     *,
     product_id: int,
@@ -269,6 +317,7 @@ async def process_api_ad_data(
             - inserted_count: 成功插入的数据条数
             - updated_count: 成功更新的数据条数
             - skipped_count: 跳过重复的数据条数
+            - zero_skipped_count: 跳过全零指标的数据条数
             - error_count: 处理出错的数据条数
     """
 
@@ -297,6 +346,7 @@ async def process_api_ad_data(
     inserted_count = 0
     updated_count = 0
     skipped_count = 0
+    zero_skipped_count = 0
     error_count = 0
     import_date_min: Optional[date] = None
     import_date_max: Optional[date] = None
@@ -416,7 +466,7 @@ async def process_api_ad_data(
                 error_count += 1
                 continue
 
-            # 计算eCPM
+            # eCPM（用于全零判断；无展示时由收益推算或为 0）
             item_ecpm_val = get_field(item, "ecpm_before_deduct")
             if item_ecpm_val is not None and item_ecpm_val != "":
                 try:
@@ -425,6 +475,27 @@ async def process_api_ad_data(
                     item_ecpm = (item_revenue / item_display_count * 1000) if item_display_count > 0 else 0.0
             else:
                 item_ecpm = (item_revenue / item_display_count * 1000) if item_display_count > 0 else 0.0
+
+            if is_empty_ad_metrics(
+                request_count=item_request_count,
+                match_count=item_match_count,
+                display_count=item_display_count,
+                click_count=item_click_count,
+                revenue=item_revenue,
+                pageviews=item_pageviews,
+                viewability_rate=item_viewability_rate,
+                cpc=item_cpc,
+                ecpm=item_ecpm,
+            ):
+                zero_skipped_count += 1
+                logger.debug(
+                    "跳过全零指标行: date=%s product=%s",
+                    item_date_str,
+                    item_product_name,
+                )
+                continue
+
+            # 计算eCPM（后续分组累加沿用已算好的 item_ecpm）
 
             # 尝试识别国家代码
             item_country_input = get_field(item, "country_code", None)
@@ -603,11 +674,14 @@ async def process_api_ad_data(
         logger.info(
             f"数据预处理完成: 原始数据 {total_original_items} 条, "
             f"合并后 {total_grouped_items} 条 "
-            f"(能识别国家: {len(recognized_data)}, 无法识别国家: {len(unrecognized_data)})"
+            f"(能识别国家: {len(recognized_data)}, 无法识别国家: {len(unrecognized_data)}), "
+            f"跳过全零 {zero_skipped_count} 条"
         )
 
     # ========== 第二步：处理能识别国家代码的数据（按日期、产品、国家检查重复，累加后处理） ==========
     for key, grouped_data in recognized_data.items():
+        if _grouped_data_is_empty(grouped_data):
+            continue
         pending_write: Optional[str] = None  # "insert" | "update"
         pending_product_id: Optional[int] = None
         async with db.begin_nested() as savepoint:
@@ -913,6 +987,8 @@ async def process_api_ad_data(
 
     # ========== 第三步：处理无国家输入（NULL）或无法识别（保留原始代码）的累加数据 ==========
     for key, grouped_data in unrecognized_data.items():
+        if _grouped_data_is_empty(grouped_data):
+            continue
         pending_write: Optional[str] = None
         pending_product_id: Optional[int] = None
         async with db.begin_nested() as savepoint:
@@ -1237,6 +1313,7 @@ async def process_api_ad_data(
                     "inserted_count": inserted_count,
                     "updated_count": updated_count,
                     "skipped_count": skipped_count,
+                    "zero_skipped_count": zero_skipped_count,
                     "error_count": error_count,
                     "source": f"{source}自动导入",
                 },
@@ -1258,6 +1335,7 @@ async def process_api_ad_data(
         "inserted_count": inserted_count,
         "updated_count": updated_count,
         "skipped_count": skipped_count,
+        "zero_skipped_count": zero_skipped_count,
         "error_count": error_count,
         "assignment_gaps": assignment_gaps,
         "assignment_orphan_total": assignment_orphan_total,
