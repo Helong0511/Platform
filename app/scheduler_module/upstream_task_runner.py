@@ -43,8 +43,7 @@ async def run_upstream_import_task(
     """
     上游拉数任务标准流程：未配置则跳过 → 拉数 → import_upstream_ad_data 入库。
 
-    report_type 默认为 legacy：入库时 process_api_ad_data 会按 ad_unit/country 行形态
-    自动推断为 unit/country/cross/daily；各 task 也可显式传入（如 zhisuo unit/country）。
+    report_type 保留兼容；入库时按每行 ad_unit / country_code 自动推断 unit/country/cross/daily。
 
     参数:
         task_name: 调度任务名（与 task_names 常量一致）

@@ -3,7 +3,7 @@ yangyangdeyi（TBSJ）上游广告数据拉取定时任务。
 """
 import logging
 
-from app.core.ad_data_metadata import DATA_SOURCE_TBSJ, REPORT_TYPE_CROSS
+from app.core.ad_data_metadata import DATA_SOURCE_TBSJ
 from app.core.config import settings
 from app.scheduler_module.task_names import TBSJ_API_TASK_NAME
 from app.scheduler_module.task_utils import log_task_error, resolve_upstream_date_range
@@ -77,7 +77,6 @@ async def tbsj_api_task(
             source="yangyangdeyi定时任务",
             notify_title="yangyangdeyi",
             data_source=DATA_SOURCE_TBSJ,
-            report_type=REPORT_TYPE_CROSS,
             notify_params=notify_params,
         )
     except Exception as e:

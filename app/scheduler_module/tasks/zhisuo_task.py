@@ -10,12 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.core.ad_data_metadata import (
-    DATA_SOURCE_ZHISUO,
-    REPORT_TYPE_COUNTRY,
-    REPORT_TYPE_DAILY,
-    REPORT_TYPE_UNIT,
-)
+from app.core.ad_data_metadata import DATA_SOURCE_ZHISUO
 from app.core.config import settings
 from app.scheduler_module.task_names import ZHISUO_API_TASK_NAME
 from app.scheduler_module.task_result_store import set_task_result
@@ -172,9 +167,8 @@ async def _import_zhisuo_account(
             current_time_str=current_time_str,
             notify_title=f"zhisuo-{client_id}-广告单元",
             update_task_result=False,
-            notify_params={**notify_base, "报表": "unit"},
+            notify_params={**notify_base},
             data_source=DATA_SOURCE_ZHISUO,
-            report_type=REPORT_TYPE_UNIT,
             upstream_account=client_id,
         )
         summaries.append(f"unit: {unit_summary}")
@@ -188,9 +182,8 @@ async def _import_zhisuo_account(
             current_time_str=current_time_str,
             notify_title=f"zhisuo-{client_id}-国家报告",
             update_task_result=False,
-            notify_params={**notify_base, "报表": "country"},
+            notify_params={**notify_base},
             data_source=DATA_SOURCE_ZHISUO,
-            report_type=REPORT_TYPE_COUNTRY,
             upstream_account=client_id,
         )
         summaries.append(f"country: {country_summary}")
@@ -204,9 +197,8 @@ async def _import_zhisuo_account(
             current_time_str=current_time_str,
             notify_title=f"zhisuo-{client_id}-日报兜底",
             update_task_result=False,
-            notify_params={**notify_base, "报表": "daily"},
+            notify_params={**notify_base},
             data_source=DATA_SOURCE_ZHISUO,
-            report_type=REPORT_TYPE_DAILY,
             upstream_account=client_id,
         )
         summaries.append(f"daily: {daily_summary}")

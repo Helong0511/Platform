@@ -4,10 +4,7 @@ Addermobi 上游广告数据拉取定时任务。
 import json
 import logging
 
-from app.core.ad_data_metadata import (
-    DATA_SOURCE_ADDERMOBI,
-    REPORT_TYPE_CROSS,
-)
+from app.core.ad_data_metadata import DATA_SOURCE_ADDERMOBI
 from app.core.config import settings
 from app.scheduler_module.task_names import ADDERMOBI_API_TASK_NAME
 from app.scheduler_module.task_utils import resolve_upstream_date_range
@@ -97,7 +94,6 @@ async def addermobi_api_task(
         source="Addermobi定时任务",
         notify_title="Addermobi",
         data_source=DATA_SOURCE_ADDERMOBI,
-        report_type=REPORT_TYPE_CROSS,
         data_transform=preprocess_addermobi_match_counts,
         log_label="Addermobi API获取数据",
         notify_params=notify_params,

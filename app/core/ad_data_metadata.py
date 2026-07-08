@@ -6,7 +6,7 @@ report_type 枚举（与客户报表维度、唯一键一致）：
 - country 国家明细（有 country、无 ad_unit）— 智索 country API、TQT/Huguang 等
 - cross   国家+广告单元交叉 — Addermobi、Skymobi、Pomiad、GAM country 等
 - daily   日汇总（无 country、无 ad_unit）— 智索 daily 兜底、GAM daily
-- legacy  历史/待标注；入库时若未显式指定则按行形态自动推断为 unit/country/cross/daily
+- legacy  历史/待标注；新入库一律按行形态自动推断为 unit/country/cross/daily
 """
 from __future__ import annotations
 
@@ -119,11 +119,28 @@ def resolve_report_type_for_row(
     ad_unit: str = "",
     country_code: Optional[str] = None,
 ) -> str:
-    """入库单行 report_type：调用方已指定非 legacy 则沿用，否则按 ad_unit/country 推断。"""
-    normalized = normalize_report_type(explicit)
-    if normalized != REPORT_TYPE_LEGACY:
-        return normalized
+    """入库单行 report_type：按 ad_unit / country_code 行形态自动推断。"""
+    del explicit
     return infer_report_type_from_shape(ad_unit=ad_unit, country_code=country_code)
+
+
+def format_report_type_counts_for_notify(
+    counts: Optional[dict[str, int]],
+) -> str:
+    """将入库统计中的报表类型计数格式化为 Telegram 通知文案。"""
+    if not counts:
+        return ""
+    parts: list[str] = []
+    for key in REPORT_TYPE_DETAIL_OPTIONS:
+        count = int(counts.get(key) or 0)
+        if count <= 0:
+            continue
+        label = REPORT_TYPE_LABELS.get(key, key)
+        parts.append(f"{label}({key}) {count}条")
+    legacy_count = int(counts.get(REPORT_TYPE_LEGACY) or 0)
+    if legacy_count > 0:
+        parts.append(f"{REPORT_TYPE_LABELS[REPORT_TYPE_LEGACY]}({REPORT_TYPE_LEGACY}) {legacy_count}条")
+    return "、".join(parts)
 
 
 def get_report_type_options_for_admin() -> list[dict[str, str]]:
@@ -191,16 +208,16 @@ REPORT_TYPE_HINTS: dict[str, str] = {
     REPORT_TYPE_LEGACY: "历史或未标注；新入库会自动按行形态推断",
 }
 
-# 各上游 API 默认报表维度（显式传入时可覆盖自动推断）
+# 各上游 API 默认报表维度（入库时按行形态自动推断，此处仅作文档/兼容）
 UPSTREAM_DEFAULT_REPORT_TYPES: dict[str, str] = {
-    DATA_SOURCE_ZHISUO: REPORT_TYPE_LEGACY,  # zhisuo_task 按接口分别传 unit/country/daily
-    DATA_SOURCE_GAM: REPORT_TYPE_LEGACY,  # gam_import 按报表键转换
-    DATA_SOURCE_POMIAD: REPORT_TYPE_CROSS,
-    DATA_SOURCE_ADDERMOBI: REPORT_TYPE_CROSS,
-    DATA_SOURCE_SKYMOBI: REPORT_TYPE_CROSS,
+    DATA_SOURCE_ZHISUO: REPORT_TYPE_LEGACY,
+    DATA_SOURCE_GAM: REPORT_TYPE_LEGACY,
+    DATA_SOURCE_POMIAD: REPORT_TYPE_LEGACY,
+    DATA_SOURCE_ADDERMOBI: REPORT_TYPE_LEGACY,
+    DATA_SOURCE_SKYMOBI: REPORT_TYPE_LEGACY,
     DATA_SOURCE_HUGUANG: REPORT_TYPE_LEGACY,
     DATA_SOURCE_TQT: REPORT_TYPE_LEGACY,
-    DATA_SOURCE_TBSJ: REPORT_TYPE_CROSS,
+    DATA_SOURCE_TBSJ: REPORT_TYPE_LEGACY,
     DATA_SOURCE_EXCEL: REPORT_TYPE_LEGACY,
 }
 

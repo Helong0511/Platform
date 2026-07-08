@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ad_data_processor import process_api_ad_data
+from app.core.ad_data_metadata import format_report_type_counts_for_notify
 from app.core.product_assignment import format_assignment_gap_telegram_message
 from app.core.telegram import send_telegram_message_async
 from app.core.database import AsyncSessionLocal
@@ -82,6 +83,9 @@ async def finalize_upstream_import(
     error_count = result.get("error_count", 0)
     assignment_gaps = result.get("assignment_gaps") or []
     assignment_orphan_total = int(result.get("assignment_orphan_total") or 0)
+    report_type_line = format_report_type_counts_for_notify(
+        result.get("report_type_counts")
+    )
 
     result_summary = format_result_summary(
         inserted=inserted_count,
@@ -99,6 +103,10 @@ async def finalize_upstream_import(
             f"⏰ {notify_title} 定时任务执行完成\n\n"
             f"执行时间: {current_time_str}\n"
             f"{params_block}"
+        )
+        if report_type_line:
+            telegram_msg += f"报表类型: {report_type_line}\n"
+        telegram_msg += (
             f"✅ 成功插入: {inserted_count} 条\n"
             f"✅ 成功更新: {updated_count} 条"
         )

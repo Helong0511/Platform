@@ -7,6 +7,7 @@
 """
 import logging
 import asyncio
+from collections import defaultdict
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Set
 import pytz
@@ -309,7 +310,7 @@ async def process_api_ad_data(
         source: 数据来源标识（用于日志记录，默认"API"）
         field_mapping: 字段映射字典，键为标准字段名，值为API返回的字段名
         data_source: 入库字段，上游系统标识（zhisuo/gam/excel 等）
-        report_type: 入库字段，报表维度（unit/country/cross/daily）
+        report_type: 入库字段（保留参数兼容；实际按 ad_unit/country 行形态自动推断）
         upstream_account: 入库字段，上游账号（如 KE11）
     
     返回:
@@ -348,6 +349,7 @@ async def process_api_ad_data(
     skipped_count = 0
     zero_skipped_count = 0
     error_count = 0
+    report_type_counts: dict[str, int] = defaultdict(int)
     import_date_min: Optional[date] = None
     import_date_max: Optional[date] = None
     # 本次成功 insert/update 的产品 ID（skip / error 不计入，用于分配空窗检查范围）
@@ -684,6 +686,7 @@ async def process_api_ad_data(
             continue
         pending_write: Optional[str] = None  # "insert" | "update"
         pending_product_id: Optional[int] = None
+        pending_report_type: Optional[str] = None
         async with db.begin_nested() as savepoint:
             try:
                 date_str = grouped_data["date_str"]
@@ -912,6 +915,7 @@ async def process_api_ad_data(
                     if need_update:
                         pending_write = "update"
                         pending_product_id = product_id
+                        pending_report_type = row_report_type
                         logger.info(
                             f"更新广告数据: 日期={date_str}, 产品={product_name}, 国家={country_code}, "
                             f"变化字段: {', '.join(update_fields)}"
@@ -952,6 +956,7 @@ async def process_api_ad_data(
                     await db.refresh(new_ad_data)
                     pending_write = "insert"
                     pending_product_id = product_id
+                    pending_report_type = row_report_type
 
                     logger.info(
                         f"添加广告数据: 日期={date_str}, 产品={product_name}, 国家={country_code}, "
@@ -966,6 +971,7 @@ async def process_api_ad_data(
                 await savepoint.rollback()
                 pending_write = None
                 pending_product_id = None
+                pending_report_type = None
                 error_msg = str(e)
                 if "IntegrityError" in str(type(e)) or "Duplicate entry" in error_msg or "uq_ad_data" in error_msg:
                     logger.warning(
@@ -981,9 +987,13 @@ async def process_api_ad_data(
         if pending_write == "insert" and pending_product_id is not None:
             inserted_count += 1
             written_product_ids.add(pending_product_id)
+            if pending_report_type:
+                report_type_counts[pending_report_type] += 1
         elif pending_write == "update" and pending_product_id is not None:
             updated_count += 1
             written_product_ids.add(pending_product_id)
+            if pending_report_type:
+                report_type_counts[pending_report_type] += 1
 
     # ========== 第三步：处理无国家输入（NULL）或无法识别（保留原始代码）的累加数据 ==========
     for key, grouped_data in unrecognized_data.items():
@@ -991,6 +1001,7 @@ async def process_api_ad_data(
             continue
         pending_write: Optional[str] = None
         pending_product_id: Optional[int] = None
+        pending_report_type: Optional[str] = None
         async with db.begin_nested() as savepoint:
             try:
                 if len(key) == 4:
@@ -1225,6 +1236,7 @@ async def process_api_ad_data(
                     if need_update:
                         pending_write = "update"
                         pending_product_id = product_id
+                        pending_report_type = row_report_type
                         logger.info(
                             f"更新广告数据（无国家或无法识别，已累加）: 日期={date_str}, 产品={product_name}, "
                             f"国家={country_code or 'NULL'}, 变化字段: {', '.join(update_fields)}"
@@ -1268,6 +1280,7 @@ async def process_api_ad_data(
                     await db.refresh(new_ad_data)
                     pending_write = "insert"
                     pending_product_id = product_id
+                    pending_report_type = row_report_type
 
                     logger.info(
                         f"添加广告数据（国家代码未识别，已保留原始值）: 日期={date_str}, 产品={product_name}, 国家={country_code}, "
@@ -1281,6 +1294,7 @@ async def process_api_ad_data(
                 await savepoint.rollback()
                 pending_write = None
                 pending_product_id = None
+                pending_report_type = None
                 error_msg = str(e)
                 if "IntegrityError" in str(type(e)) or "Duplicate entry" in error_msg or "uq_ad_data" in error_msg:
                     logger.warning(
@@ -1295,9 +1309,13 @@ async def process_api_ad_data(
         if pending_write == "insert" and pending_product_id is not None:
             inserted_count += 1
             written_product_ids.add(pending_product_id)
+            if pending_report_type:
+                report_type_counts[pending_report_type] += 1
         elif pending_write == "update" and pending_product_id is not None:
             updated_count += 1
             written_product_ids.add(pending_product_id)
+            if pending_report_type:
+                report_type_counts[pending_report_type] += 1
 
     if inserted_count > 0 or updated_count > 0:
         try:
@@ -1337,6 +1355,7 @@ async def process_api_ad_data(
         "skipped_count": skipped_count,
         "zero_skipped_count": zero_skipped_count,
         "error_count": error_count,
+        "report_type_counts": dict(report_type_counts),
         "assignment_gaps": assignment_gaps,
         "assignment_orphan_total": assignment_orphan_total,
     }

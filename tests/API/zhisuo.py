@@ -13,6 +13,7 @@ url = "https://ch.tecnee.xyz"
 day_report = "/api/channeldaily"
 country = "/api/channelcountry"
 unit = "/api/channelunit"
+country_and_unit = "/api/channelcountryandunit"
 
 ## 替换后的参数
 # clientId = 'zhisuo24'                              # 客户ID（替换）
@@ -25,8 +26,8 @@ key = 'cded7587a3b1aad269b9c9f5248f8b7e'  # 私钥（替换）
 # start_date = date.today().isoformat()              # 当前日期，例如 '2026-05-29'
 # end_date = date.today().isoformat()                # 结束日期（可根据需要调整）
 
-start_date = '2026-07-01'
-end_date = '2026-07-06'
+start_date = '2026-07-08'
+end_date = '2026-07-08'
 
 timestamp = int(time.time() * 1000)  # 当前13位毫秒时间戳
 page = 1
@@ -81,8 +82,8 @@ need = [
 
 # 国家数据
 response = requests.get(url + country, params=params).json()
-print(response)
 data = response.get('data', []).get('list', [])
 for item in data:
-    if item.get('domain_name', '') in need:
-        print(item)
+    print(item)
+    # if item.get('domain_name', '') in need:
+    #     print(item)
