@@ -232,6 +232,7 @@ async def build_data_decrease_warning(
         telegram_msg += "减少的字段:\n"
         for field in decreased_fields:
             telegram_msg += f"• {field}\n"
+        telegram_msg += "\n✅ 已按上游新数据更新本地记录"
         return telegram_msg
     except Exception as e:
         logger.warning(f"构建数据减少警告时出错: {e}")
@@ -804,8 +805,6 @@ async def process_api_ad_data(
 
                 # 处理数据（新建或更新）
                 if existing_data:
-                    if existing_data.report_type != row_report_type:
-                        existing_data.report_type = row_report_type
                     pending_decrease_warning = await build_data_decrease_warning(
                         existing_data=existing_data,
                         new_request_count=grouped_data["request_count"],
@@ -824,6 +823,13 @@ async def process_api_ad_data(
                     # 检查是否需要更新
                     need_update = False
                     update_fields = []
+
+                    if existing_data.report_type != row_report_type:
+                        need_update = True
+                        update_fields.append(
+                            f"报表类型: {existing_data.report_type} -> {row_report_type}"
+                        )
+                        existing_data.report_type = row_report_type
 
                     if existing_data.request_count != grouped_data["request_count"]:
                         need_update = True
@@ -1126,8 +1132,6 @@ async def process_api_ad_data(
 
                 # 处理数据（新建或更新）
                 if existing_data:
-                    if existing_data.report_type != row_report_type:
-                        existing_data.report_type = row_report_type
                     pending_decrease_warning = await build_data_decrease_warning(
                         existing_data=existing_data,
                         new_request_count=grouped_data["request_count"],
@@ -1146,6 +1150,13 @@ async def process_api_ad_data(
                     # 检查是否需要更新
                     need_update = False
                     update_fields = []
+
+                    if existing_data.report_type != row_report_type:
+                        need_update = True
+                        update_fields.append(
+                            f"报表类型: {existing_data.report_type} -> {row_report_type}"
+                        )
+                        existing_data.report_type = row_report_type
 
                     if existing_data.country_code != country_code:
                         old_country = existing_data.country_code

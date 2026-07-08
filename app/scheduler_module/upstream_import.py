@@ -80,6 +80,13 @@ async def finalize_upstream_import(
     # ---------- 汇总统计 ----------
     inserted_count = result.get("inserted_count", 0)
     updated_count = result.get("updated_count", 0)
+    decrease_warning_count = len(result.get("decrease_warnings") or [])
+    if decrease_warning_count > updated_count:
+        logger.error(
+            "数据减少告警数量异常: decrease_warnings=%d > updated_count=%d",
+            decrease_warning_count,
+            updated_count,
+        )
     skipped_count = result.get("skipped_count", 0)
     zero_skipped_count = result.get("zero_skipped_count", 0)
     error_count = result.get("error_count", 0)
