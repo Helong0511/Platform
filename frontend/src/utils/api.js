@@ -72,6 +72,7 @@ import logger from './logger';
 import axios from 'axios';
 import { ElMessage } from 'element-plus';
 import { getCsrfToken, extractAndSaveCsrfToken, fetchCsrfTokenFromEndpoints } from './csrfToken';
+import { assertValidRequestUrl } from './apiPath';
 
 /**
  * 标准化API响应处理
@@ -824,6 +825,10 @@ export const request = async (config, options = {}) => {
     const requestConfig = { ...config };
     if (timeout !== null) {
       requestConfig.timeout = timeout;
+    }
+
+    if (requestConfig.url) {
+      assertValidRequestUrl(requestConfig.url);
     }
     
     const response = await axios(requestConfig);

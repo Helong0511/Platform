@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum
 import logging
+import re
 from typing import Optional
 
 from app.core.config import settings
@@ -223,6 +224,12 @@ _PROD_LOW_DOC_MARKERS: tuple[str, ...] = (
     "/openapi.json",
 )
 
+# JS 打包产物中的模板变量名（如 ${e}、${u}）被安全扫描器当作字面路径探测
+_BUNDLE_TEMPLATE_PLACEHOLDER_RE = re.compile(
+    r"\$\{[^}/]+\}|%24%7b[^%/]+%7d",
+    re.IGNORECASE,
+)
+
 
 def _marker_rules() -> tuple[PathRule, ...]:
     """合并内置子串规则、生产环境低危文档路径及 SENSITIVE_PATH_BLOCK_EXTRA 扩展。"""
@@ -284,12 +291,27 @@ def reload_marker_rules() -> None:
     _MARKER_RULES_CACHE = None
 
 
+def is_bundle_template_placeholder_path(path: str) -> bool:
+    """
+    检测前端打包 JS 中的模板占位符被扫描器原样请求的 URL。
+
+    例如 /api/v1/clients/${u}、/api/v1/ad-data/%24%7Be%7D。
+    正常业务请求不会出现此类路径。
+    """
+    if not path:
+        return False
+    return bool(_BUNDLE_TEMPLATE_PLACEHOLDER_RE.search(path))
+
+
 def match_sensitive_path(path: str) -> Optional[SensitivePathMatch]:
     """
     匹配敏感路径，若多条规则命中则取最高等级。
     """
     path_l = (path or "").lower()
     best: Optional[SensitivePathMatch] = None
+
+    if is_bundle_template_placeholder_path(path):
+        return _build_match("bundle_template_placeholder", SensitivePathLevel.LOW)
 
     for rule in _EXACT_RULES:
         if path_l == rule.pattern:

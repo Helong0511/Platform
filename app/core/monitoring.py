@@ -1367,7 +1367,11 @@ class SystemMonitoringMiddleware(BaseHTTPMiddleware):
         if any(path.startswith(prefix) for prefix in cls._SKIP_PATH_PREFIXES):
             return True
         lower = path.lower()
-        return any(lower.endswith(suffix) for suffix in cls._SKIP_PATH_SUFFIXES)
+        if any(lower.endswith(suffix) for suffix in cls._SKIP_PATH_SUFFIXES):
+            return True
+        from app.core.sensitive_path_rules import is_bundle_template_placeholder_path
+
+        return is_bundle_template_placeholder_path(path)
 
     @classmethod
     def _should_sample_path_stats(cls) -> bool:
