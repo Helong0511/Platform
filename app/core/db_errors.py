@@ -54,8 +54,24 @@ def is_database_unreachable_error(exc: BaseException) -> bool:
         if orig_args and str(orig_args[0]) == "2003":
             return True
 
+    return False
+
+
+def is_duplicate_entry_error(exc: BaseException) -> bool:
+    """判断是否为 MySQL 唯一键冲突（1062 Duplicate entry）。"""
+    if exc is None:
+        return False
+
+    message = str(exc)
+    if "1062" in message or "Duplicate entry" in message:
+        return True
+
+    orig = getattr(exc, "orig", None)
+    if orig is not None and orig is not exc:
+        return is_duplicate_entry_error(orig)
+
     cause = getattr(exc, "__cause__", None)
     if cause is not None and cause is not exc:
-        return is_database_unreachable_error(cause)
+        return is_duplicate_entry_error(cause)
 
     return False
