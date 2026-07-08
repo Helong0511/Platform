@@ -144,7 +144,7 @@ async def _import_zhisuo_account(
 
     covered = _zhisuo_product_date_keys(unit_rows) | _zhisuo_product_date_keys(country_rows)
     daily_fallback: list[Any] = []
-    if account.get("fetch_daily_fallback", True):
+    if account.get("fetch_daily_fallback"):
         daily_result = await fetch_zhisuo_daily_rows(
             base_url=base_url,
             client_id=client_id,
@@ -235,12 +235,13 @@ async def zhisuo_api_task(
 
     active = [
         acc for acc in accounts
-        if acc.get("fetch_unit") or acc.get("fetch_country") or acc.get("fetch_daily_fallback", True)
+        if acc.get("fetch_unit") or acc.get("fetch_country") or acc.get("fetch_daily_fallback")
     ]
     if not active:
         msg = (
-            "跳过: 所有 Zhisuo 账号均未启用广告单元或国家报告拉数"
-            "（请检查 ZHISUO_API_FETCH_UNIT / ZHISUO_API_FETCH_COUNTRY / ZHISUO_API_ACCOUNT_FETCH）"
+            "跳过: 所有 Zhisuo 账号均未启用广告单元、国家报告或日报兜底拉数"
+            "（请检查 ZHISUO_API_FETCH_UNIT / ZHISUO_API_FETCH_COUNTRY / "
+            "ZHISUO_API_FETCH_DAILY_FALLBACK / ZHISUO_API_ACCOUNT_FETCH）"
         )
         logger.warning(msg)
         set_task_result(ZHISUO_API_TASK_NAME, msg)
