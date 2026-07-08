@@ -158,7 +158,7 @@ async def _find_existing_ad_data_for_import(
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
 
-async def check_and_notify_data_decrease(
+async def build_data_decrease_warning(
         existing_data: Any,
         new_request_count: int,
         new_match_count: int,
@@ -171,33 +171,15 @@ async def check_and_notify_data_decrease(
         country_code: Optional[str],
         source: str = "API",
         db: Optional[AsyncSession] = None,
-) -> None:
+) -> Optional[str]:
     """
-    检查待更新数据是否比原有数据减少，如果减少则发送Telegram通知给管理员
-    
-    重要说明：
-    - API获取的数据正常情况下应该比上一次获得的数据大（累积增长）
-    - 如果数据减少，可能是数据源异常或数据被重置，需要检查数据源
-    - 此检查仅用于警告，不会阻止数据更新
-    
-    Args:
-        existing_data: 数据库中现有的数据对象
-        new_request_count: 新的请求数
-        new_match_count: 新的匹配数
-        new_display_count: 新的展示数
-        new_click_count: 新的点击数
-        new_revenue_before: 新的收益（减扣前）
-        new_revenue_after: 新的收益（减扣后）
-        date_str: 日期字符串
-        product_name: 产品名称
-        country_code: 国家代码
-        source: 数据来源（默认"API"）
+    检查待更新数据是否比原有数据减少，构建 Telegram 告警文案（不发送）。
+
+    调用方应在确认行将写入且事务提交成功后再调用 send_pending_data_decrease_warnings。
     """
     try:
-        # 检查关键指标是否减少（减少量必须大于阈值才报告，避免浮点数精度问题导致的误报）
         decreased_fields = []
-        # 浮点数类型的最小减少量阈值：至少减少0.01
-        FLOAT_THRESHOLD = 0.01
+        float_threshold = 0.01
 
         request_decrease = existing_data.request_count - new_request_count
         if request_decrease > 0:
@@ -220,57 +202,57 @@ async def check_and_notify_data_decrease(
                 f"点击数: 原有 {existing_data.click_count} → 新获取 {new_click_count} (减少 {click_decrease})")
 
         revenue_before_decrease = existing_data.revenue_before_deduct - new_revenue_before
-        if revenue_before_decrease > FLOAT_THRESHOLD:
+        if revenue_before_decrease > float_threshold:
             decreased_fields.append(
                 f"收益(减扣前): 原有 {existing_data.revenue_before_deduct:.2f} → 新获取 {new_revenue_before:.2f} (减少 {revenue_before_decrease:.2f})")
 
         revenue_after_decrease = existing_data.revenue_after_deduct - new_revenue_after
-        if revenue_after_decrease > FLOAT_THRESHOLD:
+        if revenue_after_decrease > float_threshold:
             decreased_fields.append(
                 f"收益(减扣后): 原有 {existing_data.revenue_after_deduct:.2f} → 新获取 {new_revenue_after:.2f} (减少 {revenue_after_decrease:.2f})")
 
-        # 如果有数据减少，发送通知
-        if decreased_fields:
-            if db is not None:
-                country_display = await resolve_country_display(db, country_code)
-            else:
-                country_display = format_country_display(country_code)
+        if not decreased_fields:
+            return None
 
-            # 获取当前时间（使用时区）
-            current_time = datetime.now(APP_TIMEZONE)
-            current_time_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
+        if db is not None:
+            country_display = await resolve_country_display(db, country_code)
+        else:
+            country_display = format_country_display(country_code)
 
-            telegram_msg = f"⚠️ 数据减少警告\n\n"
-            telegram_msg += f"数据来源: {source}\n"
-            telegram_msg += f"数据日期: {date_str}\n"
-            telegram_msg += f"产品: {product_name}\n"
-            telegram_msg += f"国家: {country_display}\n"
-            telegram_msg += f"发送时间: {current_time_str}（时区: {settings.TIMEZONE}）\n\n"
-            telegram_msg += f"⚠️ 注意：API获取的数据正常情况下应该比上一次获得的数据大（累积增长）\n"
-            telegram_msg += f"如果数据减少，可能是数据源异常或数据被重置，请检查数据源！\n\n"
-            telegram_msg += f"减少的字段:\n"
-            for field in decreased_fields:
-                telegram_msg += f"• {field}\n"
+        current_time_str = datetime.now(APP_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
 
-            # 发送通知（异步，不阻塞）
-            try:
-                await asyncio.wait_for(
-                    send_telegram_message_async(settings.TELEGRAM_ADMIN, telegram_msg),
-                    timeout=5.0
-                )
-                logger.warning(
-                    f"数据减少警告已发送: 日期={date_str}, 产品={product_name}, 国家={country_code}, "
-                    f"减少字段数={len(decreased_fields)}。"
-                    f"注意：API获取的数据正常情况下应该比上一次获得的数据大（累积增长），"
-                    f"如果数据减少可能是数据源异常或数据被重置"
-                )
-            except asyncio.TimeoutError:
-                logger.warning(f"发送数据减少警告超时: 日期={date_str}, 产品={product_name}")
-            except Exception as notify_err:
-                logger.warning(f"发送数据减少警告失败: {notify_err}")
+        telegram_msg = "⚠️ 数据减少警告\n\n"
+        telegram_msg += f"数据来源: {source}\n"
+        telegram_msg += f"数据日期: {date_str}\n"
+        telegram_msg += f"产品: {product_name}\n"
+        telegram_msg += f"国家: {country_display}\n"
+        telegram_msg += f"发送时间: {current_time_str}（时区: {settings.TIMEZONE}）\n\n"
+        telegram_msg += "⚠️ 注意：API获取的数据正常情况下应该比上一次获得的数据大（累积增长）\n"
+        telegram_msg += "如果数据减少，可能是数据源异常或数据被重置，请检查数据源！\n\n"
+        telegram_msg += "减少的字段:\n"
+        for field in decreased_fields:
+            telegram_msg += f"• {field}\n"
+        return telegram_msg
     except Exception as e:
-        # 通知失败不应该影响数据更新流程
-        logger.warning(f"检查数据减少时出错: {e}")
+        logger.warning(f"构建数据减少警告时出错: {e}")
+        return None
+
+
+async def send_pending_data_decrease_warnings(warnings: list[str]) -> None:
+    """事务提交成功后批量发送数据减少告警。"""
+    if not warnings:
+        return
+    for telegram_msg in warnings:
+        try:
+            await asyncio.wait_for(
+                send_telegram_message_async(settings.TELEGRAM_ADMIN, telegram_msg),
+                timeout=5.0,
+            )
+            logger.warning("数据减少警告已发送（提交成功后）")
+        except asyncio.TimeoutError:
+            logger.warning("发送数据减少警告超时")
+        except Exception as notify_err:
+            logger.warning(f"发送数据减少警告失败: {notify_err}")
 
 
 async def process_api_ad_data(
@@ -354,6 +336,7 @@ async def process_api_ad_data(
     import_date_max: Optional[date] = None
     # 本次成功 insert/update 的产品 ID（skip / error 不计入，用于分配空窗检查范围）
     written_product_ids: Set[int] = set()
+    pending_decrease_warnings: list[str] = []
 
     # ========== 第一步：预处理所有数据，识别国家代码并分组 ==========
     # 存储能识别国家代码的数据：按 (date_str, product_name, country_code) 分组累加
@@ -687,6 +670,7 @@ async def process_api_ad_data(
         pending_write: Optional[str] = None  # "insert" | "update"
         pending_product_id: Optional[int] = None
         pending_report_type: Optional[str] = None
+        pending_decrease_warning: Optional[str] = None
         async with db.begin_nested() as savepoint:
             try:
                 date_str = grouped_data["date_str"]
@@ -822,8 +806,7 @@ async def process_api_ad_data(
                 if existing_data:
                     if existing_data.report_type != row_report_type:
                         existing_data.report_type = row_report_type
-                    # 检查数据是否减少（在更新之前）
-                    await check_and_notify_data_decrease(
+                    pending_decrease_warning = await build_data_decrease_warning(
                         existing_data=existing_data,
                         new_request_count=grouped_data["request_count"],
                         new_match_count=grouped_data["match_count"],
@@ -923,6 +906,7 @@ async def process_api_ad_data(
 
                     else:
                         skipped_count += 1
+                        pending_decrease_warning = None
                         logger.info(f"数据完全相同，跳过: 日期={date_str}, 产品={product_name}, 国家={country_code}")
                 else:
                     # 创建新记录
@@ -972,6 +956,7 @@ async def process_api_ad_data(
                 pending_write = None
                 pending_product_id = None
                 pending_report_type = None
+                pending_decrease_warning = None
                 error_msg = str(e)
                 if "IntegrityError" in str(type(e)) or "Duplicate entry" in error_msg or "uq_ad_data" in error_msg:
                     logger.warning(
@@ -994,6 +979,8 @@ async def process_api_ad_data(
             written_product_ids.add(pending_product_id)
             if pending_report_type:
                 report_type_counts[pending_report_type] += 1
+            if pending_decrease_warning:
+                pending_decrease_warnings.append(pending_decrease_warning)
 
     # ========== 第三步：处理无国家输入（NULL）或无法识别（保留原始代码）的累加数据 ==========
     for key, grouped_data in unrecognized_data.items():
@@ -1002,6 +989,7 @@ async def process_api_ad_data(
         pending_write: Optional[str] = None
         pending_product_id: Optional[int] = None
         pending_report_type: Optional[str] = None
+        pending_decrease_warning: Optional[str] = None
         async with db.begin_nested() as savepoint:
             try:
                 if len(key) == 4:
@@ -1140,8 +1128,7 @@ async def process_api_ad_data(
                 if existing_data:
                     if existing_data.report_type != row_report_type:
                         existing_data.report_type = row_report_type
-                    # 检查数据是否减少（在更新之前）
-                    await check_and_notify_data_decrease(
+                    pending_decrease_warning = await build_data_decrease_warning(
                         existing_data=existing_data,
                         new_request_count=grouped_data["request_count"],
                         new_match_count=grouped_data["match_count"],
@@ -1244,6 +1231,7 @@ async def process_api_ad_data(
 
                     else:
                         skipped_count += 1
+                        pending_decrease_warning = None
                         logger.info(
                             f"数据完全相同，跳过: 日期={date_str}, 产品={product_name}, "
                             f"国家={country_code or 'NULL'}"
@@ -1295,6 +1283,7 @@ async def process_api_ad_data(
                 pending_write = None
                 pending_product_id = None
                 pending_report_type = None
+                pending_decrease_warning = None
                 error_msg = str(e)
                 if "IntegrityError" in str(type(e)) or "Duplicate entry" in error_msg or "uq_ad_data" in error_msg:
                     logger.warning(
@@ -1316,6 +1305,8 @@ async def process_api_ad_data(
             written_product_ids.add(pending_product_id)
             if pending_report_type:
                 report_type_counts[pending_report_type] += 1
+            if pending_decrease_warning:
+                pending_decrease_warnings.append(pending_decrease_warning)
 
     if inserted_count > 0 or updated_count > 0:
         try:
@@ -1358,4 +1349,5 @@ async def process_api_ad_data(
         "report_type_counts": dict(report_type_counts),
         "assignment_gaps": assignment_gaps,
         "assignment_orphan_total": assignment_orphan_total,
+        "decrease_warnings": pending_decrease_warnings,
     }

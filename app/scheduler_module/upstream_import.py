@@ -23,7 +23,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.ad_data_processor import process_api_ad_data
+from app.core.ad_data_processor import process_api_ad_data, send_pending_data_decrease_warnings
 from app.core.ad_data_metadata import format_report_type_counts_for_notify
 from app.core.product_assignment import format_assignment_gap_telegram_message
 from app.core.telegram import send_telegram_message_async
@@ -74,6 +74,8 @@ async def finalize_upstream_import(
         await db.rollback()
         logger.error(f"数据提交失败，已回滚: {commit_error}", exc_info=True)
         raise Exception(f"数据提交失败: {commit_error}") from commit_error
+
+    await send_pending_data_decrease_warnings(result.get("decrease_warnings") or [])
 
     # ---------- 汇总统计 ----------
     inserted_count = result.get("inserted_count", 0)

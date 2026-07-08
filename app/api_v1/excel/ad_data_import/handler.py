@@ -21,6 +21,7 @@ from app.core.utils import format_error_details, build_import_message, get_date_
 from app.core.country_code import normalize_ad_data_country_cache_key
 from app.models.models import User, AdData, AdminNotificationConfig
 from app.schemas.excel import ExcelImportResponse
+from app.core.ad_data_processor import send_pending_data_decrease_warnings
 from app.services.telegram_notification_service import TelegramNotificationService
 
 logger = logging.getLogger(__name__)
@@ -212,6 +213,8 @@ async def import_ad_data_handler(
                 ),
                 log_context="Ad data import"
             )
+
+        await send_pending_data_decrease_warnings(result.get("decrease_warnings") or [])
 
         # 构建响应：使用统一的错误详情格式化函数
         error_details = format_error_details(result.get("errors", []))

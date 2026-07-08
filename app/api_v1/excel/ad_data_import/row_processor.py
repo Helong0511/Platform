@@ -21,7 +21,7 @@ from app.api_v1.excel.utils import (
     is_valid_numeric_value, normalize_date_key, parse_date_value, safe_get_value,
 )
 from app.core.ad_data_metadata import DATA_SOURCE_EXCEL, infer_report_type_from_shape
-from app.core.ad_data_processor import check_and_notify_data_decrease
+from app.core.ad_data_processor import build_data_decrease_warning
 from app.core.constants import ECPM_MULTIPLIER
 from app.core.country_code import (
     build_ad_data_country_equality,
@@ -308,7 +308,7 @@ async def process_row_data(
             else:
                 date_str = str(data_date)
 
-            await check_and_notify_data_decrease(
+            decrease_warning = await build_data_decrease_warning(
                 existing_data=existing_data,
                 new_request_count=request_count,
                 new_match_count=match_count,
@@ -345,6 +345,8 @@ async def process_row_data(
             # 如果基础数据有变化，重新计算比率字段（确保一致性）
             existing_data.calculate_rates()
             result["updated_rows"] += 1
+            if decrease_warning:
+                result.setdefault("decrease_warnings", []).append(decrease_warning)
             logger.debug(f"✅ 已更新记录: 日期={data_date}, 产品={product_name}")
         else:
             # 创建新记录
