@@ -4,6 +4,10 @@ Google Ad Manager（GAM）定时拉数任务。
 每小时拉取 ad_unit / country / site 报表到内存，
 country 与 ad_unit 分形态入库；site 仅做一致性校验。
 账号与白名单见项目 config/gam_scheduler.json。
+
+容错约定：
+- 单账号拉数失败时，失败原因须写入 scheduled_tasks.last_error，并计为任务失败（error_count）
+- 其他账号仍可继续入库；结果摘要为「部分失败」而非「执行成功」
 """
 from __future__ import annotations
 
@@ -35,11 +39,32 @@ GAM_SKIP_NO_CONFIG = (
 GAM_SKIP_NO_ACCOUNTS = "跳过: gam_scheduler.json 中未配置 GAM 账号"
 
 
+def _collect_fetch_failures(bundles: list[dict]) -> list[str]:
+    """从拉数结果中收集带 fetch_error 的账号失败摘要。"""
+    failures: list[str] = []
+    for bundle in bundles:
+        fetch_error = str(bundle.get("fetch_error") or "").strip()
+        if not fetch_error:
+            continue
+        account_key = str(bundle.get("account_key") or "?")
+        network_code = str(bundle.get("network_code") or "?")
+        # fetch_error 已含中文说明；前缀账号便于管理端「最后错误」一眼定位
+        if fetch_error.startswith(f"{account_key}("):
+            failures.append(fetch_error)
+        else:
+            failures.append(f"{account_key}({network_code}): {fetch_error}")
+    return failures
+
+
 async def google_api_task(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> None:
-    """Google API 获取数据：内存拉数 + GAM 专用分报表入库。"""
+    """
+    Google API 获取数据：内存拉数 + GAM 专用分报表入库。
+
+    任一侧账号拉数或入库失败时抛出 RuntimeError，由调度器写入 last_error 并增加 error_count。
+    """
     if not gam_scheduler_config_exists():
         logger.warning(GAM_SKIP_NO_CONFIG)
         log_scheduled_task_skip(
@@ -98,10 +123,16 @@ async def google_api_task(
         set_task_result(GAM_API_TASK_NAME, "执行成功: 暂无可用 GAM 账号数据")
         return
 
+    # ---------- 1. 拉数阶段已失败的账号（如 NO_NETWORKS_TO_ACCESS）----------
+    fetch_failures = _collect_fetch_failures(bundles)
     phase_summaries: list[str] = []
-    failures: list[str] = []
+    import_failures: list[str] = []
+
+    # ---------- 2. 仅对拉数成功的账号入库 ----------
     for bundle in bundles:
         account_key = bundle.get("account_key", "?")
+        if bundle.get("fetch_error"):
+            continue
         try:
             summary = await import_gam_account_bundle(
                 bundle,
@@ -111,15 +142,25 @@ async def google_api_task(
             phase_summaries.append(f"{account_key}: {summary}")
         except Exception as exc:
             err = f"{account_key}: {exc}"
-            failures.append(err)
+            import_failures.append(err)
             logger.error("GAM 账号入库失败 - %s", err, exc_info=True)
 
-    if failures and not phase_summaries:
-        message = truncate_task_error_message("; ".join(failures))
+    all_failures = fetch_failures + import_failures
+
+    # 全部账号失败：明确失败文案，调度器记 error_count
+    if all_failures and not phase_summaries:
+        message = truncate_task_error_message("拉数/入库失败: " + "; ".join(all_failures))
+        set_task_result(GAM_API_TASK_NAME, message)
+        raise RuntimeError(message)
+
+    # 部分账号失败：仍抛错，确保 last_error 显示失败原因，且不计入 success_count
+    if all_failures:
+        result = "部分失败: " + "; ".join(all_failures)
+        if phase_summaries:
+            result += " | 成功账号: " + "; ".join(phase_summaries)
+        message = truncate_task_error_message(result)
         set_task_result(GAM_API_TASK_NAME, message)
         raise RuntimeError(message)
 
     result = "执行成功: " + "; ".join(phase_summaries)
-    if failures:
-        result += " | 部分失败: " + "; ".join(failures)
     set_task_result(GAM_API_TASK_NAME, truncate_task_error_message(result))

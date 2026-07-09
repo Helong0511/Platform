@@ -55,8 +55,18 @@ def refresh_gam_report_types_for_account(account: dict[str, Any]) -> dict[str, A
     return gam_api_fetch.probe_gam_report_types_for_account(account)
 
 
-def normalize_gam_api_exception(exc: Exception) -> Exception:
-    """将 GAM/Google 异常转为带中文说明的 ValueError（若可识别）。"""
+def normalize_gam_api_exception(
+    exc: Exception,
+    *,
+    credentials_path: str | None = None,
+    account_key: str = "",
+    network_code: str = "",
+) -> Exception:
+    """
+    将 GAM/Google 异常转为带中文说明的 ValueError（若可识别）。
+
+    识别 invalid_grant、NO_NETWORKS_TO_ACCESS 等，便于写入定时任务 last_error。
+    """
     if isinstance(exc, ValueError):
         return exc
     if isinstance(exc, PermissionError) and ".cache" in str(exc):
@@ -65,6 +75,20 @@ def normalize_gam_api_exception(exc: Exception) -> Exception:
             "请以 root 执行: bash scripts/ensure_gam_runtime_dirs.sh"
         )
     lowered = str(exc).lower()
-    if any(token in lowered for token in ("invalid_grant", "access_denied", "permission_denied")):
-        return gam_api_fetch.format_gam_auth_error(exc)
+    auth_tokens = (
+        "invalid_grant",
+        "access_denied",
+        "permission_denied",
+        "authenticationerror",
+        "no_networks_to_access",
+        "not_whitelisted_for_api_access",
+        "network_not_found",
+    )
+    if any(token in lowered for token in auth_tokens):
+        return gam_api_fetch.format_gam_auth_error(
+            exc,
+            credentials_path=credentials_path,
+            account_key=account_key,
+            network_code=network_code,
+        )
     return exc

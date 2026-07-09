@@ -1972,6 +1972,39 @@ def fetch_account_reports_to_memory(
     }
 
 
+def _format_account_fetch_failure(
+    cfg: dict,
+    exc: Exception,
+) -> tuple[str, dict]:
+    """
+    将单账号拉数异常格式化为可读摘要，并生成带 fetch_error 的失败 bundle。
+
+    失败 bundle 仍占一个账号位，供定时任务写入 last_error；不把错误塞进其他成功账号的 warnings。
+    """
+    normalized = format_gam_auth_error(
+        exc,
+        credentials_path=cfg.get("credentials_path"),
+        account_key=str(cfg.get("account_key") or ""),
+        network_code=str(cfg.get("network_code") or ""),
+    )
+    detail = str(normalized)
+    account_key = str(cfg.get("account_key") or "?")
+    network_code = str(cfg.get("network_code") or "?")
+    summary = f"{account_key}({network_code}): {detail}"
+    failure_bundle = {
+        "account_key": account_key,
+        "network_code": network_code,
+        "application_name": cfg.get("application_name"),
+        "start_date": cfg["start_date"].isoformat() if cfg.get("start_date") else None,
+        "end_date": cfg["end_date"].isoformat() if cfg.get("end_date") else None,
+        "reports": {},
+        "report_summaries": [],
+        "fetch_error": detail,
+        "warnings": [],
+    }
+    return summary, failure_bundle
+
+
 def run_gam_fetch_to_memory(
     start_date: date,
     end_date: date,
@@ -1989,7 +2022,11 @@ def run_gam_fetch_to_memory(
         accounts: 可选账号配置（含 product_whitelist、report_keys）；未传则走环境变量/内置默认
 
     Returns:
-        每个账号一个 bundle dict（含 reports: ad_unit/country/site → list[dict]）
+        每个账号一个 bundle dict（含 reports: ad_unit/country/site → list[dict]）。
+        单账号失败时仍返回该账号 bundle，并设置 ``fetch_error`` 字段；全部失败则抛 RuntimeError。
+
+    Raises:
+        RuntimeError: 无可用密钥，或全部账号拉数失败
     """
     _require_googleads()
     run_cfg = _gam_run_config()
@@ -2033,14 +2070,12 @@ def run_gam_fetch_to_memory(
                 cfg["account_key"],
                 cfg["network_code"],
             )
-            failures.append(
-                f"{cfg['account_key']}({cfg['network_code']}): {type(exc).__name__}: {exc}"
-            )
-    if failures and not bundles:
+            summary, failure_bundle = _format_account_fetch_failure(cfg, exc)
+            failures.append(summary)
+            bundles.append(failure_bundle)
+    # 全部失败：直接抛出，由任务层写入 last_error 并计 error_count
+    if failures and all(bundle.get("fetch_error") for bundle in bundles):
         raise RuntimeError("; ".join(failures))
-    if failures:
-        for account_bundle in bundles:
-            account_bundle.setdefault("warnings", []).extend(failures)
     return bundles
 
 
@@ -2243,16 +2278,41 @@ def format_gam_auth_error(
     *,
     credentials_path: Path | str | None = None,
     account_key: str = "",
+    network_code: str = "",
 ) -> ValueError:
-    """将 Google OAuth / GAM 认证错误转为可读中文说明。"""
+    """
+    将 Google OAuth / GAM 认证错误转为可读中文说明。
+
+    用于探针、定时拉数失败摘要写入 scheduled_tasks.last_error，避免只留下 SOAP 原始 Fault。
+    """
     message = str(exc)
     lowered = message.lower()
     path = Path(credentials_path) if credentials_path else None
     email = _read_service_account_email(path) if path and path.is_file() else ""
     email_hint = f" 服务账号：{email}" if email else ""
     account_hint = f" 账号：{account_key}" if account_key else ""
+    network_hint = f" Network：{network_code}" if network_code else ""
     path_hint = f" 密钥：{path}" if path else ""
 
+    if "no_networks_to_access" in lowered:
+        return ValueError(
+            "服务账号未关联任何可访问的 GAM Network（NO_NETWORKS_TO_ACCESS）。"
+            f"{account_hint}{network_hint}{email_hint}{path_hint} "
+            "请检查：① 该 Network 已开启 API 访问（Admin → Global settings → Network settings）；"
+            "② 须用「Add a service account user」添加上述 client_email，勿当普通用户添加；"
+            "③ network_code 与密钥所属 Network 一致，且服务账号未被移除/停用。"
+        )
+    if "not_whitelisted_for_api_access" in lowered:
+        return ValueError(
+            "该 Network 未对 API 开放访问（NOT_WHITELISTED_FOR_API_ACCESS）。"
+            f"{account_hint}{network_hint}{email_hint} "
+            "请管理员在 GAM 后台开启 API access 并保存。"
+        )
+    if "network_not_found" in lowered:
+        return ValueError(
+            "找不到指定的 GAM Network（NETWORK_NOT_FOUND）。"
+            f"{account_hint}{network_hint}{path_hint} 请核对密钥文件名中的 network_code。"
+        )
     if "invalid_grant" in lowered and "account not found" in lowered:
         return ValueError(
             "Google 服务账号不存在或密钥已失效（invalid_grant: account not found）。"
@@ -2270,6 +2330,11 @@ def format_gam_auth_error(
         return ValueError(
             f"GAM API 权限不足。{account_hint}{email_hint} "
             "请确认服务账号已在 GAM 后台授权，且具备报表读取权限。"
+        )
+    if "authenticationerror" in lowered:
+        return ValueError(
+            f"GAM 认证失败。{account_hint}{network_hint}{email_hint}{path_hint} "
+            f"原始信息：{message}"
         )
     return ValueError(f"GAM API 调用失败。{account_hint}{path_hint} {message}")
 
@@ -2301,6 +2366,7 @@ def probe_gam_report_types_for_account(raw_account: dict) -> dict:
             exc,
             credentials_path=credentials_path,
             account_key=str(cfg.get("account_key") or account.get("key") or ""),
+            network_code=str(cfg.get("network_code") or ""),
         ) from exc
     if not report_types:
         raise RuntimeError(

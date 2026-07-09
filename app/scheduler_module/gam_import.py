@@ -368,9 +368,16 @@ async def import_gam_account_bundle(
 ) -> str:
     """
     单账号 GAM bundle 入库：country 交叉行；ad_unit 仅在校验且无 country 数据时入库；site 仅校验。
+
+    Raises:
+        RuntimeError: bundle 带 fetch_error（拉数已失败，不应入库）
     """
     network_code = str(bundle.get("network_code") or "")
     account_key = str(bundle.get("account_key") or "")
+    fetch_error = str(bundle.get("fetch_error") or "").strip()
+    if fetch_error:
+        raise RuntimeError(f"{account_key}({network_code}) 拉数失败，跳过入库: {fetch_error}")
+
     reports: dict[str, list[dict[str, Any]]] = bundle.get("reports") or {}
 
     ad_unit_rows = list(reports.get("ad_unit") or [])
@@ -452,8 +459,13 @@ async def import_gam_account_bundle(
     site_count = len(_filter_leaf_rows(site_rows))
     phase_summaries.append(f"site({site_count}行): 仅校验不入库")
 
-    bundle_warnings = list(bundle.get("warnings") or [])
+    # warnings 仅保留校验类提示；账号级拉数失败已改用 fetch_error，由任务层写入 last_error
+    bundle_warnings = [
+        str(item).strip()
+        for item in (bundle.get("warnings") or [])
+        if str(item).strip()
+    ]
     if bundle_warnings:
-        phase_summaries.append("拉数告警: " + "; ".join(bundle_warnings))
+        phase_summaries.append("校验告警: " + "; ".join(bundle_warnings))
 
     return "; ".join(phase_summaries)
