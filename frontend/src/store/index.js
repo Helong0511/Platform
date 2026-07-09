@@ -76,6 +76,7 @@ import { initTimezone } from '../utils/dateFormat';
 import { logger } from '../utils/logger';
 import { request } from '../utils/api';
 import { loginOAuth2, logout as authLogout } from '../api/auth';
+import { clearCsrfToken } from '../utils/csrfToken';
 
 
 
@@ -127,6 +128,8 @@ export const getDefaultRoute = (userInfo) => {
 export const clearAuthData = () => {
   try {
     sessionStorage.removeItem('userInfo');
+    // 退出/会话失效时同步清 CSRF，避免下一角色登录后仍用旧探测链路触发管理员接口 403
+    clearCsrfToken();
     // 注意：refresh_token 和 access_token 存储在 HttpOnly Cookie 中，由后端在 logout 接口中清除
   } catch (e) {
     logger.warn('清除认证信息时出错:', e);

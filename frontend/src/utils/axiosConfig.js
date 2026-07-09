@@ -210,7 +210,10 @@ const handleCsrfError = async (error) => {
       // 4. 最后尝试使用一个简单的GET请求获取CSRF token
       try {
         logger.info('尝试使用简单GET请求获取CSRF token');
-        const response = await axios.get('/api/v1/dashboard/stats');
+        const response = await axios.get('/api/v1/users/me', {
+          skipErrorMessage: true,
+          skipRequestCache: true,
+        });
         const simpleCsrfToken = getCsrfTokenFromResponse(response);
         if (simpleCsrfToken) {
           saveCsrfToken(simpleCsrfToken);
@@ -359,12 +362,23 @@ export const setupResponseInterceptor = () => {
         }
       } else if (error.response && error.response.status === 403) {
         // 403 Forbidden错误：可能是CSRF令牌问题或其他权限问题
-        const errorData = error.response.data;
-        const errorDetail = (errorData && typeof errorData === 'object' && !(errorData instanceof Blob))
-          ? (errorData.detail || errorData.message || '请求被拒绝')
-          : '请求被拒绝';
+        // CSRF 探测 / 静默请求：不弹权限提示（避免角色切换后误报「需要管理员权限」）
+        if (error.config?.skipErrorMessage || error.config?.silent) {
+          error._handled = true;
+          return Promise.reject(error);
+        }
 
-        if (errorDetail.includes('CSRF') || errorDetail.includes('csrf') || errorDetail.includes('令牌')) {
+        const errorData = error.response.data;
+        // 标准错误体 detail 可能是字符串，也可能是嵌套对象
+        let errorDetail = '请求被拒绝';
+        if (errorData && typeof errorData === 'object' && !(errorData instanceof Blob)) {
+          const raw = errorData.detail ?? errorData.message;
+          errorDetail = typeof raw === 'string'
+            ? raw
+            : (raw?.detail || raw?.message || errorData.message || '请求被拒绝');
+        }
+
+        if (typeof errorDetail === 'string' && (errorDetail.includes('CSRF') || errorDetail.includes('csrf') || errorDetail.includes('令牌'))) {
           sessionStorage.removeItem('csrf_token');
           const retryResponse = await handleCsrfError(error);
           if (retryResponse) {
@@ -372,7 +386,7 @@ export const setupResponseInterceptor = () => {
           }
           error._handled = true;
         } else {
-          ElMessage.error(errorDetail);
+          ElMessage.error(String(errorDetail));
           error._handled = true;
         }
       } else if (error.response && error.response.status === 429) {

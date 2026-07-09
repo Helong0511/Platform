@@ -246,6 +246,31 @@ export const initPageVisibilityRefresh = () => {
 };
 
 /**
+ * 清除本地 CSRF 令牌（退出登录 / 角色切换时调用）
+ * 避免管理员会话残留的探测请求在客户登录后触发「需要管理员权限」提示
+ */
+export const clearCsrfToken = () => {
+  try {
+    sessionStorage.removeItem('csrf_token');
+    localStorage.removeItem('csrf_token');
+    localStorage.removeItem('csrf_token_updated_at');
+  } catch (e) {
+    logger.warn('清除 CSRF 令牌失败:', e);
+  }
+};
+
+/**
+ * CSRF 探测用 GET 端点：必须对「任意已登录用户」可用。
+ * 禁止放入仅管理员接口（如 /users/stats、/clients、部分 short-links），
+ * 否则客户登录后刷新 CSRF 会收到 403「需要管理员权限」并被拦截器弹窗。
+ */
+const CSRF_PROBE_ENDPOINTS = [
+  '/api/v1/users/me',
+  '/api/v1/dashboard/stats',
+  '/api/v1/products/?page_size=1',
+];
+
+/**
  * 尝试从多个端点获取 CSRF token
  * 改进：添加令牌刷新锁，避免多个标签页同时刷新
  * @param {Array<string>} endpoints - 要尝试的端点列表（可选，默认使用常用端点）
@@ -270,19 +295,15 @@ export const fetchCsrfTokenFromEndpoints = async (endpoints = null) => {
   isRefreshingToken = true;
 
   try {
-    const defaultEndpoints = [
-      '/api/v1/users/stats',
-      '/api/v1/dashboard/stats',
-      '/api/v1/products/?page_size=1',
-      '/api/v1/short-links/?page_size=1',
-      '/api/v1/clients/?page_size=1'
-    ];
-
-    const endpointsToTry = endpoints || defaultEndpoints;
+    const endpointsToTry = endpoints || CSRF_PROBE_ENDPOINTS;
 
     for (const endpoint of endpointsToTry) {
       try {
-        const response = await axios.get(endpoint);
+        // skipErrorMessage：探测失败（含历史误配的管理员接口）不弹权限错误
+        const response = await axios.get(endpoint, {
+          skipErrorMessage: true,
+          skipRequestCache: true,
+        });
         const csrfToken = extractAndSaveCsrfToken(response);
         if (csrfToken) {
           logger.info(`通过 GET 请求获取到新的 CSRF token: ${endpoint}`);
