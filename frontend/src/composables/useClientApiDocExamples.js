@@ -60,6 +60,7 @@ export function useClientApiDocExamples() {
   const signAdDataAll = ref('');
   const signAdDataDay = ref('');
   const signAdDataAllCountry = ref('');
+  const signAdDataWithPage = ref('');
 
   async function refreshSigns() {
     if (!hasCredentials.value) {
@@ -67,6 +68,7 @@ export function useClientApiDocExamples() {
       signAdDataAll.value = '';
       signAdDataDay.value = '';
       signAdDataAllCountry.value = '';
+      signAdDataWithPage.value = '';
       return;
     }
     const base = { clientId: clientId.value, reqTime: rt.value };
@@ -87,6 +89,18 @@ export function useClientApiDocExamples() {
         dimension: 'country',
         startDate: td.value,
         endDate: td.value
+      },
+      skVal
+    );
+    signAdDataWithPage.value = await generateClientApiSign(
+      {
+        ...base,
+        dataType: 'all',
+        dimension: 'country',
+        startDate: td.value,
+        endDate: td.value,
+        page: 1,
+        pageSize: 1000
       },
       skVal
     );
@@ -229,6 +243,37 @@ export function useClientApiDocExamples() {
     );
   });
 
+  const adDataRequestWithPageJson = computed(() => {
+    if (!hasCredentials.value) {
+      return `{
+  "client_id": "您的客户ID",
+  "req_time": ${rt.value},
+  "sign": "登录后自动生成",
+  "data_type": "all",
+  "dimension": "country",
+  "start_date": "${td.value}",
+  "end_date": "${td.value}",
+  "page": 1,
+  "page_size": 1000
+}`;
+    }
+    return JSON.stringify(
+      {
+        client_id: Number(clientId.value),
+        req_time: rt.value,
+        sign: signAdDataWithPage.value,
+        data_type: 'all',
+        dimension: 'country',
+        start_date: td.value,
+        end_date: td.value,
+        page: 1,
+        page_size: 1000
+      },
+      null,
+      2
+    );
+  });
+
   const pythonSignProducts = computed(
     () => `import hmac
 import hashlib
@@ -273,9 +318,11 @@ import time
 client_id = ${cid.value}
 req_time = ${rt.value}  # 页面加载时的时间戳（10位秒级），实际请求请用 int(time.time())
 data_type = 'all'  # 必填参数：'all' 或 'day'
-dimension = 'country'  # 可选：country / ad_unit / country_ad_unit；不传则不过滤维度
+dimension = 'country'  # 可选：country / ad_unit / ad_unit_country；不传则不过滤维度
 start_date = '${td.value}'  # 当天日期
 end_date = '${td.value}'  # 当天日期
+page = 1  # 可选；显式传入时须参与签名
+page_size = 1000  # 可选；不传默认 1000，最大 5000；显式传入时须参与签名
 SECRET_KEY = '${sk.value}'
 
 # 1. 准备参数（data_type 是必填的）
@@ -292,6 +339,10 @@ if start_date:
     params['start_date'] = str(start_date)
 if end_date:
     params['end_date'] = str(end_date)
+if page is not None:
+    params['page'] = str(page)
+if page_size is not None:
+    params['page_size'] = str(page_size)
 
 # 2. 按字母顺序排序
 sorted_keys = sorted(params.keys())
@@ -309,7 +360,7 @@ sign = hmac.new(
     temp_str.encode('utf-8'),
     hashlib.sha256,
 ).hexdigest().lower()
-# sign = ${signAdDataAllCountry.value ? `'${signAdDataAllCountry.value}'` : '（需配置密钥后生成）'}`
+# sign = ${signAdDataWithPage.value ? `'${signAdDataWithPage.value}'` : '（需配置密钥后生成）'}`
   );
 
   const pythonFullExample = computed(
@@ -324,8 +375,11 @@ BASE_URL = 'https://client.btfrx.online/api/v1'
 CLIENT_ID = ${cid.value}
 SECRET_KEY = '${sk.value}'
 
-def generate_signature(client_id, req_time, secret_key, data_type=None, dimension=None, start_date=None, end_date=None):
-    """生成 HMAC-SHA256 签名（MD5 仍向后兼容）"""
+def generate_signature(client_id, req_time, secret_key, data_type=None, dimension=None,
+                       start_date=None, end_date=None, page=None, page_size=None):
+    """生成 HMAC-SHA256 签名（MD5 仍向后兼容）
+    注意：page / page_size 仅在显式传入时参与签名；不传则服务端默认 page=1、page_size=1000。
+    """
     params = {
         'client_id': str(client_id),
         'req_time': str(req_time)
@@ -339,6 +393,10 @@ def generate_signature(client_id, req_time, secret_key, data_type=None, dimensio
         params['start_date'] = str(start_date)
     if end_date:
         params['end_date'] = str(end_date)
+    if page is not None:
+        params['page'] = str(page)
+    if page_size is not None:
+        params['page_size'] = str(page_size)
     
     sorted_keys = sorted(params.keys())
     temp_str = '&'.join([f"{key}={params[key]}" for key in sorted_keys])
@@ -371,16 +429,21 @@ def get_products():
     
     return response.json()
 
-def get_ad_data(data_type, start_date=None, end_date=None, dimension=None):
+def get_ad_data(data_type, start_date=None, end_date=None, dimension=None, page=None, page_size=None):
     """获取广告数据
     Args:
         data_type: 必填，'all' 明细 或 'day' 日汇总
         start_date: 可选，起始日期（格式：YYYY-MM-DD）
         end_date: 可选，终止日期（格式：YYYY-MM-DD）
-        dimension: 可选，country / ad_unit / country_ad_unit（与后台报表一致；建议双 API 客户必传）
+        dimension: 可选，country / ad_unit / ad_unit_country（与后台报表一致；建议双 API 客户必传）
+        page: 可选，页码（从 1 开始）；不传默认 1；显式传入须参与签名
+        page_size: 可选，每页条数；不传默认 1000，最大 5000；显式传入须参与签名
     """
     req_time = int(time.time())
-    sign = generate_signature(CLIENT_ID, req_time, SECRET_KEY, data_type, dimension, start_date, end_date)
+    sign = generate_signature(
+        CLIENT_ID, req_time, SECRET_KEY, data_type, dimension,
+        start_date, end_date, page, page_size
+    )
     
     params = {
         'client_id': CLIENT_ID,
@@ -396,6 +459,10 @@ def get_ad_data(data_type, start_date=None, end_date=None, dimension=None):
         params['start_date'] = start_date
     if end_date:
         params['end_date'] = end_date
+    if page is not None:
+        params['page'] = page
+    if page_size is not None:
+        params['page_size'] = page_size
     
     headers = {'Content-Type': 'application/json'}
     response = requests.post(
@@ -407,6 +474,29 @@ def get_ad_data(data_type, start_date=None, end_date=None, dimension=None):
     
     return response.json()
 
+def get_all_ad_data(data_type, start_date=None, end_date=None, dimension=None, page_size=5000):
+    """分页拉全量广告数据"""
+    all_rows = []
+    page = 1
+    total_pages = 1
+    while page <= total_pages:
+        result = get_ad_data(
+            data_type=data_type,
+            start_date=start_date,
+            end_date=end_date,
+            dimension=dimension,
+            page=page,
+            page_size=page_size,
+        )
+        rows = result.get('data') or []
+        all_rows.extend(rows)
+        total = int(result.get('total') or 0)
+        total_pages = int(result.get('total_pages') or 1)
+        page += 1
+        if not rows:
+            break
+    return {'total': len(all_rows), 'data': all_rows}
+
 # 使用示例（日期为当天 ${td.value}）
 if __name__ == '__main__':
     today = '${td.value}'
@@ -415,8 +505,11 @@ if __name__ == '__main__':
     products_result = get_products()
     print("产品列表:", json.dumps(products_result, indent=2, ensure_ascii=False))
     
-    # 获取详细广告数据（按国家维度，推荐）
-    ad_data_result = get_ad_data(data_type='all', dimension='country', start_date=today, end_date=today)
+    # 获取详细广告数据（按国家维度，推荐；带分页）
+    ad_data_result = get_ad_data(
+        data_type='all', dimension='country',
+        start_date=today, end_date=today, page=1, page_size=1000
+    )
     print("按国家-详细数据:", json.dumps(ad_data_result, indent=2, ensure_ascii=False))
     
     # 获取每日汇总（按国家维度）
@@ -444,11 +537,12 @@ public class ClientAPI {
     private static final String SECRET_KEY = "${key}";
     
     private static String generateSignature(int clientId, long reqTime, String secretKey) {
-        return generateSignature(clientId, reqTime, secretKey, null, null, null, null);
+        return generateSignature(clientId, reqTime, secretKey, null, null, null, null, null, null);
     }
     
     private static String generateSignature(int clientId, long reqTime, String secretKey, 
-                                             String dataType, String dimension, String startDate, String endDate) {
+                                             String dataType, String dimension, String startDate, String endDate,
+                                             Integer page, Integer pageSize) {
         try {
             Map<String, String> params = new LinkedHashMap<>();
             params.put("client_id", String.valueOf(clientId));
@@ -465,6 +559,12 @@ public class ClientAPI {
             }
             if (endDate != null && !endDate.isEmpty()) {
                 params.put("end_date", endDate);
+            }
+            if (page != null) {
+                params.put("page", String.valueOf(page));
+            }
+            if (pageSize != null) {
+                params.put("page_size", String.valueOf(pageSize));
             }
             
             List<String> sortedKeys = new ArrayList<>(params.keySet());
@@ -523,13 +623,18 @@ public class ClientAPI {
     
     /**
      * 获取广告数据
-     * @param dataType 必填，数据类型，'all' 表示详细数据（按国家+广告单元），'day' 表示每日汇总（按产品+日期+广告单元）
+     * @param dataType 必填，'all' 明细 或 'day' 日汇总
      * @param startDate 可选，起始日期（格式：YYYY-MM-DD）
      * @param endDate 可选，终止日期（格式：YYYY-MM-DD）
+     * @param dimension 可选，country / ad_unit / ad_unit_country
+     * @param page 可选，页码（从 1 开始）；不传默认 1；显式传入须参与签名
+     * @param pageSize 可选，每页条数；不传默认 1000，最大 5000；显式传入须参与签名
      */
-    public static String getAdData(String dataType, String startDate, String endDate, String dimension) throws Exception {
+    public static String getAdData(String dataType, String startDate, String endDate, String dimension,
+                                   Integer page, Integer pageSize) throws Exception {
         long reqTime = Instant.now().getEpochSecond();
-        String sign = generateSignature(CLIENT_ID, reqTime, SECRET_KEY, dataType, dimension, startDate, endDate);
+        String sign = generateSignature(CLIENT_ID, reqTime, SECRET_KEY, dataType, dimension,
+                                        startDate, endDate, page, pageSize);
         
         Map<String, Object> params = new HashMap<>();
         params.put("client_id", CLIENT_ID);
@@ -546,6 +651,12 @@ public class ClientAPI {
         }
         if (endDate != null && !endDate.isEmpty()) {
             params.put("end_date", endDate);
+        }
+        if (page != null) {
+            params.put("page", page);
+        }
+        if (pageSize != null) {
+            params.put("page_size", pageSize);
         }
         
         ObjectMapper mapper = new ObjectMapper();
@@ -566,8 +677,8 @@ public class ClientAPI {
     public static void main(String[] args) throws Exception {
         String today = "${today}";
         getProducts();
-        getAdData("all", today, today, "country");
-        getAdData("day", today, today, "country");
+        getAdData("all", today, today, "country", 1, 1000);
+        getAdData("day", today, today, "country", null, null);
     }
 }`;
   });
@@ -582,10 +693,12 @@ public class ClientAPI {
     signAdDataAll,
     signAdDataDay,
     signAdDataAllCountry,
+    signAdDataWithPage,
     productRequestJson,
     adDataRequestAllJson,
     adDataRequestAllWithDimensionJson,
     adDataRequestDayJson,
+    adDataRequestWithPageJson,
     pythonSignProducts,
     pythonSignAdData,
     pythonFullExample,

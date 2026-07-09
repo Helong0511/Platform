@@ -54,7 +54,7 @@
           <li><strong>准备参数</strong>：将请求参数放入参数字典
             <ul>
               <li><code>/client_products</code> 接口：<code>client_id</code>、<code>req_time</code></li>
-              <li><code>/client_data</code> 接口：<code>client_id</code>、<code>req_time</code>、<code>data_type</code>（必填），以及可选参数 <code>dimension</code>、<code>start_date</code>、<code>end_date</code>（如果提供则参与签名）</li>
+              <li><code>/client_data</code> 接口：<code>client_id</code>、<code>req_time</code>、<code>data_type</code>（必填），以及可选参数 <code>dimension</code>、<code>start_date</code>、<code>end_date</code>、<code>page</code>、<code>page_size</code>（如果提供则参与签名）</li>
             </ul>
           </li>
           <li><strong>参数排序</strong>：按字母顺序对参数键进行排序</li>
@@ -67,6 +67,7 @@
           <ul>
             <li><code>/client_data</code> 接口的 <code>data_type</code> 参数是必填的，必须包含在签名计算中</li>
             <li><code>dimension</code> 为可选参数；传入时须参与签名。取值：<code>country</code>（按国家）、<code>ad_unit</code>（按广告单元）、<code>ad_unit_country</code>（按广告单元+国家，<code>country_ad_unit</code> 为兼容别名）</li>
+            <li><code>page</code> / <code>page_size</code> 为可选分页参数；仅当请求体中<strong>显式传入</strong>时才参与签名；不传则服务端默认 <code>page=1</code>、<code>page_size=1000</code>（最大 5000），且默认值不参与签名</li>
             <li>若同时存在国家 API 与广告单元 API 数据，强烈建议传入 <code>dimension</code>，否则不传时返回全量行可能重复统计</li>
             <li>只有非空参数才参与签名计算。如果未提供可选参数，则不包含在签名中</li>
             <li>时间戳允许误差为 ±15 秒（服务器与客户端时钟须大致同步）</li>
@@ -123,7 +124,8 @@ import javax.crypto.spec.SecretKeySpec;
 import java.util.*;
 
 public String generateSignature(int clientId, long reqTime, String secretKey,
-                                 String dataType, String dimension, String startDate, String endDate) {
+                                 String dataType, String dimension, String startDate, String endDate,
+                                 Integer page, Integer pageSize) {
     try {
         Map&lt;String, String&gt; params = new LinkedHashMap&lt;&gt;();
         params.put("client_id", String.valueOf(clientId));
@@ -138,6 +140,12 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
         }
         if (endDate != null && !endDate.isEmpty()) {
             params.put("end_date", endDate);
+        }
+        if (page != null) {
+            params.put("page", String.valueOf(page));
+        }
+        if (pageSize != null) {
+            params.put("page_size", String.valueOf(pageSize));
         }
 
         List&lt;String&gt; sortedKeys = new ArrayList&lt;&gt;(params.keySet());
@@ -264,7 +272,7 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
             </div>
           </template>
 
-          <p>获取客户的广告数据。支持明细（<code>data_type=all</code>）与日汇总（<code>data_type=day</code>）。可通过可选参数 <code>dimension</code> 指定统计维度，与后台「广告数据」报表一致。</p>
+          <p>获取客户的广告数据。支持明细（<code>data_type=all</code>）与日汇总（<code>data_type=day</code>）。可通过可选参数 <code>dimension</code> 指定统计维度，与后台「广告数据」报表一致。支持 <code>page</code> / <code>page_size</code> 分页。</p>
 
           <h4>请求参数</h4>
           <el-table :data="adDataRequestParams" border style="width: 100%">
@@ -285,7 +293,17 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
             <el-collapse-item title="查看请求示例（每日汇总）" name="ad-data-request-day">
               <pre><code>{{ adDataRequestDayJson }}</code></pre>
             </el-collapse-item>
+            <el-collapse-item title="查看请求示例（分页 page / page_size）" name="ad-data-request-page">
+              <pre><code>{{ adDataRequestWithPageJson }}</code></pre>
+            </el-collapse-item>
           </el-collapse>
+
+          <h4>响应外层字段（分页）</h4>
+          <el-table :data="adDataPaginationFields" border style="width: 100%; margin-bottom: 16px;">
+            <el-table-column prop="field" label="字段名" width="180" />
+            <el-table-column prop="type" label="类型" width="100" />
+            <el-table-column prop="description" label="说明" />
+          </el-table>
 
           <h4>响应示例</h4>
           <el-collapse>
@@ -307,6 +325,9 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
       "display_rate": 93.75,
       "click_count": 500,
       "click_rate": 6.67,
+      "viewability_rate": 65.0,
+      "cpc": 0.79,
+      "pageviews": 7500,
       "ecpm": 5.25,
       "revenue": 393.75
     },
@@ -323,10 +344,17 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
       "display_rate": 93.75,
       "click_count": 600,
       "click_rate": 6.67,
+      "viewability_rate": 70.0,
+      "cpc": 0.80,
+      "pageviews": 9000,
       "ecpm": 5.30,
       "revenue": 477.0
     }
-  ]
+  ],
+  "total": 30,
+  "page": 1,
+  "page_size": 1000,
+  "total_pages": 1
 }</code></pre>
             </el-collapse-item>
             <el-collapse-item title="查看响应示例（每日汇总模式）" name="ad-data-response-day">
@@ -347,6 +375,9 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
       "display_rate": 93.75,
       "click_count": 2500,
       "click_rate": 6.67,
+      "viewability_rate": 68.0,
+      "cpc": 0.79,
+      "pageviews": 37500,
       "ecpm": 5.25,
       "revenue": 1968.75
     },
@@ -363,6 +394,9 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
       "display_rate": 93.75,
       "click_count": 600,
       "click_rate": 6.67,
+      "viewability_rate": 70.0,
+      "cpc": 0.80,
+      "pageviews": 9000,
       "ecpm": 5.30,
       "revenue": 477.0
     },
@@ -379,15 +413,22 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
       "display_rate": 93.75,
       "click_count": 3000,
       "click_rate": 6.67,
+      "viewability_rate": 69.0,
+      "cpc": 0.80,
+      "pageviews": 45000,
       "ecpm": 5.30,
       "revenue": 2385.0
     }
-  ]
+  ],
+  "total": 15,
+  "page": 1,
+  "page_size": 1000,
+  "total_pages": 1
 }</code></pre>
             </el-collapse-item>
           </el-collapse>
 
-          <h4>响应字段说明</h4>
+          <h4>响应字段说明（data 数组元素）</h4>
           <el-table :data="adDataResponseFields" border style="width: 100%">
             <el-table-column prop="field" label="字段名" width="180" />
             <el-table-column prop="type" label="类型" width="100" />
@@ -431,6 +472,13 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
                   <li><code>"AA"</code>: 未知区域（无法识别的国家）</li>
                 </ul>
               </li>
+            </ul>
+            <p><strong>分页说明</strong>：</p>
+            <ul>
+              <li>不传 <code>page</code> / <code>page_size</code>：默认第 1 页、每页 1000 条；默认值<strong>不参与</strong>签名</li>
+              <li>显式传入时：须把传入的值加入签名字符串；<code>page</code> ≥ 1，<code>page_size</code> 范围 1～5000</li>
+              <li>响应中的 <code>total</code> 为符合条件的总条数；<code>data</code> 仅为当前页；可用 <code>total_pages</code> 判断是否需继续翻页</li>
+              <li>拉全量时建议：固定 <code>page_size</code>（如 5000），从 <code>page=1</code> 递增直到 <code>page &gt;= total_pages</code></li>
             </ul>
             <p><strong>注意事项</strong>：</p>
             <ul>
@@ -520,6 +568,7 @@ const {
   adDataRequestAllJson,
   adDataRequestAllWithDimensionJson,
   adDataRequestDayJson,
+  adDataRequestWithPageJson,
   pythonSignProducts,
   pythonSignAdData,
   pythonFullExample,
@@ -533,15 +582,28 @@ const productRequestParams = [
   { name: 'sign', type: 'string', required: '是', description: 'HMAC-SHA256 签名（小写十六进制；MD5 仍兼容）' }
 ];
 
-// 广告数据接口请求参数
+// 广告数据接口请求参数（与后端 ClientDataRequest 一致）
 const adDataRequestParams = [
   { name: 'client_id', type: 'int', required: '是', description: '客户ID' },
   { name: 'req_time', type: 'int', required: '是', description: '请求时间戳（10位秒级，Unix时间戳）' },
   { name: 'data_type', type: 'string', required: '是', description: '数据类型：\'all\' 明细，\'day\' 日汇总' },
   { name: 'dimension', type: 'string', required: '否', description: '统计维度：country / ad_unit / ad_unit_country（country_ad_unit 为兼容别名）；与后台报表一致，双 API 客户建议必传' },
-  { name: 'start_date', type: 'string', required: '否', description: '起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天' },
-  { name: 'end_date', type: 'string', required: '否', description: '终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天' },
-  { name: 'sign', type: 'string', required: '是', description: 'HMAC-SHA256 签名（小写十六进制），包含所有非空参数' }
+  { name: 'start_date', type: 'string', required: '否', description: '起始日期（格式：YYYY-MM-DD）；不提供则使用当前月第一天' },
+  { name: 'end_date', type: 'string', required: '否', description: '终止日期（格式：YYYY-MM-DD）；不提供则使用当前月最后一天' },
+  { name: 'page', type: 'int', required: '否', description: '页码，从 1 开始；不传默认 1。显式传入时须参与签名' },
+  { name: 'page_size', type: 'int', required: '否', description: '每页条数；不传默认 1000，最大 5000。显式传入时须参与签名' },
+  { name: 'sign', type: 'string', required: '是', description: 'HMAC-SHA256 签名（小写十六进制），包含所有非空业务参数（含显式传入的 page / page_size）' }
+];
+
+// 响应外层分页字段
+const adDataPaginationFields = [
+  { field: 'code', type: 'int', description: '业务状态码，成功为 200' },
+  { field: 'message', type: 'string', description: '提示信息' },
+  { field: 'data', type: 'array', description: '当前页数据列表（元素字段见下表）' },
+  { field: 'total', type: 'int', description: '符合条件的总条数（非当前页条数）' },
+  { field: 'page', type: 'int', description: '当前页码' },
+  { field: 'page_size', type: 'int', description: '每页条数' },
+  { field: 'total_pages', type: 'int', description: '总页数 = ceil(total / page_size)' }
 ];
 
 // 广告数据响应字段
@@ -558,8 +620,11 @@ const adDataResponseFields = [
   { field: 'display_rate', type: 'float', description: '展示率（%，浮点数，保留2位小数）' },
   { field: 'click_count', type: 'int', description: '点击数（整数）' },
   { field: 'click_rate', type: 'float', description: '点击率（%，浮点数，保留2位小数）' },
-  { field: 'ecpm', type: 'float', description: 'eCPM（浮点数，保留2位小数）' },
-  { field: 'revenue', type: 'float', description: '收益（浮点数，保留2位小数）' }
+  { field: 'viewability_rate', type: 'float', description: '可见率（%，浮点数，保留2位小数）' },
+  { field: 'cpc', type: 'float', description: 'CPC（浮点数，保留2位小数）' },
+  { field: 'pageviews', type: 'int', description: 'PageViews（整数）' },
+  { field: 'ecpm', type: 'float', description: 'eCPM（减扣后，浮点数，保留2位小数）' },
+  { field: 'revenue', type: 'float', description: '收益（减扣后，浮点数，保留2位小数）' }
 ];
 
 // 错误码列表
