@@ -7,7 +7,7 @@ import logging
 from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.cap import check_cap, increment_cap_count
+from app.core.cap import check_cap, increment_cap_count, rollback_cap_redis_counts
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,23 @@ class CapChecker:
             logger.error(f"Cap 检查失败：{e}", exc_info=True)
             # Cap 检查失败不影响主流程，记录错误但继续
             return True, "cap_check_error"
+
+    @staticmethod
+    async def rollback_redis(
+        offer_id: Optional[int],
+        publisher_id: Optional[int],
+        advertiser_id: Optional[int],
+        db: AsyncSession,
+    ) -> None:
+        """DB 回滚后同步回退 Redis Cap 计数。"""
+        if not offer_id:
+            return
+        await rollback_cap_redis_counts(
+            db=db,
+            offer_id=offer_id,
+            publisher_id=publisher_id,
+            advertiser_id=advertiser_id,
+        )
     
     @staticmethod
     async def increment(

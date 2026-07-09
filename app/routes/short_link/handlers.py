@@ -137,8 +137,16 @@ async def handle_cached_redirect(
         if expires_at and expires_at < now:
             raise_short_link_not_found("短链接已过期")
 
-    if not original_url or not original_url.startswith(('http://', 'https://')):
-        raise_short_link_bad_config("短链接配置错误：原始URL格式无效")
+    if not original_url:
+        raise_short_link_bad_config("短链接配置错误：原始URL为空")
+    original_url = original_url.strip()
+    # 与 DB 路径一致：无协议时自动补 https://，避免缓存命中与未命中行为不一致
+    if not original_url.startswith(('http://', 'https://')):
+        if original_url and not original_url.startswith('/'):
+            original_url = f"https://{original_url}"
+            logger.warning(f"短链接 {short_code} 缓存URL缺少协议，已自动添加https://")
+        else:
+            raise_short_link_bad_config("短链接配置错误：原始URL格式无效")
 
     short_link_id = cached_data.get("id")
     if not short_link_id:

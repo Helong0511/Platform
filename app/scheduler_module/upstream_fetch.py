@@ -27,6 +27,7 @@ UPSTREAM_PAGINATION_MAX_PAGES = 500
 ZHISUO_UNIT_PATH = "/api/channelunit"
 ZHISUO_COUNTRY_PATH = "/api/channelcountry"
 ZHISUO_DAILY_PATH = "/api/channeldaily"
+ZHISUO_DATA_PATH = "/api/channeldata"  # 国家+广告单元交叉
 
 
 @dataclass
@@ -620,6 +621,28 @@ async def fetch_zhisuo_daily_rows(
         end=end,
         path=ZHISUO_DAILY_PATH,
         label="Zhisuo 日报 API",
+        limit=limit,
+    )
+
+
+async def fetch_zhisuo_data_rows(
+    *,
+    base_url: str,
+    client_id: str,
+    api_key: str,
+    start: str,
+    end: str,
+    limit: int = 1000,
+) -> UpstreamFetchResult:
+    """拉取 zhisuo 国家+广告单元交叉报告（channeldata，按天循环 + 分页）。"""
+    return await fetch_zhisuo_report_rows(
+        base_url=base_url,
+        client_id=client_id,
+        api_key=api_key,
+        start=start,
+        end=end,
+        path=ZHISUO_DATA_PATH,
+        label="Zhisuo 国家+广告单元 API",
         limit=limit,
     )
 

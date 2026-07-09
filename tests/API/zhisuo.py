@@ -13,7 +13,7 @@ url = "https://ch.tecnee.xyz"
 day_report = "/api/channeldaily"
 country = "/api/channelcountry"
 unit = "/api/channelunit"
-country_and_unit = "/api/channelcountryandunit"
+country_and_unit = "/api/channeldata"  # 国家+广告单元交叉
 
 ## 替换后的参数
 # clientId = 'zhisuo24'                              # 客户ID（替换）

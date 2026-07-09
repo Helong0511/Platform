@@ -31,8 +31,12 @@
     <br>
     <div class="stats-grid">
       <!-- 统计卡片 -->
-      <template v-for="stat in stats" :key="stat.id">
-        <el-card v-if="stat && stat.id && stat.icon" class="stat-card">
+      <el-card
+        v-for="stat in stats"
+        v-show="stat && stat.id && stat.icon"
+        :key="stat.id"
+        class="stat-card"
+      >
           <el-statistic
             :title="stat.label"
             :value="stat.value"
@@ -51,7 +55,6 @@
             </template>
           </el-statistic>
         </el-card>
-      </template>
     </div>
 
     

@@ -255,6 +255,64 @@ async def increment_cap_count(
         raise
 
 
+async def rollback_cap_redis_counts(
+    db: AsyncSession,
+    offer_id: int,
+    publisher_id: Optional[int] = None,
+    advertiser_id: Optional[int] = None,
+) -> None:
+    """
+    DB 事务回滚后同步回退 Redis Cap 计数。
+
+    increment_cap_count 会先写 Redis 再改 DB；外层 rollback 不会撤销 Redis，
+    须在转化入库失败或 Cap 递增判定失败时显式调用本函数。
+    """
+    if not offer_id:
+        return
+    try:
+        query = select(OfferCap).where(
+            and_(
+                OfferCap.offer_id == offer_id,
+                OfferCap.is_active == True,  # noqa: E712
+            )
+        )
+        if publisher_id:
+            query = query.where(
+                or_(
+                    OfferCap.publisher_id == publisher_id,
+                    OfferCap.publisher_id.is_(None),
+                )
+            )
+        if advertiser_id:
+            query = query.where(
+                or_(
+                    OfferCap.cap_type == "offer",
+                    and_(
+                        OfferCap.cap_type == "advertiser_offer",
+                        OfferCap.advertiser_id == advertiser_id,
+                    ),
+                )
+            )
+        else:
+            query = query.where(OfferCap.cap_type == "offer")
+
+        result = await db.execute(query)
+        caps = result.scalars().all()
+        for cap in caps:
+            if cap.daily_cap:
+                await RedisCapManager.decrement_daily(cap.offer_id, cap.publisher_id)
+            if cap.total_cap:
+                await RedisCapManager.decrement_total(cap.offer_id, cap.publisher_id)
+    except Exception as e:
+        logger.error(
+            "回退 Redis Cap 计数失败: offer_id=%s publisher_id=%s err=%s",
+            offer_id,
+            publisher_id,
+            e,
+            exc_info=True,
+        )
+
+
 async def reset_daily_caps(db: AsyncSession) -> None:
     """
     重置每日 Cap 计数（定时任务调用）

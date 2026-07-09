@@ -558,7 +558,13 @@ class Settings(BaseSettings):
         "1",
         "yes",
     ]
-    # 日报兜底（channeldaily）：unit+country 均无数据时用日报补全；全局默认
+    # 国家+广告单元交叉（channeldata）；全局默认
+    ZHISUO_API_FETCH_DATA: bool = os.getenv("ZHISUO_API_FETCH_DATA", "false").lower() in [
+        "true",
+        "1",
+        "yes",
+    ]
+    # 日报兜底（channeldaily）：unit/country/data 均无数据时用日报补全；全局默认
     ZHISUO_API_FETCH_DAILY_FALLBACK: bool = os.getenv(
         "ZHISUO_API_FETCH_DAILY_FALLBACK", "true"
     ).lower() in [
@@ -566,7 +572,7 @@ class Settings(BaseSettings):
         "1",
         "yes",
     ]
-    # 按 clientId 覆盖拉数开关，JSON 对象，如 {"zhisuo24":{"fetch_unit":true,"fetch_country":true,"fetch_daily_fallback":false}}
+    # 按 clientId 覆盖拉数开关，如 {"zhisuo24":{"fetch_unit":true,"fetch_country":true,"fetch_data":true,"fetch_daily_fallback":false}}
     ZHISUO_API_ACCOUNT_FETCH: str = os.getenv("ZHISUO_API_ACCOUNT_FETCH", "")
 
     POMIAD_API_BASE_URL: str = os.getenv("POMIAD_API_BASE_URL", "https://data.pomiad.com/ys_data")
@@ -605,9 +611,10 @@ class Settings(BaseSettings):
         client_id: str,
         item: Dict[str, object] | None = None,
     ) -> Dict[str, bool]:
-        """解析单个 zhisuo 账号的广告单元 / 国家报告 / 日报兜底拉数开关。"""
+        """解析单个 zhisuo 账号的 unit/country/data/daily 拉数开关。"""
         fetch_unit = self.ZHISUO_API_FETCH_UNIT
         fetch_country = self.ZHISUO_API_FETCH_COUNTRY
+        fetch_data = self.ZHISUO_API_FETCH_DATA
         fetch_daily_fallback = self.ZHISUO_API_FETCH_DAILY_FALLBACK
         if item:
             if "fetch_unit" in item:
@@ -616,6 +623,8 @@ class Settings(BaseSettings):
                 fetch_country = self._coerce_zhisuo_fetch_bool(
                     item.get("fetch_country"), fetch_country
                 )
+            if "fetch_data" in item:
+                fetch_data = self._coerce_zhisuo_fetch_bool(item.get("fetch_data"), fetch_data)
             if "fetch_daily_fallback" in item:
                 fetch_daily_fallback = self._coerce_zhisuo_fetch_bool(
                     item.get("fetch_daily_fallback"), fetch_daily_fallback
@@ -635,6 +644,10 @@ class Settings(BaseSettings):
             fetch_country = self._coerce_zhisuo_fetch_bool(
                 client_override.get("fetch_country"), fetch_country
             )
+        if "fetch_data" in client_override:
+            fetch_data = self._coerce_zhisuo_fetch_bool(
+                client_override.get("fetch_data"), fetch_data
+            )
         if "fetch_daily_fallback" in client_override:
             fetch_daily_fallback = self._coerce_zhisuo_fetch_bool(
                 client_override.get("fetch_daily_fallback"), fetch_daily_fallback
@@ -642,11 +655,12 @@ class Settings(BaseSettings):
         return {
             "fetch_unit": fetch_unit,
             "fetch_country": fetch_country,
+            "fetch_data": fetch_data,
             "fetch_daily_fallback": fetch_daily_fallback,
         }
 
     def get_zhisuo_accounts(self) -> List[Dict[str, object]]:
-        """返回 zhisuo 账号列表，每项含 client_id、api_key、fetch_unit、fetch_country、fetch_daily_fallback。"""
+        """返回 zhisuo 账号列表，每项含 client_id、api_key 与各报表拉数开关。"""
         raw = (self.ZHISUO_API_ACCOUNTS or "").strip()
         if raw:
             try:
@@ -671,6 +685,7 @@ class Settings(BaseSettings):
                                 "api_key": api_key,
                                 "fetch_unit": flags["fetch_unit"],
                                 "fetch_country": flags["fetch_country"],
+                                "fetch_data": flags["fetch_data"],
                                 "fetch_daily_fallback": flags["fetch_daily_fallback"],
                             }
                         )
@@ -694,6 +709,7 @@ class Settings(BaseSettings):
                         "api_key": key,
                         "fetch_unit": flags["fetch_unit"],
                         "fetch_country": flags["fetch_country"],
+                        "fetch_data": flags["fetch_data"],
                         "fetch_daily_fallback": flags["fetch_daily_fallback"],
                     }
                 )

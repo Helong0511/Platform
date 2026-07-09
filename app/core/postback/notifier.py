@@ -16,6 +16,7 @@ from app.models.models import (
     ClientNotificationConfig, ProductNotificationConfig,
 )
 from app.core.redis_client import get_redis_client
+from app.core.database import AsyncSessionLocal
 from app.services.telegram_notification_service import TelegramNotificationService
 from app.core.postback.notification.config_helpers import (
     should_notify,
@@ -187,16 +188,34 @@ class PostbackNotifier:
             notification_frequency = config.notification_frequency if config else 'realtime'
 
             if notification_frequency == 'realtime':
-                # 实时通知：立即发送
+                # 实时通知：独立会话 + 按 ID 重载转化，避免请求 session 关闭后写库失败
                 if 'telegram' in channels and telegram_chat_id:
-                    asyncio.create_task(
-                        TelegramNotificationService.send_client_notification(
-                            message=message,
-                            telegram_chat_id=telegram_chat_id,
-                            conversion=conversion,
-                            db=db
-                        )
-                    )
+                    conversion_id = conversion.id
+                    notify_message = message
+                    notify_chat_id = telegram_chat_id
+
+                    async def _notify_with_fresh_session() -> None:
+                        async with AsyncSessionLocal() as notify_db:
+                            result = await notify_db.execute(
+                                select(PostbackConversion).where(
+                                    PostbackConversion.id == conversion_id
+                                )
+                            )
+                            conv = result.scalar_one_or_none()
+                            if not conv:
+                                logger.warning(
+                                    "实时通知跳过：转化不存在 conversion_id=%s",
+                                    conversion_id,
+                                )
+                                return
+                            await TelegramNotificationService.send_client_notification(
+                                message=notify_message,
+                                telegram_chat_id=notify_chat_id,
+                                conversion=conv,
+                                db=notify_db,
+                            )
+
+                    asyncio.create_task(_notify_with_fresh_session())
             else:
                 # 汇总通知（hourly/daily）：将通知放入队列，由定时任务汇总发送
                 # 使用 Redis 队列存储待汇总的通知

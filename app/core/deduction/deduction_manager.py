@@ -176,7 +176,8 @@ class RoundRobinDeductionStrategy(DeductionStrategy):
         if interval <= 0:
             return False
         
-        return stats.processed % interval == 0
+        # 与 proportional 一致：用 processed+1，避免首单（processed=0）必扣
+        return (stats.processed + 1) % interval == 0
 
 
 class DeductionStrategyFactory:

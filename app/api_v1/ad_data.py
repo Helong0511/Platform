@@ -419,6 +419,38 @@ async def get_ad_data_date_range(
         )
 
 
+@router.get("/summary", response_model=ResponseBaseSchema[AdDataSummaryResponse], summary="获取广告数据汇总")
+async def get_ad_data_summary(
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+        start_date: date | None = Query(None, description="开始日期，格式YYYY-MM-DD"),
+        end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD"),
+        client_id: int | None = Query(None, description="客户ID过滤"),
+        product_id: int | None = Query(None, description="产品ID过滤")
+):
+    """
+    获取广告数据汇总统计（已重构使用服务层）
+    - 计算指定条件下的广告数据总和
+    - 包括请求数、匹配数、展示数、点击数等关键指标的汇总
+    - 计算平均覆盖率、展示率、点击率等指标
+    - 使用产品分配历史表时，会根据日期匹配正确的客户归属
+    - 使用缓存提升性能（缓存 2 分钟）
+    """
+    # 使用服务层（业务逻辑在AdDataService中）
+    ad_data_service: AdDataService = await get_ad_data_service(db)
+    
+    # 调用服务层获取汇总数据（服务层会处理查询、缓存和权限检查）
+    response_data = await ad_data_service.get_ad_data_summary(
+        current_user=current_user,
+        start_date=start_date,
+        end_date=end_date,
+        client_id=client_id,
+        product_id=product_id
+    )
+
+    return ResponseBaseSchema.success(data=AdDataSummaryResponse(**response_data))
+
+
 @router.get("/{data_id}", response_model=ResponseBaseSchema[AdDataResponse], summary="获取广告数据详情")
 async def get_ad_data_detail(
         data_id: int = Path(..., ge=1, description="广告数据ID"),
@@ -619,33 +651,3 @@ async def delete_ad_data(
     return ResponseBaseSchema.success(data={"message": "广告数据已成功删除"})
 
 
-@router.get("/summary", response_model=ResponseBaseSchema[AdDataSummaryResponse], summary="获取广告数据汇总")
-async def get_ad_data_summary(
-        db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(get_current_user),
-        start_date: date | None = Query(None, description="开始日期，格式YYYY-MM-DD"),
-        end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD"),
-        client_id: int | None = Query(None, description="客户ID过滤"),
-        product_id: int | None = Query(None, description="产品ID过滤")
-):
-    """
-    获取广告数据汇总统计（已重构使用服务层）
-    - 计算指定条件下的广告数据总和
-    - 包括请求数、匹配数、展示数、点击数等关键指标的汇总
-    - 计算平均覆盖率、展示率、点击率等指标
-    - 使用产品分配历史表时，会根据日期匹配正确的客户归属
-    - 使用缓存提升性能（缓存 2 分钟）
-    """
-    # 使用服务层（业务逻辑在AdDataService中）
-    ad_data_service: AdDataService = await get_ad_data_service(db)
-    
-    # 调用服务层获取汇总数据（服务层会处理查询、缓存和权限检查）
-    response_data = await ad_data_service.get_ad_data_summary(
-        current_user=current_user,
-        start_date=start_date,
-        end_date=end_date,
-        client_id=client_id,
-        product_id=product_id
-    )
-
-    return ResponseBaseSchema.success(data=AdDataSummaryResponse(**response_data))

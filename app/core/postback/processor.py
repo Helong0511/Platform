@@ -201,6 +201,12 @@ class PostbackProcessor:
                         commit=False,
                     )
                 except Exception:
+                    await CapChecker.rollback_redis(
+                        offer_id=offer_id,
+                        publisher_id=publisher_id,
+                        advertiser_id=advertiser_id,
+                        db=db,
+                    )
                     await db.rollback()
                     logger.error(
                         "Cap 计数递增异常，已回滚：offer_id=%s publisher_id=%s",
@@ -213,6 +219,12 @@ class PostbackProcessor:
                         "message": "Cap 计数更新失败，转化未入库",
                     }
                 if not cap_incremented:
+                    await CapChecker.rollback_redis(
+                        offer_id=offer_id,
+                        publisher_id=publisher_id,
+                        advertiser_id=advertiser_id,
+                        db=db,
+                    )
                     await db.rollback()
                     logger.error(
                         "Cap 计数递增未通过，已回滚：offer_id=%s publisher_id=%s",
@@ -233,6 +245,13 @@ class PostbackProcessor:
             try:
                 conversion = await step_save_conversion(pipe_ctx)
             except IntegrityError:
+                if cap_ok:
+                    await CapChecker.rollback_redis(
+                        offer_id=offer_id,
+                        publisher_id=publisher_id,
+                        advertiser_id=advertiser_id,
+                        db=db,
+                    )
                 await db.rollback()
                 logger.info("并发重复转化，已跳过：platform=%s", platform)
                 return {
@@ -240,6 +259,13 @@ class PostbackProcessor:
                     "message": "重复转化，已跳过",
                 }
             except Exception as save_err:
+                if cap_ok:
+                    await CapChecker.rollback_redis(
+                        offer_id=offer_id,
+                        publisher_id=publisher_id,
+                        advertiser_id=advertiser_id,
+                        db=db,
+                    )
                 await db.rollback()
                 logger.error("保存转化记录失败，已回滚：%s", save_err, exc_info=True)
                 raise

@@ -48,7 +48,8 @@ module.exports = {
 
     // ======= Vue 规则 =======
     'vue/multi-word-component-names': 'off',
-    'vue/no-unused-vars': ['warn', { vars: 'all', args: 'after-used' }],
+    // vue/no-unused-vars 仅支持 ignorePattern，勿套用 eslint no-unused-vars 的 vars/args
+    'vue/no-unused-vars': ['warn', { ignorePattern: '^_' }],
     'vue/no-unused-components': 'warn',
     'vue/no-mutating-props': ['warn', { shallowOnly: true }],
     'vue/require-prop-types': 'warn',
@@ -76,7 +77,8 @@ module.exports = {
     'no-implied-eval': 'error',
     'no-new-func': 'error',
     'no-script-url': 'error',
-    'vue/no-template-v-for-with-key': 'error',
+    // vue3 推荐用 vue/no-v-for-template-key（旧规则名已移除）
+    'vue/no-v-for-template-key': 'error',
     'vue/no-ref-as-operand': 'warn'
   },
   overrides: [

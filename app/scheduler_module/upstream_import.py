@@ -173,7 +173,9 @@ def preprocess_addermobi_match_counts(ad_data: List[Any]) -> List[Any]:
                 # 字段无法转为数值时跳过该行
                 continue
             if match_count == 0 and coverage_rate != 0 and request_count > 0:
-                item["MatchedAdRequests"] = int(request_count * coverage_rate)
+                # AdRequestsCoverage 可能是 0–1 比例或 0–100 百分比
+                rate = coverage_rate / 100.0 if coverage_rate > 1 else coverage_rate
+                item["MatchedAdRequests"] = int(request_count * rate)
         except Exception as e:
             logger.warning("Addermobi 预处理数据项失败: %s", e)
     return ad_data

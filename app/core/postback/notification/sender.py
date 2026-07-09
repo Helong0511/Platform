@@ -126,7 +126,8 @@ async def send_notification_async(
                 created_at=get_app_now_naive()
             )
             db.add(notification_record)
-            await db.commit()
+            # 仅 flush，避免异常路径中 commit 污染外层 Postback 事务
+            await db.flush()
         except Exception as commit_error:
             logger.error(f"保存通知记录失败: {commit_error}")
 

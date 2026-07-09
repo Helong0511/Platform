@@ -143,12 +143,19 @@ async def _find_existing_ad_data_for_import(
         AdData.data_source == data_source,
         _report_type_lookup_condition(row_report_type),
     ]
-    if upstream_account:
-        filters.append(AdData.upstream_account == upstream_account)
+    # 唯一约束不含 upstream_account：查重不按账号过滤，避免多账号 INSERT 冲突丢数。
+    # 若传入账号，优先返回同账号行；否则返回同维度任意行供更新。
     result = await db.execute(select(AdData).where(*filters))
     rows = result.scalars().all()
     if not rows:
         return None
+    if upstream_account:
+        for row in rows:
+            if row.upstream_account == upstream_account and row.report_type == row_report_type:
+                return row
+        for row in rows:
+            if row.upstream_account == upstream_account:
+                return row
     for row in rows:
         if row.report_type == row_report_type:
             return row
@@ -381,6 +388,8 @@ async def process_api_ad_data(
                         item_date = datetime.strptime(date_part, '%Y-%m-%d')
                 # 统一设置为当天的0点0分0秒
                 item_date = item_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                # 分组 key 使用规范化日期，避免同一天不同字符串拆成两组触发唯一键冲突
+                item_date_str = item_date.date().isoformat()
             except (ValueError, TypeError) as e:
                 logger.warning(f"日期格式错误: {item_date_str}, 错误: {str(e)}, 跳过该条数据")
                 error_count += 1

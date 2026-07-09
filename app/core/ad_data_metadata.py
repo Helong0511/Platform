@@ -201,10 +201,10 @@ REPORT_TYPE_DETAIL_OPTIONS: tuple[str, ...] = (
 )
 
 REPORT_TYPE_HINTS: dict[str, str] = {
-    REPORT_TYPE_UNIT: "按广告单元，无国家；智索 unit、GAM ad_unit",
-    REPORT_TYPE_COUNTRY: "按国家，无广告单元；智索 country、TQT、Huguang",
-    REPORT_TYPE_CROSS: "国家+广告单元；Addermobi、Skymobi、Pomiad、GAM country",
-    REPORT_TYPE_DAILY: "日汇总，无国家无单元；智索 daily 兜底、GAM daily",
+    REPORT_TYPE_UNIT: "按广告单元，无国家；智索 channelunit、GAM ad_unit",
+    REPORT_TYPE_COUNTRY: "按国家，无广告单元；智索 channelcountry、TQT、Huguang",
+    REPORT_TYPE_CROSS: "国家+广告单元；智索 channeldata、Addermobi、Skymobi、Pomiad、GAM country",
+    REPORT_TYPE_DAILY: "日汇总，无国家无单元；智索 channeldaily 兜底、GAM daily",
     REPORT_TYPE_LEGACY: "历史或未标注；新入库会自动按行形态推断",
 }
 
