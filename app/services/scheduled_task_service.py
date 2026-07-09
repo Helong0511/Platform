@@ -235,6 +235,14 @@ class ScheduledTaskService:
         old_is_active = task.is_active
         is_active_changed = (old_is_active != is_active)
 
+        # 运行中禁止切换启用/禁用，避免调度器与执行中任务状态不一致
+        if task.is_running and is_active_changed:
+            await self.db.rollback()
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail="任务正在运行，无法切换启用状态，请等待执行完成或先释放锁"
+            )
+
         # 更新状态
         task.is_active = is_active
         task.updated_at = get_app_now_naive()

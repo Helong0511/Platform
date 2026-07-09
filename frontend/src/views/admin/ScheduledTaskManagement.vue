@@ -130,8 +130,14 @@
               >
                 账号配置
               </el-button>
-              <el-tag v-if="scope.row.is_running" type="warning" size="small" style="margin-left: 8px;">
-                运行中
+              <el-tag
+                v-if="isTaskRunning(scope.row)"
+                type="warning"
+                size="small"
+                effect="dark"
+                style="margin-left: 8px;"
+              >
+                正在运行
               </el-tag>
             </div>
           </template>
@@ -164,12 +170,25 @@
             <span v-else class="no-function">未注册</span>
           </template>
         </el-table-column>
-        <el-table-column prop="is_active" label="状态" width="100" align="center">
+        <el-table-column prop="is_active" label="状态" width="140" align="center">
           <template #default="scope">
+            <!-- 运行中：展示「正在运行」，禁用启用开关，不可切换激活 -->
+            <div v-if="isTaskRunning(scope.row)" class="running-status-cell">
+              <el-tag type="warning" size="small" effect="dark">正在运行</el-tag>
+              <el-tooltip content="任务正在运行，无法切换启用状态" placement="top">
+                <el-switch
+                  :model-value="scope.row.is_active"
+                  disabled
+                  :active-text="scope.row.is_active ? '启用' : ''"
+                  :inactive-text="!scope.row.is_active ? '禁用' : ''"
+                  aria-label="任务正在运行，无法切换启用状态"
+                />
+              </el-tooltip>
+            </div>
             <el-switch
+              v-else
               v-model="scope.row.is_active"
               @change="handleToggleActive(scope.row)"
-              :disabled="scope.row.is_running"
               :active-text="scope.row.is_active ? '启用' : ''"
               :inactive-text="!scope.row.is_active ? '禁用' : ''"
               aria-label="切换任务状态"
@@ -223,17 +242,17 @@
                 type="primary"
                 size="small"
                 @click="handleTrigger(scope.row)"
-                :disabled="!scope.row.is_active || scope.row.is_running"
+                :disabled="!scope.row.is_active || isTaskRunning(scope.row)"
                 class="action-btn"
                 :icon="VideoPlay"
               >
-                触发
+                {{ isTaskRunning(scope.row) ? '运行中' : '触发' }}
               </el-button>
               <el-button
                 type="warning"
                 size="small"
                 @click="handleReleaseLock(scope.row)"
-                :disabled="!scope.row.is_running"
+                :disabled="!isTaskRunning(scope.row)"
                 class="action-btn"
                 :icon="Unlock"
               >
@@ -316,6 +335,7 @@ import { ElMessage } from 'element-plus';
 import { Search, Refresh, VideoPlay, Unlock, Document, Folder } from '@element-plus/icons-vue';
 import { formatDateTime } from '../../utils/dateFormat';
 import { isGamSchedulerTask } from '../../constants/scheduledTasks';
+import { isTaskRunning } from '../../utils/scheduledTaskStatus';
 import { useDevice } from '../../composables/useDevice';
 import { useScheduledTasks } from '../../composables/useScheduledTasks';
 import { useScheduledTaskActions } from '../../composables/useScheduledTaskActions';
@@ -553,6 +573,13 @@ onUnmounted(() => {
   align-items: center;
   font-weight: 600;
   font-size: 16px;
+}
+
+.running-status-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
 }
 
 .task-name-cell {

@@ -1,12 +1,19 @@
 /**
  * 组合式函数 - 定时任务列表与状态
  * @file composables/useScheduledTasks.js
+ *
+ * 有任务运行中时提高轮询频率，保证查询结果能及时显示「正在运行」并禁用启用开关。
  */
 import { computed, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getScheduledTasks } from '../api/scheduled-task';
 import { extractErrorMessage, isErrorHandled } from '../utils/api';
+import { normalizeScheduledTaskRow } from '../utils/scheduledTaskStatus';
 
+/** 空闲时自动刷新间隔 */
+const IDLE_REFRESH_MS = 60000;
+/** 存在运行中任务时的刷新间隔（便于前端及时展示「正在运行」） */
+const RUNNING_REFRESH_MS = 5000;
 const FETCH_DEBOUNCE_MS = 2000;
 
 /**
@@ -52,6 +59,8 @@ export function useScheduledTasks() {
     };
   });
 
+  const hasRunningTasks = computed(() => tasks.value.some((t) => t.is_running));
+
   const fetchTasks = async (immediate = false) => {
     if (loading.value && !immediate) return;
 
@@ -83,8 +92,13 @@ export function useScheduledTasks() {
       };
       const response = await getScheduledTasks(params);
       if (currentController.signal.aborted) return;
-      tasks.value = response.data || [];
+      // 归一化布尔字段，避免 is_running 非严格 true 时开关仍可点
+      tasks.value = (response.data || []).map(normalizeScheduledTaskRow);
       pagination.total = response.total || 0;
+      // 运行状态变化时调整轮询节奏
+      if (!document.hidden) {
+        startAutoRefresh();
+      }
     } catch (error) {
       if (error.name === 'AbortError' || error.name === 'CanceledError') return;
       if (error.response?.status === 401) {
@@ -147,11 +161,13 @@ export function useScheduledTasks() {
 
   const startAutoRefresh = () => {
     if (refreshTimer.value) clearInterval(refreshTimer.value);
+    const intervalMs = hasRunningTasks.value ? RUNNING_REFRESH_MS : IDLE_REFRESH_MS;
     refreshTimer.value = setInterval(() => {
       if (!document.hidden && !loading.value) {
-        fetchTasks();
+        // 有运行中任务时立即拉取，保证「正在运行」与禁用启用开关及时更新
+        fetchTasks(hasRunningTasks.value);
       }
-    }, 60000);
+    }, intervalMs);
   };
 
   const stopAutoRefresh = () => {
