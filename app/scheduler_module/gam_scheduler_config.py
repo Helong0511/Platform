@@ -199,6 +199,26 @@ def _normalize_config_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _gam_config_permission_hint(path: Path) -> str:
+    """生成 GAM 配置文件权限错误的运维提示。"""
+    script = ROOT / "scripts" / "ensure_gam_runtime_dirs.sh"
+    return (
+        f"GAM 配置文件无读写权限: {path}。"
+        f"若在服务器上以 root 执行过 git pull，请用 root 运行: "
+        f"bash {script}"
+    )
+
+
+def _write_gam_scheduler_config_file(path: Path, text: str) -> None:
+    """写入 GAM 配置文件；权限不足时给出可执行的修复提示。"""
+    try:
+        path.write_text(text, encoding="utf-8")
+    except (PermissionError, OSError) as exc:
+        if getattr(exc, "errno", None) != 13 and not isinstance(exc, PermissionError):
+            raise
+        raise PermissionError(_gam_config_permission_hint(path)) from exc
+
+
 def load_gam_scheduler_config() -> dict[str, Any]:
     """读取并规范化 GAM JSON 配置。"""
     path = get_gam_scheduler_config_path()
@@ -207,8 +227,13 @@ def load_gam_scheduler_config() -> dict[str, Any]:
             f"GAM 配置文件不存在: {path}，请创建 config/gam_scheduler.json"
         )
 
-    with path.open("r", encoding="utf-8") as handle:
-        payload = json.load(handle)
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (PermissionError, OSError) as exc:
+        if getattr(exc, "errno", None) != 13 and not isinstance(exc, PermissionError):
+            raise
+        raise PermissionError(_gam_config_permission_hint(path)) from exc
     if not isinstance(payload, dict):
         raise ValueError(f"GAM 配置文件格式无效: {path}")
 
@@ -220,7 +245,12 @@ def load_gam_scheduler_config() -> dict[str, Any]:
 def save_gam_scheduler_config(config: dict[str, Any]) -> Path:
     """将 GAM 配置写回 JSON 文件。"""
     path = get_gam_scheduler_config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except (PermissionError, OSError) as exc:
+        if getattr(exc, "errno", None) != 13 and not isinstance(exc, PermissionError):
+            raise
+        raise PermissionError(_gam_config_permission_hint(path)) from exc
 
     normalized = _normalize_config_payload(config)
     output = {
@@ -239,7 +269,7 @@ def save_gam_scheduler_config(config: dict[str, Any]) -> Path:
     }
 
     text = json.dumps(output, ensure_ascii=False, indent=2) + "\n"
-    path.write_text(text, encoding="utf-8")
+    _write_gam_scheduler_config_file(path, text)
     logger.info("已保存 GAM 配置: %s（%d 个账号）", path, len(output["accounts"]))
     return path
 

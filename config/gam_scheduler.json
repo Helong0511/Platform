@@ -16,15 +16,6 @@
         "puzzlegames.shop",
         "thestrategygames.shop"
       ]
-    },
-    {
-      "key": "leadwin",
-      "credentials_json": "secrets/gam-23348711678.json",
-      "application_name": "Leadwin",
-      "report_keys": [
-        "country"
-      ],
-      "product_whitelist": []
     }
   ]
 }
