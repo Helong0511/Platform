@@ -22,6 +22,7 @@ from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive
 from app.models.models import UserAuditLog
 from app.scheduler_module.task_names import CLEANUP_LOGS_TASK_NAME
+from app.scheduler_module.task_result_store import get_task_result, set_task_result
 from app.services.audit_log_service import invalidate_audit_log_stats_cache
 from app.scheduler_module.task_utils import (
     log_task_start,
