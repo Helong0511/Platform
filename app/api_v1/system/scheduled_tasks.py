@@ -80,6 +80,7 @@ class ScheduledTaskResponse(BaseSchema):
     id: int
     task_name: str
     last_run_time: Optional[datetime] = None
+    last_finish_time: Optional[datetime] = None
     is_running: bool
     last_run_pid: Optional[int] = None
     last_run_host: Optional[str] = None
@@ -207,6 +208,7 @@ async def get_scheduled_tasks(
                         "id": task.id,
                         "task_name": task.task_name,
                         "last_run_time": task.last_run_time,
+                        "last_finish_time": task.last_finish_time,
                         "is_running": task.is_running,
                         "last_run_pid": task.last_run_pid,
                         "last_run_host": task.last_run_host,
@@ -510,6 +512,7 @@ async def update_scheduled_task(
                 "is_active": task.is_active,
                 "is_running": task.is_running,
                 "last_run_time": task.last_run_time,
+                "last_finish_time": task.last_finish_time,
                 "run_count": task.run_count,
                 "success_count": task.success_count,
                 "error_count": task.error_count,

@@ -852,7 +852,8 @@ DROP TABLE IF EXISTS `scheduled_tasks`;
 CREATE TABLE IF NOT EXISTS `scheduled_tasks`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '定时任务ID',
   `task_name` varchar(100) NOT NULL COMMENT '任务名称（唯一）',
-  `last_run_time` datetime(6) NULL DEFAULT NULL COMMENT '上次执行时间',
+  `last_run_time` datetime(6) NULL DEFAULT NULL COMMENT '上次开始执行时间',
+  `last_finish_time` datetime(6) NULL DEFAULT NULL COMMENT '上次完成执行时间',
   `is_running` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否正在执行',
   `last_run_pid` int NULL DEFAULT NULL COMMENT '上次执行的进程ID',
   `last_run_host` varchar(100) NULL DEFAULT NULL COMMENT '上次执行的服务器主机名',

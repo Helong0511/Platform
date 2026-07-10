@@ -195,10 +195,20 @@
             />
           </template>
         </el-table-column>
-        <el-table-column prop="last_run_time" label="上次执行" width="180">
+        <el-table-column prop="last_run_time" label="上次执行" width="200">
           <template #default="scope">
-            <div v-if="scope.row.last_run_time">
-              <div>{{ formatDateTime(scope.row.last_run_time) }}</div>
+            <div v-if="scope.row.last_run_time || scope.row.last_finish_time">
+              <div v-if="scope.row.last_run_time" class="run-time-line">
+                <span class="run-time-label">开始</span>
+                {{ formatDateTime(scope.row.last_run_time) }}
+              </div>
+              <div v-if="scope.row.last_finish_time" class="run-time-line">
+                <span class="run-time-label">完成</span>
+                {{ formatDateTime(scope.row.last_finish_time) }}
+              </div>
+              <div v-else-if="scope.row.is_running" class="run-time-line running-hint">
+                执行中…
+              </div>
               <div class="run-info" v-if="scope.row.last_run_pid">
                 <span class="info-text">PID: {{ scope.row.last_run_pid }}</span>
                 <span class="info-text" v-if="scope.row.last_run_host">
@@ -602,6 +612,23 @@ onUnmounted(() => {
   margin-top: 4px;
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.run-time-line {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.run-time-label {
+  display: inline-block;
+  width: 2.5em;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.running-hint {
+  color: var(--warning-color, #e6a23c);
+  font-size: 12px;
 }
 
 .info-text {

@@ -15,7 +15,7 @@
 import hashlib
 import logging
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import timedelta
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, func
@@ -24,6 +24,7 @@ from sqlalchemy.future import select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.core.utils import get_app_now_naive
 from app.models.models import ScheduledTask
 from app.scheduler_module.lock import get_current_pid, CURRENT_HOST
 from app.scheduler_module.task_queue import get_task_queue
@@ -237,7 +238,7 @@ async def get_process_for_task(
         # 2. 查询最近运行过任务的进程（即使当前没有运行任务）
         # 优化：缩短时间窗口到2分钟，避免使用过期的进程ID
         # 这样可以发现所有可用的worker进程，但不会使用太旧的进程记录
-        recent_time = datetime.now(timezone.utc) - timedelta(minutes=2)  # 最近2分钟内运行过任务的进程
+        recent_time = get_app_now_naive() - timedelta(minutes=2)  # 最近2分钟内运行过任务的进程（北京时间）
         result = await db.execute(
             select(ScheduledTask.last_run_pid)
             .where(
@@ -540,7 +541,7 @@ async def cleanup_stale_process_records(
 
     try:
         # 计算过期时间
-        expire_time = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+        expire_time = get_app_now_naive() - timedelta(minutes=max_age_minutes)
 
         # 查询所有活跃任务，获取它们的last_run_pid
         result = await db.execute(

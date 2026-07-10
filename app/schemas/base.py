@@ -7,9 +7,9 @@
 
 说明：请求/响应 JSON 结构定义，供 FastAPI 校验与 OpenAPI 文档生成。"""
 from datetime import datetime
-from typing import Generic, TypeVar  # Generic 和 TypeVar 仍需从 typing 导入
+from typing import Any, Generic, TypeVar  # Generic 和 TypeVar 仍需从 typing 导入
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
 
 from app.core.utils import APP_TIMEZONE
 
@@ -26,10 +26,8 @@ def datetime_encoder(v: datetime) -> str:
     - 如果没有时区信息，假设是应用时区（用于时间戳字段）
     """
     if v.tzinfo is None:
-        # 如果没有时区信息，假设是应用时区（默认北京时间）
-        # 注意：AdData.date等业务日期字段是系统时区的naive datetime，但为了API兼容性，也标记为应用时区
-        v = v.replace(tzinfo=APP_TIMEZONE)
-    # 使用 isoformat() 生成 ISO 8601 格式，包含时区信息
+        # naive datetime 须用 localize，replace(tzinfo=) 在 pytz 下会得到错误的 +08:06 偏移
+        v = APP_TIMEZONE.localize(v)
     return v.isoformat()
 
 
@@ -45,10 +43,14 @@ class BaseSchema(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
         arbitrary_types_allowed=True,
-        json_encoders={
-            datetime: datetime_encoder
-        }
     )
+
+    @field_serializer('*', mode='plain', check_fields=False, when_used='json')
+    def _serialize_datetime_fields_for_json(self, value: Any) -> Any:
+        """Pydantic v2 JSON 模式下将 datetime 统一输出为带应用时区的 ISO8601。"""
+        if isinstance(value, datetime):
+            return datetime_encoder(value)
+        return value
 
 
 class IDBaseSchema(BaseSchema):

@@ -282,7 +282,9 @@ async def release_task_lock(
             # 原子性更新：在持有行锁的情况下更新状态
             task_record.is_running = False
             # 存储北京时间到数据库（数据库统一使用北京时间）
-            task_record.updated_at = get_app_now_naive()
+            now_app = get_app_now_naive()
+            task_record.updated_at = now_app
+            task_record.last_finish_time = now_app
 
             if success:
                 task_record.success_count += 1

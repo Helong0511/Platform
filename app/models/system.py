@@ -22,7 +22,8 @@ class ScheduledTask(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='定时任务ID')
     task_name = Column(String(100), nullable=False, unique=True, index=True, comment='任务名称（唯一）')
-    last_run_time = Column(DateTime, nullable=True, comment='上次执行时间')
+    last_run_time = Column(DateTime, nullable=True, comment='上次开始执行时间')
+    last_finish_time = Column(DateTime, nullable=True, comment='上次完成执行时间')
     is_running = Column(Boolean, default=False, comment='是否正在执行')
     last_run_pid = Column(Integer, nullable=True, comment='上次执行的进程ID')
     last_run_host = Column(String(100), nullable=True, comment='上次执行的服务器主机名')
