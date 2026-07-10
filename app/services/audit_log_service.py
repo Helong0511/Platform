@@ -24,12 +24,24 @@ from sqlalchemy.future import select
 from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.infrastructure.cache_compat import (
     generate_cache_key,
+    invalidate_cache,
     legacy_get_cached as get_cached,
     legacy_set_cached as set_cached,
 )
 from app.models.models import UserAuditLog, User
 
 logger = logging.getLogger(__name__)
+
+# 统计缓存键前缀，便于批量失效（如清理日志、手工 TRUNCATE 后）
+AUDIT_LOG_STATS_CACHE_PREFIX = "audit_log_stats"
+
+
+async def invalidate_audit_log_stats_cache() -> int:
+    """清除操作日志统计缓存，避免库表已清空但页面仍显示旧汇总。"""
+    deleted = await invalidate_cache(f"{AUDIT_LOG_STATS_CACHE_PREFIX}:")
+    if deleted:
+        logger.info("已清除操作日志统计缓存 %s 条", deleted)
+    return deleted
 
 
 class AuditLogService:
@@ -127,62 +139,77 @@ class AuditLogService:
     async def get_audit_log_stats(
             self,
             start_date: Optional[datetime] = None,
-            end_date: Optional[datetime] = None
+            end_date: Optional[datetime] = None,
+            force_refresh: bool = False,
     ) -> Dict[str, Any]:
         """
         获取审计日志统计摘要。
 
         含总量、成功/失败数、Top10 操作类型与资源类型、活跃用户数。
-        相同时间范围命中缓存则直接返回（TTL 300s）。
+        相同时间范围命中缓存则直接返回（TTL 300s）；返回前会用 COUNT
+        校验缓存总量是否与库内一致，避免手工清表后仍展示旧数据。
 
         Args:
             start_date: 统计起始时间
             end_date: 统计结束时间
+            force_refresh: 为 True 时跳过缓存强制重算
 
         Returns:
             聚合统计字典
         """
-        # --- 缓存层：避免 Dashboard 频繁全表聚合 ---
-        cache_key = generate_cache_key("audit_log_stats", start_date, end_date)
-        cached = await get_cached(cache_key, key_prefix="audit_log")
-        if cached:
-            logger.debug("缓存命中: audit_log_stats")
-            return cached
-
-        # 构建基础查询
-        base_query = select(UserAuditLog)
         conditions = []
-
         if start_date:
             conditions.append(UserAuditLog.created_at >= start_date)
         if end_date:
             conditions.append(UserAuditLog.created_at <= end_date)
 
+        def _count_where(*extra):
+            """组合筛选条件与额外谓词。"""
+            all_conditions = list(extra) + conditions
+            if not all_conditions:
+                return True
+            return and_(*all_conditions)
+
+        # --- 缓存层：避免 Dashboard 频繁全表聚合 ---
+        cache_key = (
+            f"{AUDIT_LOG_STATS_CACHE_PREFIX}:"
+            f"{generate_cache_key(start_date, end_date)}"
+        )
+        if not force_refresh:
+            cached = await get_cached(cache_key, key_prefix="audit_log")
+            if cached:
+                # 轻量校验：总量与库内一致才使用缓存（防止清表后仍显示旧统计）
+                total_count_result = await self.db.execute(
+                    select(func.count(UserAuditLog.id)).where(_count_where())
+                )
+                db_total = total_count_result.scalar() or 0
+                if cached.get("total_count") == db_total:
+                    logger.debug("缓存命中: audit_log_stats")
+                    return cached
+                logger.info(
+                    "audit_log_stats 缓存与数据库不一致（缓存=%s, 数据库=%s），重新聚合",
+                    cached.get("total_count"),
+                    db_total,
+                )
+                await invalidate_audit_log_stats_cache()
+
         # --- 多维度 COUNT / GROUP BY 聚合 ---
         total_count_result = await self.db.execute(
-            select(func.count(UserAuditLog.id)).where(
-                and_(*conditions) if conditions else True
-            )
+            select(func.count(UserAuditLog.id)).where(_count_where())
         )
         total_count = total_count_result.scalar() or 0
 
         # 成功/失败数量
         success_count_result = await self.db.execute(
             select(func.count(UserAuditLog.id)).where(
-                and_(
-                    UserAuditLog.success == True,
-                    *conditions if conditions else []
-                )
+                _count_where(UserAuditLog.success == True)
             )
         )
         success_count = success_count_result.scalar() or 0
 
         failure_count_result = await self.db.execute(
             select(func.count(UserAuditLog.id)).where(
-                and_(
-                    UserAuditLog.success == False,
-                    *conditions if conditions else []
-                )
+                _count_where(UserAuditLog.success == False)
             )
         )
         failure_count = failure_count_result.scalar() or 0
@@ -193,7 +220,7 @@ class AuditLogService:
                 UserAuditLog.action_type,
                 func.count(UserAuditLog.id).label("count")
             )
-            .where(and_(*conditions) if conditions else True)
+            .where(_count_where())
             .group_by(UserAuditLog.action_type)
             .order_by(func.count(UserAuditLog.id).desc())
             .limit(10)
@@ -209,7 +236,7 @@ class AuditLogService:
                 UserAuditLog.resource_type,
                 func.count(UserAuditLog.id).label("count")
             )
-            .where(and_(*conditions) if conditions else True)
+            .where(_count_where())
             .group_by(UserAuditLog.resource_type)
             .order_by(func.count(UserAuditLog.id).desc())
             .limit(10)
@@ -223,12 +250,7 @@ class AuditLogService:
         # 活跃用户数（有操作记录的用户）
         active_users_result = await self.db.execute(
             select(func.count(func.distinct(UserAuditLog.user_id)))
-            .where(
-                and_(
-                    UserAuditLog.user_id.isnot(None),
-                    *conditions if conditions else []
-                )
-            )
+            .where(_count_where(UserAuditLog.user_id.isnot(None)))
         )
         active_users_count = active_users_result.scalar() or 0
 

@@ -140,6 +140,7 @@ async def get_audit_logs(
 async def get_audit_log_stats(
         start_date: Optional[datetime] = Query(None, description="开始时间"),
         end_date: Optional[datetime] = Query(None, description="结束时间"),
+        force_refresh: bool = Query(False, description="强制刷新统计（跳过缓存）"),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin)
 ):
@@ -164,7 +165,8 @@ async def get_audit_log_stats(
         # 调用服务层获取日志统计摘要（服务层会处理查询、统计、缓存）
         stats = await audit_log_service.get_audit_log_stats(
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            force_refresh=force_refresh,
         )
 
         return ResponseBaseSchema.success(

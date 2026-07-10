@@ -22,7 +22,7 @@ from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive
 from app.models.models import UserAuditLog
 from app.scheduler_module.task_names import CLEANUP_LOGS_TASK_NAME
-from app.scheduler_module.task_result_store import get_task_result, set_task_result
+from app.services.audit_log_service import invalidate_audit_log_stats_cache
 from app.scheduler_module.task_utils import (
     log_task_start,
     log_task_result,
@@ -185,6 +185,10 @@ async def cleanup_old_audit_logs(
 
         # 提交事务
         await db.commit()
+
+        # 清理后失效统计缓存，避免页面仍显示旧汇总
+        if deleted_count > 0 or archived_count > 0:
+            await invalidate_audit_log_stats_cache()
 
         # 格式化结果摘要
         if archive:
