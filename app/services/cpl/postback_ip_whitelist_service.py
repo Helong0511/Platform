@@ -151,7 +151,7 @@ class PostbackIpWhitelistService:
                 is_active=data.is_active,
             )
             db.add(whitelist_item)
-            await db.commit()
+            await db.flush()
             await db.refresh(whitelist_item)
 
             logger.info(
@@ -242,7 +242,7 @@ class PostbackIpWhitelistService:
             if data.is_active is not None:
                 whitelist_item.is_active = data.is_active
 
-            await db.commit()
+            await db.flush()
             await db.refresh(whitelist_item)
 
             logger.info(
@@ -329,7 +329,7 @@ class PostbackIpWhitelistService:
 
             if created_items:
                 try:
-                    await db.commit()
+                    await db.flush()
                     for item in created_items:
                         await db.refresh(item)
                 except Exception as commit_error:
@@ -443,7 +443,7 @@ class PostbackIpWhitelistService:
 
             ip_address = whitelist_item.ip_address
             await db.delete(whitelist_item)
-            await db.commit()
+            await db.flush()
 
             logger.info(
                 "管理员 %s 删除 IP 白名单: id=%s ip=%s",

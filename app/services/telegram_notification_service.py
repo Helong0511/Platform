@@ -39,6 +39,20 @@ from app.core.telegram_utils import (
 logger = logging.getLogger(__name__)
 
 
+async def _persist_notification_record(
+    db: AsyncSession,
+    record: PostbackNotification,
+    *,
+    commit: bool = False,
+) -> None:
+    """写入通知历史；Postback 热路径传 commit=False 由外层事务统一提交。"""
+    db.add(record)
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
+
+
 class TelegramNotificationService:
     """
     Telegram 消息构建与发送服务。
@@ -417,7 +431,9 @@ class TelegramNotificationService:
             client_id: Optional[int] = None,
             product_id: Optional[int] = None,
             notification_type: str = 'conversion',
-            db: Optional[AsyncSession] = None
+            db: Optional[AsyncSession] = None,
+            *,
+            commit: bool = True,
     ) -> bool:
         """
         向客户 Telegram Chat 发送通知并可选写入历史。
@@ -468,8 +484,7 @@ class TelegramNotificationService:
                         postback_url=None,
                         created_at=get_app_now_naive()
                     )
-                    db.add(notification_record)
-                    await db.commit()
+                    await _persist_notification_record(db, notification_record, commit=commit)
                 except Exception as e:
                     logger.warning(f"记录客户通知历史失败: {str(e)}")
                     if db:
@@ -486,7 +501,9 @@ class TelegramNotificationService:
             telegram_chat_id: Optional[str] = None,
             conversion: Optional[PostbackConversion] = None,
             notification_type: str = 'conversion',
-            db: Optional[AsyncSession] = None
+            db: Optional[AsyncSession] = None,
+            *,
+            commit: bool = True,
     ) -> bool:
         """
         向管理员 Telegram 发送通知。
@@ -529,8 +546,7 @@ class TelegramNotificationService:
                         postback_url=None,
                         created_at=get_app_now_naive()
                     )
-                    db.add(notification_record)
-                    await db.commit()
+                    await _persist_notification_record(db, notification_record, commit=commit)
                 except Exception as e:
                     logger.warning(f"记录管理员通知历史失败: {str(e)}")
                     if db:
@@ -548,7 +564,9 @@ class TelegramNotificationService:
             location: Optional[Dict[str, str]] = None,
             error: Optional[Exception] = None,
             telegram_chat_id: Optional[str] = None,
-            db: Optional[AsyncSession] = None
+            db: Optional[AsyncSession] = None,
+            *,
+            commit: bool = True,
     ) -> bool:
         """
         发送系统异常/错误告警至管理员 Telegram。
@@ -600,8 +618,7 @@ class TelegramNotificationService:
                         postback_url=None,
                         created_at=get_app_now_naive()
                     )
-                    db.add(notification_record)
-                    await db.commit()
+                    await _persist_notification_record(db, notification_record, commit=commit)
                 except Exception as e:
                     logger.warning(f"记录系统告警通知历史失败: {str(e)}")
                     if db:
@@ -631,7 +648,9 @@ class TelegramNotificationService:
             telegram_chat_id: Optional[str] = None,
             db: Optional[AsyncSession] = None,
             client_id: Optional[int] = None,
-            product_id: Optional[int] = None
+            product_id: Optional[int] = None,
+            *,
+            commit: bool = True,
     ) -> bool:
         """
         发送汇总统计通知
@@ -676,8 +695,7 @@ class TelegramNotificationService:
                         postback_url=None,
                         created_at=get_app_now_naive()
                     )
-                    db.add(notification_record)
-                    await db.commit()
+                    await _persist_notification_record(db, notification_record, commit=commit)
                 except Exception as e:
                     logger.warning(f"记录汇总统计通知历史失败: {str(e)}")
                     if db:
@@ -695,7 +713,9 @@ class TelegramNotificationService:
             telegram_chat_id: str,
             db: Optional[AsyncSession] = None,
             client_id: Optional[int] = None,
-            product_id: Optional[int] = None
+            product_id: Optional[int] = None,
+            *,
+            commit: bool = True,
     ) -> bool:
         """
         批量发送转化通知（用于汇总通知场景）
@@ -766,8 +786,7 @@ class TelegramNotificationService:
                         postback_url=None,
                         created_at=get_app_now_naive()
                     )
-                    db.add(notification_record)
-                    await db.commit()
+                    await _persist_notification_record(db, notification_record, commit=commit)
                 except Exception as e:
                     logger.warning(f"记录批量转化通知历史失败: {str(e)}")
                     if db:
@@ -786,7 +805,9 @@ class TelegramNotificationService:
             telegram_chat_id: Optional[str] = None,
             db: Optional[AsyncSession] = None,
             conversion: Optional[PostbackConversion] = None,
-            notification_type: str = 'interactive'
+            notification_type: str = 'interactive',
+            *,
+            commit: bool = True,
     ) -> tuple[bool, Optional[int]]:
         """
         发送带按钮的交互式通知
@@ -831,8 +852,7 @@ class TelegramNotificationService:
                         postback_url=None,
                         created_at=get_app_now_naive()
                     )
-                    db.add(notification_record)
-                    await db.commit()
+                    await _persist_notification_record(db, notification_record, commit=commit)
                 except Exception as e:
                     logger.warning(f"记录交互式通知历史失败: {str(e)}")
                     if db:

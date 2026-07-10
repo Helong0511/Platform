@@ -14,9 +14,12 @@ import {
   getCsrfTokenFromResponse,
   fetchCsrfTokenFromEndpoints
 } from './csrfToken';
+import { formatApiDetail } from './api';
 import { createCacheInterceptor, DEFAULT_GET_CACHE_URL_PATTERNS } from './requestCache.js';
 
-/** 开发环境网络错误提示冷却，避免广告数据页并发筛选请求刷屏 */
+/** 401 刷新单飞锁，避免并发请求重复刷新令牌 */
+let refreshTokenPromise = null;
+
 let lastDevNetworkErrorAt = 0;
 const DEV_NETWORK_ERROR_COOLDOWN_MS = 4000;
 /** 开发环境 health 探测缓存，避免每个失败请求都探测 */
@@ -294,6 +297,10 @@ export const setupResponseInterceptor = () => {
         logger.debug('从错误响应中提取到新的 CSRF token，已更新:', csrfTokenFromError.substring(0, 10) + '...');
       }
 
+      const suppressErrorMessage = Boolean(
+        error.config?.silent || error.config?.skipErrorMessage
+      );
+
       // 处理403 CSRF令牌错误
       if (error.response && error.response.status === 403) {
         const retryResponse = await handleCsrfError(error);
@@ -313,20 +320,33 @@ export const setupResponseInterceptor = () => {
           return Promise.reject(error);
         }
 
+        if (error.config?._authRetried) {
+          clearAuthData();
+          error._handled = true;
+          return Promise.reject(error);
+        }
+
         // 尝试使用刷新令牌自动刷新访问令牌（refresh_token 从 HttpOnly Cookie 自动获取）
         try {
-          const { refreshAccessToken } = await import('../api/auth');
           const userInfoStr = sessionStorage.getItem('userInfo');
 
           if (userInfoStr) {
             try {
-              const refreshResponse = await refreshAccessToken();
+              if (!refreshTokenPromise) {
+                refreshTokenPromise = (async () => {
+                  const { refreshAccessToken } = await import('../api/auth');
+                  return refreshAccessToken();
+                })().finally(() => {
+                  refreshTokenPromise = null;
+                });
+              }
+              const refreshResponse = await refreshTokenPromise;
               const payload = refreshResponse?.user
                 ? refreshResponse
                 : refreshResponse?.data;
               if (payload?.user) {
                 sessionStorage.setItem('userInfo', JSON.stringify(payload.user));
-                // 认证由 HttpOnly Cookie 承载，直接重试原请求
+                error.config._authRetried = true;
                 return axios(error.config);
               }
             } catch (refreshError) {
@@ -334,7 +354,6 @@ export const setupResponseInterceptor = () => {
             }
           }
         } catch (e) {
-          // 刷新令牌功能不可用，继续执行清除认证数据的流程
           logger.warn('尝试刷新令牌时出错:', e);
         }
 
@@ -347,7 +366,7 @@ export const setupResponseInterceptor = () => {
         // refresh_token 和 access_token 存储在 HttpOnly Cookie 中，由后端在 logout 接口中清除
         error._handled = true;
 
-        if (window.location.pathname !== '/login') {
+        if (window.location.pathname !== '/login' && !suppressErrorMessage) {
           const friendlyMessage = errorDetail === 'Not authenticated' || errorDetail.includes('Not authenticated')
             ? '登录已过期，请重新登录'
             : errorDetail;
@@ -359,11 +378,13 @@ export const setupResponseInterceptor = () => {
           } catch (e) {
             window.location.href = '/login';
           }
+        } else if (suppressErrorMessage) {
+          error._handled = true;
         }
       } else if (error.response && error.response.status === 403) {
         // 403 Forbidden错误：可能是CSRF令牌问题或其他权限问题
         // CSRF 探测 / 静默请求：不弹权限提示（避免角色切换后误报「需要管理员权限」）
-        if (error.config?.skipErrorMessage || error.config?.silent) {
+        if (error.config?.skipErrorMessage || error.config?.silent || suppressErrorMessage) {
           error._handled = true;
           return Promise.reject(error);
         }
@@ -385,8 +406,10 @@ export const setupResponseInterceptor = () => {
             return retryResponse;
           }
           error._handled = true;
-        } else {
+        } else if (!suppressErrorMessage) {
           ElMessage.error(String(errorDetail));
+          error._handled = true;
+        } else {
           error._handled = true;
         }
       } else if (error.response && error.response.status === 429) {
@@ -395,28 +418,34 @@ export const setupResponseInterceptor = () => {
         const errorDetail = (errorData && typeof errorData === 'object' && !(errorData instanceof Blob))
           ? (errorData.detail || '请求过于频繁，请稍后再试')
           : '请求过于频繁，请稍后再试';
-        ElMessage.error(errorDetail);
+        if (!suppressErrorMessage) {
+          ElMessage.error(errorDetail);
+        }
         error._handled = true;
       } else if (error.response && error.response.status >= 400 && error.response.status < 500) {
         // 4xx 客户端错误
         const status = error.response.status;
         const errorData = error.response.data;
         let errorDetail = (errorData && typeof errorData === 'object' && !(errorData instanceof Blob))
-          ? (errorData.detail || errorData.message || '请求失败，请检查输入')
+          ? formatApiDetail(errorData.detail || errorData.message || '请求失败，请检查输入')
           : '请求失败，请检查输入';
 
         if (status === 403 && (!errorData || errorData instanceof Blob || (!errorData.detail && !errorData.message))) {
           errorDetail = '禁止登录，请联系管理员';
         }
 
-        if (!error._handled) {
+        if (!error._handled && !suppressErrorMessage) {
           ElMessage.error(errorDetail);
+          error._handled = true;
+        } else if (suppressErrorMessage) {
           error._handled = true;
         }
       } else if (error.response && error.response.status >= 500) {
         // 5xx 服务器错误
-        if (!error._handled) {
+        if (!error._handled && !suppressErrorMessage) {
           ElMessage.error('服务器错误，请稍后重试');
+          error._handled = true;
+        } else if (suppressErrorMessage) {
           error._handled = true;
         }
       } else if (!error._handled && !error.response) {
@@ -434,8 +463,10 @@ export const setupResponseInterceptor = () => {
               ? '网络连接超时，请检查网络连接或稍后重试'
               : '请求超时，请检查网络连接');
           if (import.meta.env.DEV) {
-            showDevNetworkError(errorMsg);
-          } else {
+            if (!suppressErrorMessage) {
+              showDevNetworkError(errorMsg);
+            }
+          } else if (!suppressErrorMessage) {
             ElMessage.error(errorMsg);
           }
         } else {
@@ -454,15 +485,19 @@ export const setupResponseInterceptor = () => {
             }
           }
           if (import.meta.env.DEV) {
-            showDevNetworkError(errorMsg);
-          } else {
+            if (!suppressErrorMessage) {
+              showDevNetworkError(errorMsg);
+            }
+          } else if (!suppressErrorMessage) {
             ElMessage.error(errorMsg);
           }
         }
         error._handled = true;
       } else if (!error._handled && error.response && import.meta.env.DEV) {
         if (error.response.status === 502 || error.response.status === 504) {
-          showDevNetworkError('后端未响应 (8960)，请确认 uvicorn 已启动且未卡在 reload');
+          if (!suppressErrorMessage) {
+            showDevNetworkError('后端未响应 (8960)，请确认 uvicorn 已启动且未卡在 reload');
+          }
           error._handled = true;
         }
       } else if (!error._handled) {
@@ -471,7 +506,9 @@ export const setupResponseInterceptor = () => {
         const errorDetail = (errorData && typeof errorData === 'object' && !(errorData instanceof Blob))
           ? (errorData.detail || errorData.message || '请求失败，请稍后重试')
           : '请求失败，请稍后重试';
-        ElMessage.error(errorDetail);
+        if (!suppressErrorMessage) {
+          ElMessage.error(errorDetail);
+        }
         error._handled = true;
       }
       return Promise.reject(error);

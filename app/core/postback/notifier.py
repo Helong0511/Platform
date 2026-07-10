@@ -253,7 +253,8 @@ class PostbackNotifier:
                                         message=message,
                                         telegram_chat_id=telegram_chat_id,
                                         conversion=conversion,
-                                        db=db
+                                        db=db,
+                                        commit=False,
                                     )
                                 )
                             return  # 已降级为实时发送，直接返回
@@ -272,7 +273,8 @@ class PostbackNotifier:
                                         message=message,
                                         telegram_chat_id=telegram_chat_id,
                                         conversion=conversion,
-                                        db=db
+                                        db=db,
+                                        commit=False,
                                     )
                                 )
                             return  # 队列已满，已降级为实时发送，直接返回
@@ -305,7 +307,8 @@ class PostbackNotifier:
                                     message=message,
                                     telegram_chat_id=telegram_chat_id,
                                     conversion=conversion,
-                                    db=db
+                                    db=db,
+                                    commit=False,
                                 )
                             )
                 except Exception as e:
@@ -320,7 +323,8 @@ class PostbackNotifier:
                                 message=message,
                                 telegram_chat_id=telegram_chat_id,
                                 conversion=conversion,
-                                db=db
+                                db=db,
+                                commit=False,
                             )
                         )
 

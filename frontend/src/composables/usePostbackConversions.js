@@ -124,7 +124,6 @@ export function usePostbackConversions() {
     watch(() => pagination.page, () => fetchConversions());
     watch(() => pagination.pageSize, () => {
       pagination.page = 1;
-      fetchConversions();
     });
   };
 

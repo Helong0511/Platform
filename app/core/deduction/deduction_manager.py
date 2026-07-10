@@ -30,12 +30,13 @@ from app.core.infrastructure.cache_compat import (
     legacy_set_cached as set_cached,
 )
 from app.core.redis_client import get_redis_client
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 # 缓存配置
 CONFIG_CACHE_TTL = 300  # 配置缓存5分钟
-CONFIG_CACHE_PREFIX = "cpl:deduction_config:"
+CONFIG_CACHE_PREFIX = "cpl:deduction_config:"  # 保留前缀供 invalidate 使用
 STATS_CACHE_TTL = 60  # 统计缓存1分钟
 STATS_CACHE_PREFIX = "cpl:conversion_stats:"
 
@@ -239,45 +240,32 @@ class DeductionManager:
         try:
             # 优先级1: Offer级别配置
             if offer_id:
-                config = await self._get_cached_config('offer', offer_id)
-                if config:
-                    logger.debug(f"找到Offer级别扣减配置: offer_id={offer_id}, config_id={config.id}")
-                    return config
-                
                 config = await self._find_offer_config(offer_id)
                 if config:
-                    await self._cache_config('offer', offer_id, config)
+                    logger.debug(f"找到Offer级别扣减配置: offer_id={offer_id}, config_id={config.id}")
                     return config
             
             # 优先级2: 广告主级别配置
             if advertiser_id:
-                config = await self._get_cached_config('advertiser', advertiser_id)
-                if config:
-                    logger.debug(f"找到广告主级别扣减配置: advertiser_id={advertiser_id}, config_id={config.id}")
-                    return config
-                
                 config = await self._find_advertiser_config(advertiser_id)
                 if config:
-                    await self._cache_config('advertiser', advertiser_id, config)
+                    logger.debug(f"找到广告主级别扣减配置: advertiser_id={advertiser_id}, config_id={config.id}")
                     return config
             
             # 优先级3: 渠道级别配置
             if publisher_id:
-                config = await self._get_cached_config('publisher', publisher_id)
-                if config:
-                    logger.debug(f"找到渠道级别扣减配置: publisher_id={publisher_id}, config_id={config.id}")
-                    return config
-                
                 config = await self._find_publisher_config(publisher_id)
                 if config:
-                    await self._cache_config('publisher', publisher_id, config)
+                    logger.debug(f"找到渠道级别扣减配置: publisher_id={publisher_id}, config_id={config.id}")
                     return config
             
             return None
             
         except Exception as e:
             logger.error(f"查找扣减配置失败: {str(e)}", exc_info=True)
-            return None
+            if settings.DEDUCTION_FAIL_OPEN:
+                return None
+            raise
     
     async def _find_offer_config(self, offer_id: int) -> Optional[ConversionDeductionConfig]:
         """查找Offer级别配置"""
@@ -315,34 +303,47 @@ class DeductionManager:
         )
         return result.scalars().first()
     
-    async def _get_cached_config(
+    DECISION_SEQ_TTL = 86400 * 2  # 决策序号缓存 2 天
+
+    async def _get_stats_for_decision(
         self,
-        level: str,
-        target_id: int
-    ) -> Optional[ConversionDeductionConfig]:
-        """从缓存获取配置"""
-        cache_key = f"{CONFIG_CACHE_PREFIX}{level}:{target_id}"
-        cached_data = await get_cached(cache_key)
-        if cached_data:
-            # 从缓存数据重建配置对象（简化版，实际可能需要更复杂的序列化）
-            try:
-                # 这里简化处理，实际应该从数据库重新加载以确保数据一致性
-                return None  # 暂时禁用配置缓存，避免序列化问题
-            except Exception as e:
-                logger.debug(f"从缓存重建配置失败: {e}")
-        return None
-    
-    async def _cache_config(
-        self,
-        level: str,
-        target_id: int,
-        config: ConversionDeductionConfig
-    ) -> None:
-        """缓存配置"""
-        # 暂时禁用配置缓存，避免序列化问题
-        # 可以考虑只缓存配置ID，然后从数据库加载
-        pass
-    
+        advertiser_id: Optional[int] = None,
+        offer_id: Optional[int] = None,
+        publisher_id: Optional[int] = None,
+        hours: int = 24,
+    ) -> ConversionStats:
+        """
+        获取扣量决策用统计：DB 汇总 + Redis 原子序号，避免并发下 processed 重复。
+        """
+        base_stats = await self.get_recent_stats(
+            advertiser_id=advertiser_id,
+            offer_id=offer_id,
+            publisher_id=publisher_id,
+            hours=hours,
+        )
+        redis = await get_redis_client()
+        if not redis:
+            return base_stats
+
+        cache_key = self._build_stats_cache_key(
+            advertiser_id, offer_id, publisher_id, hours
+        )
+        seq_key = f"{cache_key}:decision_seq"
+        try:
+            seq = int(await redis.incr(seq_key))
+            if seq == 1:
+                await redis.expire(seq_key, self.DECISION_SEQ_TTL)
+            processed = seq - 1
+            total = max(seq, base_stats.total)
+            return ConversionStats(
+                total=total,
+                deducted=base_stats.deducted,
+                processed=processed,
+            )
+        except Exception as e:
+            logger.warning("扣量决策序号 Redis 失败，回退 DB 统计: %s", e)
+            return base_stats
+
     async def get_recent_stats(
         self,
         advertiser_id: Optional[int] = None,
@@ -420,7 +421,9 @@ class DeductionManager:
             
         except Exception as e:
             logger.error(f"获取转化统计失败: {str(e)}", exc_info=True)
-            return ConversionStats()
+            if settings.DEDUCTION_FAIL_OPEN:
+                return ConversionStats()
+            raise
     
     def _build_stats_cache_key(
         self,
@@ -514,8 +517,8 @@ class DeductionManager:
             final_amount=conversion_data.get('original_payout', 0.0) or 0.0,
         )
         
-        # 获取转化统计
-        stats = await self.get_recent_stats(
+        # 获取转化统计（Redis 原子序号保证并发决策不重复）
+        stats = await self._get_stats_for_decision(
             advertiser_id=advertiser_id,
             offer_id=offer_id,
             publisher_id=publisher_id,

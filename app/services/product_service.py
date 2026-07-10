@@ -293,7 +293,7 @@ class ProductService(BaseService[Product]):
             if 'notification_address' in product_data:
                 admin_default_product.notification_address = product_data['notification_address']
 
-            await self.db.commit()
+            await self.db.flush()
             await self.db.refresh(admin_default_product)
 
             logger.info(
@@ -318,21 +318,22 @@ class ProductService(BaseService[Product]):
         self.db.add(product)
         await self.db.flush()  # 先flush以获取product.id
 
-        # 初始化产品分配记录
-        try:
-            product_start_date = date.today()
-            await initialize_product_assignment(
-                db=self.db,
-                product_id=product.id,
-                client_id=product.client_id,
-                start_date=product_start_date
-            )
-            logger.info(f"产品 {product.id} 的分配记录已初始化：客户 {product.client_id}，开始日期: {product_start_date}")
-        except Exception as e:
-            logger.warning(f"初始化产品分配记录失败: {str(e)}，但产品创建继续")
-            # 分配记录初始化失败不影响产品创建，继续执行
+        # 初始化产品分配记录（失败则整体回滚，避免有产品无分配历史）
+        product_start_date = date.today()
+        await initialize_product_assignment(
+            db=self.db,
+            product_id=product.id,
+            client_id=product.client_id,
+            start_date=product_start_date,
+        )
+        logger.info(
+            "产品 %s 的分配记录已初始化：客户 %s，开始日期: %s",
+            product.id,
+            product.client_id,
+            product_start_date,
+        )
 
-        await self.db.commit()
+        await self.db.flush()
         await self.db.refresh(product)
 
         logger.info(f"产品已创建: {product.name} (ID: {product.id})")
@@ -481,7 +482,6 @@ class ProductService(BaseService[Product]):
                     f"旧客户结束日期: {old_client_end_date or '自动计算'}"
                 )
             except ValueError as e:
-                # 验证失败（如重叠、空窗期等），需要回滚并返回错误
                 await self.db.rollback()
                 logger.error(f"产品分配历史验证失败: {str(e)}", exc_info=True)
                 raise_api_exception(
@@ -489,15 +489,19 @@ class ProductService(BaseService[Product]):
                     detail=str(e)
                 )
             except Exception as e:
-                # 其他异常（如数据库错误），记录日志但不影响产品转移
+                await self.db.rollback()
                 logger.error(f"记录产品分配历史失败: {str(e)}", exc_info=True)
+                raise_api_exception(
+                    ErrorCode.OPERATION_FAILED,
+                    detail="产品客户转移失败，请稍后重试",
+                )
 
         # 更新产品字段
         for key, value in product_data.items():
             if hasattr(product, key):
                 setattr(product, key, value)
 
-        await self.db.commit()
+        await self.db.flush()
         await self.db.refresh(product)
 
         logger.info(f"产品已更新: {product.name} (ID: {product.id})")
@@ -584,10 +588,14 @@ class ProductService(BaseService[Product]):
                     f"从客户 {old_client_id} 转移到默认客户 {admin_default_client.id}"
                 )
             except Exception as e:
+                await self.db.rollback()
                 logger.error(f"更新产品分配历史失败: {str(e)}", exc_info=True)
-                # 分配历史更新失败不影响产品转移，继续执行
+                raise_api_exception(
+                    ErrorCode.OPERATION_FAILED,
+                    detail="产品转移时更新分配历史失败，请稍后重试",
+                )
 
-            await self.db.commit()
+            await self.db.flush()
             await self.db.refresh(product)
 
             return {
@@ -601,7 +609,7 @@ class ProductService(BaseService[Product]):
 
             # 删除产品
             await self.db.delete(product)
-            await self.db.commit()
+            await self.db.flush()
 
             logger.info(f"产品已删除: {product.name} (ID: {product_id})")
 

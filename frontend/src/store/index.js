@@ -197,7 +197,8 @@ export const useAuthStore = defineStore('auth', {
       userInfo: userInfo,
       isAuthenticated: isValid, // 基于 userInfo 的有效性判断
       loading: false,
-      error: null
+      error: null,
+      userInfoFetchedAt: 0,
     };
   },
   getters: {
@@ -221,6 +222,7 @@ export const useAuthStore = defineStore('auth', {
         // 更新状态（使用camelCase）
         this.userInfo = userInfoFromApi;
         this.isAuthenticated = true;
+        this.userInfoFetchedAt = Date.now();
 
         ElMessage.success('登录成功');
 
@@ -318,6 +320,7 @@ export const useAuthStore = defineStore('auth', {
       // 清空所有认证相关的状态
       this.userInfo = {};
       this.isAuthenticated = false;
+      this.userInfoFetchedAt = 0;
 
       // ====== 跳转到登录页 ======
       // 重定向到登录页面
@@ -370,7 +373,20 @@ export const useAuthStore = defineStore('auth', {
     },
     async fetchUserInfo(options = {}) {
       const { silent = false, force = false } = options;
+      const USER_INFO_CACHE_TTL_MS = 30_000;
+
       if (!force && !this.isAuthenticated) return;
+
+      const now = Date.now();
+      if (
+        !force &&
+        this.userInfoFetchedAt > 0 &&
+        now - this.userInfoFetchedAt < USER_INFO_CACHE_TTL_MS &&
+        this.userInfo &&
+        Object.keys(this.userInfo).length > 0
+      ) {
+        return;
+      }
 
       this.loading = true;
       try {
@@ -382,6 +398,7 @@ export const useAuthStore = defineStore('auth', {
         this.userInfo = userData || {};
         sessionStorage.setItem('userInfo', JSON.stringify(this.userInfo));
         this.isAuthenticated = true;
+        this.userInfoFetchedAt = Date.now();
       } catch (err) {
         const httpStatus = err.response?.status;
         const businessCode = err.code ?? err.response?.data?.code;
@@ -395,6 +412,7 @@ export const useAuthStore = defineStore('auth', {
           clearAuthData();
           this.userInfo = {};
           this.isAuthenticated = false;
+          this.userInfoFetchedAt = 0;
 
           if (!silent && window.location.pathname !== '/login') {
             ElMessage.error('会话已过期，请重新登录');

@@ -155,6 +155,10 @@ class ErrorMessage:
     CANNOT_MODIFY_SELF_ROLE = "不能将自己的角色修改为非管理员"
     USER_HAS_CLIENTS = "用户有关联客户数据，无法删除"
     NO_ADMIN_USERS = "系统中没有管理员用户"
+    RESOURCE_NOT_FOUND = "资源不存在"
+    RESOURCE_ALREADY_EXISTS = "资源已存在"
+    ACCESS_DENIED = "访问被拒绝"
+    INVALID_PARAMETER = "参数无效"
 
 
 def get_error_message(error_code: int, custom_message: Optional[str] = None) -> str:
@@ -225,6 +229,10 @@ def get_error_message(error_code: int, custom_message: Optional[str] = None) -> 
         ErrorCode.CANNOT_MODIFY_SELF_ROLE: ErrorMessage.CANNOT_MODIFY_SELF_ROLE,
         ErrorCode.USER_HAS_CLIENTS: ErrorMessage.USER_HAS_CLIENTS,
         ErrorCode.NO_ADMIN_USERS: ErrorMessage.NO_ADMIN_USERS,
+        ErrorCode.RESOURCE_NOT_FOUND: ErrorMessage.RESOURCE_NOT_FOUND,
+        ErrorCode.RESOURCE_ALREADY_EXISTS: ErrorMessage.RESOURCE_ALREADY_EXISTS,
+        ErrorCode.ACCESS_DENIED: ErrorMessage.ACCESS_DENIED,
+        ErrorCode.INVALID_PARAMETER: ErrorMessage.INVALID_PARAMETER,
     }
 
     return error_code_map.get(error_code, ErrorMessage.INTERNAL_ERROR)

@@ -76,6 +76,21 @@ def auth_failure_response(exc: StarletteHTTPException) -> JSONResponse:
     return response
 
 
+def mark_auth_failure_cookies(exc: StarletteHTTPException) -> StarletteHTTPException:
+    """
+    标记 HTTPException：全局异常处理器将清除认证 Cookie。
+
+    用于 refresh 等须 raise（避免 get_db 误提交）且须清 Cookie 的场景。
+    """
+    exc._clear_auth_cookies = True  # type: ignore[attr-defined]
+    return exc
+
+
+def raise_auth_failure(exc: StarletteHTTPException) -> None:
+    """抛出须清除 Cookie 的认证失败异常（供全局处理器统一响应）。"""
+    raise mark_auth_failure_cookies(exc)
+
+
 def build_token_json_response(
     access_token: str,
     refresh_token: Optional[str],

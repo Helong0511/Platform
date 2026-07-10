@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Request, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import get_postback_db
 
 from ..handlers import receive_handler
 
@@ -17,6 +17,6 @@ router = APIRouter()
 async def receive_postback(
     request: Request,
     platform: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_postback_db),
 ):
     return await receive_handler.receive_postback(request, platform, db)

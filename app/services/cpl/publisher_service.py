@@ -191,7 +191,7 @@ class PublisherService(BaseService[Publisher]):
         )
 
         self.db.add(publisher)
-        await self.db.commit()
+        await self.db.flush()
         await self.db.refresh(publisher)
 
         # 记录审计日志
@@ -265,7 +265,7 @@ class PublisherService(BaseService[Publisher]):
         if 'is_active' in publisher_data:
             publisher.is_active = publisher_data['is_active']
 
-        await self.db.commit()
+        await self.db.flush()
         await self.db.refresh(publisher)
 
         # 记录审计日志
@@ -333,6 +333,6 @@ class PublisherService(BaseService[Publisher]):
 
         # 删除渠道
         await self.db.delete(publisher)
-        await self.db.commit()
+        await self.db.flush()
 
         logger.info(f"渠道已删除: {publisher.publisher_name} (ID: {publisher_id})")

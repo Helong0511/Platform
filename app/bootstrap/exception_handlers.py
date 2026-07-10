@@ -14,7 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.future import select
 
-from app.core.audit_log import log_runtime_error
+from app.core.auth_response import clear_auth_cookies
 from app.core.config import settings
 from app.core.constants import MAX_ERROR_MESSAGE_LENGTH, MAX_STACK_TRACE_LENGTH
 from app.core.database import AsyncSessionLocal
@@ -154,6 +154,9 @@ async def _create_http_exception_response(
 
         # 添加CSRF token（如果存在）
         _add_csrf_token_to_response(response, exc)
+
+        if getattr(exc, "_clear_auth_cookies", False):
+            clear_auth_cookies(response)
 
         return response
     except Exception as e:

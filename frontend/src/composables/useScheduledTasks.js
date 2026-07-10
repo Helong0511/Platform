@@ -90,7 +90,7 @@ export function useScheduledTasks() {
         ...(searchForm.is_running !== null &&
           searchForm.is_running !== '' && { is_running: searchForm.is_running }),
       };
-      const response = await getScheduledTasks(params);
+      const response = await getScheduledTasks(params, { signal: currentController.signal });
       if (currentController.signal.aborted) return;
       // 归一化布尔字段，避免 is_running 非严格 true 时开关仍可点
       tasks.value = (response.data || []).map(normalizeScheduledTaskRow);

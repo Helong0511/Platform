@@ -133,7 +133,8 @@ class PostbackForwardQueue(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='队列ID')
     conversion_id = Column(Integer, ForeignKey("postback_conversions.id", ondelete="CASCADE"), nullable=False, index=True, comment='关联的转化记录ID')
-    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True, comment='产品ID')
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=True, index=True, comment='产品ID（产品级转发时使用）')
+    publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="SET NULL"), nullable=True, index=True, comment='渠道ID（渠道级转发时使用）')
     downstream_url = Column(String(500), nullable=False, comment='下游URL')
     request_method = Column(String(10), nullable=False, comment='请求方式：GET 或 POST')
     request_data = Column(Text, nullable=True, comment='请求数据（JSON格式，用于POST请求）')
@@ -149,6 +150,7 @@ class PostbackForwardQueue(Base):
     __table_args__ = (
         Index("idx_forward_queue_time", "next_retry_time"),
         Index("idx_forward_queue_conversion", "conversion_id"),
+        Index("idx_forward_queue_publisher", "publisher_id"),
     )
 
 class ClientNotificationConfig(Base):

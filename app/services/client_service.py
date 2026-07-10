@@ -24,7 +24,7 @@ from sqlalchemy.orm import selectinload
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.fulltext_search import search_with_fulltext
-from app.models.models import Client, User, UserRole
+from app.models.models import Client, User, UserRole, Product, Publisher
 from app.services.base_service import BaseService
 
 logger = logging.getLogger(__name__)
@@ -247,6 +247,25 @@ class ClientService(BaseService[Client]):
             raise_api_exception(
                 ErrorCode.FORBIDDEN,
                 detail="只有管理员可以删除客户"
+            )
+
+        product_count = (
+            await self.db.execute(
+                select(func.count(Product.id)).where(Product.client_id == client_id)
+            )
+        ).scalar() or 0
+        publisher_count = (
+            await self.db.execute(
+                select(func.count(Publisher.id)).where(Publisher.client_id == client_id)
+            )
+        ).scalar() or 0
+        if product_count > 0 or publisher_count > 0:
+            raise_api_exception(
+                ErrorCode.CLIENT_HAS_PRODUCTS,
+                detail=(
+                    f"客户仍有关联数据，无法删除"
+                    f"（产品 {product_count} 个，渠道 {publisher_count} 个）"
+                ),
             )
 
         await self.db.delete(client)

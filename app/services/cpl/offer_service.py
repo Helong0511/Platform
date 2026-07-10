@@ -26,7 +26,7 @@ from app.models.models import (
 from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
-from app.core.audit_log import log_user_action, commit_audit_log
+from app.core.audit_log import log_user_action
 from app.core.infrastructure.cache import CacheInvalidator
 from app.core.config import settings
 from app.services.cpl.offer.helpers import (
@@ -198,7 +198,7 @@ class OfferService(BaseService[Offer]):
                     publisher_ids_for_short_link.append(pub_id)
 
         try:
-            await self.db.commit()
+            await self.db.flush()
             await self.db.refresh(offer)
         except IntegrityError as e:
             await self.db.rollback()
@@ -230,7 +230,7 @@ class OfferService(BaseService[Offer]):
                 current_user_id=current_user.id,
                 advertiser_tracklink=offer.advertiser_tracklink
             )
-            await self.db.commit()  # 提交短链接创建
+            await self.db.flush()
             await self.db.refresh(offer)
         elif publisher_ids_for_short_link and not offer.advertiser_tracklink:
             logger.warning(f"Offer {offer.id} 没有配置上游Tracklink，无法创建短链接")
@@ -249,8 +249,6 @@ class OfferService(BaseService[Offer]):
             resource_name=offer.offer_name,
             success=True
         )
-        await commit_audit_log(self.db)
-
         logger.info(f"Offer已创建: {offer.offer_name} (ID: {offer.id})")
         return offer, short_link_info
 
@@ -418,7 +416,7 @@ class OfferService(BaseService[Offer]):
                     publisher_ids_for_short_link.append(pub_id)
 
         try:
-            await self.db.commit()
+            await self.db.flush()
             await self.db.refresh(offer)
         except IntegrityError as e:
             await self.db.rollback()
@@ -478,7 +476,7 @@ class OfferService(BaseService[Offer]):
                     current_user_id=current_user.id,
                     advertiser_tracklink=current_advertiser_tracklink
                 )
-                await self.db.commit()  # 提交短链接变更
+                await self.db.flush()
                 await self.db.refresh(offer)
             elif not current_advertiser_tracklink:
                 logger.warning(f"Offer {offer.id} 没有配置上游Tracklink，无法创建短链接")
@@ -514,7 +512,7 @@ class OfferService(BaseService[Offer]):
 
                     # 更新offer.downstream_tracklink为短链接URL
                     offer.downstream_tracklink = short_link_url
-                    await self.db.commit()
+                    await self.db.flush()
                     await self.db.refresh(offer)
             except Exception as e:
                 # 如果创建短链接失败，记录错误但不影响Offer更新
@@ -539,8 +537,6 @@ class OfferService(BaseService[Offer]):
             resource_name=offer.offer_name,
             success=True
         )
-        await commit_audit_log(self.db)
-
         logger.info(f"Offer已更新: {offer.offer_name} (ID: {offer.id})")
         return offer, short_link_info, downstream_tracklink_short_link_info, downstream_tracklink_changed
 
@@ -591,6 +587,6 @@ class OfferService(BaseService[Offer]):
 
         # 删除Offer
         await self.db.delete(offer)
-        await self.db.commit()
+        await self.db.flush()
 
         logger.info(f"Offer已删除: {offer.offer_name} (ID: {offer_id})")

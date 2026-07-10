@@ -86,7 +86,7 @@ async def upsert_config(
             if hasattr(existing_config, key):
                 setattr(existing_config, key, value)
         try:
-            await db.commit()
+            await db.flush()
             await db.refresh(existing_config)
             logger.info(updated_log)
             return existing_config
@@ -101,7 +101,7 @@ async def upsert_config(
     new_config = model_class(**create_kwargs, **config_data)
     try:
         db.add(new_config)
-        await db.commit()
+        await db.flush()
         await db.refresh(new_config)
         logger.info(created_log)
         return new_config
@@ -124,7 +124,7 @@ async def delete_config(
     """删除单条通知配置记录。"""
     try:
         await db.delete(config)
-        await db.commit()
+        await db.flush()
         logger.info(log_msg)
     except Exception as e:
         await db.rollback()

@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.postback.checks.cap_checker import CapChecker
+from app.core.postback.errors import DeductionProcessingError
 from app.core.postback.pipeline import attribution_ids_from_association
 from app.core.postback.validators.ip_validator import IpValidator
 from app.core.postback.validators.data_validator import DataValidator
@@ -147,17 +147,10 @@ class PostbackProcessor:
                 logger.info(f"检测到重复转化，跳过处理：platform={platform}")
                 return {
                     "success": True,
-                    "message": "重复转化，已跳过"
+                    "message": "重复转化，已跳过",
+                    "retryable": False,
                 }
 
-            # 去重通过后再做第三方像素上报，避免重复 CAPI 事件
-            await PostbackProcessor._send_third_party_report_if_needed(
-                click_association=click_association,
-                normalized_data=normalized_data,
-                raw_data=raw_data,
-                db=db,
-            )
-            
             # ========== 第 6–8 步：Cap / 扣量 / 保存（pipeline） ==========
             logger.info("=== 第 6 步：Cap 检查 ====")
             pipe_ctx.click_association = click_association
@@ -165,8 +158,26 @@ class PostbackProcessor:
             conversion_status = pipe_ctx.conversion_status
             logger.info(f"Cap 检查结果：{cap_ok}, 状态：{conversion_status}")
 
+            if not cap_ok and cap_status == "cap_check_error":
+                await db.rollback()
+                logger.error("Cap 检查基础设施失败，拒绝入库并请求上游重试")
+                return {
+                    "success": False,
+                    "message": "Cap 检查失败，请重试",
+                    "retryable": True,
+                }
+
             logger.info("=== 第 7 步：扣量计算 ===")
-            final_payout, deduction_info, skip_save_and_forward = await step_apply_discount(pipe_ctx)
+            try:
+                final_payout, deduction_info, skip_save_and_forward = await step_apply_discount(pipe_ctx)
+            except DeductionProcessingError as ded_err:
+                await db.rollback()
+                logger.error("扣量计算失败，已回滚：%s", ded_err, exc_info=True)
+                return {
+                    "success": False,
+                    "message": "扣量计算失败，请重试",
+                    "retryable": True,
+                }
             logger.info(
                 f"扣量计算结果：final_payout={final_payout}, "
                 f"skip_save={skip_save_and_forward}, 扣量信息：{deduction_info}"
@@ -198,7 +209,6 @@ class PostbackProcessor:
                         publisher_id=publisher_id,
                         advertiser_id=advertiser_id,
                         db=db,
-                        commit=False,
                     )
                 except Exception:
                     await CapChecker.rollback_redis(
@@ -217,6 +227,7 @@ class PostbackProcessor:
                     return {
                         "success": False,
                         "message": "Cap 计数更新失败，转化未入库",
+                        "retryable": True,
                     }
                 if not cap_incremented:
                     await CapChecker.rollback_redis(
@@ -234,6 +245,7 @@ class PostbackProcessor:
                     return {
                         "success": False,
                         "message": "Cap 计数更新失败，转化未入库",
+                        "retryable": True,
                     }
 
             # Cap 超限时与转化记录同一事务内关闭短链
@@ -278,6 +290,17 @@ class PostbackProcessor:
             logger.info("=== 第 11 步：提交事务 ====")
             await db.commit()
             logger.info("事务提交成功")
+
+            # 入库成功后再做第三方像素上报，避免 DB 回滚后产生幽灵 CAPI 事件
+            try:
+                await PostbackProcessor._send_third_party_report_if_needed(
+                    click_association=click_association,
+                    normalized_data=normalized_data,
+                    raw_data=raw_data,
+                    db=db,
+                )
+            except Exception as pixel_err:
+                logger.error("第三方像素上报失败（转化已入库）: %s", pixel_err, exc_info=True)
             
             # ========== 第 9 步：渠道转发（Cap 超限或扣量时不转发） ==========
             logger.info("=== 第 9 步：渠道转发 ====")
@@ -541,10 +564,17 @@ class PostbackProcessor:
                     message="\n".join(msg_lines),
                     telegram_chat_id=admin_config.telegram_chat_id,
                     notification_type='system_error',
-                    db=db
+                    db=db,
+                    commit=False,
                 )
         except Exception as e:
             logger.warning(f"发送 IP 验证失败通知失败：{e}")
+
+        try:
+            await db.commit()
+        except Exception as e:
+            logger.warning(f"提交 IP 失败通知记录失败: {e}")
+            await db.rollback()
         
         return {
             "success": True,

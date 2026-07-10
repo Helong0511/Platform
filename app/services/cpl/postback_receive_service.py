@@ -11,20 +11,39 @@ Postback 回调接收入口服务。
 
 注意事项：
 1. 响应须快速返回，耗时逻辑（通知、转发）应异步或后台执行
-2. 异常映射为 HTTP 状态码时须符合各上游平台 retry 策略
+2. 可恢复错误返回 5xx 促使上游重试；业务拒绝（重复、校验失败）仍返回 200 ok
 """
 import logging
 
-from fastapi import HTTPException, Request, Response
+from fastapi import HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ErrorCode
-from app.core.exceptions import raise_api_exception
 from app.core.postback import PostbackProcessor
 from app.core.postback.request_parser import collect_postback_raw_data
 from app.core.utils import get_client_ip
 
 logger = logging.getLogger(__name__)
+
+# 返回给上游的通用重试提示（不泄露内部细节）
+_POSTBACK_RETRY_HINT = "Postback processing failed, please retry"
+
+
+def raise_if_postback_retryable(result: dict) -> None:
+    """S2S 可恢复失败 → HTTP 503，促使上游重试。"""
+    if result.get("success") is False and result.get("retryable", True):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=result.get("message") or _POSTBACK_RETRY_HINT,
+        )
+
+
+def build_postback_ok_response() -> Response:
+    """S2S 成功响应：固定 plain text ok。"""
+    return Response(
+        content="ok",
+        media_type="text/plain; charset=utf-8",
+        status_code=200,
+    )
 
 
 class PostbackReceiveService:
@@ -53,25 +72,22 @@ class PostbackReceiveService:
             if client_ip and client_ip != "unknown" and "ip" not in raw_data:
                 raw_data["ip"] = client_ip
 
-            await PostbackProcessor.process(
+            result = await PostbackProcessor.process(
                 platform=platform,
                 raw_data=raw_data,
                 db=db,
                 request_ip=client_ip,
             )
-            return Response(
-                content="ok",
-                media_type="text/plain; charset=utf-8",
-                status_code=200,
-            )
+            raise_if_postback_retryable(result)
+            return build_postback_ok_response()
         except HTTPException:
             raise
         except Exception as e:
             logger.error("接收 PostBack 回调时发生错误: %s", e, exc_info=True)
-            raise_api_exception(
-                ErrorCode.OPERATION_FAILED,
-                detail=f"处理 PostBack 回调失败: {str(e)}",
-            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=_POSTBACK_RETRY_HINT,
+            ) from e
 
 
 postback_receive_service = PostbackReceiveService()

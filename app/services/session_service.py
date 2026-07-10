@@ -163,7 +163,7 @@ class SessionService:
         session.is_active = False
 
         try:
-            await self.db.commit()
+            await self.db.flush()
             logger.info(f"用户 {user_id} 撤销了会话 {session_id}")
         except Exception as e:
             await self.db.rollback()
@@ -218,7 +218,7 @@ class SessionService:
             revoked_count += 1
 
         try:
-            await self.db.commit()
+            await self.db.flush()
             logger.info(f"用户 {user_id} 撤销了 {revoked_count} 个其他会话")
         except Exception as e:
             await self.db.rollback()
@@ -324,7 +324,7 @@ class SessionService:
         session.is_active = False
 
         try:
-            await self.db.commit()
+            await self.db.flush()
             logger.info(f"管理员 {current_user.id} 撤销了用户 {user_id} 的会话 {session_id}")
         except Exception as e:
             await self.db.rollback()
@@ -382,7 +382,7 @@ class SessionService:
             revoked_count += 1
 
         try:
-            await self.db.commit()
+            await self.db.flush()
             logger.info(f"管理员 {current_user.id} 撤销了用户 {user.username} 的 {revoked_count} 个会话")
         except Exception as e:
             await self.db.rollback()

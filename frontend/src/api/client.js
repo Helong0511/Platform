@@ -58,7 +58,7 @@ export const getClientDetail = async (id, options = {}) => {
     );
   } catch (error) {
     if (silent) {
-      handleError(error, { showMessage: false });
+      handleError(error, { silent: true });
     } else {
       handleError(error);
     }

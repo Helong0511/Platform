@@ -489,7 +489,7 @@ class PostbackConversionService:
             # 更新转化状态
             if hasattr(conversion, 'conversion_status'):
                 conversion.conversion_status = status
-                await db.commit()
+                await db.flush()
                 await db.refresh(conversion)
 
                 logger.info(

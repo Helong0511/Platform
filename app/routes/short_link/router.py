@@ -27,6 +27,7 @@ from app.routes.short_link.cloak_change import register_cloak_change_routes
 from app.routes.short_link.cloak_report import register_cloak_report_routes
 from app.routes.short_link.errors import raise_short_link_bad_config
 from app.routes.short_link.handlers import handle_cached_redirect, handle_database_redirect
+from app.routes.short_link.short_code_validate import validate_route_short_code
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ async def redirect_short_link_public(
     异常统一映射为 404/500，保留浏览器可识别的 HTTP 状态码。
     """
     try:
+        short_code = validate_route_short_code(short_code)
         request_url = str(request.url)
         request_params = {k.lower(): v for k, v in request.query_params.items()}
         logger.warning(

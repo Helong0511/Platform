@@ -265,6 +265,45 @@ export const safeGet = (obj, path, defaultValue = null) => {
 };
 
 /**
+ * 将 FastAPI 校验错误 detail（字符串或 {loc,msg}[]）格式化为可读文案
+ * @param {unknown} detail
+ * @returns {string}
+ */
+export const formatApiDetail = (detail) => {
+  if (detail == null) {
+    return '';
+  }
+  if (typeof detail === 'string') {
+    return detail;
+  }
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === 'string') {
+          return item;
+        }
+        if (item && typeof item === 'object') {
+          const loc = Array.isArray(item.loc) ? item.loc.join('.') : '';
+          const msg = item.msg || item.message || JSON.stringify(item);
+          return loc ? `${loc}: ${msg}` : String(msg);
+        }
+        return String(item);
+      })
+      .filter(Boolean)
+      .join('；');
+  }
+  if (typeof detail === 'object') {
+    if (detail.detail) {
+      return formatApiDetail(detail.detail);
+    }
+    if (detail.message) {
+      return String(detail.message);
+    }
+  }
+  return String(detail);
+};
+
+/**
  * 提取错误消息
  * @param {Error} error - 错误对象
  * @returns {String} 错误消息
@@ -286,10 +325,10 @@ export const extractErrorMessage = (error) => {
     }
     // 优先使用 detail，其次使用 message
     if (errorData && typeof errorData === 'object' && errorData.detail) {
-      return errorData.detail;
+      return formatApiDetail(errorData.detail);
     }
     if (errorData && typeof errorData === 'object' && errorData.message) {
-      return errorData.message;
+      return formatApiDetail(errorData.message);
     }
     
     // 兼容旧格式（直接是字符串）
@@ -557,7 +596,8 @@ export const ensureCsrfToken = async (getRequestFn = null) => {
  * @returns {void}
  */
 export const handleError = (error, options = {}) => {
-  const { silent = false, customHandler } = options;
+  const { silent: silentOpt = false, customHandler } = options;
+  const silent = silentOpt || options.showMessage === false;
   
   // 如果错误已被处理（如429限流），直接抛出
   if (isErrorHandled(error)) {
@@ -825,6 +865,10 @@ export const request = async (config, options = {}) => {
     const requestConfig = { ...config };
     if (timeout !== null) {
       requestConfig.timeout = timeout;
+    }
+    if (silent) {
+      requestConfig.silent = true;
+      requestConfig.skipErrorMessage = true;
     }
 
     if (requestConfig.url) {

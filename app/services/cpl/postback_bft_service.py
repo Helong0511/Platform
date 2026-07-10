@@ -18,17 +18,19 @@ import json
 import logging
 from typing import Any, Dict
 
-from fastapi import HTTPException, Request, Response
+from fastapi import HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.errors import ErrorCode
-from app.core.exceptions import raise_api_exception
 from app.core.postback import PostbackProcessor
 from app.core.postback.request_parser import collect_postback_raw_data
 from app.core.telegram import send_telegram_message_async
 from app.core.telegram_utils import truncate_message
 from app.core.utils import get_app_now_naive, get_client_ip
+from app.services.cpl.postback_receive_service import (
+    build_postback_ok_response,
+    raise_if_postback_retryable,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -177,29 +179,26 @@ class PostbackBftService:
                     mapped_data.get("event_name"),
                 )
 
-            await PostbackProcessor.process(
+            result = await PostbackProcessor.process(
                 platform="bft",
                 raw_data=mapped_data,
                 db=db,
                 request_ip=client_ip,
             )
-            return Response(
-                content="ok",
-                media_type="text/plain; charset=utf-8",
-                status_code=200,
-            )
+            raise_if_postback_retryable(result)
+            return build_postback_ok_response()
         except HTTPException:
             raise
         except Exception as e:
-            logger.warning(
-                "处理 BFT PostBack 回调时发生错误: %s: %s",
-                type(e).__name__,
-                str(e)[:200],
+            logger.error(
+                "处理 BFT PostBack 回调时发生错误: %s",
+                e,
+                exc_info=True,
             )
-            raise_api_exception(
-                ErrorCode.OPERATION_FAILED,
-                detail=f"处理 PostBack 回调失败：{str(e)}",
-            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Postback processing failed, please retry",
+            ) from e
 
 
 postback_bft_service = PostbackBftService()

@@ -23,9 +23,9 @@ from sqlalchemy.orm import selectinload
 
 from app.core.async_orm import get_first_loaded_collection_item
 from app.core.auth_response import (
-    auth_failure_response,
     build_token_json_response,
     raise_auth_error,
+    raise_auth_failure,
 )
 from app.core.auth_user_payload import build_auth_user_payload
 from app.core.config import settings
@@ -189,8 +189,10 @@ async def refresh_token(
         )
 
     except HTTPException as exc:
-        return auth_failure_response(exc)
+        await db.rollback()
+        raise_auth_failure(exc)
     except TokenReuseError:
+        await db.rollback()
         try:
             raise_auth_error(
                 ErrorCode.TOKEN_INVALID,
@@ -198,8 +200,9 @@ async def refresh_token(
                 http_status=status.HTTP_401_UNAUTHORIZED,
             )
         except HTTPException as exc:
-            return auth_failure_response(exc)
+            raise_auth_failure(exc)
     except Exception as e:
+        await db.rollback()
         logger.error(f"刷新令牌失败: {str(e)}", exc_info=True)
         try:
             raise_auth_error(
@@ -208,4 +211,4 @@ async def refresh_token(
                 http_status=status.HTTP_401_UNAUTHORIZED,
             )
         except HTTPException as exc:
-            return auth_failure_response(exc)
+            raise_auth_failure(exc)

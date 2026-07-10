@@ -77,6 +77,7 @@ from typing import Iterator, Optional
 from sqlalchemy import select
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.core.errors import ErrorCode, create_error_response
 from app.core.redis_client import get_redis_client, reset_redis_client
 from app.core.security import is_authenticated_request
 from app.core.sensitive_path_guard import (
@@ -97,6 +98,23 @@ _rate_limit_store: dict[str, dict[str, tuple[int, datetime]]] = defaultdict(dict
 # Redis 限流异常日志限频（避免短时间刷屏）
 _rate_limit_redis_error_log_window_seconds = 60
 _rate_limit_redis_error_last_log_at: dict[str, float] = {}
+
+
+def _rate_limit_exceeded_response(*, limit: int, window: int) -> JSONResponse:
+    """限流响应：与 API 标准错误体一致。"""
+    body = create_error_response(
+        ErrorCode.TOO_MANY_REQUESTS,
+        message="请求过于频繁，请稍后再试",
+    )
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content=body,
+        headers={
+            "Retry-After": str(window),
+            "X-RateLimit-Limit": str(limit),
+            "X-RateLimit-Remaining": "0",
+        },
+    )
 
 # ====== 限流配置 ======
 # 从配置中读取限流设置，提供默认值
@@ -199,15 +217,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if redis_counted:
             if updated_count > limit:
                 logger.warning(f"API限流触发（Redis）: IP={client_ip}, 路径={request.url.path}, 限制={limit}/{window}秒")
-                return JSONResponse(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    content={"detail": "请求过于频繁，请稍后再试"},
-                    headers={
-                        "Retry-After": str(window),
-                        "X-RateLimit-Limit": str(limit),
-                        "X-RateLimit-Remaining": "0",
-                    },
-                )
+                return _rate_limit_exceeded_response(limit=limit, window=window)
 
             response = await call_next(request)
             remaining = max(0, limit - updated_count)
@@ -233,17 +243,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # ====== 检查是否超过限制 ======
         if current_count >= limit:
             logger.warning(f"API限流触发（内存）: IP={client_ip}, 路径={request.url.path}, 限制={limit}/{window}秒")
-            return JSONResponse(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                content={
-                    "detail": "请求过于频繁，请稍后再试"
-                },
-                headers={
-                    "Retry-After": str(window),
-                    "X-RateLimit-Limit": str(limit),
-                    "X-RateLimit-Remaining": "0",
-                }
-            )
+            return _rate_limit_exceeded_response(limit=limit, window=window)
 
         # ====== 更新请求计数 ======
         client_requests[current_window_key] = (current_count + 1, now)
@@ -597,8 +597,12 @@ class CompressionMiddleware(BaseHTTPMiddleware):
                     response_body += chunk
             except Exception as e:
                 logger.error(f"读取响应体时出错: {e}")
-                # 如果读取失败，返回原始响应（可能已经被部分消费）
-                return response
+                return Response(
+                    content=b"",
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                    media_type=response.media_type,
+                )
 
             # 如果响应体太小，不压缩
             if len(response_body) < self.min_compress_size:

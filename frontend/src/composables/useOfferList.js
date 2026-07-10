@@ -6,6 +6,7 @@ import { nextTick, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getOffers } from '../api/offer';
 import { useCplFilterOptions } from './useCplFilterOptions';
+import { isErrorHandled } from '../utils/api';
 import { logger } from '../utils/logger';
 
 function fixSelectDisplayLater() {
@@ -33,6 +34,7 @@ export function useOfferList() {
   });
 
   const tableData = ref([]);
+  let loadRequestId = 0;
 
   const {
     advertiserList,
@@ -43,6 +45,7 @@ export function useOfferList() {
   } = useCplFilterOptions();
 
   const loadData = async () => {
+    const requestId = ++loadRequestId;
     loading.value = true;
     try {
       const params = {
@@ -55,14 +58,21 @@ export function useOfferList() {
         is_active: filterActive.value !== null ? filterActive.value : undefined,
       };
       const response = await getOffers(params);
+      if (requestId !== loadRequestId) {
+        return;
+      }
       tableData.value = response.data || [];
       pagination.total = response.total || 0;
       fixSelectDisplayLater();
     } catch (error) {
       logger.error('获取Offer列表失败:', error);
-      ElMessage.error('获取数据失败');
+      if (!isErrorHandled(error)) {
+        ElMessage.error('获取数据失败');
+      }
     } finally {
-      loading.value = false;
+      if (requestId === loadRequestId) {
+        loading.value = false;
+      }
     }
   };
 

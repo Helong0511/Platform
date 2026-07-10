@@ -21,7 +21,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.clicks_queue import dequeue_clicks, drain_clicks_queue, get_queue_length
+from app.core.clicks_queue import (
+    acknowledge_reserved,
+    drain_clicks_queue,
+    get_queue_length,
+    recover_processing_queue,
+    requeue_reserved,
+    reserve_clicks,
+)
 from app.core.tracking.click_persist import should_persist_clicks_to_db
 from app.core.database import AsyncSessionLocal
 from app.core.offer_cache import get_offer_advertiser_id, set_offer_cache
@@ -71,6 +78,10 @@ async def process_clicks_queue() -> Dict[str, int]:
         return result
 
     try:
+        recovered = await recover_processing_queue()
+        if recovered:
+            logger.info("点击队列启动恢复：processing → 主队列 %s 条", recovered)
+
         # 循环处理，直到队列为空或达到最大批次数（防止长时间占用）
         max_batches = 10  # 最多处理10批（10,000条记录）
         batch_count = 0
@@ -87,13 +98,17 @@ async def process_clicks_queue() -> Dict[str, int]:
 
             logger.debug(f"开始批量处理点击记录队列（第 {batch_count + 1} 批），队列长度: {queue_length}")
 
-            # 批量从队列取出点击记录
-            clicks = await dequeue_clicks(count=min(BATCH_SIZE, queue_length))
-            if not clicks:
+            # 原子预留：主队列 → processing（失败时可回队）
+            reserved = await reserve_clicks(count=min(BATCH_SIZE, queue_length))
+            if not reserved:
                 break
+
+            raw_items = [raw for raw, _ in reserved]
+            clicks = [data for _, data in reserved]
 
             batch_count += 1
             result['processed'] += len(clicks)
+            batch_failed = False
 
             # 批量插入到数据库
             async with AsyncSessionLocal() as db:
@@ -103,6 +118,7 @@ async def process_clicks_queue() -> Dict[str, int]:
                     if not valid_clicks:
                         logger.warning(f"第 {batch_count} 批：所有点击记录的offer_id都无效，跳过插入")
                         result['failed'] += len(clicks)
+                        await acknowledge_reserved(raw_items)
                         continue
 
                     # 记录被过滤的记录数
@@ -126,6 +142,7 @@ async def process_clicks_queue() -> Dict[str, int]:
                     result['failed'] += len(valid_clicks) - inserted_count
 
                     await db.commit()
+                    await acknowledge_reserved(raw_items)
                     logger.debug(
                         f"批量插入点击记录成功（第 {batch_count} 批）: "
                         f"处理={len(clicks)}, "
@@ -134,12 +151,17 @@ async def process_clicks_queue() -> Dict[str, int]:
                     )
                 except Exception as e:
                     await db.rollback()
+                    batch_failed = True
                     logger.error(
                         f"批量插入点击记录失败（第 {batch_count} 批）: error={e}",
                         exc_info=True
                     )
-                    # 使用 valid_clicks 的长度（如果存在），否则使用 clicks
                     result['failed'] += len(valid_clicks) if 'valid_clicks' in locals() else len(clicks)
+                    await requeue_reserved(raw_items)
+
+            if batch_failed:
+                # 本批已回队，避免同轮循环反复处理
+                break
 
         # 获取剩余队列长度
         result['queue_remaining'] = await get_queue_length()

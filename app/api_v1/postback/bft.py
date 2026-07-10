@@ -6,12 +6,10 @@
 说明：处理上游转化回调、下游转发、去重诊断与 IP 白名单管理。"""
 import logging
 
-from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi import APIRouter, Depends, Request, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
-from app.core.errors import ErrorCode
-from app.core.exceptions import raise_api_exception
+from app.core.database import get_postback_db
 from app.services.cpl.postback_bft_service import postback_bft_service
 
 router = APIRouter()
@@ -25,7 +23,7 @@ logger = logging.getLogger(__name__)
 )
 async def receive_bft_postback(
         request: Request,
-        db: AsyncSession = Depends(get_db),
+        db: AsyncSession = Depends(get_postback_db),
 ):
     """
     接收 BFT 平台 S2S Postback（GET/POST 均可，参数由服务层解析）。
@@ -38,7 +36,7 @@ async def receive_bft_postback(
         raise
     except Exception as e:
         logger.error("接收 BFT PostBack 回调时发生错误: %s", e, exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"处理 PostBack 回调失败：{str(e)}",
-        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Postback processing failed, please retry",
+        ) from e

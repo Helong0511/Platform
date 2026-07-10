@@ -11,6 +11,7 @@ import {
   generateShortCode,
 } from '../api/short-link';
 import { logger } from '../utils/logger';
+import { isErrorHandled } from '../utils/api';
 import { createShortLinkFormRules } from '../utils/shortLinkFormRules';
 
 const emptyForm = () => ({
@@ -68,6 +69,9 @@ export function useShortLinkForm({ refreshListAndStats }) {
   };
 
   const handleSave = async () => {
+    if (saving.value) {
+      return;
+    }
     try {
       saving.value = true;
       const submitData = { ...formData };
@@ -85,12 +89,14 @@ export function useShortLinkForm({ refreshListAndStats }) {
       await refreshListAndStats();
     } catch (error) {
       logger.error('保存短链接失败:', error);
-      const errorMessage =
-        error.response?.data?.detail ||
-        error.response?.data?.message ||
-        error.message ||
-        '保存失败，请稍后重试';
-      ElMessage.error(errorMessage);
+      if (!isErrorHandled(error)) {
+        const errorMessage =
+          error.response?.data?.detail ||
+          error.response?.data?.message ||
+          error.message ||
+          '保存失败，请稍后重试';
+        ElMessage.error(errorMessage);
+      }
     } finally {
       saving.value = false;
     }

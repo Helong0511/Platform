@@ -163,7 +163,7 @@ class AdvertiserService(BaseService[Advertiser]):
         )
 
         self.db.add(advertiser)
-        await self.db.commit()
+        await self.db.flush()
         await self.db.refresh(advertiser)
 
         # 记录审计日志
@@ -219,7 +219,7 @@ class AdvertiserService(BaseService[Advertiser]):
         if 'is_active' in advertiser_data:
             advertiser.is_active = advertiser_data['is_active']
 
-        await self.db.commit()
+        await self.db.flush()
         await self.db.refresh(advertiser)
 
         # 失效相关缓存
@@ -288,6 +288,6 @@ class AdvertiserService(BaseService[Advertiser]):
 
         # 删除广告主
         await self.db.delete(advertiser)
-        await self.db.commit()
+        await self.db.flush()
 
         logger.info(f"广告主已删除: {advertiser.advertiser_name} (ID: {advertiser_id})")

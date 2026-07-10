@@ -447,12 +447,22 @@ function hasPublisherAccess(authStore) {
  */
 router.beforeEach(async (to, from, next) => {
   try {
-    // 如果是登录页，直接放行，不执行任何检查
+    const authStore = useAuthStore();
+
+    // 登录页：已登录用户重定向到默认首页
     if (to.path === '/login' || to.path === '/') {
+      validateAuthData();
+      if (!authStore.isAuthenticated) {
+        authStore.checkAuth();
+      }
+      if (authStore.isAuthenticated) {
+        if (to.path === '/login') {
+          ElMessage.info('您已登录');
+        }
+        return next(getDefaultRoute(authStore.userInfo));
+      }
       return next();
     }
-
-    const authStore = useAuthStore();
 
     // ====== 需要认证的路由：先校验本地状态，再向服务端确认会话 ======
     if (to.meta.requiresAuth) {
@@ -471,7 +481,7 @@ router.beforeEach(async (to, from, next) => {
       }
 
       try {
-        await authStore.fetchUserInfo({ silent: true, force: true });
+        await authStore.fetchUserInfo({ silent: true, force: false });
       } catch {
         clearAuthData();
         authStore.isAuthenticated = false;
@@ -487,14 +497,6 @@ router.beforeEach(async (to, from, next) => {
       if (authStore.isAuthenticated === false && validateAuthData()) {
         authStore.checkAuth();
       }
-    }
-
-    // ====== 已登录用户访问登录页 ======
-    if (to.path === '/login' && authStore.isAuthenticated) {
-      ElMessage.info('您已登录');
-      // 根据用户角色和菜单显示情况跳转到合适的页面
-      const defaultRoute = getDefaultRoute(authStore.userInfo);
-      return next(defaultRoute);
     }
 
     // ====== 管理员权限检查 ======
@@ -515,10 +517,10 @@ router.beforeEach(async (to, from, next) => {
 
       // 检查管理员权限
       if (!authStore.isAdmin) {
-        // 如果是从其他页面跳转过来的，返回原页面；否则跳转到仪表盘
         const fallbackPath = from.path && from.path !== '/login' && from.path.startsWith('/app')
           ? from.path
           : '/app/dashboard';
+        ElMessage.warning('无权访问该页面，需要管理员权限');
         return next(fallbackPath);
       }
     }

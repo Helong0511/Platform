@@ -104,8 +104,13 @@ def _map_error_code_to_status_code(error_code: int) -> int:
     # 3. 服务不可用（503）- 系统级错误
 
     if error_code == ErrorCode.UNAUTHORIZED:
-        # 401 未授权：需要特殊处理，浏览器会自动处理，保持401
         return status.HTTP_401_UNAUTHORIZED
+    elif error_code == ErrorCode.FORBIDDEN:
+        return status.HTTP_403_FORBIDDEN
+    elif error_code == ErrorCode.NOT_FOUND:
+        return status.HTTP_404_NOT_FOUND
+    elif error_code == ErrorCode.TOO_MANY_REQUESTS:
+        return status.HTTP_429_TOO_MANY_REQUESTS
     elif error_code == ErrorCode.INTERNAL_ERROR:
         # 500 服务器内部错误：真正的程序代码错误
         return status.HTTP_500_INTERNAL_SERVER_ERROR

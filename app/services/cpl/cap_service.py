@@ -181,7 +181,7 @@ class CapService(BaseService[OfferCap]):
 
         try:
             self.db.add(cap)
-            await self.db.commit()
+            await self.db.flush()
             await self.db.refresh(cap)
 
             # 重新加载关联信息（使用joinedload优化）
@@ -330,7 +330,7 @@ class CapService(BaseService[OfferCap]):
                 setattr(cap, key, value)
 
         try:
-            await self.db.commit()
+            await self.db.flush()
             await self.db.refresh(cap)
 
             # 重新加载关联信息（使用joinedload优化）
@@ -381,7 +381,7 @@ class CapService(BaseService[OfferCap]):
 
         try:
             await self.db.execute(delete(OfferCap).where(OfferCap.id == cap_id))
-            await self.db.commit()
+            await self.db.flush()
 
             logger.info(f"Cap配置删除成功: cap_id={cap_id}")
         except Exception as e:

@@ -8,6 +8,7 @@ from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cap import check_cap, increment_cap_count, rollback_cap_redis_counts
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +62,9 @@ class CapChecker:
             
         except Exception as e:
             logger.error(f"Cap 检查失败：{e}", exc_info=True)
-            # Cap 检查失败不影响主流程，记录错误但继续
-            return True, "cap_check_error"
+            if settings.CAP_FAIL_OPEN:
+                return True, "cap_check_error"
+            return False, "cap_check_error"
 
     @staticmethod
     async def rollback_redis(
@@ -87,14 +89,9 @@ class CapChecker:
         publisher_id: Optional[int],
         advertiser_id: Optional[int],
         db: AsyncSession,
-        *,
-        commit: bool = True,
     ) -> bool:
         """
-        增加 Cap 计数
-
-        Args:
-            commit: 为 False 时仅 flush，由调用方统一 commit（与转化入库同事务）
+        增加 Cap 计数（仅 flush，由 PostbackProcessor 统一 commit）。
         """
         if not offer_id:
             logger.debug("没有 Offer ID，跳过 Cap 计数递增")
@@ -115,8 +112,7 @@ class CapChecker:
                     publisher_id,
                 )
                 return False
-            if commit:
-                await db.commit()
+            await db.flush()
             logger.debug(
                 f"Cap 计数已增加：offer_id={offer_id}, publisher_id={publisher_id}"
             )

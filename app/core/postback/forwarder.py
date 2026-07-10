@@ -19,7 +19,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import (
-    PostbackConversion, PostbackForwardLog, Publisher,
+    PostbackConversion, PostbackForwardLog, PostbackForwardQueue, Publisher,
     AdminNotificationConfig
 )
 from app.core.postback.forwarding.cache_manager import CacheManager
@@ -270,6 +270,17 @@ class PostbackForwarder:
             f"Postback 转发完成：conversion_id={conversion.id}, "
             f"publisher_id={publisher_id}, success={final_success}"
         )
+
+        if not final_success:
+            await PostbackForwarder._enqueue_publisher_forward_retry(
+                db=db,
+                conversion=conversion,
+                publisher_id=publisher_id,
+                downstream_url=final_url,
+                method=method,
+                params=params,
+                json_data=json_data if method.upper() == "POST" else None,
+            )
         
         # ========== 第 7 步：发送通知（失败和成功时） ==========
         if not final_success:
@@ -334,7 +345,8 @@ class PostbackForwarder:
                     message="\n".join(msg_lines),
                     telegram_chat_id=admin_config.telegram_chat_id,
                     notification_type='forward_failure',
-                    db=db
+                    db=db,
+                    commit=False,
                 )
                 
         except Exception as e:
@@ -381,12 +393,69 @@ class PostbackForwarder:
                     message="\n".join(msg_lines),
                     telegram_chat_id=admin_config.telegram_chat_id,
                     notification_type='forward_success',
-                    db=db
+                    db=db,
+                    commit=False,
                 )
                 
         except Exception as e:
             # 记录发送通知失败的错误
             logger.warning(f"发送转发成功通知失败：{e}")
+
+    @staticmethod
+    async def _enqueue_publisher_forward_retry(
+        db: AsyncSession,
+        conversion: PostbackConversion,
+        publisher_id: int,
+        downstream_url: str,
+        method: str,
+        params: Optional[Dict[str, Any]],
+        json_data: Optional[Dict[str, Any]],
+    ) -> None:
+        """转发失败时写入重试队列，由定时任务指数退避重试。"""
+        try:
+            existing = await db.execute(
+                select(PostbackForwardQueue).where(
+                    PostbackForwardQueue.conversion_id == conversion.id,
+                    PostbackForwardQueue.publisher_id == publisher_id,
+                )
+            )
+            if existing.scalars().first():
+                logger.debug(
+                    "转发重试队列已存在: conversion_id=%s publisher_id=%s",
+                    conversion.id,
+                    publisher_id,
+                )
+                return
+
+            task = PostbackForwardQueue(
+                conversion_id=conversion.id,
+                product_id=conversion.product_id,
+                publisher_id=publisher_id,
+                downstream_url=downstream_url,
+                request_method=method,
+                request_params=json.dumps(params, ensure_ascii=False) if params else None,
+                request_data=json.dumps(json_data, ensure_ascii=False) if json_data else None,
+                retry_count=0,
+                next_retry_time=get_app_now_naive(),
+            )
+            db.add(task)
+            await db.flush()
+            logger.info(
+                "转发失败已入重试队列: conversion_id=%s publisher_id=%s",
+                conversion.id,
+                publisher_id,
+            )
+            import asyncio
+            from app.scheduler_module.tasks.forward_tasks import trigger_forward_processing
+
+            asyncio.create_task(trigger_forward_processing())
+        except Exception as exc:
+            logger.error(
+                "入队转发重试失败: conversion_id=%s err=%s",
+                conversion.id,
+                exc,
+                exc_info=True,
+            )
 
 
 # 向后兼容：导入 select

@@ -33,6 +33,7 @@ from app.services.ad_data.queries.daily_summary_query import DailySummaryQuery
 logger = logging.getLogger(__name__)
 
 MAX_DAILY_SUMMARY_EXPORT_ROWS = 50_000
+MAX_DETAIL_EXPORT_ROWS = 50_000
 
 
 def resolve_daily_summary_export_grouping(
@@ -419,9 +420,19 @@ async def export_ad_data_handler(
         query = query.where(AdData.date >= month_start_datetime)
         query = query.where(AdData.date <= month_end_datetime)
 
-    # 执行查询
-    result = await db.execute(query.order_by(AdData.date.desc()))
-    ad_data_results = result.all()  # 返回 (AdData, CountryInfo) 元组列表
+    # 执行查询（限制最大行数，防止 OOM）
+    result = await db.execute(
+        query.order_by(AdData.date.desc()).limit(MAX_DETAIL_EXPORT_ROWS + 1)
+    )
+    ad_data_results = result.all()
+    if len(ad_data_results) > MAX_DETAIL_EXPORT_ROWS:
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=(
+                f"导出数据量过大（超过 {MAX_DETAIL_EXPORT_ROWS} 行），"
+                "请缩小日期范围或筛选条件后重试"
+            ),
+        )
 
     # 如果没有数据，抛出错误提示用户
     # ---------- 条件分支 ----------

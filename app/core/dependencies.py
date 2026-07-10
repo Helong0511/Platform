@@ -9,7 +9,7 @@
 """
 from functools import lru_cache
 from typing import Annotated, Tuple
-from fastapi import Depends
+from fastapi import Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -58,7 +58,8 @@ async def get_current_admin_user(
     if current_user.role != UserRole.ADMIN:
         raise_api_exception(
             ErrorCode.FORBIDDEN,
-            detail="此操作需要管理员权限"
+            detail="此操作需要管理员权限",
+            status_code=status.HTTP_403_FORBIDDEN,
         )
     return current_user
 

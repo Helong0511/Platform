@@ -42,7 +42,7 @@ class AdDataDeleteCommand:
             )
 
         await self.db.delete(ad_data)
-        await self.db.commit()
+        await self.db.flush()
         logger.info("广告数据已删除: ID=%s", data_id)
 
 
@@ -77,7 +77,7 @@ class AdDataBatchDeleteCommand:
         try:
             result = await self.db.execute(delete(AdData).where(AdData.id.in_(deletable_ids)))
             deleted_count = result.rowcount
-            await self.db.commit()
+            await self.db.flush()
             logger.info(
                 "Batch deleted %s ad data records by %s",
                 deleted_count,

@@ -37,6 +37,7 @@ export function useDebouncedPaginatedFetch({
   let timer = null;
   let currentPromise = null;
   let currentParamsKey = null;
+  let pendingAfterLoad = false;
 
   const executeFetch = async (paramsKey, params) => {
     currentParamsKey = paramsKey;
@@ -72,6 +73,11 @@ export function useDebouncedPaginatedFetch({
       if (afterEmpty && response !== undefined) {
         await afterEmpty(response);
       }
+
+      if (pendingAfterLoad) {
+        pendingAfterLoad = false;
+        await runFetch();
+      }
     })();
 
     currentPromise = requestPromise;
@@ -80,6 +86,7 @@ export function useDebouncedPaginatedFetch({
 
   const runFetch = async () => {
     if (loading.value) {
+      pendingAfterLoad = true;
       return;
     }
 

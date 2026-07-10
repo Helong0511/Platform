@@ -52,6 +52,7 @@ from app.core.auth_user_payload import build_auth_user_payload
 from app.core.async_orm import get_first_loaded_collection_item
 from app.core.config import settings
 from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
 from app.core.database import get_db
 from app.core.security import JWTUtils, get_current_user
 from app.core.utils import get_client_ip
@@ -211,7 +212,6 @@ async def login(
     except HTTPException:
         raise
     except Exception as e:
-        # 捕获其他异常，记录日志并返回401错误
         error_msg = str(e)
         error_type = type(e).__name__
         logger.error(
@@ -220,15 +220,14 @@ async def login(
             f"IP={client_ip}",
             exc_info=True
         )
-        # 在开发环境返回更详细的错误信息，生产环境返回通用错误
         if settings.is_development:
             detail = f"登录失败: {error_type}: {error_msg}"
         else:
-            detail = "登录失败，请稍后重试"
+            detail = "登录服务暂时不可用，请稍后重试"
         raise_auth_error(
-            ErrorCode.INVALID_CREDENTIALS,
+            ErrorCode.SERVICE_UNAVAILABLE,
             detail,
-            http_status=status.HTTP_401_UNAUTHORIZED,
+            http_status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
     if not user.is_active:
@@ -389,9 +388,10 @@ async def logout(
     except HTTPException:
         raise
     except Exception as e:
-        # 日志记录失败不应该影响退出登录
-        logger.warning(f"记录退出登录日志失败: {e}")
-
+        logger.error(f"退出登录失败: {e}", exc_info=True)
         clear_auth_cookies(response)
-        
-        return ResponseBaseSchema.success(data={"message": "退出登录成功"})
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail="退出登录失败，请重试",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )

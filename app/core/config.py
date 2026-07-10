@@ -62,6 +62,32 @@ def is_production_env_name(env_name: str) -> bool:
     return env_name in ("production", "prod")
 
 
+def _resolve_cap_fail_open() -> bool:
+    """
+    Cap 异常时是否放行（fail-open）。
+
+    - 显式设置 CAP_FAIL_OPEN 时以其为准
+    - 未设置：开发环境 fail-open，生产环境 fail-close
+    """
+    explicit = os.getenv("CAP_FAIL_OPEN")
+    if explicit is not None and str(explicit).strip() != "":
+        return str(explicit).strip().lower() in ["true", "1", "yes"]
+    return detect_production_env() != "production"
+
+
+def _resolve_deduction_fail_open() -> bool:
+    """
+    扣量异常时是否放行（fail-open）。
+
+    - 显式设置 DEDUCTION_FAIL_OPEN 时以其为准
+    - 未设置：开发环境 fail-open，生产环境 fail-close
+    """
+    explicit = os.getenv("DEDUCTION_FAIL_OPEN")
+    if explicit is not None and str(explicit).strip() != "":
+        return str(explicit).strip().lower() in ["true", "1", "yes"]
+    return detect_production_env() != "production"
+
+
 # Windows 本机开发默认 Bot Token（仅 development 使用，生产须通过环境变量配置）
 WINDOWS_DEFAULT_TELEGRAM_TOKEN = "8790845059:AAE3FrEh9S1FQcgNv6YFo1r2NrwtMS7AFOo"
 
@@ -791,6 +817,17 @@ class Settings(BaseSettings):
     FACEBOOK_PIXEL_ID: str = os.getenv("FACEBOOK_PIXEL_ID", "")
     FACEBOOK_ACCESS_TOKEN: str = os.getenv("FACEBOOK_ACCESS_TOKEN", "")
     FACEBOOK_API_VERSION: str = os.getenv("FACEBOOK_API_VERSION", "v23.0")
+
+    # Cap 检查/递增异常时是否放行（false=fail-close，生产默认关闭放行）
+    CAP_FAIL_OPEN: bool = Field(
+        default_factory=_resolve_cap_fail_open,
+        description="Cap 故障时是否 fail-open；生产环境默认 fail-close",
+    )
+
+    DEDUCTION_FAIL_OPEN: bool = Field(
+        default_factory=_resolve_deduction_fail_open,
+        description="扣量故障时是否 fail-open；生产环境默认 fail-close",
+    )
 
     # 已废弃：斗篷配置已迁移至数据库表 cloak_configs（系统服务 -> 斗篷管理）
     # 该字段仅保留兼容，业务逻辑不再依赖此映射。

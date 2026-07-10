@@ -248,7 +248,7 @@ class ScheduledTaskService:
         task.updated_at = get_app_now_naive()
 
         try:
-            await self.db.commit()
+            await self.db.flush()
             await self.db.refresh(task)
 
             # 如果启用状态发生变化，需要重新注册任务或从调度器中移除
@@ -656,7 +656,7 @@ class ScheduledTaskService:
         task.last_error = "管理员手动释放锁"
 
         try:
-            await self.db.commit()
+            await self.db.flush()
             logger.warning(f"管理员 {current_user.username} 手动释放了任务锁: {task_name}")
 
             return {"message": "任务锁已释放"}

@@ -8,8 +8,10 @@ from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.deduction import apply_deduction, find_deduction_config, log_deduction
 from app.core.discount import calculate_discount
+from app.core.postback.errors import DeductionProcessingError
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,10 @@ class DiscountChecker:
                     )
             except Exception as exc:
                 logger.warning("OfferDiscount 计算失败：%s", exc)
+                if not settings.DEDUCTION_FAIL_OPEN:
+                    raise DeductionProcessingError(
+                        f"OfferDiscount 计算失败: {exc}"
+                    ) from exc
 
         # 2. ConversionDeductionConfig（扣量 / 扣金额）
         try:
@@ -105,6 +111,10 @@ class DiscountChecker:
                         )
                     except Exception as log_exc:
                         logger.warning("记录扣量日志失败：%s", log_exc)
+                        if not settings.DEDUCTION_FAIL_OPEN:
+                            raise DeductionProcessingError(
+                                f"记录扣量日志失败: {log_exc}"
+                            ) from log_exc
                     logger.info(
                         "转化扣量命中：offer_id=%s publisher_id=%s，跳过入库与转发",
                         offer_id,
@@ -126,8 +136,18 @@ class DiscountChecker:
                             )
                         except Exception as log_exc:
                             logger.warning("记录扣金额日志失败：%s", log_exc)
+                            if not settings.DEDUCTION_FAIL_OPEN:
+                                raise DeductionProcessingError(
+                                    f"记录扣金额日志失败: {log_exc}"
+                                ) from log_exc
+        except DeductionProcessingError:
+            raise
         except Exception as exc:
             logger.warning("ConversionDeductionConfig 处理失败：%s", exc)
+            if not settings.DEDUCTION_FAIL_OPEN:
+                raise DeductionProcessingError(
+                    f"ConversionDeductionConfig 处理失败: {exc}"
+                ) from exc
 
         deduction_info["final_payout"] = final_payout
         return final_payout, deduction_info, skip_save_and_forward

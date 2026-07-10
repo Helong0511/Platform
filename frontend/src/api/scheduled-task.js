@@ -11,9 +11,14 @@ import { getSuccessMessage } from '../utils/messages';
 /**
  * 分页获取定时任务列表。
  */
-export const getScheduledTasks = async (params) =>
+export const getScheduledTasks = async (params, options = {}) =>
   request(
-    { url: '/api/v1/scheduled-tasks/', method: 'get', params },
+    {
+      url: '/api/v1/scheduled-tasks/',
+      method: 'get',
+      params,
+      signal: options.signal,
+    },
     { paginated: true }
   );
 

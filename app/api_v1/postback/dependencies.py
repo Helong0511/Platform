@@ -6,7 +6,7 @@
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import get_db, get_postback_db
 from app.core.security import require_admin
 from app.models.models import User
 

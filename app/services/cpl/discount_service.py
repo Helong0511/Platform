@@ -126,7 +126,7 @@ class DiscountService(BaseService[OfferDiscount]):
 
         try:
             self.db.add(discount)
-            await self.db.commit()
+            await self.db.flush()
             await self.db.refresh(discount)
 
             # 重新加载关联信息（使用joinedload优化）
@@ -259,7 +259,7 @@ class DiscountService(BaseService[OfferDiscount]):
                 setattr(discount, key, value)
 
         try:
-            await self.db.commit()
+            await self.db.flush()
             await self.db.refresh(discount)
 
             # 重新加载关联信息（使用joinedload优化）
@@ -309,7 +309,7 @@ class DiscountService(BaseService[OfferDiscount]):
 
         try:
             await self.db.execute(delete(OfferDiscount).where(OfferDiscount.id == discount_id))
-            await self.db.commit()
+            await self.db.flush()
 
             logger.info(f"扣量配置删除成功: discount_id={discount_id}")
         except Exception as e:

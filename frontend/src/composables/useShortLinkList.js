@@ -8,6 +8,7 @@ import { ElMessage } from 'element-plus';
 import { getShortLinks, getShortLinkStats, updateShortLink } from '../api/short-link';
 import { getOffers } from '../api/offer';
 import { getPublishers } from '../api/publisher';
+import { isErrorHandled } from '../utils/api';
 import { logger } from '../utils/logger';
 
 /**
@@ -45,8 +46,10 @@ export function useShortLinkList() {
   });
 
   let isApplyingSearch = false;
+  let loadRequestId = 0;
 
   const loadData = async () => {
+    const requestId = ++loadRequestId;
     loading.value = true;
     try {
       const params = {
@@ -60,6 +63,9 @@ export function useShortLinkList() {
         params.is_active = filters.is_active;
       }
       const result = await getShortLinks(params);
+      if (requestId !== loadRequestId) {
+        return;
+      }
       links.value = (result.data || []).map((link) => ({
         ...link,
         _toggleLoading: false,
@@ -67,9 +73,13 @@ export function useShortLinkList() {
       pagination.total = result.total || 0;
     } catch (error) {
       logger.error('加载短链接列表失败:', error);
-      ElMessage.error('加载数据失败，请重试');
+      if (!isErrorHandled(error)) {
+        ElMessage.error('加载数据失败，请重试');
+      }
     } finally {
-      loading.value = false;
+      if (requestId === loadRequestId) {
+        loading.value = false;
+      }
     }
   };
 

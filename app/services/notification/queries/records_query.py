@@ -228,7 +228,7 @@ class NotificationRecordsQuery:
                 created_at=get_app_now_naive(),
             )
             self.db.add(new_notification)
-            await self.db.commit()
+            await self.db.flush()
             await self.db.refresh(new_notification)
             logger.info(
                 "自动创建通知记录: conversion_id=%s, notification_id=%s",

@@ -34,3 +34,7 @@ npm run dev
 # API 性能评估（可选）
 # python tests/performance/run_benchmark.py --scenario smoke,normal
 # 报告：tests/performance/reports/
+
+
+
+DELETE FROM `ad_data` WHERE `DATE` >= '2026-07-01';

@@ -188,7 +188,7 @@ class PostbackPendingService:
                     )
 
             if result["approved_count"] > 0 or result["skipped_count"] > 0:
-                await db.commit()
+                await db.flush()
                 if result["approved_count"] > 0:
                     logger.info(
                         "管理员 %s 添加 IP %s 白名单后自动批准 %s 条待确认转化",
@@ -381,7 +381,7 @@ class PostbackPendingService:
                 )
 
             conversion = await self._create_conversion_from_pending(pending, db)
-            await db.commit()
+            await db.flush()
             await db.refresh(conversion)
 
             # 构建响应
@@ -446,7 +446,7 @@ class PostbackPendingService:
             pending.status = 'rejected'
             pending.rejected_at = get_app_now_naive()
 
-            await db.commit()
+            await db.flush()
 
             logger.info(
                 f"管理员 {current_user.username} 拒绝了待确认转化记录: "

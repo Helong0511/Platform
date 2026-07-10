@@ -335,7 +335,7 @@ class ShortLinkService(BaseService[ShortLink]):
 
             # 提交事务，确保数据保存到数据库
             logger.debug("提交事务")
-            await self.db.commit()
+            await self.db.flush()
 
             logger.info(f"短链接创建成功: {short_link.short_code} -> {short_link.original_url}")
             return short_link
@@ -421,7 +421,7 @@ class ShortLinkService(BaseService[ShortLink]):
         for key, value in link_data.items():
             setattr(short_link, key, value)
 
-        await self.db.commit()
+        await self.db.flush()
         await self.db.refresh(short_link)
 
         # 清除缓存，确保数据一致性
@@ -459,7 +459,7 @@ class ShortLinkService(BaseService[ShortLink]):
 
         # 删除短链接
         await self.db.delete(short_link)
-        await self.db.commit()
+        await self.db.flush()
 
         # 清除缓存和Redis计数器，确保数据一致性
         await invalidate_short_link_cache(short_code)

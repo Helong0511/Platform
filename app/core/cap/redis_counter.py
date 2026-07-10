@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from app.core.redis_client import get_redis_client
+from app.core.config import settings
 from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
@@ -39,24 +40,44 @@ def get_total_cap_key(offer_id: int, publisher_id: Optional[int] = None) -> str:
 
 class RedisCapManager:
     """Redis Cap 管理器"""
+
+    @staticmethod
+    def _redis_unavailable_result() -> bool:
+        """Redis 不可用时按 CAP_FAIL_OPEN 决定放行或拒绝。"""
+        if settings.CAP_FAIL_OPEN:
+            logger.warning("Redis不可用，Cap fail-open 放行")
+            return True
+        logger.error("Redis不可用，Cap fail-close 拒绝")
+        return False
+
+    @staticmethod
+    def _lua_failure_result() -> bool:
+        if settings.CAP_FAIL_OPEN:
+            logger.warning("Redis Cap Lua 失败，fail-open 放行")
+            return True
+        logger.error("Redis Cap Lua 失败，fail-close 拒绝")
+        return False
     
-    # Lua 脚本：原子递增并设置过期时间
+    # Lua：先判限再递增，超限返回 -1（不修改 key）
     # KEYS[1]: cap_key
     # ARGV[1]: expire_seconds
-    # ARGV[2]: initial_value (可选，用于冷启动同步)
-    _INCR_LUA = """
+    # ARGV[2]: initial_value（冷启动，key 不存在时使用）
+    # ARGV[3]: limit
+    _RESERVE_LUA = """
+    local limit = tonumber(ARGV[3])
     local current = redis.call('GET', KEYS[1])
     if not current then
-        local val = 1
-        if ARGV[2] and ARGV[2] ~= "" then
-            val = tonumber(ARGV[2]) + 1
-        end
-        redis.call('SET', KEYS[1], val)
-        redis.call('EXPIRE', KEYS[1], ARGV[1])
-        return val
+        current = tonumber(ARGV[2]) or 0
     else
-        return redis.call('INCR', KEYS[1])
+        current = tonumber(current)
     end
+    if current >= limit then
+        return -1
+    end
+    local new_val = current + 1
+    redis.call('SET', KEYS[1], new_val)
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+    return new_val
     """
 
     @staticmethod
@@ -80,28 +101,27 @@ class RedisCapManager:
         """
         redis = await get_redis_client()
         if not redis:
-            logger.warning("Redis不可用，Cap检查跳过 (Fail Open)")
-            return True
+            return RedisCapManager._redis_unavailable_result()
             
         now = get_app_now_naive()
         key = get_daily_cap_key(offer_id, now, publisher_id)
         
         try:
-            # 执行 Lua 脚本实现原子操作
-            # initial_value 如果为 None，传空字符串给 Lua
-            init_val = str(initial_value) if initial_value is not None else ""
+            init_val = str(initial_value) if initial_value is not None else "0"
             current = await redis.eval(
-                RedisCapManager._INCR_LUA, 1, key, DEFAULT_EXPIRE_SECONDS, init_val
+                RedisCapManager._RESERVE_LUA,
+                1,
+                key,
+                DEFAULT_EXPIRE_SECONDS,
+                init_val,
+                str(limit),
             )
-            
-            # 检查是否超量
-            if current > limit:
+            if int(current) < 0:
                 return False
-                
             return True
         except Exception as e:
             logger.error(f"Redis Lua操作失败: {e}", exc_info=True)
-            return True  # Fail Open
+            return RedisCapManager._lua_failure_result()
 
     @staticmethod
     async def check_and_increment_total(
@@ -115,24 +135,26 @@ class RedisCapManager:
         """
         redis = await get_redis_client()
         if not redis:
-            logger.warning("Redis不可用，总Cap递增检查跳过 (Fail Open)")
-            return True
+            return RedisCapManager._redis_unavailable_result()
             
         key = get_total_cap_key(offer_id, publisher_id)
         
         try:
-            init_val = str(initial_value) if initial_value is not None else ""
-            # 总 Cap 过期时间设长一点（比如 30 天）或者不设，这里设 30 天作为兜底
+            init_val = str(initial_value) if initial_value is not None else "0"
             current = await redis.eval(
-                RedisCapManager._INCR_LUA, 1, key, 30 * 24 * 3600, init_val
+                RedisCapManager._RESERVE_LUA,
+                1,
+                key,
+                30 * 24 * 3600,
+                init_val,
+                str(limit),
             )
-            
-            if current > limit:
+            if int(current) < 0:
                 return False
             return True
         except Exception as e:
             logger.error(f"Redis Lua操作失败: {e}", exc_info=True)
-            return True  # Fail Open
+            return RedisCapManager._lua_failure_result()
             
     @staticmethod
     async def decrement_daily(

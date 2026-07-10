@@ -66,7 +66,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
 
         try:
             self.db.add(config)
-            await self.db.commit()
+            await self.db.flush()
             await self.db.refresh(config)
             await deduction_helpers.invalidate_config_cache(level, target_id)
             config = await deduction_helpers.load_config_with_relations(self.db, config.id)
@@ -147,7 +147,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                 setattr(config, field, value)
 
         try:
-            await self.db.commit()
+            await self.db.flush()
             await self.db.refresh(config)
             if level and target_id:
                 await deduction_helpers.invalidate_config_cache(level, target_id)
@@ -186,7 +186,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
         config.is_active = is_active
 
         try:
-            await self.db.commit()
+            await self.db.flush()
             await self.db.refresh(config)
             if level and target_id:
                 await deduction_helpers.invalidate_config_cache(level, target_id)
@@ -236,7 +236,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                 request=request,
             )
             await self.db.delete(config)
-            await self.db.commit()
+            await self.db.flush()
             if level and target_id:
                 await deduction_helpers.invalidate_config_cache(level, target_id)
             logger.info("扣减配置删除成功: config_id=%s", config_id)
@@ -287,7 +287,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                 .where(ConversionDeductionConfig.id.in_(config_ids))
                 .values(is_active=is_active)
             )
-            await self.db.commit()
+            await self.db.flush()
 
             for config in configs:
                 level, target_id = resolve_config_level_target(config)
@@ -358,7 +358,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                     ConversionDeductionConfig.id.in_(config_ids)
                 )
             )
-            await self.db.commit()
+            await self.db.flush()
 
             for config in configs:
                 level, target_id = resolve_config_level_target(config)

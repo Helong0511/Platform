@@ -418,7 +418,7 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
             }
 
             # 提交更改
-            await self.db.commit()
+            await self.db.flush()
 
             logger.info(
                 f"管理员 {current_user.id} 更新了产品分配记录 {assignment_id} 的日期："
@@ -550,7 +550,7 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
                 )
 
             # 验证通过，提交所有更改
-            await self.db.commit()
+            await self.db.flush()
 
             # 记录日志
             update_summary = []

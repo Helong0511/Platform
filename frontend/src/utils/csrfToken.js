@@ -115,11 +115,14 @@ export const getCsrfToken = () => {
  */
 export const saveCsrfToken = (token) => {
   if (token) {
-    const oldToken = sessionStorage.getItem('csrf_token');
-    // 只有当令牌发生变化时才更新，避免不必要的storage事件
-    if (oldToken !== token) {
+    const oldSession = sessionStorage.getItem('csrf_token');
+    const oldLocal = localStorage.getItem('csrf_token');
+    if (oldSession !== token || oldLocal !== token) {
       sessionStorage.setItem('csrf_token', token);
-      // 如果不是从storage事件触发的更新，记录日志
+      if (!isUpdatingFromStorage) {
+        localStorage.setItem('csrf_token', token);
+        localStorage.setItem('csrf_token_updated_at', String(Date.now()));
+      }
       if (!isUpdatingFromStorage) {
         logger.debug('已保存 CSRF token');
       }

@@ -151,8 +151,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             # 如果没有异常，提交事务
             await session.commit()
         except HTTPException:
-            # HTTPException是FastAPI的业务逻辑异常，不应该回滚或记录为数据库错误
-            # 直接抛出，让FastAPI的异常处理器处理
+            await session.rollback()
             raise
         except RequestValidationError:
             await session.rollback()
@@ -164,6 +163,29 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             # 确保会话被关闭（释放连接）
+            await session.close()
+
+
+async def get_postback_db() -> AsyncGenerator[AsyncSession, None]:
+    """
+    Postback S2S 专用数据库会话：不在请求结束时自动 commit。
+
+    事务由 PostbackProcessor 显式 commit/rollback，避免与 get_db 二次提交冲突。
+  """
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        except HTTPException:
+            await session.rollback()
+            raise
+        except RequestValidationError:
+            await session.rollback()
+            raise
+        except Exception as e:
+            logger.error(f"Postback 数据库会话错误: {str(e)}", exc_info=True)
+            await session.rollback()
+            raise
+        finally:
             await session.close()
 
 

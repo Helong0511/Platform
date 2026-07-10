@@ -227,7 +227,7 @@ class UserService(BaseService[User]):
                 self.db.add(client)
                 await self.db.flush()
 
-        await self.db.commit()
+        await self.db.flush()
 
         # 若创建了客户，重新加载用户以包含客户信息（避免异步懒加载）
         if user_data.get('company_name'):
@@ -337,7 +337,7 @@ class UserService(BaseService[User]):
             if hasattr(user, key):
                 setattr(user, key, value)
 
-        await self.db.commit()
+        await self.db.flush()
 
         user = await self.get_user_by_id(user_id, current_user, include_client=False)
 
@@ -380,7 +380,7 @@ class UserService(BaseService[User]):
 
         # 删除用户
         await self.db.delete(user)
-        await self.db.commit()
+        await self.db.flush()
 
         # 清除权限缓存（用户已删除）
         try:
@@ -457,7 +457,7 @@ class UserService(BaseService[User]):
 
         # 设置新密码
         user.set_password(new_password)
-        await self.db.commit()
+        await self.db.flush()
 
         # 记录审计日志
         await log_user_action(

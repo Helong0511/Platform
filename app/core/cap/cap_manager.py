@@ -15,6 +15,7 @@ from app.models.models import OfferCap, Offer, PostbackConversion
 logger = logging.getLogger(__name__)
 
 from app.core.cap.redis_counter import RedisCapManager, get_daily_cap_key, get_total_cap_key
+from app.core.config import settings
 from app.core.redis_client import get_redis_client
 from app.core.utils import get_app_now_naive
 
@@ -132,8 +133,10 @@ async def check_cap(
         return True, None
     except Exception as e:
         logger.error(f"检查Cap失败: {str(e)}", exc_info=True)
-        # 出错时允许通过，避免影响正常流程
-        return True, None
+        if settings.CAP_FAIL_OPEN:
+            logger.warning("Cap 检查异常，fail-open 放行")
+            return True, None
+        return False, "cap_check_error"
 
 
 async def increment_cap_count(
@@ -198,52 +201,70 @@ async def increment_cap_count(
         all_passed = True
         
         for cap in caps:
-            # 2. 处理每日计数
+            # 2. 处理每日计数（Redis 先预留名额，成功后再更新 DB）
             if cap.daily_cap:
-                # 检查是否需要重置（新的一天）
-                if not cap.cap_start_date or cap.cap_start_date.date() < today_start.date():
-                    cap.current_daily_count = 0
+                is_new_day = (
+                    not cap.cap_start_date
+                    or cap.cap_start_date.date() < today_start.date()
+                )
+                if is_new_day:
                     cap.cap_start_date = today_start
-                    # 重置时，Redis 的 initial_value 应为 0
                     redis_init_val = 0
                 else:
-                    # 正常递增，传递当前 DB 的值作为冷启动初始值
                     redis_init_val = cap.current_daily_count
-                
-                # DB 更新 (由于有 with_for_update，这里是安全的)
-                cap.current_daily_count += 1
 
-                # ====== 优化：Redis 原子递增并同步 DB 初始值 ======
                 try:
                     passed = await RedisCapManager.check_and_increment_daily(
-                         cap.offer_id, cap.daily_cap, cap.publisher_id,
-                         initial_value=redis_init_val
+                        cap.offer_id,
+                        cap.daily_cap,
+                        cap.publisher_id,
+                        initial_value=redis_init_val,
                     )
-                    if not passed:
-                        all_passed = False
-                        logger.warning(f"每日Cap超限: offer={cap.offer_id}, limit={cap.daily_cap}, current={cap.current_daily_count}")
                 except Exception as e:
                     logger.warning(f"Redis计数递增同步失败: {e}")
+                    if settings.CAP_FAIL_OPEN:
+                        passed = True
+                    else:
+                        passed = False
+
+                if not passed:
+                    all_passed = False
+                    logger.warning(
+                        f"每日Cap超限: offer={cap.offer_id}, limit={cap.daily_cap}, "
+                        f"current={redis_init_val}"
+                    )
+                else:
+                    cap.current_daily_count = redis_init_val + 1
             
-            # 3. 处理总计数
+            # 3. 处理总计数（Redis 先预留，成功后再更新 DB）
             if cap.total_cap:
                 if not cap.cap_start_date:
                     cap.cap_start_date = now
-                
+
                 redis_init_val = cap.current_total_count
-                cap.current_total_count += 1
-                
-                # Redis 更新 (Total Cap)
+
                 try:
                     passed = await RedisCapManager.check_and_increment_total(
-                        cap.offer_id, cap.total_cap, cap.publisher_id,
-                        initial_value=redis_init_val
+                        cap.offer_id,
+                        cap.total_cap,
+                        cap.publisher_id,
+                        initial_value=redis_init_val,
                     )
-                    if not passed:
-                        all_passed = False
-                        logger.warning(f"总Cap超限: offer={cap.offer_id}, limit={cap.total_cap}, current={cap.current_total_count}")
                 except Exception as e:
                     logger.warning(f"Redis总计数递增同步失败: {e}")
+                    if settings.CAP_FAIL_OPEN:
+                        passed = True
+                    else:
+                        passed = False
+
+                if not passed:
+                    all_passed = False
+                    logger.warning(
+                        f"总Cap超限: offer={cap.offer_id}, limit={cap.total_cap}, "
+                        f"current={redis_init_val}"
+                    )
+                else:
+                    cap.current_total_count = redis_init_val + 1
         
         # 由调用方控制外层事务时可选跳过 flush，与转化入库同一 commit
         if session_flush:
