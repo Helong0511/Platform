@@ -19,8 +19,17 @@ import {
 
 const DEFAULT_REPORT_KEYS = ['ad_unit', 'country', 'site'];
 
+/** 前端本地账号实例 ID，用于 v-for key 与按索引删除（与可编辑的 key 字段解耦） */
+let gamAccountLocalIdSeq = 0;
+
+function nextGamAccountLocalId() {
+  gamAccountLocalIdSeq += 1;
+  return gamAccountLocalIdSeq;
+}
+
 function createEmptyAccount(index = 1, defaultReportOptions = []) {
   return {
+    _localId: nextGamAccountLocalId(),
     key: `account_${index}`,
     credentials_json: '',
     application_name: '',
@@ -42,6 +51,7 @@ function cloneAccount(account, defaultReportOptions = []) {
     : defaultReportOptions;
   return {
     ...account,
+    _localId: account._localId || nextGamAccountLocalId(),
     report_keys: [...(account.report_keys || DEFAULT_REPORT_KEYS)],
     report_type_options: [...(options || [])],
     reportTypesNetworkLabel: account.reportTypesNetworkLabel || '',
@@ -94,6 +104,9 @@ export function useGamSchedulerConfig() {
   const globalBulkText = ref('');
   const copySourceKey = ref('');
 
+  /** 递增序号：丢弃过期的 load/save 响应，避免覆盖用户刚删除的账号 */
+  let configSyncSeq = 0;
+
   const hasMultipleAccounts = () => (accounts.value || []).length > 1;
 
   const syncFromResponse = (data) => {
@@ -113,9 +126,11 @@ export function useGamSchedulerConfig() {
   };
 
   const loadConfig = async () => {
+    const seq = ++configSyncSeq;
     loading.value = true;
     try {
       const data = await getGamSchedulerConfig(GAM_SCHEDULED_TASK_NAME);
+      if (seq !== configSyncSeq) return;
       syncFromResponse(data);
     } catch (error) {
       if (!isErrorHandled(error)) {
@@ -165,6 +180,7 @@ export function useGamSchedulerConfig() {
     }
     if (!validateAccounts()) return false;
 
+    const seq = ++configSyncSeq;
     saving.value = true;
     try {
       const data = await saveGamSchedulerConfig(GAM_SCHEDULED_TASK_NAME, {
@@ -177,6 +193,7 @@ export function useGamSchedulerConfig() {
           product_whitelist: item.product_whitelist || [],
         })),
       });
+      if (seq !== configSyncSeq) return false;
       syncFromResponse(data);
       return true;
     } catch (error) {
@@ -198,19 +215,27 @@ export function useGamSchedulerConfig() {
     }
   };
 
-  const removeAccount = async (account) => {
+  const removeAccount = async (index) => {
+    const account = accounts.value[index];
+    if (!account) return;
+
+    const displayKey = String(account.key || '').trim() || `账号 ${index + 1}`;
     try {
       await ElMessageBox.confirm(
-        `确定删除账号「${account.key}」吗？删除后需点击保存才会写入配置文件。`,
+        `确定删除账号「${displayKey}」吗？删除后需点击「保存配置」才会写入配置文件。`,
         '删除账号',
         { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' },
       );
-      accounts.value = accounts.value.filter((item) => item.key !== account.key);
+      // 使进行中的 load/save 响应失效，防止把已删账号写回列表
+      configSyncSeq += 1;
+      accounts.value = accounts.value.filter((_, itemIndex) => itemIndex !== index);
       if (copySourceKey.value === account.key) {
         copySourceKey.value = accounts.value[0]?.key || '';
       }
+      ElMessage.success('账号已从列表移除，请点击「保存配置」生效');
     } catch (error) {
-      if (error !== 'cancel' && !isErrorHandled(error)) {
+      if (error === 'cancel' || error === 'close') return;
+      if (!isErrorHandled(error)) {
         ElMessage.error(extractErrorMessage(error));
       }
     }

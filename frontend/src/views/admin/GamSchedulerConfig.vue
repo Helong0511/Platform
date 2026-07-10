@@ -106,7 +106,7 @@
 
       <el-card
         v-for="(account, index) in accounts"
-        :key="`${account.key}-${index}`"
+        :key="account._localId"
         shadow="never"
         class="account-card"
       >
@@ -128,7 +128,7 @@
                 {{ account.credentials_exists ? '密钥文件存在' : '密钥文件缺失' }}
               </el-tag>
             </div>
-            <el-button type="danger" plain size="small" @click="removeAccount(account)">
+            <el-button type="danger" plain size="small" @click="removeAccount(index)">
               删除账号
             </el-button>
           </div>
