@@ -29,7 +29,12 @@ from app.core.ad_data_metadata import (
     normalize_report_type,
     resolve_report_type_for_row,
 )
-from app.core.utils import truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data, normalize_ad_unit
+from app.core.utils import (
+    apply_deduct_ratio,
+    get_date_range,
+    normalize_ad_unit,
+    normalize_date_for_ad_data,
+)
 from app.core.telegram import send_telegram_message_async
 from app.core.config import settings
 
@@ -788,9 +793,9 @@ async def process_api_ad_data(
                 # 更新分组数据中的可见率值
                 grouped_data["viewability_rate"] = calculated_viewability_rate
 
-                # 计算减扣后的值（截断到两位小数，不使用四舍五入）
-                ecpm_after_deduct = truncate_to_2_decimal(final_ecpm * (1 - ecpm_deduct_ratio))
-                revenue_after_deduct = truncate_to_2_decimal(total_revenue * (1 - revenue_deduct_ratio))
+                # 计算减扣后的值：无扣减保留原始精度，有扣减截断两位小数
+                ecpm_after_deduct = apply_deduct_ratio(final_ecpm, ecpm_deduct_ratio)
+                revenue_after_deduct = apply_deduct_ratio(total_revenue, revenue_deduct_ratio)
 
                 # 检查数据是否重复（按日期、产品、国家、广告单元）
                 date_start, date_end = get_date_range(item_date)
@@ -1114,9 +1119,9 @@ async def process_api_ad_data(
                 # 更新分组数据中的可见率值
                 grouped_data["viewability_rate"] = calculated_viewability_rate
 
-                # 计算减扣后的值（截断到两位小数，不使用四舍五入）
-                ecpm_after_deduct = truncate_to_2_decimal(final_ecpm * (1 - ecpm_deduct_ratio))
-                revenue_after_deduct = truncate_to_2_decimal(total_revenue * (1 - revenue_deduct_ratio))
+                # 计算减扣后的值：无扣减保留原始精度，有扣减截断两位小数
+                ecpm_after_deduct = apply_deduct_ratio(final_ecpm, ecpm_deduct_ratio)
+                revenue_after_deduct = apply_deduct_ratio(total_revenue, revenue_deduct_ratio)
 
                 # 检查数据是否重复（按日期、产品、国家代码、广告单元）
                 item_date = grouped_data["date"]

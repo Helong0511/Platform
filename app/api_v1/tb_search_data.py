@@ -57,7 +57,7 @@ from app.services.ad_data.queries.join_helpers import (
 )
 from app.core.utils import (
     find_or_create_default_client, optimize_page_size_for_device,
-    get_product_name, get_client_name, get_user_name, truncate_to_2_decimal
+    get_product_name, get_client_name, get_user_name, apply_deduct_ratio
 )
 from app.core.country_code import resolve_country_name, find_country_code_by_any_format, preserve_unrecognized_country_code
 from app.api_v1.excel.utils import (
@@ -479,9 +479,9 @@ async def import_tb_search_data(
             revenue_deduct_ratio = product.revenue_deduct_ratio or 0.0
             ecpm_deduct_ratio = product.ecpm_deduct_ratio or 0.0 # RPM 对应 eCPM 扣减比例
             
-            # 计算扣减后的值（保留两位小数）
-            revenue = truncate_to_2_decimal(revenue_origin * (1 - revenue_deduct_ratio))
-            rpm = truncate_to_2_decimal(rpm_origin * (1 - ecpm_deduct_ratio))
+            # 计算扣减后的值：无扣减保留原始精度，有扣减截断两位小数
+            revenue = apply_deduct_ratio(revenue_origin, revenue_deduct_ratio)
+            rpm = apply_deduct_ratio(rpm_origin, ecpm_deduct_ratio)
             
             # ---------- 条件分支 ----------
             if existing:

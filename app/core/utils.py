@@ -150,6 +150,19 @@ def truncate_to_2_decimal(value: float) -> float:
     return math.floor(value * 100) / 100
 
 
+def apply_deduct_ratio(amount: float, deduct_ratio: float) -> float:
+    """
+    按产品扣减比例计算扣后金额。
+
+    扣减比例为 0 时保留原始金额的全部小数位；有扣减时截断到两位小数（不四舍五入）。
+    """
+    value = float(amount or 0)
+    ratio = float(deduct_ratio or 0)
+    if ratio <= 0:
+        return value
+    return truncate_to_2_decimal(value * (1 - ratio))
+
+
 def get_date_range(date_obj: datetime | Any) -> tuple[datetime, datetime]:
     """
     获取日期范围（当天的开始和结束时间）

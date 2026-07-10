@@ -30,7 +30,7 @@ from app.core.country_code import (
     preserve_unrecognized_country_code,
 )
 from app.core.utils import (
-    get_date_range, normalize_ad_unit, normalize_date_for_ad_data, truncate_to_2_decimal,
+    get_date_range, normalize_ad_unit, normalize_date_for_ad_data, apply_deduct_ratio,
 )
 from app.models.models import User, AdData
 
@@ -244,9 +244,9 @@ async def process_row_data(
         if ecpm_before < 0 or revenue_before < 0:
             raise ValueError("eCPM和收益不能为负数")
 
-        # 计算减扣后的值（截断到两位小数，不使用四舍五入）
-        ecpm_after = truncate_to_2_decimal(ecpm_before * (1 - ecpm_deduct_ratio))
-        revenue_after = truncate_to_2_decimal(revenue_before * (1 - revenue_deduct_ratio))
+        # 计算减扣后的值：无扣减保留原始精度，有扣减截断两位小数
+        ecpm_after = apply_deduct_ratio(ecpm_before, ecpm_deduct_ratio)
+        revenue_after = apply_deduct_ratio(revenue_before, revenue_deduct_ratio)
 
         logger.debug(
             f"产品: {product_name}, 客户ID: {product_info['client_id']}, "
