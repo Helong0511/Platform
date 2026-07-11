@@ -36,27 +36,24 @@ from app.models.models import User, AdData
 
 logger = logging.getLogger(__name__)
 
-EXCEL_DEFAULT_COUNTRY_CODE = "ZZ"
-
-
 async def resolve_excel_import_country_code(
         db: AsyncSession,
         row: pd.Series,
         *,
         product_name: str,
         date_hint: Any = None,
-) -> str:
+) -> str | None:
     """
     Excel 导入专用国家解析：
     - 有国家列且单元格有值：解析后写入（支持 ZZ/US/中文国名等）
-    - 无国家列，或国家列为空：默认 ZZ（全部区域）
+    - 无国家列，或国家列为空：入库 NULL（配合 report_type=daily 日汇总）
     """
     if not excel_row_has_country_column(row):
-        return EXCEL_DEFAULT_COUNTRY_CODE
+        return None
 
     country_input = read_excel_country_cell_value(row)
     if not country_input:
-        return EXCEL_DEFAULT_COUNTRY_CODE
+        return None
 
     upper = country_input.upper()
     if upper in ("ZZ", "AA"):
@@ -157,7 +154,7 @@ async def process_row_data(
         elif "广告单元" in row.index and pd.notna(row.get("广告单元")):
             ad_unit = normalize_ad_unit(row["广告单元"])
 
-        # 国家代码（Excel 导入：有国家列则读取，无列或空单元格默认 ZZ）
+        # 国家代码（Excel 导入：有国家列则读取，无列或空单元格入库 NULL → report_type=daily）
         country_code = await resolve_excel_import_country_code(
             db,
             row,
