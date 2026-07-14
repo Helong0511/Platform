@@ -272,6 +272,10 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
         self.app = app
         self.slow_request_threshold = 3.0  # 慢请求 WARNING 阈值（秒）
         self.very_slow_request_threshold = 8.0  # 非常慢请求 ERROR 阈值（秒）
+        # 导出类接口允许更长耗时，超过极慢阈值只记 WARNING，避免刷 ERROR
+        self.heavy_path_prefixes = (
+            "/api/v1/excel/export",
+        )
 
         # 性能统计（可选，用于监控）
         self.request_count = 0
@@ -300,9 +304,13 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
         self.total_process_time += process_time
         
         # 记录慢请求
+        path = request.url.path or ""
+        is_heavy = any(path.startswith(p) for p in self.heavy_path_prefixes)
         if process_time > self.very_slow_request_threshold:
             self.very_slow_request_count += 1
-            self._log_performance(request, process_time, level="error")
+            # 导出等已知重接口不以 ERROR 刷屏
+            level = "warning" if is_heavy else "error"
+            self._log_performance(request, process_time, level=level)
         elif process_time > self.slow_request_threshold:
             self.slow_request_count += 1
             self._log_performance(request, process_time, level="warning")

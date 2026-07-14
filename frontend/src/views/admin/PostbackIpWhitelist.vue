@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   Postback IP 白名单管理页面（PostbackIpWhitelist.vue）
 
   功能区块：
@@ -72,7 +72,7 @@
         <div class="table-header">
           <span>IP 白名单列表</span>
           <el-button 
-            type="text" 
+            type="link" 
             :icon="Setting" 
             @click="columnSettingVisible = true"
             style="float: right;"

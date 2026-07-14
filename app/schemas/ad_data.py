@@ -64,7 +64,7 @@ class AdDataBase(BaseModel):
     product_id: int | None = None
     product_name: str | None = None  # 添加产品名称字段
     ad_unit: str | None = None  # 广告单元（可为空）
-    country_code: str | None = None  # 国家代码（ISO 3166-1 二字母代码）
+    country_code: str | None = None  # 国家代码（最长 100 字符；无国家维度时为 NULL）
     country_name_zh: str | None = None  # 国家中文名称
     request_count: int | None = None
     match_count: int | None = None
@@ -106,6 +106,7 @@ class AdDataResponse(AdDataInDBBase):
     upstream_account: str | None = None
     report_type: str | None = None
     report_type_label: str | None = None
+    is_deducted: bool | None = None
     ecpm_before_deduct: float | None = None
     revenue_before_deduct: float | None = None
 

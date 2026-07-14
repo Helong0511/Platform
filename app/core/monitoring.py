@@ -71,8 +71,9 @@ class MonitoringConfig:
         self.very_slow_request_threshold = 8.0
         # 错误率告警阈值（0.0-1.0）
         self.error_rate_threshold = 0.1
-        # 告警间隔（秒）- 防止告警刷屏
-        self.alert_interval = 60
+        # 告警最小间隔（秒）；CRITICAL 单独更长，避免探针噪声每分钟刷屏
+        self.alert_interval = 300
+        self.alert_interval_critical = 900
         # 统计窗口大小（秒）
         self.statistics_window = 60
         # 历史数据保留时间（小时）
@@ -91,6 +92,15 @@ class MonitoringConfig:
         except ValueError:
             self.path_stats_sample_rate = 1.0
         self.path_stats_sample_rate = max(0.0, min(1.0, self.path_stats_sample_rate))
+
+def is_monitored_error_status(status_code: int) -> bool:
+    """
+    是否计入业务错误率。
+
+    仅 5xx 计入：扫描探针 404、黑名单 403、未登录 401 等客户端噪声不抬高 error_rate。
+    """
+    return int(status_code) >= 500
+
 
 # ====== 单个指标记录 ======
 class MetricRecord:
@@ -724,8 +734,8 @@ class SystemMonitor:
                 if len(self.slow_requests) > self.config.max_slow_requests:
                     self.slow_requests.pop(0)
             
-            # 记录错误
-            if status_code >= 400:
+            # 记录错误（仅 5xx，见 is_monitored_error_status）
+            if is_monitored_error_status(status_code):
                 self.current_api_stats.error_count += 1
             
             # 按路径分组（可采样以降低开销）
@@ -740,7 +750,7 @@ class SystemMonitor:
                     path_stat.slow_request_count += 1
                     if duration >= self.config.very_slow_request_threshold:
                         path_stat.very_slow_request_count += 1
-                if status_code >= 400:
+                if is_monitored_error_status(status_code):
                     path_stat.error_count += 1
 
         # 跨 Worker Redis 汇总（异步 fire-and-forget，不阻塞请求路径）
@@ -959,10 +969,15 @@ class SystemMonitor:
 
             if rule.evaluate(value):
                 alert_key = f"{rule.name}:{rule.level}"
+                interval = (
+                    self.config.alert_interval_critical
+                    if rule.level == AlertLevel.CRITICAL
+                    else self.config.alert_interval
+                )
                 should_trigger = False
                 with self._stats_lock:
                     last_alert_time = self.last_alert_times.get(alert_key, 0.0)
-                    if now - last_alert_time >= self.config.alert_interval:
+                    if now - last_alert_time >= interval:
                         self.last_alert_times[alert_key] = now
                         should_trigger = True
                 if should_trigger:

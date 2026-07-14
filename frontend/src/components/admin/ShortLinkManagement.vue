@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   短链接管理内嵌组件
   @file components/admin/ShortLinkManagement.vue
 -->
@@ -25,7 +25,7 @@
     <div class="action-bar">
       <el-button type="primary" @click="handleCreate" :icon="Plus">创建短链接</el-button>
       <el-button 
-        type="text" 
+        type="link" 
         :icon="Setting" 
         @click="columnSettingVisible = true"
         style="margin-left: 10px;"

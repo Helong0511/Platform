@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   管理端 - 在线会话管理
   @file views/admin/SessionManagement.vue
 -->
@@ -57,7 +57,7 @@
             <div class="table-header">
               <span>会话列表</span>
               <el-button 
-                type="text" 
+                type="link" 
                 :icon="Setting" 
                 @click="columnSettingVisible = true"
                 style="float: right;"

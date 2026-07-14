@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   管理端 - 短链接访问记录
   @file views/admin/ClickLog.vue
 -->
@@ -16,7 +16,7 @@
             <span class="header-title">短链接访问记录</span>
           </div>
           <div class="header-right">
-            <el-button type="text" :icon="Setting" @click="columnSettingVisible = true">
+            <el-button type="link" :icon="Setting" @click="columnSettingVisible = true">
               列设置
             </el-button>
           </div>

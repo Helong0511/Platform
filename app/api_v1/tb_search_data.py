@@ -175,10 +175,10 @@ async def get_tb_search_data(
     # 但前端可以通过传递一个很大的日期范围来显示所有数据
     # ---------- 条件分支 ----------
     if start_date:
-        query = query.where(TBSearchData.date >= datetime.combine(start_date, datetime.min.time()))
+        query = query.where(TBSearchData.date >= start_date)
     # ---------- 条件分支 ----------
     if end_date:
-        query = query.where(TBSearchData.date <= datetime.combine(end_date, datetime.max.time()))
+        query = query.where(TBSearchData.date <= end_date)
     # ---------- 条件分支 ----------
     elif not start_date and not end_date:
         # 如果没有传递日期范围，默认显示当前月的数据
@@ -186,8 +186,8 @@ async def get_tb_search_data(
         month_start = date(today.year, today.month, 1)
         _, last_day = monthrange(today.year, today.month)
         month_end = date(today.year, today.month, last_day)
-        query = query.where(TBSearchData.date >= datetime.combine(month_start, datetime.min.time()))
-        query = query.where(TBSearchData.date <= datetime.combine(month_end, datetime.max.time()))
+        query = query.where(TBSearchData.date >= month_start)
+        query = query.where(TBSearchData.date <= month_end)
 
     # 排序
     sort_fields = {
@@ -262,10 +262,10 @@ async def get_tb_search_data(
     # 日期范围过滤（与主查询保持一致）
     # ---------- 条件分支 ----------
     if start_date:
-        count_query = count_query.where(TBSearchData.date >= datetime.combine(start_date, datetime.min.time()))
+        count_query = count_query.where(TBSearchData.date >= start_date)
     # ---------- 条件分支 ----------
     if end_date:
-        count_query = count_query.where(TBSearchData.date <= datetime.combine(end_date, datetime.max.time()))
+        count_query = count_query.where(TBSearchData.date <= end_date)
     # ---------- 条件分支 ----------
     elif not start_date and not end_date:
         # 如果没有传递日期范围，默认显示当前月的数据
@@ -273,8 +273,8 @@ async def get_tb_search_data(
         month_start = date(today.year, today.month, 1)
         _, last_day = monthrange(today.year, today.month)
         month_end = date(today.year, today.month, last_day)
-        count_query = count_query.where(TBSearchData.date >= datetime.combine(month_start, datetime.min.time()))
-        count_query = count_query.where(TBSearchData.date <= datetime.combine(month_end, datetime.max.time()))
+        count_query = count_query.where(TBSearchData.date >= month_start)
+        count_query = count_query.where(TBSearchData.date <= month_end)
 
     total = (await db.execute(count_query)).scalar() or 0
 
@@ -437,7 +437,7 @@ async def import_tb_search_data(
             # 查找是否已存在
             existing_query = select(TBSearchData).where(
                 and_(
-                    TBSearchData.date == datetime.combine(date_val, datetime.min.time()),
+                    TBSearchData.date == date_val,
                     TBSearchData.product_id == subid,
                     TBSearchData.country_code == geo
                 )
@@ -497,7 +497,7 @@ async def import_tb_search_data(
             else:
                 # 创建
                 new_data = TBSearchData(
-                    date=datetime.combine(date_val, datetime.min.time()),
+                    date=date_val,
                     product_id=subid,
                     country_code=geo,
                     redirects=redirects,
@@ -767,24 +767,16 @@ async def get_clients_with_tb_search_data(
         # 日期范围过滤
         # ---------- 条件分支 ----------
         if start_date:
-            start_datetime = datetime.combine(start_date, datetime.min.time())
-            query = query.where(TBSearchData.date >= start_datetime)
-        # ---------- 条件分支 ----------
+            query = query.where(TBSearchData.date >= start_date)
         if end_date:
-            end_datetime = datetime.combine(end_date, datetime.max.time())
-            query = query.where(TBSearchData.date <= end_datetime)
-        # 如果没有指定日期范围，默认查询当前月的数据
-        # ---------- 条件分支 ----------
+            query = query.where(TBSearchData.date <= end_date)
         elif not start_date and not end_date:
             today = date.today()
             month_start = date(today.year, today.month, 1)
             _, last_day = monthrange(today.year, today.month)
             month_end = date(today.year, today.month, last_day)
-            
-            month_start_datetime = datetime.combine(month_start, datetime.min.time())
-            month_end_datetime = datetime.combine(month_end, datetime.max.time())
-            query = query.where(TBSearchData.date >= month_start_datetime)
-            query = query.where(TBSearchData.date <= month_end_datetime)
+            query = query.where(TBSearchData.date >= month_start)
+            query = query.where(TBSearchData.date <= month_end)
         
         # 执行查询
         result = await db.execute(query)
@@ -961,24 +953,16 @@ async def get_countries_with_tb_search_data(
         # 日期范围过滤
         # ---------- 条件分支 ----------
         if start_date:
-            start_datetime = datetime.combine(start_date, datetime.min.time())
-            query = query.where(TBSearchData.date >= start_datetime)
-        # ---------- 条件分支 ----------
+            query = query.where(TBSearchData.date >= start_date)
         if end_date:
-            end_datetime = datetime.combine(end_date, datetime.max.time())
-            query = query.where(TBSearchData.date <= end_datetime)
-        # 如果没有指定日期范围，默认查询当前月的数据
-        # ---------- 条件分支 ----------
+            query = query.where(TBSearchData.date <= end_date)
         elif not start_date and not end_date:
             today = date.today()
             month_start = date(today.year, today.month, 1)
             _, last_day = monthrange(today.year, today.month)
             month_end = date(today.year, today.month, last_day)
-            
-            month_start_datetime = datetime.combine(month_start, datetime.min.time())
-            month_end_datetime = datetime.combine(month_end, datetime.max.time())
-            query = query.where(TBSearchData.date >= month_start_datetime)
-            query = query.where(TBSearchData.date <= month_end_datetime)
+            query = query.where(TBSearchData.date >= month_start)
+            query = query.where(TBSearchData.date <= month_end)
         
         # 执行查询
         result = await db.execute(query)

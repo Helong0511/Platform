@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   客户端 - 客户子用户管理
   @file views/client/ClientUserManagement.vue
 -->
@@ -97,7 +97,7 @@
             <span>我的产品信息</span>
           </div>
           <el-button 
-            type="text" 
+            type="link" 
             :icon="Setting" 
             @click="columnSettingVisible = true"
             size="small"

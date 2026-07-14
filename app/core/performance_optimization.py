@@ -409,13 +409,13 @@ class PerformanceOptimizationManager:
                 description=f"P99响应时间过高: {metrics['api.response_time_p99']:.2f}s"
             ))
         
-        # 检测错误率瓶颈
-        if metrics['api.error_rate'] > 0.05:
+        # 检测错误率瓶颈（与监控 CRITICAL 对齐，避免 401/404 噪声后仍刷屏）
+        if metrics['api.error_rate'] > 0.1:
             bottlenecks.append(BottleneckRecord(
                 bottleneck_type=BottleneckType.HIGH_ERROR_RATE,
                 metric_name='api.error_rate',
                 current_value=metrics['api.error_rate'],
-                threshold=0.05,
+                threshold=0.1,
                 description=f"错误率过高: {metrics['api.error_rate']:.2%}"
             ))
         
@@ -591,25 +591,47 @@ optimization_manager = PerformanceOptimizationManager()
 
 
 # ====== 定期检测任务 ======
+_last_bottleneck_log_mono: float = 0.0
+_last_bottleneck_signature: str = ""
+
+
 async def start_bottleneck_detection():
     """
-    启动定期瓶颈检测任务
-    
-    每5分钟检测一次系统性能瓶颈
+    启动定期瓶颈检测任务。
+
+    每 10 分钟检测一次；同一组瓶颈 30 分钟内重复只打 debug，避免日志刷屏。
     """
+    import time
+
+    global _last_bottleneck_log_mono, _last_bottleneck_signature
     try:
         while True:
             try:
-                await asyncio.sleep(300)  # 每5分钟检测一次
+                await asyncio.sleep(600)  # 每 10 分钟检测一次
             except asyncio.CancelledError:
                 logger.debug("【性能优化】瓶颈检测任务已取消")
                 raise
             bottlenecks = optimization_manager.detect_bottlenecks()
 
-            if bottlenecks:
+            if not bottlenecks:
+                continue
+            signature = "|".join(sorted(b.bottleneck_type.value for b in bottlenecks))
+            now = time.monotonic()
+            should_warn = (
+                signature != _last_bottleneck_signature
+                or (now - _last_bottleneck_log_mono) >= 1800
+            )
+            if should_warn:
                 logger.warning(f"【性能优化】检测到 {len(bottlenecks)} 个性能瓶颈")
                 for b in bottlenecks:
                     logger.warning(f"  - {b.bottleneck_type.value}: {b.description}")
+                _last_bottleneck_log_mono = now
+                _last_bottleneck_signature = signature
+            else:
+                logger.debug(
+                    "【性能优化】瓶颈仍存在（冷却中，跳过重复 WARNING）: %s",
+                    signature,
+                )
     except asyncio.CancelledError:
         logger.debug("【性能优化】定期检测任务已停止")
         raise

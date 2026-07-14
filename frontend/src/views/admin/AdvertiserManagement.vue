@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   管理端 - 广告主（上游）管理
   @file views/admin/AdvertiserManagement.vue
 -->
@@ -15,7 +15,7 @@
           </div>
           <div class="header-right">
             <el-button 
-              type="text" 
+              type="link" 
               :icon="Setting" 
               @click="columnSettingVisible = true"
               style="margin-right: 10px;"

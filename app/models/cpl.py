@@ -182,7 +182,7 @@ class Click(Base):
     is_bot = Column(Boolean, default=False, nullable=False, comment='是否为机器人/爬虫')
     
     # 硬件信息
-    device_type = Column(String(20), nullable=True, index=True, comment='设备类型（mobile/tablet/desktop）')
+    device_type = Column(String(20), nullable=True, comment='设备类型（mobile/tablet/desktop）')
     device_brand = Column(String(50), nullable=True, comment='设备品牌')
     device_model = Column(String(100), nullable=True, comment='设备型号')
     
@@ -209,17 +209,12 @@ class Click(Base):
         Index("idx_conversion_id", "conversion_id"),
         Index("idx_ip", "ip"),
         Index("idx_country", "country"),
-        Index("idx_device_type", "device_type"),
-        Index("idx_os", "os"),
-        Index("idx_browser", "browser"),
-        Index("idx_is_bot", "is_bot"),
         Index("idx_clicks_time_offer", "click_time", "offer_id"),
         Index("idx_click_time_publisher", "click_time", "publisher_id"),
         Index("idx_clicks_time_offer_publisher", "click_time", "offer_id", "publisher_id"),
         Index("idx_clicks_offer_publisher_time", "offer_id", "publisher_id", "click_time"),
         Index("idx_safe_delete", "advertiser_id", "offer_id", "publisher_id", "created_at"),
         Index("idx_clicks_created_at_id", "created_at", "id"),
-        Index("idx_clicks_is_bot_id", "is_bot", "id"),
     )
 
 class OfferCap(Base):

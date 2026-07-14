@@ -1,4 +1,4 @@
-<!--
+﻿<!--
 Postback 转化管理页面
 功能说明：
 - 查询和管理所有转化记录（已融合转化日志功能）
@@ -93,7 +93,7 @@ Postback 转化管理页面
         <div class="table-header">
           <span>转化记录列表</span>
           <el-button 
-            type="text" 
+            type="link" 
             :icon="Setting" 
             @click="columnSettingVisible = true"
             style="float: right;"

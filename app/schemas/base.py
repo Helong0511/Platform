@@ -21,7 +21,7 @@ def datetime_encoder(v: datetime) -> str:
     """
     将 datetime 对象编码为 ISO 8601 格式（带时区信息）
     注意：
-    - 对于AdData.date等业务日期字段，存储的是系统时区的naive datetime
+    - 对于 AdData.date 等业务日期字段，存储为 DATE（仅日期）
     - 对于created_at、updated_at等时间戳字段，存储的是应用配置时区（默认北京时间）的naive datetime
     - 如果没有时区信息，假设是应用时区（用于时间戳字段）
     """

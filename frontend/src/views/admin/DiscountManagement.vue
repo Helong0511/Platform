@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   扣量（Discount）配置管理页面（DiscountManagement.vue）
 
   功能区块：
@@ -86,7 +86,7 @@
       <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px; margin-bottom: 10px;">
         <span style="font-weight: 600;">扣量配置列表</span>
         <el-button 
-          type="text" 
+          type="link" 
           :icon="Setting" 
           @click="columnSettingVisible = true"
         >

@@ -263,15 +263,33 @@ export const clearCsrfToken = () => {
 };
 
 /**
- * CSRF 探测用 GET 端点：必须对「任意已登录用户」可用。
- * 禁止放入仅管理员接口（如 /users/stats、/clients、部分 short-links），
- * 否则客户登录后刷新 CSRF 会收到 403「需要管理员权限」并被拦截器弹窗。
+ * CSRF 探测用 GET 端点。
+ * - 须对未登录 / 任意登录角色可用，禁止仅管理员接口
+ * - 优先 /health：未登录刷新登录页时不再因 /users/me 刷 401 控制台噪声
  */
 const CSRF_PROBE_ENDPOINTS = [
+  '/api/v1/health',
   '/api/v1/users/me',
   '/api/v1/dashboard/stats',
   '/api/v1/products/?page_size=1',
 ];
+
+/**
+ * 当前是否明显处于「未登录浏览登录页」：此时只需公开端点即可换 CSRF。
+ */
+function shouldUsePublicCsrfProbeOnly() {
+  try {
+    const path = window.location?.pathname || '';
+    if (path !== '/login' && path !== '/') {
+      return false;
+    }
+    // 本地无有效登录痕迹时，避免探测需登录的接口
+    const userInfo = sessionStorage.getItem('userInfo');
+    return !userInfo;
+  } catch {
+    return true;
+  }
+}
 
 /**
  * 尝试从多个端点获取 CSRF token
@@ -298,7 +316,10 @@ export const fetchCsrfTokenFromEndpoints = async (endpoints = null) => {
   isRefreshingToken = true;
 
   try {
-    const endpointsToTry = endpoints || CSRF_PROBE_ENDPOINTS;
+    const endpointsToTry = endpoints
+      || (shouldUsePublicCsrfProbeOnly()
+        ? ['/api/v1/health']
+        : CSRF_PROBE_ENDPOINTS);
 
     for (const endpoint of endpointsToTry) {
       try {
@@ -319,9 +340,9 @@ export const fetchCsrfTokenFromEndpoints = async (endpoints = null) => {
           logger.info(`从错误响应中获取到 CSRF token: ${endpoint}`);
           return csrfToken;
         }
-        // 如果错误是 401，可能是认证问题，不应该继续
+        // 401：未登录探测鉴权接口时继续下一个端点（勿中断整条探测链）
         if (error.response?.status === 401) {
-          throw error;
+          continue;
         }
         continue;
       }

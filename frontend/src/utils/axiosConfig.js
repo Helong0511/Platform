@@ -213,7 +213,7 @@ const handleCsrfError = async (error) => {
       // 4. 最后尝试使用一个简单的GET请求获取CSRF token
       try {
         logger.info('尝试使用简单GET请求获取CSRF token');
-        const response = await axios.get('/api/v1/users/me', {
+        const response = await axios.get('/api/v1/health', {
           skipErrorMessage: true,
           skipRequestCache: true,
         });

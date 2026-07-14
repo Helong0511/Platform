@@ -230,3 +230,25 @@ def format_data_source_label(value: Optional[str]) -> str:
 def format_report_type_label(value: Optional[str]) -> str:
     key = normalize_report_type(value)
     return REPORT_TYPE_LABELS.get(key, key)
+
+
+# DECIMAL(7,4) 比率字段合法范围（百分比数值）
+AD_DATA_RATE_MIN = -999.9999
+AD_DATA_RATE_MAX = 999.9999
+
+
+def clamp_ad_data_rate(value: Optional[float | int | str]) -> float:
+    """将覆盖率/展示率等比率裁剪到数据库 DECIMAL(7,4) 合法范围。"""
+    try:
+        numeric = float(value or 0)
+    except (TypeError, ValueError):
+        numeric = 0.0
+    return max(AD_DATA_RATE_MIN, min(AD_DATA_RATE_MAX, numeric))
+
+
+def clamp_ad_data_money(value: Optional[float | int | str]) -> float:
+    """金额类字段安全转 float（DECIMAL(12,4) 由数据库约束）。"""
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0

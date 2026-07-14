@@ -232,6 +232,5 @@ scripts/keys/
 # 导入样本目录
 导入样本/
 .trae
-tests/API/zhisuo_dimension_check.py
-tests/API/zhisuo_report_KE11_full.txt
-tests/API/zhisuo_report_KE11.txt
+tests/
+sql/migrate_schema_20260711_production.sql

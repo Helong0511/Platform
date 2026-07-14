@@ -83,6 +83,7 @@ class AdDataUpdateCommand:
             new_ad_unit = filtered.get("ad_unit", ad_data.ad_unit or "")
             new_data_source = filtered.get("data_source", ad_data.data_source or "legacy")
             new_report_type = filtered.get("report_type", ad_data.report_type or "legacy")
+            new_upstream_account = filtered.get("upstream_account", ad_data.upstream_account or "")
 
             uniqueness = AdDataUniquenessQuery(self.db)
             conflict = await uniqueness.find_conflict(
@@ -92,6 +93,7 @@ class AdDataUpdateCommand:
                 new_ad_unit,
                 data_source=new_data_source,
                 report_type=new_report_type,
+                upstream_account=new_upstream_account,
             )
             if conflict:
                 raise_api_exception(
@@ -107,7 +109,7 @@ class AdDataUpdateCommand:
             if key in UPDATE_ALLOWED_FIELDS and hasattr(ad_data, key):
                 setattr(ad_data, key, value)
         if _RATE_FIELDS.intersection(filtered):
-            ad_data.calculate_rates()
+            ad_data.finalize_metrics()
 
     async def _persist(
         self,

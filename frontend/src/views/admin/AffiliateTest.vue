@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   管理端 - 下游联调测试
   @file views/admin/AffiliateTest.vue
 -->
@@ -15,7 +15,7 @@
           </div>
           <div class="header-right">
             <el-button 
-              type="text" 
+              type="link" 
               :icon="Setting" 
               @click="columnSettingVisible = true"
               style="margin-right: 10px;"

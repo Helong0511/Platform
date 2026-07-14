@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   管理端 - 转化扣减配置
   @file views/admin/ConversionDeductionManagement.vue
 -->
@@ -41,7 +41,7 @@
               </el-button>
             </div>
             <el-button 
-              type="text" 
+              type="link" 
               :icon="Setting" 
               @click="columnSettingVisible = true"
               style="margin-right: 10px;"

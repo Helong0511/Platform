@@ -50,7 +50,7 @@ async def record_api_request_async(
     将单条 API 请求计数写入当前分钟 Redis Hash（供多 Worker 汇总）。
 
     Args:
-        status_code: HTTP 响应状态码；>=400 时递增 error_count。
+        status_code: HTTP 响应状态码；仅 >=500 时递增 error_count（与进程内监控一致）。
         duration: 请求耗时（秒），累加至 total_duration。
         slow: 是否达到慢请求阈值。
         very_slow: 是否达到极慢请求阈值。
@@ -63,6 +63,7 @@ async def record_api_request_async(
     """
     try:
         from app.core.redis_client import get_redis_client
+        from app.core.monitoring import is_monitored_error_status
 
         client = await get_redis_client()
         if not client:
@@ -72,7 +73,7 @@ async def record_api_request_async(
         pipe = client.pipeline()
         pipe.hincrby(key, "request_count", 1)
         pipe.hincrbyfloat(key, "total_duration", float(duration))
-        if status_code >= 400:
+        if is_monitored_error_status(status_code):
             pipe.hincrby(key, "error_count", 1)
         if slow:
             pipe.hincrby(key, "slow_request_count", 1)

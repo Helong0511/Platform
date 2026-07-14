@@ -22,6 +22,7 @@ from sqlalchemy.future import select
 # 本地导入
 from app.core.audit_log import log_update, log_delete, log_user_action, commit_audit_log
 from app.core.database import get_db
+from app.core.db_errors import is_table_definition_changed_error
 from app.core.security import get_current_user, require_admin, is_admin
 from app.core.config import settings
 from app.core.constants import MAX_PAGE_SIZE, ECPM_MULTIPLIER, PERCENTAGE_MULTIPLIER
@@ -38,7 +39,8 @@ from app.core.query_utils import (
 from app.core.dependencies import get_ad_data_service
 from app.core.utils import (
     optimize_page_size_for_device, get_product_name, get_client_name, get_user_name,
-    calculate_coverage_rate, calculate_display_rate, calculate_click_rate
+    calculate_coverage_rate, calculate_display_rate, calculate_click_rate,
+    normalize_date_for_ad_data,
 )
 from app.schemas.ad_data import (
     AdDataResponse,
@@ -185,6 +187,11 @@ async def get_clients_with_data(
         raise_filter_validation_api_exception(str(exc))
     except Exception as e:
         logger.error(f"获取有数据的客户列表失败: {str(e)}", exc_info=True)
+        if is_table_definition_changed_error(e):
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail="数据库表结构刚刚更新，请刷新页面重试",
+            )
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"获取有数据的客户列表失败：{str(e)}。请稍后重试或联系管理员"
@@ -490,14 +497,7 @@ async def get_ad_data_detail(
         ad_data.click_rate
     )
 
-    # 将 DateTime 转换为 date
-    date_value = ad_data.date
-    # ---------- 条件分支 ----------
-    if isinstance(date_value, datetime):
-        date_value = date_value.date()
-    # ---------- 条件分支 ----------
-    elif hasattr(date_value, 'date'):
-        date_value = date_value.date()
+    date_value = normalize_date_for_ad_data(ad_data.date)
 
     country_name_zh = resolve_country_name(country_info, ad_data.country_code)
 
@@ -520,11 +520,11 @@ async def get_ad_data_detail(
         "display_rate": display_rate,
         "click_count": ad_data.click_count,
         "click_rate": click_rate,
-        "viewability_rate": round(ad_data.viewability_rate or 0.0, 2),
-        "ecpm_before_deduct": round(ad_data.ecpm_before_deduct, 4),
-        "ecpm_after_deduct": round(ad_data.ecpm_after_deduct, 4),
-        "revenue_before_deduct": round(ad_data.revenue_before_deduct, 4),
-        "revenue_after_deduct": round(ad_data.revenue_after_deduct, 4),
+        "viewability_rate": round(float(ad_data.viewability_rate or 0), 2),
+        "ecpm_before_deduct": float(round(float(ad_data.ecpm_before_deduct or 0), 4)),
+        "ecpm_after_deduct": float(round(float(ad_data.ecpm_after_deduct or 0), 4)),
+        "revenue_before_deduct": float(round(float(ad_data.revenue_before_deduct or 0), 4)),
+        "revenue_after_deduct": float(round(float(ad_data.revenue_after_deduct or 0), 4)),
         "created_at": ad_data.created_at,
         "updated_at": ad_data.updated_at
     }
@@ -536,6 +536,7 @@ async def get_ad_data_detail(
                 "upstream_account": ad_data.upstream_account or "",
                 "report_type": ad_data.report_type or "legacy",
                 "report_type_label": format_report_type_label(ad_data.report_type),
+                "is_deducted": bool(ad_data.is_deducted),
             }
         )
 

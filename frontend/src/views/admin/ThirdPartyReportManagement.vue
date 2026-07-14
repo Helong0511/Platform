@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   管理端 - 第三方报表
   @file views/admin/ThirdPartyReportManagement.vue
 -->
@@ -93,7 +93,7 @@
     <template #header>
         <div class="table-header">
           <span>上报日志列表</span>
-          <el-button type="text" :icon="Setting" @click="columnSettingVisible = true" style="float: right;">
+          <el-button type="link" :icon="Setting" @click="columnSettingVisible = true" style="float: right;">
             列设置
           </el-button>
         </div>

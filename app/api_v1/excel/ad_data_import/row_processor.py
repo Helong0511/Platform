@@ -20,7 +20,7 @@ from app.api_v1.excel.ad_data_import.product_resolver import find_or_create_prod
 from app.api_v1.excel.utils import (
     is_valid_numeric_value, normalize_date_key, parse_date_value, safe_get_value,
 )
-from app.core.ad_data_metadata import DATA_SOURCE_EXCEL, infer_report_type_from_shape
+from app.core.ad_data_metadata import DATA_SOURCE_EXCEL, infer_report_type_from_shape, normalize_upstream_account
 from app.core.ad_data_processor import build_data_decrease_warning
 from app.core.constants import ECPM_MULTIPLIER
 from app.core.country_code import (
@@ -30,7 +30,7 @@ from app.core.country_code import (
     preserve_unrecognized_country_code,
 )
 from app.core.utils import (
-    get_date_range, normalize_ad_unit, normalize_date_for_ad_data, apply_deduct_ratio,
+    normalize_ad_unit, normalize_date_for_ad_data, apply_deduct_ratio,
 )
 from app.models.models import User, AdData
 
@@ -269,19 +269,20 @@ async def process_row_data(
                 ad_unit,
                 DATA_SOURCE_EXCEL,
                 excel_report_type,
+                normalize_upstream_account(""),
             )
             existing_data = existing_records.get(key)
         else:
             # 如果没有预查询结果，则单独查询（向后兼容）
-            date_start, date_end = get_date_range(data_date)
+            ad_data_date = normalize_date_for_ad_data(data_date)
 
             existing_query = select(AdData).where(
-                AdData.date >= date_start,
-                AdData.date <= date_end,
+                AdData.date == ad_data_date,
                 AdData.product_id == product_info["product_id"],
                 AdData.ad_unit == ad_unit,
                 AdData.data_source == DATA_SOURCE_EXCEL,
                 AdData.report_type == excel_report_type,
+                AdData.upstream_account == normalize_upstream_account(""),
                 country_condition
             )
             existing_result = await db.execute(existing_query)
@@ -340,16 +341,13 @@ async def process_row_data(
             existing_data.click_rate = click_rate
             existing_data.viewability_rate = viewability_rate
             # 如果基础数据有变化，重新计算比率字段（确保一致性）
-            existing_data.calculate_rates()
+            existing_data.finalize_metrics()
             result["updated_rows"] += 1
             if decrease_warning:
                 result.setdefault("decrease_warnings", []).append(decrease_warning)
             logger.debug(f"✅ 已更新记录: 日期={data_date}, 产品={product_name}")
         else:
-            # 创建新记录
-            # 注意：如果data_date是date类型，需要转换为datetime（使用当天的00:00:00）
-            # Excel导入的日期默认是系统时区，不需要进行时区转换
-            # 确保与数据库中的DateTime类型一致
+            # 创建新记录（AdData.date 为 DATE 类型）
             ad_data_date = normalize_date_for_ad_data(data_date)
 
             ad_data = AdData(
@@ -378,7 +376,7 @@ async def process_row_data(
             ad_data.click_rate = click_rate
             ad_data.viewability_rate = viewability_rate
             # 调用计算方法确保比率字段正确（如果基础数据有变化，会重新计算）
-            ad_data.calculate_rates()
+            ad_data.finalize_metrics()
             db.add(ad_data)
             result["new_rows"] += 1
             logger.debug(f"✅ 已创建新记录: 日期={data_date}, 产品={product_name}")
@@ -396,6 +394,7 @@ async def process_row_data(
                     ad_unit,
                     DATA_SOURCE_EXCEL,
                     excel_report_type,
+                    normalize_upstream_account(""),
                 )
                 existing_records[key] = ad_data
 

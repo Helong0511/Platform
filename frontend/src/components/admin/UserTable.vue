@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   用户管理列表表格与分页
   @file components/admin/UserTable.vue
 -->
@@ -7,7 +7,7 @@
     <template #header>
       <div class="table-header">
         <span>用户列表</span>
-        <el-button type="text" :icon="Setting" style="float: right;" @click="emit('open-column-settings')">
+        <el-button type="link" :icon="Setting" style="float: right;" @click="emit('open-column-settings')">
           列设置
         </el-button>
       </div>

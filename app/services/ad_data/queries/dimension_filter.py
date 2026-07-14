@@ -13,7 +13,7 @@
 from datetime import date
 from typing import Any, Optional, Set, Tuple
 
-from sqlalchemy import and_, exists, func, not_, or_, select, tuple_
+from sqlalchemy import and_, exists, not_, or_, select, tuple_
 from sqlalchemy.orm import aliased
 
 from app.core.ad_data_metadata import (
@@ -337,9 +337,9 @@ def _apply_ad_data_date_bounds(
 ) -> Any:
     """限制互斥选源子查询的扫描范围（与外层日期筛选一致）。"""
     if start_date is not None:
-        query = query.where(func.date(ad_data_model.date) >= start_date)
+        query = query.where(ad_data_model.date >= start_date)
     if end_date is not None:
-        query = query.where(func.date(ad_data_model.date) <= end_date)
+        query = query.where(ad_data_model.date <= end_date)
     return query
 
 
@@ -354,7 +354,7 @@ def _report_type_product_date_pairs_subquery(
     query = (
         select(
             ad_data_model.product_id.label(f"{col_prefix}_product_id"),
-            func.date(ad_data_model.date).label(f"{col_prefix}_date"),
+            ad_data_model.date.label(f"{col_prefix}_date"),
         )
         .where(ad_data_model.report_type == report_type)
     )
@@ -373,7 +373,7 @@ def _outer_row_not_in_report_type_product_dates(
     )
     pid_col = list(sq.c)[0]
     date_col = list(sq.c)[1]
-    return tuple_(ad_data_model.product_id, func.date(ad_data_model.date)).notin_(
+    return tuple_(ad_data_model.product_id, ad_data_model.date).notin_(
         select(pid_col, date_col)
     )
 
@@ -387,7 +387,7 @@ def _country_only_product_date_pairs_subquery(
     query = (
         select(
             ad_data_model.product_id.label("co_product_id"),
-            func.date(ad_data_model.date).label("co_date"),
+            ad_data_model.date.label("co_date"),
         )
         .where(
             or_(
@@ -414,7 +414,7 @@ def _ad_unit_only_product_date_pairs_subquery(
     query = (
         select(
             ad_data_model.product_id.label("ao_product_id"),
-            func.date(ad_data_model.date).label("ao_date"),
+            ad_data_model.date.label("ao_date"),
         )
         .where(
             or_(
@@ -439,7 +439,7 @@ def _outer_row_not_in_country_only_product_dates(
 ) -> Any:
     """当前行 product+date 不在纯国家集合中（替代逐行 correlated EXISTS）。"""
     sq = _country_only_product_date_pairs_subquery(ad_data_model, start_date, end_date)
-    return tuple_(ad_data_model.product_id, func.date(ad_data_model.date)).notin_(
+    return tuple_(ad_data_model.product_id, ad_data_model.date).notin_(
         select(sq.c.co_product_id, sq.c.co_date)
     )
 
@@ -450,7 +450,7 @@ def _outer_row_not_in_ad_unit_only_product_dates(
     end_date: Optional[date] = None,
 ) -> Any:
     sq = _ad_unit_only_product_date_pairs_subquery(ad_data_model, start_date, end_date)
-    return tuple_(ad_data_model.product_id, func.date(ad_data_model.date)).notin_(
+    return tuple_(ad_data_model.product_id, ad_data_model.date).notin_(
         select(sq.c.ao_product_id, sq.c.ao_date)
     )
 
@@ -461,7 +461,7 @@ def _exists_country_only_same_product_date(ad_data_model: Any) -> Any:
     return exists(
         select(1).where(
             sibling.product_id == ad_data_model.product_id,
-            func.date(sibling.date) == func.date(ad_data_model.date),
+            sibling.date == ad_data_model.date,
             _country_only_row_condition(sibling.country_code, sibling.ad_unit),
         )
     ).correlate(ad_data_model)
@@ -473,7 +473,7 @@ def _exists_ad_unit_only_same_product_date(ad_data_model: Any) -> Any:
     return exists(
         select(1).where(
             sibling.product_id == ad_data_model.product_id,
-            func.date(sibling.date) == func.date(ad_data_model.date),
+            sibling.date == ad_data_model.date,
             _ad_unit_only_row_condition(sibling.country_code, sibling.ad_unit),
         )
     ).correlate(ad_data_model)

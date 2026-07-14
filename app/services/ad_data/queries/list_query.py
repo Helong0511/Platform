@@ -347,7 +347,7 @@ class AdDataListQuery:
             click_rate = calculate_click_rate(
                 ad_data.click_count, ad_data.display_count, ad_data.click_rate
             )
-            viewability_rate = ad_data.viewability_rate if ad_data.viewability_rate is not None else 0.0
+            viewability_rate = float(ad_data.viewability_rate) if ad_data.viewability_rate is not None else 0.0
             date_value = normalize_date_key(ad_data.date)
             country_name_zh = resolve_country_name(country_info, ad_data.country_code)
 
@@ -367,10 +367,10 @@ class AdDataListQuery:
                 "click_count": ad_data.click_count,
                 "click_rate": click_rate,
                 "viewability_rate": round(viewability_rate, 2),
-                "cpc": round(ad_data.cpc or 0.0, 2),
+                "cpc": float(round(float(ad_data.cpc or 0), 2)),
                 "pageviews": ad_data.pageviews or 0,
-                "ecpm_after_deduct": round(ad_data.ecpm_after_deduct, 4),
-                "revenue_after_deduct": round(ad_data.revenue_after_deduct, 4),
+                "ecpm_after_deduct": float(round(float(ad_data.ecpm_after_deduct or 0), 4)),
+                "revenue_after_deduct": float(round(float(ad_data.revenue_after_deduct or 0), 4)),
             }
 
             if is_admin(current_user):
@@ -384,8 +384,9 @@ class AdDataListQuery:
                         "upstream_account": ad_data.upstream_account or "",
                         "report_type": ad_data.report_type or "legacy",
                         "report_type_label": format_report_type_label(ad_data.report_type),
-                        "ecpm_before_deduct": round(ad_data.ecpm_before_deduct, 4),
-                        "revenue_before_deduct": round(ad_data.revenue_before_deduct, 4),
+                        "is_deducted": bool(ad_data.is_deducted),
+                        "ecpm_before_deduct": float(round(float(ad_data.ecpm_before_deduct or 0), 4)),
+                        "revenue_before_deduct": float(round(float(ad_data.revenue_before_deduct or 0), 4)),
                     }
                 )
 

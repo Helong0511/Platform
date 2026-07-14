@@ -7,7 +7,7 @@ from typing import Optional
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.telegram import send_telegram_message_async
+from app.core.telegram import send_telegram_notify_async
 from app.core.utils import get_app_now_naive
 from app.models.models import PostbackConversion, Client, Product, PostbackNotification
 from app.core.postback.notification.config_helpers import detect_notification_channel
@@ -164,15 +164,13 @@ async def send_to_address(
     try:
         if channel == 'telegram':
             # Telegram Chat ID
-            await asyncio.wait_for(
-                send_telegram_message_async(address, message),
-                timeout=5.0
-            )
-            logger.debug(
-                f"Telegram 通知已发送: chat_id={address}, "
-                f"message_length={len(message)}"
-            )
-            return True
+            ok = await send_telegram_notify_async(address, message)
+            if ok:
+                logger.debug(
+                    f"Telegram 通知已发送: chat_id={address}, "
+                    f"message_length={len(message)}"
+                )
+            return ok
         elif channel == 'email':
             # 邮箱地址
             # TODO: 实现邮件通知
@@ -285,21 +283,16 @@ async def send_to_channel(
             # 如果没有提供，使用默认配置（向后兼容）
             chat_id = recipient if recipient else None
             if chat_id:
-                await asyncio.wait_for(
-                    send_telegram_message_async(chat_id, message),
-                    timeout=5.0
-                )
+                ok = await send_telegram_notify_async(chat_id, message)
             else:
                 # 如果没有提供 chat_id，使用默认管理员
-                await asyncio.wait_for(
-                    send_telegram_message_async(message),
-                    timeout=5.0
+                ok = await send_telegram_notify_async(message)
+            if ok:
+                logger.debug(
+                    f"Telegram 通知已发送: chat_id={chat_id or 'default'}, "
+                    f"message_length={len(message)}"
                 )
-            logger.debug(
-                f"Telegram 通知已发送: chat_id={chat_id or 'default'}, "
-                f"message_length={len(message)}"
-            )
-            return True
+            return ok
         elif channel == 'email':
             # 使用产品配置的邮箱地址
             if not recipient:

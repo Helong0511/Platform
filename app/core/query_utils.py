@@ -26,7 +26,7 @@ def date_range_condition(
     避免在列上使用函数，提升索引使用率
     
     Args:
-        column: 日期列（DATETIME 类型）
+        column: 日期列（DATE 或 DATETIME 类型；AdData.date / TBSearchData.date 为 DATE）
         start_date: 开始日期（可选）
         end_date: 结束日期（可选）
     
@@ -41,14 +41,10 @@ def date_range_condition(
     conditions = []
     
     if start_date:
-        # 将 date 转换为 datetime 的开始时间（00:00:00）
-        start_datetime = datetime.combine(start_date, datetime.min.time())
-        conditions.append(column >= start_datetime)
+        conditions.append(column >= start_date)
     
     if end_date:
-        # 将 date 转换为 datetime 的结束时间（23:59:59.999999）
-        end_datetime = datetime.combine(end_date, datetime.max.time())
-        conditions.append(column <= end_datetime)
+        conditions.append(column <= end_date)
     
     # 如果没有条件，返回 None
     if not conditions:
@@ -71,7 +67,7 @@ def product_assignment_join_condition(
     避免在 ad_data.date 上使用 func.date()，提升索引使用率
     
     Args:
-        ad_data_date: AdData.date 列（DATETIME 类型）
+        ad_data_date: AdData.date 列（DATE 类型）
         assignment_start: ProductAssignment.start_date 列（DATE 类型）
         assignment_end: ProductAssignment.end_date 列（DATE 类型，可为 NULL）
     
@@ -79,8 +75,8 @@ def product_assignment_join_condition(
         SQLAlchemy JOIN 条件表达式
     
     Note:
-        MySQL 会自动将 DATE 转换为 DATETIME（时间部分为 00:00:00）进行比较
-        为了包含整天的数据，结束日期需要加 1 天
+        AdData.date / TBSearchData.date 为 DATE 列，直接与 start_date/end_date 比较即可。
+        end_date 为 NULL 时表示分配仍有效。
     
     Example:
         query = query.join(
@@ -101,15 +97,10 @@ def product_assignment_join_condition(
     # 注意：在 SQLAlchemy 2.0 中，or_() 中的表达式必须都是有效的布尔表达式
     # 直接使用比较操作符，确保返回布尔表达式
     return and_(
-        # 开始日期：ad_data.date >= start_date 的 00:00:00
         ad_data_date >= assignment_start,
-        # 结束日期条件：end_date IS NULL OR ad_data_date < end_date + 1 DAY
         or_(
-            # 如果 end_date 为 NULL，表示当前有效
             assignment_end.is_(None),
-            # 如果 end_date 不为 NULL，使用 DATE_ADD 确保包含整天的数据
-            # 直接内联表达式，与 ad_data.py 中的写法完全一致
-            ad_data_date < func.date_add(assignment_end, text("INTERVAL 1 DAY"))
+            ad_data_date <= assignment_end,
         )
     )
 

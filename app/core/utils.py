@@ -20,7 +20,7 @@
 import math
 import uuid
 import pytz
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Optional
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -165,7 +165,10 @@ def apply_deduct_ratio(amount: float, deduct_ratio: float) -> float:
 
 def get_date_range(date_obj: datetime | Any) -> tuple[datetime, datetime]:
     """
-    获取日期范围（当天的开始和结束时间）
+    获取日期范围（当天的开始和结束时间）。
+
+    .. deprecated::
+        AdData.date / TBSearchData.date 已改为 DATE 列，请改用 ``normalize_date_for_ad_data``。
     
     Args:
         date_obj: 日期对象（datetime 或 date 类型）
@@ -182,20 +185,25 @@ def get_date_range(date_obj: datetime | Any) -> tuple[datetime, datetime]:
     return date_start, date_end
 
 
-def normalize_date_for_ad_data(date_obj: datetime | Any) -> datetime:
+def normalize_date_for_ad_data(date_obj: datetime | Any):
     """
-    规范化日期对象用于 AdData（转换为当天的 00:00:00）
-    
+    规范化日期对象用于 AdData（DATE 列，返回 date 类型）
+
     Args:
         date_obj: 日期对象（datetime 或 date 类型）
-    
+
     Returns:
-        datetime: 规范化后的日期对象（当天的 00:00:00）
+        date: 日历日期
     """
+    from datetime import date as date_type
+
     if isinstance(date_obj, datetime):
-        return date_obj.replace(hour=0, minute=0, second=0, microsecond=0)
-    else:
-        return datetime.combine(date_obj, datetime.min.time())
+        return date_obj.date()
+    if isinstance(date_obj, date_type):
+        return date_obj
+    if hasattr(date_obj, "date"):
+        return date_obj.date()
+    return date_obj
 
 
 def get_app_now() -> datetime:
@@ -539,7 +547,7 @@ def calculate_coverage_rate(
         覆盖率（百分比）
     """
     if stored_rate is not None:
-        return round(stored_rate, decimals)
+        return round(float(stored_rate), decimals)
     if request_count > 0:
         return round((match_count / request_count * PERCENTAGE_MULTIPLIER), decimals)
     return 0.0
@@ -564,7 +572,7 @@ def calculate_display_rate(
         展示率（百分比）
     """
     if stored_rate is not None:
-        return round(stored_rate, decimals)
+        return round(float(stored_rate), decimals)
     if match_count > 0:
         return round((display_count / match_count * PERCENTAGE_MULTIPLIER), decimals)
     return 0.0
@@ -589,7 +597,7 @@ def calculate_click_rate(
         点击率（百分比）
     """
     if stored_rate is not None:
-        return round(stored_rate, decimals)
+        return round(float(stored_rate), decimals)
     if display_count > 0:
         return round((click_count / display_count * PERCENTAGE_MULTIPLIER), decimals)
     return 0.0

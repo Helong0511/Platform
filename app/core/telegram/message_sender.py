@@ -24,6 +24,66 @@ INTER_CHAT_DELAY = 0.35  # 同一批次向多个 Chat ID 发送时的间隔（�
 MIN_SEND_INTERVAL = 0.05  # 全局最小发送间隔（秒）
 MAX_RATE_LIMIT_WAIT = 120  # 429 限流时最长等待秒数
 
+
+def estimate_telegram_send_timeout_seconds(chat_count: int = 1) -> float:
+    """
+    估算单次发送的合理外层超时（含多 Chat、重试与退避上限）。
+
+    避免业务侧 ``wait_for(5)`` 过早取消导致孤儿线程继续重试并打出双 ERROR。
+    """
+    n = max(1, int(chat_count))
+    # 每 Chat：TIMEOUT * MAX_RETRIES + 退避 2+4；Chat 间间隔；再留缓冲
+    per_chat = TIMEOUT_SECONDS * MAX_RETRIES + BASE_RETRY_DELAY * (2 ** (MAX_RETRIES - 1))
+    return float(per_chat * n + INTER_CHAT_DELAY * n + 30.0)
+
+
+def _admin_chat_count() -> int:
+    admin = getattr(settings, "TELEGRAM_ADMIN", None) or ""
+    return max(1, len([c for c in str(admin).split(",") if c.strip()]))
+
+
+async def send_telegram_notify_async(
+    chat_id_or_message: str,
+    message: Optional[str] = None,
+    *,
+    parse_mode: Optional[str] = None,
+    reply_to_message_id: Optional[int] = None,
+    timeout: Optional[float] = None,
+) -> bool:
+    """
+    业务通知推荐入口：等待发送完成，外层超时足够覆盖重试，失败只记 WARNING。
+
+    请勿再包一层短 ``wait_for(5)``。
+    """
+    import asyncio
+
+    wait_sec = timeout
+    if wait_sec is None:
+        if message is None:
+            chat_n = _admin_chat_count()
+        else:
+            chat_n = max(
+                1,
+                len([c for c in str(chat_id_or_message or "").split(",") if c.strip()]),
+            )
+        wait_sec = estimate_telegram_send_timeout_seconds(chat_n)
+    try:
+        return await asyncio.wait_for(
+            send_telegram_message_async(
+                chat_id_or_message,
+                message,
+                parse_mode=parse_mode,
+                reply_to_message_id=reply_to_message_id,
+            ),
+            timeout=wait_sec,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "发送 Telegram 通知整体超时（%.0fs），线程内发送可能仍在重试，请检查网络或 api.telegram.org",
+            wait_sec,
+        )
+        return False
+
 _send_lock = threading.Lock()
 _last_send_monotonic = 0.0
 

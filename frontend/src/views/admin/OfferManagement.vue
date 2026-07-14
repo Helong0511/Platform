@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   Offer 管理页面
   职责：Offer CRUD、Tracklink 配置、详情统计 Tab、列显隐与批量操作。
   @file views/admin/OfferManagement.vue
@@ -16,7 +16,7 @@
           </div>
           <div class="header-right">
             <el-button 
-              type="text" 
+              type="link" 
               :icon="Setting" 
               @click="columnSettingVisible = true"
               style="margin-right: 10px;"

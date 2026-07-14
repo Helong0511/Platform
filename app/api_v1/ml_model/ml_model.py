@@ -36,7 +36,7 @@ from app.core.exceptions import raise_api_exception
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
-from app.core.utils import get_app_now_naive, build_import_message
+from app.core.utils import get_app_now_naive, build_import_message, normalize_date_for_ad_data
 from app.models.models import User, AdData, Product
 from app.schemas.base import ResponseBaseSchema
 
@@ -1517,16 +1517,10 @@ async def import_training_data(
             # 构建查询条件
             conditions = []
             for date, product_id in new_data_pairs:
-                if isinstance(date, datetime):
-                    date_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
-                    date_end = date.replace(hour=23, minute=59, second=59, microsecond=999999)
-                else:
-                    date_start = datetime.combine(date, datetime.min.time())
-                    date_end = datetime.combine(date, datetime.max.time())
+                ad_date = normalize_date_for_ad_data(date)
                 conditions.append(
                     and_(
-                        AdData.date >= date_start,
-                        AdData.date <= date_end,
+                        AdData.date == ad_date,
                         AdData.product_id == product_id
                     )
                 )
@@ -1539,7 +1533,7 @@ async def import_training_data(
                 # 构建已存在记录的映射
                 existing_map = {}
                 for ad_data, product in existing_result.all():
-                    record_date = ad_data.date.date() if hasattr(ad_data.date, 'date') else ad_data.date
+                    record_date = ad_data.date
                     key = (record_date, ad_data.product_id)
                     existing_map[key] = {
                         "ad_data": ad_data,

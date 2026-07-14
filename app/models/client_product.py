@@ -2,7 +2,7 @@
 客户、产品、广告数据与产品分配 ORM 模型。
 """
 from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, Enum, Text, Index, \
-    UniqueConstraint, Date
+    UniqueConstraint, Date, Numeric
 from sqlalchemy.orm import foreign, relationship
 from datetime import datetime
 import enum
@@ -111,27 +111,27 @@ class AdData(Base):
     __tablename__ = "ad_data"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='广告数据ID')
-    date = Column(DateTime, nullable=False, comment='数据日期')
+    date = Column(Date, nullable=False, comment='数据日期（仅日期）')
 
     # 国家代码（ISO 二字母；无法识别时保留完整原始国名，最长 100 字符）
     country_code = Column(String(100), nullable=True, comment='国家代码（ISO 二字母；未识别时保留原始国名）')
 
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, comment='产品ID')
-    ad_unit = Column(String(100), nullable=False, default='', server_default='', comment='广告单元')
+    ad_unit = Column(String(150), nullable=False, default='', server_default='', comment='广告单元')
     request_count = Column(Integer, default=0, comment='请求数')
     match_count = Column(Integer, default=0, comment='匹配数')
-    coverage_rate = Column(Float, default=0.0, comment='覆盖率（%）')
+    coverage_rate = Column(Numeric(7, 4), nullable=False, default=0, server_default='0.0000', comment='覆盖率（%）')
     display_count = Column(Integer, default=0, comment='展示数')
-    display_rate = Column(Float, default=0.0, comment='展示率（%）')
+    display_rate = Column(Numeric(7, 4), nullable=False, default=0, server_default='0.0000', comment='展示率（%）')
     click_count = Column(Integer, default=0, comment='点击数')
-    click_rate = Column(Float, default=0.0, comment='点击率（%）')
-    viewability_rate = Column(Float, default=0.0, comment='可见率（%）')
-    cpc = Column(Float, default=0.0, comment='CPC')
-    pageviews = Column(Integer, default=0, comment='PageViews')
-    ecpm_before_deduct = Column(Float, default=0.0, comment='eCPM未减扣')
-    ecpm_after_deduct = Column(Float, default=0.0, comment='eCPM已减扣')
-    revenue_before_deduct = Column(Float, default=0.0, comment='收益未减扣')
-    revenue_after_deduct = Column(Float, default=0.0, comment='收益已减扣')
+    click_rate = Column(Numeric(7, 4), nullable=False, default=0, server_default='0.0000', comment='点击率（%）')
+    viewability_rate = Column(Numeric(7, 4), nullable=False, default=0, server_default='0.0000', comment='可见率（%）')
+    cpc = Column(Numeric(12, 4), nullable=False, default=0, server_default='0.0000', comment='CPC')
+    pageviews = Column(Integer, nullable=False, default=0, server_default='0', comment='PageViews')
+    ecpm_before_deduct = Column(Numeric(12, 4), nullable=False, default=0, server_default='0.0000', comment='eCPM未减扣')
+    ecpm_after_deduct = Column(Numeric(12, 4), nullable=False, default=0, server_default='0.0000', comment='eCPM已减扣')
+    revenue_before_deduct = Column(Numeric(12, 4), nullable=False, default=0, server_default='0.0000', comment='收益未减扣')
+    revenue_after_deduct = Column(Numeric(12, 4), nullable=False, default=0, server_default='0.0000', comment='收益已减扣')
     data_source = Column(
         String(32), nullable=False, default='legacy', server_default='legacy',
         comment='数据来源：zhisuo/gam/excel/legacy 等',
@@ -144,28 +144,18 @@ class AdData(Base):
         String(16), nullable=False, default='legacy', server_default='legacy',
         comment='报表维度：unit/country/cross/daily/legacy',
     )
+    is_deducted = Column(Boolean, nullable=False, default=False, server_default='0', comment='是否已被扣减')
     created_at = Column(DateTime, default=get_app_now_naive, comment='创建时间')
     updated_at = Column(DateTime, default=get_app_now_naive,
                         onupdate=get_app_now_naive, comment='更新时间')
 
     __table_args__ = (
-        Index("idx_ad_data_date", "date"),  # 优化日期范围查询
-        Index("idx_ad_data_product", "product_id"),  # 优化产品查询
-        Index("idx_ad_data_country", "country_code"),  # 优化国家代码查询
-        Index("idx_ad_data_ad_unit", "ad_unit"),  # 优化广告单元查询
-        # 复合索引：优化常见查询组合
-        Index("idx_ad_data_date_product", "date", "product_id"),  # 日期 + 产品
-        Index("idx_ad_data_date_country", "date", "country_code"),  # 日期 + 国家
-        Index("idx_ad_data_product_country", "product_id", "country_code"),  # 产品 + 国家
-        Index("idx_ad_data_date_product_country", "date", "product_id", "country_code"),  # 日期 + 产品 + 国家
-        Index("idx_ad_data_date_product_ad_unit", "date", "product_id", "ad_unit"),  # 日期 + 产品 + 广告单元
-        Index("idx_ad_data_date_ad_unit", "date", "ad_unit"),  # 日期 + 广告单元
+        Index("idx_ad_data_product", "product_id"),
+        Index("idx_ad_data_country_code", "country_code"),
         Index("idx_ad_data_source_type", "data_source", "report_type"),
-        Index("idx_ad_data_date_product_type", "date", "product_id", "report_type"),
-        # 唯一性：日期+产品+国家+单元+来源+报表维度
         UniqueConstraint(
             "date", "product_id", "country_code", "ad_unit",
-            "data_source", "report_type",
+            "data_source", "report_type", "upstream_account",
             name="uq_ad_data_identity",
         ),
     )
@@ -192,6 +182,24 @@ class AdData(Base):
             2
         )
 
+    def finalize_metrics(self) -> None:
+        """入库前计算比率并裁剪到 DECIMAL 合法范围，同步 is_deducted。"""
+        from app.core.ad_data_metadata import clamp_ad_data_money, clamp_ad_data_rate
+
+        self.calculate_rates()
+        self.coverage_rate = clamp_ad_data_rate(self.coverage_rate)
+        self.display_rate = clamp_ad_data_rate(self.display_rate)
+        self.click_rate = clamp_ad_data_rate(self.click_rate)
+        self.viewability_rate = clamp_ad_data_rate(self.viewability_rate)
+        self.cpc = clamp_ad_data_money(self.cpc)
+        self.ecpm_before_deduct = clamp_ad_data_money(self.ecpm_before_deduct)
+        self.ecpm_after_deduct = clamp_ad_data_money(self.ecpm_after_deduct)
+        self.revenue_before_deduct = clamp_ad_data_money(self.revenue_before_deduct)
+        self.revenue_after_deduct = clamp_ad_data_money(self.revenue_after_deduct)
+        before = float(self.revenue_before_deduct or 0)
+        after = float(self.revenue_after_deduct or 0)
+        self.is_deducted = abs(before - after) > 0.0001
+
 
     # 关系
     product = relationship("Product", back_populates="ad_data")
@@ -211,22 +219,22 @@ class TBSearchData(Base):
     __tablename__ = "tb_search_data"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='ID')
-    date = Column(DateTime, nullable=False, comment='日期')
+    date = Column(Date, nullable=False, comment='日期（仅日期）')
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, comment='产品ID')
     country_code = Column(String(100), nullable=True, comment='国家代码（ISO 二字母；未识别时保留原始国名）')
-    redirects = Column(Integer, default=0, comment='REDIRECTS')
-    searches = Column(Integer, default=0, comment='SEARCHES')
-    monetized = Column(Integer, default=0, comment='MONETIZED')
-    clicks = Column(Integer, default=0, comment='CLICKS')
+    redirects = Column(Integer, nullable=False, default=0, server_default='0', comment='REDIRECTS')
+    searches = Column(Integer, nullable=False, default=0, server_default='0', comment='SEARCHES')
+    monetized = Column(Integer, nullable=False, default=0, server_default='0', comment='MONETIZED')
+    clicks = Column(Integer, nullable=False, default=0, server_default='0', comment='CLICKS')
 
-    revenue = Column(Float, default=0.0, comment='REVENUE（扣减后）')
-    rpm = Column(Float, default=0.0, comment='RPM（扣减后）')
-    
-    revenue_before_deduct = Column(Float, default=0.0, comment='REVENUE（扣减前）')
-    rpm_before_deduct = Column(Float, default=0.0, comment='RPM（扣减前）')
-    
-    created_at = Column(DateTime, default=get_app_now_naive, comment='创建时间')
-    updated_at = Column(DateTime, default=get_app_now_naive, onupdate=get_app_now_naive, comment='更新时间')
+    revenue = Column(Numeric(12, 4), nullable=False, default=0, server_default='0.0000', comment='REVENUE（扣减后）')
+    rpm = Column(Numeric(10, 4), nullable=False, default=0, server_default='0.0000', comment='RPM（扣减后）')
+
+    revenue_before_deduct = Column(Numeric(12, 4), nullable=False, default=0, server_default='0.0000', comment='REVENUE（扣减前）')
+    rpm_before_deduct = Column(Numeric(10, 4), nullable=False, default=0, server_default='0.0000', comment='RPM（扣减前）')
+
+    created_at = Column(DateTime(6), default=get_app_now_naive, comment='创建时间')
+    updated_at = Column(DateTime(6), default=get_app_now_naive, onupdate=get_app_now_naive, comment='更新时间')
 
     # 关系
     product = relationship("Product", back_populates="tb_search_data")
@@ -237,15 +245,8 @@ class TBSearchData(Base):
     )
 
     __table_args__ = (
-        Index("idx_tb_search_data_date", "date"),
         Index("idx_tb_search_data_product", "product_id"),
-        Index("idx_tb_search_data_country", "country_code"),
-        # 复合索引：优化常见查询组合
-        Index("idx_tb_search_data_date_product", "date", "product_id"),  # 日期 + 产品
-        Index("idx_tb_search_data_date_country", "date", "country_code"),  # 日期 + 国家
-        Index("idx_tb_search_data_product_country", "product_id", "country_code"),  # 产品 + 国家
-        Index("idx_tb_search_data_date_product_country", "date", "product_id", "country_code"),  # 日期 + 产品 + 国家
-        # 唯一性约束
+        Index("idx_tb_search_data_country_code", "country_code"),
         UniqueConstraint("date", "product_id", "country_code", name="uq_tb_search_data_date_product_country"),
     )
 

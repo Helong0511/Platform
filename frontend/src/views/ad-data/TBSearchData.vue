@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   广告数据 - TB 搜索数据
   @file views/ad-data/TBSearchData.vue
 -->
@@ -101,7 +101,7 @@
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <span style="font-weight: 600; font-size: 16px;">TB搜索数据</span>
           <el-button 
-            type="text" 
+            type="link" 
             :icon="Setting" 
             @click="columnSettingVisible = true"
           >

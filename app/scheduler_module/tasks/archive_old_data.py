@@ -14,7 +14,7 @@
 """
 import logging
 from calendar import monthrange
-from datetime import datetime
+from datetime import datetime, date
 
 from sqlalchemy import text
 
@@ -71,7 +71,7 @@ async def archive_old_ad_data(months: int = 6) -> dict:
             # 获取目标月份的最后一天，确保日期有效
             _, last_day = monthrange(target_year, target_month)
             # 使用目标月份的第一天作为归档阈值（小于这个日期的数据将被归档）
-            archive_date = datetime(target_year, target_month, 1)
+            archive_date = date(target_year, target_month, 1)
             archive_date_str = archive_date.strftime('%Y-%m-%d')
 
             # 检查归档表是否存在
@@ -85,43 +85,10 @@ async def archive_old_ad_data(months: int = 6) -> dict:
             table_exists = result.scalar() > 0
 
             if not table_exists:
-                # 创建归档表
-                logger.info("归档表不存在，正在创建...")
-
-                # 创建归档表，结构与主表完全一致
-                # 注意：country_code 字段类型与主表保持一致（varchar(2)）
-                # 使用不同的外键约束名称和索引名称，避免与主表冲突
-                create_table_sql = text("""
-                                        CREATE TABLE `ad_data_archive`
-                                        (
-                                            `id`                    int      NOT NULL AUTO_INCREMENT COMMENT '广告数据ID',
-                                            `date`                  datetime NOT NULL COMMENT '数据日期',
-                                            `country_code`          varchar(2) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL COMMENT '国家代码（ISO 3166-1 二字母代码）',
-                                            `product_id`            int      NOT NULL COMMENT '产品ID',
-                                            `ad_unit`               varchar(100) NOT NULL DEFAULT '' COMMENT '广告单元',
-                                            `request_count`         int      NOT NULL DEFAULT 0 COMMENT '请求数',
-                                            `match_count`           int      NOT NULL DEFAULT 0 COMMENT '匹配数',
-                                            `display_count`         int      NOT NULL DEFAULT 0 COMMENT '展示数',
-                                            `click_count`           int      NOT NULL DEFAULT 0 COMMENT '点击数',
-                                            `ecpm_before_deduct`    float    NOT NULL DEFAULT 0 COMMENT 'eCPM未减扣',
-                                            `ecpm_after_deduct`     float    NOT NULL DEFAULT 0 COMMENT 'eCPM已减扣',
-                                            `revenue_before_deduct` float    NOT NULL DEFAULT 0 COMMENT '收益未减扣',
-                                            `revenue_after_deduct`  float    NOT NULL DEFAULT 0 COMMENT '收益已减扣',
-                                            `created_at`            datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '创建时间',
-                                            `updated_at`            datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
-                                            PRIMARY KEY (`id`) USING BTREE,
-                                            UNIQUE INDEX `uq_ad_data_archive_date_product_country_unit`(`date` ASC, `product_id` ASC, `country_code` ASC, `ad_unit` ASC) USING BTREE,
-                                            INDEX                   `idx_ad_data_archive_date`(`date` ASC) USING BTREE,
-                                            INDEX                   `idx_ad_data_archive_product`(`product_id` ASC) USING BTREE,
-                                            INDEX                   `idx_ad_data_archive_date_product`(`date` ASC, `product_id` ASC) USING BTREE,
-                                            INDEX                   `idx_ad_data_archive_country_code`(`country_code` ASC) USING BTREE,
-                                            CONSTRAINT `fk_ad_data_archive_country_code` FOREIGN KEY (`country_code`) REFERENCES `countries` (`alpha_2_code`) ON DELETE SET NULL ON UPDATE CASCADE,
-                                            CONSTRAINT `fk_ad_data_archive_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
-                                        ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC COMMENT = '广告数据归档表';
-                                        """)
-                await db.execute(create_table_sql)
-                await db.commit()
-                logger.info("归档表创建成功")
+                logger.error(
+                    "归档表 ad_data_archive 不存在，请先执行 sql/platform.sql 或 migrate_schema_20260711.sql 创建"
+                )
+                raise RuntimeError("ad_data_archive 表不存在")
             else:
                 # 表已存在，检查是否需要修复约束（如果之前创建失败导致约束名称冲突）
                 logger.debug("归档表已存在，检查约束...")
@@ -201,30 +168,19 @@ async def archive_old_ad_data(months: int = 6) -> dict:
 
             logger.info(f"发现 {total_count} 条需要归档的数据")
 
-            # 步骤1：插入到归档表
-            # 使用 INSERT IGNORE 避免重复归档（如果数据已经归档过，忽略错误继续执行）
-            # 明确指定列名，包括 country_code 字段，排除生成列（coverage_rate, display_rate, click_rate）
+            # 步骤1：插入到归档表（字段与主表 ad_data 对齐）
             archive_sql = text("""
-                               INSERT
-                               IGNORE INTO `ad_data_archive` 
-                (`id`, `date`, `country_code`, `product_id`, `ad_unit`, `request_count`, `match_count`, 
-                 `display_count`, `click_count`, `ecpm_before_deduct`, `ecpm_after_deduct`, 
-                 `revenue_before_deduct`, `revenue_after_deduct`, `created_at`, `updated_at`)
-                               SELECT `id`,
-                                      `date`,
-                                      `country_code`,
-                                      `product_id`,
-                                      `ad_unit`,
-                                      `request_count`,
-                                      `match_count`,
-                                      `display_count`,
-                                      `click_count`,
-                                      `ecpm_before_deduct`,
-                                      `ecpm_after_deduct`,
-                                      `revenue_before_deduct`,
-                                      `revenue_after_deduct`,
-                                      `created_at`,
-                                      `updated_at`
+                               INSERT IGNORE INTO `ad_data_archive`
+                (`id`, `date`, `country_code`, `product_id`, `ad_unit`,
+                 `request_count`, `match_count`, `coverage_rate`, `display_count`, `display_rate`,
+                 `click_count`, `click_rate`, `viewability_rate`, `cpc`, `pageviews`,
+                 `ecpm_before_deduct`, `ecpm_after_deduct`, `revenue_before_deduct`, `revenue_after_deduct`,
+                 `data_source`, `upstream_account`, `report_type`, `created_at`, `updated_at`, `is_deducted`)
+                               SELECT `id`, `date`, `country_code`, `product_id`, `ad_unit`,
+                                      `request_count`, `match_count`, `coverage_rate`, `display_count`, `display_rate`,
+                                      `click_count`, `click_rate`, `viewability_rate`, `cpc`, `pageviews`,
+                                      `ecpm_before_deduct`, `ecpm_after_deduct`, `revenue_before_deduct`, `revenue_after_deduct`,
+                                      `data_source`, `upstream_account`, `report_type`, `created_at`, `updated_at`, `is_deducted`
                                FROM `ad_data`
                                WHERE `date` < :archive_date
                                """)

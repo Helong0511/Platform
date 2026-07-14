@@ -10,7 +10,7 @@ from calendar import monthrange
 from datetime import date, datetime
 from fastapi import Depends
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, and_, or_, text
+from sqlalchemy import func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -19,7 +19,7 @@ from app.services.ad_data.queries.filter_conditions import apply_ad_data_scope_f
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
-from app.core.query_utils import check_use_assignment_table
+from app.core.query_utils import check_use_assignment_table, product_assignment_join_condition
 from app.core.security import get_current_user
 from app.core.excel_io import excel_streaming_response
 from app.models.models import User, Client, Product, AdData, UserRole, ProductAssignment, CountryInfo
@@ -263,13 +263,11 @@ async def export_ad_data_handler(
                 ProductAssignment,
                 and_(
                     ProductAssignment.product_id == Product.id,
-                    # MySQL 会自动将 DATE 转换为 DATETIME，所以可以直接比较
-                    AdData.date >= ProductAssignment.start_date,
-                    or_(
-                        ProductAssignment.end_date.is_(None),
-                        # 使用 DATE_ADD 确保包含整天的数据（end_date 23:59:59.999999）
-                        AdData.date < func.date_add(ProductAssignment.end_date, text("INTERVAL 1 DAY"))
-                    )
+                    product_assignment_join_condition(
+                        AdData.date,
+                        ProductAssignment.start_date,
+                        ProductAssignment.end_date,
+                    ),
                 )
             )
             # JOIN Client表，然后通过WHERE子句过滤客户ID（与 ad_data.py 保持一致）
@@ -290,12 +288,10 @@ async def export_ad_data_handler(
         # 应用日期范围过滤（如果指定了日期范围）
         # ---------- 条件分支 ----------
         if start_date:
-            start_datetime = datetime.combine(start_date, datetime.min.time())
-            data_count_query = data_count_query.where(AdData.date >= start_datetime)
+            data_count_query = data_count_query.where(AdData.date >= start_date)
         # ---------- 条件分支 ----------
         if end_date:
-            end_datetime = datetime.combine(end_date, datetime.max.time())
-            data_count_query = data_count_query.where(AdData.date <= end_datetime)
+            data_count_query = data_count_query.where(AdData.date <= end_date)
 
         data_count_result = await db.execute(data_count_query)
         total_data_count = data_count_result.scalar() or 0
@@ -345,13 +341,11 @@ async def export_ad_data_handler(
             ProductAssignment,
             and_(
                 ProductAssignment.product_id == Product.id,
-                # MySQL 会自动将 DATE 转换为 DATETIME，所以可以直接比较
-                AdData.date >= ProductAssignment.start_date,
-                or_(
-                    ProductAssignment.end_date.is_(None),
-                    # 使用 DATE_ADD 确保包含整天的数据（end_date 23:59:59.999999）
-                    AdData.date < func.date_add(ProductAssignment.end_date, text("INTERVAL 1 DAY"))
-                )
+                product_assignment_join_condition(
+                    AdData.date,
+                    ProductAssignment.start_date,
+                    ProductAssignment.end_date,
+                ),
             )
         )
         # JOIN Client表，然后通过WHERE子句过滤客户ID（与 ad_data.py 保持一致）
@@ -399,12 +393,10 @@ async def export_ad_data_handler(
     # 应用日期过滤（直接使用条件，避免函数可能的问题）
     # ---------- 条件分支 ----------
     if start_date:
-        start_datetime = datetime.combine(start_date, datetime.min.time())
-        query = query.where(AdData.date >= start_datetime)
+        query = query.where(AdData.date >= start_date)
     # ---------- 条件分支 ----------
     if end_date:
-        end_datetime = datetime.combine(end_date, datetime.max.time())
-        query = query.where(AdData.date <= end_datetime)
+        query = query.where(AdData.date <= end_date)
     # 如果没有指定日期范围，默认查询当前月的数据（与 ad_data.py 保持一致）
     # ---------- 条件分支 ----------
     elif not start_date and not end_date:
@@ -415,10 +407,8 @@ async def export_ad_data_handler(
         _, last_day = monthrange(today.year, today.month)
         month_end = date(today.year, today.month, last_day)
 
-        month_start_datetime = datetime.combine(month_start, datetime.min.time())
-        month_end_datetime = datetime.combine(month_end, datetime.max.time())
-        query = query.where(AdData.date >= month_start_datetime)
-        query = query.where(AdData.date <= month_end_datetime)
+        query = query.where(AdData.date >= month_start)
+        query = query.where(AdData.date <= month_end)
 
     # 执行查询（限制最大行数，防止 OOM）
     result = await db.execute(
@@ -536,12 +526,12 @@ async def export_ad_data_handler(
                 "展示率": f"{display_rate}%",
                 "点击数": item.click_count,
                 "点击率": f"{click_rate}%",
-                "CPC($)": round(item.cpc or 0.0, 2),
+                "CPC($)": float(round(float(item.cpc or 0), 2)),
                 "PageViews": item.pageviews or 0,
-                "eCPM(扣)($)": round(item.ecpm_after_deduct, 4),
-                "eCPM($)": round(item.ecpm_before_deduct, 4),
-                "收益(扣)($)": round(item.revenue_after_deduct, 4),
-                "收益($)": round(item.revenue_before_deduct, 4)
+                "eCPM(扣)($)": float(round(float(item.ecpm_after_deduct or 0), 4)),
+                "eCPM($)": float(round(float(item.ecpm_before_deduct or 0), 4)),
+                "收益(扣)($)": float(round(float(item.revenue_after_deduct or 0), 4)),
+                "收益($)": float(round(float(item.revenue_before_deduct or 0), 4))
             }
         else:
             row_data = {
@@ -557,10 +547,10 @@ async def export_ad_data_handler(
                 "展示率": f"{display_rate}%",
                 "点击数": item.click_count,
                 "点击率": f"{click_rate}%",
-                "CPC($)": round(item.cpc or 0.0, 2),
+                "CPC($)": float(round(float(item.cpc or 0), 2)),
                 "PageViews": item.pageviews or 0,
-                "eCPM($)": round(item.ecpm_after_deduct, 4),
-                "收益($)": round(item.revenue_after_deduct, 4)
+                "eCPM($)": float(round(float(item.ecpm_after_deduct or 0), 4)),
+                "收益($)": float(round(float(item.revenue_after_deduct or 0), 4))
             }
 
         data.append(row_data)

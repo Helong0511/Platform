@@ -16,6 +16,7 @@ from sqlalchemy import and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.db_errors import run_with_mysql_schema_retry
 from app.core.country_code import resolve_country_name
 from app.core.infrastructure.cache_compat import (
     generate_cache_key,
@@ -88,38 +89,44 @@ class FilterOptionsQuery:
         if cached:
             return cached.get("data", [])
 
-        use_assignment_table = await check_use_assignment_table(self.db)
+        async def _load() -> List[Dict[str, Any]]:
+            use_assignment_table = await check_use_assignment_table(self.db)
 
-        if use_assignment_table:
-            query = select(func.distinct(Client.id), User.full_name, User.username, Client.user_id)
-            query = query.select_from(AdData)
-            query = join_product_and_client(query, use_assignment_table)
-        else:
-            query = select(func.distinct(Client.id), User.full_name, User.username, Client.user_id)
-            query = query.select_from(Client)
-            query = query.join(Product, Product.client_id == Client.id)
-            query = query.join(AdData, AdData.product_id == Product.id)
+            if use_assignment_table:
+                query = select(func.distinct(Client.id), User.full_name, User.username, Client.user_id)
+                query = query.select_from(AdData)
+                query = join_product_and_client(query, use_assignment_table)
+            else:
+                query = select(func.distinct(Client.id), User.full_name, User.username, Client.user_id)
+                query = query.select_from(Client)
+                query = query.join(Product, Product.client_id == Client.id)
+                query = query.join(AdData, AdData.product_id == Product.id)
 
-        query = query.join(User, Client.user_id == User.id)
-        query = query.where(Product.is_active == True)
+            query = query.join(User, Client.user_id == User.id)
+            query = query.where(Product.is_active == True)
 
-        if not is_admin(current_user):
-            query = query.where(Client.user_id == current_user.id)
+            if not is_admin(current_user):
+                query = query.where(Client.user_id == current_user.id)
 
-        query = apply_date_range_filter(
-            query, AdData.date, start_date, end_date, default_to_current_month=True
+            query = apply_date_range_filter(
+                query, AdData.date, start_date, end_date, default_to_current_month=True
+            )
+
+            result = await self.db.execute(query)
+            clients = [
+                {
+                    "id": client_id,
+                    "full_name": full_name or username or "未知客户",
+                    "user_id": user_id,
+                }
+                for client_id, full_name, username, user_id in result.all()
+            ]
+            clients.sort(key=lambda x: x["full_name"])
+            return clients
+
+        clients_list = await run_with_mysql_schema_retry(
+            self.db, _load, label="clients_with_data"
         )
-
-        result = await self.db.execute(query)
-        clients_list = [
-            {
-                "id": client_id,
-                "full_name": full_name or username or "未知客户",
-                "user_id": user_id,
-            }
-            for client_id, full_name, username, user_id in result.all()
-        ]
-        clients_list.sort(key=lambda x: x["full_name"])
 
         await set_cached(
             cache_key,
@@ -317,8 +324,8 @@ class FilterOptionsQuery:
         use_assignment_table = await check_use_assignment_table(self.db)
 
         query = select(
-            func.min(func.date(AdData.date)).label("min_date"),
-            func.max(func.date(AdData.date)).label("max_date"),
+            func.min(AdData.date).label("min_date"),
+            func.max(AdData.date).label("max_date"),
         ).select_from(AdData)
         query = join_product_and_client(query, use_assignment_table)
 

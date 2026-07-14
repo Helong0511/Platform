@@ -507,7 +507,7 @@ class Settings(BaseSettings):
     # 默认：Asia/Shanghai（中国时区，UTC+8）
     # 可选值：Asia/Shanghai, UTC, America/New_York 等（pytz 支持的时区）
     # 注意：
-    # - 业务日期字段（如AdData.date）存储为系统时区的naive datetime
+    # - 业务日期字段（如 AdData.date）存储为 DATE（仅日期，无时间部分）
     # - 时间戳字段（如created_at、updated_at）存储为应用配置时区（默认北京时间）的naive datetime
     TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Shanghai")
 
@@ -553,6 +553,11 @@ class Settings(BaseSettings):
     
     TBSJ_API_USERNAME: str = os.getenv("TBSJ_API_USERNAME", "")
     TBSJ_API_PASSWORD: str = os.getenv("TBSJ_API_PASSWORD", "")
+    # 通百世家/第三方服务 Base（无尾斜杠）；Token 为 {BASE}/token
+    TBSJ_API_BASE_URL: str = os.getenv(
+        "TBSJ_API_BASE_URL",
+        "https://data.tongbaishijia.com/api/thirdservice",
+    ).rstrip("/")
 
     # 定时任务拉取上游 API（TBSJ / Huguang 等）HTTP 超时与重试
     UPSTREAM_HTTP_TIMEOUT: float = float(os.getenv("UPSTREAM_HTTP_TIMEOUT", "45"))

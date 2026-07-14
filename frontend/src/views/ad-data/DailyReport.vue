@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   广告数据 - 每日统计
   @file views/ad-data/DailyReport.vue
 -->
@@ -44,7 +44,7 @@
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <span style="font-weight: 600; font-size: 16px;">{{ pageConfig.title }}</span>
           <el-button 
-            type="text" 
+            type="link" 
             :icon="Setting" 
             @click="columnSettingVisible = true"
           >

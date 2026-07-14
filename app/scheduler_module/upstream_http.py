@@ -92,6 +92,7 @@ async def _request_json(
     url: str,
     *,
     json_body: Optional[Mapping[str, Any]] = None,
+    form_body: Optional[Mapping[str, Any]] = None,
     params: Optional[Mapping[str, Any]] = None,
     headers: Optional[Mapping[str, str]] = None,
     label: str = "API",
@@ -101,7 +102,7 @@ async def _request_json(
 ) -> Dict[str, Any]:
     """
     上游 HTTP 请求核心：5xx/429/超时/网络错误按退避策略重试，成功返回 JSON 字典。
-    post_json / get_json 均委托本函数。
+    post_json / post_form / get_json 均委托本函数。
     """
     total_timeout = timeout if timeout is not None else _default_timeout()
     attempts = max_retries if max_retries is not None else _default_max_retries()
@@ -118,6 +119,7 @@ async def _request_json(
                     method,
                     url,
                     json=json_body,
+                    data=form_body,
                     params=params,
                     headers=headers,
                 )
@@ -195,11 +197,34 @@ async def post_json(
     verify: bool = True,
     max_retries: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """POST 请求并返回解析后的 JSON。"""
+    """POST JSON 请求并返回解析后的 JSON。"""
     return await _request_json(
         "POST",
         url,
         json_body=json_body,
+        headers=headers,
+        label=label,
+        timeout=timeout,
+        verify=verify,
+        max_retries=max_retries,
+    )
+
+
+async def post_form(
+    url: str,
+    *,
+    form_body: Optional[Mapping[str, Any]] = None,
+    headers: Optional[Mapping[str, str]] = None,
+    label: str = "API",
+    timeout: Optional[float] = None,
+    verify: bool = True,
+    max_retries: Optional[int] = None,
+) -> Dict[str, Any]:
+    """POST application/x-www-form-urlencoded 并返回解析后的 JSON。"""
+    return await _request_json(
+        "POST",
+        url,
+        form_body=form_body,
         headers=headers,
         label=label,
         timeout=timeout,

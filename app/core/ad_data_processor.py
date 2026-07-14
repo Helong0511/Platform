@@ -27,15 +27,15 @@ from app.core.ad_data_metadata import (
     DATA_SOURCE_UNKNOWN,
     REPORT_TYPE_LEGACY,
     normalize_report_type,
+    normalize_upstream_account,
     resolve_report_type_for_row,
 )
 from app.core.utils import (
     apply_deduct_ratio,
-    get_date_range,
     normalize_ad_unit,
     normalize_date_for_ad_data,
 )
-from app.core.telegram import send_telegram_message_async
+from app.core.telegram import send_telegram_notify_async
 from app.core.config import settings
 
 # 获取当前模块的日志记录器
@@ -48,6 +48,19 @@ def _metric_is_zero_int(value: Any) -> bool:
 
 def _metric_is_zero_float(value: Any) -> bool:
     return abs(float(value or 0.0)) < 1e-9
+
+
+def _as_float(value: Any) -> float:
+    """将 Decimal/None/数值统一为 float，避免 DECIMAL 列与 float 混算报错。"""
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _metric_differs(existing_value: Any, new_value: Any, threshold: float = 0.01) -> bool:
+    """比较 DECIMAL 列与 float 新值是否超出阈值。"""
+    return abs(_as_float(existing_value) - _as_float(new_value)) > threshold
 
 
 def is_empty_ad_metrics(
@@ -93,27 +106,23 @@ def _grouped_data_is_empty(grouped_data: Dict[str, Any]) -> bool:
 def _ad_data_identity_filters(
     *,
     product_id: int,
-    date_start,
-    date_end,
+    storage_date: date,
     country_code,
     ad_unit: str,
     data_source: str,
     report_type: str,
     upstream_account: str,
 ):
-    """构建 ad_data 唯一性查询条件（含来源与报表维度）。"""
-    filters = [
-        AdData.date >= date_start,
-        AdData.date <= date_end,
+    """构建 ad_data 唯一性查询条件（含来源、报表维度与上游账号）。"""
+    return [
+        AdData.date == storage_date,
         AdData.product_id == product_id,
         build_ad_data_country_equality(AdData.country_code, country_code),
         AdData.ad_unit == ad_unit,
         AdData.data_source == data_source,
         AdData.report_type == report_type,
+        AdData.upstream_account == normalize_upstream_account(upstream_account),
     ]
-    if upstream_account:
-        filters.append(AdData.upstream_account == upstream_account)
-    return filters
 
 
 def _report_type_lookup_condition(row_report_type: str):
@@ -130,8 +139,7 @@ async def _find_existing_ad_data_for_import(
     db: AsyncSession,
     *,
     product_id: int,
-    date_start,
-    date_end,
+    ad_date,
     country_code,
     ad_unit: str,
     data_source: str,
@@ -139,32 +147,18 @@ async def _find_existing_ad_data_for_import(
     upstream_account: str,
 ):
     """按唯一键查找已有行；legacy 行在推断入库时可被匹配并升级 report_type。"""
+    storage_date = normalize_date_for_ad_data(ad_date)
     filters = [
-        AdData.date >= date_start,
-        AdData.date <= date_end,
+        AdData.date == storage_date,
         AdData.product_id == product_id,
         build_ad_data_country_equality(AdData.country_code, country_code),
         AdData.ad_unit == ad_unit,
         AdData.data_source == data_source,
+        AdData.upstream_account == normalize_upstream_account(upstream_account),
         _report_type_lookup_condition(row_report_type),
     ]
-    # 唯一约束不含 upstream_account：查重不按账号过滤，避免多账号 INSERT 冲突丢数。
-    # 若传入账号，优先返回同账号行；否则返回同维度任意行供更新。
     result = await db.execute(select(AdData).where(*filters))
-    rows = result.scalars().all()
-    if not rows:
-        return None
-    if upstream_account:
-        for row in rows:
-            if row.upstream_account == upstream_account and row.report_type == row_report_type:
-                return row
-        for row in rows:
-            if row.upstream_account == upstream_account:
-                return row
-    for row in rows:
-        if row.report_type == row_report_type:
-            return row
-    return rows[0]
+    return result.scalars().first()
 
 # 应用时区配置（从统一配置读取）
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
@@ -213,15 +207,15 @@ async def build_data_decrease_warning(
             decreased_fields.append(
                 f"点击数: 原有 {existing_data.click_count} → 新获取 {new_click_count} (减少 {click_decrease})")
 
-        revenue_before_decrease = existing_data.revenue_before_deduct - new_revenue_before
+        revenue_before_decrease = _as_float(existing_data.revenue_before_deduct) - _as_float(new_revenue_before)
         if revenue_before_decrease > float_threshold:
             decreased_fields.append(
-                f"收益(减扣前): 原有 {existing_data.revenue_before_deduct:.2f} → 新获取 {new_revenue_before:.2f} (减少 {revenue_before_decrease:.2f})")
+                f"收益(减扣前): 原有 {_as_float(existing_data.revenue_before_deduct):.2f} → 新获取 {_as_float(new_revenue_before):.2f} (减少 {revenue_before_decrease:.2f})")
 
-        revenue_after_decrease = existing_data.revenue_after_deduct - new_revenue_after
+        revenue_after_decrease = _as_float(existing_data.revenue_after_deduct) - _as_float(new_revenue_after)
         if revenue_after_decrease > float_threshold:
             decreased_fields.append(
-                f"收益(减扣后): 原有 {existing_data.revenue_after_deduct:.2f} → 新获取 {new_revenue_after:.2f} (减少 {revenue_after_decrease:.2f})")
+                f"收益(减扣后): 原有 {_as_float(existing_data.revenue_after_deduct):.2f} → 新获取 {_as_float(new_revenue_after):.2f} (减少 {revenue_after_decrease:.2f})")
 
         if not decreased_fields:
             return None
@@ -257,13 +251,8 @@ async def send_pending_data_decrease_warnings(warnings: list[str]) -> None:
         return
     for telegram_msg in warnings:
         try:
-            await asyncio.wait_for(
-                send_telegram_message_async(settings.TELEGRAM_ADMIN, telegram_msg),
-                timeout=5.0,
-            )
+            await send_telegram_notify_async(settings.TELEGRAM_ADMIN, telegram_msg)
             logger.warning("数据减少警告已发送（提交成功后）")
-        except asyncio.TimeoutError:
-            logger.warning("发送数据减少警告超时")
         except Exception as notify_err:
             logger.warning(f"发送数据减少警告失败: {notify_err}")
 
@@ -649,13 +638,8 @@ async def process_api_ad_data(
                             
                             # 发送通知（异步，不阻塞）
                             try:
-                                await asyncio.wait_for(
-                                    send_telegram_message_async(settings.TELEGRAM_ADMIN, telegram_msg),
-                                    timeout=5.0
-                                )
+                                await send_telegram_notify_async(settings.TELEGRAM_ADMIN, telegram_msg)
                                 logger.info(f"无法识别国家代码警告已发送: 日期={item_date_str}, 产品={item_product_name}, 国家代码输入=[{item_country_input}]")
-                            except asyncio.TimeoutError:
-                                logger.warning(f"发送无法识别国家代码警告超时: 日期={item_date_str}, 产品={item_product_name}")
                             except Exception as notify_err:
                                 logger.warning(f"发送无法识别国家代码警告失败: {notify_err}")
                         except Exception as e:
@@ -798,18 +782,15 @@ async def process_api_ad_data(
                 revenue_after_deduct = apply_deduct_ratio(total_revenue, revenue_deduct_ratio)
 
                 # 检查数据是否重复（按日期、产品、国家、广告单元）
-                date_start, date_end = get_date_range(item_date)
                 row_report_type = resolve_report_type_for_row(
                     resolved_report_type,
                     ad_unit=ad_unit,
                     country_code=country_code,
                 )
-
                 existing_data = await _find_existing_ad_data_for_import(
                     db,
                     product_id=product_id,
-                    date_start=date_start,
-                    date_end=date_end,
+                    ad_date=item_date,
                     country_code=country_code,
                     ad_unit=ad_unit,
                     data_source=resolved_data_source,
@@ -867,16 +848,20 @@ async def process_api_ad_data(
 
                     # CPC（有字段映射则使用加权平均，否则使用公式计算：CPC = 收益 / 点击数）
                     grouped_cpc = grouped_data.get("cpc", 0.0)
-                    if abs(existing_data.cpc - grouped_cpc) > 0.01:
+                    if _metric_differs(existing_data.cpc, grouped_cpc):
                         need_update = True
-                        update_fields.append(f"CPC: {existing_data.cpc:.2f} -> {grouped_cpc:.2f}")
+                        update_fields.append(
+                            f"CPC: {_as_float(existing_data.cpc):.2f} -> {_as_float(grouped_cpc):.2f}"
+                        )
                         existing_data.cpc = grouped_cpc
 
                     # 可见率（如果有字段映射则更新）
                     grouped_viewability_rate = grouped_data.get("viewability_rate", 0.0)
-                    if abs(existing_data.viewability_rate - grouped_viewability_rate) > 0.01:
+                    if _metric_differs(existing_data.viewability_rate, grouped_viewability_rate):
                         need_update = True
-                        update_fields.append(f"可见率: {existing_data.viewability_rate:.2f} -> {grouped_viewability_rate:.2f}")
+                        update_fields.append(
+                            f"可见率: {_as_float(existing_data.viewability_rate):.2f} -> {_as_float(grouped_viewability_rate):.2f}"
+                        )
                         existing_data.viewability_rate = grouped_viewability_rate
 
                     # PageViews（如果字段映射存在则更新）
@@ -889,30 +874,30 @@ async def process_api_ad_data(
 
                     # 如果基础数据有变化，重新计算比率字段
                     if need_update:
-                        existing_data.calculate_rates()
+                        existing_data.finalize_metrics()
 
-                    if abs(existing_data.ecpm_before_deduct - final_ecpm) > 0.01:
+                    if _metric_differs(existing_data.ecpm_before_deduct, final_ecpm):
                         need_update = True
                         update_fields.append(
-                            f"eCPM(减扣前): {existing_data.ecpm_before_deduct:.2f} -> {final_ecpm:.2f}")
+                            f"eCPM(减扣前): {_as_float(existing_data.ecpm_before_deduct):.2f} -> {_as_float(final_ecpm):.2f}")
                         existing_data.ecpm_before_deduct = final_ecpm
 
-                    if abs(existing_data.revenue_before_deduct - total_revenue) > 0.01:
+                    if _metric_differs(existing_data.revenue_before_deduct, total_revenue):
                         need_update = True
                         update_fields.append(
-                            f"收益(减扣前): {existing_data.revenue_before_deduct:.2f} -> {total_revenue:.2f}")
+                            f"收益(减扣前): {_as_float(existing_data.revenue_before_deduct):.2f} -> {_as_float(total_revenue):.2f}")
                         existing_data.revenue_before_deduct = total_revenue
 
-                    if abs(existing_data.ecpm_after_deduct - ecpm_after_deduct) > 0.01:
+                    if _metric_differs(existing_data.ecpm_after_deduct, ecpm_after_deduct):
                         need_update = True
                         update_fields.append(
-                            f"eCPM(减扣后): {existing_data.ecpm_after_deduct:.2f} -> {ecpm_after_deduct:.2f}")
+                            f"eCPM(减扣后): {_as_float(existing_data.ecpm_after_deduct):.2f} -> {_as_float(ecpm_after_deduct):.2f}")
                         existing_data.ecpm_after_deduct = ecpm_after_deduct
 
-                    if abs(existing_data.revenue_after_deduct - revenue_after_deduct) > 0.01:
+                    if _metric_differs(existing_data.revenue_after_deduct, revenue_after_deduct):
                         need_update = True
                         update_fields.append(
-                            f"收益(减扣后): {existing_data.revenue_after_deduct:.2f} -> {revenue_after_deduct:.2f}")
+                            f"收益(减扣后): {_as_float(existing_data.revenue_after_deduct):.2f} -> {_as_float(revenue_after_deduct):.2f}")
                         existing_data.revenue_after_deduct = revenue_after_deduct
 
                     if need_update:
@@ -953,7 +938,7 @@ async def process_api_ad_data(
                         revenue_after_deduct=revenue_after_deduct
                     )
                     # 计算并设置比率字段
-                    new_ad_data.calculate_rates()
+                    new_ad_data.finalize_metrics()
 
                     db.add(new_ad_data)
                     await db.flush()
@@ -1125,18 +1110,15 @@ async def process_api_ad_data(
 
                 # 检查数据是否重复（按日期、产品、国家代码、广告单元）
                 item_date = grouped_data["date"]
-                date_start, date_end = get_date_range(item_date)
                 row_report_type = resolve_report_type_for_row(
                     resolved_report_type,
                     ad_unit=ad_unit,
                     country_code=country_code,
                 )
-
                 existing_data = await _find_existing_ad_data_for_import(
                     db,
                     product_id=product_id,
-                    date_start=date_start,
-                    date_end=date_end,
+                    ad_date=item_date,
                     country_code=country_code,
                     ad_unit=ad_unit,
                     data_source=resolved_data_source,
@@ -1204,9 +1186,11 @@ async def process_api_ad_data(
 
                     # CPC（有字段映射则使用加权平均，否则使用公式计算：CPC = 收益 / 点击数）
                     grouped_cpc = grouped_data.get("cpc", 0.0)
-                    if abs(existing_data.cpc - grouped_cpc) > 0.01:
+                    if _metric_differs(existing_data.cpc, grouped_cpc):
                         need_update = True
-                        update_fields.append(f"CPC: {existing_data.cpc:.2f} -> {grouped_cpc:.2f}")
+                        update_fields.append(
+                            f"CPC: {_as_float(existing_data.cpc):.2f} -> {_as_float(grouped_cpc):.2f}"
+                        )
                         existing_data.cpc = grouped_cpc
 
                     # PageViews（如果字段映射存在则更新）
@@ -1219,30 +1203,30 @@ async def process_api_ad_data(
 
                     # 如果基础数据有变化，重新计算比率字段
                     if need_update:
-                        existing_data.calculate_rates()
+                        existing_data.finalize_metrics()
 
-                    if abs(existing_data.ecpm_before_deduct - final_ecpm) > 0.01:
+                    if _metric_differs(existing_data.ecpm_before_deduct, final_ecpm):
                         need_update = True
                         update_fields.append(
-                            f"eCPM(减扣前): {existing_data.ecpm_before_deduct:.2f} -> {final_ecpm:.2f}")
+                            f"eCPM(减扣前): {_as_float(existing_data.ecpm_before_deduct):.2f} -> {_as_float(final_ecpm):.2f}")
                         existing_data.ecpm_before_deduct = final_ecpm
 
-                    if abs(existing_data.revenue_before_deduct - total_revenue) > 0.01:
+                    if _metric_differs(existing_data.revenue_before_deduct, total_revenue):
                         need_update = True
                         update_fields.append(
-                            f"收益(减扣前): {existing_data.revenue_before_deduct:.2f} -> {total_revenue:.2f}")
+                            f"收益(减扣前): {_as_float(existing_data.revenue_before_deduct):.2f} -> {_as_float(total_revenue):.2f}")
                         existing_data.revenue_before_deduct = total_revenue
 
-                    if abs(existing_data.ecpm_after_deduct - ecpm_after_deduct) > 0.01:
+                    if _metric_differs(existing_data.ecpm_after_deduct, ecpm_after_deduct):
                         need_update = True
                         update_fields.append(
-                            f"eCPM(减扣后): {existing_data.ecpm_after_deduct:.2f} -> {ecpm_after_deduct:.2f}")
+                            f"eCPM(减扣后): {_as_float(existing_data.ecpm_after_deduct):.2f} -> {_as_float(ecpm_after_deduct):.2f}")
                         existing_data.ecpm_after_deduct = ecpm_after_deduct
 
-                    if abs(existing_data.revenue_after_deduct - revenue_after_deduct) > 0.01:
+                    if _metric_differs(existing_data.revenue_after_deduct, revenue_after_deduct):
                         need_update = True
                         update_fields.append(
-                            f"收益(减扣后): {existing_data.revenue_after_deduct:.2f} -> {revenue_after_deduct:.2f}")
+                            f"收益(减扣后): {_as_float(existing_data.revenue_after_deduct):.2f} -> {_as_float(revenue_after_deduct):.2f}")
                         existing_data.revenue_after_deduct = revenue_after_deduct
 
                     if need_update:
@@ -1286,7 +1270,7 @@ async def process_api_ad_data(
                         revenue_after_deduct=revenue_after_deduct
                     )
                     # 计算并设置比率字段
-                    new_ad_data.calculate_rates()
+                    new_ad_data.finalize_metrics()
 
                     db.add(new_ad_data)
                     await db.flush()

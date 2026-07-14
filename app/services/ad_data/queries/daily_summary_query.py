@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.constants import ECPM_MULTIPLIER, PERCENTAGE_MULTIPLIER
+from app.core.utils import normalize_date_for_ad_data
 from app.core.country_code import resolve_country_name
 from app.core.query_utils import apply_date_range_filter, check_use_assignment_table
 from app.core.security import is_admin
@@ -165,7 +166,7 @@ class DailySummaryQuery:
         ]
 
         base_dims = [
-            func.date(AdData.date).label("date"),
+            AdData.date.label("date"),
             Product.id.label("product_id"),
             Product.name.label("product_name"),
             Client.id.label("client_id"),
@@ -175,7 +176,7 @@ class DailySummaryQuery:
         ]
 
         group_by_cols: List[Any] = [
-            func.date(AdData.date),
+            AdData.date,
             Product.id,
             Product.name,
             Client.id,
@@ -223,7 +224,7 @@ class DailySummaryQuery:
         query = query.group_by(*group_by_cols)
 
         valid_sort_fields = {
-            "date": func.date(AdData.date),
+            "date": AdData.date,
             "product": Product.name,
             "ad_unit": AdData.ad_unit if group_by_ad_unit else None,
             "country": AdData.country_code if group_by_country else None,
@@ -288,13 +289,7 @@ class DailySummaryQuery:
 
         ad_data_responses = []
         for row in all_summary_data:
-            date_obj = (
-                row.date
-                if isinstance(row.date, date)
-                else row.date.date()
-                if hasattr(row.date, "date")
-                else row.date
-            )
+            date_obj = normalize_date_for_ad_data(row.date)
             date_str = date_obj.isoformat() if hasattr(date_obj, "isoformat") else str(date_obj)
 
             total_request_count = int(row.request_count or 0)
@@ -472,11 +467,11 @@ class DailySummaryQuery:
     ) -> int:
         try:
             sub_cols = [
-                func.date(AdData.date).label("date"),
+                AdData.date.label("date"),
                 Product.id.label("product_id"),
                 Client.id.label("client_id"),
             ]
-            group_cols = [func.date(AdData.date), Product.id, Client.id]
+            group_cols = [AdData.date, Product.id, Client.id]
 
             if group_by_ad_unit:
                 sub_cols.append(AdData.ad_unit.label("ad_unit"))

@@ -17,7 +17,8 @@ from app.api_v1.excel.ad_data_import.row_processor import process_row_data
 from app.api_v1.excel.utils import parse_date_value
 from app.core.exceptions import handle_integrity_error, raise_api_exception
 from app.core.errors import ErrorCode
-from app.core.utils import format_error_details, build_import_message, get_date_range
+from app.core.utils import format_error_details, build_import_message, normalize_date_for_ad_data
+from app.core.ad_data_metadata import normalize_upstream_account
 from app.core.country_code import normalize_ad_data_country_cache_key
 from app.models.models import User, AdData, AdminNotificationConfig
 from app.schemas.excel import ExcelImportResponse
@@ -135,13 +136,9 @@ async def import_ad_data_handler(
             conditions = []
             # ---------- 循环处理 ----------
             for date, product_id in date_product_pairs:
-                # 确保日期格式正确（AdData.date是DateTime类型，需要转换为datetime进行比较）
-                # 使用统一的日期范围函数
-                date_start, date_end = get_date_range(date)
                 conditions.append(
                     and_(
-                        AdData.date >= date_start,
-                        AdData.date <= date_end,
+                        AdData.date == normalize_date_for_ad_data(date),
                         AdData.product_id == product_id
                     )
                 )
@@ -151,8 +148,7 @@ async def import_ad_data_handler(
                 existing_result = await db.execute(existing_query)
                 # ---------- 循环处理 ----------
                 for record in existing_result.scalars().all():
-                    # 使用日期（不包含时间）和产品ID作为key
-                    record_date = record.date.date() if hasattr(record.date, 'date') else record.date
+                    record_date = record.date
                     record_country = normalize_ad_data_country_cache_key(record.country_code)
                     key = (
                         record_date,
@@ -161,6 +157,7 @@ async def import_ad_data_handler(
                         record.ad_unit or '',
                         record.data_source or 'legacy',
                         record.report_type or 'legacy',
+                        normalize_upstream_account(record.upstream_account),
                     )
                     existing_records[key] = record
                 logger.debug(f"批量查询到 {len(existing_records)} 条已存在的记录")
@@ -299,7 +296,7 @@ async def import_ad_data_handler(
                             notification_type='statistics',
                             db=db
                         ),
-                        timeout=5.0
+                        timeout=120.0,
                     )
                     logger.info(
                         f"Telegram 通知发送成功，用户: {current_user.username}, 文件: {file.filename}, 成功: {result['success_rows']} 条")

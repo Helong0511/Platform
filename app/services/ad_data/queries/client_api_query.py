@@ -10,12 +10,14 @@ import logging
 from datetime import date
 from typing import Any, List, Optional, Tuple
 
-from sqlalchemy import and_, func, literal_column, or_, text
+from app.core.utils import normalize_date_for_ad_data
+
+from sqlalchemy import and_, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.constants import CLIENT_API_DEFAULT_PAGE_SIZE, CLIENT_API_MAX_PAGE_SIZE
-from app.core.query_utils import check_use_assignment_table, date_range_condition
+from app.core.query_utils import check_use_assignment_table, date_range_condition, product_assignment_join_condition
 from app.models.models import AdData, Client, CountryInfo, Product, ProductAssignment
 from app.services.ad_data.queries.dimension_filter import (
     CROSS_DIMENSION,
@@ -66,16 +68,15 @@ class ClientAdDataQuery:
         query = query.where(Product.is_active == True)
 
         if use_assignment_table:
-            end_date_with_default = func.coalesce(
-                func.date_add(ProductAssignment.end_date, text("INTERVAL 1 DAY")),
-                literal_column("'2099-12-31'"),
-            )
             query = query.join(
                 ProductAssignment,
                 and_(
                     ProductAssignment.product_id == Product.id,
-                    AdData.date >= ProductAssignment.start_date,
-                    AdData.date < end_date_with_default,
+                    product_assignment_join_condition(
+                        AdData.date,
+                        ProductAssignment.start_date,
+                        ProductAssignment.end_date,
+                    ),
                 ),
             )
             query = query.where(ProductAssignment.client_id == client.id)
@@ -160,7 +161,7 @@ class ClientAdDataQuery:
         for row in rows:
             ad_data, product_name, country_name_zh = row[0], row[1], row[2]
 
-            date_obj = ad_data.date.date() if hasattr(ad_data.date, "date") else ad_data.date
+            date_obj = normalize_date_for_ad_data(ad_data.date)
             date_str = date_obj.isoformat()
 
             coverage_rate = (
@@ -276,7 +277,7 @@ class ClientAdDataQuery:
         page_size: int,
     ) -> tuple[list[dict[str, Any]], int]:
         query = select(
-            func.date(AdData.date).label("date"),
+            AdData.date.label("date"),
             Product.id.label("product_id"),
             Product.name.label("product_name"),
             AdData.ad_unit.label("ad_unit"),
@@ -291,11 +292,11 @@ class ClientAdDataQuery:
         query = self._apply_client_product_scope(query, client, use_assignment_table)
         query = self._apply_date_and_dimension(query, start_date, end_date, None)
         query = query.group_by(
-            func.date(AdData.date),
+            AdData.date,
             Product.id,
             Product.name,
             AdData.ad_unit,
-        ).order_by(func.date(AdData.date).asc(), Product.id.asc())
+        ).order_by(AdData.date.asc(), Product.id.asc())
 
         rows, total = await self._paginate_grouped_query(query, offset, page_size)
         return [self._daily_row_to_dict(row, dim=None) for row in rows], total
@@ -313,12 +314,12 @@ class ClientAdDataQuery:
         group_by_ad_unit = dimension == "ad_unit" or is_cross_dimension(dimension)
 
         select_cols: list[Any] = [
-            func.date(AdData.date).label("date"),
+            AdData.date.label("date"),
             Product.id.label("product_id"),
             Product.name.label("product_name"),
         ]
         group_cols: list[Any] = [
-            func.date(AdData.date),
+            AdData.date,
             Product.id,
             Product.name,
         ]
@@ -342,7 +343,7 @@ class ClientAdDataQuery:
             query, start_date, end_date, dimension, daily_summary=True
         )
         query = query.group_by(*group_cols).order_by(
-            func.date(AdData.date).asc(), Product.id.asc()
+            AdData.date.asc(), Product.id.asc()
         )
 
         rows, total = await self._paginate_grouped_query(query, offset, page_size)
@@ -353,7 +354,7 @@ class ClientAdDataQuery:
         row: Any,
         dim: Optional[str],
     ) -> dict[str, Any]:
-        date_obj = row.date if isinstance(row.date, date) else row.date.date()
+        date_obj = normalize_date_for_ad_data(row.date)
         date_str = date_obj.isoformat()
 
         total_request_count = int(row.request_count or 0)

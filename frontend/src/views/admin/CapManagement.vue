@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   Cap 上限配置管理页面
   职责：按 Offer/渠道/广告主维度配置日 Cap 与总 Cap，支持筛选、列显隐与 CRUD 弹窗。
 -->
@@ -15,7 +15,7 @@
           </div>
           <div class="header-right">
             <el-button 
-              type="text" 
+              type="link" 
               :icon="Setting" 
               @click="columnSettingVisible = true"
               style="margin-right: 10px;"

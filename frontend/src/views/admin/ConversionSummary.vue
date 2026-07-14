@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   转化总览报表页面（ConversionSummary.vue）
 
   功能区块：
@@ -140,14 +140,14 @@
             <span>转化总览</span>
             <div style="float: right; display: flex; gap: 10px;">
               <el-button 
-                type="text" 
+                type="link" 
                 :icon="Download" 
                 @click="exportToExcel"
               >
                 导出Excel
               </el-button>
               <el-button 
-                type="text" 
+                type="link" 
                 :icon="Setting" 
                 @click="columnSettingVisible = true"
               >

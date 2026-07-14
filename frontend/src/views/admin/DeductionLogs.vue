@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   管理端 - 扣减执行日志
   @file views/admin/DeductionLogs.vue
 -->
@@ -15,7 +15,7 @@
           </div>
           <div class="header-right">
             <el-button 
-              type="text" 
+              type="link" 
               :icon="Setting" 
               @click="columnSettingVisible = true"
               style="margin-right: 10px;"

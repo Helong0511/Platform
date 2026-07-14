@@ -16,7 +16,6 @@
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Mapping
 from typing import Any, Callable, Dict, List, Optional
@@ -26,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.ad_data_processor import process_api_ad_data, send_pending_data_decrease_warnings
 from app.core.ad_data_metadata import format_report_type_counts_for_notify
 from app.core.product_assignment import format_assignment_gap_telegram_message
-from app.core.telegram import send_telegram_message_async
+from app.core.telegram import send_telegram_notify_async
 from app.core.database import AsyncSessionLocal
 from app.scheduler_module.task_result_store import set_task_result
 from app.scheduler_module.task_utils import (
@@ -126,9 +125,9 @@ async def finalize_upstream_import(
         if error_count > 0:
             telegram_msg += f"\n❌ 错误: {error_count} 条"
         try:
-            await asyncio.wait_for(send_telegram_message_async(telegram_msg), timeout=5.0)
-        except asyncio.TimeoutError:
-            logger.warning(f"发送 Telegram 通知超时: {task_name}")
+            await send_telegram_notify_async(telegram_msg)
+        except Exception as notify_err:
+            logger.warning(f"发送 Telegram 通知失败: {task_name}: {notify_err}")
 
     if assignment_orphan_total > 0:
         gap_msg = format_assignment_gap_telegram_message(
@@ -137,9 +136,9 @@ async def finalize_upstream_import(
             total_orphan=assignment_orphan_total,
         )
         try:
-            await asyncio.wait_for(send_telegram_message_async(gap_msg), timeout=5.0)
-        except asyncio.TimeoutError:
-            logger.warning(f"发送产品分配空窗 Telegram 告警超时: {task_name}")
+            await send_telegram_notify_async(gap_msg)
+        except Exception as notify_err:
+            logger.warning(f"发送产品分配空窗 Telegram 告警失败: {task_name}: {notify_err}")
 
     # ---------- 写入任务结果供调度器持久化 ----------
     if update_task_result:

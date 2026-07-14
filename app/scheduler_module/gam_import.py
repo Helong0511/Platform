@@ -17,6 +17,19 @@ from app.scheduler_module.upstream_import import import_upstream_ad_data
 
 logger = logging.getLogger(__name__)
 
+# Telegram 通知标题用中文标签（与配置页「报表类型」一致；内部 key 仍为 country/ad_unit）
+_GAM_REPORT_NOTIFY_LABELS: dict[str, str] = {
+    "country": "国家+广告单元",
+    "ad_unit": "广告单元",
+    "site": "站点+广告单元",
+    "daily": "按日汇总",
+}
+
+
+def _gam_notify_title(account_key: str, report_key: str) -> str:
+    label = _GAM_REPORT_NOTIFY_LABELS.get(report_key, report_key)
+    return f"GAM-{account_key}-{label}"
+
 GAM_FIELD_MAPPING: dict[str, str] = {
     "date": "date",
     "product_name": "product_name",
@@ -419,7 +432,7 @@ async def import_gam_account_bundle(
             field_mapping=GAM_FIELD_MAPPING,
             source=f"GAM-{network_code}-country",
             current_time_str=current_time_str,
-            notify_title=f"GAM-{account_key}-country",
+            notify_title=_gam_notify_title(account_key, "country"),
             update_task_result=False,
             notify_params=notify_params,
             data_source=DATA_SOURCE_GAM,
@@ -445,7 +458,7 @@ async def import_gam_account_bundle(
             field_mapping=GAM_FIELD_MAPPING,
             source=f"GAM-{network_code}-ad_unit",
             current_time_str=current_time_str,
-            notify_title=f"GAM-{account_key}-ad_unit",
+            notify_title=_gam_notify_title(account_key, "ad_unit"),
             update_task_result=True,
             notify_params=notify_params,
             data_source=DATA_SOURCE_GAM,

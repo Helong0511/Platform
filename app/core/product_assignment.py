@@ -511,7 +511,7 @@ def _assignment_covers_ad_data_date_condition():
         AdData.date >= ProductAssignment.start_date,
         or_(
             ProductAssignment.end_date.is_(None),
-            AdData.date < func.date_add(ProductAssignment.end_date, text("INTERVAL 1 DAY")),
+            AdData.date <= ProductAssignment.end_date,
         ),
     )
 
@@ -537,8 +537,8 @@ async def find_ad_data_assignment_gaps(
     )
 
     filters = [
-        func.date(AdData.date) >= start_date,
-        func.date(AdData.date) <= end_date,
+        AdData.date >= start_date,
+        AdData.date <= end_date,
         ~has_assignment,
     ]
     if product_ids:
@@ -553,13 +553,13 @@ async def find_ad_data_assignment_gaps(
         select(
             Product.id.label("product_id"),
             Product.name.label("product_name"),
-            func.date(AdData.date).label("data_date"),
+            AdData.date.label("data_date"),
             func.count(AdData.id).label("row_count"),
         )
         .join(Product, AdData.product_id == Product.id)
         .where(*filters)
-        .group_by(Product.id, Product.name, func.date(AdData.date))
-        .order_by(func.date(AdData.date).desc(), func.count(AdData.id).desc())
+        .group_by(Product.id, Product.name, AdData.date)
+        .order_by(AdData.date.desc(), func.count(AdData.id).desc())
         .limit(limit)
     )
     rows = (await db.execute(detail_query)).all()

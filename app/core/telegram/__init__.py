@@ -14,6 +14,7 @@ from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE,
 from app.core.telegram.message_sender import (
     send_telegram_message,
     send_telegram_message_async,
+    send_telegram_notify_async,
     send_telegram_message_with_buttons,
     send_admin_notification
 )
@@ -38,6 +39,7 @@ __all__ = [
     # 消息发送
     'send_telegram_message',
     'send_telegram_message_async',
+    'send_telegram_notify_async',
     'send_telegram_message_with_buttons',
     'send_admin_notification',
     

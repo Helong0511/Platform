@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   广告数据详细报表 - 表格与分页
   @file components/ad-data/AdDataDetailTable.vue
 -->
@@ -7,7 +7,7 @@
     <template #header>
       <div class="table-card-header">
         <span class="table-title">详细报表数据</span>
-        <el-button type="text" :icon="Setting" @click="emit('open-column-settings')">
+        <el-button type="link" :icon="Setting" @click="emit('open-column-settings')">
           列设置
         </el-button>
       </div>
