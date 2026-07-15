@@ -233,4 +233,3 @@ scripts/keys/
 导入样本/
 .trae
 tests/
-sql/migrate_schema_20260711_production.sql
