@@ -115,7 +115,7 @@
               size="small"
               type="success"
               :icon="Box"
-              title="管理产品"
+              title="打开产品管理（按此客户筛选）"
               class="product-button"
               @click="emit('manage-products', scope.row)"
             >

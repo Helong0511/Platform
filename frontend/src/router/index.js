@@ -79,6 +79,7 @@ const DailyReport = createAsyncComponent(() => import(/* webpackChunkName: "dail
 const MLModelManagement = createAsyncComponent(() => import(/* webpackChunkName: "ml-model" */ '../views/admin/MLModelManagement.vue'), 'MLModelManagement');
 const NotFound = createAsyncComponent(() => import(/* webpackChunkName: "not-found" */ '../views/NotFound.vue'), 'NotFound');
 const UserManagement = createAsyncComponent(() => import(/* webpackChunkName: "user-management" */ '../views/admin/UserManagement.vue'), 'UserManagement');
+const ProductManagement = createAsyncComponent(() => import(/* webpackChunkName: "product-management" */ '../views/admin/ProductManagement.vue'), 'ProductManagement');
 const ScheduledTaskManagement = createAsyncComponent(() => import(/* webpackChunkName: "scheduled-task" */ '../views/admin/ScheduledTaskManagement.vue'), 'ScheduledTaskManagement');
 const GamSchedulerConfig = createAsyncComponent(() => import(/* webpackChunkName: "gam-scheduler-config" */ '../views/admin/GamSchedulerConfig.vue'), 'GamSchedulerConfig');
 const AuditLogManagement = createAsyncComponent(() => import(/* webpackChunkName: "audit-log" */ '../views/admin/AuditLogManagement.vue'), 'AuditLogManagement');
@@ -203,6 +204,12 @@ const routes = [
         path: 'admin/users',
         name: 'UserManagement',
         component: UserManagement,
+        meta: { requiresAdmin: true }
+      },
+      {
+        path: 'admin/products',
+        name: 'ProductManagement',
+        component: ProductManagement,
         meta: { requiresAdmin: true }
       },
       {

@@ -121,16 +121,6 @@
         <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
       </template>
     </el-dialog>
-
-    <!-- 产品管理对话框 -->
-    <ProductManagementDialog
-      v-model="productManagementVisible"
-      :client-id="selectedClientId"
-      :client-name="selectedClientName"
-      :products="selectedClientProducts"
-      :loading="loadingProducts"
-      @refresh="handleProductManagementRefresh"
-    />
   </div>
 </template>
 
@@ -154,7 +144,6 @@ import {
 import { useDataPageFilterCascade } from '../composables/useDataPageFilterCascade';
 import { useDebouncedPaginatedFetch } from '../composables/useDebouncedPaginatedFetch';
 import { useAdDataDateRangeBootstrap } from '../composables/useAdDataDateRangeBootstrap';
-import { useAdDataProductPanel } from '../composables/useAdDataProductPanel';
 import {
   appendDimensionAwareFilters,
   applyDimensionColumnDefaults,
@@ -167,10 +156,10 @@ import {
   AD_DATA_DETAIL_ALL_DIMENSION,
   AD_UNIT_COUNTRY_DIMENSION
 } from '../constants/adDataDimension';
-import ProductManagementDialog from '../components/admin/ProductManagementDialog.vue';
 import AdDataFilterCard from '../components/ad-data/AdDataFilterCard.vue';
 import AdDataDetailTable from '../components/ad-data/AdDataDetailTable.vue';
 import AdDataEditDialog from '../components/ad-data/AdDataEditDialog.vue';
+import { navigateToProductManagement } from '../utils/navigateProductManagement';
 
 // 路由实例
 const router = useRouter();
@@ -193,18 +182,6 @@ const pagination = ref({
   size: 10,
   total: 0
 });
-
-const {
-  productManagementVisible,
-  selectedClientId,
-  selectedClientName,
-  selectedClientProducts,
-  loadingProducts,
-  selectedProductId,
-  selectedProductName,
-  openProductPanel,
-  loadClientProducts
-} = useAdDataProductPanel();
 
 // 排序状态
 const sortInfo = ref({
@@ -977,14 +954,12 @@ onUnmounted(() => {
 });
 
 const handleProductClick = (row) => {
-  openProductPanel(row, {
-    defaultClientId: authStore.userInfo?.id,
-    defaultClientName: authStore.userInfo?.full_name || '未知客户'
+  navigateToProductManagement(router, {
+    isAdmin: isAdmin.value,
+    clientId: row?.client_id,
+    productId: row?.product_id,
+    productName: row?.product_name,
   });
-};
-
-const handleProductManagementRefresh = () => {
-  fetchAdData();
 };
 
 // 监听路由变化，当从其他页面导航到本页时自动刷新数据

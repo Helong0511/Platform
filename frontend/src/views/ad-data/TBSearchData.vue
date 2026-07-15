@@ -249,21 +249,12 @@
         <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
       </template>
     </el-dialog>
-
-    <!-- 产品管理对话框 -->
-    <ProductManagementDialog
-      v-model="productManagementDialogVisible"
-      :client-id="selectedClientId"
-      :client-name="selectedClientName"
-      :products="selectedClientProducts"
-      :loading="loadingProducts"
-      @refresh="handleProductManagementRefresh"
-    />
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { useAuthStore } from '../../store';
 import { ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Upload, Delete, Setting, Right } from '@element-plus/icons-vue';
@@ -272,25 +263,23 @@ import {
   updateTBSearchData,
   deleteTBSearchData,
   batchDeleteTBSearchData,
-  importTBSearchData,
-  getProductsWithTBSearchData
+  importTBSearchData
 } from '../../api/tb-search-data';
-import { getProductById } from '../../api/ad-data';
 import { extractErrorMessage, isErrorHandled } from '../../utils/api';
 import { useDataPageFilterCascade } from '../../composables/useDataPageFilterCascade';
 import { useDebouncedPaginatedFetch } from '../../composables/useDebouncedPaginatedFetch';
-import { useAdDataProductPanel } from '../../composables/useAdDataProductPanel';
 import {
   useTbSearchColumnVisibility
 } from '../../composables/useTbSearchColumnVisibility';
 import { useTbSearchTableFormat } from '../../composables/useTbSearchTableFormat';
-import ProductManagementDialog from '../../components/admin/ProductManagementDialog.vue';
 import ProductFilterSelect from '../../components/ad-data/ProductFilterSelect.vue';
 import {
   hasProductOwnershipLabels,
   PRODUCT_OWNERSHIP_HINT,
 } from '../../utils/productFilterOptions';
+import { navigateToProductManagement } from '../../utils/navigateProductManagement';
 
+const router = useRouter();
 const authStore = useAuthStore();
 const isAdmin = computed(() => authStore.isAdmin);
 
@@ -327,21 +316,6 @@ const sortInfo = ref({
 
 const editDialogVisible = ref(false);
 const editForm = ref({});
-
-const {
-  productManagementVisible: productManagementDialogVisible,
-  selectedClientId,
-  selectedClientName,
-  selectedClientProducts,
-  loadingProducts,
-  selectedProductId,
-  selectedProductName,
-  openProductPanel
-} = useAdDataProductPanel({
-  getProductById,
-  fetchProductsForClient: (clientId) =>
-    getProductsWithTBSearchData(clientId).then((r) => r?.data || [])
-});
 
 const {
   users,
@@ -399,14 +373,12 @@ const { runFetch: fetchData } = useDebouncedPaginatedFetch({
 
 const handleProductClick = (row) => {
   if (!row) return;
-  openProductPanel(row, {
-    defaultClientId: authStore.userInfo?.id,
-    defaultClientName: authStore.userInfo?.full_name || '未知客户'
+  navigateToProductManagement(router, {
+    isAdmin: isAdmin.value,
+    clientId: row.client_id,
+    productId: row.product_id,
+    productName: row.product_name,
   });
-};
-
-const handleProductManagementRefresh = () => {
-  fetchData();
 };
 
 onMounted(async () => {

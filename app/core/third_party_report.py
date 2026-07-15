@@ -197,6 +197,22 @@ async def send_third_party_report(
     ua = (ua or "").strip()
     adsid = (adsid or "").strip()
 
+    # 像素凭证须由调用方显式传入（短链 / 斗篷）；不再回退全局 FACEBOOK_*
+    pixel_id = (facebook_pixel_id or "").strip()
+    access_token = (facebook_access_token or "").strip()
+    api_version = (facebook_api_version or settings.FACEBOOK_API_VERSION or "v23.0").strip()
+    if not pixel_id or not access_token:
+        logger.warning(
+            "[第三方上报] 缺少像素凭证，跳过 Facebook CAPI：event=%s pixel_id=%s",
+            event,
+            "empty" if not pixel_id else pixel_id[:10],
+        )
+        return {
+            "success": False,
+            "skipped": True,
+            "reason": "missing_facebook_credentials",
+        }
+
     # 创建上报日志记录，传递conversion_id
     report_log_id = await create_report_log(
         source=source,
@@ -281,11 +297,6 @@ async def send_third_party_report(
     report_start_time = get_app_now_naive()
     await update_report_log(report_log_id, report_start_time=report_start_time)
 
-    # 确定使用哪个 Facebook 像素配置（优先级：参数 > 全局配置）
-    pixel_id = facebook_pixel_id or settings.FACEBOOK_PIXEL_ID
-    access_token = facebook_access_token or settings.FACEBOOK_ACCESS_TOKEN
-    api_version = facebook_api_version or settings.FACEBOOK_API_VERSION
-    
     logger.info("[第三方上报] 使用像素配置 - Pixel ID: %s, API 版本：%s", pixel_id, api_version)
     
     for attempt in range(max_retries):

@@ -113,6 +113,11 @@
       <span>用户管理</span>
     </el-menu-item>
 
+    <el-menu-item v-if="isAdmin" index="/app/admin/products">
+      <template #icon><Box /></template>
+      <span>产品管理</span>
+    </el-menu-item>
+
     <el-sub-menu v-if="isAdmin" index="/app/admin/system-services">
       <template #title>
         <el-icon><Setting /></el-icon>

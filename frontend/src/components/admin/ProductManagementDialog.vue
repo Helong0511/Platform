@@ -1,6 +1,7 @@
 <!--
-  产品管理弹窗
+  产品管理弹窗（按客户维度）
   @file components/admin/ProductManagementDialog.vue
+  说明：独立菜单页 ProductManagement.vue 为正式入口；本弹窗保留供兼容复用。
 -->
 <template>
   <el-dialog

@@ -3,6 +3,7 @@
  * @file composables/useUserRowActions.js
  */
 import { ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { deleteUser, updateUser, getUserDetail } from '../api/user';
 import { updateClient, updateClientSwitches } from '../api/client';
@@ -13,16 +14,13 @@ import { logger } from '../utils/logger';
 
 /**
  * 用户列表行操作：删除、状态、客户开关、产品、通知配置。
- */
-/**
- * 组合式函数 - 用户行操作：启用/禁用/重置密码
- * @returns {Object} 响应式状态与业务操作方法
+ * @param {{ fetchUsers: Function, fetchStats: Function }} options
  */
 export function useUserRowActions({
   fetchUsers,
   fetchStats,
-  openProductDialog,
 }) {
+  const router = useRouter();
   // notificationConfigDialogVisible 响应式状态
   const notificationConfigDialogVisible = ref(false);
   const currentClientIdForNotification = ref(null);
@@ -128,9 +126,9 @@ export function useUserRowActions({
   const handleManageProducts = async (user) => {
     if (user.role !== 'client') return;
     if (!(await ensureUserHasClient(user, getUserDetail, ElMessage))) return;
-    openProductDialog({
-      id: user.client.id,
-      full_name: user.full_name || user.username || '未知客户',
+    router.push({
+      name: 'ProductManagement',
+      query: { client_id: String(user.client.id) },
     });
   };
 

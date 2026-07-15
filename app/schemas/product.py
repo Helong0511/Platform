@@ -85,8 +85,24 @@ class ProductResponse(ProductInDBBase):
     单条产品 API 响应
     
     API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    client_name 来自关联 Client.company_name，列表/详情在加载 client 时填充。
     """
-    pass
+    client_name: str | None = Field(
+        None,
+        description="所属客户公司名（来自 clients.company_name）",
+    )
+
+
+def build_product_response(product) -> ProductResponse:
+    """将 ORM Product 转为响应；有关联 client 时填充 client_name。"""
+    response = ProductResponse.model_validate(product)
+    client = getattr(product, "client", None)
+    if client is None:
+        return response
+    company_name = getattr(client, "company_name", None)
+    if not company_name:
+        return response
+    return response.model_copy(update={"client_name": company_name})
 
 
 class ProductListResponse(BaseModel):

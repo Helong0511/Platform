@@ -818,7 +818,8 @@ class Settings(BaseSettings):
         return v
 
     # ====== Facebook 像素配置 ======
-    # 全局默认 Facebook 像素配置（作为兜底配置）
+    # Pixel ID / Access Token 已不再作运行时兜底（凭证来自短链或启用中的斗篷配置）。
+    # 保留环境变量兼容旧 .env；FACEBOOK_API_VERSION 仍用作 Graph API 默认版本号。
     FACEBOOK_PIXEL_ID: str = os.getenv("FACEBOOK_PIXEL_ID", "")
     FACEBOOK_ACCESS_TOKEN: str = os.getenv("FACEBOOK_ACCESS_TOKEN", "")
     FACEBOOK_API_VERSION: str = os.getenv("FACEBOOK_API_VERSION", "v23.0")

@@ -64,17 +64,6 @@
       :format-date="formatDate"
     />
 
-    <ProductManagementDialog
-      v-model="productDialogVisible"
-      :client-name="currentClientName"
-      :client-id="currentClientIdForProducts"
-      :products="products"
-      :loading="productLoading"
-      @save="saveProduct"
-      @delete="removeProduct"
-      @refresh="handleProductRefresh"
-    />
-
     <ClientNotificationConfigDialog
       v-model="notificationConfigDialogVisible"
       :client-id="currentClientIdForNotification"
@@ -89,11 +78,9 @@ import { ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../../store';
 import { useDevice } from '../../composables/useDevice';
-import { useClientProducts } from '../../composables/useClientProducts';
 import { useUserForm } from '../../composables/useUserForm';
 import { useUserRowActions } from '../../composables/useUserRowActions';
 import { useUserManagementInit } from '../../composables/useUserManagementInit';
-import ProductManagementDialog from '../../components/admin/ProductManagementDialog.vue';
 import ClientNotificationConfigDialog from '../../components/admin/ClientNotificationConfigDialog.vue';
 import UserColumnSettingDialog from '../../components/admin/UserColumnSettingDialog.vue';
 import UserDetailDialog from '../../components/admin/UserDetailDialog.vue';
@@ -142,18 +129,6 @@ useUserManagementInit({
 const { isMobile } = useDevice();
 
 const {
-  productDialogVisible,
-  currentClientIdForProducts,
-  currentClientName,
-  products,
-  productLoading,
-  openProductDialog,
-  fetchProductsForClient,
-  saveProduct,
-  removeProduct,
-} = useClientProducts();
-
-const {
   dialogVisible,
   viewDialogVisible,
   dialogTitle,
@@ -188,14 +163,9 @@ const {
   handleManageProducts,
   handleNotificationConfig,
   handleNotificationConfigSaved,
-} = useUserRowActions({ fetchUsers, fetchStats, openProductDialog });
+} = useUserRowActions({ fetchUsers, fetchStats });
 
 const hasClientUsers = computed(() => users.value.some((user) => user.role === 'client'));
-
-const handleProductRefresh = async () => {
-  await fetchProductsForClient(currentClientIdForProducts.value);
-  await fetchUsers();
-};
 
 const handleSortChange = () => {
   // 排序功能可在后续版本中实现

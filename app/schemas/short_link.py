@@ -33,9 +33,13 @@ class ShortLinkBase(BaseModel):
     expires_at: Optional[datetime] = Field(None, description="过期时间（可选）")
     is_active: bool = Field(True, description="是否激活")
     
-    # Facebook 像素配置字段（可选，不设置则使用全局配置）
-    facebook_pixel_id: Optional[str] = Field(None, max_length=50, description="Facebook Pixel ID（可选，不设置则使用全局配置）")
-    facebook_access_token: Optional[str] = Field(None, max_length=500, description="Facebook Access Token（可选，不设置则使用全局配置）")
+    # Facebook 像素配置字段（可选；未设置时由启用中的斗篷配置提供，无全局回退）
+    facebook_pixel_id: Optional[str] = Field(
+        None, max_length=50, description="Facebook Pixel ID（可选；未设则用启用中的斗篷配置）"
+    )
+    facebook_access_token: Optional[str] = Field(
+        None, max_length=500, description="Facebook Access Token（可选；未设则用启用中的斗篷配置）"
+    )
     facebook_api_version: Optional[str] = Field("v21.0", max_length=20, description="Facebook API 版本（可选，默认 v21.0）")
 
     @field_validator('original_url')
@@ -98,9 +102,13 @@ class ShortLinkUpdate(BaseModel):
     is_active: Optional[bool] = Field(None, description="是否激活")
     expires_at: Optional[datetime] = Field(None, description="过期时间")
     
-    # Facebook 像素配置字段（可选）
-    facebook_pixel_id: Optional[str] = Field(None, max_length=50, description="Facebook Pixel ID（可选，不设置则使用全局配置）")
-    facebook_access_token: Optional[str] = Field(None, max_length=500, description="Facebook Access Token（可选，不设置则使用全局配置）")
+    # Facebook 像素配置字段（可选；未设则用启用中的斗篷配置）
+    facebook_pixel_id: Optional[str] = Field(
+        None, max_length=50, description="Facebook Pixel ID（可选；未设则用启用中的斗篷配置）"
+    )
+    facebook_access_token: Optional[str] = Field(
+        None, max_length=500, description="Facebook Access Token（可选；未设则用启用中的斗篷配置）"
+    )
     facebook_api_version: Optional[str] = Field(None, max_length=20, description="Facebook API 版本（可选）")
 
     @field_validator('original_url')

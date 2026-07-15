@@ -95,7 +95,7 @@ from app.core.product_assignment import (
 )
 from app.models.models import AdData, Client, Product, User, UserRole
 from app.schemas.base import PaginatedResponseBaseSchema, ResponseBaseSchema, ListResponseBaseSchema
-from app.schemas.product import ProductCreate, ProductResponse, ProductUpdate
+from app.schemas.product import ProductCreate, ProductResponse, ProductUpdate, build_product_response
 from datetime import date
 
 # 创建路由实例
@@ -263,11 +263,12 @@ async def get_products(
         client_id=client_id,
         name=name,
         is_active=is_active,
-        search=name  # 使用search参数
+        # name 已做前缀过滤；勿再与 search 条件 AND，否则列表常为空
+        search=None,
     )
 
     # 转换为响应模型
-    product_responses = [ProductResponse.model_validate(product) for product in products]
+    product_responses = [build_product_response(product) for product in products]
 
     return PaginatedResponseBaseSchema.success(
         data=product_responses,
@@ -294,7 +295,7 @@ async def get_product(
     product_service: ProductService = await get_product_service(db)
     product = await product_service.get_product_by_id(product_id, current_user, include_client=True)
 
-    return ResponseBaseSchema.success(data=ProductResponse.model_validate(product))
+    return ResponseBaseSchema.success(data=build_product_response(product))
 
 
 @router.post("/", response_model=ResponseBaseSchema[ProductResponse], summary="创建产品")
@@ -350,7 +351,7 @@ async def create_product(
     # 构建响应数据
     # ---------- 异常处理 ----------
     try:
-        product_data = ProductResponse.model_validate(product)
+        product_data = build_product_response(product)
         return ResponseBaseSchema.success(data=product_data)
     except HTTPException:
         raise
@@ -464,7 +465,7 @@ async def update_product(
         await commit_audit_log(db)
 
     # ---------- 构建响应 ----------
-    return ResponseBaseSchema.success(data=ProductResponse.model_validate(product))
+    return ResponseBaseSchema.success(data=build_product_response(product))
 
 
 @router.delete("/{product_id}", response_model=ResponseBaseSchema[dict], summary="删除产品")

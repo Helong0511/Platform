@@ -12,7 +12,7 @@
 - 本模块：可复用的纯业务函数，亦可被测试或其它入口调用
 
 在系统中的位置：
-- 依赖 ``app.services.cloak_pixel_mapping`` 获取像素配置；配置项见 ``app.core.config.settings``
+- 依赖 ``app.services.cloak_pixel_mapping`` 获取像素配置（短链 / 启用中的斗篷，无全局回退）
 
 注意事项：
 1. dp 合法字符集与 Schema、像素映射服务保持一致（``_DP_RE``）
@@ -30,7 +30,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm.exc import StaleDataError
 
-from app.core.config import settings
 from app.core.redis_client import get_redis_client
 from app.core.short_link_cache import get_short_link_from_cache, update_short_link_cache
 from app.core.third_party_report import send_third_party_report
@@ -327,28 +326,28 @@ def _resolve_fb_report_params(
             source = f"short_link_load_dp_{dp_param}"
             conv_seg = "load"
     else:
+        # 无像素配置时不报；有配置则看点击阶段开关
         click_on = bool(
-            not pixel_config or pixel_config.get("cloak_click_report_enabled", True)
+            pixel_config and pixel_config.get("cloak_click_report_enabled", True)
         )
         if not click_on:
-            logger.info("[斗篷点击上报] 已关闭，跳过 CAPI")
+            logger.info("[斗篷点击上报] 已关闭或无可选配置，跳过 CAPI")
         else:
             send_fb = True
             if resolved_dp:
                 source = f"short_link_dp_{resolved_dp}"
                 logger.info("[第三方上报] 检测到 dp 参数：%s，已更新 source 标识", resolved_dp)
-            if pixel_config:
-                report_event = pixel_config.get("cloak_report_event") or "ViewContent"
-                rv = pixel_config.get("cloak_report_value")
-                if rv is not None:
-                    try:
-                        report_value = float(rv)
-                    except (TypeError, ValueError):
-                        report_value = None
-                report_currency = (
-                    (pixel_config.get("cloak_report_currency") or "USD").strip().upper()
-                    or "USD"
-                )
+            report_event = pixel_config.get("cloak_report_event") or "ViewContent"
+            rv = pixel_config.get("cloak_report_value")
+            if rv is not None:
+                try:
+                    report_value = float(rv)
+                except (TypeError, ValueError):
+                    report_value = None
+            report_currency = (
+                (pixel_config.get("cloak_report_currency") or "USD").strip().upper()
+                or "USD"
+            )
 
     return send_fb, report_event, report_value, report_currency, source, conv_seg
 
@@ -379,28 +378,10 @@ async def schedule_cloak_facebook_report(
     logger.info("[第三方上报] phase=%s dp=%s, short_code=%s", report_phase, dp_param, short_code)
 
     pixel_config = None
-    report_kwargs_fb: Dict[str, Any] = {}
     try:
         pixel_config = await get_cloak_pixel_config(
             db, dp=dp_param, short_code=short_code, use_cache=True
         )
-        if pixel_config:
-            report_kwargs_fb = {
-                "facebook_pixel_id": pixel_config["facebook_pixel_id"],
-                "facebook_access_token": pixel_config["facebook_access_token"],
-                "facebook_api_version": pixel_config["facebook_api_version"],
-            }
-        else:
-            report_kwargs_fb = {
-                "facebook_pixel_id": settings.FACEBOOK_PIXEL_ID,
-                "facebook_access_token": settings.FACEBOOK_ACCESS_TOKEN,
-                "facebook_api_version": settings.FACEBOOK_API_VERSION,
-            }
-            logger.info(
-                "[第三方上报] 未找到斗篷像素配置，将使用全局配置：dp=%s, short_code=%s",
-                dp_param,
-                short_code,
-            )
     except Exception as exc:
         logger.error(
             "[第三方上报] 获取像素配置失败：dp=%s, short_code=%s, error=%s",
@@ -409,11 +390,22 @@ async def schedule_cloak_facebook_report(
             exc,
             exc_info=True,
         )
-        report_kwargs_fb = {
-            "facebook_pixel_id": settings.FACEBOOK_PIXEL_ID,
-            "facebook_access_token": settings.FACEBOOK_ACCESS_TOKEN,
-            "facebook_api_version": settings.FACEBOOK_API_VERSION,
-        }
+        return
+
+    if not pixel_config:
+        logger.info(
+            "[第三方上报] 无可用像素配置，跳过 Facebook 上报：dp=%s, short_code=%s, phase=%s",
+            dp_param,
+            short_code,
+            report_phase,
+        )
+        return
+
+    report_kwargs_fb: Dict[str, Any] = {
+        "facebook_pixel_id": pixel_config["facebook_pixel_id"],
+        "facebook_access_token": pixel_config["facebook_access_token"],
+        "facebook_api_version": pixel_config["facebook_api_version"],
+    }
 
     send_fb, report_event, report_value, report_currency, source, conv_seg = (
         _resolve_fb_report_params(report_phase, pixel_config, resolved_dp, dp_param)
@@ -459,7 +451,7 @@ async def schedule_cloak_facebook_report(
         client_ip,
         source,
         report_event,
-        "自定义" if pixel_config else "全局",
+        "斗篷/短链配置",
     )
 
 

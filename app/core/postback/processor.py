@@ -402,10 +402,11 @@ class PostbackProcessor:
         from app.core.config import settings
         from app.services.cloak_pixel_mapping import get_cloak_pixel_config
 
-        facebook_pixel_id = settings.FACEBOOK_PIXEL_ID
-        facebook_access_token = settings.FACEBOOK_ACCESS_TOKEN
-        facebook_api_version = settings.FACEBOOK_API_VERSION
-        config_source = "全局配置"
+        # 像素凭证仅来自短链自定义或启用中的斗篷配置，不再回退全局 FACEBOOK_*
+        facebook_pixel_id: Optional[str] = None
+        facebook_access_token: Optional[str] = None
+        facebook_api_version: Optional[str] = settings.FACEBOOK_API_VERSION
+        config_source = "未解析"
         short_link = None
 
         short_link_id = click_association.get("short_link_id")
@@ -416,12 +417,12 @@ class PostbackProcessor:
                 if short_link and short_link.facebook_pixel_id and short_link.facebook_access_token:
                     facebook_pixel_id = short_link.facebook_pixel_id
                     facebook_access_token = short_link.facebook_access_token
-                    facebook_api_version = short_link.facebook_api_version or "v21.0"
-                    config_source = f"数据库配置 (short_link_id={short_link_id})"
+                    facebook_api_version = short_link.facebook_api_version or settings.FACEBOOK_API_VERSION
+                    config_source = f"短链接配置 (short_link_id={short_link_id})"
             except Exception as exc:
                 logger.warning("查询数据库像素配置失败：%s", exc)
 
-        if config_source == "全局配置" and dp and short_link and short_link.short_code:
+        if not facebook_access_token and dp and short_link and short_link.short_code:
             try:
                 cloak_pixel_config = await get_cloak_pixel_config(
                     db=db,
@@ -430,25 +431,33 @@ class PostbackProcessor:
                     use_cache=True,
                 )
                 if cloak_pixel_config:
-                    facebook_pixel_id = cloak_pixel_config.get(
-                        "facebook_pixel_id", settings.FACEBOOK_PIXEL_ID
-                    )
-                    facebook_access_token = cloak_pixel_config.get(
-                        "facebook_access_token", settings.FACEBOOK_ACCESS_TOKEN
-                    )
-                    facebook_api_version = cloak_pixel_config.get(
-                        "facebook_api_version", settings.FACEBOOK_API_VERSION
+                    facebook_pixel_id = cloak_pixel_config.get("facebook_pixel_id")
+                    facebook_access_token = cloak_pixel_config.get("facebook_access_token")
+                    facebook_api_version = (
+                        cloak_pixel_config.get("facebook_api_version")
+                        or settings.FACEBOOK_API_VERSION
                     )
                     config_source = f"斗篷配置表[{dp}]"
             except Exception as exc:
                 logger.warning("查询斗篷配置表失败：%s", exc)
 
+        if not facebook_pixel_id or not facebook_access_token:
+            logger.info(
+                "无可用像素凭证，跳过第三方上报：dp=%s source=%s",
+                dp,
+                config_source,
+            )
+            return
+
         logger.info("像素配置来源：%s", config_source)
 
         try:
             click_time = click_association.get("click_time")
+            # 斗篷总开关关闭时不按本斗篷做 postback CAPI
             use_cfg_pb = bool(
-                cloak_cfg_pb and getattr(cloak_cfg_pb, "postback_report_enabled", False)
+                cloak_cfg_pb
+                and getattr(cloak_cfg_pb, "is_enabled", False)
+                and getattr(cloak_cfg_pb, "postback_report_enabled", False)
             )
             if use_cfg_pb:
                 fb_event = (cloak_cfg_pb.postback_report_event or "Purchase").strip() or "Purchase"

@@ -7,7 +7,9 @@
 配置优先级（高 → 低）：
 1. 短链接自身配置的 facebook_pixel_id / facebook_access_token
 2. cloak_configs 表中已启用且磁盘存在 {dp}.html 的斗篷配置
-3. settings 全局 FACEBOOK_PIXEL_ID / FACEBOOK_ACCESS_TOKEN
+
+无以上两者时返回 None（不再回退全局 FACEBOOK_PIXEL_ID / FACEBOOK_ACCESS_TOKEN）。
+API 版本缺省仍可用 settings.FACEBOOK_API_VERSION（仅版本号，非像素凭证）。
 
 缓存：内存缓存键为 {short_code}:{dp}，TTL 1 小时；配置或桥页变更时调用 invalidate_cloak_cache_for_dp。
 """
@@ -146,27 +148,36 @@ class CloakPixelMappingService:
                 logger.warning(f"[斗篷像素映射] 斗篷已停用：short_code={short_code}")
                 return None
             
-            # 查询斗篷配置表（系统服务维护）
+            # 查询斗篷配置表（仅 is_enabled=True 且存在桥页）
             cloak_config = await self._get_enabled_cloak_config(db, dp)
 
-            # 构建像素配置（使用 dp 参数匹配）
+            # 构建像素配置（短链自定义 > 启用中的斗篷配置；无则返回 None）
             pixel_config = self._build_pixel_config(short_link, dp, cloak_config)
-            
+            if not pixel_config:
+                logger.info(
+                    "[斗篷像素映射] 无可用像素配置（短链未配置且斗篷未启用/无凭证）："
+                    "dp=%s, short_code=%s",
+                    dp,
+                    short_code,
+                )
+                return None
+
             # 验证配置有效性
             if not self._validate_pixel_config(pixel_config, dp):
                 return None
-            
+
             # 更新缓存
             if use_cache:
                 self._update_cache(cache_key, pixel_config)
-            
-            # 记录成功日志
+
+            pixel_id = pixel_config.get("facebook_pixel_id") or ""
             logger.info(
-                f"[斗篷像素映射] 成功获取配置："
-                f"dp={dp}, short_code={short_code}, "
-                f"pixel_id={pixel_config['facebook_pixel_id'][:10] if pixel_config['facebook_pixel_id'] else '使用全局配置'}..."
+                "[斗篷像素映射] 成功获取配置：dp=%s, short_code=%s, pixel_id=%s...",
+                dp,
+                short_code,
+                pixel_id[:10] if pixel_id else "(empty)",
             )
-            
+
             return pixel_config
             
         except Exception as e:
@@ -194,18 +205,15 @@ class CloakPixelMappingService:
         short_link: ShortLink,
         dp: str,
         cloak_config: Optional[CloakConfig] = None
-    ) -> Dict[str, Any]:
+    ) -> Optional[Dict[str, Any]]:
         """
-        从 ShortLink 对象构建像素配置
-        
+        从 ShortLink / 启用中的斗篷配置构建像素凭证。
+
         优先级：
         1. 短链接自定义配置（数据库字段）
-        2. 系统服务中的斗篷配置（cloak_configs）
-        3. 全局配置（config.py）
-        
-        参数：
-        - short_link: ShortLink 对象
-        - dp: HTML 名称（如 master, test 等），用于匹配 cloak_configs.cloak_name
+        2. 系统服务中已启用的斗篷配置（cloak_configs）
+
+        两者皆无时返回 None（不回退全局 FACEBOOK_* 环境变量）。
         """
         # 优先级 1: 短链接自定义配置
         if short_link.facebook_pixel_id and short_link.facebook_access_token:
@@ -228,8 +236,8 @@ class CloakPixelMappingService:
                 pixel_config["cloak_report_currency"] = getattr(cloak_config, "report_currency", None) or "USD"
             pixel_config.update(_cloak_phase_report_dict(cloak_config))
             return pixel_config
-        
-        # 优先级 2: 系统服务中的斗篷配置
+
+        # 优先级 2: 系统服务中已启用的斗篷配置
         if cloak_config and cloak_config.pixel_id and cloak_config.access_token:
             logger.info(f"[斗篷像素映射] 使用数据库斗篷配置：dp={dp}")
             pixel_config = {
@@ -252,22 +260,7 @@ class CloakPixelMappingService:
             pixel_config.update(_cloak_phase_report_dict(cloak_config))
             return pixel_config
 
-        # 优先级 3: 全局配置
-        logger.info(f"[斗篷像素映射] 使用全局配置：dp={dp}")
-        pixel_config = {
-            "facebook_pixel_id": settings.FACEBOOK_PIXEL_ID,
-            "facebook_access_token": settings.FACEBOOK_ACCESS_TOKEN,
-            "facebook_api_version": settings.FACEBOOK_API_VERSION,
-            "dp_name": dp,
-            "short_code": short_link.short_code,
-            "original_url": short_link.original_url,
-            "is_active": short_link.is_active,
-            "title": short_link.title,
-            "offer_id": short_link.offer_id,
-            "channel_id": short_link.channel_id,
-        }
-        pixel_config.update(_cloak_phase_report_dict(cloak_config))
-        return pixel_config
+        return None
     
     def _validate_pixel_config(
         self, 
@@ -282,34 +275,35 @@ class CloakPixelMappingService:
         2. Access Token 非空
         3. API 版本格式
         """
-        # 检查必需的字段
+        # Access Token 必填（dp 仅为投放参数名，便于定位链路）
         if not pixel_config.get("facebook_access_token"):
-            logger.error(
-                f"[斗篷像素映射] 配置验证失败：Access Token 不能为空 "
-                f"(cloak_name={cloak_name})"
+            logger.warning(
+                "[斗篷像素映射] 配置验证失败：Access Token 不能为空 (dp=%s)",
+                cloak_name,
             )
             return False
-        
+
         # 验证 Pixel ID 格式（如果提供）
         pixel_id = pixel_config.get("facebook_pixel_id")
         if pixel_id:
             if not re.match(r'^\d{15,17}$', pixel_id):
                 logger.warning(
-                    f"[斗篷像素映射] Pixel ID 格式可能不正确："
-                    f"cloak_name={cloak_name}, pixel_id={pixel_id[:10]}..."
+                    "[斗篷像素映射] Pixel ID 格式可能不正确：dp=%s, pixel_id=%s...",
+                    cloak_name,
+                    pixel_id[:10],
                 )
-                # 不返回 False，因为可能是自定义 ID 格式
-        
+
         # 验证 API 版本格式
         api_version = pixel_config.get("facebook_api_version")
         if api_version:
             if not re.match(r'^v\d+\.\d+$', api_version):
-                logger.error(
-                    f"[斗篷像素映射] API 版本格式无效："
-                    f"cloak_name={cloak_name}, api_version={api_version}"
+                logger.warning(
+                    "[斗篷像素映射] API 版本格式无效：dp=%s, api_version=%s",
+                    cloak_name,
+                    api_version,
                 )
                 return False
-        
+
         return True
     
     def _get_from_cache(self, cloak_name: str) -> Optional[Dict[str, Any]]:

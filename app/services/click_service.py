@@ -446,12 +446,12 @@ class ClickService:
         dp = resolve_dp_from_url_params(url_params)
         short_code = click.short_link.short_code if click.short_link else None
 
-        facebook_pixel_id = settings.FACEBOOK_PIXEL_ID
-        facebook_access_token = settings.FACEBOOK_ACCESS_TOKEN
+        # 像素凭证优先级：短链自定义 > 启用中的斗篷配置（不回退全局 FACEBOOK_*）
+        facebook_pixel_id = None
+        facebook_access_token = None
         facebook_api_version = settings.FACEBOOK_API_VERSION
-        config_source = "全局配置"
+        config_source = "未解析"
 
-        # 像素凭证优先级：短链自定义 > 斗篷配置 > 全局 settings
         if click.short_link and click.short_link.facebook_pixel_id and click.short_link.facebook_access_token:
             facebook_pixel_id = click.short_link.facebook_pixel_id
             facebook_access_token = click.short_link.facebook_access_token
@@ -466,12 +466,23 @@ class ClickService:
                     use_cache=True
                 )
                 if cloak_cfg:
-                    facebook_pixel_id = cloak_cfg.get("facebook_pixel_id") or facebook_pixel_id
-                    facebook_access_token = cloak_cfg.get("facebook_access_token") or facebook_access_token
-                    facebook_api_version = cloak_cfg.get("facebook_api_version") or facebook_api_version
+                    facebook_pixel_id = cloak_cfg.get("facebook_pixel_id")
+                    facebook_access_token = cloak_cfg.get("facebook_access_token")
+                    facebook_api_version = (
+                        cloak_cfg.get("facebook_api_version") or settings.FACEBOOK_API_VERSION
+                    )
                     config_source = f"斗篷配置(dp={dp})"
             except Exception as exc:
-                logger.warning("获取斗篷像素配置失败，继续使用默认配置: %s", exc)
+                logger.warning("获取斗篷像素配置失败: %s", exc)
+
+        if not facebook_pixel_id or not facebook_access_token:
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail=(
+                    "无可用 Facebook 像素凭证：请在短链上配置 Pixel，"
+                    "或启用对应斗篷配置后再补报"
+                ),
+            )
 
         payload = self._build_facebook_report_payload(
             click=click,

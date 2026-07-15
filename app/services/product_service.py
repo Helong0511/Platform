@@ -171,12 +171,14 @@ class ProductService(BaseService[Product]):
         if conditions:
             query = query.where(and_(*conditions))
 
-        # 总数查询（优化：不加载关联数据）
+        # 总数查询（优化：不加载关联数据；管理员按 client_id 过滤须与主查询一致）
         count_query = select(func.count(Product.id))
         if current_user.role != UserRole.ADMIN:
             count_query = count_query.join(Client, Product.client_id == Client.id).where(
                 Client.user_id == current_user.id
             )
+        elif client_id:
+            count_query = count_query.where(Product.client_id == client_id)
         if conditions:
             count_query = count_query.where(and_(*conditions))
 

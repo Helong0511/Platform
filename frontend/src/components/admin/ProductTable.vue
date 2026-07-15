@@ -34,6 +34,18 @@
           </div>
         </template>
       </el-table-column>
+      <el-table-column
+        v-if="showClient"
+        prop="client_name"
+        label="所属客户"
+        :min-width="isMobile ? 100 : 160"
+        show-overflow-tooltip
+        class-name="client-column"
+      >
+        <template #default="scope">
+          <span>{{ resolveClientLabel(scope.row) }}</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="ecpm_deduct_ratio" :label="isMobile ? 'eCPM' : 'eCPM减扣比例'" :width="isMobile ? 65 : 120" align="center" class-name="ecpm-column">
         <template #default="scope">
           <el-tag type="warning" effect="dark" :size="isMobile ? 'small' : 'default'">
@@ -118,12 +130,22 @@ import { formatDate } from '../../utils/dateFormat';
 import { formatRatioAsPercent as formatPercentage } from '../../utils/percentFormat';
 import '../../styles/product-management-dialog.css';
 
-defineProps({
+const props = defineProps({
   products: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
   isMobile: { type: Boolean, default: false },
   tableMaxHeight: { type: Number, default: 400 },
+  /** 独立产品管理页显示「所属客户」列 */
+  showClient: { type: Boolean, default: false },
+  /** client_id → 展示名；缺省时用 row.client_name */
+  clientLabelMap: { type: Object, default: () => ({}) },
 });
 
 const emit = defineEmits(['history', 'edit', 'delete']);
+
+function resolveClientLabel(row) {
+  const fromMap = props.clientLabelMap?.[row?.client_id];
+  if (fromMap) return fromMap;
+  return row?.client_name || (row?.client_id != null ? `客户#${row.client_id}` : '-');
+}
 </script>
