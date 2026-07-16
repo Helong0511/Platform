@@ -9,7 +9,7 @@
 - resolve_bridge_html_read_path：读取时找首个存在的文件
 - resolve_bridge_html_write_path：上传时覆盖已有文件或写入首个可写目录
 - read_bridge_html_template_cached：按 mtime 缓存模板内容，降低高并发读盘压力
-- validate_bridge_html_bytes：管理端上传前的 UTF-8 / HTML 结构 / 大小校验
+- validate_bridge_html_bytes：管理端上传前的 UTF-8 / HTML 结构 / 大小 / XSS 消毒校验
 """
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ import os
 from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
+
+from app.core.bridge_html_sanitize import sanitize_bridge_html_strict
 
 # 桥页模板 LRU 缓存：键为规范化绝对路径，值为 (mtime, 文本内容)
 # 文件 mtime 变化或 invalidate_bridge_template_cache 调用时自动失效
@@ -180,6 +182,7 @@ def validate_bridge_html_bytes(raw: bytes) -> str:
     2. 必须为合法 UTF-8 编码（拒绝 GBK 等）
     3. 去掉 BOM 后内容长度 ≥ 20 字符（防止空文件）
     4. 前 4000 字符内须含 <!doctype html> 或 <html（基本 HTML 结构）
+    5. XSS 消毒：拒绝 iframe、外链 script、事件属性、javascript: 等危险内容
 
     Args:
         raw: 上传文件的原始字节
@@ -206,4 +209,4 @@ def validate_bridge_html_bytes(raw: bytes) -> str:
     if "<html" not in head and "<!doctype html" not in head:
         raise ValueError("文件内容需为 HTML（需包含 <!DOCTYPE html> 或 <html>）")
 
-    return text
+    return sanitize_bridge_html_strict(text)
