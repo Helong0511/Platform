@@ -73,6 +73,12 @@ AUDIT_LOG_RETENTION_DAYS_DEFAULT = 90
 MAX_CONCURRENT_SCHEDULED_TASKS_DEFAULT = 2
 # 任务名称最大长度（字符）
 MAX_TASK_NAME_LENGTH = 100
+# 禁止与静态诊断路由同名的任务名（避免 /{task_name} 歧义）
+SCHEDULED_TASK_RESERVED_NAMES = frozenset({
+    "queue-status",
+    "scheduler-status",
+    "reload-all",
+})
 # 数据库查询超时时间（秒）
 QUERY_TIMEOUT = 30
 

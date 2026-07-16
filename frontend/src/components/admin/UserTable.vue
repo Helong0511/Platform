@@ -62,7 +62,7 @@
             :active-text="scope.row.is_active ? '启用' : ''"
             :inactive-text="!scope.row.is_active ? '禁用' : ''"
             aria-label="切换状态"
-            @change="emit('status-change', scope.row)"
+            @change="(val) => emit('status-change', scope.row, val)"
           />
         </template>
       </el-table-column>
@@ -136,7 +136,7 @@
               :type="scope.row.is_active ? 'warning' : 'success'"
               :icon="scope.row.is_active ? Lock : Unlock"
               :title="scope.row.is_active ? '禁用用户' : '启用用户'"
-              @click="emit('status-change', scope.row)"
+              @click="emit('status-change', scope.row, !scope.row.is_active)"
             >
               {{ scope.row.is_active ? '禁用' : '启用' }}
             </el-button>

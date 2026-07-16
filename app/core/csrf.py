@@ -2,6 +2,7 @@
 CSRF防护模块
 提供CSRF令牌生成、验证和中间件
 """
+import json
 import secrets
 import logging
 import hashlib
@@ -20,6 +21,7 @@ from app.core.csrf_utils import safe_raise_csrf_exception
 from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.database import get_db
 from app.core.log_filters import CsrfProbePathFilter
+from app.core.errors import ErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -417,42 +419,40 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             else:
                 logger.warning(f"无法添加CSRF令牌到响应头: {request.method} {request.url.path}，错误: {e}")
     
-    async def _handle_csrf_validation_error(self, request: Request, message: str, token_to_return: Optional[str] = None) -> None:
+    async def _handle_csrf_validation_error(
+        self, request: Request, message: str, token_to_return: Optional[str] = None
+    ) -> Response:
         """
-        处理CSRF验证错误
-        检查连接状态，使用安全的异常抛出机制
-        支持双重提交Cookie模式
+        处理 CSRF 验证错误。
+
+        注意：必须在 BaseHTTPMiddleware 中直接返回 Response，
+        不能 raise HTTPException（会被错误地变成 500）。
         """
-        # 检查连接状态
         if not await self._check_connection_status(request):
             raise EndOfStream("客户端已断开连接")
-        
-        # 创建HTTPException
-        # 直接在创建时设置headers，确保它不是None
-        headers = {}
-        
-        # 如果提供了令牌，将其添加到headers中
+
+        headers: dict[str, str] = {"Content-Type": "application/json"}
         if token_to_return:
             headers["X-CSRF-Token"] = token_to_return
-            
-            # 同时设置Cookie（双重提交模式）
-            # 注意：HTTPException的headers会被FastAPI自动添加到响应中
-            # 但Cookie需要特殊处理，这里通过headers传递信息给异常处理器
-            headers["Set-Cookie"] = f"csrf_token={token_to_return}; HttpOnly; SameSite=Strict; Max-Age={settings.CSRF_TOKEN_EXPIRE_SECONDS}; Path=/"
-            
-            logger.debug(f"在CSRF错误响应中添加新令牌: {token_to_return[:10]}...")
-        
-        http_exc = HTTPException(
+            logger.debug("在 CSRF 错误响应中附加令牌: %s...", token_to_return[:10])
+
+        body = json.dumps(
+            {
+                "code": int(ErrorCode.FORBIDDEN),
+                "message": message,
+                "detail": message,
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        response = Response(
+            content=body,
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=message,
-            headers=headers
+            headers=headers,
+            media_type="application/json",
         )
-        
-        # 确保headers属性存在且是字典（防御性编程）
-        if not hasattr(http_exc, "headers") or http_exc.headers is None:
-            http_exc.headers = headers
-        
-        raise http_exc
+        if token_to_return:
+            await self._add_csrf_token_to_response(response, token_to_return, request)
+        return response
     
     async def _check_connection_status(self, request: Request) -> bool:
         """
@@ -547,10 +547,14 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 request.method,
                 request.url.path,
             )
-            # 生成新令牌并返回错误
-            new_csrf_token = generate_csrf_token()
-            await self._store_csrf_token(session_id, new_csrf_token, request)
-            await self._handle_csrf_validation_error(request, "请求来源验证失败", new_csrf_token)
+            # 不覆盖已有会话令牌，避免探测请求冲掉合法 CSRF
+            existing = await self._retrieve_csrf_token(session_id, request)
+            token_to_return = existing or generate_csrf_token()
+            if not existing:
+                await self._store_csrf_token(session_id, token_to_return, request)
+            return await self._handle_csrf_validation_error(
+                request, "请求来源验证失败", token_to_return
+            )
         
         # 获取请求中的CSRF令牌
         csrf_token = get_csrf_token_from_request(request)
@@ -585,10 +589,14 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     break
             except Exception as e:
                 logger.error(f"记录CSRF审计日志失败: {e}")
-            # 生成新令牌并返回错误
-            new_csrf_token = generate_csrf_token()
-            await self._store_csrf_token(session_id, new_csrf_token, request)
-            await self._handle_csrf_validation_error(request, "CSRF令牌缺失，请刷新页面后重试", new_csrf_token)
+            # 缺失时优先回传已有令牌，禁止探测请求覆写合法会话 CSRF
+            existing = await self._retrieve_csrf_token(session_id, request)
+            token_to_return = existing or generate_csrf_token()
+            if not existing:
+                await self._store_csrf_token(session_id, token_to_return, request)
+            return await self._handle_csrf_validation_error(
+                request, "CSRF令牌缺失，请刷新页面后重试", token_to_return
+            )
         
         # 获取存储的CSRF令牌
         stored_token = await self._retrieve_csrf_token(session_id, request)
@@ -628,7 +636,9 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     break
             except Exception as e:
                 logger.error(f"记录CSRF审计日志失败: {e}")
-            await self._handle_csrf_validation_error(request, "CSRF令牌无效或已过期，请刷新页面后重试", stored_token)
+            return await self._handle_csrf_validation_error(
+                request, "CSRF令牌无效或已过期，请刷新页面后重试", stored_token
+            )
         
         # 使用安全的字符串比较（防止时序攻击）
         if not secrets.compare_digest(csrf_token, stored_token):
@@ -636,8 +646,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             client_ip = get_client_ip(request)
             user_id = extract_user_id_from_token(request)
             user_agent = request.headers.get("User-Agent", "")[:100]
-            user_agent_hash = hashlib.sha256(user_agent.encode('utf-8')).hexdigest()[:16]
-            csrf_key = f"csrf_token:{session_id}"
             
             logger.log(
                 _csrf_violation_log_level(request),
@@ -677,7 +685,9 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             
             # 无论什么原因导致的令牌不匹配，都返回存储的正确令牌
             logger.info(f"CSRF令牌不匹配，返回正确的存储令牌: {stored_token[:10]}...")
-            await self._handle_csrf_validation_error(request, "CSRF令牌验证失败，请刷新页面后重试", stored_token)
+            return await self._handle_csrf_validation_error(
+                request, "CSRF令牌验证失败，请刷新页面后重试", stored_token
+            )
         
         # 验证通过，处理请求
         response = await call_next(request)

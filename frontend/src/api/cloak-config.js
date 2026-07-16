@@ -10,23 +10,26 @@ import { request } from '../utils/api';
 import { withCsrfMutate } from '../utils/csrfMutate';
 const {
   getCloakConfigs,
+  getCloakConfig,
   createCloakConfig,
   updateCloakConfig,
   deleteCloakConfig
 } = createCrudApi('/api/v1/cloak-configs', {
   methodNames: {
     list: 'getCloakConfigs',
+    get: 'getCloakConfig',
     create: 'createCloakConfig',
     update: 'updateCloakConfig',
     delete: 'deleteCloakConfig'
   },
-  include: ['list', 'create', 'update', 'delete'],
+  include: ['list', 'get', 'create', 'update', 'delete'],
   csrfOnMutate: true
 });
 
-/** 斗篷配置 CRUD：列表、新建、更新、删除 */
+/** 斗篷配置 CRUD：列表、详情、新建、更新、删除 */
 export {
   getCloakConfigs,
+  getCloakConfig,
   createCloakConfig,
   updateCloakConfig,
   deleteCloakConfig

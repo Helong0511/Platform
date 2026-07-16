@@ -4,7 +4,11 @@ Postback 统一处理器模块（重构版）
 协调各子模块完成 Postback 处理流程：
 1. IP 验证 → 2. 数据验证 → 3. 数据标准化 → 4. Click 关联 → 5. 重复检测
 6. Cap 检查 → 7. 扣量计算 → 8. 保存记录 → 9. 渠道转发 → 10. 通知发送
+
+说明：入库 commit 后，渠道/产品转发改为后台任务（独立 DB 会话），
+避免下游慢/超时时阻塞上游 PostBack 回调响应。
 """
+import asyncio
 import logging
 from typing import Dict, Any, Optional
 
@@ -12,11 +16,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import AsyncSessionLocal
 from app.core.postback.errors import DeductionProcessingError
 from app.core.postback.pipeline import attribution_ids_from_association
 from app.core.postback.validators.ip_validator import IpValidator
 from app.core.postback.validators.data_validator import DataValidator
 from app.core.postback.transformers.normalizer import DataNormalizer
+from app.core.postback.checks.cap_checker import CapChecker
 from app.core.postback.pipeline import (
     PostbackPipelineContext,
     step_apply_discount,
@@ -28,7 +34,12 @@ from app.core.postback.pipeline import (
 )
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
-from app.models.models import AdminNotificationConfig, CloakConfig, ShortLink
+from app.models.models import (
+    AdminNotificationConfig,
+    CloakConfig,
+    PostbackConversion,
+    ShortLink,
+)
 from app.services.telegram_notification_service import TelegramNotificationService
 from app.core.third_party_report import send_third_party_report
 from app.core.url.url_params_util import (
@@ -302,23 +313,29 @@ class PostbackProcessor:
             except Exception as pixel_err:
                 logger.error("第三方像素上报失败（转化已入库）: %s", pixel_err, exc_info=True)
             
-            # ========== 第 9 步：渠道转发（Cap 超限或扣量时不转发） ==========
-            logger.info("=== 第 9 步：渠道转发 ====")
-            try:
-                if (
-                    cap_ok
-                    and not pipe_ctx.skip_save_and_forward
-                    and click_association
-                    and click_association.get('publisher_id')
-                ):
-                    logger.info(f"开始转发到渠道：publisher_id={click_association.get('publisher_id')}")
-                    await PostbackForwarder.forward_to_publisher(conversion, db, click_association)
-                    logger.info("渠道转发完成")
-                else:
-                    logger.info("跳过渠道转发（Cap 超限、扣量或无渠道信息）")
-            except Exception as e:
-                logger.warning(f"渠道转发失败：{e}", exc_info=True)
-            
+            # ========== 第 9/9b 步：渠道 + 产品转发（后台，不阻塞上游回调） ==========
+            logger.info("=== 第 9/9b 步：调度下游转发（后台） ====")
+            should_forward_pub = bool(
+                cap_ok
+                and not pipe_ctx.skip_save_and_forward
+                and click_association
+                and click_association.get("publisher_id")
+            )
+            should_forward_prod = bool(
+                cap_ok
+                and not pipe_ctx.skip_save_and_forward
+                and conversion.product_id
+            )
+            if should_forward_pub or should_forward_prod:
+                PostbackProcessor._schedule_downstream_forwards(
+                    conversion_id=conversion.id,
+                    click_association=click_association,
+                    forward_publisher=should_forward_pub,
+                    forward_product=should_forward_prod,
+                )
+            else:
+                logger.info("跳过下游转发（Cap 超限、扣量或无目标）")
+
             # ========== 第 10 步：通知发送 ==========
             logger.info("=== 第 10 步：通知发送 ====")
             try:
@@ -347,6 +364,110 @@ class PostbackProcessor:
             logger.error(f"Postback 处理失败，已回滚事务：platform={platform}, error={str(e)}", exc_info=True)
             raise
     
+    @staticmethod
+    def _snapshot_click_association(
+        click_association: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """拷贝 Click 关联中的可序列化字段，供后台转发使用。"""
+        if not click_association:
+            return None
+        keys = (
+            "publisher_id",
+            "offer_id",
+            "click_id",
+            "product_id",
+            "client_id",
+            "ip",
+            "user_agent",
+            "url_params",
+            "short_link_id",
+        )
+        snap: Dict[str, Any] = {}
+        for key in keys:
+            if key in click_association:
+                snap[key] = click_association[key]
+        return snap
+
+    @staticmethod
+    def _schedule_downstream_forwards(
+        *,
+        conversion_id: int,
+        click_association: Optional[Dict[str, Any]],
+        forward_publisher: bool,
+        forward_product: bool,
+    ) -> None:
+        """
+        入库成功后后台转发。
+
+        使用独立 DB 会话并显式 commit，避免：
+        1) 下游超时拖垮上游回调；
+        2) get_postback_db 不自动 commit 导致转发日志丢失。
+        """
+        assoc_snap = PostbackProcessor._snapshot_click_association(click_association)
+
+        async def _run() -> None:
+            async with AsyncSessionLocal() as fwd_db:
+                try:
+                    result = await fwd_db.execute(
+                        select(PostbackConversion).where(
+                            PostbackConversion.id == conversion_id
+                        )
+                    )
+                    conv = result.scalars().first()
+                    if not conv:
+                        logger.warning(
+                            "后台转发跳过：转化不存在 conversion_id=%s",
+                            conversion_id,
+                        )
+                        return
+                    if forward_publisher:
+                        logger.info(
+                            "后台渠道转发开始：conversion_id=%s publisher_id=%s",
+                            conversion_id,
+                            (assoc_snap or {}).get("publisher_id"),
+                        )
+                        await PostbackForwarder.forward_to_publisher(
+                            conv, fwd_db, assoc_snap
+                        )
+                    if forward_product:
+                        logger.info(
+                            "后台产品转发开始：conversion_id=%s product_id=%s",
+                            conversion_id,
+                            conv.product_id,
+                        )
+                        await PostbackForwarder.forward_to_product(
+                            conv, fwd_db, assoc_snap
+                        )
+                    await fwd_db.commit()
+                    logger.info(
+                        "后台下游转发完成并已提交：conversion_id=%s",
+                        conversion_id,
+                    )
+                except Exception as exc:
+                    await fwd_db.rollback()
+                    logger.warning(
+                        "后台下游转发失败：conversion_id=%s err=%s",
+                        conversion_id,
+                        exc,
+                        exc_info=True,
+                    )
+
+        try:
+            asyncio.create_task(_run())
+            logger.info(
+                "已调度后台转发：conversion_id=%s pub=%s prod=%s",
+                conversion_id,
+                forward_publisher,
+                forward_product,
+            )
+        except Exception as exc:
+            logger.warning(
+                "调度后台转发失败：conversion_id=%s err=%s",
+                conversion_id,
+                exc,
+                exc_info=True,
+            )
+
     @staticmethod
     async def _send_third_party_report_if_needed(
         click_association: Optional[Dict[str, Any]],

@@ -133,6 +133,12 @@ export function useUserList(authStore, router) {
     }
   };
 
+  /** 查询：回到第 1 页再拉取，避免停在空页 */
+  const handleSearch = () => {
+    pagination.value.current = 1;
+    fetchUsers();
+  };
+
   const resetFilter = () => {
     searchForm.username = '';
     searchForm.role = '';
@@ -170,6 +176,7 @@ export function useUserList(authStore, router) {
     searchForm,
     fetchUsers,
     fetchStats,
+    handleSearch,
     resetFilter,
     bindPaginationWatch,
   };

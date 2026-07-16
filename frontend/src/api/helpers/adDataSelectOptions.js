@@ -7,20 +7,45 @@
 import { request, handleError } from '../../utils/api';
 
 /**
+ * 分页拉取全部列表（后端 MAX_PAGE_SIZE=100）。
+ * @param {string} url
+ * @param {Object} [baseParams]
+ * @returns {Promise<Array>}
+ */
+async function fetchAllPages(url, baseParams = {}) {
+  const pageSize = 100;
+  const maxPages = 50;
+  let page = 1;
+  let total = Infinity;
+  const all = [];
+
+  while (all.length < total && page <= maxPages) {
+    const data = await request(
+      {
+        url,
+        method: 'get',
+        params: { ...baseParams, page, page_size: pageSize },
+      },
+      { paginated: true }
+    );
+    const items = data.data || [];
+    total = data.total ?? data.count ?? all.length + items.length;
+    all.push(...items);
+    if (items.length === 0 || items.length < pageSize) {
+      break;
+    }
+    page += 1;
+  }
+  return all;
+}
+
+/**
  * 获取客户下拉选项（label 含客户 ID 与关联用户名）
  * @returns {Promise<Array<{value: number, label: string}>>}
  */
 export async function fetchClientsAsUserSelectOptions() {
   try {
-    const usersData = await request(
-      {
-        url: '/api/v1/users/',
-        method: 'get',
-        params: { page_size: 100 }
-      },
-      { paginated: true }
-    );
-    const users = usersData.data || [];
+    const users = await fetchAllPages('/api/v1/users/');
     const userMap = users.reduce((acc, user) => {
       if (user?.id) {
         acc[user.id] = user.full_name || user.username || '未知用户';
@@ -28,22 +53,14 @@ export async function fetchClientsAsUserSelectOptions() {
       return acc;
     }, {});
 
-    const clientsData = await request(
-      {
-        url: '/api/v1/clients/',
-        method: 'get',
-        params: { page_size: 100 }
-      },
-      { paginated: true }
-    );
-    const clients = clientsData.data || [];
+    const clients = await fetchAllPages('/api/v1/clients/');
 
     return clients
       .map((item) => {
         if (!item?.id) return null;
         return {
           value: item.id,
-          label: `${item.id} - ${userMap[item.user_id] || '未知用户'}`
+          label: `${item.id} - ${userMap[item.user_id] || item.company_name || '未知用户'}`,
         };
       })
       .filter(Boolean);
@@ -60,21 +77,17 @@ export async function fetchClientsAsUserSelectOptions() {
  */
 export async function fetchProductsAsSelectOptions(clientId = null) {
   try {
-    const params = { page_size: 100 };
-    if (clientId) params.client_id = clientId;
+    const baseParams = {};
+    if (clientId) baseParams.client_id = clientId;
 
-    const productsData = await request(
-      { url: '/api/v1/products/', method: 'get', params },
-      { paginated: true }
-    );
-    const products = productsData.data || [];
+    const products = await fetchAllPages('/api/v1/products/', baseParams);
 
     return products
       .map((item) => {
         if (!item?.id) return null;
         return {
           label: `${item.id} - ${item.name || '未知产品'}`,
-          value: item.id
+          value: item.id,
         };
       })
       .filter(Boolean);

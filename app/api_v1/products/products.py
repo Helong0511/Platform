@@ -238,13 +238,14 @@ async def get_products(
         page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
         client_id: int | None = Query(None, description="客户ID过滤"),
         name: str | None = Query(None, description="产品名称过滤"),
-        is_active: bool | None = Query(None, description="是否激活过滤")
+        is_active: bool | None = Query(None, description="是否激活过滤"),
+        product_id: int | None = Query(None, ge=1, description="产品ID精确过滤（跳转定位）"),
 ):
     """
     获取产品列表，支持分页和过滤（已重构使用服务层）
     - 管理员可查看所有产品
     - 客户只能查看自己的产品
-    - 支持按客户ID、产品名称和激活状态过滤
+    - 支持按客户ID、产品ID、产品名称和激活状态过滤
     - 根据设备类型自动优化分页大小
     """
     # ====== 设备类型优化：自动调整分页大小 ======
@@ -263,6 +264,7 @@ async def get_products(
         client_id=client_id,
         name=name,
         is_active=is_active,
+        product_id=product_id,
         # name 已做前缀过滤；勿再与 search 条件 AND，否则列表常为空
         search=None,
     )
@@ -321,7 +323,7 @@ async def create_product(
     
     # 调用服务层创建产品（服务层会处理所有验证和默认客户逻辑）
     product = await product_service.create_product(product_data, current_user)
-    
+
     # 记录创建操作
     # ---------- 异常处理 ----------
     try:
@@ -347,20 +349,12 @@ async def create_product(
         logger.error(f"记录产品创建审计日志失败: {str(e)}", exc_info=True)
     else:
         await commit_audit_log(db)
-    
-    # 构建响应数据
-    # ---------- 异常处理 ----------
-    try:
-        product_data = build_product_response(product)
-        return ResponseBaseSchema.success(data=product_data)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"构建产品响应数据失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"产品创建成功，但构建响应数据失败：{str(e)}。请刷新页面查看新创建的产品"
-        )
+
+    # 重新加载并 selectinload(client)，避免响应序列化触发异步懒加载
+    product = await product_service.get_product_by_id(
+        product.id, current_user, include_client=True
+    )
+    return ResponseBaseSchema.success(data=build_product_response(product))
 
 
 @router.put("/{product_id}", response_model=ResponseBaseSchema[ProductResponse], summary="更新产品")

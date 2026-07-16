@@ -99,12 +99,13 @@ class ProductService(BaseService[Product]):
             client_id: Optional[int] = None,
             name: Optional[str] = None,
             is_active: Optional[bool] = None,
-            search: Optional[str] = None
+            search: Optional[str] = None,
+            product_id: Optional[int] = None,
     ) -> tuple[List[Product], int]:
         """
         分页获取产品列表。
 
-        名称/搜索优先前缀匹配或全文索引；管理员可按 client_id 筛选。
+        名称/搜索优先前缀匹配或全文索引；管理员可按 client_id / product_id 筛选。
 
         Args:
             current_user: 当前用户
@@ -114,6 +115,7 @@ class ProductService(BaseService[Product]):
             name: 产品名称前缀
             is_active: 启用状态
             search: 搜索词（全文或前缀）
+            product_id: 精确产品 ID（广告数据跳转定位用）
 
         Returns:
             (产品列表, 总条数)
@@ -138,6 +140,9 @@ class ProductService(BaseService[Product]):
 
         # 筛选条件
         conditions = []
+
+        if product_id is not None:
+            conditions.append(Product.id == product_id)
 
         if name:
             # 优化：去掉func.lower()避免索引失效，使用前缀匹配可以使用索引
@@ -276,9 +281,10 @@ class ProductService(BaseService[Product]):
 
         # 如果找到属于默认客户（导入数据）的产品，更新client_id而不是创建新产品
         if admin_default_product:
+            old_client_id = admin_default_product.client_id
             logger.info(
                 f"产品名称 '{product_data['name']}' 属于默认客户（导入数据）（产品ID: {admin_default_product.id}，"
-                f"原客户ID: {admin_default_product.client_id}），将更新为客户ID: {client_id}"
+                f"原客户ID: {old_client_id}），将更新为客户ID: {client_id}"
             )
 
             # 更新产品的client_id和扣减比例
@@ -292,15 +298,39 @@ class ProductService(BaseService[Product]):
                 admin_default_product.downstream_postback_url = product_data['downstream_postback_url']
             if 'downstream_postback_method' in product_data:
                 admin_default_product.downstream_postback_method = product_data['downstream_postback_method']
+            if 'downstream_postback_success_check' in product_data:
+                admin_default_product.downstream_postback_success_check = product_data[
+                    'downstream_postback_success_check'
+                ]
             if 'notification_address' in product_data:
                 admin_default_product.notification_address = product_data['notification_address']
+
+            # 同步分配历史，避免 products.client_id 与 product_assignments 不一致
+            try:
+                await transfer_product_assignment(
+                    db=self.db,
+                    product_id=admin_default_product.id,
+                    old_client_id=old_client_id,
+                    new_client_id=client_id,
+                    transfer_date=date.today(),
+                )
+            except Exception as e:
+                await self.db.rollback()
+                logger.error(
+                    f"默认客户同名产品改绑时更新分配历史失败: product_id={admin_default_product.id}, err={e}",
+                    exc_info=True,
+                )
+                raise_api_exception(
+                    ErrorCode.OPERATION_FAILED,
+                    detail="产品从默认客户改绑时更新分配历史失败，请稍后重试",
+                )
 
             await self.db.flush()
             await self.db.refresh(admin_default_product)
 
             logger.info(
                 f"产品 '{product_data['name']}' 已从默认客户（导入数据）转移到客户ID {client_id}，"
-                f"并更新了扣减比例"
+                f"并更新了扣减比例与分配历史"
             )
 
             return admin_default_product
@@ -314,6 +344,7 @@ class ProductService(BaseService[Product]):
             is_active=product_data.get('is_active', True),
             downstream_postback_url=product_data.get('downstream_postback_url'),
             downstream_postback_method=product_data.get('downstream_postback_method', 'GET'),
+            downstream_postback_success_check=product_data.get('downstream_postback_success_check'),
             notification_address=product_data.get('notification_address')
         )
 
@@ -506,6 +537,12 @@ class ProductService(BaseService[Product]):
         await self.db.flush()
         await self.db.refresh(product)
 
+        try:
+            from app.core.postback.forwarding.cache_manager import CacheManager
+            await CacheManager.invalidate_product(product.id)
+        except Exception as e:
+            logger.debug("失效产品转发缓存失败: %s", e)
+
         logger.info(f"产品已更新: {product.name} (ID: {product.id})")
         return product
 
@@ -600,6 +637,12 @@ class ProductService(BaseService[Product]):
             await self.db.flush()
             await self.db.refresh(product)
 
+            try:
+                from app.core.postback.forwarding.cache_manager import CacheManager
+                await CacheManager.invalidate_product(product.id)
+            except Exception as e:
+                logger.debug("失效产品转发缓存失败: %s", e)
+
             return {
                 "transferred": True,
                 "message": f"产品已转移到默认客户（导入数据）（该产品关联了 {ad_data_count} 条广告数据）",
@@ -608,6 +651,12 @@ class ProductService(BaseService[Product]):
         else:
             # 没有关联广告数据：直接删除产品
             logger.debug(f"产品 {product.name} (ID: {product_id}) 没有关联广告数据，将直接删除")
+
+            try:
+                from app.core.postback.forwarding.cache_manager import CacheManager
+                await CacheManager.invalidate_product(product.id)
+            except Exception as e:
+                logger.debug("失效产品转发缓存失败: %s", e)
 
             # 删除产品
             await self.db.delete(product)

@@ -55,13 +55,13 @@ class BftPostbackHandler(PostbackHandler):
         if not clk_id or not str(clk_id).strip():
             return False, "clk_id 或 click_id 或 cid 参数不能为空"
         
-        # 验证 payout 是必填的
-        if not payout:
+        # 验证 payout 是必填且必须大于 0（字符串 "0" 不能用布尔假值判断）
+        if payout is None or str(payout).strip() == '':
             return False, "payout 参数不能为空"
-        
-        # 验证 payout 格式
         try:
-            float(payout)
+            payout_val = float(payout)
+            if payout_val <= 0:
+                return False, f"payout 必须大于 0：当前值={payout}"
         except (ValueError, TypeError):
             return False, f"payout 格式错误：{payout}（应为数字）"
         

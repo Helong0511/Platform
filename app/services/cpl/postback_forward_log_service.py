@@ -141,7 +141,7 @@ class PostbackForwardLogService:
         根据转发日志 ID 手动补发 Postback 至下游渠道。
 
         从日志还原 conversion_id，加载转化记录后调用 PostbackForwarder。
-        仅支持 publisher_id 目标；产品级下游转发已废弃。
+        支持渠道（publisher_id）与产品级（product_id）下游补发。
 
         Args:
             forward_log_id: PostbackForwardLog 主键。
@@ -178,14 +178,12 @@ class PostbackForwardLogService:
                 await PostbackForwarder.forward_to_publisher(conversion, db)
                 message = f"已补发转发到渠道（Publisher ID: {forward_log.publisher_id}）"
             elif forward_log.product_id:
-                raise_api_exception(
-                    ErrorCode.VALIDATION_ERROR,
-                    detail="产品下游转发功能已废弃，PostBack 数据只转发给渠道（Publisher）",
-                )
+                await PostbackForwarder.forward_to_product(conversion, db)
+                message = f"已补发转发到产品下游（Product ID: {forward_log.product_id}）"
             else:
                 raise_api_exception(
                     ErrorCode.VALIDATION_ERROR,
-                    detail="转发日志缺少 publisher_id，无法确定转发目标",
+                    detail="转发日志缺少 publisher_id / product_id，无法确定转发目标",
                 )
 
             logger.info(

@@ -149,6 +149,24 @@ export const uploadGamCredentials = async (taskName, file, networkCode = null) =
 };
 
 /**
+ * 获取内存任务队列状态（排队/执行中）。
+ */
+export const getTaskQueueStatus = async () =>
+  request(
+    { url: '/api/v1/scheduled-tasks/queue-status', method: 'get' },
+    { returnDataOnly: true }
+  );
+
+/**
+ * 获取当前 Worker 调度器状态（已注册 job 等）。
+ */
+export const getSchedulerStatus = async () =>
+  request(
+    { url: '/api/v1/scheduled-tasks/scheduler-status', method: 'get' },
+    { returnDataOnly: true }
+  );
+
+/**
  * 刷新指定 GAM 账号的报表类型（探测 Google API）。
  * @param {string} taskName
  * @param {{ account_key?: string, credentials_json?: string, application_name?: string }} account

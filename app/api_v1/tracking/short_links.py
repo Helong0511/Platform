@@ -242,123 +242,6 @@ async def get_short_links(
     )
 
 
-@router.get("/{link_id}/detail",
-            response_model=ResponseBaseSchema[ShortLinkResponse],
-            summary="获取短链接详情")
-async def get_short_link_detail(
-    request: Request,
-    link_id: int = Path(..., ge=1, description="短链接ID"),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    按 link_id 获取单条短链接详情（含点击数、渠道名、完整 short_url）。
-
-    权限：登录用户；无权限时返回 404。
-    """
-    # 使用服务层（业务逻辑在ShortLinkService中）
-    short_link_service: ShortLinkService = await get_short_link_service(db)
-    
-    # 获取短链接（包含关联信息）
-    short_link = await short_link_service.get_short_link_by_id(link_id, current_user, include_relations=True)
-    
-    # 构建完整的短链接URL
-    base_url = str(request.base_url).rstrip('/')
-    response_data = ShortLinkResponse.model_validate(short_link)
-    response_data.short_url = f"{base_url}/s/{short_link.short_code}"
-    # 添加创建者名称（已通过joinedload预加载）
-    if short_link.creator:
-        response_data.creator_name = short_link.creator.username
-    # 添加渠道名称（已通过joinedload预加载）
-    if short_link.channel:
-        response_data.channel_name = short_link.channel.publisher_name
-    
-    return ResponseBaseSchema.success(data=response_data)
-
-
-@router.put("/{link_id}",
-            response_model=ResponseBaseSchema[ShortLinkResponse],
-            summary="更新短链接")
-async def update_short_link(
-    request: Request,
-    link_id: int = Path(..., ge=1, description="短链接ID"),
-    link_in: ShortLinkUpdate = ...,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    按 link_id 更新短链接（URL、标题、Offer 关联、像素配置等）。
-
-    修改 original_url 时重新校验 Tracklink 占位符。
-    权限：仅管理员。
-    """
-    # 使用服务层（业务逻辑在ShortLinkService中）
-    short_link_service: ShortLinkService = await get_short_link_service(db)
-    
-    # 获取更新数据
-    update_data = link_in.model_dump(exclude_unset=True)
-    
-    # 调用服务层更新短链接（服务层会处理验证、权限检查和缓存清理）
-    short_link = await short_link_service.update_short_link(link_id, update_data, current_user)
-
-    if update_data:
-        await log_update(
-            db=db,
-            user=current_user,
-            resource_type="SHORT_LINK",
-            resource_id=link_id,
-            resource_name=short_link.short_code,
-            request=request,
-            details={"updated_fields": list(update_data.keys())},
-        )
-        await commit_audit_log(db)
-    
-    # 构建完整的短链接URL
-    base_url = str(request.base_url).rstrip('/')
-    response_data = ShortLinkResponse.model_validate(short_link)
-    response_data.short_url = f"{base_url}/s/{short_link.short_code}"
-    
-    return ResponseBaseSchema.success(data=response_data)
-
-
-@router.delete("/{link_id}",
-                response_model=ResponseBaseSchema[dict],
-                summary="删除短链接")
-async def delete_short_link(
-    request: Request,
-    link_id: int = Path(..., ge=1, description="短链接ID"),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    删除短链接。
-
-    权限：仅管理员；有关联点击时由服务层拦截。
-    """
-    # 使用服务层（业务逻辑在ShortLinkService中）
-    short_link_service: ShortLinkService = await get_short_link_service(db)
-
-    short_link = await short_link_service.get_short_link_by_id(
-        link_id, current_user, include_relations=False
-    )
-    short_code = short_link.short_code
-
-    # 调用服务层删除短链接（服务层会处理权限检查和缓存清理）
-    await short_link_service.delete_short_link(link_id, current_user)
-
-    await log_delete(
-        db=db,
-        user=current_user,
-        resource_type="SHORT_LINK",
-        resource_id=link_id,
-        resource_name=short_code,
-        request=request,
-    )
-    await commit_audit_log(db)
-    
-    return ResponseBaseSchema.success(data={"message": "短链接已删除"})
-
-
 @router.get("/stats/summary",
             response_model=ResponseBaseSchema[ShortLinkStatsResponse],
             summary="获取短链接统计")
@@ -424,58 +307,6 @@ async def get_short_link_stats(
         active_links=active_links,
         expired_links=expired_links
     ))
-
-
-@router.post("/sync-clicks",
-             response_model=ResponseBaseSchema,
-             summary="手动同步点击次数到数据库（管理员）")
-async def sync_short_link_clicks(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin)
-):
-    """
-    手动触发短链接点击次数同步
-    将Redis中的点击次数同步到数据库
-    
-    注意：此接口需要管理员权限
-    """
-    # ---------- 入口：参数与依赖准备 ----------
-    
-    # ---------- 异常处理 ----------
-    try:
-        logger.info(f"管理员 {current_user.id} 手动触发短链接点击次数同步")
-        synced_count = await sync_click_counts_to_db(db)
-        
-        await log_user_action(
-            db=db,
-            action_type="TASK_RUN",
-            user=current_user,
-            resource_type="SHORT_LINK",
-            resource_id=0,
-            resource_name="同步短链接点击数",
-            request=request,
-            details={"synced_count": synced_count},
-        )
-        await commit_audit_log(db)
-        # ---------- 条件分支 ----------
-        if synced_count > 0:
-            logger.info(f"手动同步成功: 更新了 {synced_count} 条记录")
-            return ResponseBaseSchema.success(
-                data={"synced_count": synced_count, "message": f"成功同步 {synced_count} 个短链接的点击次数"}
-            )
-        else:
-            return ResponseBaseSchema.success(
-                data={"synced_count": 0, "message": "没有需要同步的点击次数"}
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"手动同步短链接点击次数失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"同步点击次数失败: {str(e)}"
-        )
 
 
 @router.get("/click-stats",
@@ -724,6 +555,189 @@ async def diagnose_short_link_sync(
     
     # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=diagnosis)
+
+
+@router.get("/{link_id}/detail",
+            response_model=ResponseBaseSchema[ShortLinkResponse],
+            summary="获取短链接详情")
+async def get_short_link_detail(
+    request: Request,
+    link_id: int = Path(..., ge=1, description="短链接ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    按 link_id 获取单条短链接详情（含点击数、渠道名、完整 short_url）。
+
+    权限：登录用户；无权限时返回 404。
+    """
+    # 使用服务层（业务逻辑在ShortLinkService中）
+    short_link_service: ShortLinkService = await get_short_link_service(db)
+    
+    # 获取短链接（包含关联信息）
+    short_link = await short_link_service.get_short_link_by_id(link_id, current_user, include_relations=True)
+    
+    # 构建完整的短链接URL
+    base_url = str(request.base_url).rstrip('/')
+    response_data = ShortLinkResponse.model_validate(short_link)
+    response_data.short_url = f"{base_url}/s/{short_link.short_code}"
+    # 添加创建者名称（已通过joinedload预加载）
+    if short_link.creator:
+        response_data.creator_name = short_link.creator.username
+    # 添加渠道名称（已通过joinedload预加载）
+    if short_link.channel:
+        response_data.channel_name = short_link.channel.publisher_name
+    
+    return ResponseBaseSchema.success(data=response_data)
+
+
+
+@router.get("/{link_id}",
+            response_model=ResponseBaseSchema[ShortLinkResponse],
+            summary="获取短链接详情（别名）")
+async def get_short_link_by_id(
+    request: Request,
+    link_id: int = Path(..., ge=1, description="短链接ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """兼容 REST：GET /{id} 与 GET /{id}/detail 等价。"""
+    return await get_short_link_detail(request, link_id, db, current_user)
+
+
+@router.put("/{link_id}",
+            response_model=ResponseBaseSchema[ShortLinkResponse],
+            summary="更新短链接")
+async def update_short_link(
+    request: Request,
+    link_id: int = Path(..., ge=1, description="短链接ID"),
+    link_in: ShortLinkUpdate = ...,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    按 link_id 更新短链接（URL、标题、Offer 关联、像素配置等）。
+
+    修改 original_url 时重新校验 Tracklink 占位符。
+    权限：仅管理员。
+    """
+    # 使用服务层（业务逻辑在ShortLinkService中）
+    short_link_service: ShortLinkService = await get_short_link_service(db)
+    
+    # 获取更新数据
+    update_data = link_in.model_dump(exclude_unset=True)
+    
+    # 调用服务层更新短链接（服务层会处理验证、权限检查和缓存清理）
+    short_link = await short_link_service.update_short_link(link_id, update_data, current_user)
+
+    if update_data:
+        await log_update(
+            db=db,
+            user=current_user,
+            resource_type="SHORT_LINK",
+            resource_id=link_id,
+            resource_name=short_link.short_code,
+            request=request,
+            details={"updated_fields": list(update_data.keys())},
+        )
+        await commit_audit_log(db)
+    
+    # 构建完整的短链接URL
+    base_url = str(request.base_url).rstrip('/')
+    response_data = ShortLinkResponse.model_validate(short_link)
+    response_data.short_url = f"{base_url}/s/{short_link.short_code}"
+    
+    return ResponseBaseSchema.success(data=response_data)
+
+
+@router.delete("/{link_id}",
+                response_model=ResponseBaseSchema[dict],
+                summary="删除短链接")
+async def delete_short_link(
+    request: Request,
+    link_id: int = Path(..., ge=1, description="短链接ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    删除短链接。
+
+    权限：仅管理员；有关联点击时由服务层拦截。
+    """
+    # 使用服务层（业务逻辑在ShortLinkService中）
+    short_link_service: ShortLinkService = await get_short_link_service(db)
+
+    short_link = await short_link_service.get_short_link_by_id(
+        link_id, current_user, include_relations=False
+    )
+    short_code = short_link.short_code
+
+    # 调用服务层删除短链接（服务层会处理权限检查和缓存清理）
+    await short_link_service.delete_short_link(link_id, current_user)
+
+    await log_delete(
+        db=db,
+        user=current_user,
+        resource_type="SHORT_LINK",
+        resource_id=link_id,
+        resource_name=short_code,
+        request=request,
+    )
+    await commit_audit_log(db)
+    
+    return ResponseBaseSchema.success(data={"message": "短链接已删除"})
+
+
+@router.post("/sync-clicks",
+             response_model=ResponseBaseSchema,
+             summary="手动同步点击次数到数据库（管理员）")
+async def sync_short_link_clicks(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    手动触发短链接点击次数同步
+    将Redis中的点击次数同步到数据库
+    
+    注意：此接口需要管理员权限
+    """
+    # ---------- 入口：参数与依赖准备 ----------
+    
+    # ---------- 异常处理 ----------
+    try:
+        logger.info(f"管理员 {current_user.id} 手动触发短链接点击次数同步")
+        synced_count = await sync_click_counts_to_db(db)
+        
+        await log_user_action(
+            db=db,
+            action_type="TASK_RUN",
+            user=current_user,
+            resource_type="SHORT_LINK",
+            resource_id=0,
+            resource_name="同步短链接点击数",
+            request=request,
+            details={"synced_count": synced_count},
+        )
+        await commit_audit_log(db)
+        # ---------- 条件分支 ----------
+        if synced_count > 0:
+            logger.info(f"手动同步成功: 更新了 {synced_count} 条记录")
+            return ResponseBaseSchema.success(
+                data={"synced_count": synced_count, "message": f"成功同步 {synced_count} 个短链接的点击次数"}
+            )
+        else:
+            return ResponseBaseSchema.success(
+                data={"synced_count": 0, "message": "没有需要同步的点击次数"}
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"手动同步短链接点击次数失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"同步点击次数失败: {str(e)}"
+        )
 
 
 @router.post("/diagnose-batch",

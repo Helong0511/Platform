@@ -15,6 +15,7 @@
 注意事项：
 1. 密码经模型 ``set_password`` bcrypt 加密，服务层勿存明文
 2. 禁用用户须同步撤销活跃会话，防止旧 token 继续使用
+3. 写操作后失效 ``user_stats`` 缓存，保证管理端统计及时
 """
 from typing import Optional, List, Dict, Any
 import uuid
@@ -32,6 +33,8 @@ from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.utils import get_app_now_naive
 from app.core.validation import validate_password_strength
 from app.core.permission_cache import invalidate_user_permission_cache
+from app.core.infrastructure.cache import get_cache_backend
+from app.services.session_service import SessionService
 import logging
 
 logger = logging.getLogger(__name__)
@@ -48,6 +51,40 @@ class UserService(BaseService[User]):
     def __init__(self, db: AsyncSession):
         """注入数据库会话并绑定 User 模型。"""
         super().__init__(db, User)
+
+    @staticmethod
+    async def invalidate_user_stats_cache() -> None:
+        """写用户后失效管理端统计缓存。"""
+        try:
+            cache = await get_cache_backend()
+            await cache.delete("user_stats")
+        except Exception as e:
+            logger.warning(f"清除 user_stats 缓存失败: {e}")
+
+    async def _revoke_sessions_on_disable(
+            self,
+            user_id: int,
+            current_user: User,
+    ) -> None:
+        """禁用用户时撤销其全部活跃会话并拉黑 JWT。"""
+        try:
+            session_service = SessionService(self.db)
+            revoked_count, username = await session_service.revoke_all_user_sessions(
+                user_id, current_user
+            )
+            logger.info(
+                "用户禁用同步撤会话: user_id=%s, username=%s, revoked=%s",
+                user_id,
+                username,
+                revoked_count,
+            )
+        except Exception as e:
+            logger.error(
+                "禁用用户时撤销会话失败: user_id=%s, err=%s",
+                user_id,
+                e,
+                exc_info=True,
+            )
 
     async def get_user_by_id(
             self,
@@ -242,6 +279,8 @@ class UserService(BaseService[User]):
         except Exception as e:
             logger.warning(f"清除权限缓存失败: {e}")
 
+        await self.invalidate_user_stats_cache()
+
         logger.info(f"用户已创建: {user.username} (ID: {user.id})")
         return user
 
@@ -267,6 +306,7 @@ class UserService(BaseService[User]):
         """
         # 获取用户
         user = await self.get_user_by_id(user_id, current_user, include_client=False)
+        old_is_active = user.is_active
 
         # 非管理员：剥离 role，且只能改自己
         if current_user.role != UserRole.ADMIN:
@@ -341,11 +381,17 @@ class UserService(BaseService[User]):
 
         user = await self.get_user_by_id(user_id, current_user, include_client=False)
 
+        # 禁用时同步撤销活跃会话（与模块注释约定一致）
+        if old_is_active and not user.is_active:
+            await self._revoke_sessions_on_disable(user_id, current_user)
+
         # 清除权限缓存（用户信息已更新）
         try:
             await invalidate_user_permission_cache(user_id)
         except Exception as e:
             logger.warning(f"清除权限缓存失败: {e}")
+
+        await self.invalidate_user_stats_cache()
 
         logger.info(f"用户已更新: {user.username} (ID: {user.id})")
         return user
@@ -387,6 +433,8 @@ class UserService(BaseService[User]):
             await invalidate_user_permission_cache(user_id)
         except Exception as e:
             logger.warning(f"清除权限缓存失败: {e}")
+
+        await self.invalidate_user_stats_cache()
 
         logger.info(f"用户已删除: {user.username} (ID: {user_id})")
 

@@ -26,10 +26,11 @@ export { getShortLinks, createShortLink, updateShortLink, deleteShortLink };
 
 /**
  * 获取短链接详情（含关联 Offer/渠道等扩展字段）。
+ * 优先走 REST 别名 GET /{id}；服务端与 /{id}/detail 等价。
  */
 export const getShortLinkDetail = async (linkId) => {
   return request({
-    url: `/api/v1/short-links/${linkId}/detail`,
+    url: `/api/v1/short-links/${linkId}`,
     method: 'get'
   }, { returnDataOnly: true });
 };

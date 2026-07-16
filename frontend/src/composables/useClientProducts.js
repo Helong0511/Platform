@@ -244,9 +244,13 @@ export function useClientProducts() {
       await ensureCsrfToken(() => fetchProductsForClient(currentClientIdForProducts.value));
       
       productLoading.value = true;
-      await deleteProduct(id);
+      const result = await deleteProduct(id);
       await fetchProductsForClient(currentClientIdForProducts.value);
-      ElMessage.success('产品删除成功');
+      if (result?.transferred) {
+        ElMessage.success(result.message || '产品已转移至默认客户（保留关联广告数据）');
+      } else {
+        ElMessage.success(result?.message || '产品删除成功');
+      }
       return true;
     } catch (error) {
       if (!error.message?.includes('取消')) {

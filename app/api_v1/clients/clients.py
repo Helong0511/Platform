@@ -110,6 +110,111 @@ async def get_clients(
     )
 
 
+@router.get("/export", response_class=StreamingResponse, summary="导出客户数据")
+async def export_clients_excel(
+        request: Request,
+        company_name: str | None = Query(None, description="公司名称过滤"),
+        is_active: bool | None = Query(None, description="是否激活过滤"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin)
+):
+    """
+    导出客户数据到Excel文件
+    - 仅管理员可访问
+    - 支持按公司名称和激活状态过滤
+    - 返回Excel文件流
+    """
+    # ---------- 入口：参数与依赖准备 ----------
+    # 构建查询（与get_clients相同的逻辑）
+    query = select(Client).options(selectinload(Client.user))
+
+    # 应用过滤条件
+    # ---------- 条件分支 ----------
+    if company_name:
+        # 使用全文搜索（优先）或LIKE查询
+        query = await search_with_fulltext(
+            db=db,
+            model_class=Client,
+            search_fields=["company_name", "contact_person"],
+            search_term=company_name,
+            base_query=query,
+            use_fulltext=True
+        )
+
+    # ---------- 条件分支 ----------
+    if is_active is not None:
+        query = query.where(Client.is_active == is_active)
+
+    # 获取所有客户数据
+    query = query.order_by(Client.id.desc())
+    result = await db.execute(query)
+    # selectinload不会产生重复行，但为了安全起见使用unique()
+    clients = result.unique().scalars().all()
+
+    # 如果没有数据，抛出错误提示用户
+    # ---------- 条件分支 ----------
+    if not clients:
+        raise_api_exception(
+            error_code=ErrorCode.NOT_FOUND,
+            message="无数据，不能导出",
+            detail="当前筛选条件下没有可导出的客户数据，请调整筛选条件后重试"
+        )
+
+    # 准备导出数据
+    data = []
+    # ---------- 循环处理 ----------
+    for client in clients:
+        user = get_loaded_relationship(client, "user")
+        row = {
+            "客户ID": client.id,
+            "公司名称": client.company_name or "",
+            "联系人": client.contact_person or "",
+            "联系电话": client.phone or "",
+            "地址": client.address or "",
+            "已配置API密钥": "是" if client.key else "否",
+            "允许的IP": client.allowed_ips or "",
+            "状态": "启用" if client.is_active else "禁用",
+            "API开关": "启用" if client.api_enabled else "禁用",
+            "密码修改开关": "启用" if client.password_change_enabled else "禁用",
+            "创建时间": client.created_at.strftime("%Y-%m-%d %H:%M:%S") if client.created_at else "",
+            "更新时间": client.updated_at.strftime("%Y-%m-%d %H:%M:%S") if client.updated_at else "",
+        }
+
+        # 添加用户信息
+        # ---------- 条件分支 ----------
+        if user:
+            row.update({
+                "用户ID": user.id,
+                "用户名": user.username or "",
+                "邮箱": user.email or "",
+                "全名": user.full_name or "",
+            })
+        else:
+            row.update({
+                "用户ID": "",
+                "用户名": "",
+                "邮箱": "",
+                "全名": "",
+            })
+
+        data.append(row)
+
+    logger.info(f"Client data exported by {current_user.username}, total: {len(data)} clients")
+
+    await log_user_action(
+        db=db,
+        action_type="EXPORT",
+        user=current_user,
+        resource_type="CLIENT",
+        request=request,
+        details={"row_count": len(data), "company_name": company_name, "is_active": is_active},
+    )
+    await commit_audit_log(db)
+
+    # ---------- 构建响应 ----------
+    return excel_streaming_response(data, "客户数据", "客户数据")
+
+
 @router.get("/{client_id}", response_model=ResponseBaseSchema[ClientResponse], summary="获取客户详情")
 async def get_client(
         client_id: int = Path(..., ge=1, description="客户ID"),
@@ -576,110 +681,6 @@ async def update_client_switches(
     # 确保返回的数据包含最新的开关状态
     return ResponseBaseSchema.success(data=_client_public_dict(client))
 
-
-@router.get("/export", response_class=StreamingResponse, summary="导出客户数据")
-async def export_clients_excel(
-        request: Request,
-        company_name: str | None = Query(None, description="公司名称过滤"),
-        is_active: bool | None = Query(None, description="是否激活过滤"),
-        db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(require_admin)
-):
-    """
-    导出客户数据到Excel文件
-    - 仅管理员可访问
-    - 支持按公司名称和激活状态过滤
-    - 返回Excel文件流
-    """
-    # ---------- 入口：参数与依赖准备 ----------
-    # 构建查询（与get_clients相同的逻辑）
-    query = select(Client).options(selectinload(Client.user))
-
-    # 应用过滤条件
-    # ---------- 条件分支 ----------
-    if company_name:
-        # 使用全文搜索（优先）或LIKE查询
-        query = await search_with_fulltext(
-            db=db,
-            model_class=Client,
-            search_fields=["company_name", "contact_person"],
-            search_term=company_name,
-            base_query=query,
-            use_fulltext=True
-        )
-
-    # ---------- 条件分支 ----------
-    if is_active is not None:
-        query = query.where(Client.is_active == is_active)
-
-    # 获取所有客户数据
-    query = query.order_by(Client.id.desc())
-    result = await db.execute(query)
-    # selectinload不会产生重复行，但为了安全起见使用unique()
-    clients = result.unique().scalars().all()
-
-    # 如果没有数据，抛出错误提示用户
-    # ---------- 条件分支 ----------
-    if not clients:
-        raise_api_exception(
-            error_code=ErrorCode.NOT_FOUND,
-            message="无数据，不能导出",
-            detail="当前筛选条件下没有可导出的客户数据，请调整筛选条件后重试"
-        )
-
-    # 准备导出数据
-    data = []
-    # ---------- 循环处理 ----------
-    for client in clients:
-        user = get_loaded_relationship(client, "user")
-        row = {
-            "客户ID": client.id,
-            "公司名称": client.company_name or "",
-            "联系人": client.contact_person or "",
-            "联系电话": client.phone or "",
-            "地址": client.address or "",
-            "已配置API密钥": "是" if client.key else "否",
-            "允许的IP": client.allowed_ips or "",
-            "状态": "启用" if client.is_active else "禁用",
-            "API开关": "启用" if client.api_enabled else "禁用",
-            "密码修改开关": "启用" if client.password_change_enabled else "禁用",
-            "创建时间": client.created_at.strftime("%Y-%m-%d %H:%M:%S") if client.created_at else "",
-            "更新时间": client.updated_at.strftime("%Y-%m-%d %H:%M:%S") if client.updated_at else "",
-        }
-
-        # 添加用户信息
-        # ---------- 条件分支 ----------
-        if user:
-            row.update({
-                "用户ID": user.id,
-                "用户名": user.username or "",
-                "邮箱": user.email or "",
-                "全名": user.full_name or "",
-            })
-        else:
-            row.update({
-                "用户ID": "",
-                "用户名": "",
-                "邮箱": "",
-                "全名": "",
-            })
-
-        data.append(row)
-
-    logger.info(f"Client data exported by {current_user.username}, total: {len(data)} clients")
-
-    await log_user_action(
-        db=db,
-        action_type="EXPORT",
-        user=current_user,
-        resource_type="CLIENT",
-        request=request,
-        details={"row_count": len(data), "company_name": company_name, "is_active": is_active},
-    )
-    await commit_audit_log(db)
-
-    # ---------- 构建响应 ----------
-    return excel_streaming_response(data, "客户数据", "客户数据")
 
 
 @router.delete("/{client_id}", response_model=ResponseBaseSchema[dict], summary="删除客户")

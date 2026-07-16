@@ -23,7 +23,7 @@ from sqlalchemy import and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.constants import MAX_TASK_NAME_LENGTH, QUERY_TIMEOUT
+from app.core.constants import MAX_TASK_NAME_LENGTH, QUERY_TIMEOUT, SCHEDULED_TASK_RESERVED_NAMES
 from app.core.errors import ErrorCode
 from fastapi import HTTPException
 from app.core.exceptions import raise_api_exception
@@ -177,6 +177,11 @@ class ScheduledTaskService:
             raise_api_exception(
                 ErrorCode.INVALID_PARAMETER,
                 detail="任务名称无效"
+            )
+        if task_name in SCHEDULED_TASK_RESERVED_NAMES:
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail=f"任务名称与系统保留路径冲突，禁止使用：{task_name}",
             )
 
         result = await self.db.execute(
@@ -629,6 +634,11 @@ class ScheduledTaskService:
             raise_api_exception(
                 ErrorCode.INVALID_PARAMETER,
                 detail="任务名称无效"
+            )
+        if task_name in SCHEDULED_TASK_RESERVED_NAMES:
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail=f"任务名称与系统保留路径冲突，禁止使用：{task_name}",
             )
 
         # 使用数据库锁获取任务记录（防止并发冲突）

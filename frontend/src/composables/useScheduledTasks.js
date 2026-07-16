@@ -6,7 +6,7 @@
  */
 import { computed, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
-import { getScheduledTasks } from '../api/scheduled-task';
+import { getScheduledTasks, getTaskQueueStatus, getSchedulerStatus } from '../api/scheduled-task';
 import { extractErrorMessage, isErrorHandled } from '../utils/api';
 import { normalizeScheduledTaskRow } from '../utils/scheduledTaskStatus';
 
@@ -27,6 +27,11 @@ export function useScheduledTasks() {
   // 数据加载中
   const loading = ref(false);
   const tasks = ref([]);
+  /** 队列/调度器运行时诊断（与列表聚合互补） */
+  const runtimeStatus = ref({
+    queue: null,
+    scheduler: null,
+  });
   // 筛选表单字段
   const searchForm = reactive({
     task_name: '',
@@ -50,14 +55,35 @@ export function useScheduledTasks() {
   const isInitializing = ref(true);
 
   const stats = computed(() => {
-    if (tasks.value.length === 0) return null;
+    if (tasks.value.length === 0 && !runtimeStatus.value.queue) return null;
+    const queue = runtimeStatus.value.queue || {};
+    const scheduler = runtimeStatus.value.scheduler || {};
     return {
       total: pagination.total,
       active: tasks.value.filter((t) => t.is_active).length,
       running: tasks.value.filter((t) => t.is_running).length,
       error: tasks.value.filter((t) => t.error_count > 0).length,
+      queueLength: queue.queue_length ?? null,
+      queueRunning: queue.current_running ?? null,
+      schedulerRunning: scheduler.scheduler_running ?? null,
+      schedulerJobs: scheduler.total_jobs ?? null,
     };
   });
+
+  const fetchRuntimeStatus = async () => {
+    try {
+      const [queue, scheduler] = await Promise.all([
+        getTaskQueueStatus(),
+        getSchedulerStatus(),
+      ]);
+      runtimeStatus.value = { queue: queue || null, scheduler: scheduler || null };
+    } catch (error) {
+      // 诊断接口失败不阻断列表；保留上次成功值
+      if (!isErrorHandled(error)) {
+        console.warn('获取调度器/队列状态失败', error);
+      }
+    }
+  };
 
   const hasRunningTasks = computed(() => tasks.value.some((t) => t.is_running));
 
@@ -95,6 +121,8 @@ export function useScheduledTasks() {
       // 归一化布尔字段，避免 is_running 非严格 true 时开关仍可点
       tasks.value = (response.data || []).map(normalizeScheduledTaskRow);
       pagination.total = response.total || 0;
+      // 并行刷新队列/调度器诊断（不阻塞列表）
+      fetchRuntimeStatus();
       // 运行状态变化时调整轮询节奏
       if (!document.hidden) {
         startAutoRefresh();
@@ -196,6 +224,7 @@ export function useScheduledTasks() {
     searchForm,
     pagination,
     stats,
+    runtimeStatus,
     fetchTasks,
     resetFilter,
     bindPaginationWatch,

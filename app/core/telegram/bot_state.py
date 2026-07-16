@@ -5,6 +5,9 @@ Telegram Bot 全局状态管理
 """
 import logging
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -25,6 +28,13 @@ _bot_lock_acquired = False
 
 # 标记 Bot 实例是否已经创建（用于多进程环境）
 _bot_instance_created = False
+
+# 连接探测：短超时 + 结果缓存，避免管理页卡在 api.telegram.org
+_CONNECTION_PROBE_TIMEOUT_SEC = 3.0
+_CONNECTION_CACHE_TTL_SEC = 60.0
+_CONNECTION_FAIL_CACHE_TTL_SEC = 15.0
+_connection_cache: dict = {"result": None, "ts": 0.0}
+_probe_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="tg-probe")
 
 
 def get_bot_state():
@@ -65,6 +75,20 @@ def set_bot_state(new_bot, initialized: bool, available: bool):
     logger.info(f"Bot 状态已更新：initialized={initialized}, available={available}")
 
 
+def _probe_telegram_connection() -> str:
+    """短超时探测 get_me，失败/超时不阻塞过久。"""
+    if not (bot_initialized and TELEBOT_AVAILABLE and bot):
+        return "未测试"
+    try:
+        future = _probe_executor.submit(bot.get_me)
+        future.result(timeout=_CONNECTION_PROBE_TIMEOUT_SEC)
+        return "成功"
+    except FuturesTimeoutError:
+        return f"超时(>{int(_CONNECTION_PROBE_TIMEOUT_SEC)}s，本地网络可能无法访问 Telegram)"
+    except Exception as e:
+        return f"失败: {str(e)}"
+
+
 def get_bot_status_info():
     """
     获取 Bot 详细状态信息
@@ -85,14 +109,22 @@ def get_bot_status_info():
             bot_thread_alive = thread.is_alive()
             break
     
-    # 测试连接
+    # 连接探测（带缓存，避免每次打开状态页都卡 15s）
     connection_test = "未测试"
-    if bot_initialized and TELEBOT_AVAILABLE and bot:
-        try:
-            bot.get_me()
-            connection_test = "成功"
-        except Exception as e:
-            connection_test = f"失败: {str(e)}"
+    now = time.monotonic()
+    cached = _connection_cache.get("result")
+    cached_ts = float(_connection_cache.get("ts") or 0.0)
+    ttl = (
+        _CONNECTION_CACHE_TTL_SEC
+        if cached == "成功"
+        else _CONNECTION_FAIL_CACHE_TTL_SEC
+    )
+    if cached is not None and (now - cached_ts) < ttl:
+        connection_test = cached
+    elif bot_initialized and TELEBOT_AVAILABLE and bot:
+        connection_test = _probe_telegram_connection()
+        _connection_cache["result"] = connection_test
+        _connection_cache["ts"] = now
     
     return {
         "token_configured": token_configured,

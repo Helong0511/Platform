@@ -13,9 +13,9 @@ logger = logging.getLogger(__name__)
 class HttpClient:
     """HTTP 客户端"""
     
-    # HTTP 超时配置（秒）
-    DEFAULT_TIMEOUT = 30
-    CONNECT_TIMEOUT = 10
+    # HTTP 超时配置（秒）：下游不可达时尽快失败，避免拖垮入库/补发接口
+    DEFAULT_TIMEOUT = 12
+    CONNECT_TIMEOUT = 5
     
     @staticmethod
     async def send_request(

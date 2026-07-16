@@ -74,9 +74,22 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
             click_association = await ClickAssociator.associate(conversion.click_id, db)
 
         try:
-            await PostbackForwarder.forward_to_publisher(
-                conversion, db, click_association=click_association
-            )
+            if task.publisher_id:
+                await PostbackForwarder.forward_to_publisher(
+                    conversion, db, click_association=click_association
+                )
+            elif task.product_id:
+                await PostbackForwarder.forward_to_product(
+                    conversion, db, click_association=click_association
+                )
+            else:
+                logger.warning(
+                    "转发任务缺少 publisher_id/product_id: queue_id=%s",
+                    task.id,
+                )
+                await db.delete(task)
+                await db.commit()
+                return
 
             log_query = (
                 select(PostbackForwardLog)
@@ -87,6 +100,11 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
             if task.publisher_id:
                 log_query = log_query.where(
                     PostbackForwardLog.publisher_id == task.publisher_id
+                )
+            elif task.product_id:
+                log_query = log_query.where(
+                    PostbackForwardLog.product_id == task.product_id,
+                    PostbackForwardLog.publisher_id.is_(None),
                 )
             latest_log = (await db.execute(log_query)).scalars().first()
 

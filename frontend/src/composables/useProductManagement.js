@@ -37,6 +37,7 @@ export function useProductManagement() {
     name: '',
     clientId: null,
     isActive: null,
+    productId: null,
   });
 
   const pagination = reactive({
@@ -70,14 +71,28 @@ export function useProductManagement() {
       clientLabelMap.value[searchForm.clientId] || `客户#${searchForm.clientId}`;
   };
 
-  const applyRouteQuery = () => {
-    const q = route.query || {};
+  /**
+   * 将路由 query 写入筛选项。
+   * @param {Record<string, string|string[]>|null} [queryOverride] 路由更新守卫中传入 to.query
+   */
+  const applyRouteQuery = (queryOverride = null) => {
+    const q = queryOverride || route.query || {};
+    // 同页跳入时先清空，避免残留旧筛选
+    searchForm.name = '';
+    searchForm.clientId = null;
+    searchForm.isActive = null;
+    searchForm.productId = null;
+
     if (q.client_id != null && String(q.client_id).trim() !== '') {
       const cid = Number(q.client_id);
       searchForm.clientId = Number.isFinite(cid) ? cid : null;
     }
     if (q.name != null && String(q.name).trim() !== '') {
       searchForm.name = String(q.name).trim();
+    }
+    if (q.product_id != null && String(q.product_id).trim() !== '') {
+      const pid = Number(q.product_id);
+      searchForm.productId = Number.isFinite(pid) ? pid : null;
     }
     if (q.is_active === 'true' || q.is_active === '1') {
       searchForm.isActive = true;
@@ -91,9 +106,9 @@ export function useProductManagement() {
     const query = {};
     if (searchForm.clientId != null) query.client_id = String(searchForm.clientId);
     if (searchForm.name?.trim()) query.name = searchForm.name.trim();
+    if (searchForm.productId != null) query.product_id = String(searchForm.productId);
     if (searchForm.isActive === true) query.is_active = 'true';
     if (searchForm.isActive === false) query.is_active = 'false';
-    if (route.query.product_id) query.product_id = route.query.product_id;
     router.replace({ query }).catch(() => {});
   };
 
@@ -111,6 +126,7 @@ export function useProductManagement() {
       };
       if (searchForm.clientId != null) params.client_id = searchForm.clientId;
       if (searchForm.name?.trim()) params.name = searchForm.name.trim();
+      if (searchForm.productId != null) params.product_id = searchForm.productId;
       if (searchForm.isActive !== null && searchForm.isActive !== undefined) {
         params.is_active = searchForm.isActive;
       }
@@ -139,6 +155,7 @@ export function useProductManagement() {
     searchForm.name = '';
     searchForm.clientId = null;
     searchForm.isActive = null;
+    searchForm.productId = null;
     formScope.clientId = null;
     formScope.clientName = '';
     pagination.page = 1;
@@ -235,8 +252,12 @@ export function useProductManagement() {
         return false;
       }
       loading.value = true;
-      await deleteProduct(id);
-      ElMessage.success('产品删除成功');
+      const result = await deleteProduct(id);
+      if (result?.transferred) {
+        ElMessage.success(result.message || '产品已转移至默认客户（保留关联广告数据）');
+      } else {
+        ElMessage.success(result?.message || '产品删除成功');
+      }
       await fetchProducts();
       return true;
     } catch (error) {
@@ -300,7 +321,7 @@ export function useProductManagement() {
   const handleDeleteClick = async (id) => {
     try {
       await ElMessageBox.confirm(
-        '确定要删除此产品吗？此操作不可撤销，且会删除关联的广告数据。',
+        '确定要删除此产品吗？若产品仍有关联广告数据，将转移到「默认客户（导入数据）」并保留广告数据；无关联数据时会彻底删除。',
         '确认删除',
         {
           confirmButtonText: '确定',

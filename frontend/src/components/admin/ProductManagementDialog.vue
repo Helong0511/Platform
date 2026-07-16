@@ -180,7 +180,7 @@ const handleViewHistory = (product) => {
 const handleDelete = async (id) => {
   try {
     await ElMessageBox.confirm(
-      '确定要删除此产品吗？此操作不可撤销，且会删除关联的广告数据。',
+      '确定要删除此产品吗？若产品仍有关联广告数据，将转移到「默认客户（导入数据）」并保留广告数据；无关联数据时会彻底删除。',
       '确认删除',
       {
         confirmButtonText: '确定',

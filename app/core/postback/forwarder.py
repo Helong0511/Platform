@@ -402,6 +402,143 @@ class PostbackForwarder:
             logger.warning(f"发送转发成功通知失败：{e}")
 
     @staticmethod
+    async def forward_to_product(
+        conversion: PostbackConversion,
+        db: AsyncSession,
+        click_association: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        将转化数据转发到产品配置的下游 Postback URL（追加于渠道转发之外）。
+
+        仅当 conversion.product_id 存在且产品配置了 downstream_postback_url 时执行。
+        """
+        if not conversion.product_id:
+            logger.debug("转化无 product_id，跳过产品级转发")
+            return
+
+        logger.info(
+            "开始产品级 Postback 转发：conversion_id=%s product_id=%s",
+            conversion.id,
+            conversion.product_id,
+        )
+
+        product = await CacheManager.get_cached_product(conversion.product_id, db)
+        if not product or not product.downstream_postback_url:
+            logger.debug(
+                "产品无下游 Postback URL，跳过：product_id=%s",
+                conversion.product_id,
+            )
+            return
+        if not product.is_active:
+            logger.warning(
+                "产品未激活，跳过产品级转发：product_id=%s",
+                conversion.product_id,
+            )
+            return
+
+        click_association_data = {}
+        if click_association:
+            click_association_data = build_click_association_payload(click_association)
+        elif conversion.click_id:
+            from app.core.postback.transformers.click_associator import ClickAssociator
+            click_association = await ClickAssociator.associate(conversion.click_id, db)
+            if click_association:
+                click_association_data = build_click_association_payload(click_association)
+
+        conversion_data = {
+            'conversion_id': conversion.conversion_id,
+            'payout': conversion.payout,
+            'event_name': conversion.event_name,
+            'event_value': conversion.event_value,
+            'ip': conversion.ip,
+        }
+
+        base_url = product.downstream_postback_url
+        url_data = {**conversion_data, **click_association_data}
+        resolved_url = PlaceholderResolver.resolve(base_url, url_data)
+        final_url, params = UrlBuilder.build_postback_url(
+            resolved_url,
+            conversion_data,
+            click_association_data,
+        )
+
+        method = product.downstream_postback_method or 'GET'
+        request_params = None
+        json_data = None
+
+        if method.upper() == 'POST':
+            json_data = {}
+            if conversion_data.get('payout'):
+                json_data['payout'] = conversion_data['payout']
+            if conversion_data.get('conversion_id'):
+                json_data['conversion_id'] = conversion_data['conversion_id']
+            if conversion_data.get('event_name'):
+                json_data['event_name'] = conversion_data['event_name']
+            url_params = click_association_data.get('url_params', {})
+            cid = scalar_query_value(url_params.get('click_id')) or click_association_data.get(
+                'click_id'
+            )
+            if cid:
+                json_data['clickid'] = str(cid)
+                json_data['click_id'] = str(cid)
+            oid = scalar_query_value(url_params.get('offer_id')) or click_association_data.get(
+                'offer_id'
+            )
+            if oid is not None:
+                json_data['offer_id'] = str(oid)
+        else:
+            request_params = params
+
+        success, status_code, response_content = await HttpClient.send_request(
+            url=final_url,
+            method=method,
+            params=request_params,
+            json_data=json_data,
+        )
+
+        check_success, check_message = SuccessChecker.check(
+            status_code=status_code,
+            response_content=response_content,
+            success_check_config=product.downstream_postback_success_check,
+        )
+        final_success = success and check_success
+
+        forward_log = PostbackForwardLog(
+            conversion_id=conversion.id,
+            product_id=conversion.product_id,
+            publisher_id=None,
+            downstream_url=final_url,
+            request_method=method,
+            request_params=json.dumps(params, ensure_ascii=False) if params else None,
+            response_status=status_code,
+            response_body=response_content[:1000] if response_content else None,
+            success=final_success,
+            error_message=check_message if not final_success else None,
+            created_at=get_app_now_naive(),
+            completed_at=get_app_now_naive(),
+        )
+        db.add(forward_log)
+        await db.flush()
+
+        logger.info(
+            "产品级 Postback 转发完成：conversion_id=%s, product_id=%s, success=%s",
+            conversion.id,
+            conversion.product_id,
+            final_success,
+        )
+
+        if not final_success:
+            await PostbackForwarder._enqueue_product_forward_retry(
+                db=db,
+                conversion=conversion,
+                product_id=conversion.product_id,
+                downstream_url=final_url,
+                method=method,
+                params=params,
+                json_data=json_data if method.upper() == "POST" else None,
+            )
+
+    @staticmethod
     async def _enqueue_publisher_forward_retry(
         db: AsyncSession,
         conversion: PostbackConversion,
@@ -452,6 +589,63 @@ class PostbackForwarder:
         except Exception as exc:
             logger.error(
                 "入队转发重试失败: conversion_id=%s err=%s",
+                conversion.id,
+                exc,
+                exc_info=True,
+            )
+
+    @staticmethod
+    async def _enqueue_product_forward_retry(
+        db: AsyncSession,
+        conversion: PostbackConversion,
+        product_id: int,
+        downstream_url: str,
+        method: str,
+        params: Optional[Dict[str, Any]],
+        json_data: Optional[Dict[str, Any]],
+    ) -> None:
+        """产品级转发失败时写入重试队列。"""
+        try:
+            existing = await db.execute(
+                select(PostbackForwardQueue).where(
+                    PostbackForwardQueue.conversion_id == conversion.id,
+                    PostbackForwardQueue.product_id == product_id,
+                    PostbackForwardQueue.publisher_id.is_(None),
+                )
+            )
+            if existing.scalars().first():
+                logger.debug(
+                    "产品级转发重试队列已存在: conversion_id=%s product_id=%s",
+                    conversion.id,
+                    product_id,
+                )
+                return
+
+            task = PostbackForwardQueue(
+                conversion_id=conversion.id,
+                product_id=product_id,
+                publisher_id=None,
+                downstream_url=downstream_url,
+                request_method=method,
+                request_params=json.dumps(params, ensure_ascii=False) if params else None,
+                request_data=json.dumps(json_data, ensure_ascii=False) if json_data else None,
+                retry_count=0,
+                next_retry_time=get_app_now_naive(),
+            )
+            db.add(task)
+            await db.flush()
+            logger.info(
+                "产品级转发失败已入重试队列: conversion_id=%s product_id=%s",
+                conversion.id,
+                product_id,
+            )
+            import asyncio
+            from app.scheduler_module.tasks.forward_tasks import trigger_forward_processing
+
+            asyncio.create_task(trigger_forward_processing())
+        except Exception as exc:
+            logger.error(
+                "入队产品级转发重试失败: conversion_id=%s err=%s",
                 conversion.id,
                 exc,
                 exc_info=True,

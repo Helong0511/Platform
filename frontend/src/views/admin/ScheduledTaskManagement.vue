@@ -33,6 +33,17 @@
             <span class="stat-label">失败：</span>
             <span class="stat-value danger">{{ stats.error || 0 }}</span>
           </span>
+          <span class="stat-item" v-if="stats.queueRunning !== null">
+            <span class="stat-label">队列执行：</span>
+            <span class="stat-value">{{ stats.queueRunning }}/排队 {{ stats.queueLength ?? 0 }}</span>
+          </span>
+          <span class="stat-item" v-if="stats.schedulerRunning !== null">
+            <span class="stat-label">调度器：</span>
+            <span class="stat-value" :class="stats.schedulerRunning ? 'success' : 'danger'">
+              {{ stats.schedulerRunning ? '运行中' : '已停止' }}
+              <template v-if="stats.schedulerJobs !== null">（{{ stats.schedulerJobs }} jobs）</template>
+            </span>
+          </span>
         </div>
       </div>
     </div>

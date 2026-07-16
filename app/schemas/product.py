@@ -94,9 +94,18 @@ class ProductResponse(ProductInDBBase):
 
 
 def build_product_response(product) -> ProductResponse:
-    """将 ORM Product 转为响应；有关联 client 时填充 client_name。"""
+    """将 ORM Product 转为响应；仅在 client 已预加载时填充 client_name（避免异步懒加载）。"""
     response = ProductResponse.model_validate(product)
-    client = getattr(product, "client", None)
+    client = None
+    try:
+        from sqlalchemy import inspect as sa_inspect
+
+        state = sa_inspect(product)
+        # client 未加载时不要触发 lazy load（异步会话会 greenlet 报错）
+        if "client" not in state.unloaded:
+            client = product.client
+    except Exception:
+        client = None
     if client is None:
         return response
     company_name = getattr(client, "company_name", None)

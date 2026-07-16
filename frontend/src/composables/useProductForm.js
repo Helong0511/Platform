@@ -74,6 +74,8 @@ export function useProductForm(props, emit) {
 
   const productNames = ref([]);
   const productNamesLoading = ref(false);
+  /** 当前 productNames 对应的客户 ID，换客户时须重拉 */
+  const loadedNamesClientId = ref(null);
   const productNameBackup = ref('');
   const selectedProduct = ref(null);
 
@@ -155,21 +157,42 @@ export function useProductForm(props, emit) {
     cb(results);
   };
 
-  const loadProductNames = async () => {
-    if (productNames.value.length > 0) {
+  /**
+   * 加载可选产品名；按客户缓存，换客户或 force 时重新请求。
+   * @param {boolean} [force=false]
+   */
+  const loadProductNames = async (force = false) => {
+    const clientId = props.clientId ?? null;
+    if (
+      !force &&
+      productNames.value.length > 0 &&
+      loadedNamesClientId.value === clientId
+    ) {
       return;
     }
 
     try {
       productNamesLoading.value = true;
-      const result = await getAvailableProductNames(props.clientId);
+      const result = await getAvailableProductNames(clientId);
       productNames.value = result.data || [];
+      loadedNamesClientId.value = clientId;
     } catch {
       productNames.value = [];
+      loadedNamesClientId.value = null;
     } finally {
       productNamesLoading.value = false;
     }
   };
+
+  watch(
+    () => props.clientId,
+    (next, prev) => {
+      if (next !== prev) {
+        productNames.value = [];
+        loadedNamesClientId.value = null;
+      }
+    }
+  );
 
   const fetchClientDetailCached = async (clientId) => {
     if (clientDetailCache.value.has(clientId)) {
@@ -274,6 +297,7 @@ export function useProductForm(props, emit) {
     Object.assign(formData, createEmptyFormData());
     currentProductId.value = null;
     productNames.value = [];
+    loadedNamesClientId.value = null;
     selectedProduct.value = null;
     clearTransferState();
   };
@@ -285,7 +309,7 @@ export function useProductForm(props, emit) {
     productNameBackup.value = '';
     selectedProduct.value = null;
     clearTransferState();
-    await loadProductNames();
+    await loadProductNames(true);
     clearFormValidation();
     formDialogVisible.value = true;
   };
@@ -293,7 +317,7 @@ export function useProductForm(props, emit) {
   const handleEdit = async (product) => {
     currentProductId.value = product.id;
     formTitle.value = '编辑产品';
-    await loadProductNames();
+    await loadProductNames(true);
     Object.assign(formData, {
       name: product.name || '',
       ecpm_deduct_ratio: product.ecpm_deduct_ratio || 0,

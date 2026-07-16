@@ -268,6 +268,12 @@ class PublisherService(BaseService[Publisher]):
         await self.db.flush()
         await self.db.refresh(publisher)
 
+        try:
+            from app.core.postback.forwarding.cache_manager import CacheManager
+            await CacheManager.invalidate_publisher(publisher.id)
+        except Exception as e:
+            logger.debug("失效渠道转发缓存失败: %s", e)
+
         # 记录审计日志
         await log_user_action(
             db=self.db,

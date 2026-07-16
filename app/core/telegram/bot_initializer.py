@@ -107,6 +107,12 @@ def initialize_bot():
                 logger.info(f"Telegram token 加载结果：{token[:4]}****" if token else "None")
                 
                 if token and isinstance(token, str) and token.strip():
+                    # 短超时，避免管理接口被 api.telegram.org 拖死
+                    try:
+                        telebot.apihelper.CONNECT_TIMEOUT = 3
+                        telebot.apihelper.READ_TIMEOUT = 5
+                    except Exception as timeout_err:
+                        logger.debug("设置 telebot 超时失败（可忽略）: %s", timeout_err)
                     # 初始化 Telegram Bot
                     bot_instance = telebot.TeleBot(token=token)
                     set_bot_state(bot_instance, True, dynamic_telebot_available)

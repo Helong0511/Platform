@@ -157,6 +157,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import { onBeforeRouteUpdate } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { Box, Plus, Refresh, Search } from '@element-plus/icons-vue';
 import ProductAssignmentHistoryDialog from '../../components/admin/ProductAssignmentHistoryDialog.vue';
@@ -241,6 +242,15 @@ const handleViewHistory = (product) => {
 onMounted(async () => {
   applyRouteQuery();
   await loadClientOptions();
+  await fetchProducts();
+});
+
+/** 同页再次带 query 跳入时（如从广告数据点产品）重新应用筛选 */
+onBeforeRouteUpdate(async (to, from) => {
+  if (to.fullPath === from.fullPath) return;
+  // 本页 search 也会 replace query，用 fullPath 差异过滤即可
+  applyRouteQuery(to.query);
+  pagination.page = 1;
   await fetchProducts();
 });
 </script>

@@ -9,7 +9,7 @@
     <UserFilterBar
       :search-form="searchForm"
       :loading="loading"
-      @search="fetchUsers"
+      @search="handleSearch"
       @reset="resetFilter"
     />
 
@@ -112,6 +112,7 @@ const {
   searchForm,
   fetchUsers,
   fetchStats,
+  handleSearch,
   resetFilter,
   bindPaginationWatch,
 } = useUserList(authStore, router);

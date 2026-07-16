@@ -38,15 +38,16 @@ class DataValidator:
         if click_id and len(str(click_id)) > 200:
             errors.append(f"click_id/conversion_id 过长：{len(str(click_id))} 字符（最大 100）")
         
-        # 检查 payout 是必填的
+        # 检查 payout 是必填且必须为大于 0 的数字
+        # 注意：字符串 "0" 在布尔判断中为 True，不能用 `if not payout`
         payout = raw_data.get('payout')
-        if not payout:
+        if payout is None or str(payout).strip() == '':
             errors.append("缺少必填字段：payout")
-        
-        # 检查 payout 格式
-        if payout:
+        else:
             try:
-                float(payout)
+                payout_val = float(payout)
+                if payout_val <= 0:
+                    errors.append(f"payout 必须大于 0：当前值={payout}")
             except (ValueError, TypeError):
                 errors.append(f"payout 格式错误：{payout}（应为数字）")
         

@@ -232,4 +232,7 @@ scripts/keys/
 # 导入样本目录
 导入样本/
 .trae
-tests/
+# 默认忽略 tests 下内容；仅白名单本仓库集成测试脚本
+tests/*
+!tests/test_*.py
+!tests/scan_route_order.py

@@ -391,6 +391,79 @@ async def upload_gam_credentials_scheduled_task(
 
 
 @router.get(
+    "/queue-status",
+    response_model=ResponseBaseSchema[dict],
+    summary="获取任务队列状态",
+    dependencies=[Depends(require_admin)]
+)
+async def get_task_queue_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    获取任务执行队列的当前状态（已重构使用服务层）
+    
+    返回信息包括：
+    - current_running: 当前正在执行的任务数
+    - max_concurrent: 最大并发任务数
+    - queue_length: 队列中等待的任务数
+    - running_tasks: 正在执行的任务名称列表
+    - queued_tasks: 队列中等待的任务名称列表
+    - queue_details: 队列详细信息（包含优先级和等待时间）
+    
+    仅管理员可访问
+    """
+    # 使用服务层（业务逻辑在ScheduledTaskService中）
+    task_service: ScheduledTaskService = await get_scheduled_task_service(db)
+    
+    try:
+        # 调用服务层获取任务队列状态（服务层会处理查询）
+        status = await task_service.get_task_queue_status()
+        
+        return ResponseBaseSchema.success(data=status, message="获取队列状态成功")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取任务队列状态失败: {e}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"获取任务队列状态失败：{str(e)}"
+        )
+
+
+@router.get(
+    "/scheduler-status",
+    response_model=ResponseBaseSchema[dict],
+    summary="获取调度器状态（诊断用）"
+)
+async def get_scheduler_status(
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin)
+):
+    """
+    获取调度器的详细状态信息，用于诊断定时任务是否正常运行（已重构使用服务层）
+    - 仅管理员可访问
+    - 显示调度器运行状态、已注册任务列表、下次执行时间等
+    """
+    # 使用服务层（业务逻辑在ScheduledTaskService中）
+    task_service: ScheduledTaskService = await get_scheduled_task_service(db)
+    
+    try:
+        # 调用服务层获取调度器状态（服务层会处理查询）
+        status_data = await task_service.get_scheduler_status()
+        
+        return ResponseBaseSchema.success(data=status_data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取调度器状态失败: {e}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"获取调度器状态失败：{str(e)}"
+        )
+
+
+@router.get(
     "/{task_name}",
     response_model=ResponseBaseSchema[ScheduledTaskResponse],
     summary="获取定时任务详情"
@@ -678,82 +751,6 @@ async def reload_all_scheduled_tasks(
             detail=f"重新加载所有定时任务失败：{str(e)}"
         )
 
-
-@router.get(
-    "/queue-status",
-    response_model=ResponseBaseSchema[dict],
-    summary="获取任务队列状态",
-    dependencies=[Depends(require_admin)]
-)
-async def get_task_queue_status(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin)
-):
-    """
-    获取任务执行队列的当前状态（已重构使用服务层）
-    
-    返回信息包括：
-    - current_running: 当前正在执行的任务数
-    - max_concurrent: 最大并发任务数
-    - queue_length: 队列中等待的任务数
-    - running_tasks: 正在执行的任务名称列表
-    - queued_tasks: 队列中等待的任务名称列表
-    - queue_details: 队列详细信息（包含优先级和等待时间）
-    
-    仅管理员可访问
-    """
-    # 使用服务层（业务逻辑在ScheduledTaskService中）
-    task_service: ScheduledTaskService = await get_scheduled_task_service(db)
-    
-    try:
-        # 调用服务层获取任务队列状态（服务层会处理查询）
-        status = await task_service.get_task_queue_status()
-        
-        return ResponseBaseSchema(
-            success=True,
-            message="获取队列状态成功",
-            data=status
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"获取任务队列状态失败: {e}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"获取任务队列状态失败：{str(e)}"
-        )
-
-
-@router.get(
-    "/scheduler-status",
-    response_model=ResponseBaseSchema[dict],
-    summary="获取调度器状态（诊断用）"
-)
-async def get_scheduler_status(
-        db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(require_admin)
-):
-    """
-    获取调度器的详细状态信息，用于诊断定时任务是否正常运行（已重构使用服务层）
-    - 仅管理员可访问
-    - 显示调度器运行状态、已注册任务列表、下次执行时间等
-    """
-    # 使用服务层（业务逻辑在ScheduledTaskService中）
-    task_service: ScheduledTaskService = await get_scheduled_task_service(db)
-    
-    try:
-        # 调用服务层获取调度器状态（服务层会处理查询）
-        status_data = await task_service.get_scheduler_status()
-        
-        return ResponseBaseSchema.success(data=status_data)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"获取调度器状态失败: {e}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"获取调度器状态失败：{str(e)}"
-        )
 
 
 @router.post(

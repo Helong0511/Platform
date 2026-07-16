@@ -123,17 +123,48 @@ class AdDataListResponse(BaseModel):
     page_size: int
 
 
+class AdDataSummaryDateRange(BaseModel):
+    """广告数据汇总的日期区间。"""
+    start_date: date | None = None
+    end_date: date | None = None
+
+
 class AdDataSummaryResponse(BaseModel):
     """
-    广告数据区间汇总（展示、点击、收入、平均 eCPM）
-    
-    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    广告数据区间汇总。
+
+    字段与 ``AdDataSummaryQuery`` / 前端表格合计行口径对齐；
+    管理员额外包含减扣前 eCPM / 收益。
     """
-    total_impressions: int
-    total_clicks: int
-    total_revenue: float
-    average_ecpm: float
-    date_range: str
+    date_range: AdDataSummaryDateRange | None = None
+    total_requests: int = 0
+    total_matches: int = 0
+    total_displays: int = 0
+    total_clicks: int = 0
+    avg_coverage_rate: float = 0.0
+    avg_display_rate: float = 0.0
+    avg_click_rate: float = 0.0
+    total_ecpm_after_deduct: float = 0.0
+    total_revenue_after_deduct: float = 0.0
+    total_ecpm_before_deduct: float | None = None
+    total_revenue_before_deduct: float | None = None
+    # 与表格列同名的别名字段（兼容前端/Telegram）
+    request_count: int = 0
+    match_count: int = 0
+    display_count: int = 0
+    click_count: int = 0
+    pageviews: int = 0
+    coverage_rate: float = 0.0
+    display_rate: float = 0.0
+    click_rate: float = 0.0
+    viewability_rate: float = 0.0
+    cpc: float = 0.0
+    ecpm_after_deduct: float = 0.0
+    revenue_after_deduct: float = 0.0
+    ecpm_before_deduct: float | None = None
+    revenue_before_deduct: float | None = None
+    product_id: int | None = None
+    product_name: str | None = None
 
 
 class AdDataUpdate(BaseModel):

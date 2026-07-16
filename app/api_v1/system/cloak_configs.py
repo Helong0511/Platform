@@ -450,6 +450,27 @@ async def create_cloak_config(
     return ResponseBaseSchema.success(data=resp, message="创建斗篷配置成功")
 
 
+@router.get(
+    "/{config_id}",
+    response_model=ResponseBaseSchema[CloakConfigResponse],
+    summary="获取斗篷配置详情",
+)
+async def get_cloak_config(
+    config_id: int = Path(..., ge=1, description="配置ID"),
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(require_admin),
+):
+    """按 ID 获取单条斗篷配置（含桥页可用性字段）。"""
+    result = await db.execute(select(CloakConfig).where(CloakConfig.id == config_id))
+    config = result.scalars().first()
+    if not config:
+        raise_api_exception(ErrorCode.RESOURCE_NOT_FOUND, detail="斗篷配置不存在")
+    resp = CloakConfigResponse.model_validate(config).model_copy(
+        update=_bridge_usability_fields(config.cloak_name)
+    )
+    return ResponseBaseSchema.success(data=resp, message="获取斗篷配置成功")
+
+
 @router.put(
     "/{config_id}",
     response_model=ResponseBaseSchema[CloakConfigResponse],

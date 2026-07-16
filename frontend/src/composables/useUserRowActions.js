@@ -10,6 +10,8 @@ import { updateClient, updateClientSwitches } from '../api/client';
 import { extractErrorMessage, isErrorHandled } from '../utils/api';
 import { ensureCsrfToken } from '../utils/csrfMutate';
 import { resolveClientIdForUser, ensureUserHasClient } from '../utils/userClient';
+import { navigateToProductManagement } from '../utils/navigateProductManagement';
+import { useAuthStore } from '../store';
 import { logger } from '../utils/logger';
 
 /**
@@ -21,6 +23,7 @@ export function useUserRowActions({
   fetchStats,
 }) {
   const router = useRouter();
+  const authStore = useAuthStore();
   // notificationConfigDialogVisible 响应式状态
   const notificationConfigDialogVisible = ref(false);
   const currentClientIdForNotification = ref(null);
@@ -53,9 +56,18 @@ export function useUserRowActions({
     }
   };
 
-  const handleStatusChange = async (user) => {
+  /**
+   * 切换用户启用/禁用。
+   * @param {Object} user 用户行
+   * @param {boolean} [desiredStatus] 目标状态；开关会先经 v-model 更新再传入，按钮传入取反后的目标值
+   */
+  const handleStatusChange = async (user, desiredStatus) => {
+    const newStatus = typeof desiredStatus === 'boolean' ? desiredStatus : !user.is_active;
+    const previousStatus = !newStatus;
+    // 统一 UI 为目标态（开关路径已同步；按钮路径需立即反映）
+    user.is_active = newStatus;
+
     try {
-      const newStatus = !user.is_active;
       const confirmText = newStatus ? '启用' : '禁用';
       await ElMessageBox.confirm(
         `确定要${confirmText}用户 "${user.username}" 吗？`,
@@ -75,6 +87,7 @@ export function useUserRowActions({
       ElMessage.success(`用户${confirmText}成功`);
       await refreshUsersAndStats();
     } catch (error) {
+      user.is_active = previousStatus;
       if (error !== 'cancel' && !isErrorHandled(error)) {
         ElMessage.error(extractErrorMessage(error));
       }
@@ -126,9 +139,9 @@ export function useUserRowActions({
   const handleManageProducts = async (user) => {
     if (user.role !== 'client') return;
     if (!(await ensureUserHasClient(user, getUserDetail, ElMessage))) return;
-    router.push({
-      name: 'ProductManagement',
-      query: { client_id: String(user.client.id) },
+    navigateToProductManagement(router, {
+      isAdmin: authStore.isAdmin,
+      clientId: user.client.id,
     });
   };
 
