@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Optional
 
@@ -30,9 +31,31 @@ from app.models.models import SensitiveBlockedIP
 logger = logging.getLogger(__name__)
 
 # 内存降级：ip -> {level_value: (count, expire_ts)}
-_mem_hit_store: dict[str, dict[int, tuple[int, float]]] = {}
-_mem_alert_ts: dict[str, float] = {}
+# 使用 OrderedDict 保证 LRU 淘汰顺序
+_mem_hit_store: OrderedDict[str, dict[int, tuple[int, float]]] = OrderedDict()
+_mem_alert_ts: OrderedDict[str, float] = OrderedDict()
 _blocked_ip_cache_bust_callbacks: list = []
+
+# 内存存储最大IP数量限制
+_MEM_STORE_MAX_IP = 5000
+# 内存存储清理阈值（达到最大数量的80%时触发清理）
+_MEM_STORE_CLEANUP_THRESHOLD = int(_MEM_STORE_MAX_IP * 0.8)
+
+
+def _cleanup_memory_store() -> None:
+    """清理内存存储，淘汰最久未使用的IP记录。"""
+    global _mem_hit_store, _mem_alert_ts
+
+    if len(_mem_hit_store) >= _MEM_STORE_CLEANUP_THRESHOLD:
+        # 清理到总大小的50%
+        entries_to_clean = len(_mem_hit_store) - int(_MEM_STORE_MAX_IP * 0.5)
+        cleaned = 0
+        while cleaned < entries_to_clean and _mem_hit_store:
+            oldest_ip, _ = _mem_hit_store.popitem(last=False)
+            _mem_alert_ts.pop(oldest_ip, None)
+            cleaned += 1
+        if cleaned:
+            logger.debug(f"清理了 {cleaned} 个旧的敏感路径探测记录，当前内存存储IP数: {len(_mem_hit_store)}")
 
 
 def register_blocked_ip_cache_bust(callback) -> None:
@@ -92,8 +115,11 @@ class SensitivePathHitTracker:
 
     def _mem_increment(self, ip: str, level: SensitivePathLevel) -> int:
         """Redis 不可用时的进程内滑动窗口计数降级实现。"""
+        _cleanup_memory_store()
         now = time.time()
         expire = now + self._window
+        if ip in _mem_hit_store:
+            _mem_hit_store.move_to_end(ip)
         bucket = _mem_hit_store.setdefault(ip, {})
         lv = int(level)
         cnt, exp = bucket.get(lv, (0, 0.0))

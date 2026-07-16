@@ -45,7 +45,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='用户ID')
     username = Column(String(50), unique=True, nullable=False, comment='用户名称(登录名称)')
-    hashed_password = Column('hashed_password', String(191), nullable=False, comment='用户Hash密码')
+    hashed_password = Column('hashed_password', String(100), nullable=False, comment='用户Hash密码')
     full_name = Column(String(100), comment='用户全名')
     email = Column(String(100), unique=True, comment='用户邮箱')
     role = Column(Enum(UserRole, values_callable=lambda obj: [e.value for e in UserRole], create_constraint=True), 

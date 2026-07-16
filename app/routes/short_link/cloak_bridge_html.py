@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 # 桥页 HTML 响应的 Content-Security-Policy，限制脚本与资源来源以降低 XSS 风险
 BRIDGE_CSP = (
     "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+    "script-src-attr 'none'; object-src 'none'; "
     "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
     "img-src 'self' data: https:; font-src 'self' data: https://cdnjs.cloudflare.com; "
     "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; "
@@ -143,6 +144,23 @@ def inject_meta_into_html(html_content: str, meta_snippet: str) -> str:
     return meta_snippet + "\n" + html_content
 
 
+def _to_js_string_literal(value: str) -> str:
+    """
+    将 Python 字符串安全序列化为 JS 字符串字面量（含外层引号）。
+
+    使用 json.dumps，并把 < > & 转为 Unicode 转义，避免在 HTML <script>
+    中出现 </script> 等提前闭合标签的序列。
+    """
+    literal = json.dumps(value if value is not None else "", ensure_ascii=False)
+    return (
+        literal.replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
+
+
 def inject_original_url_into_html(
         html_content: str,
         original_url: str,
@@ -153,13 +171,13 @@ def inject_original_url_into_html(
 
     跳转 URL 会附带 email、phone、fbclid、dp 等查询参数（与短链占位符逻辑一致）。
     """
-    escaped_url = original_url.replace("\\", "\\\\").replace('"', '\\"')
-    escaped_dp = (dp or "").replace("\\", "\\\\").replace('"', '\\"')
+    url_js = _to_js_string_literal(original_url)
+    dp_js = _to_js_string_literal(dp or "")
     pattern = r"function getOriginalUrl\([^)]*\) \{[\s\S]*?return originalUrl;[\s\S]*?\}"
     replacement = (
         f'function getOriginalUrl(adEventData) {{ '
-        f'let originalUrl = "{escaped_url}"; '
-        f'const dpParam = "{escaped_dp}"; '
+        f'let originalUrl = {url_js}; '
+        f'const dpParam = {dp_js}; '
         f'const email = adEventData?.email || sessionStorage.getItem("ad_event_email") || ""; '
         f'const phone = adEventData?.phone || sessionStorage.getItem("ad_event_phone") || ""; '
         f'try {{ '
@@ -189,7 +207,8 @@ def inject_original_url_into_html(
         f'return originalUrl; '
         f"}}"
     )
-    result = re.sub(pattern, replacement, html_content)
+    # 使用回调注入，避免 re.sub 把替换串中的 \u003c 等当作正则转义
+    result = re.sub(pattern, lambda _m: replacement, html_content)
     if replacement not in result:
         logger.error("[斗篷服务] 原始URL注入失败")
     return result

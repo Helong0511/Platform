@@ -19,6 +19,7 @@
  * 权限控制：
  * - requiresAuth: 需要登录才能访问
  * - requiresAdmin: 需要管理员权限才能访问
+ * - requiresClientAccess: 仅客户（非管理员）可访问
  * - requiresPublisher: 需要管理员或有关联渠道的客户才能访问
  * - requiresAdDataAccess: 广告数据类页面（有关联渠道的客户不可访问）
  * - requiresApiEnabled: 客户 API 文档（需 api_enabled）
@@ -394,7 +395,8 @@ const routes = [
       {
         path: 'client/user-management',
         name: 'ClientUserManagement',
-        component: ClientUserManagement
+        component: ClientUserManagement,
+        meta: { requiresAuth: true, requiresClientAccess: true }
       },
       {
         path: 'api-documentation',
@@ -528,6 +530,22 @@ router.beforeEach(async (to, from, next) => {
           ? from.path
           : '/app/dashboard';
         ElMessage.warning('无权访问该页面，需要管理员权限');
+        return next(fallbackPath);
+      }
+    }
+
+    // ====== 客户专属页面（与侧栏 !isAdmin 一致） ======
+    if (to.meta.requiresClientAccess) {
+      if (!authStore.isAuthenticated) {
+        clearAuthData();
+        ElMessage.warning('请先登录');
+        return next('/login');
+      }
+      if (authStore.isAdmin) {
+        const fallbackPath = from.path && from.path !== '/login' && from.path.startsWith('/app')
+          ? from.path
+          : '/app/dashboard';
+        ElMessage.warning('该页面仅供客户访问');
         return next(fallbackPath);
       }
     }

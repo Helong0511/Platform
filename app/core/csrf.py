@@ -7,6 +7,7 @@ import secrets
 import logging
 import hashlib
 import time
+from collections import OrderedDict
 from typing import Optional, Dict
 from fastapi import Request, HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -32,8 +33,8 @@ def _csrf_violation_log_level(request: Request) -> int:
         return logging.INFO
     return logging.WARNING
 
-# CSRF令牌存储（内存存储，Redis不可用时使用）
-_csrf_tokens: Dict[str, str] = {}
+# CSRF令牌存储（内存降级；OrderedDict 保证 LRU 淘汰不依赖 dict 插入顺序语义）
+_csrf_tokens: OrderedDict[str, str] = OrderedDict()
 # 内存令牌存储最大大小
 _MEMORY_TOKEN_STORE_MAX_SIZE = 10000
 # 内存令牌清理阈值（当达到最大大小的80%时触发清理）
@@ -330,14 +331,18 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 stored_token = await redis_client.get(csrf_key)
                 if stored_token:
                     stored_token = stored_token.decode('utf-8') if isinstance(stored_token, bytes) else stored_token
-                    # 更新内存存储（作为备份）
+                    # 更新内存存储（作为备份，并标记为最近使用）
                     _csrf_tokens[session_id] = stored_token
+                    _csrf_tokens.move_to_end(session_id)
                     return stored_token
             except Exception as e:
                 logger.warning(f"Redis CSRF令牌获取失败: {str(e)}，将检查内存存储")
         
         # 尝试从内存存储获取
-        return _csrf_tokens.get(session_id)
+        token = _csrf_tokens.get(session_id)
+        if token is not None:
+            _csrf_tokens.move_to_end(session_id)
+        return token
     
     async def _store_csrf_token(self, session_id: str, csrf_token: str, request: Request) -> None:
         """
@@ -358,31 +363,33 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 # 同时更新内存存储（作为备份）
                 self._cleanup_memory_tokens_if_needed()
                 _csrf_tokens[session_id] = csrf_token
+                _csrf_tokens.move_to_end(session_id)
             except Exception as e:
                 logger.warning(f"Redis CSRF令牌存储失败: {str(e)}，使用内存存储")
                 self._cleanup_memory_tokens_if_needed()
                 _csrf_tokens[session_id] = csrf_token
+                _csrf_tokens.move_to_end(session_id)
         else:
             self._cleanup_memory_tokens_if_needed()
             _csrf_tokens[session_id] = csrf_token
+            _csrf_tokens.move_to_end(session_id)
     
     def _cleanup_memory_tokens_if_needed(self) -> None:
         """
-        检查并清理内存令牌存储
-        当存储大小达到清理阈值时，清理最旧的令牌
+        检查并清理内存令牌存储。
+        使用 OrderedDict.popitem(last=False) 淘汰最久未使用的令牌。
         """
         global _csrf_tokens
         
         if len(_csrf_tokens) >= _MEMORY_TOKEN_CLEANUP_THRESHOLD:
             # 计算需要清理的令牌数量（清理到总大小的50%）
             tokens_to_clean = len(_csrf_tokens) - int(_MEMORY_TOKEN_STORE_MAX_SIZE * 0.5)
-            if tokens_to_clean > 0:
-                # 获取所有令牌的键（这里假设字典的插入顺序是最近添加的在后面）
-                # 在Python 3.7+中，字典保持插入顺序
-                oldest_tokens = list(_csrf_tokens.keys())[:tokens_to_clean]
-                for token_key in oldest_tokens:
-                    _csrf_tokens.pop(token_key, None)
-                logger.debug(f"清理了 {len(oldest_tokens)} 个旧的CSRF令牌，当前内存存储大小: {len(_csrf_tokens)}")
+            cleaned = 0
+            while cleaned < tokens_to_clean and _csrf_tokens:
+                _csrf_tokens.popitem(last=False)
+                cleaned += 1
+            if cleaned:
+                logger.debug(f"清理了 {cleaned} 个旧的CSRF令牌，当前内存存储大小: {len(_csrf_tokens)}")
     
     async def _add_csrf_token_to_response(self, response: Response, csrf_token: str, request: Request) -> None:
         """

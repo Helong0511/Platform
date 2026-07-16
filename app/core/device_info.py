@@ -11,6 +11,29 @@ from typing import Dict, Optional, Any
 from fastapi import Request
 from app.core.utils import get_client_ip
 
+# 落库 all_headers 时脱敏的请求头（小写名）；避免 Cookie/会话令牌长期存库
+_SENSITIVE_HEADER_NAMES = frozenset(
+    {
+        "cookie",
+        "authorization",
+        "proxy-authorization",
+        "x-csrf-token",
+        "x-xsrf-token",
+        "set-cookie",
+    }
+)
+
+
+def _redact_headers_for_storage(raw_headers) -> Dict[str, str]:
+    """复制请求头并将敏感头值替换为 [REDACTED]。"""
+    redacted: Dict[str, str] = {}
+    for key, value in raw_headers.items():
+        if str(key).lower() in _SENSITIVE_HEADER_NAMES:
+            redacted[key] = "[REDACTED]"
+        else:
+            redacted[key] = value
+    return redacted
+
 
 def parse_user_agent(user_agent: Optional[str]) -> Dict[str, Optional[str]]:
     """
@@ -252,11 +275,9 @@ def collect_request_info(request: Request) -> Dict[str, Any]:
     # 获取客户端IP（使用统一的工具函数）
     client_ip = get_client_ip(request)
     
-    # 收集所有请求头
-    headers = {}
-    for key, value in request.headers.items():
-        headers[key] = value
-    
+    # 收集请求头（敏感头脱敏后再落库，防止 Cookie/Authorization 泄露）
+    headers = _redact_headers_for_storage(request.headers)
+
     # 收集URL参数（必须保留全部：含重复 key、空值；用于 clicks 访问记录）
     # - url_params: JSON(dict[str, list[str]]) 便于存库与后续追加字段
     # - url_params_dict: dict[str, str|list[str]] 便于生成 click_id 令牌使用
@@ -304,7 +325,7 @@ def collect_request_info(request: Request) -> Dict[str, Any]:
         # 给令牌生成用（dict 形式，不丢重复值）
         'url_params_dict': url_params_dict if url_params_multi else None,
         
-        # 所有请求头（JSON格式存储，用于详细分析）
+        # 请求头（敏感头已脱敏；JSON 存库供设备/排障分析）
         'all_headers': json.dumps(headers) if headers else None,
     }
     

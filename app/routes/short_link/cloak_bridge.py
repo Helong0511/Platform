@@ -38,6 +38,7 @@ _CONTENT_TYPE_MAP = {
 # 桥页静态资源与 HTML 共用 CSP 策略，允许 cdnjs 字体/样式
 _BRIDGE_STATIC_CSP = (
     "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+    "script-src-attr 'none'; object-src 'none'; "
     "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
     "img-src 'self' data: https: blob:; font-src 'self' data: "
     "https://cdnjs.cloudflare.com; connect-src 'self'; "

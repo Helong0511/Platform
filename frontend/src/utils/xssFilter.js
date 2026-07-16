@@ -177,6 +177,43 @@ const VOID_ELEMENTS = new Set([
 const DANGEROUS_STYLE_VALUE = /expression|javascript|vbscript|behavior|-moz-binding|-ms-behavior|@import|<|>|\\|`/i;
 
 /**
+ * 校验 CSS url() 是否安全：允许相对路径、http(s)、data:image；拒绝 javascript/data 脚本等
+ * @param {string} value
+ * @returns {boolean}
+ */
+function isStyleUrlSafe(value) {
+  const matches = value.matchAll(/url\s*\(\s*(['"]?)([^'")]+)\1\s*\)/gi);
+  for (const match of matches) {
+    const raw = (match[2] || '').trim();
+    if (!raw) {
+      return false;
+    }
+    const lower = raw.toLowerCase();
+    if (lower.startsWith('data:')) {
+      if (!/^data:image\//i.test(raw)) {
+        return false;
+      }
+      continue;
+    }
+    if (
+      lower.startsWith('/') ||
+      lower.startsWith('./') ||
+      lower.startsWith('../') ||
+      lower.startsWith('#') ||
+      lower.startsWith('http://') ||
+      lower.startsWith('https://')
+    ) {
+      if (!isUrlSafe(raw) && (lower.startsWith('http://') || lower.startsWith('https://'))) {
+        return false;
+      }
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+/**
  * 使用 DOMParser 解析 HTML（不挂载到活动文档，避免 innerHTML 解析阶段的副作用）
  * @param {string} html
  * @returns {HTMLElement} 包裹解析结果的临时容器
@@ -359,8 +396,8 @@ function isStyleDeclarationValueSafe(value) {
   if (DANGEROUS_STYLE_VALUE.test(trimmed)) {
     return false;
   }
-  // 内联 style 禁止 url()，避免 javascript:/data: 等协议注入
-  if (/url\s*\(/i.test(trimmed)) {
+  // 允许安全 url()（相对路径 / https / data:image），拒绝危险协议
+  if (/url\s*\(/i.test(trimmed) && !isStyleUrlSafe(trimmed)) {
     return false;
   }
   return true;
@@ -393,7 +430,7 @@ export function filterStyle(style) {
     .replace(/vbscript\s*:/gi, '')
     .replace(/@import\s+[^;]+/gi, '')
     .replace(/url\s*\(\s*['"]?\s*javascript:/gi, '')
-    .replace(/url\s*\(\s*['"]?\s*data:/gi, '');
+    .replace(/url\s*\(\s*['"]?\s*data:(?!image\/)/gi, '');
   
   const properties = filtered.split(';').map(p => p.trim()).filter(p => p);
   const safeProperties = [];
@@ -466,6 +503,33 @@ export function sanitizeInput(input) {
  * @returns {boolean} result.isSafe - 是否安全
  * @returns {string[]} result.issues - 发现的安全问题列表
  */
+/** validateInput 额外危险模式（补充常见 XSS 变体） */
+const XSS_EXTRA_PATTERNS = [
+  { re: /<\s*(script|iframe|object|embed|svg|math|link|meta|base|form|applet|frameset|noscript|template|html|body|head)\b/i, msg: '发现危险HTML标签' },
+  { re: /\bsrcdoc\s*=/i, msg: '发现srcdoc属性' },
+  { re: /\bformaction\s*=/i, msg: '发现formaction属性' },
+  { re: /\bxlink:href\s*=/i, msg: '发现xlink:href属性' },
+  { re: /\bon\w+\s*=/i, msg: '发现事件处理属性' },
+  { re: /\bjavascript\s*:/i, msg: '发现JavaScript伪协议' },
+  { re: /\bvbscript\s*:/i, msg: '发现VBScript伪协议' },
+  { re: /\blivescript\s*:/i, msg: '发现LiveScript伪协议' },
+  { re: /&#x?0*(?:6a|106|74|116|61|97|76|118|73|105)/i, msg: '发现可疑HTML实体编码' },
+  { re: /&#x?[0-9a-f]+;/gi, msg: '发现过多HTML实体编码' },
+  { re: /\\u0061script|\\x6aascript|\\x6Ascript/i, msg: '发现转义脚本协议' },
+  { re: /\\u[0-9a-f]{4}/gi, msg: '发现Unicode转义序列' },
+  { re: /\\x[0-9a-f]{2}/gi, msg: '发现十六进制转义序列' },
+  { re: /data:\s*text\/html/i, msg: '发现data:text/html' },
+  { re: /data:\s*application\/javascript/i, msg: '发现data:javascript' },
+  { re: /data:\s*application\/x-javascript/i, msg: '发现data:x-javascript' },
+  { re: /data:\s*application\/ecmascript/i, msg: '发现data:ecmascript' },
+  { re: /data:\s*text\/javascript/i, msg: '发现data:text/javascript' },
+  { re: /\bexpression\s*\(/i, msg: '发现CSS表达式' },
+  { re: /\bbehavior\s*:/i, msg: '发现CSS行为属性' },
+  { re: /\burl\s*\(\s*javascript:/i, msg: '发现CSS中的JavaScript URL' },
+  { re: /\b@import\s+/i, msg: '发现CSS @import' },
+  { re: /<\!\[CDATA\[/i, msg: '发现CDATA标记' },
+];
+
 export function validateInput(input) {
   if (!input || typeof input !== 'string') {
     return { isSafe: true, issues: [] };
@@ -513,6 +577,12 @@ export function validateInput(input) {
   // 检查on*属性（更通用的检查）
   if (/on\w+\s*=/.test(lowerInput)) {
     issues.push('发现事件绑定');
+  }
+
+  for (const { re, msg } of XSS_EXTRA_PATTERNS) {
+    if (re.test(input)) {
+      issues.push(msg);
+    }
   }
   
   return {

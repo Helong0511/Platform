@@ -93,11 +93,44 @@ from urllib.parse import unquote
 logger = logging.getLogger(__name__)
 
 # ====== API限流存储 ======
-# 使用内存存储限流信息（Redis不可用时使用）
+# 内存降级：多进程不共享；生产应启用 Redis。此处限制 IP 条目数，防止探测撑爆内存。
 _rate_limit_store: dict[str, dict[str, tuple[int, datetime]]] = defaultdict(dict)
+_RATE_LIMIT_STORE_MAX_IPS = 10000
 # Redis 限流异常日志限频（避免短时间刷屏）
 _rate_limit_redis_error_log_window_seconds = 60
 _rate_limit_redis_error_last_log_at: dict[str, float] = {}
+
+
+def _evict_rate_limit_store_if_needed(now: datetime, window: int) -> None:
+    """清理过期窗口；IP 数超上限时淘汰最久未活跃的条目。"""
+    # 先清各 IP 下过期窗口，并删除空 IP
+    empty_ips: list[str] = []
+    for ip, windows in _rate_limit_store.items():
+        expired = [
+            key for key, (_count, ts) in windows.items()
+            if (now - ts).total_seconds() > window
+        ]
+        for key in expired:
+            del windows[key]
+        if not windows:
+            empty_ips.append(ip)
+    for ip in empty_ips:
+        _rate_limit_store.pop(ip, None)
+
+    overflow = len(_rate_limit_store) - _RATE_LIMIT_STORE_MAX_IPS
+    if overflow <= 0:
+        return
+
+    # 按该 IP 最近窗口时间排序，淘汰最旧的
+    def _last_ts(ip: str) -> datetime:
+        windows = _rate_limit_store.get(ip) or {}
+        if not windows:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        return max(ts for _c, ts in windows.values())
+
+    stale_ips = sorted(_rate_limit_store.keys(), key=_last_ts)[:overflow]
+    for ip in stale_ips:
+        _rate_limit_store.pop(ip, None)
 
 
 def _rate_limit_exceeded_response(*, limit: int, window: int) -> JSONResponse:
@@ -226,16 +259,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             response.headers["X-RateLimit-Reset"] = str(int((now + timedelta(seconds=window)).timestamp()))
             return response
         
-        # ====== 使用内存存储进行限流（Redis不可用时） ======
+        # ====== 使用内存存储进行限流（Redis不可用时；多进程不共享） ======
+        _evict_rate_limit_store_if_needed(now, window)
         client_requests = _rate_limit_store[client_ip]
-
-        # 清理过期记录
-        expired_keys = [
-            key for key, (count, timestamp) in client_requests.items()
-            if (now - timestamp).total_seconds() > window
-        ]
-        for key in expired_keys:
-            del client_requests[key]
 
         # 统计当前窗口的请求数
         current_count, _ = client_requests.get(current_window_key, (0, now))
@@ -277,7 +303,7 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
             "/api/v1/excel/export",
         )
 
-        # 性能统计（可选，用于监控）
+        # 本进程兜底计数（重启丢失；跨 Worker 聚合见 monitoring_redis / SystemMonitor）
         self.request_count = 0
         self.total_process_time = 0.0
         self.slow_request_count = 0
@@ -299,7 +325,7 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
         # 计算处理时间
         process_time = time.time() - start_time
         
-        # 更新统计
+        # 更新本进程统计（仅作 Redis 不可用时的响应头兜底）
         self.request_count += 1
         self.total_process_time += process_time
         
@@ -320,11 +346,25 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
         # 添加性能响应头
         response.headers["X-Process-Time"] = f"{process_time:.4f}"
         
-        # 可选：添加性能统计响应头（每100个请求更新一次）
+        # 每 100 次附带聚合头：优先 Redis 跨 Worker 汇总，避免仅看本进程且重启归零
         if self.request_count % 100 == 0:
-            avg_time = self.total_process_time / self.request_count if self.request_count > 0 else 0
+            avg_time = 0.0
+            slow_count = self.slow_request_count
+            try:
+                from app.core.monitoring_redis import get_cached_redis_api_totals
+
+                redis_totals = get_cached_redis_api_totals()
+                req = int(redis_totals.get("request_count") or 0)
+                if req > 0:
+                    avg_time = float(redis_totals.get("total_duration") or 0) / req
+                    slow_count = int(redis_totals.get("slow_request_count") or 0)
+                elif self.request_count > 0:
+                    avg_time = self.total_process_time / self.request_count
+            except Exception:
+                if self.request_count > 0:
+                    avg_time = self.total_process_time / self.request_count
             response.headers["X-Avg-Process-Time"] = f"{avg_time:.4f}"
-            response.headers["X-Slow-Request-Count"] = str(self.slow_request_count)
+            response.headers["X-Slow-Request-Count"] = str(slow_count)
         
         return response
     
@@ -414,29 +454,43 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         is_html_response = "text/html" in content_type or request.url.path.endswith(".html")
         
         if is_html_response:
-                # 生产环境使用更严格的CSP，禁止内联脚本和eval
+                path = request.url.path or ""
+                # 桥页/静态桥资源依赖内联脚本；其它 HTML 生产环境禁用 unsafe-inline
+                needs_inline_script = (
+                    path.startswith("/change")
+                    or path.startswith("/bridge")
+                    or "/change/" in path
+                )
                 if settings.is_production:
-                    # 生产环境：允许内联脚本（用于change路由的跳转功能）
+                    script_src = (
+                        "script-src 'self' 'unsafe-inline'; "
+                        if needs_inline_script
+                        else "script-src 'self'; "
+                    )
                     csp = (
                         "default-src 'self'; "
-                        "script-src 'self' 'unsafe-inline'; "  # 允许内联脚本（用于change路由的跳转功能）
-                        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "  # 允许Font Awesome CDN
+                        f"{script_src}"
+                        "script-src-attr 'none'; "
+                        "object-src 'none'; "
+                        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
                         "img-src 'self' data: https:; "
-                        "font-src 'self' data: https://cdnjs.cloudflare.com; "  # 允许Font Awesome CDN
+                        "font-src 'self' data: https://cdnjs.cloudflare.com; "
                         "connect-src 'self'; "
-                        "frame-ancestors 'none'; "  # 禁止被iframe嵌入
-                        "base-uri 'self'; "  # 限制base标签
-                        "form-action 'self'; "  # 限制表单提交目标
-                        "upgrade-insecure-requests;"  # 自动升级HTTP到HTTPS
+                        "frame-ancestors 'none'; "
+                        "base-uri 'self'; "
+                        "form-action 'self'; "
+                        "upgrade-insecure-requests;"
                     )
                 else:
                     # 开发环境：允许unsafe-inline和unsafe-eval（用于开发调试）
                     csp = (
                         "default-src 'self'; "
                         "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-                        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "  # 允许Font Awesome CDN
+                        "script-src-attr 'none'; "
+                        "object-src 'none'; "
+                        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
                         "img-src 'self' data: https:; "
-                        "font-src 'self' data: https://cdnjs.cloudflare.com; "  # 允许Font Awesome CDN
+                        "font-src 'self' data: https://cdnjs.cloudflare.com; "
                         "connect-src 'self'; "
                         "frame-ancestors 'none';"
                     )

@@ -149,7 +149,7 @@ def validate_username(username: str) -> tuple[bool, str | None]:
     if not username:
         return False, "用户名不能为空"
 
-    if len(username) < 2:
+    if len(username) < 3:
         return False, "用户名至少需要3个字符"
 
     if len(username) > 20:
@@ -466,11 +466,9 @@ def validate_cron_expression(cron_expression: str) -> tuple[bool, str | None]:
     if len(parts) != 5:
         return False, "Cron表达式格式错误：应为5个字段（分 时 日 月 星期），用空格分隔"
 
-        # 尝试使用 APScheduler 的 CronTrigger 验证
+    # 使用 APScheduler 的 CronTrigger 校验字段取值
     try:
-
-        # 尝试创建 CronTrigger 来验证表达式
-        # 这会抛出 ValueError 如果表达式无效
+        # 无效表达式会抛出 ValueError
         CronTrigger.from_crontab(cron_expression, timezone=settings.TIMEZONE)
         return True, None
     except ValueError as e:

@@ -37,6 +37,16 @@ if os.getenv("UNIT_TEST") != "1":
             logger.info("如果使用 systemd 服务，请确保 .env 文件权限正确：sudo chown www-data:www-data /data/Platform/.env && sudo chmod 640 /data/Platform/.env")
 
 
+def _default_db_pool_size() -> int:
+    """按 CPU 核数给出每 worker 连接池默认大小（5–16）。"""
+    return max(5, min(16, (os.cpu_count() or 2) + 2))
+
+
+def _default_db_max_overflow() -> int:
+    """按默认池大小给出溢出连接数（4–12）。"""
+    return max(4, min(12, _default_db_pool_size() // 2))
+
+
 def detect_production_env(explicit: str | None = None) -> str:
     """
     推断运行环境。
@@ -381,12 +391,10 @@ class Settings(BaseSettings):
         return v
 
     # 数据库连接池配置
-    # 多进程环境优化：每个 worker 进程有独立的连接池
-    # 高并发优化：对于短链接服务，大部分请求使用缓存，数据库压力较小
-    # 推荐配置：pool_size = 10-12, max_overflow = 5-8（减少连接数以节省内存）
-    # 对于 3 个 workers：总连接数 = (12 + 8) × 3 = 60（在 MySQL 默认 151 连接限制内，节省内存）
-    DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "12"))  # 连接池大小（每个 worker），高并发优化
-    DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "8"))  # 最大溢出连接数（每个 worker）
+    # 多进程环境：每个 worker 独立连接池；未设环境变量时按 CPU 粗调默认值
+    # 生产可通过 DB_POOL_SIZE / DB_MAX_OVERFLOW 显式覆盖
+    DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", str(_default_db_pool_size())))
+    DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", str(_default_db_max_overflow())))
     DB_POOL_RECYCLE: int = int(os.getenv("DB_POOL_RECYCLE", "3600"))  # 连接回收时间（秒，1小时）
 
     # ====== Redis配置 ======
