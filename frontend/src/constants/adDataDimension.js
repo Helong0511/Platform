@@ -323,6 +323,7 @@ export const AD_DATA_SOURCE_LABELS = {
   zhisuo: '智索',
   gam: 'GAM',
   pomiad: 'Pomiad',
+  h5deer: 'H5 Deer',
   addermobi: 'Addermobi',
   skymobi: 'Skymobi',
   huguang: 'Huguang',
@@ -338,6 +339,7 @@ export const UPSTREAM_API_DATA_SOURCES = [
   'zhisuo',
   'gam',
   'pomiad',
+  'h5deer',
   'addermobi',
   'skymobi',
   'huguang',
@@ -367,7 +369,7 @@ export const AD_DATA_REPORT_TYPE_OTHER_OPTIONS = ['legacy'];
 export const AD_DATA_REPORT_TYPE_HINTS = {
   unit: '按广告单元，无国家；智索 channelunit、GAM ad_unit',
   country: '按国家，无广告单元；智索 channelcountry、TQT、Huguang',
-  cross: '国家+广告单元；智索 channeldata、Addermobi、Skymobi、Pomiad、GAM country',
+  cross: '国家+广告单元；智索 channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、GAM country',
   daily: '日汇总，无国家无单元；智索 channeldaily 兜底、GAM daily',
   legacy: '历史或未标注；新入库会自动按行形态推断'
 };

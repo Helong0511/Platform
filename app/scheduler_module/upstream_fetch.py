@@ -829,3 +829,112 @@ async def fetch_pomiad_rows(
         total_rows=last_api_total or len(all_detail_rows),
     )
     return UpstreamFetchResult(rows=all_detail_rows, stats=detail_stats)
+
+
+# H5 Deer 开放 API（参见 tests/API/H5 deer Api对接文档-新版.pdf）
+H5DEER_TOKEN_PATH = "/api/user_oauth/token"
+H5DEER_REPORT_PATH = "/v1/api/h5report"
+# 默认最细颗粒度；上游广告单元字段拼写为 ad_nuit（非 ad_unit）
+H5DEER_DEFAULT_DIMENSION = "date,url,country_code,ad_nuit"
+
+
+def _h5deer_ok(json_data: Dict[str, Any]) -> bool:
+    """H5 Deer 业务成功判断：code == 200。"""
+    return json_data.get("code") == 200
+
+
+async def _h5deer_login(*, base_url: str, username: str, password: str) -> str:
+    """H5 Deer 登录获取 JWT access token（Header 形如 ``JWT <token>``）。"""
+    url = f"{base_url.rstrip('/')}{H5DEER_TOKEN_PATH}"
+    json_data = await post_json(
+        url,
+        json_body={"username": username, "password": password},
+        headers={"Content-Type": "application/json"},
+        label="H5 Deer API 登录",
+    )
+    raise_unless_api_success(json_data, _h5deer_ok, label="H5 Deer API 登录")
+    token = json_data.get("token")
+    if not token:
+        raise Exception("H5 Deer API 登录成功但未返回 token")
+    return str(token)
+
+
+async def fetch_h5deer_rows(
+    *,
+    base_url: str,
+    username: str,
+    password: str,
+    start: str,
+    end: str,
+    dimension: str = H5DEER_DEFAULT_DIMENSION,
+    limit: int = 500,
+) -> UpstreamFetchResult:
+    """
+    H5 Deer 拉数：先 POST token，再分页 GET h5report。
+
+    Authorization 必须为 ``JWT <token>``（文档约定，非 Bearer）。
+    limit 上限 500；dimension 默认 date,url,country_code,ad_nuit（最细颗粒度）。
+    """
+    base = base_url.rstrip("/")
+    page_size = max(1, min(int(limit or 500), 500))
+    dims = (dimension or H5DEER_DEFAULT_DIMENSION).strip() or H5DEER_DEFAULT_DIMENSION
+    token = await _h5deer_login(base_url=base, username=username, password=password)
+    auth_headers = {"Authorization": f"JWT {token}"}
+
+    all_rows: List[Any] = []
+    page = 1
+    last_total = 0
+    report_url = f"{base}{H5DEER_REPORT_PATH}"
+
+    while True:
+        params = {
+            "page": page,
+            "limit": page_size,
+            "start_date": start,
+            "end_date": end,
+            "dimension": dims,
+        }
+        json_data = await get_json(
+            report_url,
+            params=params,
+            headers=auth_headers,
+            label=f"H5 Deer h5report (page={page})",
+        )
+        # token 过期时重新登录并重试当前页一次
+        if json_data.get("code") in (401, 403) or "token" in str(json_data.get("msg") or "").lower():
+            token = await _h5deer_login(base_url=base, username=username, password=password)
+            auth_headers = {"Authorization": f"JWT {token}"}
+            json_data = await get_json(
+                report_url,
+                params=params,
+                headers=auth_headers,
+                label=f"H5 Deer h5report (page={page}, reauth)",
+            )
+        raise_unless_api_success(json_data, _h5deer_ok, label="H5 Deer h5report")
+
+        rows = json_data.get("data") or []
+        if not isinstance(rows, list):
+            rows = []
+        all_rows.extend(rows)
+
+        total = int(json_data.get("totalcount") or 0)
+        last_total = total or last_total
+        if _should_break_upstream_pagination(
+            rows,
+            total=total,
+            collected=len(all_rows),
+            page=page,
+            total_pages=0,
+            limit=page_size,
+        ):
+            break
+        page += 1
+
+    stats = _build_fetch_stats(
+        pages_fetched=page,
+        total_pages=0,
+        rows_fetched=len(all_rows),
+        total_rows=last_total,
+        limit=page_size,
+    )
+    return UpstreamFetchResult(rows=all_rows, stats=stats)

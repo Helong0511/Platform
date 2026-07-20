@@ -16,6 +16,7 @@ from typing import Optional
 DATA_SOURCE_ZHISUO = "zhisuo"
 DATA_SOURCE_GAM = "gam"
 DATA_SOURCE_POMIAD = "pomiad"
+DATA_SOURCE_H5DEER = "h5deer"
 DATA_SOURCE_ADDERMOBI = "addermobi"
 DATA_SOURCE_SKYMOBI = "skymobi"
 DATA_SOURCE_HUGUANG = "huguang"
@@ -30,6 +31,7 @@ UPSTREAM_API_DATA_SOURCES: tuple[str, ...] = (
     DATA_SOURCE_ZHISUO,
     DATA_SOURCE_GAM,
     DATA_SOURCE_POMIAD,
+    DATA_SOURCE_H5DEER,
     DATA_SOURCE_ADDERMOBI,
     DATA_SOURCE_SKYMOBI,
     DATA_SOURCE_HUGUANG,
@@ -174,6 +176,7 @@ DATA_SOURCE_LABELS: dict[str, str] = {
     DATA_SOURCE_ZHISUO: "智索",
     DATA_SOURCE_GAM: "GAM",
     DATA_SOURCE_POMIAD: "Pomiad",
+    DATA_SOURCE_H5DEER: "H5 Deer",
     DATA_SOURCE_ADDERMOBI: "Addermobi",
     DATA_SOURCE_SKYMOBI: "Skymobi",
     DATA_SOURCE_HUGUANG: "Huguang",
@@ -203,7 +206,7 @@ REPORT_TYPE_DETAIL_OPTIONS: tuple[str, ...] = (
 REPORT_TYPE_HINTS: dict[str, str] = {
     REPORT_TYPE_UNIT: "按广告单元，无国家；智索 channelunit、GAM ad_unit",
     REPORT_TYPE_COUNTRY: "按国家，无广告单元；智索 channelcountry、TQT、Huguang",
-    REPORT_TYPE_CROSS: "国家+广告单元；智索 channeldata、Addermobi、Skymobi、Pomiad、GAM country",
+    REPORT_TYPE_CROSS: "国家+广告单元；智索 channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、GAM country",
     REPORT_TYPE_DAILY: "日汇总，无国家无单元；智索 channeldaily 兜底、GAM daily",
     REPORT_TYPE_LEGACY: "历史或未标注；新入库会自动按行形态推断",
 }
@@ -213,6 +216,7 @@ UPSTREAM_DEFAULT_REPORT_TYPES: dict[str, str] = {
     DATA_SOURCE_ZHISUO: REPORT_TYPE_LEGACY,
     DATA_SOURCE_GAM: REPORT_TYPE_LEGACY,
     DATA_SOURCE_POMIAD: REPORT_TYPE_LEGACY,
+    DATA_SOURCE_H5DEER: REPORT_TYPE_LEGACY,
     DATA_SOURCE_ADDERMOBI: REPORT_TYPE_LEGACY,
     DATA_SOURCE_SKYMOBI: REPORT_TYPE_LEGACY,
     DATA_SOURCE_HUGUANG: REPORT_TYPE_LEGACY,

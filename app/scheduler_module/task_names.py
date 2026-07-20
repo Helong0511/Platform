@@ -52,6 +52,9 @@ ZHISUO_API_TASK_NAME = "zhisuo API获取数据"
 # Pomiad API获取数据任务
 POMIAD_API_TASK_NAME = "Pomiad API获取数据"
 
+# H5 Deer API获取数据任务
+H5DEER_API_TASK_NAME = "H5 Deer API获取数据"
+
 # Google Ad Manager API获取数据任务
 GAM_API_TASK_NAME = "Google API获取数据"
 
@@ -73,6 +76,7 @@ TASK_NAME_MAP = {
     "huguang_task": HUGUANG_API_TASK_NAME,
     "zhisuo_task": ZHISUO_API_TASK_NAME,
     "pomiad_task": POMIAD_API_TASK_NAME,
+    "h5deer_task": H5DEER_API_TASK_NAME,
     "gam_task": GAM_API_TASK_NAME,
     "cpl_tasks": RESET_DAILY_CAPS_TASK_NAME,
 }
@@ -92,6 +96,7 @@ ALL_TASK_NAMES = [
     HUGUANG_API_TASK_NAME,
     ZHISUO_API_TASK_NAME,
     POMIAD_API_TASK_NAME,
+    H5DEER_API_TASK_NAME,
     GAM_API_TASK_NAME,
     RESET_DAILY_CAPS_TASK_NAME,
 ]

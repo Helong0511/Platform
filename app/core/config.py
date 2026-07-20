@@ -620,6 +620,18 @@ class Settings(BaseSettings):
     POMIAD_IS_BY_COUNTRY: int = int(os.getenv("POMIAD_IS_BY_COUNTRY", "0"))
     POMIAD_API_DATA_LIMIT: int = int(os.getenv("POMIAD_API_DATA_LIMIT", "100"))
 
+    # H5 Deer（api.h5deer.com:8000，文档要求 HTTP + JWT 鉴权头）
+    H5DEER_API_BASE_URL: str = os.getenv(
+        "H5DEER_API_BASE_URL", "http://api.h5deer.com:8000"
+    ).rstrip("/")
+    H5DEER_API_USERNAME: str = os.getenv("H5DEER_API_USERNAME", "")
+    H5DEER_API_PASSWORD: str = os.getenv("H5DEER_API_PASSWORD", "")
+    # 默认最细颗粒度 date,url,country_code,ad_nuit；limit 上限 500
+    H5DEER_API_DIMENSION: str = os.getenv(
+        "H5DEER_API_DIMENSION", "date,url,country_code,ad_nuit"
+    )
+    H5DEER_API_LIMIT: int = int(os.getenv("H5DEER_API_LIMIT", "500"))
+
     @staticmethod
     def _coerce_zhisuo_fetch_bool(value: object, default: bool) -> bool:
         if isinstance(value, bool):
@@ -893,6 +905,8 @@ if settings.is_production:
         logger.warning("生产环境未配置 HUGUANG_API_KEY，Huguang 定时任务将跳过")
     if not settings.TQT_APP_KEY.strip():
         logger.warning("生产环境未配置 TQT_APP_KEY，TQT 定时任务将跳过")
+    if not settings.H5DEER_API_USERNAME.strip():
+        logger.warning("生产环境未配置 H5DEER_API_USERNAME，H5 Deer 定时任务将跳过")
 else:
     # 开发环境：不显示警告，仅在需要时提示
     # SECRET_KEY 验证已在 validate_secret_key 中处理，这里不需要额外提示

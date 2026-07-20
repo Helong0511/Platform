@@ -261,6 +261,17 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "description": "每隔30分钟执行一次，从 Pomiad API 获取广告明细数据",
     },
 
+    # ========== H5 Deer API获取数据任务 ==========
+    "H5 Deer API获取数据": {
+        "task_name": "H5 Deer API获取数据",
+        "task_module": "app.scheduler_module.tasks.h5deer_task",
+        "task_function": "h5deer_api_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "*/30 * * * *",
+        "description": "每隔30分钟执行一次，从 H5 Deer API 获取广告明细数据",
+    },
+
     # ========== Google API获取数据任务（GAM） ==========
     "Google API获取数据": {
         "task_name": "Google API获取数据",
