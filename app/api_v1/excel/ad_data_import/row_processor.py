@@ -314,6 +314,8 @@ async def process_row_data(
                 new_click_count=click_count,
                 new_revenue_before=revenue_before,
                 new_revenue_after=revenue_after,
+                new_ecpm_before=ecpm_before,
+                new_ecpm_after=ecpm_after,
                 date_str=date_str,
                 product_name=product_name,
                 country_code=country_code,

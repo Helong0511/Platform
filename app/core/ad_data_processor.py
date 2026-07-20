@@ -1,7 +1,8 @@
 """
 广告数据（AdData）导入与聚合处理工具。
 
-职责：解析上游 API/Excel 原始行、国家代码映射、比率计算、批量入库与 Telegram 告警。
+职责：解析上游 API/Excel 原始行、国家代码映射、比率计算、批量入库；
+eCPM/收益减少时 Telegram 告警，其它指标减少仅写 app.log。
 
 在系统中的位置：``app.core.ad_data_processor``，由定时拉取任务与管理端导入 API 调用。
 """
@@ -177,47 +178,77 @@ async def build_data_decrease_warning(
         country_code: Optional[str],
         source: str = "API",
         db: Optional[AsyncSession] = None,
+        new_ecpm_before: float = 0.0,
+        new_ecpm_after: float = 0.0,
 ) -> Optional[str]:
     """
-    检查待更新数据是否比原有数据减少，构建 Telegram 告警文案（不发送）。
+    检查待更新数据是否比原有数据减少。
 
-    调用方应在确认行将写入且事务提交成功后再调用 send_pending_data_decrease_warnings。
+    - eCPM / 收益减少：返回 Telegram 告警文案（由调用方在事务提交后发送）
+    - 请求数/匹配数/展示数/点击数减少：仅写入 app.log，不发 Telegram
     """
     try:
-        decreased_fields = []
+        # 仅日志：流量类指标减少
+        log_only_fields: list[str] = []
+        # 需 Telegram：eCPM / 收益减少
+        telegram_fields: list[str] = []
         float_threshold = 0.01
 
         request_decrease = existing_data.request_count - new_request_count
         if request_decrease > 0:
-            decreased_fields.append(
+            log_only_fields.append(
                 f"请求数: 原有 {existing_data.request_count} → 新获取 {new_request_count} (减少 {request_decrease})")
 
         match_decrease = existing_data.match_count - new_match_count
         if match_decrease > 0:
-            decreased_fields.append(
+            log_only_fields.append(
                 f"匹配数: 原有 {existing_data.match_count} → 新获取 {new_match_count} (减少 {match_decrease})")
 
         display_decrease = existing_data.display_count - new_display_count
         if display_decrease > 0:
-            decreased_fields.append(
+            log_only_fields.append(
                 f"展示数: 原有 {existing_data.display_count} → 新获取 {new_display_count} (减少 {display_decrease})")
 
         click_decrease = existing_data.click_count - new_click_count
         if click_decrease > 0:
-            decreased_fields.append(
+            log_only_fields.append(
                 f"点击数: 原有 {existing_data.click_count} → 新获取 {new_click_count} (减少 {click_decrease})")
+
+        ecpm_before_decrease = _as_float(existing_data.ecpm_before_deduct) - _as_float(new_ecpm_before)
+        if ecpm_before_decrease > float_threshold:
+            telegram_fields.append(
+                f"eCPM(减扣前): 原有 {_as_float(existing_data.ecpm_before_deduct):.2f} → "
+                f"新获取 {_as_float(new_ecpm_before):.2f} (减少 {ecpm_before_decrease:.2f})")
+
+        ecpm_after_decrease = _as_float(existing_data.ecpm_after_deduct) - _as_float(new_ecpm_after)
+        if ecpm_after_decrease > float_threshold:
+            telegram_fields.append(
+                f"eCPM(减扣后): 原有 {_as_float(existing_data.ecpm_after_deduct):.2f} → "
+                f"新获取 {_as_float(new_ecpm_after):.2f} (减少 {ecpm_after_decrease:.2f})")
 
         revenue_before_decrease = _as_float(existing_data.revenue_before_deduct) - _as_float(new_revenue_before)
         if revenue_before_decrease > float_threshold:
-            decreased_fields.append(
-                f"收益(减扣前): 原有 {_as_float(existing_data.revenue_before_deduct):.2f} → 新获取 {_as_float(new_revenue_before):.2f} (减少 {revenue_before_decrease:.2f})")
+            telegram_fields.append(
+                f"收益(减扣前): 原有 {_as_float(existing_data.revenue_before_deduct):.2f} → "
+                f"新获取 {_as_float(new_revenue_before):.2f} (减少 {revenue_before_decrease:.2f})")
 
         revenue_after_decrease = _as_float(existing_data.revenue_after_deduct) - _as_float(new_revenue_after)
         if revenue_after_decrease > float_threshold:
-            decreased_fields.append(
-                f"收益(减扣后): 原有 {_as_float(existing_data.revenue_after_deduct):.2f} → 新获取 {_as_float(new_revenue_after):.2f} (减少 {revenue_after_decrease:.2f})")
+            telegram_fields.append(
+                f"收益(减扣后): 原有 {_as_float(existing_data.revenue_after_deduct):.2f} → "
+                f"新获取 {_as_float(new_revenue_after):.2f} (减少 {revenue_after_decrease:.2f})")
 
-        if not decreased_fields:
+        if log_only_fields:
+            logger.warning(
+                "数据减少（仅日志，不发 Telegram）: 来源=%s 日期=%s 产品=%s 国家=%s | %s",
+                source,
+                date_str,
+                product_name,
+                country_code or "-",
+                "; ".join(log_only_fields),
+            )
+
+        if not telegram_fields:
             return None
 
         if db is not None:
@@ -234,9 +265,9 @@ async def build_data_decrease_warning(
         telegram_msg += f"国家: {country_display}\n"
         telegram_msg += f"发送时间: {current_time_str}（时区: {settings.TIMEZONE}）\n\n"
         telegram_msg += "⚠️ 注意：API获取的数据正常情况下应该比上一次获得的数据大（累积增长）\n"
-        telegram_msg += "如果数据减少，可能是数据源异常或数据被重置，请检查数据源！\n\n"
+        telegram_msg += "如果 eCPM / 收益减少，可能是数据源异常或数据被重置，请检查数据源！\n\n"
         telegram_msg += "减少的字段:\n"
-        for field in decreased_fields:
+        for field in telegram_fields:
             telegram_msg += f"• {field}\n"
         telegram_msg += "\n✅ 已按上游新数据更新本地记录"
         return telegram_msg
@@ -808,6 +839,8 @@ async def process_api_ad_data(
                         new_click_count=grouped_data["click_count"],
                         new_revenue_before=total_revenue,
                         new_revenue_after=revenue_after_deduct,
+                        new_ecpm_before=final_ecpm,
+                        new_ecpm_after=ecpm_after_deduct,
                         date_str=date_str,
                         product_name=product_name,
                         country_code=country_code,
@@ -1136,6 +1169,8 @@ async def process_api_ad_data(
                         new_click_count=grouped_data["click_count"],
                         new_revenue_before=total_revenue,
                         new_revenue_after=revenue_after_deduct,
+                        new_ecpm_before=final_ecpm,
+                        new_ecpm_after=ecpm_after_deduct,
                         date_str=date_str,
                         product_name=product_name,
                         country_code=country_code,
