@@ -2,7 +2,7 @@
 广告数据（AdData）导入与聚合处理工具。
 
 职责：解析上游 API/Excel 原始行、国家代码映射、比率计算、批量入库；
-eCPM/收益按减扣前/后各汇总一条 Telegram，流量指标汇总一条（均按产品、国家排序，超长连续拆分）。
+eCPM/收益按减扣前/后各汇总一条 Telegram，流量指标汇总一条（按日期、产品、国家、广告单元排序，超长连续拆分）。
 
 在系统中的位置：``app.core.ad_data_processor``，由定时拉取任务与管理端导入 API 调用。
 """
@@ -179,12 +179,14 @@ _METRIC_DECREASE_NOTICE = (
 
 
 def _sort_decrease_items(items: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    """按日期、产品、国家、广告单元排序。"""
     return sorted(
         items,
         key=lambda x: (
+            str(x.get("date_str") or ""),
             str(x.get("product_name") or ""),
             str(x.get("country_display") or x.get("country_code") or ""),
-            str(x.get("date_str") or ""),
+            str(x.get("ad_unit") or ""),
         ),
     )
 
@@ -198,6 +200,15 @@ def _resolve_decrease_source_label(
     return " / ".join(sorted(sources)) if sources else source_hint
 
 
+def _format_decrease_item_location(item: Dict[str, Any]) -> str:
+    """明细行只展示国家与广告单元（日期/产品已在分组头）。"""
+    country_display = item.get("country_display") or item.get("country_code") or "-"
+    ad_unit = str(item.get("ad_unit") or "").strip()
+    if ad_unit:
+        return f"  国家: {country_display} | 广告单元: {ad_unit}"
+    return f"  国家: {country_display}"
+
+
 def format_decrease_summary(
     items: list[Dict[str, Any]],
     *,
@@ -206,7 +217,7 @@ def format_decrease_summary(
     notice: str,
     source_hint: str = "API",
 ) -> Optional[str]:
-    """将减少条目汇总为一条 Telegram 文案，按产品、国家、日期排序。"""
+    """将减少条目汇总为一条 Telegram 文案，按日期、产品、国家、广告单元排序。"""
     if not items:
         return None
 
@@ -225,18 +236,24 @@ def format_decrease_summary(
         "",
     ]
 
+    current_date: Optional[str] = None
     current_product: Optional[str] = None
     for item in sorted_items:
+        date_str = str(item.get("date_str") or "-")
         product_name = str(item.get("product_name") or "未知产品")
-        if product_name != current_product:
-            if current_product is not None:
+
+        if date_str != current_date:
+            if current_date is not None:
                 lines.append("")
+            lines.append(f"📅 {date_str}")
+            current_date = date_str
+            current_product = None
+
+        if product_name != current_product:
             lines.append(f"【{product_name}】")
             current_product = product_name
 
-        country_display = item.get("country_display") or item.get("country_code") or "-"
-        date_str = item.get("date_str") or "-"
-        lines.append(f"  国家: {country_display} | 日期: {date_str}")
+        lines.append(_format_decrease_item_location(item))
         for field in item.get("fields") or []:
             lines.append(f"  • {field}")
 
@@ -274,6 +291,7 @@ async def build_data_decrease_warning(
         db: Optional[AsyncSession] = None,
         new_ecpm_before: float = 0.0,
         new_ecpm_after: float = 0.0,
+        ad_unit: str = "",
 ) -> Optional[Dict[str, Any]]:
     """
     检查待更新数据是否比原有数据减少。
@@ -286,6 +304,9 @@ async def build_data_decrease_warning(
         traffic_fields: list[str] = []
         metric_items: list[Dict[str, Any]] = []
         float_threshold = 0.01
+        resolved_ad_unit = normalize_ad_unit(
+            ad_unit or getattr(existing_data, "ad_unit", "") or ""
+        )
 
         request_decrease = existing_data.request_count - new_request_count
         if request_decrease > 0:
@@ -362,11 +383,12 @@ async def build_data_decrease_warning(
 
         if traffic_fields:
             logger.warning(
-                "流量指标减少: 来源=%s 日期=%s 产品=%s 国家=%s | %s",
+                "流量指标减少: 来源=%s 日期=%s 产品=%s 国家=%s 广告单元=%s | %s",
                 source,
                 date_str,
                 product_name,
                 country_code or "-",
+                resolved_ad_unit or "-",
                 "; ".join(traffic_fields),
             )
             result["traffic_item"] = {
@@ -374,18 +396,20 @@ async def build_data_decrease_warning(
                 "product_name": product_name,
                 "country_code": country_code or "",
                 "country_display": country_display,
+                "ad_unit": resolved_ad_unit,
                 "source": source,
                 "fields": traffic_fields,
             }
 
         for metric_item in metric_items:
             logger.warning(
-                "指标减少: 类型=%s 来源=%s 日期=%s 产品=%s 国家=%s | %s",
+                "指标减少: 类型=%s 来源=%s 日期=%s 产品=%s 国家=%s 广告单元=%s | %s",
                 metric_item["metric_type"],
                 source,
                 date_str,
                 product_name,
                 country_code or "-",
+                resolved_ad_unit or "-",
                 "; ".join(metric_item["fields"]),
             )
             result["metric_items"].append({
@@ -394,6 +418,7 @@ async def build_data_decrease_warning(
                 "product_name": product_name,
                 "country_code": country_code or "",
                 "country_display": country_display,
+                "ad_unit": resolved_ad_unit,
                 "source": source,
             })
 
@@ -408,7 +433,7 @@ def format_traffic_decrease_summary(
     *,
     source_hint: str = "API",
 ) -> Optional[str]:
-    """将流量类指标减少条目汇总为一条 Telegram 文案，按产品、国家排序。"""
+    """将流量类指标减少条目汇总为一条 Telegram 文案，按日期、产品、国家、广告单元排序。"""
     return format_decrease_summary(
         traffic_items,
         title="⚠️ 流量指标减少汇总",
@@ -1052,6 +1077,7 @@ async def process_api_ad_data(
                         date_str=date_str,
                         product_name=product_name,
                         country_code=country_code,
+                        ad_unit=ad_unit,
                         source=source,
                         db=db,
                     )
@@ -1386,6 +1412,7 @@ async def process_api_ad_data(
                         date_str=date_str,
                         product_name=product_name,
                         country_code=country_code,
+                        ad_unit=ad_unit,
                         source=f"{source}（无国家或无法识别，已累加）",
                         db=db,
                     )

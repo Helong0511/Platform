@@ -24,7 +24,7 @@ from app.scheduler_module.upstream_task_runner import run_upstream_import_task
 H5DEER_FIELD_MAPPING = {
     "date": "date",
     "product_name": "url",
-    "ad_unit": "adNuit",
+    "ad_unit": "ad_nuit",
     "country_code": "countryCode",
     "request_count": "adRequests",
     "match_count": "adMatchRequests",

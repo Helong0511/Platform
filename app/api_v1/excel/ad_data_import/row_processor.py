@@ -319,6 +319,7 @@ async def process_row_data(
                 date_str=date_str,
                 product_name=product_name,
                 country_code=country_code,
+                ad_unit=ad_unit,
                 source=f"Excel导入（用户: {current_user.username}）",
                 db=db,
             )
