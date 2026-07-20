@@ -834,7 +834,7 @@ async def fetch_pomiad_rows(
 # H5 Deer 开放 API（参见 tests/API/H5 deer Api对接文档-新版.pdf）
 H5DEER_TOKEN_PATH = "/api/user_oauth/token"
 H5DEER_REPORT_PATH = "/v1/api/h5report"
-# 默认最细颗粒度；上游广告单元字段拼写为 ad_nuit（非 ad_unit）
+# 默认最细颗粒度；dimension 参数拼写为 ad_nuit，响应字段为 adNuit
 H5DEER_DEFAULT_DIMENSION = "date,url,country_code,ad_nuit"
 
 

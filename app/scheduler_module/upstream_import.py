@@ -82,9 +82,26 @@ async def finalize_upstream_import(
     # ---------- 汇总统计 ----------
     inserted_count = result.get("inserted_count", 0)
     updated_count = result.get("updated_count", 0)
-    decrease_warning_count = len(result.get("metric_decreases") or []) + len(
-        result.get("traffic_decreases") or []
+    # 同一更新行可产生多条 metric（eCPM/收益各类型）+ 1 条 traffic，按位置去重后再与 updated_count 比较
+    decrease_location_keys = {
+        (
+            str(item.get("date_str") or ""),
+            str(item.get("product_name") or ""),
+            str(item.get("country_code") or ""),
+            str(item.get("ad_unit") or ""),
+        )
+        for item in (result.get("metric_decreases") or [])
+    }
+    decrease_location_keys.update(
+        (
+            str(item.get("date_str") or ""),
+            str(item.get("product_name") or ""),
+            str(item.get("country_code") or ""),
+            str(item.get("ad_unit") or ""),
+        )
+        for item in (result.get("traffic_decreases") or [])
     )
+    decrease_warning_count = len(decrease_location_keys)
     if decrease_warning_count > updated_count:
         logger.error(
             "数据减少告警数量异常: decrease_warnings=%d > updated_count=%d",

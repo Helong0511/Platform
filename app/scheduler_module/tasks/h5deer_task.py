@@ -11,7 +11,7 @@ H5 Deer 上游广告数据拉取定时任务。
 注意事项：
 1. Authorization 头为 ``JWT <token>``，与 Bearer 不同
 2. 默认最细颗粒度 date,url,country_code,ad_nuit（国家+广告单元交叉）
-3. 上游广告单元字段拼写为 ad_nuit（文档原文），映射到平台 ad_unit
+3. 请求 dimension 拼写为 ad_nuit（文档原文）；响应字段为 adNuit，映射到平台 ad_unit
 """
 from app.core.ad_data_metadata import DATA_SOURCE_H5DEER
 from app.core.config import settings
@@ -24,7 +24,8 @@ from app.scheduler_module.upstream_task_runner import run_upstream_import_task
 H5DEER_FIELD_MAPPING = {
     "date": "date",
     "product_name": "url",
-    "ad_unit": "ad_nuit",
+    # 响应字段为 adNuit；dimension 请求参数才是 ad_nuit
+    "ad_unit": "adNuit",
     "country_code": "countryCode",
     "request_count": "adRequests",
     "match_count": "adMatchRequests",

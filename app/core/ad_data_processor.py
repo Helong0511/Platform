@@ -185,7 +185,7 @@ def _sort_decrease_items(items: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
         key=lambda x: (
             str(x.get("date_str") or ""),
             str(x.get("product_name") or ""),
-            str(x.get("country_display") or x.get("country_code") or ""),
+            str(x.get("country_code") or x.get("country_display") or ""),
             str(x.get("ad_unit") or ""),
         ),
     )

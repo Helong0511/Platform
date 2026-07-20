@@ -626,7 +626,8 @@ class Settings(BaseSettings):
     ).rstrip("/")
     H5DEER_API_USERNAME: str = os.getenv("H5DEER_API_USERNAME", "")
     H5DEER_API_PASSWORD: str = os.getenv("H5DEER_API_PASSWORD", "")
-    # 默认最细颗粒度 date,url,country_code,ad_nuit；limit 上限 500
+    # 默认最细颗粒度 date,url,country_code,ad_nuit（dimension 拼写）；
+    # 响应字段为 adNuit。limit 上限 500
     H5DEER_API_DIMENSION: str = os.getenv(
         "H5DEER_API_DIMENSION", "date,url,country_code,ad_nuit"
     )
