@@ -306,7 +306,7 @@ async def process_row_data(
             else:
                 date_str = str(data_date)
 
-            decrease_warning = await build_data_decrease_warning(
+            decrease_result = await build_data_decrease_warning(
                 existing_data=existing_data,
                 new_request_count=request_count,
                 new_match_count=match_count,
@@ -345,8 +345,12 @@ async def process_row_data(
             # 如果基础数据有变化，重新计算比率字段（确保一致性）
             existing_data.finalize_metrics()
             result["updated_rows"] += 1
-            if decrease_warning:
-                result.setdefault("decrease_warnings", []).append(decrease_warning)
+            if decrease_result:
+                traffic_item = decrease_result.get("traffic_item")
+                if traffic_item:
+                    result.setdefault("traffic_decreases", []).append(traffic_item)
+                for metric_item in decrease_result.get("metric_items") or []:
+                    result.setdefault("metric_decreases", []).append(metric_item)
             logger.debug(f"✅ 已更新记录: 日期={data_date}, 产品={product_name}")
         else:
             # 创建新记录（AdData.date 为 DATE 类型）

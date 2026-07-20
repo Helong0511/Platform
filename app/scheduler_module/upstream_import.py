@@ -74,12 +74,17 @@ async def finalize_upstream_import(
         logger.error(f"数据提交失败，已回滚: {commit_error}", exc_info=True)
         raise Exception(f"数据提交失败: {commit_error}") from commit_error
 
-    await send_pending_data_decrease_warnings(result.get("decrease_warnings") or [])
+    await send_pending_data_decrease_warnings(
+        traffic_decreases=result.get("traffic_decreases") or [],
+        metric_decreases=result.get("metric_decreases") or [],
+    )
 
     # ---------- 汇总统计 ----------
     inserted_count = result.get("inserted_count", 0)
     updated_count = result.get("updated_count", 0)
-    decrease_warning_count = len(result.get("decrease_warnings") or [])
+    decrease_warning_count = len(result.get("metric_decreases") or []) + len(
+        result.get("traffic_decreases") or []
+    )
     if decrease_warning_count > updated_count:
         logger.error(
             "数据减少告警数量异常: decrease_warnings=%d > updated_count=%d",

@@ -211,7 +211,10 @@ async def import_ad_data_handler(
                 log_context="Ad data import"
             )
 
-        await send_pending_data_decrease_warnings(result.get("decrease_warnings") or [])
+        await send_pending_data_decrease_warnings(
+            traffic_decreases=result.get("traffic_decreases") or [],
+            metric_decreases=result.get("metric_decreases") or [],
+        )
 
         # 构建响应：使用统一的错误详情格式化函数
         error_details = format_error_details(result.get("errors", []))

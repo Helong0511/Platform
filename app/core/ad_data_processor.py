@@ -2,7 +2,7 @@
 广告数据（AdData）导入与聚合处理工具。
 
 职责：解析上游 API/Excel 原始行、国家代码映射、比率计算、批量入库；
-eCPM/收益减少时 Telegram 告警，其它指标减少仅写 app.log。
+eCPM/收益按减扣前/后各汇总一条 Telegram，流量指标汇总一条（均按产品、国家排序，超长连续拆分）。
 
 在系统中的位置：``app.core.ad_data_processor``，由定时拉取任务与管理端导入 API 调用。
 """
@@ -165,6 +165,100 @@ async def _find_existing_ad_data_for_import(
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
 
+METRIC_DECREASE_CATEGORIES: tuple[tuple[str, str, str], ...] = (
+    ("ecpm_before", "⚠️ eCPM(减扣前)减少汇总", "eCPM(减扣前)"),
+    ("ecpm_after", "⚠️ eCPM(减扣后)减少汇总", "eCPM(减扣后)"),
+    ("revenue_before", "⚠️ 收益(减扣前)减少汇总", "收益(减扣前)"),
+    ("revenue_after", "⚠️ 收益(减扣后)减少汇总", "收益(减扣后)"),
+)
+
+_METRIC_DECREASE_NOTICE = (
+    "⚠️ 注意：API获取的数据正常情况下应该比上一次获得的数据大（累积增长）\n"
+    "如果 eCPM / 收益减少，可能是数据源异常或数据被重置，请检查数据源。"
+)
+
+
+def _sort_decrease_items(items: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    return sorted(
+        items,
+        key=lambda x: (
+            str(x.get("product_name") or ""),
+            str(x.get("country_display") or x.get("country_code") or ""),
+            str(x.get("date_str") or ""),
+        ),
+    )
+
+
+def _resolve_decrease_source_label(
+    items: list[Dict[str, Any]],
+    *,
+    source_hint: str = "API",
+) -> str:
+    sources = {str(x.get("source") or "") for x in items if x.get("source")}
+    return " / ".join(sorted(sources)) if sources else source_hint
+
+
+def format_decrease_summary(
+    items: list[Dict[str, Any]],
+    *,
+    title: str,
+    record_description: str,
+    notice: str,
+    source_hint: str = "API",
+) -> Optional[str]:
+    """将减少条目汇总为一条 Telegram 文案，按产品、国家、日期排序。"""
+    if not items:
+        return None
+
+    sorted_items = _sort_decrease_items(items)
+    source_label = _resolve_decrease_source_label(sorted_items, source_hint=source_hint)
+    current_time_str = datetime.now(APP_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+
+    lines: list[str] = [
+        title,
+        "",
+        f"数据来源: {source_label}",
+        f"发送时间: {current_time_str}（时区: {settings.TIMEZONE}）",
+        f"共 {len(sorted_items)} 条记录存在{record_description}",
+        "",
+        notice,
+        "",
+    ]
+
+    current_product: Optional[str] = None
+    for item in sorted_items:
+        product_name = str(item.get("product_name") or "未知产品")
+        if product_name != current_product:
+            if current_product is not None:
+                lines.append("")
+            lines.append(f"【{product_name}】")
+            current_product = product_name
+
+        country_display = item.get("country_display") or item.get("country_code") or "-"
+        date_str = item.get("date_str") or "-"
+        lines.append(f"  国家: {country_display} | 日期: {date_str}")
+        for field in item.get("fields") or []:
+            lines.append(f"  • {field}")
+
+    lines.append("")
+    lines.append("✅ 已按上游新数据更新本地记录")
+    return "\n".join(lines)
+
+
+def _append_decrease_result(
+    decrease_result: Optional[Dict[str, Any]],
+    *,
+    pending_traffic_decreases: list[Dict[str, Any]],
+    pending_metric_decreases: list[Dict[str, Any]],
+) -> None:
+    if not decrease_result:
+        return
+    traffic_item = decrease_result.get("traffic_item")
+    if traffic_item:
+        pending_traffic_decreases.append(traffic_item)
+    pending_metric_decreases.extend(decrease_result.get("metric_items") or [])
+
+
 async def build_data_decrease_warning(
         existing_data: Any,
         new_request_count: int,
@@ -180,75 +274,80 @@ async def build_data_decrease_warning(
         db: Optional[AsyncSession] = None,
         new_ecpm_before: float = 0.0,
         new_ecpm_after: float = 0.0,
-) -> Optional[str]:
+) -> Optional[Dict[str, Any]]:
     """
     检查待更新数据是否比原有数据减少。
 
-    - eCPM / 收益减少：返回 Telegram 告警文案（由调用方在事务提交后发送）
-    - 请求数/匹配数/展示数/点击数减少：仅写入 app.log，不发 Telegram
+    返回字典（无减少时返回 None）：
+    - metric_items: eCPM/收益减少条目，按类型汇总后发 Telegram
+    - traffic_item: 流量类指标减少条目，供批次汇总（可无）
     """
     try:
-        # 仅日志：流量类指标减少
-        log_only_fields: list[str] = []
-        # 需 Telegram：eCPM / 收益减少
-        telegram_fields: list[str] = []
+        traffic_fields: list[str] = []
+        metric_items: list[Dict[str, Any]] = []
         float_threshold = 0.01
 
         request_decrease = existing_data.request_count - new_request_count
         if request_decrease > 0:
-            log_only_fields.append(
+            traffic_fields.append(
                 f"请求数: 原有 {existing_data.request_count} → 新获取 {new_request_count} (减少 {request_decrease})")
 
         match_decrease = existing_data.match_count - new_match_count
         if match_decrease > 0:
-            log_only_fields.append(
+            traffic_fields.append(
                 f"匹配数: 原有 {existing_data.match_count} → 新获取 {new_match_count} (减少 {match_decrease})")
 
         display_decrease = existing_data.display_count - new_display_count
         if display_decrease > 0:
-            log_only_fields.append(
+            traffic_fields.append(
                 f"展示数: 原有 {existing_data.display_count} → 新获取 {new_display_count} (减少 {display_decrease})")
 
         click_decrease = existing_data.click_count - new_click_count
         if click_decrease > 0:
-            log_only_fields.append(
+            traffic_fields.append(
                 f"点击数: 原有 {existing_data.click_count} → 新获取 {new_click_count} (减少 {click_decrease})")
 
         ecpm_before_decrease = _as_float(existing_data.ecpm_before_deduct) - _as_float(new_ecpm_before)
         if ecpm_before_decrease > float_threshold:
-            telegram_fields.append(
-                f"eCPM(减扣前): 原有 {_as_float(existing_data.ecpm_before_deduct):.2f} → "
-                f"新获取 {_as_float(new_ecpm_before):.2f} (减少 {ecpm_before_decrease:.2f})")
+            metric_items.append({
+                "metric_type": "ecpm_before",
+                "fields": [
+                    f"原有 {_as_float(existing_data.ecpm_before_deduct):.2f} → "
+                    f"新获取 {_as_float(new_ecpm_before):.2f} (减少 {ecpm_before_decrease:.2f})"
+                ],
+            })
 
         ecpm_after_decrease = _as_float(existing_data.ecpm_after_deduct) - _as_float(new_ecpm_after)
         if ecpm_after_decrease > float_threshold:
-            telegram_fields.append(
-                f"eCPM(减扣后): 原有 {_as_float(existing_data.ecpm_after_deduct):.2f} → "
-                f"新获取 {_as_float(new_ecpm_after):.2f} (减少 {ecpm_after_decrease:.2f})")
+            metric_items.append({
+                "metric_type": "ecpm_after",
+                "fields": [
+                    f"原有 {_as_float(existing_data.ecpm_after_deduct):.2f} → "
+                    f"新获取 {_as_float(new_ecpm_after):.2f} (减少 {ecpm_after_decrease:.2f})"
+                ],
+            })
 
         revenue_before_decrease = _as_float(existing_data.revenue_before_deduct) - _as_float(new_revenue_before)
         if revenue_before_decrease > float_threshold:
-            telegram_fields.append(
-                f"收益(减扣前): 原有 {_as_float(existing_data.revenue_before_deduct):.2f} → "
-                f"新获取 {_as_float(new_revenue_before):.2f} (减少 {revenue_before_decrease:.2f})")
+            metric_items.append({
+                "metric_type": "revenue_before",
+                "fields": [
+                    f"原有 {_as_float(existing_data.revenue_before_deduct):.2f} → "
+                    f"新获取 {_as_float(new_revenue_before):.2f} (减少 {revenue_before_decrease:.2f})"
+                ],
+            })
 
         revenue_after_decrease = _as_float(existing_data.revenue_after_deduct) - _as_float(new_revenue_after)
         if revenue_after_decrease > float_threshold:
-            telegram_fields.append(
-                f"收益(减扣后): 原有 {_as_float(existing_data.revenue_after_deduct):.2f} → "
-                f"新获取 {_as_float(new_revenue_after):.2f} (减少 {revenue_after_decrease:.2f})")
+            metric_items.append({
+                "metric_type": "revenue_after",
+                "fields": [
+                    f"原有 {_as_float(existing_data.revenue_after_deduct):.2f} → "
+                    f"新获取 {_as_float(new_revenue_after):.2f} (减少 {revenue_after_decrease:.2f})"
+                ],
+            })
 
-        if log_only_fields:
-            logger.warning(
-                "数据减少（仅日志，不发 Telegram）: 来源=%s 日期=%s 产品=%s 国家=%s | %s",
-                source,
-                date_str,
-                product_name,
-                country_code or "-",
-                "; ".join(log_only_fields),
-            )
-
-        if not telegram_fields:
+        if not traffic_fields and not metric_items:
             return None
 
         if db is not None:
@@ -256,37 +355,145 @@ async def build_data_decrease_warning(
         else:
             country_display = format_country_display(country_code)
 
-        current_time_str = datetime.now(APP_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+        result: Dict[str, Any] = {
+            "metric_items": [],
+            "traffic_item": None,
+        }
 
-        telegram_msg = "⚠️ 数据减少警告\n\n"
-        telegram_msg += f"数据来源: {source}\n"
-        telegram_msg += f"数据日期: {date_str}\n"
-        telegram_msg += f"产品: {product_name}\n"
-        telegram_msg += f"国家: {country_display}\n"
-        telegram_msg += f"发送时间: {current_time_str}（时区: {settings.TIMEZONE}）\n\n"
-        telegram_msg += "⚠️ 注意：API获取的数据正常情况下应该比上一次获得的数据大（累积增长）\n"
-        telegram_msg += "如果 eCPM / 收益减少，可能是数据源异常或数据被重置，请检查数据源！\n\n"
-        telegram_msg += "减少的字段:\n"
-        for field in telegram_fields:
-            telegram_msg += f"• {field}\n"
-        telegram_msg += "\n✅ 已按上游新数据更新本地记录"
-        return telegram_msg
+        if traffic_fields:
+            logger.warning(
+                "流量指标减少: 来源=%s 日期=%s 产品=%s 国家=%s | %s",
+                source,
+                date_str,
+                product_name,
+                country_code or "-",
+                "; ".join(traffic_fields),
+            )
+            result["traffic_item"] = {
+                "date_str": date_str,
+                "product_name": product_name,
+                "country_code": country_code or "",
+                "country_display": country_display,
+                "source": source,
+                "fields": traffic_fields,
+            }
+
+        for metric_item in metric_items:
+            logger.warning(
+                "指标减少: 类型=%s 来源=%s 日期=%s 产品=%s 国家=%s | %s",
+                metric_item["metric_type"],
+                source,
+                date_str,
+                product_name,
+                country_code or "-",
+                "; ".join(metric_item["fields"]),
+            )
+            result["metric_items"].append({
+                **metric_item,
+                "date_str": date_str,
+                "product_name": product_name,
+                "country_code": country_code or "",
+                "country_display": country_display,
+                "source": source,
+            })
+
+        return result
     except Exception as e:
         logger.warning(f"构建数据减少警告时出错: {e}")
         return None
 
 
-async def send_pending_data_decrease_warnings(warnings: list[str]) -> None:
-    """事务提交成功后批量发送数据减少告警。"""
-    if not warnings:
-        return
-    for telegram_msg in warnings:
-        try:
-            await send_telegram_notify_async(settings.TELEGRAM_ADMIN, telegram_msg)
-            logger.warning("数据减少警告已发送（提交成功后）")
-        except Exception as notify_err:
-            logger.warning(f"发送数据减少警告失败: {notify_err}")
+def format_traffic_decrease_summary(
+    traffic_items: list[Dict[str, Any]],
+    *,
+    source_hint: str = "API",
+) -> Optional[str]:
+    """将流量类指标减少条目汇总为一条 Telegram 文案，按产品、国家排序。"""
+    return format_decrease_summary(
+        traffic_items,
+        title="⚠️ 流量指标减少汇总",
+        record_description="请求数/匹配数/展示数/点击数减少",
+        notice="⚠️ 正常情况下上游数据应为累积增长；流量回落请核对数据源。",
+        source_hint=source_hint,
+    )
 
+
+def format_metric_decrease_summary(
+    metric_items: list[Dict[str, Any]],
+    *,
+    metric_type: str,
+    source_hint: str = "API",
+) -> Optional[str]:
+    """将某一类 eCPM/收益减少条目汇总为一条 Telegram 文案。"""
+    category = next(
+        (item for item in METRIC_DECREASE_CATEGORIES if item[0] == metric_type),
+        None,
+    )
+    if not category:
+        return None
+    _, title, metric_label = category
+    filtered_items = [
+        item for item in metric_items if item.get("metric_type") == metric_type
+    ]
+    return format_decrease_summary(
+        filtered_items,
+        title=title,
+        record_description=f"{metric_label}减少",
+        notice=_METRIC_DECREASE_NOTICE,
+        source_hint=source_hint,
+    )
+
+
+async def _send_decrease_summary_messages(
+    summary: Optional[str],
+    *,
+    log_label: str,
+    item_count: int,
+) -> None:
+    from app.core.telegram_utils import split_long_message
+
+    if not summary:
+        return
+    try:
+        for part in split_long_message(summary):
+            await send_telegram_notify_async(settings.TELEGRAM_ADMIN, part)
+        logger.warning("%s已发送（提交成功后）: %d 条", log_label, item_count)
+    except Exception as notify_err:
+        logger.warning("发送%s失败: %s", log_label, notify_err)
+
+
+async def send_pending_data_decrease_warnings(
+    *,
+    traffic_decreases: Optional[list[Dict[str, Any]]] = None,
+    metric_decreases: Optional[list[Dict[str, Any]]] = None,
+) -> None:
+    """事务提交成功后发送数据减少告警。
+
+    - eCPM/收益：按减扣前/后各汇总一条（过长则连续拆分）
+    - 请求/匹配/展示/点击：汇总为一条（过长则连续拆分）
+    """
+    metric_items = metric_decreases or []
+    for metric_type, _, metric_label in METRIC_DECREASE_CATEGORIES:
+        category_items = [
+            item for item in metric_items if item.get("metric_type") == metric_type
+        ]
+        summary = format_metric_decrease_summary(
+            metric_items,
+            metric_type=metric_type,
+        )
+        await _send_decrease_summary_messages(
+            summary,
+            log_label=f"{metric_label}减少汇总",
+            item_count=len(category_items),
+        )
+
+    traffic_items = traffic_decreases or []
+    traffic_summary = format_traffic_decrease_summary(traffic_items)
+    await _send_decrease_summary_messages(
+        traffic_summary,
+        log_label="流量指标减少汇总",
+        item_count=len(traffic_items),
+    )
 
 async def process_api_ad_data(
         data: List[Dict[str, Any]],
@@ -369,7 +576,8 @@ async def process_api_ad_data(
     import_date_max: Optional[date] = None
     # 本次成功 insert/update 的产品 ID（skip / error 不计入，用于分配空窗检查范围）
     written_product_ids: Set[int] = set()
-    pending_decrease_warnings: list[str] = []
+    pending_traffic_decreases: list[Dict[str, Any]] = []
+    pending_metric_decreases: list[Dict[str, Any]] = []
 
     # ========== 第一步：预处理所有数据，识别国家代码并分组 ==========
     # 存储能识别国家代码的数据：按 (date_str, product_name, country_code) 分组累加
@@ -700,7 +908,7 @@ async def process_api_ad_data(
         pending_write: Optional[str] = None  # "insert" | "update"
         pending_product_id: Optional[int] = None
         pending_report_type: Optional[str] = None
-        pending_decrease_warning: Optional[str] = None
+        pending_decrease_result: Optional[Dict[str, Any]] = None
         async with db.begin_nested() as savepoint:
             try:
                 date_str = grouped_data["date_str"]
@@ -831,7 +1039,7 @@ async def process_api_ad_data(
 
                 # 处理数据（新建或更新）
                 if existing_data:
-                    pending_decrease_warning = await build_data_decrease_warning(
+                    pending_decrease_result = await build_data_decrease_warning(
                         existing_data=existing_data,
                         new_request_count=grouped_data["request_count"],
                         new_match_count=grouped_data["match_count"],
@@ -944,7 +1152,7 @@ async def process_api_ad_data(
 
                     else:
                         skipped_count += 1
-                        pending_decrease_warning = None
+                        pending_decrease_result = None
                         logger.info(f"数据完全相同，跳过: 日期={date_str}, 产品={product_name}, 国家={country_code}")
                 else:
                     # 创建新记录
@@ -994,7 +1202,7 @@ async def process_api_ad_data(
                 pending_write = None
                 pending_product_id = None
                 pending_report_type = None
-                pending_decrease_warning = None
+                pending_decrease_result = None
                 error_msg = str(e)
                 if "IntegrityError" in str(type(e)) or "Duplicate entry" in error_msg or "uq_ad_data" in error_msg:
                     logger.warning(
@@ -1017,8 +1225,12 @@ async def process_api_ad_data(
             written_product_ids.add(pending_product_id)
             if pending_report_type:
                 report_type_counts[pending_report_type] += 1
-            if pending_decrease_warning:
-                pending_decrease_warnings.append(pending_decrease_warning)
+            if pending_decrease_result:
+                _append_decrease_result(
+                    pending_decrease_result,
+                    pending_traffic_decreases=pending_traffic_decreases,
+                    pending_metric_decreases=pending_metric_decreases,
+                )
 
     # ========== 第三步：处理无国家输入（NULL）或无法识别（保留原始代码）的累加数据 ==========
     for key, grouped_data in unrecognized_data.items():
@@ -1027,7 +1239,7 @@ async def process_api_ad_data(
         pending_write: Optional[str] = None
         pending_product_id: Optional[int] = None
         pending_report_type: Optional[str] = None
-        pending_decrease_warning: Optional[str] = None
+        pending_decrease_result: Optional[Dict[str, Any]] = None
         async with db.begin_nested() as savepoint:
             try:
                 if len(key) == 4:
@@ -1161,7 +1373,7 @@ async def process_api_ad_data(
 
                 # 处理数据（新建或更新）
                 if existing_data:
-                    pending_decrease_warning = await build_data_decrease_warning(
+                    pending_decrease_result = await build_data_decrease_warning(
                         existing_data=existing_data,
                         new_request_count=grouped_data["request_count"],
                         new_match_count=grouped_data["match_count"],
@@ -1275,7 +1487,7 @@ async def process_api_ad_data(
 
                     else:
                         skipped_count += 1
-                        pending_decrease_warning = None
+                        pending_decrease_result = None
                         logger.info(
                             f"数据完全相同，跳过: 日期={date_str}, 产品={product_name}, "
                             f"国家={country_code or 'NULL'}"
@@ -1327,7 +1539,7 @@ async def process_api_ad_data(
                 pending_write = None
                 pending_product_id = None
                 pending_report_type = None
-                pending_decrease_warning = None
+                pending_decrease_result = None
                 error_msg = str(e)
                 if "IntegrityError" in str(type(e)) or "Duplicate entry" in error_msg or "uq_ad_data" in error_msg:
                     logger.warning(
@@ -1349,8 +1561,12 @@ async def process_api_ad_data(
             written_product_ids.add(pending_product_id)
             if pending_report_type:
                 report_type_counts[pending_report_type] += 1
-            if pending_decrease_warning:
-                pending_decrease_warnings.append(pending_decrease_warning)
+            if pending_decrease_result:
+                _append_decrease_result(
+                    pending_decrease_result,
+                    pending_traffic_decreases=pending_traffic_decreases,
+                    pending_metric_decreases=pending_metric_decreases,
+                )
 
     if inserted_count > 0 or updated_count > 0:
         try:
@@ -1393,5 +1609,6 @@ async def process_api_ad_data(
         "report_type_counts": dict(report_type_counts),
         "assignment_gaps": assignment_gaps,
         "assignment_orphan_total": assignment_orphan_total,
-        "decrease_warnings": pending_decrease_warnings,
+        "metric_decreases": pending_metric_decreases,
+        "traffic_decreases": pending_traffic_decreases,
     }
