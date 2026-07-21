@@ -2,7 +2,8 @@
 广告数据（AdData）导入与聚合处理工具。
 
 职责：解析上游 API/Excel 原始行、国家代码映射、比率计算、批量入库；
-eCPM/收益按减扣前/后各汇总一条 Telegram，流量指标汇总一条（按日期、产品、国家、广告单元排序，超长连续拆分）。
+eCPM/收益按减扣前/后汇总 Telegram（扣减为 0 时不重复发减扣后；eCPM 小幅波动仅写日志），
+流量指标汇总一条（按日期、产品、国家、广告单元排序，超长连续拆分）。
 
 在系统中的位置：``app.core.ad_data_processor``，由定时拉取任务与管理端导入 API 调用。
 """
@@ -304,6 +305,10 @@ async def build_data_decrease_warning(
         traffic_fields: list[str] = []
         metric_items: list[Dict[str, Any]] = []
         float_threshold = 0.01
+        # eCPM 是收益/展示派生比率：日内拉数时展示增速常快于收益，绝对值小幅回落很常见。
+        # 仅当相对降幅≥5% 或绝对降幅≥1.0 才进 Telegram，其余只写日志。
+        ecpm_rel_threshold = 0.05
+        ecpm_abs_threshold = 1.0
         resolved_ad_unit = normalize_ad_unit(
             ad_unit or getattr(existing_data, "ad_unit", "") or ""
         )
@@ -328,45 +333,96 @@ async def build_data_decrease_warning(
             traffic_fields.append(
                 f"点击数: 原有 {existing_data.click_count} → 新获取 {new_click_count} (减少 {click_decrease})")
 
-        ecpm_before_decrease = _as_float(existing_data.ecpm_before_deduct) - _as_float(new_ecpm_before)
+        def _ecpm_should_telegram(old_v: float, new_v: float, decrease: float) -> bool:
+            if decrease <= float_threshold:
+                return False
+            if decrease >= ecpm_abs_threshold:
+                return True
+            if old_v > 0 and (decrease / old_v) >= ecpm_rel_threshold:
+                return True
+            return False
+
+        ecpm_log_only_fields: list[str] = []
+
+        old_ecpm_before = _as_float(existing_data.ecpm_before_deduct)
+        new_ecpm_before_f = _as_float(new_ecpm_before)
+        ecpm_before_decrease = old_ecpm_before - new_ecpm_before_f
         if ecpm_before_decrease > float_threshold:
-            metric_items.append({
-                "metric_type": "ecpm_before",
-                "fields": [
-                    f"原有 {_as_float(existing_data.ecpm_before_deduct):.2f} → "
-                    f"新获取 {_as_float(new_ecpm_before):.2f} (减少 {ecpm_before_decrease:.2f})"
-                ],
-            })
+            field_text = (
+                f"原有 {old_ecpm_before:.2f} → "
+                f"新获取 {new_ecpm_before_f:.2f} (减少 {ecpm_before_decrease:.2f})"
+            )
+            if _ecpm_should_telegram(old_ecpm_before, new_ecpm_before_f, ecpm_before_decrease):
+                metric_items.append({
+                    "metric_type": "ecpm_before",
+                    "fields": [field_text],
+                    "decrease": ecpm_before_decrease,
+                })
+            else:
+                ecpm_log_only_fields.append(f"eCPM(减扣前): {field_text}")
 
-        ecpm_after_decrease = _as_float(existing_data.ecpm_after_deduct) - _as_float(new_ecpm_after)
-        if ecpm_after_decrease > float_threshold:
-            metric_items.append({
-                "metric_type": "ecpm_after",
-                "fields": [
-                    f"原有 {_as_float(existing_data.ecpm_after_deduct):.2f} → "
-                    f"新获取 {_as_float(new_ecpm_after):.2f} (减少 {ecpm_after_decrease:.2f})"
-                ],
-            })
+        old_ecpm_after = _as_float(existing_data.ecpm_after_deduct)
+        new_ecpm_after_f = _as_float(new_ecpm_after)
+        ecpm_after_decrease = old_ecpm_after - new_ecpm_after_f
+        # 扣减比例为 0 时减扣前后相同，避免重复发两条几乎一样的汇总
+        ecpm_after_mirrors_before = (
+            abs(old_ecpm_after - old_ecpm_before) <= float_threshold
+            and abs(new_ecpm_after_f - new_ecpm_before_f) <= float_threshold
+        )
+        if ecpm_after_decrease > float_threshold and not ecpm_after_mirrors_before:
+            field_text = (
+                f"原有 {old_ecpm_after:.2f} → "
+                f"新获取 {new_ecpm_after_f:.2f} (减少 {ecpm_after_decrease:.2f})"
+            )
+            if _ecpm_should_telegram(old_ecpm_after, new_ecpm_after_f, ecpm_after_decrease):
+                metric_items.append({
+                    "metric_type": "ecpm_after",
+                    "fields": [field_text],
+                    "decrease": ecpm_after_decrease,
+                })
+            else:
+                ecpm_log_only_fields.append(f"eCPM(减扣后): {field_text}")
 
-        revenue_before_decrease = _as_float(existing_data.revenue_before_deduct) - _as_float(new_revenue_before)
+        old_revenue_before = _as_float(existing_data.revenue_before_deduct)
+        new_revenue_before_f = _as_float(new_revenue_before)
+        revenue_before_decrease = old_revenue_before - new_revenue_before_f
         if revenue_before_decrease > float_threshold:
             metric_items.append({
                 "metric_type": "revenue_before",
                 "fields": [
-                    f"原有 {_as_float(existing_data.revenue_before_deduct):.2f} → "
-                    f"新获取 {_as_float(new_revenue_before):.2f} (减少 {revenue_before_decrease:.2f})"
+                    f"原有 {old_revenue_before:.2f} → "
+                    f"新获取 {new_revenue_before_f:.2f} (减少 {revenue_before_decrease:.2f})"
                 ],
+                "decrease": revenue_before_decrease,
             })
 
-        revenue_after_decrease = _as_float(existing_data.revenue_after_deduct) - _as_float(new_revenue_after)
-        if revenue_after_decrease > float_threshold:
+        old_revenue_after = _as_float(existing_data.revenue_after_deduct)
+        new_revenue_after_f = _as_float(new_revenue_after)
+        revenue_after_decrease = old_revenue_after - new_revenue_after_f
+        revenue_after_mirrors_before = (
+            abs(old_revenue_after - old_revenue_before) <= float_threshold
+            and abs(new_revenue_after_f - new_revenue_before_f) <= float_threshold
+        )
+        if revenue_after_decrease > float_threshold and not revenue_after_mirrors_before:
             metric_items.append({
                 "metric_type": "revenue_after",
                 "fields": [
-                    f"原有 {_as_float(existing_data.revenue_after_deduct):.2f} → "
-                    f"新获取 {_as_float(new_revenue_after):.2f} (减少 {revenue_after_decrease:.2f})"
+                    f"原有 {old_revenue_after:.2f} → "
+                    f"新获取 {new_revenue_after_f:.2f} (减少 {revenue_after_decrease:.2f})"
                 ],
+                "decrease": revenue_after_decrease,
             })
+
+        if ecpm_log_only_fields:
+            logger.warning(
+                "eCPM 小幅波动（仅日志，不发 Telegram）: 来源=%s 日期=%s 产品=%s 国家=%s 广告单元=%s | %s",
+                source,
+                date_str,
+                product_name,
+                country_code or "-",
+                resolved_ad_unit or "-",
+                "; ".join(ecpm_log_only_fields),
+            )
 
         if not traffic_fields and not metric_items:
             return None
