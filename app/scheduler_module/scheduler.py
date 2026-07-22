@@ -24,6 +24,7 @@ import os
 import asyncio
 import logging
 import threading
+from datetime import datetime
 from typing import Optional, Callable, Any
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -116,6 +117,44 @@ def get_scheduler() -> AsyncIOScheduler:
                     f"[Worker PID:{worker_pid}] 调度器已初始化（时区: {DEFAULT_TIMEZONE}, 执行器: AsyncIOExecutor）"
                 )
     return scheduler
+
+
+def get_job_next_run_time(job: Any, *, now: Optional[datetime] = None) -> Optional[datetime]:
+    """
+    安全获取 APScheduler Job 的下次执行时间。
+
+    pending 或未入 job store 的 job 可能尚未设置 next_run_time，
+    此时回退到 trigger.get_next_fire_time 推算。
+    """
+    next_run_time = getattr(job, "next_run_time", None)
+    if next_run_time is not None:
+        return next_run_time
+
+    trigger = getattr(job, "trigger", None)
+    if trigger is None:
+        return None
+
+    try:
+        ref = now or datetime.now(APP_TIMEZONE)
+        return trigger.get_next_fire_time(None, ref)
+    except Exception:
+        return None
+
+
+def format_job_next_run_time(
+        job: Any,
+        *,
+        now: Optional[datetime] = None,
+        fmt: str = "%Y-%m-%d %H:%M:%S",
+) -> str:
+    """格式化 Job 下次执行时间；无法获取时返回「未计划」。"""
+    next_run_time = get_job_next_run_time(job, now=now)
+    if not next_run_time:
+        return "未计划"
+    try:
+        return next_run_time.strftime(fmt)
+    except Exception:
+        return str(next_run_time)
 
 
 async def execute_task_with_lock(
@@ -523,18 +562,15 @@ def register_scheduled_task(
     worker_pid = os.getpid()
 
     # 计算下次执行时间
-    next_run_time = None
+    next_run_str = "未计划"
     try:
-        # 获取任务的触发器
         jobs = sched.get_jobs()
         for job in jobs:
             if job.id == task_name:
-                next_run_time = job.next_run_time
+                next_run_str = format_job_next_run_time(job)
                 break
     except Exception:
         pass
-
-    next_run_str = next_run_time.strftime('%Y-%m-%d %H:%M:%S') if next_run_time else "未计划"
 
     logger.info(
         f"[Worker PID:{worker_pid}] 定时任务已注册: '{task_name}' "
@@ -694,8 +730,7 @@ async def start_scheduler() -> None:
             if jobs:
                 logger.info(f"[Worker PID:{worker_pid}] 已注册的任务列表:")
                 for job in jobs:
-                    next_run_time = job.next_run_time
-                    next_run_str = next_run_time.strftime('%Y-%m-%d %H:%M:%S') if next_run_time else "未计划"
+                    next_run_str = format_job_next_run_time(job)
                     logger.info(
                         f"  - 任务ID: {job.id}, "
                         f"名称: {job.name}, "

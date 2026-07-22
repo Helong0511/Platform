@@ -32,6 +32,7 @@ from app.core.utils import get_app_now_naive
 from app.core.validation import sanitize_input
 from app.models.models import ScheduledTask, User
 from app.scheduler_module import get_scheduler, init_scheduled_tasks
+from app.scheduler_module.scheduler import format_job_next_run_time
 from app.scheduler_module.scheduler import register_scheduled_task, execute_task_with_lock
 from app.scheduler_module.task_queue import get_task_queue
 from app.scheduler_module.task_registry import get_task_function_by_name_or_path
@@ -590,13 +591,10 @@ class ScheduledTaskService:
         # 构建任务详情列表
         jobs_info = []
         for job in jobs:
-            next_run_time = job.next_run_time
-            next_run_str = next_run_time.strftime('%Y-%m-%d %H:%M:%S %Z') if next_run_time else "未计划"
-
             jobs_info.append({
                 'id': job.id,
                 'name': job.name,
-                'next_run_time': next_run_str,
+                'next_run_time': format_job_next_run_time(job, fmt='%Y-%m-%d %H:%M:%S %Z'),
                 'trigger': str(job.trigger),
                 'func': str(job.func) if hasattr(job, 'func') else 'N/A'
             })
