@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.future import select
 
 from app.core.auth_response import clear_auth_cookies
+from app.core.audit_log import log_runtime_error
 from app.core.config import settings
 from app.core.constants import MAX_ERROR_MESSAGE_LENGTH, MAX_STACK_TRACE_LENGTH
 from app.core.database import AsyncSessionLocal

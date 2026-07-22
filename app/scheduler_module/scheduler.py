@@ -123,22 +123,22 @@ def get_job_next_run_time(job: Any, *, now: Optional[datetime] = None) -> Option
     """
     安全获取 APScheduler Job 的下次执行时间。
 
-    pending 或未入 job store 的 job 可能尚未设置 next_run_time，
-    此时回退到 trigger.get_next_fire_time 推算。
+    - 已入调度且正常运行：返回 job.next_run_time
+    - 已暂停（next_run_time 为 None）：返回 None，由调用方显示「未计划」
+    - pending（尚未入 job store）：用 trigger 推算理论下次执行时间
     """
-    next_run_time = getattr(job, "next_run_time", None)
-    if next_run_time is not None:
-        return next_run_time
+    if getattr(job, "pending", False):
+        trigger = getattr(job, "trigger", None)
+        if trigger is None:
+            return None
+        try:
+            ref = now or datetime.now(APP_TIMEZONE)
+            return trigger.get_next_fire_time(None, ref)
+        except Exception:
+            return None
 
-    trigger = getattr(job, "trigger", None)
-    if trigger is None:
-        return None
-
-    try:
-        ref = now or datetime.now(APP_TIMEZONE)
-        return trigger.get_next_fire_time(None, ref)
-    except Exception:
-        return None
+    # 已入 job store：以 next_run_time 为准（None 表示暂停，不做 trigger 回退）
+    return getattr(job, "next_run_time", None)
 
 
 def format_job_next_run_time(

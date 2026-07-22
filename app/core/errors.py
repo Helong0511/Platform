@@ -13,6 +13,7 @@ from sqlalchemy.future import select
 
 from app.core.audit_log import log_runtime_error
 from app.core.database import AsyncSessionLocal
+from app.core.telegram.runtime_error_notify import notify_runtime_error_async
 from app.core.utils import get_client_ip, get_app_now_naive
 from app.models.models import User
 
@@ -444,6 +445,22 @@ async def record_http_exception_log(
                 details=request_details
             )
             await audit_db.commit()
+
+            await notify_runtime_error_async(
+                error_type=f"{error_type}_{exc.status_code}",
+                error_message=truncated_error,
+                location={
+                    "module": "app.core.errors",
+                    "function": "record_http_exception_log",
+                },
+                context={
+                    "path": request.url.path,
+                    "method": request.method,
+                    "status_code": exc.status_code,
+                    "client_ip": request_details.get("client_ip"),
+                },
+                stack_trace=request_details.get("stack_trace"),
+            )
         except Exception as log_error:
             logger.warning(f"记录{error_type}日志失败: {log_error}")
         finally:

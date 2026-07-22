@@ -13,7 +13,7 @@ import warnings
 from app.core.config import settings
 from app.core.constants import LOG_DIR_MODE, LOG_FILE_BACKUP_COUNT, LOG_FILE_MAX_BYTES
 from app.core.log_filters import PostbackLoggerFilter
-from app.core.log_handlers import SafeRotatingFileHandler
+from app.core.log_handlers import SafeRotatingFileHandler, TelegramRuntimeErrorHandler
 
 warnings.filterwarnings('ignore', message='.*pkg_resources is deprecated.*', category=UserWarning)
 
@@ -218,6 +218,14 @@ def _setup_logging() -> None:
 
     # 向后兼容：file_handler 指向 app_log_handler（用于 stdout/stderr 重定向）
     file_handler = app_log_handler
+
+    # 运行时 ERROR（含异常）推送 Telegram 管理员
+    try:
+        telegram_error_handler = TelegramRuntimeErrorHandler()
+        telegram_error_handler.setLevel(logging.ERROR)
+        root_logger.addHandler(telegram_error_handler)
+    except Exception as e:
+        root_logger.warning(f"无法注册 Telegram 运行时错误通知 Handler: {e}")
 
     # 记录日志文件创建信息
     if app_log_handler:

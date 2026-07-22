@@ -838,6 +838,14 @@ class Settings(BaseSettings):
                         logger.warning(f"TELEGRAM_ADMIN 格式可能不正确: {id}（应为数字字符串）")
         return v
 
+    # 程序运行错误是否推送 Telegram（ERROR 日志含异常、5xx、未捕获异常）
+    TELEGRAM_RUNTIME_ERROR_NOTIFY: bool = os.getenv(
+        "TELEGRAM_RUNTIME_ERROR_NOTIFY", "true"
+    ).lower() in ["true", "1", "yes"]
+    TELEGRAM_RUNTIME_ERROR_DEBOUNCE_SECONDS: int = int(
+        os.getenv("TELEGRAM_RUNTIME_ERROR_DEBOUNCE_SECONDS", "300")
+    )
+
     # ====== Facebook 像素配置 ======
     # Pixel ID / Access Token 已不再作运行时兜底（凭证来自短链或启用中的斗篷配置）。
     # 保留环境变量兼容旧 .env；FACEBOOK_API_VERSION 仍用作 Graph API 默认版本号。
