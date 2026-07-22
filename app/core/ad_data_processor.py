@@ -112,24 +112,21 @@ def _resolve_upstream_ecpm_before(
     """
     解析用于入库/告警的「未扣减 eCPM」。
 
-    优先用上游 API 返回的真实 eCPM；仅当接口未提供时才回退到 收益/展示×1000。
-    多行分组时按展示数对上游 eCPM 做加权平均。
+    规则：
+    - API 返回了 eCPM → 用原值（多行按展示数加权平均；展示均为 0 则简单平均）
+    - API 未返回 eCPM → 用计算值（收益/展示×1000）
     """
     items = grouped_data.get("items") or []
-    if not items:
+    api_items = [item for item in items if item.get("ecpm_from_api")]
+    if not api_items:
         return calculated_ecpm
 
-    if len(items) == 1:
-        item = items[0]
-        if item.get("ecpm_from_api"):
-            return _as_float(item.get("ecpm"))
-        return calculated_ecpm
+    if len(api_items) == 1:
+        return _as_float(api_items[0].get("ecpm"))
 
     weighted = 0.0
     weight = 0
-    for item in items:
-        if not item.get("ecpm_from_api"):
-            continue
+    for item in api_items:
         disp = int(item.get("display_count") or 0)
         if disp <= 0:
             continue
@@ -137,7 +134,8 @@ def _resolve_upstream_ecpm_before(
         weight += disp
     if weight > 0:
         return weighted / weight
-    return calculated_ecpm
+    # 有上游 eCPM 但展示均为 0：仍用 API 原值，不回退到计算值
+    return sum(_as_float(item.get("ecpm")) for item in api_items) / len(api_items)
 
 
 def _ad_data_identity_filters(
@@ -759,17 +757,23 @@ async def process_api_ad_data(
                 error_count += 1
                 continue
 
-            # eCPM：优先取上游 API 字段；无字段时回退收益/展示推算（仅作兜底）
-            item_ecpm_val = get_field(item, "ecpm_before_deduct")
+            # eCPM：field_mapping 含该字段且 API 有值 → 用原值；否则用 收益/展示×1000
             item_ecpm_from_api = False
-            if item_ecpm_val is not None and item_ecpm_val != "":
-                try:
-                    item_ecpm = float(item_ecpm_val)
-                    item_ecpm_from_api = True
-                except (ValueError, TypeError):
-                    item_ecpm = (item_revenue / item_display_count * 1000) if item_display_count > 0 else 0.0
-            else:
-                item_ecpm = (item_revenue / item_display_count * 1000) if item_display_count > 0 else 0.0
+            item_ecpm = 0.0
+            if field_mapping and "ecpm_before_deduct" in field_mapping:
+                item_ecpm_val = get_field(item, "ecpm_before_deduct")
+                if item_ecpm_val is not None and item_ecpm_val != "":
+                    try:
+                        item_ecpm = float(item_ecpm_val)
+                        item_ecpm_from_api = True
+                    except (ValueError, TypeError):
+                        pass
+            if not item_ecpm_from_api:
+                item_ecpm = (
+                    (item_revenue / item_display_count * 1000)
+                    if item_display_count > 0
+                    else 0.0
+                )
 
             if is_empty_ad_metrics(
                 request_count=item_request_count,
@@ -1002,7 +1006,7 @@ async def process_api_ad_data(
                 ecpm_deduct_ratio = product_info.get("ecpm_deduct_ratio", 0.0)
                 revenue_deduct_ratio = product_info.get("revenue_deduct_ratio", 0.0)
 
-                # 未扣减 eCPM：优先上游 API 真实值，否则回退收益/展示推算
+                # 未扣减 eCPM：API 有原值用原值，否则用 收益/展示×1000
                 total_revenue = grouped_data["revenue"]
                 total_display = grouped_data["display_count"]
                 total_clicks = grouped_data["click_count"]
@@ -1334,7 +1338,7 @@ async def process_api_ad_data(
                 ecpm_deduct_ratio = product_info.get("ecpm_deduct_ratio", 0.0)
                 revenue_deduct_ratio = product_info.get("revenue_deduct_ratio", 0.0)
 
-                # 未扣减 eCPM：优先上游 API 真实值，否则回退收益/展示推算
+                # 未扣减 eCPM：API 有原值用原值，否则用 收益/展示×1000
                 total_revenue = grouped_data["revenue"]
                 total_display = grouped_data["display_count"]
                 total_clicks = grouped_data["click_count"]
