@@ -460,6 +460,7 @@ async def record_http_exception_log(
                     "client_ip": request_details.get("client_ip"),
                 },
                 stack_trace=request_details.get("stack_trace"),
+                logger_name="app.core.errors",
             )
         except Exception as log_error:
             logger.warning(f"记录{error_type}日志失败: {log_error}")

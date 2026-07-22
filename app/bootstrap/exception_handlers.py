@@ -505,6 +505,7 @@ async def global_exception_handler(request: Request, exc: Exception):
                         "client_ip": request_details.get("client_ip"),
                     },
                     stack_trace=truncated_stack,
+                    logger_name="app.bootstrap.exception_handlers",
                 )
             except Exception as log_error:
                 # 日志记录失败不应该影响错误处理

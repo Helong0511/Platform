@@ -23,11 +23,14 @@ _DEFAULT_DEBOUNCE_SECONDS = 300
 _mem_alert_ts: dict[str, float] = {}
 _mem_lock = threading.Lock()
 
-# 避免 Telegram 自身失败再次触发通知（递归）；
-# exception_handlers 走显式 notify_runtime_error_async，跳过日志 Handler 重复推送
+# 日志 Handler 专用：这些 logger 已走显式 notify，避免重复推送
+_LOG_HANDLER_EXCLUDED_LOGGER_PREFIXES = (
+    "app.bootstrap.exception_handlers",
+)
+
+# 全局噪音过滤（递归/第三方库等，所有入口均生效）
 _EXCLUDED_LOGGER_PREFIXES = (
     "app.core.telegram",
-    "app.bootstrap.exception_handlers",
     "telebot",
     "urllib3",
     "httpx",
@@ -80,12 +83,17 @@ def is_noise_error(
         *,
         logger_name: str = "",
 ) -> bool:
-    """判断是否为无需推送的噪音错误。"""
+    """判断是否为无需推送的噪音错误（全局过滤）。"""
     for prefix in _EXCLUDED_LOGGER_PREFIXES:
         if logger_name.startswith(prefix):
             return True
     text = f"{error_type} {message}"
     return any(token in text for token in _NOISE_SUBSTRINGS)
+
+
+def _is_log_handler_excluded(logger_name: str) -> bool:
+    """日志 Handler 专用：已由显式 notify 处理的路径不再重复推送。"""
+    return any(logger_name.startswith(prefix) for prefix in _LOG_HANDLER_EXCLUDED_LOGGER_PREFIXES)
 
 
 def build_runtime_error_message(
@@ -210,6 +218,9 @@ async def notify_runtime_error_async(
 
 def notify_from_log_record(record: logging.LogRecord) -> bool:
     """从 logging.LogRecord 提取信息并推送通知。"""
+    if _is_log_handler_excluded(record.name):
+        return False
+
     error_type = record.levelname
     error_message = record.getMessage()
 
