@@ -757,17 +757,17 @@ async def process_api_ad_data(
                 error_count += 1
                 continue
 
-            # eCPM：field_mapping 含该字段且 API 有值 → 用原值；否则用 收益/展示×1000
+            # eCPM：get_field 能取到值则用 API/原始字段；否则用 收益/展示×1000
+            # 注意：field_mapping 为 None 时 get_field 会按默认字段名 ecpm_before_deduct 读取
             item_ecpm_from_api = False
             item_ecpm = 0.0
-            if field_mapping and "ecpm_before_deduct" in field_mapping:
-                item_ecpm_val = get_field(item, "ecpm_before_deduct")
-                if item_ecpm_val is not None and item_ecpm_val != "":
-                    try:
-                        item_ecpm = float(item_ecpm_val)
-                        item_ecpm_from_api = True
-                    except (ValueError, TypeError):
-                        pass
+            item_ecpm_val = get_field(item, "ecpm_before_deduct")
+            if item_ecpm_val is not None and item_ecpm_val != "":
+                try:
+                    item_ecpm = float(item_ecpm_val)
+                    item_ecpm_from_api = True
+                except (ValueError, TypeError):
+                    pass
             if not item_ecpm_from_api:
                 item_ecpm = (
                     (item_revenue / item_display_count * 1000)
