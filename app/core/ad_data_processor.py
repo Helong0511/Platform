@@ -2,8 +2,8 @@
 广告数据（AdData）导入与聚合处理工具。
 
 职责：解析上游 API/Excel 原始行、国家代码映射、比率计算、批量入库；
-eCPM/收益按减扣前/后汇总 Telegram（扣减为 0 时不重复发减扣后；eCPM 小幅波动仅写日志），
-流量指标汇总一条（按日期、产品、国家、广告单元排序，超长连续拆分）。
+eCPM Telegram：上游 API 真实 eCPM 对比本地库未扣减 eCPM，有减少才通知；
+收益按减扣前/后汇总（扣减为 0 时不重复发减扣后）；流量指标汇总一条。
 
 在系统中的位置：``app.core.ad_data_processor``，由定时拉取任务与管理端导入 API 调用。
 """
@@ -105,6 +105,41 @@ def _grouped_data_is_empty(grouped_data: Dict[str, Any]) -> bool:
     )
 
 
+def _resolve_upstream_ecpm_before(
+    grouped_data: Dict[str, Any],
+    calculated_ecpm: float,
+) -> float:
+    """
+    解析用于入库/告警的「未扣减 eCPM」。
+
+    优先用上游 API 返回的真实 eCPM；仅当接口未提供时才回退到 收益/展示×1000。
+    多行分组时按展示数对上游 eCPM 做加权平均。
+    """
+    items = grouped_data.get("items") or []
+    if not items:
+        return calculated_ecpm
+
+    if len(items) == 1:
+        item = items[0]
+        if item.get("ecpm_from_api"):
+            return _as_float(item.get("ecpm"))
+        return calculated_ecpm
+
+    weighted = 0.0
+    weight = 0
+    for item in items:
+        if not item.get("ecpm_from_api"):
+            continue
+        disp = int(item.get("display_count") or 0)
+        if disp <= 0:
+            continue
+        weighted += _as_float(item.get("ecpm")) * disp
+        weight += disp
+    if weight > 0:
+        return weighted / weight
+    return calculated_ecpm
+
+
 def _ad_data_identity_filters(
     *,
     product_id: int,
@@ -167,8 +202,7 @@ APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
 
 METRIC_DECREASE_CATEGORIES: tuple[tuple[str, str, str], ...] = (
-    ("ecpm_before", "⚠️ eCPM(减扣前)减少汇总", "eCPM(减扣前)"),
-    ("ecpm_after", "⚠️ eCPM(减扣后)减少汇总", "eCPM(减扣后)"),
+    ("ecpm_before", "⚠️ eCPM减少汇总（上游 vs 本地未扣减）", "eCPM"),
     ("revenue_before", "⚠️ 收益(减扣前)减少汇总", "收益(减扣前)"),
     ("revenue_after", "⚠️ 收益(减扣后)减少汇总", "收益(减扣后)"),
 )
@@ -298,17 +332,13 @@ async def build_data_decrease_warning(
     检查待更新数据是否比原有数据减少。
 
     返回字典（无减少时返回 None）：
-    - metric_items: eCPM/收益减少条目，按类型汇总后发 Telegram
+    - metric_items: eCPM（上游 vs 本地未扣减）/ 收益减少条目
     - traffic_item: 流量类指标减少条目，供批次汇总（可无）
     """
     try:
         traffic_fields: list[str] = []
         metric_items: list[Dict[str, Any]] = []
         float_threshold = 0.01
-        # eCPM 是收益/展示派生比率：日内拉数时展示增速常快于收益，绝对值小幅回落很常见。
-        # 仅当相对降幅≥5% 或绝对降幅≥1.0 才进 Telegram，其余只写日志。
-        ecpm_rel_threshold = 0.05
-        ecpm_abs_threshold = 1.0
         resolved_ad_unit = normalize_ad_unit(
             ad_unit or getattr(existing_data, "ad_unit", "") or ""
         )
@@ -333,55 +363,19 @@ async def build_data_decrease_warning(
             traffic_fields.append(
                 f"点击数: 原有 {existing_data.click_count} → 新获取 {new_click_count} (减少 {click_decrease})")
 
-        def _ecpm_should_telegram(old_v: float, new_v: float, decrease: float) -> bool:
-            if decrease <= float_threshold:
-                return False
-            if decrease >= ecpm_abs_threshold:
-                return True
-            if old_v > 0 and (decrease / old_v) >= ecpm_rel_threshold:
-                return True
-            return False
-
-        ecpm_log_only_fields: list[str] = []
-
+        # eCPM：仅「上游 API 真实 eCPM」对比「本地库未扣减 eCPM」，有减少才 Telegram
         old_ecpm_before = _as_float(existing_data.ecpm_before_deduct)
         new_ecpm_before_f = _as_float(new_ecpm_before)
         ecpm_before_decrease = old_ecpm_before - new_ecpm_before_f
         if ecpm_before_decrease > float_threshold:
-            field_text = (
-                f"原有 {old_ecpm_before:.2f} → "
-                f"新获取 {new_ecpm_before_f:.2f} (减少 {ecpm_before_decrease:.2f})"
-            )
-            if _ecpm_should_telegram(old_ecpm_before, new_ecpm_before_f, ecpm_before_decrease):
-                metric_items.append({
-                    "metric_type": "ecpm_before",
-                    "fields": [field_text],
-                    "decrease": ecpm_before_decrease,
-                })
-            else:
-                ecpm_log_only_fields.append(f"eCPM(减扣前): {field_text}")
-
-        old_ecpm_after = _as_float(existing_data.ecpm_after_deduct)
-        new_ecpm_after_f = _as_float(new_ecpm_after)
-        ecpm_after_decrease = old_ecpm_after - new_ecpm_after_f
-        # 扣减比例为 0 时减扣前后相同，避免重复发两条几乎一样的汇总
-        ecpm_after_mirrors_before = (
-            abs(old_ecpm_after - old_ecpm_before) <= float_threshold
-            and abs(new_ecpm_after_f - new_ecpm_before_f) <= float_threshold
-        )
-        if ecpm_after_decrease > float_threshold and not ecpm_after_mirrors_before:
-            field_text = (
-                f"原有 {old_ecpm_after:.2f} → "
-                f"新获取 {new_ecpm_after_f:.2f} (减少 {ecpm_after_decrease:.2f})"
-            )
-            if _ecpm_should_telegram(old_ecpm_after, new_ecpm_after_f, ecpm_after_decrease):
-                metric_items.append({
-                    "metric_type": "ecpm_after",
-                    "fields": [field_text],
-                    "decrease": ecpm_after_decrease,
-                })
-            else:
-                ecpm_log_only_fields.append(f"eCPM(减扣后): {field_text}")
+            metric_items.append({
+                "metric_type": "ecpm_before",
+                "fields": [
+                    f"本地未扣减 {old_ecpm_before:.2f} → "
+                    f"上游API {new_ecpm_before_f:.2f} (减少 {ecpm_before_decrease:.2f})"
+                ],
+                "decrease": ecpm_before_decrease,
+            })
 
         old_revenue_before = _as_float(existing_data.revenue_before_deduct)
         new_revenue_before_f = _as_float(new_revenue_before)
@@ -412,17 +406,6 @@ async def build_data_decrease_warning(
                 ],
                 "decrease": revenue_after_decrease,
             })
-
-        if ecpm_log_only_fields:
-            logger.warning(
-                "eCPM 小幅波动（仅日志，不发 Telegram）: 来源=%s 日期=%s 产品=%s 国家=%s 广告单元=%s | %s",
-                source,
-                date_str,
-                product_name,
-                country_code or "-",
-                resolved_ad_unit or "-",
-                "; ".join(ecpm_log_only_fields),
-            )
 
         if not traffic_fields and not metric_items:
             return None
@@ -550,7 +533,8 @@ async def send_pending_data_decrease_warnings(
 ) -> None:
     """事务提交成功后发送数据减少告警。
 
-    - eCPM/收益：按减扣前/后各汇总一条（过长则连续拆分）
+    - eCPM：上游 API 真实 eCPM vs 本地未扣减 eCPM，有减少才汇总发送
+    - 收益：按减扣前/后各汇总一条（过长则连续拆分；扣减为 0 时不重复减扣后）
     - 请求/匹配/展示/点击：汇总为一条（过长则连续拆分）
     """
     metric_items = metric_decreases or []
@@ -775,11 +759,13 @@ async def process_api_ad_data(
                 error_count += 1
                 continue
 
-            # eCPM（用于全零判断；无展示时由收益推算或为 0）
+            # eCPM：优先取上游 API 字段；无字段时回退收益/展示推算（仅作兜底）
             item_ecpm_val = get_field(item, "ecpm_before_deduct")
+            item_ecpm_from_api = False
             if item_ecpm_val is not None and item_ecpm_val != "":
                 try:
                     item_ecpm = float(item_ecpm_val)
+                    item_ecpm_from_api = True
                 except (ValueError, TypeError):
                     item_ecpm = (item_revenue / item_display_count * 1000) if item_display_count > 0 else 0.0
             else:
@@ -867,6 +853,7 @@ async def process_api_ad_data(
                     "revenue": item_revenue,
                     "display_count": item_display_count,
                     "ecpm": item_ecpm,
+                    "ecpm_from_api": item_ecpm_from_api,
                     "click_count": item_click_count
                 }
                 # 如果有字段映射且有CPC值，保存到items中
@@ -927,6 +914,7 @@ async def process_api_ad_data(
                     "revenue": item_revenue,
                     "display_count": item_display_count,
                     "ecpm": item_ecpm,
+                    "ecpm_from_api": item_ecpm_from_api,
                     "click_count": item_click_count
                 }
                 # 如果有字段映射且有CPC值，保存到items中
@@ -1014,7 +1002,7 @@ async def process_api_ad_data(
                 ecpm_deduct_ratio = product_info.get("ecpm_deduct_ratio", 0.0)
                 revenue_deduct_ratio = product_info.get("revenue_deduct_ratio", 0.0)
 
-                # 计算累加后的eCPM（加权平均）
+                # 未扣减 eCPM：优先上游 API 真实值，否则回退收益/展示推算
                 total_revenue = grouped_data["revenue"]
                 total_display = grouped_data["display_count"]
                 total_clicks = grouped_data["click_count"]
@@ -1023,7 +1011,7 @@ async def process_api_ad_data(
                 else:
                     calculated_ecpm = 0.0
 
-                final_ecpm = calculated_ecpm
+                final_ecpm = _resolve_upstream_ecpm_before(grouped_data, calculated_ecpm)
 
                 # 计算CPC：按照日期、产品、国家分组
                 # 如果分组内只有单一条数据：有字段映射用映射字段，没有字段映射用公式算
@@ -1346,7 +1334,7 @@ async def process_api_ad_data(
                 ecpm_deduct_ratio = product_info.get("ecpm_deduct_ratio", 0.0)
                 revenue_deduct_ratio = product_info.get("revenue_deduct_ratio", 0.0)
 
-                # 计算累加后的eCPM（加权平均）
+                # 未扣减 eCPM：优先上游 API 真实值，否则回退收益/展示推算
                 total_revenue = grouped_data["revenue"]
                 total_display = grouped_data["display_count"]
                 total_clicks = grouped_data["click_count"]
@@ -1355,7 +1343,7 @@ async def process_api_ad_data(
                 else:
                     calculated_ecpm = 0.0
 
-                final_ecpm = calculated_ecpm
+                final_ecpm = _resolve_upstream_ecpm_before(grouped_data, calculated_ecpm)
 
                 # 计算CPC：按照日期、产品、国家分组
                 # 如果分组内只有单一条数据：有字段映射用映射字段，没有字段映射用公式算
