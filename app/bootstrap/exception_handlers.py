@@ -22,6 +22,7 @@ from app.core.database import AsyncSessionLocal
 from app.core.errors import ErrorCode, create_error_response, record_http_exception_log
 from app.services.ad_data.queries.filter_conditions import InvalidFilterParameterError
 from app.core.security import JWTUtils
+from app.core.telegram.runtime_error_notify import notify_runtime_error_async
 from app.core.utils import get_client_ip
 from app.models.models import User
 
@@ -490,6 +491,21 @@ async def global_exception_handler(request: Request, exc: Exception):
                     details=request_details
                 )
                 await audit_db.commit()
+
+                await notify_runtime_error_async(
+                    error_type=error_type,
+                    error_message=truncated_error,
+                    location={
+                        "module": "app.bootstrap.exception_handlers",
+                        "function": "global_exception_handler",
+                    },
+                    context={
+                        "path": request.url.path,
+                        "method": request.method,
+                        "client_ip": request_details.get("client_ip"),
+                    },
+                    stack_trace=truncated_stack,
+                )
             except Exception as log_error:
                 # 日志记录失败不应该影响错误处理
                 logger.warning(f"记录运行错误日志失败: {log_error}")

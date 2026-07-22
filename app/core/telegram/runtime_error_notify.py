@@ -23,9 +23,11 @@ _DEFAULT_DEBOUNCE_SECONDS = 300
 _mem_alert_ts: dict[str, float] = {}
 _mem_lock = threading.Lock()
 
-# 避免 Telegram 自身失败再次触发通知（递归）
+# 避免 Telegram 自身失败再次触发通知（递归）；
+# exception_handlers 走显式 notify_runtime_error_async，跳过日志 Handler 重复推送
 _EXCLUDED_LOGGER_PREFIXES = (
     "app.core.telegram",
+    "app.bootstrap.exception_handlers",
     "telebot",
     "urllib3",
     "httpx",
