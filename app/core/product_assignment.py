@@ -36,24 +36,33 @@ async def create_product_assignment(
     """
     if start_date is None:
         start_date = date.today()
-    
+
+    # 禁止创建倒挂区间（start > end），否则后续校验会误报「重叠」
+    if end_date is not None and start_date > end_date:
+        raise ValueError(
+            f"日期逻辑错误：开始日期（{start_date}）不能晚于结束日期（{end_date}）"
+        )
+
     # 检查是否存在重叠的分配记录（确保没有重复占用时间）
     # 重叠条件：两个日期范围有交集
     # 范围A: [start_date, end_date or date.max]
     # 范围B: [assignment.start_date, assignment.end_date or date.max]
     # 重叠：A.start <= B.end AND A.end >= B.start
+    # 注意：end_date IS NULL 表示当前有效，须用 OR IS NULL，不能用 Python 三元（列对象恒真）
+    new_range_end = end_date if end_date is not None else date.max
     overlap_query = select(ProductAssignment).where(
         and_(
             ProductAssignment.product_id == product_id,
-            # 新记录的结束日期（或最大日期）>= 现有记录的开始日期
-            (end_date if end_date else date.max) >= ProductAssignment.start_date,
-            # 新记录的开始日期 <= 现有记录的结束日期（或最大日期）
-            start_date <= (ProductAssignment.end_date if ProductAssignment.end_date is not None else date.max)
+            new_range_end >= ProductAssignment.start_date,
+            or_(
+                ProductAssignment.end_date.is_(None),
+                start_date <= ProductAssignment.end_date,
+            ),
         )
     )
     overlap_result = await db.execute(overlap_query)
     overlapping_assignments = overlap_result.scalars().all()
-    
+
     # 检查是否有重叠的记录
     if overlapping_assignments:
         overlap_info = ", ".join([
@@ -118,6 +127,9 @@ async def close_active_assignment(
     
     Returns:
         bool: 是否成功关闭了分配记录
+
+    Raises:
+        ValueError: 结束日期早于该记录开始日期（会导致倒挂区间）
     """
     # 查找当前有效的分配记录（end_date为NULL）
     query = select(ProductAssignment).where(
@@ -128,8 +140,17 @@ async def close_active_assignment(
     )
     result = await db.execute(query)
     active_assignment = result.scalars().first()
-    
+
     if active_assignment:
+        # 关闭后区间必须合法：[start_date, end_date]，禁止 start > end
+        if end_date < active_assignment.start_date:
+            raise ValueError(
+                f"无法关闭分配记录 ID {active_assignment.id}："
+                f"结束日期（{end_date}）早于该记录开始日期（{active_assignment.start_date}）。"
+                f"请将新客户开始日期设为不早于 "
+                f"{active_assignment.start_date + timedelta(days=1)}，"
+                f"或先在分配历史中调整当前有效记录的开始日期。"
+            )
         active_assignment.end_date = end_date
         await db.flush()
         logger.info(
@@ -205,6 +226,24 @@ async def transfer_product_assignment(
             f"期望值：{expected_new_start}，当前差值：{(new_start_date - old_end_date).days}天"
         )
     
+    # 先读取当前有效记录，提前拦截「结束日早于开始日」——否则会写成倒挂区间，
+    # 后续 validate 会误报与新记录「重叠」（如 start=07-23、end=07-21）
+    active_query = select(ProductAssignment).where(
+        and_(
+            ProductAssignment.product_id == product_id,
+            ProductAssignment.end_date.is_(None),
+        )
+    )
+    active_result = await db.execute(active_query)
+    active_assignment = active_result.scalars().first()
+    if active_assignment and old_end_date < active_assignment.start_date:
+        raise ValueError(
+            f"日期逻辑错误：旧客户结束日期（{old_end_date}）早于当前有效分配的开始日期"
+            f"（记录ID {active_assignment.id}，开始于 {active_assignment.start_date}）。"
+            f"请将新客户开始日期设为不早于 {active_assignment.start_date + timedelta(days=1)}，"
+            f"或先在分配历史中调整当前有效记录的开始日期后再转移。"
+        )
+
     # 检查是否存在与新记录重叠的其他分配记录（确保没有重复占用时间）
     # 注意：这里只检查其他客户的记录，当前客户的记录会被关闭，所以不算重叠
     # 重叠条件：两个日期范围有交集
@@ -219,16 +258,18 @@ async def transfer_product_assignment(
                 ProductAssignment.client_id != old_client_id,
                 ProductAssignment.end_date.isnot(None)  # 只检查已有结束日期的记录
             ),
-            # 检查日期范围是否重叠
-            # 新记录的结束日期（date.max）>= 现有记录的开始日期
+            # 新记录为当前有效，结束视为 date.max，必覆盖现有 start
             date.max >= ProductAssignment.start_date,
-            # 新记录的开始日期 <= 现有记录的结束日期（或date.max）
-            new_start_date <= (ProductAssignment.end_date if ProductAssignment.end_date is not None else date.max)
+            # end_date IS NULL 表示仍有效，必须算作重叠
+            or_(
+                ProductAssignment.end_date.is_(None),
+                new_start_date <= ProductAssignment.end_date,
+            ),
         )
     )
     overlap_check_result = await db.execute(overlap_check_query)
     overlapping_assignments = overlap_check_result.scalars().all()
-    
+
     # 如果有重叠记录，报错
     if overlapping_assignments:
         overlap_info = ", ".join([
@@ -239,7 +280,7 @@ async def transfer_product_assignment(
             f"日期重叠错误：新分配记录（开始日期: {new_start_date}）与现有记录重叠：{overlap_info}，"
             f"请确保日期不重复占用"
         )
-    
+
     # 优化：检查是否存在一个当前有效的记录，其开始日期与新客户开始日期相同
     # 如果存在，直接更新该记录的client_id，而不是关闭+创建
     existing_active_query = select(ProductAssignment).where(
@@ -252,7 +293,7 @@ async def transfer_product_assignment(
     )
     existing_active_result = await db.execute(existing_active_query)
     existing_active_assignment = existing_active_result.scalars().first()
-    
+
     if existing_active_assignment:
         # 在更新之前，检查新客户ID是否已经有重叠的记录
         # 由于只是更新client_id，日期范围不变，所以只需要检查新客户ID是否已经有相同日期范围的记录
@@ -404,29 +445,47 @@ async def validate_product_assignments(
         errors.append(f"查询产品 {product_id} 的分配记录时出错: {str(e)}")
         return {"errors": errors, "warnings": warnings}
     
+    # 检查0：倒挂区间（start_date > end_date）——须优先于重叠检查，避免误报「重叠」
+    for assignment in assignments:
+        if (
+            assignment.end_date is not None
+            and assignment.start_date > assignment.end_date
+        ):
+            errors.append(
+                f"日期逻辑错误：记录ID {assignment.id} (客户ID: {assignment.client_id}) "
+                f"开始日期（{assignment.start_date}）晚于结束日期（{assignment.end_date}）"
+            )
+
     # 优化：先排序，然后使用扫描线算法检查重叠和间隙
     # 将复杂度从 O(n²) 降低到 O(n log n)
-    sorted_assignments = sorted(assignments, key=lambda a: (a.start_date, a.id))
-    
+    # 倒挂记录不参与后续重叠/空窗扫描（其有效区间为空）
+    sorted_assignments = sorted(
+        [
+            a
+            for a in assignments
+            if a.end_date is None or a.start_date <= a.end_date
+        ],
+        key=lambda a: (a.start_date, a.id),
+    )
+
     # 检查1：重叠检查（优化版本）
     # 使用扫描线算法：对于每个记录，检查它与后续记录是否重叠
     # 由于已排序，如果当前记录的结束日期 < 下一个记录的开始日期，则后续记录都不会重叠
     for i, assignment1 in enumerate(sorted_assignments):
         range1_end = assignment1.end_date if assignment1.end_date else date.max
-        
+
         # 只检查后续记录（避免重复检查）
         for j in range(i + 1, len(sorted_assignments)):
             assignment2 = sorted_assignments[j]
-            
+
             # 如果当前记录的结束日期 < 下一个记录的开始日期，后续记录都不会重叠
             if range1_end < assignment2.start_date:
                 break
-            
-            # 计算第二个记录的有效日期范围
-            range2_end = assignment2.end_date if assignment2.end_date else date.max
-            
+
             # 检查是否重叠：A.start <= B.end AND A.end >= B.start
-            if range1_end >= assignment2.start_date:
+            # （因已排序且上面未 break，此处必然 range1_end >= assignment2.start_date）
+            range2_end = assignment2.end_date if assignment2.end_date else date.max
+            if assignment1.start_date <= range2_end and range1_end >= assignment2.start_date:
                 errors.append(
                     f"日期重叠：记录ID {assignment1.id} (客户ID: {assignment1.client_id}, "
                     f"{assignment1.start_date} 至 {assignment1.end_date or '当前有效'}) "

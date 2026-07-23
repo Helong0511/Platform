@@ -582,24 +582,25 @@ export function useProductForm(props, emit) {
   const handleStartDateChange = (value) => {
     transferDateForm.startDate = value;
     if (value) {
-      const startDate = new Date(value);
-      startDate.setDate(startDate.getDate() - 1);
-      const year = startDate.getFullYear();
-      const month = String(startDate.getMonth() + 1).padStart(2, '0');
-      const day = String(startDate.getDate()).padStart(2, '0');
-      transferDateForm.lastClientEndDate = `${year}-${month}-${day}`;
+      // 用纯日期字符串加减，避免 new Date('YYYY-MM-DD') 的时区偏移
+      const endStr = addDaysToDateString(value, -1);
+      transferDateForm.lastClientEndDate = endStr;
+
+      // 自动回填的旧客户结束日若早于当前有效分配开始日，立即提示（与确认时校验一致）
+      const lastStartDateStr = toDateStringOnly(lastClientStartDate.value);
+      if (lastStartDateStr && endStr && endStr < lastStartDateStr) {
+        ElMessage.warning(
+          `新客户开始日期过早：旧客户结束日（${endStr}）不能早于当前有效分配开始日（${formatDate(lastClientStartDate.value)}）。`
+          + `请将开始日期设为不早于 ${addDaysToDateString(lastStartDateStr, 1)}`,
+        );
+      }
     }
   };
 
   const handleEndDateChange = (value) => {
     transferDateForm.lastClientEndDate = value;
     if (value) {
-      const endDate = new Date(value);
-      endDate.setDate(endDate.getDate() + 1);
-      const year = endDate.getFullYear();
-      const month = String(endDate.getMonth() + 1).padStart(2, '0');
-      const day = String(endDate.getDate()).padStart(2, '0');
-      transferDateForm.startDate = `${year}-${month}-${day}`;
+      transferDateForm.startDate = addDaysToDateString(value, 1);
     }
   };
 

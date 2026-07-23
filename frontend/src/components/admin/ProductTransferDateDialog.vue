@@ -24,13 +24,16 @@
           format="YYYY-MM-DD"
           value-format="YYYY-MM-DD"
           style="width: 100%;"
-          :disabled-date="(date) => date > new Date()"
+          :disabled-date="disabledStartDate"
           append-to-body
           :z-index="3002"
           @update:model-value="emit('start-date-change', $event)"
         />
         <div style="margin-top: 8px; color: #909399; font-size: 12px;">
           新客户开始拥有该产品的日期（修改后会自动更新旧客户结束日期）
+          <template v-if="lastClientStartDate">
+            ；不能早于当前有效分配开始日的次日（{{ formatDate(minNewClientStartDate) }}）
+          </template>
         </div>
       </el-form-item>
       <el-form-item label="最后一个客户结束日期">
@@ -105,6 +108,7 @@ import {
   ElTimeline,
   ElTimelineItem,
 } from 'element-plus';
+import { computed } from 'vue';
 import { formatDate } from '../../utils/dateFormat';
 import {
   formatAssignmentClientFullName,
@@ -125,15 +129,59 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'confirm', 'start-date-change', 'end-date-change']);
 
-function disabledEndDate(date) {
-  if (date > new Date()) return true;
-  if (props.lastClientStartDate) {
-    const startDate = new Date(props.lastClientStartDate);
-    startDate.setHours(0, 0, 0, 0);
-    const checkDate = new Date(date);
-    checkDate.setHours(0, 0, 0, 0);
-    return checkDate < startDate;
+/** 将 YYYY-MM-DD 或 Date 规范为本地午夜，避免 UTC 解析偏移 */
+function toLocalMidnight(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    const d = new Date(value);
+    d.setHours(0, 0, 0, 0);
+    return d;
   }
+  const s = String(value).slice(0, 10);
+  const parts = s.split('-').map(Number);
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return null;
+  const d = new Date(parts[0], parts[1] - 1, parts[2]);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function formatYmd(d) {
+  if (!d) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * 新客户最早可开始日 = 当前有效分配开始日 + 1 天
+ * （旧客户结束日不能早于其开始日，故新客户开始日至少为其开始日次日）
+ */
+const minNewClientStartDate = computed(() => {
+  const start = toLocalMidnight(props.lastClientStartDate);
+  if (!start) return null;
+  const next = new Date(start);
+  next.setDate(next.getDate() + 1);
+  return formatYmd(next);
+});
+
+function disabledStartDate(date) {
+  const check = toLocalMidnight(date);
+  if (!check) return true;
+  const today = toLocalMidnight(new Date());
+  if (check > today) return true;
+  const minStart = toLocalMidnight(minNewClientStartDate.value);
+  if (minStart && check < minStart) return true;
+  return false;
+}
+
+function disabledEndDate(date) {
+  const check = toLocalMidnight(date);
+  if (!check) return true;
+  const today = toLocalMidnight(new Date());
+  if (check > today) return true;
+  const start = toLocalMidnight(props.lastClientStartDate);
+  if (start && check < start) return true;
   return false;
 }
 </script>
