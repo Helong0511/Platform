@@ -579,29 +579,85 @@ export function useProductForm(props, emit) {
     }
   };
 
-  const handleStartDateChange = (value) => {
-    transferDateForm.startDate = value;
-    if (value) {
-      // 用纯日期字符串加减，避免 new Date('YYYY-MM-DD') 的时区偏移
-      const endStr = addDaysToDateString(value, -1);
-      transferDateForm.lastClientEndDate = endStr;
+  /**
+   * 新客户最早开始日 = 当前有效分配开始日 + 1（与对话框 disabledStartDate 一致）
+   */
+  const getMinNewClientStartDate = () => {
+    const lastStart = toDateStringOnly(lastClientStartDate.value);
+    return lastStart ? addDaysToDateString(lastStart, 1) : '';
+  };
 
-      // 自动回填的旧客户结束日若早于当前有效分配开始日，立即提示（与确认时校验一致）
-      const lastStartDateStr = toDateStringOnly(lastClientStartDate.value);
-      if (lastStartDateStr && endStr && endStr < lastStartDateStr) {
-        ElMessage.warning(
-          `新客户开始日期过早：旧客户结束日（${endStr}）不能早于当前有效分配开始日（${formatDate(lastClientStartDate.value)}）。`
-          + `请将开始日期设为不早于 ${addDaysToDateString(lastStartDateStr, 1)}`,
-        );
-      }
+  /**
+   * 校验「新客户开始日 / 旧客户结束日」是否同时满足：
+   * - 连续：start === end + 1
+   * - 开始日不早于 minNewClientStartDate
+   * - 开始日不晚于今天
+   * - 结束日不早于当前有效分配开始日
+   */
+  const getTransferDatePairError = (startStr, endStr) => {
+    const start = toDateStringOnly(startStr);
+    const end = toDateStringOnly(endStr);
+    if (!start || !end) return '';
+
+    const today = getTodayDateString();
+    if (start > today) {
+      return `新客户开始日期不能是未来日期（当前回填为 ${start}）`;
     }
+
+    const lastStart = toDateStringOnly(lastClientStartDate.value);
+    if (lastStart && end < lastStart) {
+      return `旧客户结束日期（${end}）不能早于当前有效分配开始日（${formatDate(lastClientStartDate.value)}）`;
+    }
+
+    const minStart = getMinNewClientStartDate();
+    if (minStart && start < minStart) {
+      return `新客户开始日期（${start}）不能早于 ${minStart}（当前有效分配开始日的次日）`;
+    }
+
+    const expectedStart = addDaysToDateString(end, 1);
+    if (start !== expectedStart) {
+      return `日期须连续：新客户开始日应为旧客户结束日 + 1 天（期望 ${expectedStart}）`;
+    }
+
+    return '';
+  };
+
+  const handleStartDateChange = (value) => {
+    if (!value) {
+      transferDateForm.startDate = value;
+      return;
+    }
+
+    const startStr = toDateStringOnly(value);
+    const endStr = addDaysToDateString(startStr, -1);
+    const error = getTransferDatePairError(startStr, endStr);
+    if (error) {
+      ElMessage.warning(error);
+      // 不写入非法值，保持与 disabledStartDate / disabledEndDate 一致
+      return;
+    }
+
+    transferDateForm.startDate = startStr;
+    transferDateForm.lastClientEndDate = endStr;
   };
 
   const handleEndDateChange = (value) => {
-    transferDateForm.lastClientEndDate = value;
-    if (value) {
-      transferDateForm.startDate = addDaysToDateString(value, 1);
+    if (!value) {
+      transferDateForm.lastClientEndDate = value;
+      return;
     }
+
+    const endStr = toDateStringOnly(value);
+    const startStr = addDaysToDateString(endStr, 1);
+    const error = getTransferDatePairError(startStr, endStr);
+    if (error) {
+      ElMessage.warning(error);
+      // 拒绝回填：避免界面出现违反 disabledStartDate 的开始日
+      return;
+    }
+
+    transferDateForm.lastClientEndDate = endStr;
+    transferDateForm.startDate = startStr;
   };
 
   const fetchProductAssignments = async (productId, useCache = false) => {

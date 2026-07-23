@@ -50,7 +50,7 @@
           @update:model-value="emit('end-date-change', $event)"
         />
         <div style="margin-top: 8px; color: #909399; font-size: 12px;">
-          上一个客户拥有该产品的结束日期（修改后会自动更新新客户开始日期，不能小于该客户的开始日期：{{ lastClientStartDate ? formatDate(lastClientStartDate) : '未设置' }}）
+          上一个客户拥有该产品的结束日期（修改后会自动更新新客户开始日期；最多选到昨天，且不能早于该客户开始日：{{ lastClientStartDate ? formatDate(lastClientStartDate) : '未设置' }}）
         </div>
       </el-form-item>
       <el-form-item v-if="productAssignments.length > 0" label="产品变更历史">
@@ -179,7 +179,8 @@ function disabledEndDate(date) {
   const check = toLocalMidnight(date);
   if (!check) return true;
   const today = toLocalMidnight(new Date());
-  if (check > today) return true;
+  // 结束日若选「今天」，开始日会变成明天，违反「开始日不能是未来」；故最多选到昨天
+  if (check >= today) return true;
   const start = toLocalMidnight(props.lastClientStartDate);
   if (start && check < start) return true;
   return false;
