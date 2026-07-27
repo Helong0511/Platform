@@ -17,6 +17,7 @@
 - APP_TIMEZONE: 应用时区对象（从settings.TIMEZONE读取）
 - PERCENTAGE_MULTIPLIER: 百分比乘数常量（从constants模块导入）
 """
+import ipaddress
 import math
 import uuid
 import pytz
@@ -63,8 +64,8 @@ def get_client_ip(request: Request) -> str:
     支持代理情况（X-Forwarded-For、X-Real-IP头）
     
     优先级：
-    1. X-Forwarded-For 头（代理服务器）
-    2. X-Real-IP 头（Nginx等反向代理）
+    1. 可信代理覆盖写入的 X-Real-IP
+    2. 可信代理覆盖写入的 X-Forwarded-For
     3. request.client.host（直接连接）
     
     Args:
@@ -76,18 +77,27 @@ def get_client_ip(request: Request) -> str:
     try:
         from app.core.config import settings
 
-        # 仅在可信反向代理后读取转发头，防止伪造 IP
-        if settings.TRUST_PROXY_HEADERS:
-            forwarded_for = request.headers.get("X-Forwarded-For") or request.headers.get("x-forwarded-for")
-            if forwarded_for:
-                return forwarded_for.split(",")[0].strip()
+        peer_ip = request.client.host if request.client else ""
 
-            real_ip = request.headers.get("X-Real-IP") or request.headers.get("x-real-ip")
-            if real_ip:
-                return real_ip.strip()
+        # ASGI Server 必须关闭自身 proxy_headers 解析，保留真实直连对端。
+        # 仅当直连对端在可信代理白名单时，读取由 Nginx 覆盖写入的真实 IP 头。
+        trusted_proxies = set(getattr(settings, "TRUSTED_PROXY_IPS", []) or [])
+        if settings.TRUST_PROXY_HEADERS and peer_ip in trusted_proxies:
+            candidates = [
+                request.headers.get("X-Real-IP"),
+                # Nginx 已配置为覆盖而非追加；仍只接受首个合法值。
+                (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip(),
+            ]
+            for candidate in candidates:
+                if not candidate:
+                    continue
+                try:
+                    return str(ipaddress.ip_address(candidate.strip()))
+                except ValueError:
+                    continue
 
-        if request.client:
-            return request.client.host
+        if peer_ip:
+            return peer_ip
         
         return "unknown"
     except (AttributeError, Exception):

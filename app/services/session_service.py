@@ -100,10 +100,12 @@ class SessionService:
         now = get_app_now_naive()
         query = select(UserSession).where(
             UserSession.user_id == user_id,
+            UserSession.is_active.is_(True),
             UserSession.expires_at > now  # 只返回未过期的会话
         )
         count_query = select(func.count(UserSession.id)).where(
             UserSession.user_id == user_id,
+            UserSession.is_active.is_(True),
             UserSession.expires_at > now
         )
 

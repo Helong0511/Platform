@@ -18,16 +18,32 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy import func, String, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import object_session, selectinload
 
 from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.validation import validate_postback_url_placeholders
-from app.models.models import Publisher, Client, User, OfferPublisherAssignment
+from app.models.models import Publisher, Client, User, UserRole, OfferPublisherAssignment
 from app.services.base_service import BaseService
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_publisher_for_client(publisher: Publisher) -> Publisher:
+    """客户可见渠道时脱敏联系方式与 Postback 配置。
+
+    先从 Session expunge，避免 get_db 自动 commit 把 NULL 写回数据库。
+    price_discount 响应模型为非 Optional float，脱敏用 0.0 而非 None。
+    """
+    session = object_session(publisher)
+    if session is not None:
+        session.expunge(publisher)
+    publisher.email = None
+    publisher.postback_url = None
+    publisher.postback_success_check = None
+    publisher.price_discount = 0.0
+    return publisher
 
 
 class PublisherService(BaseService[Publisher]):
@@ -41,6 +57,14 @@ class PublisherService(BaseService[Publisher]):
     def __init__(self, db: AsyncSession):
         """注入异步数据库会话。"""
         super().__init__(db, Publisher)
+
+    async def _client_id_for_user(self, user: User) -> Optional[int]:
+        if user.role != UserRole.CLIENT:
+            return None
+        result = await self.db.execute(
+            select(Client.id).where(Client.user_id == user.id).limit(1)
+        )
+        return result.scalar_one_or_none()
 
     async def get_publisher_by_id(
             self,
@@ -60,7 +84,7 @@ class PublisherService(BaseService[Publisher]):
             Publisher: 渠道 ORM 对象
 
         Raises:
-            APIException: 记录不存在
+            APIException: 记录不存在或无权访问
         """
         query = select(Publisher).where(Publisher.id == publisher_id)
 
@@ -77,6 +101,15 @@ class PublisherService(BaseService[Publisher]):
                 detail=f"渠道ID {publisher_id} 不存在"
             )
 
+        if current_user.role == UserRole.CLIENT:
+            client_id = await self._client_id_for_user(current_user)
+            if not client_id or publisher.client_id != client_id:
+                raise_api_exception(
+                    ErrorCode.RESOURCE_NOT_FOUND,
+                    detail=f"渠道ID {publisher_id} 不存在"
+                )
+            return _sanitize_publisher_for_client(publisher)
+
         return publisher
 
     async def get_publishers(
@@ -91,6 +124,7 @@ class PublisherService(BaseService[Publisher]):
         分页查询渠道列表。
 
         支持名称/ID 模糊搜索、激活状态过滤，预加载所属客户信息。
+        客户仅可见本 client_id 下渠道，并脱敏敏感字段。
 
         Args:
             current_user: 当前登录用户
@@ -106,6 +140,12 @@ class PublisherService(BaseService[Publisher]):
 
         # 筛选条件
         conditions = []
+
+        if current_user.role == UserRole.CLIENT:
+            client_id = await self._client_id_for_user(current_user)
+            if not client_id:
+                return [], 0
+            conditions.append(Publisher.client_id == client_id)
 
         if search:
             # 搜索：名称或ID
@@ -140,7 +180,10 @@ class PublisherService(BaseService[Publisher]):
         query = query.offset(offset).limit(page_size)
 
         result = await self.db.execute(query)
-        publishers = result.scalars().all()
+        publishers = list(result.scalars().all())
+
+        if current_user.role == UserRole.CLIENT:
+            publishers = [_sanitize_publisher_for_client(p) for p in publishers]
 
         return publishers, total
 

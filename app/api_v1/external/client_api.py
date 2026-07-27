@@ -16,7 +16,7 @@ from datetime import date, datetime
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -186,9 +186,7 @@ class ProductNameResponse(BaseModel):
     id: int
     name: str
 
-    class Config:
-        """Pydantic 配置：允许从 SQLAlchemy ORM 对象构造响应实例。"""
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AdDataItemResponse(BaseModel):

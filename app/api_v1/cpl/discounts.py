@@ -3,8 +3,7 @@
 职责：Offer 与渠道维度的转化扣量比例配置 CRUD，用于控制向下游转发的转化数量。
 
 权限：
-- 列表查询：已登录用户
-- 创建/详情/更新/删除：仅管理员（require_admin）
+- 全部端点：仅管理员（require_admin）；扣量比例属商业机密，禁止客户拉取。
 
 主要端点（前缀 /discounts）：
 - POST   /                  创建扣量配置
@@ -81,6 +80,7 @@ async def create_discount(
     "/",
     response_model=PaginatedResponseBaseSchema[list[OfferDiscountResponse]],
     summary="获取扣量配置列表",
+    dependencies=[Depends(require_admin)],
 )
 async def get_discounts(
         page: int = Query(1, ge=1),
@@ -90,12 +90,12 @@ async def get_discounts(
         publisher_id: Optional[int] = Query(None),
         is_active: Optional[bool] = Query(None),
         db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_admin),
 ):
     """
     分页查询扣量配置列表。
 
-    权限：登录用户，按数据权限过滤。
+    权限：仅管理员（扣量比例属商业机密，禁止客户拉取）。
     筛选：扣量类型、offer_id、channel_id、is_active 等组合条件。
     """
     discount_service: DiscountService = await get_discount_service(db)

@@ -31,7 +31,7 @@ from app.core.tracking.click_id_generator import (
 from app.core.tracking.click_token import regenerate_click_id_from_click_data
 from app.core.tracking.tracklink_generator import generate_downstream_tracklink
 from app.core.device_info import collect_request_info
-from app.models.models import User, Offer, Publisher, Click
+from app.models.models import User, Offer, Publisher, Click, OfferPublisherAssignment
 from app.schemas.base import ResponseBaseSchema
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
@@ -184,6 +184,26 @@ async def track_click(
             raise_api_exception(
                 ErrorCode.RESOURCE_NOT_FOUND,
                 detail=f"渠道ID {publisher_id} 不存在"
+            )
+
+        if not publisher.is_active:
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail="渠道已停用"
+            )
+
+        # 2.1 校验 Offer–渠道分配（防止未授权归因）
+        assignment_result = await db.execute(
+            select(OfferPublisherAssignment.id).where(
+                OfferPublisherAssignment.offer_id == offer_id,
+                OfferPublisherAssignment.publisher_id == publisher_id,
+                OfferPublisherAssignment.is_active.is_(True),
+            ).limit(1)
+        )
+        if assignment_result.scalar_one_or_none() is None:
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail="Offer 未分配给该渠道"
             )
         
         # 3. 生成 Click ID

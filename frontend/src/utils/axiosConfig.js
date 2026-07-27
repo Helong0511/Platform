@@ -92,7 +92,7 @@ export const setupRequestInterceptor = () => {
         // 但登录接口不需要CSRF令牌（后端会跳过检查）
         const method = config.method?.toUpperCase();
         const url = config.url || '';
-        const isLoginEndpoint = url.includes('/auth/login') || url.includes('/auth/logout');
+        const isLoginEndpoint = url.includes('/auth/login') || url.includes('/auth/refresh');
 
         if (method && !['GET', 'HEAD', 'OPTIONS'].includes(method) && !isLoginEndpoint) {
           logger.error(`[CSRF] CSRF令牌缺失: ${method} ${config.url} - 请求将被拒绝`);

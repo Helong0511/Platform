@@ -34,7 +34,7 @@ from sqlalchemy.orm import selectinload
 from app.models.models import User, UserRole
 from app.models.session import UserSession, TokenBlacklist
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 # 创建路由实例
 router = APIRouter()
@@ -60,9 +60,7 @@ class SessionResponse(BaseModel):
     created_at: datetime
     expires_at: datetime
 
-    class Config:
-        """允许从 ORM UserSession 构造。用于 API 请求/响应序列化与 OpenAPI 文档生成。"""
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BlacklistResponse(BaseModel):
@@ -79,9 +77,7 @@ class BlacklistResponse(BaseModel):
     expires_at: datetime
     reason: Optional[str] = None
 
-    class Config:
-        """Pydantic 配置：允许从 TokenBlacklist ORM 记录构造。"""
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.get("/me/sessions", response_model=PaginatedResponseBaseSchema[list[SessionResponse]], summary="获取当前用户的活跃会话")

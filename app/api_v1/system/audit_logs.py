@@ -233,7 +233,7 @@ async def get_audit_log(
     "/client-error",
     response_model=ResponseBaseSchema[dict],
     summary="记录客户端运行错误",
-    description="记录前端JavaScript运行错误，所有用户可访问（包括未认证用户，已重构使用服务层）"
+    description="记录前端JavaScript运行错误（需 CSRF；失败时静默，不影响页面）"
 )
 async def log_client_error(
         request: Request,

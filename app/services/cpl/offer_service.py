@@ -589,4 +589,7 @@ class OfferService(BaseService[Offer]):
         await self.db.delete(offer)
         await self.db.flush()
 
+        # 删除后同时清理通用缓存和 offer:cache:{id} 热点缓存
+        await CacheInvalidator.invalidate_offer_cache(offer_id)
+
         logger.info(f"Offer已删除: {offer.offer_name} (ID: {offer_id})")

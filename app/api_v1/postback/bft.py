@@ -16,10 +16,15 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.api_route(
+@router.get(
     "/bft/postback",
-    methods=["GET", "POST"],
-    summary="接收 BFT PostBack 回调（支持 GET 和 POST，接收任意参数）",
+    summary="通过 GET 接收 BFT PostBack 回调",
+    operation_id="receive_bft_postback_get",
+)
+@router.post(
+    "/bft/postback",
+    summary="通过 POST 接收 BFT PostBack 回调",
+    operation_id="receive_bft_postback_post",
 )
 async def receive_bft_postback(
         request: Request,

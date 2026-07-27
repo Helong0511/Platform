@@ -1,7 +1,20 @@
-cp -f /data/Platform/nginx/btfrx.online/nginx.conf /etc/nginx/
+sudo cp -f /data/Platform/nginx/btfrx.online/nginx.conf /etc/nginx/
+
+
+
+# cloudflare-realip.conf 由 nginx.conf 以绝对路径 include，一般无需复制到 /etc/nginx
+
+# 若改路径，请同步修改 nginx.conf 中的 include
+
+
 
 sudo nginx -t
 
+
+
 sudo systemctl reload nginx
 
+
+
 sudo systemctl restart nginx
+

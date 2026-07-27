@@ -176,5 +176,6 @@ if __name__ == "__main__":
         reload=True,
         reload_dirs=["app"],
         log_level="info",
-        access_log=False  # 禁用 uvicorn 的默认访问日志，使用我们的 RequestLoggingMiddleware（支持中文路径解码）
+        access_log=False,  # 禁用 uvicorn 的默认访问日志，使用我们的 RequestLoggingMiddleware（支持中文路径解码）
+        proxy_headers=False,
     )

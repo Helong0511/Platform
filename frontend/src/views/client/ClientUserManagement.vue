@@ -78,7 +78,10 @@
             {{ currentUser.client.id }}
           </el-descriptions-item>
           <el-descriptions-item label="API密钥">
-            <span v-if="clientApiKey" style="font-family: monospace; font-size: 13px;">
+            <span v-if="currentUser.client?.api_enabled === false" style="color: #909399;">
+              API功能未启用
+            </span>
+            <span v-else-if="clientApiKey" style="font-family: monospace; font-size: 13px;">
               {{ clientApiKey }}
             </span>
             <span v-else-if="currentUser.client?.has_api_key" style="color: #909399;">加载中...</span>
@@ -276,7 +279,7 @@ const fetchClientInfo = async () => {
         password_change_enabled: userData.password_change_enabled
       };
     }
-    if (userData?.client?.has_api_key) {
+    if (userData?.client?.api_enabled && userData.client.has_api_key) {
       try {
         const keyData = await getClientApiKey();
         clientApiKey.value = keyData?.key || '';
@@ -338,10 +341,7 @@ onMounted(async () => {
         }, 20000);
       });
       
-      await Promise.race([
-        Promise.allSettled([fetchClientInfo(), fetchProducts()]),
-        timeoutPromise
-      ]);
+      await Promise.race([fetchProducts(), timeoutPromise]);
     } catch (error) {
       // 超时或其他错误
       if (error.message && error.message.includes('超时')) {

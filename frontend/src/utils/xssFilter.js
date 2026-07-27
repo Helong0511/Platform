@@ -527,7 +527,7 @@ const XSS_EXTRA_PATTERNS = [
   { re: /\bbehavior\s*:/i, msg: '发现CSS行为属性' },
   { re: /\burl\s*\(\s*javascript:/i, msg: '发现CSS中的JavaScript URL' },
   { re: /\b@import\s+/i, msg: '发现CSS @import' },
-  { re: /<\!\[CDATA\[/i, msg: '发现CDATA标记' },
+  { re: /<!\[CDATA\[/i, msg: '发现CDATA标记' },
 ];
 
 export function validateInput(input) {

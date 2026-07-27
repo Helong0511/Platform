@@ -43,47 +43,106 @@ _MEMORY_TOKEN_CLEANUP_THRESHOLD = int(_MEMORY_TOKEN_STORE_MAX_SIZE * 0.8)
 _MIN_TOKEN_REFRESH_INTERVAL = 300  # 5分钟
 # 令牌刷新阈值，当令牌剩余时间小于此阈值时刷新（比例）
 _TOKEN_REFRESH_THRESHOLD = 0.1  # 10%
-def validate_referer(request: Request) -> bool:
-    """
-    验证请求的Referer头，防止跨域CSRF攻击
-    
-    参数:
-        request: FastAPI请求对象
-    
-    返回:
-        如果Referer有效返回True，否则返回False
-    """
-    referer = request.headers.get("Referer")
-    if not referer:
-        # 没有Referer头，记录警告但不直接拒绝（兼容性考虑）
-        logger.debug("CSRF检查：缺少Referer头")
-        return True
-    
-    try:
-        from urllib.parse import urlparse
-        parsed_referer = urlparse(referer)
-        referer_domain = parsed_referer.netloc.lower()
-        
-        # 获取允许的域名列表
-        allowed_origins = getattr(settings, 'BACKEND_CORS_ORIGINS', [])
-        if not allowed_origins:
-            # 如果没有配置CORS域名，默认允许当前域名
-            host = request.headers.get("Host", "").split(":")[0].lower()
-            allowed_domains = [host] if host else []
-        else:
-            allowed_domains = [str(origin).lower().replace("https://", "").replace("http://", "") for origin in allowed_origins]
-        
-        # 检查Referer域名是否在允许列表中
-        for allowed_domain in allowed_domains:
-            if referer_domain == allowed_domain or referer_domain.endswith("." + allowed_domain):
+def _csrf_allowed_hosts(request: Request) -> list[str]:
+    """从 CORS 配置与当前请求 Host 解析允许的来源主机（含端口）。"""
+    hosts: list[str] = []
+    allowed_origins = getattr(settings, "BACKEND_CORS_ORIGINS", []) or []
+    for origin in allowed_origins:
+        raw = str(origin).strip().lower()
+        raw = raw.replace("https://", "").replace("http://", "")
+        if raw:
+            hosts.append(raw)
+    # 当前请求 Host：覆盖 Vite 反代 / 同机调试（Origin 与 Host 一致）
+    req_host = (request.headers.get("Host") or "").lower()
+    if req_host and req_host not in hosts:
+        hosts.append(req_host)
+    if not hosts:
+        return [req_host] if req_host else []
+    return hosts
+
+
+def _host_matches_allowed(netloc: str, allowed_hosts: list[str]) -> bool:
+    """校验 netloc（可含端口）是否落在允许列表。"""
+    host = (netloc or "").lower()
+    if not host:
+        return False
+    for allowed in allowed_hosts:
+        if host == allowed or host.endswith("." + allowed):
+            return True
+        # 允许「配置无端口、请求带端口」的本地开发匹配
+        host_no_port = host.split(":")[0]
+        allowed_no_port = allowed.split(":")[0]
+        if host_no_port == allowed_no_port or host_no_port.endswith("." + allowed_no_port):
+            if allowed_no_port in {"localhost", "127.0.0.1", "testserver", "::1"}:
                 return True
-        
-        logger.info("CSRF检查：Referer 域名 %s 不在允许列表中", referer_domain)
+    return False
+
+
+def _is_local_test_host(request: Request) -> bool:
+    """TestClient / 本机开发 Host，用于 Origin 缺失时的兼容。"""
+    host = (request.headers.get("Host") or "").split(":")[0].lower()
+    return host in {"localhost", "127.0.0.1", "testserver", "::1"}
+
+
+def _is_loopback_netloc(netloc: str) -> bool:
+    """是否为本机回环地址（任意端口）。"""
+    host = (netloc or "").split(":")[0].lower()
+    return host in {"localhost", "127.0.0.1", "::1"}
+
+
+def validate_request_origin(request: Request) -> bool:
+    """
+    校验写操作来源：优先 Origin，其次 Referer。
+
+    - 任一存在则必须落在 BACKEND_CORS_ORIGINS（或当前 Host）
+    - 本机 Vite(3310)→API(8960) 分端口：回环 Origin + 回环 Host 放行
+    - 两者皆缺：生产环境拒绝；本机/TestClient 放行（便于探针与本地调试）
+    """
+    from urllib.parse import urlparse
+
+    allowed_hosts = _csrf_allowed_hosts(request)
+    origin = request.headers.get("Origin")
+    referer = request.headers.get("Referer")
+
+    try:
+        if origin:
+            parsed = urlparse(origin)
+            netloc = (parsed.netloc or "").lower()
+            if _host_matches_allowed(netloc, allowed_hosts):
+                return True
+            if _is_loopback_netloc(netloc) and _is_local_test_host(request):
+                return True
+            logger.info("CSRF检查：Origin 域名 %s 不在允许列表中", netloc)
+            return False
+
+        if referer:
+            parsed = urlparse(referer)
+            netloc = (parsed.netloc or "").lower()
+            if _host_matches_allowed(netloc, allowed_hosts):
+                return True
+            if _is_loopback_netloc(netloc) and _is_local_test_host(request):
+                return True
+            logger.info("CSRF检查：Referer 域名 %s 不在允许列表中", netloc)
+            return False
+
+        if _is_local_test_host(request):
+            logger.debug("CSRF检查：本机请求缺少 Origin/Referer，已放行")
+            return True
+
+        logger.info(
+            "CSRF检查：缺少 Origin/Referer: %s %s",
+            request.method,
+            request.url.path,
+        )
         return False
-        
     except Exception as e:
-        logger.info("CSRF检查：Referer 验证失败: %s", e)
+        logger.info("CSRF检查：来源验证失败: %s", e)
         return False
+
+
+def validate_referer(request: Request) -> bool:
+    """兼容旧名：等同于 validate_request_origin。"""
+    return validate_request_origin(request)
 
 
 def extract_user_id_from_token(request: Request) -> Optional[str]:
@@ -149,34 +208,28 @@ def generate_csrf_token() -> str:
 
 def get_csrf_token_from_request(request: Request) -> Optional[str]:
     """
-    从请求中获取CSRF令牌
-    支持双重提交Cookie模式和传统头模式：
-    1. 请求头：X-CSRF-Token
-    2. Cookie：csrf_token（双重提交模式）
-    3. 表单数据：csrf_token（POST/PUT/PATCH/DELETE）
-    4. 查询参数：csrf_token（仅用于GET请求）
+    从请求提取 CSRF 令牌（仅接受显式提交，禁止「仅 Cookie」绕过）。
+
+    接受顺序：
+    1. 请求头 X-CSRF-Token（SPA 主路径）
+    2. 若 Cookie csrf_token 存在，则必须与 Header 一致（双重提交校验）
+
+    不再单独采信 Cookie / 查询参数，避免同站 form CSRF。
     """
-    # 1. 从请求头获取（传统模式）
-    token = request.headers.get("X-CSRF-Token")
-    if token:
-        return token
-    
-    # 2. 从Cookie获取（双重提交模式）
-    token = request.cookies.get("csrf_token")
-    if token:
-        return token
-    
-    # 3. 从表单数据获取（POST/PUT/PATCH/DELETE）
-    # 注意：FastAPI的request.form()是异步的，需要在中间件中特殊处理
-    # 这里主要从请求头和Cookie获取，表单数据在端点中处理
-    
-    # 4. 从查询参数获取（仅用于GET请求）
-    if request.method == "GET":
-        token = request.query_params.get("csrf_token")
-        if token:
-            return token
-    
-    return None
+    header_token = (request.headers.get("X-CSRF-Token") or "").strip()
+    if not header_token:
+        return None
+
+    cookie_token = (request.cookies.get("csrf_token") or "").strip()
+    if cookie_token and not secrets.compare_digest(header_token, cookie_token):
+        logger.info(
+            "CSRF检查：Header 与 Cookie 令牌不一致: %s %s",
+            request.method,
+            request.url.path,
+        )
+        return None
+
+    return header_token
 
 
 def is_safe_method(method: str) -> bool:
@@ -215,10 +268,10 @@ def should_skip_csrf_check(request: Request) -> bool:
     判断是否应该跳过CSRF检查
     跳过条件：
     1. 安全方法（GET, HEAD, OPTIONS, TRACE）
-    2. 登录接口（使用JWT，不需要CSRF）
-    3. 客户API接口（使用签名验证，不需要CSRF）
-    4. 外部 PostBack 回调（使用 IP/参数验证，不需要CSRF）
-    5. 静态资源
+    2. 登录/刷新接口（凭证体或 refresh cookie）
+    3. 客户开放 API（签名验证）
+    4. 外部 PostBack 回调（IP/参数验证）
+    5. 静态资源 / API 文档 / 短链公开路由
     """
     path = request.url.path
     method = request.method
@@ -227,10 +280,9 @@ def should_skip_csrf_check(request: Request) -> bool:
     if is_safe_method(method):
         return True
     
-    # 登录接口使用JWT，不需要CSRF
-    # 精确匹配 /api/v1/auth/login、/api/v1/auth/logout 和 /api/v1/auth/refresh
-    if path == "/api/v1/auth/login" or path == "/api/v1/auth/logout" or path == "/api/v1/auth/refresh":
-        logger.debug(f"跳过CSRF检查（登录接口）: {method} {path}")
+    # 登录/刷新使用凭证体或 refresh cookie；logout 需 CSRF（防跨站强制登出）
+    if path == "/api/v1/auth/login" or path == "/api/v1/auth/refresh":
+        logger.debug(f"跳过CSRF检查（登录/刷新接口）: {method} {path}")
         return True
     
     # 客户API接口使用签名验证，不需要CSRF
@@ -241,11 +293,6 @@ def should_skip_csrf_check(request: Request) -> bool:
     # BFT S2S PostBack 与上游平台回调（外部接口，使用 IP/参数验证，不需要 CSRF）
     if _is_external_postback_callback(path):
         logger.debug(f"跳过CSRF检查（外部PostBack回调）: {method} {path}")
-        return True
-    
-    # 客户端错误记录接口（用于记录前端错误，即使失败也不应影响用户体验，跳过CSRF检查）
-    if path == "/api/v1/audit-logs/client-error":
-        logger.debug(f"跳过CSRF检查（客户端错误记录接口）: {method} {path}")
         return True
     
     # 静态资源不需要CSRF
@@ -546,11 +593,11 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         if not await self._check_connection_status(request):
             raise EndOfStream("客户端已断开连接")
         
-        # 验证Referer（额外的安全层）
-        if not validate_referer(request):
+        # 验证来源 Origin/Referer（额外的安全层）
+        if not validate_request_origin(request):
             logger.log(
                 _csrf_violation_log_level(request),
-                "CSRF检查失败：Referer验证失败: %s %s",
+                "CSRF检查失败：来源验证失败: %s %s",
                 request.method,
                 request.url.path,
             )
@@ -767,27 +814,13 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             logger.info(f"跳过CSRF检查（短链接重定向）: {method} {path}")
             return await call_next(request)
         
-        if path == "/api/v1/auth/login" or path == "/api/v1/auth/logout" or path == "/api/v1/auth/refresh":
-            logger.info(f"跳过CSRF检查（登录接口）: {method} {path}")
+        if path == "/api/v1/auth/login" or path == "/api/v1/auth/refresh":
+            logger.info(f"跳过CSRF检查（登录/刷新接口）: {method} {path}")
             return await call_next(request)
         
         if _is_external_postback_callback(path):
             logger.debug(f"跳过CSRF检查（外部PostBack回调）: {method} {path}")
             return await call_next(request)
-        
-        if path == "/api/v1/audit-logs/client-error":
-            logger.debug(f"跳过CSRF检查（客户端错误记录接口）: {method} {path}")
-            return await call_next(request)
-        
-        if path.startswith("/api/v1/scheduled-tasks/"):
-            if (
-                path.endswith("/trigger")
-                or path.endswith("/reload")
-                or "/gam-secrets/upload" in path
-                or path == "/api/v1/scheduled-tasks/reload-all"
-            ):
-                logger.debug(f"跳过CSRF检查（定时任务接口）: {method} {path}")
-                return await call_next(request)
         
         # 检查是否应该跳过CSRF检查
         if should_skip_csrf_check(request):

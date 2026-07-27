@@ -14,20 +14,30 @@ from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.schemas.base import ResponseBaseSchema
 
-# 与 Nginx 同域反代一致；set/delete 必须使用相同 path
+# 与 Nginx 同域反代一致；set/delete 必须使用相同 path / samesite
 AUTH_COOKIE_PATH = "/"
+# Strict：降低同站多子域 form CSRF 风险（SPA 同域导航不受影响）
+AUTH_COOKIE_SAMESITE = "strict"
 
 
 def clear_auth_cookies(response: Response) -> None:
-    """清除认证 Cookie（logout / refresh 失败时调用）。"""
+    """清除认证 Cookie 与 CSRF Cookie（logout / refresh 失败时调用）。"""
     for key in ("access_token", "refresh_token"):
         response.delete_cookie(
             key=key,
             path=AUTH_COOKIE_PATH,
             httponly=True,
             secure=settings.is_production,
-            samesite="lax",
+            samesite=AUTH_COOKIE_SAMESITE,
         )
+    # 同步清除 CSRF Cookie，避免登出后残留可被同站误用的令牌
+    response.delete_cookie(
+        key="csrf_token",
+        path="/",
+        httponly=True,
+        secure=settings.is_production,
+        samesite="strict",
+    )
 
 
 def apply_auth_cookies(
@@ -43,7 +53,7 @@ def apply_auth_cookies(
         path=AUTH_COOKIE_PATH,
         httponly=True,
         secure=settings.is_production,
-        samesite="lax",
+        samesite=AUTH_COOKIE_SAMESITE,
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
     if refresh_token:
@@ -53,7 +63,7 @@ def apply_auth_cookies(
             path=AUTH_COOKIE_PATH,
             httponly=True,
             secure=settings.is_production,
-            samesite="lax",
+            samesite=AUTH_COOKIE_SAMESITE,
             max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
         )
 

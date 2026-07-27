@@ -18,15 +18,38 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy import func, String, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import object_session
 
 from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.infrastructure.cache import CacheInvalidator
-from app.models.models import Advertiser, User, Offer
+from app.models.models import (
+    Advertiser,
+    User,
+    UserRole,
+    Offer,
+    OfferPublisherAssignment,
+    Publisher,
+    Client,
+)
 from app.services.base_service import BaseService
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_advertiser_for_client(advertiser: Advertiser) -> Advertiser:
+    """客户可见广告主时脱敏联系方式与参数模板。
+
+    先从 Session expunge，避免 get_db 自动 commit 把 NULL 写回数据库。
+    """
+    session = object_session(advertiser)
+    if session is not None:
+        session.expunge(advertiser)
+    advertiser.email = None
+    advertiser.mobile = None
+    advertiser.advertiser_params = None
+    return advertiser
 
 
 class AdvertiserService(BaseService[Advertiser]):
@@ -41,6 +64,34 @@ class AdvertiserService(BaseService[Advertiser]):
         """注入异步数据库会话。"""
         super().__init__(db, Advertiser)
 
+    async def _client_id_for_user(self, user: User) -> Optional[int]:
+        if user.role != UserRole.CLIENT:
+            return None
+        result = await self.db.execute(
+            select(Client.id).where(Client.user_id == user.id).limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def _advertiser_ids_for_client(self, client_id: int) -> List[int]:
+        """客户渠道已分配 Offer 关联的广告主 ID。"""
+        result = await self.db.execute(
+            select(Offer.advertiser_id)
+            .join(
+                OfferPublisherAssignment,
+                OfferPublisherAssignment.offer_id == Offer.id,
+            )
+            .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
+            .where(
+                and_(
+                    Publisher.client_id == client_id,
+                    Publisher.is_active == True,  # noqa: E712
+                    OfferPublisherAssignment.is_active == True,  # noqa: E712
+                )
+            )
+            .distinct()
+        )
+        return [row[0] for row in result.all() if row[0] is not None]
+
     async def get_advertiser_by_id(
             self,
             advertiser_id: int,
@@ -51,13 +102,13 @@ class AdvertiserService(BaseService[Advertiser]):
 
         Args:
             advertiser_id: 广告主主键
-            current_user: 当前登录用户（预留权限扩展）
+            current_user: 当前登录用户
 
         Returns:
             Advertiser: 广告主 ORM 对象
 
         Raises:
-            APIException: 记录不存在时抛出 RESOURCE_NOT_FOUND
+            APIException: 记录不存在或无权访问时抛出 RESOURCE_NOT_FOUND
         """
         advertiser = await self.get_by_id(advertiser_id)
 
@@ -66,6 +117,16 @@ class AdvertiserService(BaseService[Advertiser]):
                 ErrorCode.RESOURCE_NOT_FOUND,
                 detail=f"广告主ID {advertiser_id} 不存在"
             )
+
+        if current_user.role == UserRole.CLIENT:
+            client_id = await self._client_id_for_user(current_user)
+            allowed = set(await self._advertiser_ids_for_client(client_id)) if client_id else set()
+            if advertiser.id not in allowed:
+                raise_api_exception(
+                    ErrorCode.RESOURCE_NOT_FOUND,
+                    detail=f"广告主ID {advertiser_id} 不存在"
+                )
+            return _sanitize_advertiser_for_client(advertiser)
 
         return advertiser
 
@@ -81,6 +142,7 @@ class AdvertiserService(BaseService[Advertiser]):
         分页查询广告主列表。
 
         支持按名称或 ID 模糊搜索、按激活状态过滤，按创建时间倒序。
+        客户仅可见「本客户渠道已分配 Offer」关联的广告主，并脱敏敏感字段。
 
         Args:
             current_user: 当前登录用户
@@ -96,6 +158,13 @@ class AdvertiserService(BaseService[Advertiser]):
 
         # 筛选条件
         conditions = []
+
+        if current_user.role == UserRole.CLIENT:
+            client_id = await self._client_id_for_user(current_user)
+            allowed_ids = await self._advertiser_ids_for_client(client_id) if client_id else []
+            if not allowed_ids:
+                return [], 0
+            conditions.append(Advertiser.id.in_(allowed_ids))
 
         if search:
             # 搜索：名称或ID
@@ -127,7 +196,10 @@ class AdvertiserService(BaseService[Advertiser]):
         query = query.offset(offset).limit(page_size)
 
         result = await self.db.execute(query)
-        advertisers = result.scalars().all()
+        advertisers = list(result.scalars().all())
+
+        if current_user.role == UserRole.CLIENT:
+            advertisers = [_sanitize_advertiser_for_client(a) for a in advertisers]
 
         return advertisers, total
 
@@ -223,7 +295,7 @@ class AdvertiserService(BaseService[Advertiser]):
         await self.db.refresh(advertiser)
 
         # 失效相关缓存
-        await CacheInvalidator.invalidate_offer_cache(advertiser_id)
+        await CacheInvalidator.invalidate_advertiser_cache(advertiser_id)
 
         # 记录审计日志
         await log_user_action(

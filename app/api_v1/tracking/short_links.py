@@ -141,12 +141,13 @@ async def check_short_code(
 
 @router.post("/", 
              response_model=ResponseBaseSchema[ShortLinkResponse],
-             summary="创建短链接")
+             summary="创建短链接",
+             dependencies=[Depends(require_admin)])
 async def create_short_link(
     request: Request,
     link_in: ShortLinkCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """
     创建短链接。
@@ -607,13 +608,14 @@ async def get_short_link_by_id(
 
 @router.put("/{link_id}",
             response_model=ResponseBaseSchema[ShortLinkResponse],
-            summary="更新短链接")
+            summary="更新短链接",
+            dependencies=[Depends(require_admin)])
 async def update_short_link(
     request: Request,
     link_id: int = Path(..., ge=1, description="短链接ID"),
     link_in: ShortLinkUpdate = ...,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """
     按 link_id 更新短链接（URL、标题、Offer 关联、像素配置等）。
@@ -652,12 +654,13 @@ async def update_short_link(
 
 @router.delete("/{link_id}",
                 response_model=ResponseBaseSchema[dict],
-                summary="删除短链接")
+                summary="删除短链接",
+                dependencies=[Depends(require_admin)])
 async def delete_short_link(
     request: Request,
     link_id: int = Path(..., ge=1, description="短链接ID"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """
     删除短链接。

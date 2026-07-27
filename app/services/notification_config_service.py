@@ -47,7 +47,7 @@ class NotificationConfigService:
         client_id: int,
         current_user: User,
     ) -> Optional[ClientNotificationConfig]:
-        assert_client_config_access(current_user, client_id)
+        await assert_client_config_access(self.db, current_user, client_id)
 
         client = (
             await self.db.execute(select(Client).where(Client.id == client_id))
@@ -141,7 +141,7 @@ class NotificationConfigService:
                 detail=f"产品ID {product_id} 不存在",
             )
 
-        assert_product_config_access(current_user, product)
+        await assert_product_config_access(self.db, current_user, product)
 
         return (
             await self.db.execute(

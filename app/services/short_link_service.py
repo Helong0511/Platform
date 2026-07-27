@@ -238,6 +238,8 @@ class ShortLinkService(BaseService[ShortLink]):
         logger.info(f"开始创建短链接，数据: {link_data}")
         logger.info(f"当前用户: {current_user.id} ({current_user.username})")
 
+        self.require_admin(current_user)
+
         try:
             # 验证必需字段
             if not link_data.get('original_url'):
@@ -385,13 +387,7 @@ class ShortLinkService(BaseService[ShortLink]):
         # 获取短链接
         short_link = await self.get_short_link_by_id(link_id, current_user, include_relations=False)
 
-        # 权限检查：非管理员只能修改自己创建的短链接
-        if current_user.role != UserRole.ADMIN:
-            if short_link.created_by != current_user.id:
-                raise_api_exception(
-                    ErrorCode.ACCESS_DENIED,
-                    detail="无权修改该短链接"
-                )
+        self.require_admin(current_user)
 
         # 验证 Offer 是否存在（如果提供了 offer_id）
         if 'offer_id' in link_data and link_data['offer_id'] is not None:
@@ -447,13 +443,7 @@ class ShortLinkService(BaseService[ShortLink]):
         # 获取短链接
         short_link = await self.get_short_link_by_id(link_id, current_user, include_relations=False)
 
-        # 权限检查：非管理员只能删除自己创建的短链接
-        if current_user.role != UserRole.ADMIN:
-            if short_link.created_by != current_user.id:
-                raise_api_exception(
-                    ErrorCode.ACCESS_DENIED,
-                    detail="无权删除该短链接"
-                )
+        self.require_admin(current_user)
 
         short_code = short_link.short_code
 

@@ -3,8 +3,7 @@
 职责：Offer 维度的日/总转化上限配置 CRUD，以及计数一致性巡检与修复。
 
 权限：
-- 列表查询：已登录用户
-- 创建/详情/更新/删除/一致性检查：仅管理员（require_admin）
+- 全部端点：仅管理员（require_admin）；Cap 含跨租户上限，禁止客户拉取。
 
 主要端点（前缀 /caps）：
 - POST   /              创建 Cap 配置
@@ -72,6 +71,7 @@ async def create_cap(
     "/",
     response_model=PaginatedResponseBaseSchema[list[OfferCapResponse]],
     summary="获取Cap配置列表",
+    dependencies=[Depends(require_admin)],
 )
 async def get_caps(
         page: int = Query(1, ge=1),
@@ -82,12 +82,12 @@ async def get_caps(
         publisher_id: Optional[int] = Query(None),
         is_active: Optional[bool] = Query(None),
         db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_admin),
 ):
     """
     分页查询 Cap 配置列表。
 
-    权限：登录用户，按数据权限过滤。
+    权限：仅管理员（含跨租户费率/上限，禁止客户拉取）。
     筛选：cap_type、offer_id、advertiser_id、channel_id、is_active 等。
     """
     cap_service: CapService = await get_cap_service(db)

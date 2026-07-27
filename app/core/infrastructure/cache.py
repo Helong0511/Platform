@@ -341,9 +341,27 @@ class CacheInvalidator:
     @staticmethod
     async def invalidate_offer_cache(offer_id: int):
         """失效Offer相关缓存"""
+        # offer_cache 使用独立的 offer:cache:{id} 键和标签索引，
+        # 必须与通用缓存一起失效，否则更新后仍可能读取旧数据。
+        from app.core.offer_cache import invalidate_offer_cache as invalidate_hot_offer_cache
+
+        await invalidate_hot_offer_cache(offer_id)
         cache = await get_cache_backend()
         patterns = [
             f"offer:{offer_id}",
+            "offer:list:*",
+            "stats:*",
+        ]
+        for pattern in patterns:
+            await cache.delete_pattern(pattern)
+
+    @staticmethod
+    async def invalidate_advertiser_cache(advertiser_id: int):
+        """失效广告主及依赖广告主数据的列表缓存"""
+        cache = await get_cache_backend()
+        patterns = [
+            f"advertiser:{advertiser_id}",
+            "advertiser:list:*",
             "offer:list:*",
             "stats:*",
         ]

@@ -138,6 +138,7 @@ class ClickAssociator:
         max_attempts = 5
         base_delay = 0.3
         
+        click = None
         for attempt in range(max_attempts):
             # 查询 Click 记录（带关联的 Offer、Publisher、Advertiser）
             try:
@@ -167,7 +168,7 @@ class ClickAssociator:
             except Exception as e:
                 logger.error(f"第 {attempt + 1} 次尝试查询 Click 记录失败：{e}")
                 if attempt < max_attempts - 1:
-                    # 指数退避：delay = base_delay * (2 ^ attempt)
+                    # 指数退避：delay = base_delay * (2 ** attempt)
                     delay = base_delay * (2 ** attempt)
                     logger.debug(f"等待 {delay:.2f} 秒后重试...")
                     await asyncio.sleep(delay)

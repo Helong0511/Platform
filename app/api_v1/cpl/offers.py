@@ -26,7 +26,8 @@ from app.core.short_link.generator import (
     generate_short_code_from_id,
     generate_unique_short_code
 )
-from app.models.models import User, Offer, ShortLink, Click, PostbackConversion
+from app.models.models import User, UserRole, Offer, ShortLink, Click, PostbackConversion, Publisher
+from app.services.cpl.offer.helpers import assert_client_can_access_offer, get_client_id_for_user
 from app.services.cpl.offer_stats import (
     offer_stats_period_start,
     offer_stats_previous_range,
@@ -38,6 +39,37 @@ from app.services.cpl.offer_service import OfferService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_offer_response_for_client(
+        offer_data: OfferResponse,
+        current_user: User
+) -> OfferResponse:
+    """客户响应不得暴露上游价格、Cap、Offer ID、Tracklink 或内部 Postback。"""
+    if current_user.role != UserRole.CLIENT:
+        return offer_data
+    offer_data.advertiser_offer_id = None
+    offer_data.payout = None
+    offer_data.upstream_cap = None
+    offer_data.advertiser_tracklink = None
+    offer_data.postback_url = None
+    return offer_data
+
+
+def _short_link_response_for_user(
+        short_link: ShortLink,
+        short_url: str,
+        current_user: User
+) -> dict:
+    """短链状态响应仅向管理员返回真实上游目标地址。"""
+    data = {
+        "id": short_link.id,
+        "short_code": short_link.short_code,
+        "short_url": short_url,
+    }
+    if current_user.role == UserRole.ADMIN:
+        data["original_url"] = short_link.original_url
+    return data
 
 
 async def create_short_link_for_offer(
@@ -611,6 +643,7 @@ async def get_offers(
         offer_data.advertiser_name = offer.advertiser.advertiser_name if offer.advertiser else None
         # 从批量查询的结果中获取渠道分配
         offer_data.assigned_publishers = assignments_map.get(offer.id, [])
+        offer_data = _sanitize_offer_response_for_client(offer_data, current_user)
 
         offer_list.append(offer_data)
 
@@ -637,6 +670,8 @@ async def check_offer_short_link(
     检查条件：下游Tracklink在short_links表中存在，并且original_url等于上游Tracklink
     """
     # ---------- 入口：参数与依赖准备 ----------
+    await assert_client_can_access_offer(db, offer_id, current_user)
+
     result = await db.execute(
         select(Offer).where(Offer.id == offer_id)
     )
@@ -682,14 +717,14 @@ async def check_offer_short_link(
         # 不需要检查downstream_tracklink是否等于短链接URL，因为：
         # 1. 短链接可能已创建，但downstream_tracklink可能还没有更新
         # 2. 用户要求是检查"下游Tracklink在short_links表中存在，并且original_url等于上游Tracklink"
+        short_link_data = _short_link_response_for_user(
+            existing_link,
+            short_link_url,
+            current_user,
+        )
         return ResponseBaseSchema.success(data={
             "exists": True,
-            "short_link": {
-                "id": existing_link.id,
-                "short_code": existing_link.short_code,
-                "short_url": short_link_url,
-                "original_url": existing_link.original_url
-            }
+            "short_link": short_link_data,
         })
 
     # ---------- 构建响应 ----------
@@ -713,6 +748,20 @@ async def get_offer_stats(
     offer_service: OfferService = await get_offer_service(db)
     await offer_service.get_offer_by_id(offer_id, current_user, include_advertiser=False, include_assignments=False)
 
+    # 客户仅统计本客户渠道，避免共享 Offer 上泄露其他下游指标
+    publisher_ids = None
+    if current_user.role == UserRole.CLIENT:
+        client_id = await get_client_id_for_user(db, current_user)
+        if not client_id:
+            publisher_ids = []
+        else:
+            pub_result = await db.execute(
+                select(Publisher.id).where(
+                    Publisher.client_id == client_id,
+                )
+            )
+            publisher_ids = list(pub_result.scalars().all())
+
     start = offer_stats_period_start(period)
     prev_start, prev_end = offer_stats_previous_range(period, start)
 
@@ -722,6 +771,10 @@ async def get_offer_stats(
             Click.offer_id == offer_id,
             Click.click_time >= s,
         )
+        if publisher_ids is not None:
+            if not publisher_ids:
+                return 0
+            q = q.where(Click.publisher_id.in_(publisher_ids))
         # ---------- 条件分支 ----------
         if e is not None:
             q = q.where(Click.click_time < e)
@@ -733,6 +786,10 @@ async def get_offer_stats(
             PostbackConversion.offer_id == offer_id,
             PostbackConversion.created_at >= s,
         )
+        if publisher_ids is not None:
+            if not publisher_ids:
+                return 0
+            q = q.where(PostbackConversion.publisher_id.in_(publisher_ids))
         # ---------- 条件分支 ----------
         if e is not None:
             q = q.where(PostbackConversion.created_at < e)
@@ -744,6 +801,10 @@ async def get_offer_stats(
             PostbackConversion.offer_id == offer_id,
             PostbackConversion.created_at >= s,
         )
+        if publisher_ids is not None:
+            if not publisher_ids:
+                return 0.0
+            q = q.where(PostbackConversion.publisher_id.in_(publisher_ids))
         # ---------- 条件分支 ----------
         if e is not None:
             q = q.where(PostbackConversion.created_at < e)
@@ -762,21 +823,34 @@ async def get_offer_stats(
     click_day = func.date(Click.click_time).label("d")
     conv_day = func.date(PostbackConversion.created_at).label("d")
 
+    click_q = (
+        select(click_day, func.count(Click.id))
+        .where(Click.offer_id == offer_id, Click.click_time >= start)
+    )
+    if publisher_ids is not None:
+        if publisher_ids:
+            click_q = click_q.where(Click.publisher_id.in_(publisher_ids))
+        else:
+            click_q = click_q.where(Click.id == -1)
     click_rows = (
-        await db.execute(
-            select(click_day, func.count(Click.id))
-            .where(Click.offer_id == offer_id, Click.click_time >= start)
-            .group_by(click_day)
-            .order_by(click_day)
-        )
+        await db.execute(click_q.group_by(click_day).order_by(click_day))
     ).all()
-    conv_rows = (
-        await db.execute(
-            select(conv_day, func.count(PostbackConversion.id), func.coalesce(func.sum(PostbackConversion.payout), 0))
-            .where(PostbackConversion.offer_id == offer_id, PostbackConversion.created_at >= start)
-            .group_by(conv_day)
-            .order_by(conv_day)
+
+    conv_q = (
+        select(
+            conv_day,
+            func.count(PostbackConversion.id),
+            func.coalesce(func.sum(PostbackConversion.payout), 0),
         )
+        .where(PostbackConversion.offer_id == offer_id, PostbackConversion.created_at >= start)
+    )
+    if publisher_ids is not None:
+        if publisher_ids:
+            conv_q = conv_q.where(PostbackConversion.publisher_id.in_(publisher_ids))
+        else:
+            conv_q = conv_q.where(PostbackConversion.id == -1)
+    conv_rows = (
+        await db.execute(conv_q.group_by(conv_day).order_by(conv_day))
     ).all()
 
     by_date: dict[str, dict] = {}
@@ -840,6 +914,7 @@ async def get_offer(
     # 从已加载的关联中获取广告主名称
     offer_data.advertiser_name = offer.advertiser.advertiser_name if offer.advertiser else None
     offer_data.assigned_publishers = assignments
+    offer_data = _sanitize_offer_response_for_client(offer_data, current_user)
 
     return ResponseBaseSchema.success(data=offer_data)
 

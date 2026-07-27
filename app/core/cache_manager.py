@@ -6,19 +6,15 @@
 在系统中的位置：``app.core.cache_manager.CacheManager``，协调 ``offer_cache`` 与 ``short_link_cache``。
 """
 import logging
-from typing import Optional, Set, List, Dict, Any
-from datetime import datetime, timedelta
+from typing import Optional, List, Dict, Any
 
 from app.core.redis_client import get_redis_client
 from app.core.offer_cache import set_offer_cache, get_offer_advertiser_id, invalidate_offer_cache
-from app.models.models import ShortLink, Offer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 logger = logging.getLogger(__name__)
 
-# 缓存标签前缀
-TAG_PREFIX = "cache_tag:"
 # 标签到键的映射前缀
 TAG_TO_KEYS_PREFIX = "tag_keys:"
 
@@ -41,59 +37,45 @@ class CacheManager:
             成功预热的数量
         """
         try:
-            # 查询活跃的短链接（最近有点击的或最近创建的）
-            # 只查询必要的字段，避免依赖可能不存在的字段
+            # 延迟导入，避免 lifespan 启动阶段与 models 循环依赖导致 NameError
+            from app.models.postback import ShortLink
+            from app.core.short_link_cache import (
+                get_short_link_from_cache,
+                serialize_short_link,
+                set_short_link_to_cache,
+            )
+
             result = await db.execute(
-                select(ShortLink.id, ShortLink.short_code, ShortLink.original_url, 
-                       ShortLink.title, ShortLink.description, ShortLink.created_by, 
-                       ShortLink.offer_id, ShortLink.channel_id, ShortLink.click_count, 
-                       ShortLink.is_active, ShortLink.expires_at, 
-                       ShortLink.created_at, ShortLink.updated_at)
-                .where(ShortLink.is_active == True)
+                select(ShortLink)
+                .where(ShortLink.is_active.is_(True))
                 .order_by(ShortLink.click_count.desc(), ShortLink.id.desc())
                 .limit(limit)
             )
-            
-            # 延迟导入，避免循环导入
-            from app.core.short_link_cache import (
-                get_short_link_from_cache,
-                set_short_link_to_cache
-            )
+            short_links = result.scalars().all()
             
             warmed_count = 0
-            for row in result:
+            for short_link in short_links:
                 try:
-                    # 构建短链接对象
-                    short_link_data = {
-                        'id': row.id,
-                        'short_code': row.short_code,
-                        'original_url': row.original_url,
-                        'title': row.title,
-                        'description': row.description,
-                        'created_by': row.created_by,
-                        'offer_id': row.offer_id,
-                        'channel_id': row.channel_id,
-                        'click_count': row.click_count,
-                        'show_count': 0,  # 默认值，避免依赖数据库字段
-                        'is_active': row.is_active,
-                        'expires_at': row.expires_at,
-                        'created_at': row.created_at,
-                        'updated_at': row.updated_at
-                    }
-                    
-                    # 检查是否已在缓存中
-                    cached = await get_short_link_from_cache(row.short_code)
+                    cached = await get_short_link_from_cache(short_link.short_code)
                     if not cached:
-                        # 不在缓存中，写入缓存
-                        await set_short_link_to_cache(
-                            row.short_code,
-                            short_link_data
+                        written = await set_short_link_to_cache(
+                            short_link.short_code,
+                            serialize_short_link(short_link),
                         )
-                        warmed_count += 1
+                        if written:
+                            warmed_count += 1
                 except Exception as e:
-                    logger.warning(f"预热短链接失败: short_code={row.short_code if hasattr(row, 'short_code') else 'unknown'}, error={e}")
+                    logger.warning(
+                        "预热短链接失败: short_code=%s, error=%s",
+                        getattr(short_link, "short_code", "unknown"),
+                        e,
+                    )
             
-            logger.info(f"短链接缓存预热完成: 共预热 {warmed_count} 个短链接")
+            logger.info(
+                "短链接缓存预热完成: 实际写入 %s/%s 个短链接",
+                warmed_count,
+                len(short_links),
+            )
             return warmed_count
         except Exception as e:
             logger.error(f"短链接缓存预热失败: {e}", exc_info=True)
@@ -114,10 +96,16 @@ class CacheManager:
             成功预热的数量
         """
         try:
+            # 延迟导入，避免 lifespan 启动阶段与 models 循环依赖导致 NameError
+            from app.models.cpl import Offer
+
             # 查询活跃的Offer
             result = await db.execute(
                 select(Offer)
-                .where(Offer.status == 'active')
+                .where(
+                    Offer.status == "Active",
+                    Offer.is_active.is_(True),
+                )
                 .order_by(Offer.id.desc())
                 .limit(limit)
             )
@@ -129,13 +117,21 @@ class CacheManager:
                     # 检查是否已在缓存中
                     cached = await CacheManager.get_offer_cache(offer.id)
                     if not cached:
-                        # 不在缓存中，写入缓存
-                        await set_offer_cache(offer.id, offer.advertiser_id, offer.offer_name)
-                        warmed_count += 1
+                        written = await set_offer_cache(
+                            offer.id,
+                            offer.advertiser_id,
+                            offer.offer_name,
+                        )
+                        if written:
+                            warmed_count += 1
                 except Exception as e:
                     logger.warning(f"预热Offer失败: offer_id={offer.id}, error={e}")
             
-            logger.info(f"Offer缓存预热完成: 共预热 {warmed_count}/{len(offers)} 个Offer")
+            logger.info(
+                "Offer缓存预热完成: 实际写入 %s/%s 个Offer",
+                warmed_count,
+                len(offers),
+            )
             return warmed_count
         except Exception as e:
             logger.error(f"Offer缓存预热失败: {e}", exc_info=True)
@@ -158,6 +154,11 @@ class CacheManager:
             'short_links': 0,
             'offers': 0
         }
+
+        redis = await get_redis_client()
+        if not redis:
+            logger.info("Redis 不可用，跳过短链接/Offer 缓存预热")
+            return results
         
         # 预热短链接
         results['short_links'] = await CacheManager.warmup_short_links(db)

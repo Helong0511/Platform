@@ -20,7 +20,9 @@ async function recordFrontendError(errorInfo) {
     });
 
     await axios.post(`/api/v1/audit-logs/client-error?${params.toString()}`, {}, {
-      timeout: 5000
+      timeout: 5000,
+      skipErrorMessage: true,
+      silent: true,
     });
   } catch (error) {
     if (import.meta.env.DEV) {

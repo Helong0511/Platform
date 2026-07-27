@@ -3,8 +3,7 @@
 职责：按广告主/Offer/渠道层级配置转化扣减规则，并提供统计、日志查询与 Excel 导出。
 
 权限：
-- 列表查询：已登录用户
-- 创建/更新/删除/批量操作/统计/日志/导出：仅管理员
+- 全部端点：仅管理员（转化扣减规则属商业机密，禁止客户拉取）
 
 主要端点（前缀 /conversion-deductions）：
 - POST   /                      创建扣减配置
@@ -94,6 +93,7 @@ async def create_deduction_config(
     "/",
     response_model=PaginatedResponseBaseSchema[list[ConversionDeductionConfigResponse]],
     summary="获取扣减配置列表",
+    dependencies=[Depends(require_admin)],
 )
 async def get_deduction_configs(
         page: int = Query(1, ge=1),
@@ -103,12 +103,12 @@ async def get_deduction_configs(
         keyword: Optional[str] = Query(None),
         advertiser_id: Optional[int] = Query(None),
         db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_admin),
 ):
     """
     分页查询转化扣减配置列表。
 
-    权限：登录用户，按数据权限过滤。
+    权限：仅管理员（扣减规则属商业机密，禁止客户拉取）。
     """
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
     try:

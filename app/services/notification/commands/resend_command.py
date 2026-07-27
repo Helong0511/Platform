@@ -40,7 +40,7 @@ class ResendNotificationCommand:
                 detail=f"转化记录ID {conversion_id} 不存在",
             )
 
-        assert_conversion_resend_access(current_user, conversion)
+        await assert_conversion_resend_access(self.db, current_user, conversion)
 
         try:
             await PostbackForwarder.forward_to_publisher(conversion=conversion, db=self.db)
@@ -166,9 +166,12 @@ class ResendNotificationCommand:
                     continue
 
                 if current_user.role != UserRole.ADMIN:
+                    from app.services.notification.helpers import get_user_client_id
+
+                    user_client_id = await get_user_client_id(self.db, current_user)
                     if (
-                        not current_user.client_id
-                        or conversion.client_id != current_user.client_id
+                        not user_client_id
+                        or conversion.client_id != user_client_id
                     ):
                         failed_items.append({
                             "conversion_id": conversion_id,

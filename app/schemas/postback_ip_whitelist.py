@@ -7,7 +7,7 @@ import ipaddress
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, validator, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class PostbackIpWhitelistCreate(BaseModel):
@@ -16,7 +16,8 @@ class PostbackIpWhitelistCreate(BaseModel):
     description: Optional[str] = Field(None, max_length=255, description="IP地址描述/备注")
     is_active: bool = Field(True, description="是否启用")
 
-    @validator("ip_address")
+    @field_validator("ip_address")
+    @classmethod
     def validate_ip_address(cls, v):
         """校验 IPv4/IPv6 地址格式（详见字段 Field description）。"""
         try:
@@ -36,7 +37,8 @@ class PostbackIpWhitelistUpdate(BaseModel):
     description: Optional[str] = Field(None, max_length=255, description="IP地址描述/备注")
     is_active: Optional[bool] = Field(None, description="是否启用")
 
-    @validator("ip_address")
+    @field_validator("ip_address")
+    @classmethod
     def validate_ip_address(cls, v):
         """更新时可选；有值则校验 IP 格式（详见字段 Field description）。"""
         if v is None:
@@ -66,7 +68,8 @@ class PostbackIpWhitelistBatchCreate(BaseModel):
     description: Optional[str] = Field(None, max_length=255)
     is_active: bool = Field(True)
 
-    @validator("ip_addresses")
+    @field_validator("ip_addresses")
+    @classmethod
     def validate_ip_addresses(cls, v):
         """批量校验、去重，单次最多 100 个有效 IP（详见字段 Field description）。"""
         if not v:

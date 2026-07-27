@@ -48,9 +48,12 @@ class NotificationRecordsQuery:
         query = select(PostbackNotification)
 
         if current_user.role != UserRole.ADMIN:
-            if not current_user.client_id:
+            from app.services.notification.helpers import get_user_client_id
+
+            user_client_id = await get_user_client_id(self.db, current_user)
+            if not user_client_id:
                 return [], 0
-            query = query.where(PostbackNotification.client_id == current_user.client_id)
+            query = query.where(PostbackNotification.client_id == user_client_id)
 
         conditions = self._build_conditions(
             conversion_id,
@@ -102,7 +105,7 @@ class NotificationRecordsQuery:
                 detail=f"通知记录ID {notification_id} 不存在",
             )
 
-        assert_notification_record_access(current_user, notification)
+        await assert_notification_record_access(self.db, current_user, notification)
         return notification
 
     def _build_conditions(
@@ -161,12 +164,20 @@ class NotificationRecordsQuery:
         notifications: List[PostbackNotification],
         total: int,
     ) -> Tuple[List[PostbackNotification], int]:
+        from app.services.notification.helpers import get_user_client_id
+
+        user_client_id = None
+        if current_user.role != UserRole.ADMIN:
+            user_client_id = await get_user_client_id(self.db, current_user)
+            if not user_client_id:
+                return notifications, total
+
         check_query = select(func.count(PostbackNotification.id)).where(
             PostbackNotification.conversion_id == conversion_id
         )
-        if current_user.role != UserRole.ADMIN and current_user.client_id:
+        if user_client_id is not None:
             check_query = check_query.where(
-                PostbackNotification.client_id == current_user.client_id
+                PostbackNotification.client_id == user_client_id
             )
 
         existing_count = (await self.db.execute(check_query)).scalar() or 0
@@ -180,6 +191,10 @@ class NotificationRecordsQuery:
                 )
             ).scalars().first()
             if not conversion:
+                return notifications, total
+
+            # 客户不可对他人转化触发自动建通知（防 IDOR）
+            if user_client_id is not None and conversion.client_id != user_client_id:
                 return notifications, total
 
             product = None

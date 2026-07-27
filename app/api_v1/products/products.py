@@ -73,7 +73,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -116,23 +116,24 @@ class ProductNameOption(BaseModel):
     client_id: int
     user_full_name: str | None = None
 
-    class Config:
-        """允许从 ORM Product 构造。用于 API 请求/响应序列化与 OpenAPI 文档生成。"""
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.get("/available-names", response_model=ListResponseBaseSchema[list[ProductNameOption]],
-            summary="获取可用的产品列表")
+            summary="获取可用的产品列表",
+            dependencies=[Depends(require_admin)])
 async def get_available_product_names(
         db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_admin),
         exclude_client_id: int | None = Query(None, description="指定客户ID（排除该客户已有的产品）"),
         search: str | None = Query(None, description="搜索关键词")
 ):
     """
-    获取可用的产品列表（用于添加产品时选择）
+    获取可用的产品列表（用于添加产品时选择）。
+
+    权限：仅管理员（含跨客户产品名，禁止客户调用以防目录泄露）。
     - 返回关联管理员的客户的产品和其他客户的产品
-    - 排除当前客户已有的产品（避免重复）
+    - 排除指定客户已有的产品（避免重复）
     - 支持搜索过滤
     - 返回产品对象列表，包含id、name、client_id
     """

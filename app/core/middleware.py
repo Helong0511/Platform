@@ -159,6 +159,15 @@ LOGIN_RATE_LIMIT = getattr(settings, 'LOGIN_RATE_LIMIT', 5)
 LOGIN_RATE_WINDOW = 60
 
 
+def _rate_limit_bucket(path: str, method: str) -> str:
+    """按接口类别隔离限流计数，避免普通匿名请求耗尽登录配额。"""
+    if path.endswith("/login") and method.upper() == "POST":
+        return "login"
+    if path == "/api/v1/audit-logs/client-error":
+        return "client-error"
+    return "api"
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
     API限流中间件
@@ -204,7 +213,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # ====== 检查是否为登录接口 ======
         # 登录接口使用更严格的限流策略（防止暴力破解）
-        is_login = request.url.path.endswith("/login") and request.method == "POST"
+        bucket = _rate_limit_bucket(path, request.method)
+        is_login = bucket == "login"
         limit = LOGIN_RATE_LIMIT if is_login else DEFAULT_RATE_LIMIT
         window = LOGIN_RATE_WINDOW if is_login else DEFAULT_RATE_WINDOW
 
@@ -221,8 +231,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # ====== 尝试使用Redis进行限流 ======
         redis_client = await get_redis_client()
         now = datetime.now(timezone.utc)
-        current_window_key = f"{int(now.timestamp() / window)}"
-        rate_limit_key = f"rate_limit:{client_ip}:{current_window_key}"
+        current_window_key = f"{bucket}:{int(now.timestamp() / window)}"
+        rate_limit_key = f"rate_limit:{bucket}:{client_ip}:{int(now.timestamp() / window)}"
         
         redis_counted = False
         updated_count = 0

@@ -739,8 +739,8 @@
             <el-empty v-else description="暂无分配的渠道" />
           </el-tab-pane>
 
-          <!-- Cap配置 -->
-          <el-tab-pane label="Cap配置" name="caps">
+          <!-- Cap配置（仅管理员；列表含跨渠道上限，客户不可见） -->
+          <el-tab-pane v-if="isAdmin" label="Cap配置" name="caps">
             <el-table :data="relatedCaps" stripe style="width: 100%" v-loading="capsLoading">
               <el-table-column prop="id" label="ID" width="80" align="center" />
               <el-table-column prop="cap_type" label="Cap类型" width="150">

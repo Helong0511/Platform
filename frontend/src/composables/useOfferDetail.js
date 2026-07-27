@@ -117,11 +117,14 @@ export function useOfferDetail({ authStore, isAdmin, currentClientId }) {
       } else {
         clientPublisherTracklink.value = null;
       }
-      const loadPromises = [loadRelatedCaps(row.id)];
+      const loadPromises = [];
       if (isAdmin.value) {
+        loadPromises.push(loadRelatedCaps(row.id));
         loadPromises.push(loadRelatedDiscounts(row.id));
       }
-      await Promise.all(loadPromises);
+      if (loadPromises.length) {
+        await Promise.all(loadPromises);
+      }
     } catch (error) {
       logger.error('获取Offer详情失败:', error);
       ElMessage.error('获取详情失败');

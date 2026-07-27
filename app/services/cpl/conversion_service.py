@@ -30,6 +30,44 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# 客户不可见的上游金额与广告主字段（文档约定仅管理员可见）
+_CLIENT_HIDDEN_SUMMARY_TOTAL_KEYS = frozenset({"total_po", "total_profit"})
+_CLIENT_HIDDEN_STATS_KEYS = frozenset({
+    "po",
+    "adv_po",
+    "advertiser_id",
+    "advertiser_name",
+})
+
+
+def _sanitize_conversion_summary_for_client(summary: Dict[str, Any]) -> Dict[str, Any]:
+    """剥离转化总览中客户不应看到的上游 PO / 利润 / 广告主信息。"""
+    sanitized = {
+        key: value
+        for key, value in summary.items()
+        if key not in _CLIENT_HIDDEN_SUMMARY_TOTAL_KEYS
+    }
+    stats_list = sanitized.get("stats_list") or []
+    sanitized["stats_list"] = [
+        {
+            key: value
+            for key, value in item.items()
+            if key not in _CLIENT_HIDDEN_STATS_KEYS
+        }
+        for item in stats_list
+    ]
+    return sanitized
+
+
+def _sanitize_by_offer_stats_for_client(
+    stats_list: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """按 Offer 汇总时剥离上游 PO 字段。"""
+    return [
+        {key: value for key, value in item.items() if key != "po"}
+        for item in stats_list
+    ]
+
 
 class ConversionService:
     """
@@ -642,7 +680,7 @@ class ConversionService:
         stats_list.sort(key=lambda x: x['click_count'], reverse=True)
 
         # 返回最终的统计结果
-        return {
+        summary = {
             "total_clicks": total_clicks,
             "total_conversions": total_conversions,
             "cr": round(cr, 2),
@@ -654,6 +692,9 @@ class ConversionService:
             "start_date": start_date or (start_datetime.strftime("%Y-%m-%d")),
             "end_date": end_date or (end_datetime.strftime("%Y-%m-%d"))
         }
+        if current_user.role == UserRole.CLIENT:
+            return _sanitize_conversion_summary_for_client(summary)
+        return summary
 
     async def get_conversions_by_offer(
             self,
@@ -853,5 +894,6 @@ class ConversionService:
         # 按点击数量排序
         stats_list.sort(key=lambda x: x['click_count'], reverse=True)
 
-        # 返回最终的统计结果
+        if current_user.role == UserRole.CLIENT:
+            return _sanitize_by_offer_stats_for_client(stats_list)
         return stats_list

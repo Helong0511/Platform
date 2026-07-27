@@ -251,6 +251,12 @@ class Settings(BaseSettings):
         "TRUST_PROXY_HEADERS",
         "true" if is_production_env_name(detect_production_env()) else "false",
     ).lower() in ("true", "1", "yes")
+    # 只有请求直接来自这些反向代理时才读取 X-Real-IP/X-Forwarded-For。
+    TRUSTED_PROXY_IPS: list[str] = [
+        ip.strip()
+        for ip in os.getenv("TRUSTED_PROXY_IPS", "127.0.0.1,::1").split(",")
+        if ip.strip()
+    ]
 
     # JWT算法配置
     # RS256（推荐，非对称加密）或 HS256（对称加密）
@@ -817,16 +823,23 @@ class Settings(BaseSettings):
         return v
 
     # Telegram 管理员 Chat ID（用于接收系统通知）
-    # 可以是用户 ID（如 "123456789"）或群组 ID（如 "-1001234567890"）
-    # 获取方式：向 Bot 发送 /id 命令，或使用 @userinfobot
+    # TELEGRAM_ADMIN_LOCAL 用于本地开发，TELEGRAM_ADMIN_PRODUCTION 用于生产；
+    # 未配置环境专用值时回退到 TELEGRAM_ADMIN，兼容旧部署。
     TELEGRAM_ADMIN: str | None = os.getenv("TELEGRAM_ADMIN", None)
 
-    @field_validator("TELEGRAM_ADMIN")
+    @field_validator("TELEGRAM_ADMIN", mode="before")
     @classmethod
     def validate_telegram_admin(cls, v: str | None) -> str | None:
         """验证 Telegram Admin Chat ID
         支持单个 ID 或多个 ID（逗号分隔）
         """
+        is_prod = is_production_env_name(detect_production_env())
+        environment_value = os.getenv(
+            "TELEGRAM_ADMIN_PRODUCTION" if is_prod else "TELEGRAM_ADMIN_LOCAL"
+        )
+        if environment_value and environment_value.strip():
+            v = environment_value.strip()
+
         if v is not None and isinstance(v, str):
             v = v.strip()
             if v:

@@ -9,10 +9,15 @@ from ..handlers import receive_handler
 router = APIRouter()
 
 
-@router.api_route(
+@router.get(
     "/postback/{platform}",
-    methods=["GET", "POST"],
-    summary="接收任意平台的 PostBack 回调（支持 GET 和 POST，接收任意参数）",
+    summary="通过 GET 接收任意平台的 PostBack 回调",
+    operation_id="receive_platform_postback_get",
+)
+@router.post(
+    "/postback/{platform}",
+    summary="通过 POST 接收任意平台的 PostBack 回调",
+    operation_id="receive_platform_postback_post",
 )
 async def receive_postback(
     request: Request,

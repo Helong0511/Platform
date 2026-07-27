@@ -394,14 +394,13 @@ class DashboardService:
                 func.sum(AdData.display_count).label('impressions'),
                 func.sum(AdData.click_count).label('clicks'),
                 func.sum(AdData.revenue_after_deduct).label('revenue'),
+                # CTR：优先行均值；无 click_rate 时用总量反算（勿再包 avg，否则 MySQL 1111）
                 func.coalesce(
                     func.avg(AdData.click_rate),
-                    func.avg(
-                        case(
-                            (func.sum(AdData.display_count) == 0, 0),
-                            else_=func.cast(func.sum(AdData.click_count), Float) * 100.0 / func.cast(
-                                func.sum(AdData.display_count), Float)
-                        )
+                    case(
+                        (func.sum(AdData.display_count) == 0, 0),
+                        else_=func.cast(func.sum(AdData.click_count), Float) * 100.0 / func.cast(
+                            func.sum(AdData.display_count), Float)
                     )
                 ).label('avg_ctr')
             ).join(Product, AdData.product_id == Product.id)

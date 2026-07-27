@@ -29,6 +29,16 @@ from app.scheduler_module.task_init import init_scheduled_tasks_in_db
 logger = logging.getLogger(__name__)
 
 
+def _should_run_cache_warmup() -> bool:
+    """仅在单进程或 Gunicorn 的首个 API worker 中执行预热。"""
+    if os.getenv("GUNICORN_ROLE", "api").strip().lower() == "scheduler":
+        return False
+    worker_marker = os.getenv("SCHEDULER_WORKER", "").strip()
+    if worker_marker:
+        return worker_marker == "1"
+    return True
+
+
 # ====== 应用生命周期管理 ======
 # 使用 lifespan 上下文管理器替代已弃用的 @app.on_event()
 # 这是 FastAPI 0.95.0+ 推荐的方式，提供更好的资源管理
@@ -42,6 +52,8 @@ async def lifespan(app: FastAPI):
     """
     # ====== 启动时执行 ======
     worker_pid = os.getpid()
+    redis_client = None
+    cache_warmup_task = None
     logger.info(f"[Worker PID:{worker_pid}] 应用启动中...")
 
     # 检查并验证时区配置（启动时首先检查）
@@ -134,9 +146,15 @@ async def lifespan(app: FastAPI):
         if redis_client:
             logger.info(f"[Worker PID:{worker_pid}] Redis连接已初始化")
         else:
-            logger.info(f"[Worker PID:{worker_pid}] Redis未配置，使用内存存储")
+            logger.info(
+                f"[Worker PID:{worker_pid}] Redis不可用；支持降级的组件使用内存存储，"
+                "短链接/Offer缓存与预热已禁用"
+            )
     except Exception as e:
-        logger.warning(f"[Worker PID:{worker_pid}] Redis初始化失败: {e}，将使用内存存储")
+        logger.warning(
+            f"[Worker PID:{worker_pid}] Redis初始化失败: {e}；"
+            "支持降级的组件使用内存存储，短链接/Offer缓存与预热已禁用"
+        )
 
     # 定时任务：仅调度 worker 启动（Gunicorn 多 worker 时由 SCHEDULER_WORKER=1 标识）
     if settings.should_run_scheduler():
@@ -200,8 +218,8 @@ async def lifespan(app: FastAPI):
         logger.error(f"[Worker PID:{worker_pid}] Telegram 初始化失败: {e}", exc_info=True)
         logger.warning(f"[Worker PID:{worker_pid}] 应用将继续启动，Telegram 可能不可用")
 
-    # 缓存预热（可选，在后台异步执行，不阻塞启动）
-    try:
+    # 缓存预热：Redis 可用时，仅由首个 API worker 后台执行
+    if redis_client and _should_run_cache_warmup():
         # 在后台任务中执行缓存预热，不阻塞应用启动
         async def warmup_cache_background():
             """启动后后台预热字典/配置类缓存，失败仅打警告不阻塞服务。"""
@@ -212,10 +230,12 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"缓存预热失败: {e}，不影响应用启动")
 
         # 延迟执行缓存预热，确保数据库和Redis都已初始化
-        asyncio.create_task(warmup_cache_background())
+        cache_warmup_task = asyncio.create_task(warmup_cache_background())
         logger.info(f"[Worker PID:{worker_pid}] 缓存预热任务已启动（后台执行）")
-    except Exception as e:
-        logger.warning(f"[Worker PID:{worker_pid}] 启动缓存预热失败: {e}，继续启动...")
+    elif not redis_client:
+        logger.info(f"[Worker PID:{worker_pid}] 跳过缓存预热：Redis 不可用")
+    else:
+        logger.info(f"[Worker PID:{worker_pid}] 跳过缓存预热：由首个 API worker 执行")
 
     # 启动系统监控与性能优化后台任务
     try:
@@ -249,6 +269,12 @@ async def lifespan(app: FastAPI):
 
     # ====== 关闭时执行 ======
     logger.info("应用关闭中...")
+    if cache_warmup_task and not cache_warmup_task.done():
+        cache_warmup_task.cancel()
+        try:
+            await cache_warmup_task
+        except asyncio.CancelledError:
+            logger.debug("缓存预热任务已取消")
     try:
         from app.core.monitoring import system_monitor
 

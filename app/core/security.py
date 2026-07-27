@@ -428,7 +428,7 @@ async def is_authenticated_request(request: Request) -> bool:
         payload = await JWTUtils.verify_token(token, db=None)
     except HTTPException:
         return False
-    if payload.get("type") == "refresh":
+    if payload.get("type") != "access":
         return False
     return bool(payload.get("sub"))
 
@@ -460,6 +460,13 @@ async def get_current_user(
     # ====== 验证令牌 ======
     # 验证JWT令牌并获取载荷（同时检查黑名单）
     payload = await JWTUtils.verify_token(token, db=db)
+
+    # 仅允许 access；拒绝 refresh 冒充访问令牌
+    if payload.get("type") != "access":
+        _raise_auth(
+            "无效的访问令牌类型",
+            error_code=ErrorCode.TOKEN_INVALID,
+        )
 
     # ====== 提取用户ID ======
     # 从载荷中获取用户ID（subject）
