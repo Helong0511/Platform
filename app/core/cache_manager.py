@@ -8,10 +8,17 @@
 import logging
 from typing import Optional, List, Dict, Any
 
-from app.core.redis_client import get_redis_client
-from app.core.offer_cache import set_offer_cache, get_offer_advertiser_id, invalidate_offer_cache
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+
+from app.core.redis_client import get_redis_client
+from app.core.offer_cache import set_offer_cache, get_offer_advertiser_id, invalidate_offer_cache
+from app.core.short_link_cache import (
+    get_short_link_from_cache,
+    serialize_short_link,
+    set_short_link_to_cache,
+)
+from app.models.models import Offer, ShortLink
 
 logger = logging.getLogger(__name__)
 
@@ -37,14 +44,6 @@ class CacheManager:
             成功预热的数量
         """
         try:
-            # 延迟导入，避免 lifespan 启动阶段与 models 循环依赖导致 NameError
-            from app.models.postback import ShortLink
-            from app.core.short_link_cache import (
-                get_short_link_from_cache,
-                serialize_short_link,
-                set_short_link_to_cache,
-            )
-
             result = await db.execute(
                 select(ShortLink)
                 .where(ShortLink.is_active.is_(True))
@@ -96,9 +95,6 @@ class CacheManager:
             成功预热的数量
         """
         try:
-            # 延迟导入，避免 lifespan 启动阶段与 models 循环依赖导致 NameError
-            from app.models.cpl import Offer
-
             # 查询活跃的Offer
             result = await db.execute(
                 select(Offer)
