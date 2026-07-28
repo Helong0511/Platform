@@ -6,10 +6,35 @@ import { isExtensionError } from './errorFilter';
 import { logger } from './logger';
 
 /**
+ * 鉴权失败 / 已由 axios 拦截器处理的请求错误，不应记为「程序运行错误」。
+ * 典型文案：Request failed with status code 401
+ */
+function isAuthOrHandledRequestError(errorLike, message = '') {
+  const status = errorLike?.response?.status
+    ?? errorLike?.status
+    ?? errorLike?.statusCode;
+  if (status === 401 || status === 403) {
+    return true;
+  }
+  if (errorLike?._handled) {
+    return true;
+  }
+  const text = String(message || errorLike?.message || '');
+  if (/status code 401\b/i.test(text) || /status code 403\b/i.test(text)) {
+    return true;
+  }
+  if (/登录已过期|未登录|令牌|Not authenticated|Unauthorized/i.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * 记录前端错误到后端
  */
 async function recordFrontendError(errorInfo) {
   try {
+    // 使用全局 axios（initAxiosConfig 已设置 withCredentials，可带 Cookie / CSRF）
     const axios = (await import('axios')).default;
     const params = new URLSearchParams({
       error_type: errorInfo.error_type || 'JavaScriptError',
@@ -92,6 +117,10 @@ export const initGlobalErrorHandler = () => {
       return;
     }
 
+    if (isAuthOrHandledRequestError(event?.error, errorMessage)) {
+      return;
+    }
+
     // 记录前端运行错误
     try {
       const error = event.error || new Error(event.message);
@@ -163,6 +192,12 @@ export const initGlobalErrorHandler = () => {
     }
 
     if (typeof errorMessage === 'string' && errorMessage.includes('ResizeObserver loop completed with undelivered notifications')) {
+      return;
+    }
+
+    // 401/403：登录过期等，axios 已处理，勿记为程序运行错误
+    if (isAuthOrHandledRequestError(event?.reason, errorMessage)) {
+      event.preventDefault();
       return;
     }
 

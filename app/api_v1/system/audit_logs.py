@@ -263,35 +263,24 @@ async def log_client_error(
     
     # ---------- 异常处理 ----------
     try:
-        # 尝试获取当前用户（如果有认证信息）
+        # 尝试获取当前用户（Authorization 或 HttpOnly Cookie）
         current_user = None
         username = None
-        # ---------- 异常处理 ----------
         try:
-            # 从请求头中获取token
-            auth_header = request.headers.get("Authorization", "")
-            # ---------- 条件分支 ----------
-            if auth_header.startswith("Bearer "):
-                token = auth_header.replace("Bearer ", "")
-                # ---------- 条件分支 ----------
-                if token:
-                    # verify_token 是异步方法，需要使用 await
-                    payload = await JWTUtils.verify_token(token, db=db)
-                    # ---------- 条件分支 ----------
-                    if payload and "sub" in payload:
-                        user_id = payload.get("sub")
-                        # ---------- 条件分支 ----------
-                        if user_id:
-                            # ---------- 异常处理 ----------
-                            try:
-                                user_id_int = int(user_id)
-                                result = await db.execute(select(User).where(User.id == user_id_int))
-                                current_user = result.scalar_one_or_none()
-                                # ---------- 条件分支 ----------
-                                if current_user:
-                                    username = current_user.username
-                            except (ValueError, Exception):
-                                pass
+            from app.core.security import extract_access_token_from_request
+
+            token = extract_access_token_from_request(request)
+            if token:
+                payload = await JWTUtils.verify_token(token, db=db)
+                if payload and payload.get("type", "access") == "access" and payload.get("sub"):
+                    try:
+                        user_id_int = int(payload["sub"])
+                        result = await db.execute(select(User).where(User.id == user_id_int))
+                        current_user = result.scalar_one_or_none()
+                        if current_user:
+                            username = current_user.username
+                    except (ValueError, Exception):
+                        pass
         except Exception:
             # 如果无法获取用户，继续使用 None（允许未认证用户记录错误）
             pass
