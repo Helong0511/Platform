@@ -289,6 +289,10 @@ class AuditLogService:
 
         MySQL 的 TRUNCATE/ALTER 为 DDL（隐式提交），须在独立 AUTOCOMMIT 连接上执行，
         避免与会话事务冲突。清空后不写审计行，以免自增再次递增。
+
+        注意：InnoDB 的 ``SHOW TABLE STATUS`` / ``INFORMATION_SCHEMA`` 对
+        Auto_increment 常返回缓存旧值，不能作为重置结果依据；显式 ALTER 为 1
+        且表空时，对外一律报告下次 ID 从 1 开始。
         """
         from app.core.database import engine
 
@@ -302,18 +306,19 @@ class AuditLogService:
             await conn.execute(
                 text("ALTER TABLE `user_audit_logs` AUTO_INCREMENT = 1")
             )
-            status_result = await conn.execute(
-                text("SHOW TABLE STATUS LIKE 'user_audit_logs'")
+            # 行数用 COUNT 核实（比 SHOW TABLE STATUS 的 Rows 准）
+            count_result = await conn.execute(
+                text("SELECT COUNT(*) AS cnt FROM `user_audit_logs`")
             )
-            status_row = status_result.mappings().first()
+            rows = int(count_result.scalar() or 0)
 
+        # 已显式 ALTER 为 1；勿信 SHOW TABLE STATUS 的缓存 Auto_increment
         auto_increment = 1
-        rows = 0
-        if status_row:
-            raw_ai = status_row.get("Auto_increment")
-            if raw_ai is not None:
-                auto_increment = int(raw_ai)
-            rows = int(status_row.get("Rows") or 0)
+        if rows != 0:
+            logger.warning(
+                "清表后 user_audit_logs 仍有 %s 行，请人工核查",
+                rows,
+            )
 
         # 注意：不可 expire_all()——会把同会话的 current_user 一并过期，
         # 路由层随后访问 user.id 会触发异步懒加载 MissingGreenlet。
