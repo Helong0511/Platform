@@ -17,7 +17,7 @@ import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -282,6 +282,49 @@ class AuditLogService:
             select(UserAuditLog).where(UserAuditLog.id == log_id)
         )
         return result.scalar_one_or_none()
+
+    async def clear_all_audit_logs(self) -> Dict[str, Any]:
+        """
+        清空全部操作日志并重置自增主键（等价于 TRUNCATE + AUTO_INCREMENT=1）。
+
+        MySQL 的 TRUNCATE/ALTER 为 DDL（隐式提交），须在独立 AUTOCOMMIT 连接上执行，
+        避免与会话事务冲突。清空后不写审计行，以免自增再次递增。
+        """
+        from app.core.database import engine
+
+        # 结束当前事务，避免会话连接状态干扰后续查询
+        await self.db.rollback()
+
+        async with engine.connect() as conn:
+            # DDL 必须走自动提交，否则部分环境下 TRUNCATE 会失败或状态异常
+            await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await conn.execute(text("TRUNCATE TABLE `user_audit_logs`"))
+            await conn.execute(
+                text("ALTER TABLE `user_audit_logs` AUTO_INCREMENT = 1")
+            )
+            status_result = await conn.execute(
+                text("SHOW TABLE STATUS LIKE 'user_audit_logs'")
+            )
+            status_row = status_result.mappings().first()
+
+        auto_increment = 1
+        rows = 0
+        if status_row:
+            raw_ai = status_row.get("Auto_increment")
+            if raw_ai is not None:
+                auto_increment = int(raw_ai)
+            rows = int(status_row.get("Rows") or 0)
+
+        # 丢弃会话内可能残留的 ORM 实例
+        self.db.expire_all()
+        await invalidate_audit_log_stats_cache()
+
+        return {
+            "cleared": True,
+            "table": "user_audit_logs",
+            "rows": rows,
+            "auto_increment": auto_increment,
+        }
 
     async def log_client_error(
             self,

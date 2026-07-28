@@ -6,8 +6,10 @@
 
 主要端点（前缀 /audit-logs）：
 - GET /              分页列表
-- GET /action-types  操作类型枚举
-- GET /stats         统计概览。
+- GET /stats/summary 统计概览
+- DELETE /clear-all  清空全部日志（TRUNCATE + 重置自增）
+- GET /{log_id}      单条详情
+- POST /client-error 前端错误上报。
 
 说明：系统运维接口，含定时任务、审计日志、会话、缓存、斗篷与敏感路径探测。"""
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -181,6 +183,48 @@ async def get_audit_log_stats(
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"获取统计信息失败：{str(e)}"
+        )
+
+
+@router.delete(
+    "/clear-all",
+    response_model=ResponseBaseSchema[dict],
+    summary="清除全部操作日志",
+    description="TRUNCATE user_audit_logs 并重置 AUTO_INCREMENT=1，仅管理员可访问",
+)
+async def clear_all_audit_logs(
+        request: Request,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin),
+):
+    """
+    清空操作日志表（不可恢复）。
+
+    效果等同：
+    TRUNCATE TABLE `user_audit_logs`;
+    ALTER TABLE user_audit_logs AUTO_INCREMENT = 1;
+    """
+    audit_log_service: AuditLogService = await get_audit_log_service(db)
+    try:
+        result = await audit_log_service.clear_all_audit_logs()
+        logger.warning(
+            "管理员清空全部操作日志: user_id=%s username=%s ip=%s auto_increment=%s",
+            current_user.id,
+            current_user.username,
+            get_client_ip(request),
+            result.get("auto_increment"),
+        )
+        return ResponseBaseSchema.success(
+            data=result,
+            message="已清除全部操作日志",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"清除全部操作日志失败: {e}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"清除全部操作日志失败：{str(e)}",
         )
 
 
