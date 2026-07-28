@@ -315,8 +315,8 @@ class AuditLogService:
                 auto_increment = int(raw_ai)
             rows = int(status_row.get("Rows") or 0)
 
-        # 丢弃会话内可能残留的 ORM 实例
-        self.db.expire_all()
+        # 注意：不可 expire_all()——会把同会话的 current_user 一并过期，
+        # 路由层随后访问 user.id 会触发异步懒加载 MissingGreenlet。
         await invalidate_audit_log_stats_cache()
 
         return {

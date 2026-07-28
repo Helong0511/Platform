@@ -205,12 +205,15 @@ async def clear_all_audit_logs(
     ALTER TABLE user_audit_logs AUTO_INCREMENT = 1;
     """
     audit_log_service: AuditLogService = await get_audit_log_service(db)
+    # 先取出标量，避免清表流程影响会话对象后懒加载失败
+    admin_id = current_user.id
+    admin_username = current_user.username
     try:
         result = await audit_log_service.clear_all_audit_logs()
         logger.warning(
             "管理员清空全部操作日志: user_id=%s username=%s ip=%s auto_increment=%s",
-            current_user.id,
-            current_user.username,
+            admin_id,
+            admin_username,
             get_client_ip(request),
             result.get("auto_increment"),
         )
