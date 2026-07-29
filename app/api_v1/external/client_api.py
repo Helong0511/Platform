@@ -430,6 +430,7 @@ async def get_client_data(
         )
 
         username, user_full_name = await _get_client_user_names(db, client.user_id)
+        client_ip = get_client_ip(request)
 
         telegram_msg = None
         if len(data_list) > 0:
@@ -448,6 +449,8 @@ async def get_client_data(
                 )
             if total > len(data_list):
                 telegram_msg += f"\n分页: 第 {page} 页，每页 {page_size} 条"
+            if client_ip:
+                telegram_msg += f"\n来源IP: {client_ip}"
 
         background_tasks.add_task(
             _background_client_api_side_effects,
@@ -457,7 +460,7 @@ async def get_client_data(
             resource_type="AD_DATA",
             resource_id=None,
             resource_name="广告数据",
-            ip_address=get_client_ip(request),
+            ip_address=client_ip,
             user_agent=request.headers.get("user-agent", "")[:500],
             success=True,
             request_method=request.method,
