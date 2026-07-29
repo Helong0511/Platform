@@ -4,19 +4,23 @@
 
 说明：请求/响应 JSON 结构定义，供 FastAPI 校验与 OpenAPI 文档生成。"""
 from datetime import datetime, date
+from decimal import Decimal
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import Field, ConfigDict
+
+from app.schemas.base import BaseSchema
 
 
-class ProductBase(BaseModel):
+class ProductBase(BaseSchema):
     """
     产品公共字段：扣量比例、下游 Postback、通知地址、客户转移日期等
     
     公共字段基类，供 Create/Update/Response 等子模型复用，避免重复定义。
     """
     name: str | None = None
-    ecpm_deduct_ratio: float | None = Field(None, ge=0, le=1)
-    revenue_deduct_ratio: float | None = Field(None, ge=0, le=1)
+    ecpm_deduct_ratio: Decimal | None = Field(None, ge=0, le=1)
+    revenue_deduct_ratio: Decimal | None = Field(None, ge=0, le=1)
+    cplpo_deduct_ratio: Decimal | None = Field(None, ge=0, le=1)
     is_active: bool | None = True
     client_id: int | None = None
     downstream_postback_url: str | None = Field(
@@ -53,8 +57,9 @@ class ProductCreate(ProductBase):
     创建请求体：包含新建记录所需字段，提交前由 Pydantic 自动校验类型与取值范围。
     """
     name: str
-    ecpm_deduct_ratio: float = Field(..., ge=0, le=1)
-    revenue_deduct_ratio: float = Field(..., ge=0, le=1)
+    ecpm_deduct_ratio: Decimal = Field(..., ge=0, le=1)
+    revenue_deduct_ratio: Decimal = Field(..., ge=0, le=1)
+    cplpo_deduct_ratio: Decimal = Field(default=Decimal('0'), ge=0, le=1)
     client_id: int
 
 
@@ -114,7 +119,7 @@ def build_product_response(product) -> ProductResponse:
     return response.model_copy(update={"client_name": company_name})
 
 
-class ProductListResponse(BaseModel):
+class ProductListResponse(BaseSchema):
     """
     产品分页列表响应
     

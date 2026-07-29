@@ -7,12 +7,15 @@
 
 说明：CPL 子系统接口，涵盖广告主（上游）、渠道（下游）、Offer、Cap、扣量与转化。"""
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
+from pydantic import Field, field_validator, model_validator, ConfigDict
+
+from app.schemas.base import BaseSchema
 
 
-class ConversionDeductionConfigBase(BaseModel):
+class ConversionDeductionConfigBase(BaseSchema):
     """
     扣减配置基础模型
     
@@ -42,12 +45,12 @@ class ConversionDeductionConfigBase(BaseModel):
         description="是否启用按比例扣量（扣量后转化不保存到主表）",
         examples=[True]
     )
-    volume_deduction_ratio: float = Field(
-        0.0,
+    volume_deduction_ratio: Decimal = Field(
+        Decimal('0'),
         ge=0,
         le=1,
         description="按比例扣量比例（0-1，如0.10表示扣量10%）",
-        examples=[0.1]
+        examples=[Decimal('0.1')]
     )
     deduction_strategy: Literal['random', 'proportional', 'round_robin'] = Field(
         "random",
@@ -59,12 +62,12 @@ class ConversionDeductionConfigBase(BaseModel):
         description="是否启用按比例扣金额（扣金额后转化仍保存到主表）",
         examples=[True]
     )
-    amount_deduction_ratio: float = Field(
-        0.0,
+    amount_deduction_ratio: Decimal = Field(
+        Decimal('0'),
         ge=0,
         le=1,
         description="按比例扣金额比例（0-1，如0.10表示扣金额10%）",
-        examples=[0.05]
+        examples=[Decimal('0.05')]
     )
     priority: int = Field(
         0,
@@ -80,7 +83,7 @@ class ConversionDeductionConfigBase(BaseModel):
 
     @field_validator('volume_deduction_ratio', 'amount_deduction_ratio')
     @classmethod
-    def validate_ratio(cls, v: float) -> float:
+    def validate_ratio(cls, v: Decimal) -> Decimal:
         """验证比例值。用于 API 请求/响应序列化与 OpenAPI 文档生成。"""
         if v < 0 or v > 1:
             raise ValueError('比例必须在0-1之间')
@@ -115,7 +118,7 @@ class ConversionDeductionConfigCreate(ConversionDeductionConfigBase):
         return self
 
 
-class ConversionDeductionConfigUpdate(BaseModel):
+class ConversionDeductionConfigUpdate(BaseSchema):
     """
     更新扣减配置请求体。
 
@@ -124,10 +127,10 @@ class ConversionDeductionConfigUpdate(BaseModel):
     level: Optional[str] = Field(None, description="配置层级")
     target_id: Optional[int] = Field(None, description="配置对象ID")
     enable_volume_deduction: Optional[bool] = Field(None, description="是否启用按比例扣量")
-    volume_deduction_ratio: Optional[float] = Field(None, ge=0, le=1, description="按比例扣量比例")
+    volume_deduction_ratio: Optional[Decimal] = Field(None, ge=0, le=1, description="按比例扣量比例")
     deduction_strategy: Optional[str] = Field(None, description="扣减策略")
     enable_amount_deduction: Optional[bool] = Field(None, description="是否启用按比例扣金额")
-    amount_deduction_ratio: Optional[float] = Field(None, ge=0, le=1, description="按比例扣金额比例")
+    amount_deduction_ratio: Optional[Decimal] = Field(None, ge=0, le=1, description="按比例扣金额比例")
     priority: Optional[int] = Field(None, ge=0, description="优先级")
     is_active: Optional[bool] = Field(None, description="是否激活")
 
@@ -153,7 +156,7 @@ class ConversionDeductionConfigResponse(ConversionDeductionConfigBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-class ConversionDeductionLogResponse(BaseModel):
+class ConversionDeductionLogResponse(BaseSchema):
     """
     单次转化扣减日志响应。
 
@@ -166,14 +169,14 @@ class ConversionDeductionLogResponse(BaseModel):
     offer_id: Optional[int] = None
     publisher_id: Optional[int] = None
     original_volume: int
-    original_amount: float
+    original_amount: Decimal
     deducted_volume: int
-    deducted_amount: float
+    deducted_amount: Decimal
     final_volume: int
-    final_amount: float
+    final_amount: Decimal
     deduction_config_id: Optional[int] = None
-    volume_deduction_ratio: Optional[float] = None
-    amount_deduction_ratio: Optional[float] = None
+    volume_deduction_ratio: Optional[Decimal] = None
+    amount_deduction_ratio: Optional[Decimal] = None
     deduction_strategy: Optional[str] = None
     deduction_reason: Optional[str] = None
     created_at: datetime
@@ -185,7 +188,7 @@ class ConversionDeductionLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class DeductionStatsResponse(BaseModel):
+class DeductionStatsResponse(BaseSchema):
     """
     扣减汇总统计响应。
 
@@ -194,20 +197,20 @@ class DeductionStatsResponse(BaseModel):
     original_volume: int = 0
     deducted_volume: int = 0
     final_volume: int = 0
-    volume_deduction_ratio: float = 0.0
-    original_amount: float = 0.0
-    deducted_amount: float = 0.0
-    final_amount: float = 0.0
-    amount_deduction_ratio: float = 0.0
+    volume_deduction_ratio: Decimal = Decimal('0')
+    original_amount: Decimal = Decimal('0')
+    deducted_amount: Decimal = Decimal('0')
+    final_amount: Decimal = Decimal('0')
+    amount_deduction_ratio: Decimal = Decimal('0')
     items: list = []
 
 
-class BatchUpdateStatusRequest(BaseModel):
+class BatchUpdateStatusRequest(BaseSchema):
     """批量更新状态请求。用于 API 请求/响应序列化与 OpenAPI 文档生成。"""
     config_ids: list[int] = Field(..., min_length=1, description="配置ID列表")
     is_active: bool = Field(..., description="是否激活")
 
 
-class BatchDeleteRequest(BaseModel):
+class BatchDeleteRequest(BaseSchema):
     """批量删除请求。用于 API 请求/响应序列化与 OpenAPI 文档生成。"""
     config_ids: list[int] = Field(..., min_length=1, description="配置ID列表")

@@ -313,7 +313,7 @@ async def create_product(
     - 仅管理员可创建产品
     - 客户无权限创建产品，只能查看
     - 设置产品名称和减扣比例
-    - 支持处理默认客户（导入数据）的特殊逻辑
+    - 支持处理「临时挂靠」的特殊逻辑
     """
     # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在ProductService中）
@@ -322,7 +322,7 @@ async def create_product(
     # 准备产品数据
     product_data = product_in.model_dump()
     
-    # 调用服务层创建产品（服务层会处理所有验证和默认客户逻辑）
+    # 调用服务层创建产品（服务层会处理所有验证和临时挂靠逻辑）
     product = await product_service.create_product(product_data, current_user)
 
     # 记录创建操作
@@ -475,7 +475,7 @@ async def delete_product(
     - 仅管理员可删除产品
     - 客户无权限删除产品，只能查看
     - 删除规则：
-      1. 如果产品关联了广告数据 → 将产品的 client_id 改为管理员的默认客户（不删除产品）
+      1. 如果产品关联了广告数据 → 将产品的 client_id 改为「临时挂靠」（不删除产品）
       2. 如果没有关联广告数据 → 直接删除产品
     """
     # ---------- 入口：参数与依赖准备 ----------

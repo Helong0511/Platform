@@ -310,7 +310,7 @@ class PostbackConversionService:
             enrich_started_at = perf_counter()
             conversion_list = []
             for conv in conversions:
-                conv_dict = PostbackConversionResponse.model_validate(conv).model_dump()
+                conv_dict = PostbackConversionResponse.model_validate(conv).model_dump(mode='json')
                 conv_dict['notification_count'] = notification_counts.get(conv.id, 0)
                 # 添加产品名称
                 if conv.product_id and conv.product_id in products_map:

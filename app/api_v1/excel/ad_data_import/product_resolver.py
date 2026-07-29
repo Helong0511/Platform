@@ -129,17 +129,17 @@ async def find_or_create_product(
         if mapping_complete:
             logger.info(
                 f"✅ 映射完整，产品名称'{product_name}'找不到客户，"
-                f"将创建新产品（默认客户为管理员）"
+                f"将创建新产品（挂靠到临时挂靠客户）"
             )
 
-            # 获取或创建默认客户：使用统一的辅助函数
+            # 获取或创建临时挂靠客户：使用统一的辅助函数
             create_client = None
             # ---------- 条件分支 ----------
             if not target_client_id:
                 create_client = await find_or_create_default_client(db, current_user.id)
                 target_client_id = create_client.id
                 logger.info(
-                    f"使用管理员的默认客户（ID: {target_client_id}，"
+                    f"使用临时挂靠客户（ID: {target_client_id}，"
                     f"客户名称: {create_client.company_name}）创建产品"
                 )
             else:

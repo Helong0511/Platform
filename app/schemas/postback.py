@@ -3,13 +3,16 @@
 
 说明：处理上游转化回调、下游转发、去重诊断与 IP 白名单管理。"""
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional, Dict
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import Field, ConfigDict
+
+from app.schemas.base import BaseSchema
 
 
 # ====== 请求模型 ======
-class PostbackRequest(BaseModel):
+class PostbackRequest(BaseSchema):
     """
     通用 Postback 请求模型（用于POST请求）
     
@@ -18,8 +21,8 @@ class PostbackRequest(BaseModel):
     # 基础字段（各平台通用）
     conversion_id: Optional[str] = Field(None, description="转化ID（各平台唯一标识）")
     event_name: Optional[str] = Field(None, description="事件名称")
-    event_value: Optional[float] = Field(None, description="事件价值")
-    payout: Optional[float] = Field(None, description="支付金额")
+    event_value: Optional[Decimal] = Field(None, description="事件价值")
+    payout: Optional[Decimal] = Field(None, description="支付金额")
 
     # 设备信息
     devad_id: Optional[str] = Field(None, description="设备广告ID")
@@ -37,7 +40,7 @@ class PostbackRequest(BaseModel):
 
 
 # ====== 响应模型 ======
-class PostbackResponse(BaseModel):
+class PostbackResponse(BaseSchema):
     """
     Postback 响应模型
     
@@ -50,7 +53,7 @@ class PostbackResponse(BaseModel):
 
 
 # ====== 查询和统计模型 ======
-class PostbackConversionResponse(BaseModel):
+class PostbackConversionResponse(BaseSchema):
     """
     Postback 转化记录响应模型
     
@@ -60,9 +63,9 @@ class PostbackConversionResponse(BaseModel):
     platform: str
     conversion_id: str
     event_name: Optional[str]
-    event_value: Optional[float]
-    original_payout: Optional[float] = Field(None, description="原始支付金额（PO）")
-    payout: Optional[float] = Field(None, description="扣后支付金额（PO(扣)），考虑下游PO限制后的实际转发金额")
+    event_value: Optional[Decimal]
+    original_payout: Optional[Decimal] = Field(None, description="原始支付金额（PO）")
+    payout: Optional[Decimal] = Field(None, description="扣后支付金额（PO(扣)），考虑下游PO限制后的实际转发金额")
     devad_id: Optional[str]
     os: Optional[str]
     carrier: Optional[str]
@@ -93,7 +96,7 @@ class PostbackConversionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class PostbackStatsResponse(BaseModel):
+class PostbackStatsResponse(BaseSchema):
     """
     Postback 统计响应模型
     
@@ -101,14 +104,14 @@ class PostbackStatsResponse(BaseModel):
     """
     platform: str = Field(..., description="平台名称")
     total_conversions: int = Field(..., description="总转化数")
-    total_original_payout: Optional[float] = Field(None, description="原始总支付金额（PO）")
-    total_payout: float = Field(..., description="扣后总支付金额（PO(扣)）")
-    total_event_value: float = Field(..., description="总事件价值")
+    total_original_payout: Optional[Decimal] = Field(None, description="原始总支付金额（PO）")
+    total_payout: Decimal = Field(..., description="扣后总支付金额（PO(扣)）")
+    total_event_value: Decimal = Field(..., description="总事件价值")
     unique_events: int = Field(..., description="唯一事件数")
     date_range: Optional[Dict[str, str]] = Field(None, description="日期范围")
 
 
-class PostbackQueryParams(BaseModel):
+class PostbackQueryParams(BaseSchema):
     """
     Postback 查询参数模型
     
@@ -124,7 +127,7 @@ class PostbackQueryParams(BaseModel):
     page_size: int = Field(20, ge=1, le=100, description="每页数量")
 
 
-class PostbackForwardLogResponse(BaseModel):
+class PostbackForwardLogResponse(BaseSchema):
     """
     Postback 下游转发日志响应模型
     
@@ -149,7 +152,7 @@ class PostbackForwardLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class PendingPostbackConversionResponse(BaseModel):
+class PendingPostbackConversionResponse(BaseSchema):
     """
     待确认 Postback 转化记录响应模型
     
@@ -159,9 +162,9 @@ class PendingPostbackConversionResponse(BaseModel):
     platform: str
     conversion_id: str
     event_name: Optional[str]
-    event_value: Optional[float]
-    original_payout: Optional[float]
-    payout: Optional[float]
+    event_value: Optional[Decimal]
+    original_payout: Optional[Decimal]
+    payout: Optional[Decimal]
     devad_id: Optional[str]
     os: Optional[str]
     carrier: Optional[str]

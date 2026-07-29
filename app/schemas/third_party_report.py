@@ -8,6 +8,7 @@
 
 说明：请求/响应 JSON 结构定义，供 FastAPI 校验与 OpenAPI 文档生成。"""
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -26,7 +27,7 @@ class ThirdPartyReportLogBase(BaseSchema):
     event: str = Field(..., max_length=50, description="事件类型")
     conversion_id: Optional[str] = Field(None, max_length=255, description="转化ID")
     currency: Optional[str] = Field(None, max_length=10, description="货币类型")
-    amount: Optional[float] = Field(None, description="支付金额")
+    amount: Optional[Decimal] = Field(None, description="支付金额")
     email: Optional[str] = Field(None, max_length=255, description="邮箱")
     ip: Optional[str] = Field(None, max_length=50, description="IP地址")
     phone: Optional[str] = Field(None, max_length=50, description="手机号")
@@ -79,7 +80,7 @@ class ThirdPartyReportLogListResponse(BaseSchema):
     event: str = Field(..., max_length=50, description="事件类型")
     conversion_id: Optional[str] = Field(None, max_length=255, description="转化ID")
     currency: Optional[str] = Field(None, max_length=10, description="货币类型")
-    amount: Optional[float] = Field(None, description="支付金额")
+    amount: Optional[Decimal] = Field(None, description="支付金额")
     use_hash: bool = Field(True, description="是否对email、ip、phone进行哈希处理")
     status: str = Field(..., max_length=20, description="状态")
     attempt_count: int = Field(0, description="尝试次数")

@@ -29,6 +29,7 @@ class UserSession(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='会话ID')
     user_id = Column(Integer, nullable=False, comment='用户ID')
     token_jti = Column(String(64), nullable=False, unique=True, comment='JWT令牌ID（jti）')
+    token_type = Column(String(16), nullable=False, default='access', index=True, comment='令牌类型 access/refresh')
     ip_address = Column(String(50), nullable=True, index=True, comment='登录IP地址')
     user_agent = Column(String(500), nullable=True, comment='用户代理（浏览器信息）')
     device_info = Column(String(200), nullable=True, comment='设备信息（移动端/桌面端）')
@@ -41,6 +42,7 @@ class UserSession(Base):
     __table_args__ = (
         Index("idx_session_user_active", "user_id", "is_active"),
         Index("idx_session_expires", "expires_at"),
+        Index("ix_user_sessions_token_type", "token_type"),
     )
 
 

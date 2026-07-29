@@ -13,6 +13,7 @@ import asyncio
 import logging
 from calendar import monthrange
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -30,7 +31,7 @@ from app.core.security import get_current_user
 from app.core.telegram import send_telegram_message_async
 from app.core.utils import get_client_ip
 from app.models.models import Client, Product, User, UserRole
-from app.schemas.base import PaginatedResponseBaseSchema, ResponseBaseSchema
+from app.schemas.base import BaseSchema, PaginatedResponseBaseSchema, ResponseBaseSchema
 from app.services.ad_data.queries.client_api_query import ClientAdDataQuery
 from app.services.ad_data.queries.dimension_filter import ensure_valid_optional_dimension
 
@@ -189,15 +190,14 @@ class ProductNameResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class AdDataItemResponse(BaseModel):
+class AdDataItemResponse(BaseSchema):
     """
     广告数据项响应模型
     
     注意：此模型设计考虑了Java客户端的兼容性：
-    - 所有数值类型明确（int/float），不会返回字符串
+    - 数值字段使用 Decimal 校验，JSON 输出为数字
     - 日期格式为ISO标准格式（YYYY-MM-DD）
     - 字符串字段确保不为null（空字符串代替）
-    - 浮点数保留2位小数，避免精度问题
     """
     date: str = Field(..., description="数据日期（ISO格式：YYYY-MM-DD）")
     product_name: str = Field(..., description="产品名称")
@@ -206,16 +206,16 @@ class AdDataItemResponse(BaseModel):
     country_name_zh: str = Field(default="", description="国家中文名称")
     request_count: int = Field(..., description="请求数（整数）")
     match_count: int = Field(..., description="匹配数（整数）")
-    coverage_rate: float = Field(..., description="覆盖率（%，浮点数，保留2位小数）")
+    coverage_rate: Decimal = Field(..., description="覆盖率（%）")
     display_count: int = Field(..., description="展示数（整数）")
-    display_rate: float = Field(..., description="展示率（%，浮点数，保留2位小数）")
+    display_rate: Decimal = Field(..., description="展示率（%）")
     click_count: int = Field(..., description="点击数（整数）")
-    click_rate: float = Field(..., description="点击率（%，浮点数，保留2位小数）")
-    viewability_rate: float = Field(default=0.0, description="可见率（%，浮点数，保留2位小数）")
-    cpc: float = Field(..., description="CPC（浮点数，保留2位小数）")
+    click_rate: Decimal = Field(..., description="点击率（%）")
+    viewability_rate: Decimal = Field(default=Decimal('0'), description="可见率（%）")
+    cpc: Decimal = Field(..., description="CPC")
     pageviews: int = Field(..., description="PageViews（整数）")
-    ecpm: float = Field(..., description="eCPM（减扣后的，浮点数，保留2位小数）")
-    revenue: float = Field(..., description="收益（减扣后的，浮点数，保留2位小数）")
+    ecpm: Decimal = Field(..., description="eCPM（减扣后）")
+    revenue: Decimal = Field(..., description="收益（减扣后）")
 
     """
     查询客户的所有产品名称

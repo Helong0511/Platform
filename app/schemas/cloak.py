@@ -11,9 +11,12 @@
 说明：斗篷配置、上报事件与货币等字段的 Pydantic 校验。"""
 import re
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
+from pydantic import Field, field_validator, model_validator, ConfigDict
+
+from app.schemas.base import BaseSchema
 
     # ---------------------------------------------------------------------------
 # Meta Pixel / Conversions API 官方「标准事件」event_name（与 Meta 文档 Standard Events 一致）。
@@ -82,7 +85,7 @@ def validate_cloak_report_event_name(value: str) -> str:
 ALLOWED_CLOAK_REPORT_EVENTS = FACEBOOK_STANDARD_EVENT_NAMES
 
 
-class CloakConfigBase(BaseModel):
+class CloakConfigBase(BaseSchema):
     """
     斗篷配置基础模型（创建、响应共用字段）。
 
@@ -101,7 +104,7 @@ class CloakConfigBase(BaseModel):
         max_length=64,
         description="桥页按钮点击跳转时 CAPI 的 event_name（须 click_report_enabled 为真才实际上报）",
     )
-    report_value: Optional[float] = Field(
+    report_value: Optional[Decimal] = Field(
         None,
         ge=0,
         description="点击上报为 Purchase 时的金额（必填）",
@@ -126,7 +129,7 @@ class CloakConfigBase(BaseModel):
         max_length=64,
         description="加载完成时的 CAPI event_name",
     )
-    load_report_value: Optional[float] = Field(None, ge=0, description="加载上报为 Purchase 时的金额")
+    load_report_value: Optional[Decimal] = Field(None, ge=0, description="加载上报为 Purchase 时的金额")
     load_report_currency: Optional[str] = Field(
         "USD",
         max_length=10,
@@ -143,7 +146,7 @@ class CloakConfigBase(BaseModel):
         max_length=64,
         description="postback 转化时的 CAPI event_name（依赖点击记录 url_params 含 dp=斗篷名）",
     )
-    postback_report_value: Optional[float] = Field(
+    postback_report_value: Optional[Decimal] = Field(
         None,
         ge=0,
         description="postback 为 Purchase 时的固定金额；不填则在处理器中用 postback 的 payout",
@@ -250,7 +253,7 @@ class CloakConfigCreate(CloakConfigBase):
     pass
 
 
-class CloakConfigUpdate(BaseModel):
+class CloakConfigUpdate(BaseSchema):
     """
     更新斗篷配置：全部字段可选，仅提交的字段会参与更新（exclude_unset）。
 
@@ -263,16 +266,16 @@ class CloakConfigUpdate(BaseModel):
     backup_pixel_id: Optional[str] = Field(None, max_length=50, description="备份像素ID")
     backup_access_token: Optional[str] = Field(None, max_length=500, description="备份像素Token")
     report_event: Optional[str] = Field(None, max_length=64, description="点击跳转上报事件名")
-    report_value: Optional[float] = Field(None, ge=0, description="点击上报 Purchase 金额")
+    report_value: Optional[Decimal] = Field(None, ge=0, description="点击上报 Purchase 金额")
     report_currency: Optional[str] = Field(None, max_length=10, description="点击上报 Purchase 货币")
     click_report_enabled: Optional[bool] = Field(None, description="是否启用点击跳转 Facebook 上报")
     load_report_enabled: Optional[bool] = Field(None, description="是否启用加载完成 Facebook 上报")
     load_report_event: Optional[str] = Field(None, max_length=64, description="加载完成上报事件名")
-    load_report_value: Optional[float] = Field(None, ge=0, description="加载上报 Purchase 金额")
+    load_report_value: Optional[Decimal] = Field(None, ge=0, description="加载上报 Purchase 金额")
     load_report_currency: Optional[str] = Field(None, max_length=10, description="加载上报 Purchase 货币")
     postback_report_enabled: Optional[bool] = Field(None, description="是否按本配置做 postback Facebook 上报")
     postback_report_event: Optional[str] = Field(None, max_length=64, description="postback 上报事件名")
-    postback_report_value: Optional[float] = Field(None, ge=0, description="postback Purchase 固定金额，可空")
+    postback_report_value: Optional[Decimal] = Field(None, ge=0, description="postback Purchase 固定金额，可空")
     postback_report_currency: Optional[str] = Field(None, max_length=10, description="postback Purchase 货币")
     is_enabled: Optional[bool] = Field(None, description="是否启用")
 
@@ -376,7 +379,7 @@ class CloakConfigResponse(CloakConfigBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-class TestCloakReportRequest(BaseModel):
+class TestCloakReportRequest(BaseSchema):
     """
     管理端「测试上报」请求体。
 

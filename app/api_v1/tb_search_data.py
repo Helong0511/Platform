@@ -409,7 +409,7 @@ async def import_tb_search_data(
             # ---------- 条件分支 ----------
             if not product:
                 # 产品不存在，自动创建
-                # 1. 查找或创建默认客户：使用统一的辅助函数
+                # 1. 查找或创建临时挂靠客户：使用统一的辅助函数
                 client = await find_or_create_default_client(db, current_user.id)
                 
                 # 2. 创建新产品

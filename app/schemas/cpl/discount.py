@@ -5,12 +5,15 @@
 
 说明：CPL 子系统接口，涵盖广告主（上游）、渠道（下游）、Offer、Cap、扣量与转化。"""
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import Field, ConfigDict
+
+from app.schemas.base import BaseSchema
 
 
-class OfferDiscountBase(BaseModel):
+class OfferDiscountBase(BaseSchema):
     """
     扣量配置基础模型
     
@@ -19,7 +22,7 @@ class OfferDiscountBase(BaseModel):
     discount_type: str = Field(..., description="扣量类型：offer/channel")
     offer_id: Optional[int] = Field(None, description="Offer ID（如果是offer类型）")
     publisher_id: int = Field(..., description="渠道ID")
-    discount_ratio: float = Field(..., ge=0, le=100, description="扣量比例（0-100）")
+    discount_ratio: Decimal = Field(..., ge=0, le=100, description="扣量比例（0-100）")
     is_active: bool = Field(True, description="是否激活")
 
 
@@ -32,7 +35,7 @@ class OfferDiscountCreate(OfferDiscountBase):
     pass
 
 
-class OfferDiscountUpdate(BaseModel):
+class OfferDiscountUpdate(BaseSchema):
     """
     更新扣量配置
     
@@ -41,7 +44,7 @@ class OfferDiscountUpdate(BaseModel):
     discount_type: Optional[str] = Field(None, description="扣量类型")
     offer_id: Optional[int] = Field(None, description="Offer ID")
     publisher_id: Optional[int] = Field(None, description="渠道ID")
-    discount_ratio: Optional[float] = Field(None, ge=0, le=100, description="扣量比例")
+    discount_ratio: Optional[Decimal] = Field(None, ge=0, le=100, description="扣量比例")
     is_active: Optional[bool] = Field(None, description="是否激活")
 
 

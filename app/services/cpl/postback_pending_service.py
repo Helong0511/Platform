@@ -307,7 +307,7 @@ class PostbackPendingService:
 
             conversion_list = []
             for pending in pending_conversions:
-                conversion_dict = PendingPostbackConversionResponse.model_validate(pending).model_dump()
+                conversion_dict = PendingPostbackConversionResponse.model_validate(pending).model_dump(mode='json')
                 if pending.product_id and pending.product_id in products_map:
                     conversion_dict["product_name"] = products_map[pending.product_id]
                 if pending.client_id and pending.client_id in clients_map:

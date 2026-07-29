@@ -1,8 +1,8 @@
 """
 Postback 转化、转发、通知、短链、斗篷 ORM 模型。
 """
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, Enum, Text, Index, \
-    UniqueConstraint, Date
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
+    UniqueConstraint, Date, Numeric
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -23,10 +23,12 @@ class PostbackConversion(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='转化记录ID')
     platform = Column(String(50), nullable=False, index=True, comment='平台名称：bft等')
     conversion_id = Column(String(255), nullable=False, comment='转化ID（各平台唯一标识，如clk_id）')
+    transaction_id = Column(String(255), nullable=True, unique=True, comment='上游事务ID（幂等）')
+    request_id = Column(String(128), nullable=True, unique=True, comment='请求防重放ID')
     event_name = Column(String(100), nullable=True, index=True, comment='事件名称')
-    event_value = Column(Float, nullable=True, comment='事件价值（购买价格等）')
-    original_payout = Column(Float, nullable=True, comment='原始支付金额（PO）')
-    payout = Column(Float, nullable=True, comment='扣后支付金额（PO(扣)）')
+    event_value = Column(Numeric(12, 4), nullable=True, comment='事件价值（购买价格等）')
+    original_payout = Column(Numeric(12, 4), nullable=True, comment='原始支付金额（PO）')
+    payout = Column(Numeric(12, 4), nullable=True, comment='扣后支付金额（PO(扣)）')
 
     # 设备信息
     devad_id = Column(String(255), nullable=True, comment='设备广告ID（IDFA或GAID）')
@@ -167,7 +169,7 @@ class ClientNotificationConfig(Base):
     notification_enabled = Column(Boolean, default=True, comment='是否启用通知')
     notify_on_conversion = Column(Boolean, default=True, comment='转化时通知')
     notify_on_high_value = Column(Boolean, default=False, comment='高价值转化通知')
-    high_value_threshold = Column(Float, nullable=True, comment='高价值阈值')
+    high_value_threshold = Column(Numeric(12, 4), nullable=True, comment='高价值阈值')
     notify_channels = Column(Text, nullable=True, comment='通知渠道（JSON格式：["telegram", "email", "sms"]）')
     telegram_chat_id = Column(String(100), nullable=True, comment='Telegram Chat ID')
     email_address = Column(String(255), nullable=True, comment='邮箱地址')
@@ -199,7 +201,7 @@ class ProductNotificationConfig(Base):
     notification_enabled = Column(Boolean, default=True, comment='是否启用通知')
     notify_on_conversion = Column(Boolean, default=True, comment='转化时通知')
     notify_on_high_value = Column(Boolean, default=False, comment='高价值转化通知')
-    high_value_threshold = Column(Float, nullable=True, comment='高价值阈值')
+    high_value_threshold = Column(Numeric(12, 4), nullable=True, comment='高价值阈值')
     notify_channels = Column(Text, nullable=True, comment='通知渠道（JSON格式：["telegram", "email", "sms"]）')
     telegram_chat_id = Column(String(100), nullable=True, comment='Telegram Chat ID')
     email_address = Column(String(255), nullable=True, comment='邮箱地址')
@@ -270,7 +272,7 @@ class CloakConfig(Base):
             '含义与可选值见 app/schemas/cloak.py 中 FACEBOOK_STANDARD_EVENT_NAMES / 自定义命名规则'
         ),
     )
-    report_value = Column(Float, nullable=True, comment='购物类事件金额（Purchase 等需配合 report_currency）')
+    report_value = Column(Numeric(12, 4), nullable=True, comment='购物类事件金额（Purchase 等需配合 report_currency）')
     report_currency = Column(
         String(10),
         nullable=True,
@@ -295,7 +297,7 @@ class CloakConfig(Base):
         default='PageView',
         comment='加载完成时 CAPI event_name',
     )
-    load_report_value = Column(Float, nullable=True, comment='加载上报为 Purchase 时的金额')
+    load_report_value = Column(Numeric(12, 4), nullable=True, comment='加载上报为 Purchase 时的金额')
     load_report_currency = Column(
         String(10),
         nullable=True,
@@ -315,7 +317,7 @@ class CloakConfig(Base):
         comment='postback 转化时 CAPI event_name（需点击记录 url_params 含 dp=斗篷名）',
     )
     postback_report_value = Column(
-        Float,
+        Numeric(12, 4),
         nullable=True,
         comment='postback 为 Purchase 时固定金额；NULL 则用 postback 的 payout',
     )
@@ -435,9 +437,9 @@ class PendingPostbackConversion(Base):
     platform = Column(String(50), nullable=False, index=True, comment='平台名称')
     conversion_id = Column(String(255), nullable=False, comment='转化ID')
     event_name = Column(String(100), nullable=True, comment='事件名称')
-    event_value = Column(Float, nullable=True, comment='事件价值')
-    original_payout = Column(Float, nullable=True, comment='原始支付金额（PO）')
-    payout = Column(Float, nullable=True, comment='扣后支付金额（PO(扣)）')
+    event_value = Column(Numeric(12, 4), nullable=True, comment='事件价值')
+    original_payout = Column(Numeric(12, 4), nullable=True, comment='原始支付金额（PO）')
+    payout = Column(Numeric(12, 4), nullable=True, comment='扣后支付金额（PO(扣)）')
     
     # 设备信息
     devad_id = Column(String(255), nullable=True, comment='设备广告ID')

@@ -254,7 +254,7 @@ export function useProductManagement() {
       loading.value = true;
       const result = await deleteProduct(id);
       if (result?.transferred) {
-        ElMessage.success(result.message || '产品已转移至默认客户（保留关联广告数据）');
+        ElMessage.success(result.message || '产品已转移至临时挂靠（保留关联广告数据）');
       } else {
         ElMessage.success(result?.message || '产品删除成功');
       }
@@ -321,7 +321,7 @@ export function useProductManagement() {
   const handleDeleteClick = async (id) => {
     try {
       await ElMessageBox.confirm(
-        '确定要删除此产品吗？若产品仍有关联广告数据，将转移到「默认客户（导入数据）」并保留广告数据；无关联数据时会彻底删除。',
+        '确定要删除此产品吗？若产品仍有关联广告数据，将转移到「临时挂靠」并保留广告数据；无关联数据时会彻底删除。',
         '确认删除',
         {
           confirmButtonText: '确定',

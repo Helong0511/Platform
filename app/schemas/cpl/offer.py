@@ -7,10 +7,13 @@
 
 说明：CPL 子系统接口，涵盖广告主（上游）、渠道（下游）、Offer、Cap、扣量与转化。"""
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional, List
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
+
+from app.schemas.base import BaseSchema
 
 from app.core.url.placeholder_validation import (
     format_placeholder_validation_error,
@@ -18,7 +21,7 @@ from app.core.url.placeholder_validation import (
 )
 
 
-class OfferBase(BaseModel):
+class OfferBase(BaseSchema):
     """
     Offer 公共字段：名称、上游 ID、Tracklink、Postback、Cap 与点击有效期等。
 
@@ -28,8 +31,8 @@ class OfferBase(BaseModel):
     advertiser_offer_id: Optional[str] = Field(None, max_length=100, description="上游系统中的Offer ID")
     advertiser_id: int = Field(..., description="关联的广告主ID")
     preview_link: Optional[str] = Field(None, description="预览链接")
-    payout: Optional[float] = Field(None, ge=0, description="上游支付金额（PO）")
-    affiliate_payout: Optional[float] = Field(None, ge=0, description="扣价后给渠道的金额")
+    payout: Optional[Decimal] = Field(None, ge=0, description="上游支付金额（PO）")
+    affiliate_payout: Optional[Decimal] = Field(None, ge=0, description="扣价后给渠道的金额")
     country: Optional[str] = Field(None, max_length=50, description="国家")
     category: Optional[str] = Field(None, max_length=50, description="分类")
     type: Optional[str] = Field(None, max_length=50, description="类型")
@@ -55,7 +58,7 @@ class OfferBase(BaseModel):
                 raise ValueError("URL格式无效")
         return v
 
-class PublisherConfig(BaseModel):
+class PublisherConfig(BaseSchema):
     """
     单渠道维度的下游 Cap 与扣价（下游 PO）配置。
 
@@ -64,7 +67,7 @@ class PublisherConfig(BaseModel):
     publisher_id: int = Field(..., description="渠道ID")
     downstream_cap: Optional[int] = Field(None, ge=0,
                                           description="该渠道的下游每天转化个数的限制，如果渠道转化超过了这个值就不通知渠道了。客户登录查看时，也只显示真实的（真实不超过【下游Cap】的）转化")
-    affiliate_payout: Optional[float] = Field(None, ge=0,
+    affiliate_payout: Optional[Decimal] = Field(None, ge=0,
                                               description="该渠道的转化金额（不是金额的扣减比例）。如果上游通知的金额大于这个金额，就按照【下游PO】的金额通知渠道")
 
 
@@ -85,14 +88,14 @@ class OfferCreate(OfferBase):
         return v
 
 
-class OfferUpdate(BaseModel):
+class OfferUpdate(BaseSchema):
     """更新 Offer 请求；字段均可选，支持同步更新渠道配置列表。（详见字段 Field description）。"""
     offer_name: Optional[str] = Field(None, max_length=200, description="Offer名称")
     advertiser_offer_id: Optional[str] = Field(None, max_length=100, description="上游Offer ID")
     advertiser_id: Optional[int] = Field(None, description="广告主ID")
     preview_link: Optional[str] = Field(None, description="预览链接")
-    payout: Optional[float] = Field(None, ge=0, description="上游支付金额")
-    affiliate_payout: Optional[float] = Field(None, ge=0, description="扣价后金额")
+    payout: Optional[Decimal] = Field(None, ge=0, description="上游支付金额")
+    affiliate_payout: Optional[Decimal] = Field(None, ge=0, description="扣价后金额")
     country: Optional[str] = Field(None, max_length=50, description="国家")
     category: Optional[str] = Field(None, max_length=50, description="分类")
     type: Optional[str] = Field(None, max_length=50, description="类型")

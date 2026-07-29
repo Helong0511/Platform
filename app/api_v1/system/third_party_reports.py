@@ -10,14 +10,17 @@
 - GET /stats         上报统计。
 
 说明：系统运维接口，含定时任务、审计日志、会话、缓存、斗篷与敏感路径探测。"""
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func, and_
 from datetime import datetime
+from decimal import Decimal
 from time import perf_counter
 from typing import Optional
 import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy import func, and_
 
 from app.core.audit_log import log_update, log_user_action, commit_audit_log
 from app.core.database import get_db
@@ -33,7 +36,6 @@ from app.schemas.third_party_report import (
     ThirdPartyReportLogResponseSingle,
 )
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
-from pydantic import BaseModel, Field
 from app.core.third_party_report import retry_report_log, update_report_log_params
 
 # 创建路由实例
@@ -52,7 +54,7 @@ class UpdateReportLogParams(BaseModel):
     event: Optional[str] = Field(None, max_length=50, description="事件类型")
     conversion_id: Optional[str] = Field(None, max_length=255, description="转化ID")
     currency: Optional[str] = Field(None, max_length=10, description="货币类型")
-    amount: Optional[float] = Field(None, description="支付金额")
+    amount: Optional[Decimal] = Field(None, description="支付金额")
     email: Optional[str] = Field(None, max_length=255, description="邮箱")
     ip: Optional[str] = Field(None, max_length=50, description="IP地址")
     phone: Optional[str] = Field(None, max_length=50, description="手机号")

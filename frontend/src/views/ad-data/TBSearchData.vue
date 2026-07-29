@@ -475,9 +475,9 @@ const handleImport = async (options) => {
     
     // 如果用户没有选择日期范围，后端默认只显示当前月的数据
     // 为了确保能看到新导入的数据，如果当前没有选择日期范围，清除客户筛选
-    // 这样至少能看到"默认客户（导入数据）"的数据
+    // 这样至少能看到「临时挂靠」的数据
     if (!searchForm.value.dateRange || searchForm.value.dateRange.length === 0) {
-      // 没有选择日期范围时，清除客户筛选，确保能看到所有客户的数据（包括默认客户）
+      // 没有选择日期范围时，清除客户筛选，确保能看到所有客户的数据（包括临时挂靠）
       if (isAdmin.value) {
         searchForm.value.clientId = '';
       }

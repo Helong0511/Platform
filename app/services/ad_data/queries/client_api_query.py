@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, List, Optional, Tuple
 
 from app.core.utils import normalize_date_for_ad_data
@@ -29,6 +30,16 @@ from app.services.ad_data.queries.dimension_filter import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _as_decimal(value, places: int = 2) -> Decimal:
+    """将 ORM/计算结果统一为指定小数位的 Decimal。"""
+    quant = Decimal(10) ** -places
+    if value is None:
+        return Decimal(0).quantize(quant)
+    if isinstance(value, Decimal):
+        return value.quantize(quant, rounding=ROUND_HALF_UP)
+    return Decimal(str(value)).quantize(quant, rounding=ROUND_HALF_UP)
 
 
 class ClientAdDataQuery:
@@ -194,7 +205,9 @@ class ClientAdDataQuery:
                     2,
                 )
             )
-            viewability_rate = ad_data.viewability_rate if ad_data.viewability_rate is not None else 0.0
+            viewability_rate = (
+                ad_data.viewability_rate if ad_data.viewability_rate is not None else Decimal('0')
+            )
             country_code_str = ad_data.country_code or ""
 
             if country_name_zh:
@@ -217,16 +230,16 @@ class ClientAdDataQuery:
                     "country_name_zh": final_country_name,
                     "request_count": int(ad_data.request_count),
                     "match_count": int(ad_data.match_count),
-                    "coverage_rate": float(coverage_rate),
+                    "coverage_rate": _as_decimal(coverage_rate),
                     "display_count": int(ad_data.display_count),
-                    "display_rate": float(display_rate),
+                    "display_rate": _as_decimal(display_rate),
                     "click_count": int(ad_data.click_count),
-                    "click_rate": float(click_rate),
-                    "viewability_rate": float(round(viewability_rate, 2)),
-                    "cpc": float(round(ad_data.cpc or 0.0, 2)),
+                    "click_rate": _as_decimal(click_rate),
+                    "viewability_rate": _as_decimal(viewability_rate),
+                    "cpc": _as_decimal(ad_data.cpc),
                     "pageviews": int(ad_data.pageviews or 0),
-                    "ecpm": float(round(ad_data.ecpm_after_deduct, 2)),
-                    "revenue": float(round(ad_data.revenue_after_deduct, 2)),
+                    "ecpm": _as_decimal(ad_data.ecpm_after_deduct),
+                    "revenue": _as_decimal(ad_data.revenue_after_deduct),
                 }
             )
         return result, total
@@ -361,9 +374,9 @@ class ClientAdDataQuery:
         total_match_count = int(row.match_count or 0)
         total_display_count = int(row.display_count or 0)
         total_click_count = int(row.click_count or 0)
-        total_viewability_rate = float(row.viewability_rate or 0.0)
+        total_viewability_rate = _as_decimal(row.viewability_rate)
         total_pageviews = int(row.pageviews or 0)
-        total_revenue = float(row.revenue or 0.0)
+        total_revenue = _as_decimal(row.revenue)
 
         coverage_rate = round(
             (total_match_count / total_request_count * 100) if total_request_count > 0 else 0.0,
@@ -401,14 +414,14 @@ class ClientAdDataQuery:
             "country_name_zh": country_name_zh,
             "request_count": total_request_count,
             "match_count": total_match_count,
-            "coverage_rate": float(coverage_rate),
+            "coverage_rate": _as_decimal(coverage_rate),
             "display_count": total_display_count,
-            "display_rate": float(display_rate),
+            "display_rate": _as_decimal(display_rate),
             "click_count": total_click_count,
-            "click_rate": float(click_rate),
-            "viewability_rate": round(total_viewability_rate, 2),
-            "cpc": float(cpc),
+            "click_rate": _as_decimal(click_rate),
+            "viewability_rate": total_viewability_rate,
+            "cpc": _as_decimal(cpc),
             "pageviews": total_pageviews,
-            "ecpm": float(ecpm),
-            "revenue": round(total_revenue, 2),
+            "ecpm": _as_decimal(ecpm),
+            "revenue": total_revenue,
         }

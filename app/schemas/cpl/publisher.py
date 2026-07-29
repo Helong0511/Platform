@@ -7,12 +7,15 @@
 
 说明：CPL 子系统接口，涵盖广告主（上游）、渠道（下游）、Offer、Cap、扣量与转化。"""
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import Field, ConfigDict
+
+from app.schemas.base import BaseSchema
 
 
-class PublisherBase(BaseModel):
+class PublisherBase(BaseSchema):
     """
     渠道基础模型
     
@@ -20,7 +23,7 @@ class PublisherBase(BaseModel):
     """
     publisher_name: str = Field(..., max_length=100, description="渠道名称")
     email: Optional[str] = Field(None, max_length=255, description="邮箱（可选）")
-    price_discount: float = Field(0.0, ge=0, le=100,
+    price_discount: Decimal = Field(Decimal('0'), ge=0, le=100,
                                   description="渠道级别的价格折扣比例（0-100），用于旧价格折扣系统，计算给渠道的最终金额")
     postback_url: Optional[str] = Field(None, description="Postback URL（可选）")
     postback_method: str = Field('GET', description="Postback请求方式：GET/POST")
@@ -56,7 +59,7 @@ class PublisherCreate(PublisherBase):
     """
 
 
-class PublisherUpdate(BaseModel):
+class PublisherUpdate(BaseSchema):
     """
     更新渠道
     
@@ -64,7 +67,7 @@ class PublisherUpdate(BaseModel):
     """
     publisher_name: Optional[str] = Field(None, max_length=100, description="渠道名称")
     email: Optional[str] = Field(None, max_length=255, description="邮箱")
-    price_discount: Optional[float] = Field(None, ge=0, le=100, description="价格折扣比例（0-100），用于旧价格折扣系统")
+    price_discount: Optional[Decimal] = Field(None, ge=0, le=100, description="价格折扣比例（0-100），用于旧价格折扣系统")
     postback_url: Optional[str] = Field(None, description="Postback URL")
     postback_method: Optional[str] = Field(None, description="Postback请求方式：GET/POST")
     postback_success_check: Optional[str] = Field(None,

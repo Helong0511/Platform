@@ -1,8 +1,8 @@
 """
 第三方上报日志 ORM 模型。
 """
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, Enum, Text, Index, \
-    UniqueConstraint, Date
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
+    UniqueConstraint, Date, Numeric
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -37,7 +37,7 @@ class ThirdPartyReportLog(Base):
     phone = Column(String(50), nullable=True, comment='手机号（原始值）')
     ua = Column(Text, nullable=True, comment='用户代理')
     currency = Column(String(10), nullable=True, comment='货币类型')
-    amount = Column(Float, nullable=True, comment='支付金额')
+    amount = Column(Numeric(12, 4), nullable=True, comment='支付金额')
     report_params = Column(Text, nullable=True, comment='完整上报参数（JSON格式）')
 
     

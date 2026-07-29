@@ -4,11 +4,14 @@
 
 说明：请求/响应 JSON 结构定义，供 FastAPI 校验与 OpenAPI 文档生成。"""
 from datetime import date, datetime
+from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import ConfigDict
+
+from app.schemas.base import BaseSchema
 
 
-class TBSearchDataBase(BaseModel):
+class TBSearchDataBase(BaseSchema):
     """
     TB 搜索数据基础字段（日期 + 产品 + 国家维度指标）
     
@@ -23,10 +26,10 @@ class TBSearchDataBase(BaseModel):
     searches: int | None = 0
     monetized: int | None = 0
     clicks: int | None = 0
-    revenue: float | None = 0.0
-    rpm: float | None = 0.0
-    revenue_before_deduct: float | None = 0.0
-    rpm_before_deduct: float | None = 0.0
+    revenue: Decimal | None = Decimal('0')
+    rpm: Decimal | None = Decimal('0')
+    revenue_before_deduct: Decimal | None = Decimal('0')
+    rpm_before_deduct: Decimal | None = Decimal('0')
 
 
 class TBSearchDataInDBBase(TBSearchDataBase):
@@ -53,7 +56,7 @@ class TBSearchDataResponse(TBSearchDataInDBBase):
     user_name: str | None = None
 
 
-class TBSearchDataListResponse(BaseModel):
+class TBSearchDataListResponse(BaseSchema):
     """
     分页列表包装（兼容旧接口结构）
     
@@ -65,7 +68,7 @@ class TBSearchDataListResponse(BaseModel):
     page_size: int
 
 
-class TBSearchDataUpdate(BaseModel):
+class TBSearchDataUpdate(BaseSchema):
     """
     单条更新请求，所有字段可选（仅提交需修改项）
     
@@ -77,7 +80,7 @@ class TBSearchDataUpdate(BaseModel):
     searches: int | None = None
     monetized: int | None = None
     clicks: int | None = None
-    revenue: float | None = None
-    rpm: float | None = None
-    revenue_before_deduct: float | None = None
-    rpm_before_deduct: float | None = None
+    revenue: Decimal | None = None
+    rpm: Decimal | None = None
+    revenue_before_deduct: Decimal | None = None
+    rpm_before_deduct: Decimal | None = None

@@ -31,6 +31,10 @@ class ScheduledTask(Base):
     success_count = Column(Integer, default=0, comment='成功次数')
     error_count = Column(Integer, default=0, comment='失败次数')
     last_error = Column(Text, nullable=True, comment='最后一次错误信息')
+    status = Column(String(20), nullable=False, default='idle', index=True,
+                    comment='任务状态 idle/running/success/error')
+    retry_count = Column(Integer, default=0, comment='连续失败重试计数')
+    last_success_at = Column(DateTime, nullable=True, comment='上次成功完成时间')
     is_active = Column(Boolean, default=True, comment='是否启用')
     cron_expression = Column(String(100), nullable=True, comment='Cron表达式')
     description = Column(Text, nullable=True, comment='任务描述')
@@ -45,6 +49,7 @@ class ScheduledTask(Base):
         Index("idx_scheduled_task_name", "task_name"),
         Index("idx_scheduled_task_is_running", "is_running"),
         Index("idx_scheduled_task_is_active", "is_active"),
+        Index("idx_scheduled_task_status", "status"),
     )
 
 class UserAuditLog(Base):

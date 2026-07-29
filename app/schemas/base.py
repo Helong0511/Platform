@@ -7,6 +7,7 @@
 
 说明：请求/响应 JSON 结构定义，供 FastAPI 校验与 OpenAPI 文档生成。"""
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Generic, TypeVar  # Generic 和 TypeVar 仍需从 typing 导入
 
 from pydantic import BaseModel, ConfigDict, field_serializer
@@ -46,10 +47,12 @@ class BaseSchema(BaseModel):
     )
 
     @field_serializer('*', mode='plain', check_fields=False, when_used='json')
-    def _serialize_datetime_fields_for_json(self, value: Any) -> Any:
-        """Pydantic v2 JSON 模式下将 datetime 统一输出为带应用时区的 ISO8601。"""
+    def _serialize_special_fields_for_json(self, value: Any) -> Any:
+        """Pydantic v2 JSON 模式：datetime 输出 ISO8601，Decimal 输出 JSON 数字。"""
         if isinstance(value, datetime):
             return datetime_encoder(value)
+        if isinstance(value, Decimal):
+            return float(value)
         return value
 
 

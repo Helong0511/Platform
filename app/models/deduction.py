@@ -1,8 +1,8 @@
 """
 转化扣减配置与日志 ORM 模型。
 """
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, Enum, Text, Index, \
-    UniqueConstraint, Date
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
+    UniqueConstraint, Date, Numeric
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -28,8 +28,14 @@ class ConversionDeductionConfig(Base):
     publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="CASCADE"), nullable=True, index=True, comment='渠道ID（如果配置在渠道级别）')
     
     # 扣减类型配置
-    volume_deduction_ratio = Column(Float, default=0.0, comment='按比例扣量比例（0-1，如0.10表示扣量10%）')
-    amount_deduction_ratio = Column(Float, default=0.0, comment='按比例扣金额比例（0-1，如0.10表示扣金额10%）')
+    volume_deduction_ratio = Column(
+        Numeric(5, 4), nullable=True, default=0, server_default='0.0000',
+        comment='按比例扣量比例（0-1，如0.10表示扣量10%）',
+    )
+    amount_deduction_ratio = Column(
+        Numeric(5, 4), nullable=True, default=0, server_default='0.0000',
+        comment='按比例扣金额比例（0-1，如0.10表示扣金额10%）',
+    )
     
     # 扣减策略配置
     deduction_strategy = Column(String(50), default='random', comment='扣减策略：random（随机）/proportional（按比例）/round_robin（轮询）')
@@ -80,18 +86,18 @@ class ConversionDeductionLog(Base):
     
     # 扣减前数据
     original_volume = Column(Integer, default=1, comment='原始转化数量（通常为1）')
-    original_amount = Column(Float, nullable=False, comment='原始转化金额')
+    original_amount = Column(Numeric(10, 2), nullable=False, comment='原始转化金额')
     
     # 扣减后数据
     deducted_volume = Column(Integer, default=0, comment='扣减的转化数量')
-    deducted_amount = Column(Float, default=0.0, comment='扣减的转化金额')
+    deducted_amount = Column(Numeric(10, 2), nullable=True, default=0, server_default='0.00', comment='扣减的转化金额')
     final_volume = Column(Integer, default=1, comment='最终转化数量（扣减后）')
-    final_amount = Column(Float, nullable=False, comment='最终转化金额（扣减后）')
+    final_amount = Column(Numeric(10, 2), nullable=False, comment='最终转化金额（扣减后）')
     
     # 扣减配置信息
     deduction_config_id = Column(Integer, ForeignKey("conversion_deduction_configs.id", ondelete="SET NULL"), nullable=True, index=True, comment='使用的扣减配置ID')
-    volume_deduction_ratio = Column(Float, nullable=True, comment='使用的扣量比例')
-    amount_deduction_ratio = Column(Float, nullable=True, comment='使用的扣金额比例')
+    volume_deduction_ratio = Column(Numeric(5, 4), nullable=True, comment='使用的扣量比例')
+    amount_deduction_ratio = Column(Numeric(5, 4), nullable=True, comment='使用的扣金额比例')
     deduction_strategy = Column(String(50), nullable=True, comment='使用的扣减策略')
     
     # 扣减原因

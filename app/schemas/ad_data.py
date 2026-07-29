@@ -4,13 +4,16 @@
 
 说明：请求/响应 JSON 结构定义，供 FastAPI 校验与 OpenAPI 文档生成。"""
 from datetime import date
+from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import ConfigDict
+
+from app.schemas.base import BaseSchema
 
 
 # Python 3.10+ 使用内置类型注解
 
-class StatItem(BaseModel):
+class StatItem(BaseSchema):
     """
     仪表盘单个统计卡片项（含环比趋势）
     
@@ -23,7 +26,7 @@ class StatItem(BaseModel):
     precision: int = 0
 
 
-class DashboardStatsResponse(BaseModel):
+class DashboardStatsResponse(BaseSchema):
     """
     仪表盘汇总响应：卡片列表 + 衍生指标字典
     
@@ -33,7 +36,7 @@ class DashboardStatsResponse(BaseModel):
     metrics: dict[str, float]
 
 
-class TrendSeriesItem(BaseModel):
+class TrendSeriesItem(BaseSchema):
     """
     趋势图单条序列（名称 + 按日数值数组）
     
@@ -43,7 +46,7 @@ class TrendSeriesItem(BaseModel):
     data: list[int | float]
 
 
-class TrendDataResponse(BaseModel):
+class TrendDataResponse(BaseSchema):
     """
     趋势图响应：横轴日期 + 多条序列
     
@@ -53,7 +56,7 @@ class TrendDataResponse(BaseModel):
     series: list[TrendSeriesItem]
 
 
-class AdDataBase(BaseModel):
+class AdDataBase(BaseSchema):
     """
     广告数据行基础字段（日期 + 产品 + 国家 + 投放指标）
     
@@ -68,16 +71,16 @@ class AdDataBase(BaseModel):
     country_name_zh: str | None = None  # 国家中文名称
     request_count: int | None = None
     match_count: int | None = None
-    coverage_rate: float | None = None
+    coverage_rate: Decimal | None = None
     display_count: int | None = None
-    display_rate: float | None = None
+    display_rate: Decimal | None = None
     click_count: int | None = None
-    click_rate: float | None = None
-    viewability_rate: float | None = None
-    cpc: float | None = None
+    click_rate: Decimal | None = None
+    viewability_rate: Decimal | None = None
+    cpc: Decimal | None = None
     pageviews: int | None = None
-    ecpm_after_deduct: float | None = None
-    revenue_after_deduct: float | None = None
+    ecpm_after_deduct: Decimal | None = None
+    revenue_after_deduct: Decimal | None = None
 
 
 class AdDataInDBBase(AdDataBase):
@@ -107,11 +110,11 @@ class AdDataResponse(AdDataInDBBase):
     report_type: str | None = None
     report_type_label: str | None = None
     is_deducted: bool | None = None
-    ecpm_before_deduct: float | None = None
-    revenue_before_deduct: float | None = None
+    ecpm_before_deduct: Decimal | None = None
+    revenue_before_deduct: Decimal | None = None
 
 
-class AdDataListResponse(BaseModel):
+class AdDataListResponse(BaseSchema):
     """
     广告数据分页列表响应
     
@@ -123,13 +126,13 @@ class AdDataListResponse(BaseModel):
     page_size: int
 
 
-class AdDataSummaryDateRange(BaseModel):
+class AdDataSummaryDateRange(BaseSchema):
     """广告数据汇总的日期区间。"""
     start_date: date | None = None
     end_date: date | None = None
 
 
-class AdDataSummaryResponse(BaseModel):
+class AdDataSummaryResponse(BaseSchema):
     """
     广告数据区间汇总。
 
@@ -141,33 +144,33 @@ class AdDataSummaryResponse(BaseModel):
     total_matches: int = 0
     total_displays: int = 0
     total_clicks: int = 0
-    avg_coverage_rate: float = 0.0
-    avg_display_rate: float = 0.0
-    avg_click_rate: float = 0.0
-    total_ecpm_after_deduct: float = 0.0
-    total_revenue_after_deduct: float = 0.0
-    total_ecpm_before_deduct: float | None = None
-    total_revenue_before_deduct: float | None = None
+    avg_coverage_rate: Decimal = Decimal('0')
+    avg_display_rate: Decimal = Decimal('0')
+    avg_click_rate: Decimal = Decimal('0')
+    total_ecpm_after_deduct: Decimal = Decimal('0')
+    total_revenue_after_deduct: Decimal = Decimal('0')
+    total_ecpm_before_deduct: Decimal | None = None
+    total_revenue_before_deduct: Decimal | None = None
     # 与表格列同名的别名字段（兼容前端/Telegram）
     request_count: int = 0
     match_count: int = 0
     display_count: int = 0
     click_count: int = 0
     pageviews: int = 0
-    coverage_rate: float = 0.0
-    display_rate: float = 0.0
-    click_rate: float = 0.0
-    viewability_rate: float = 0.0
-    cpc: float = 0.0
-    ecpm_after_deduct: float = 0.0
-    revenue_after_deduct: float = 0.0
-    ecpm_before_deduct: float | None = None
-    revenue_before_deduct: float | None = None
+    coverage_rate: Decimal = Decimal('0')
+    display_rate: Decimal = Decimal('0')
+    click_rate: Decimal = Decimal('0')
+    viewability_rate: Decimal = Decimal('0')
+    cpc: Decimal = Decimal('0')
+    ecpm_after_deduct: Decimal = Decimal('0')
+    revenue_after_deduct: Decimal = Decimal('0')
+    ecpm_before_deduct: Decimal | None = None
+    revenue_before_deduct: Decimal | None = None
     product_id: int | None = None
     product_name: str | None = None
 
 
-class AdDataUpdate(BaseModel):
+class AdDataUpdate(BaseSchema):
     """
     更新广告数据的Schema
     
@@ -180,13 +183,13 @@ class AdDataUpdate(BaseModel):
     match_count: int | None = None
     display_count: int | None = None
     click_count: int | None = None
-    viewability_rate: float | None = None
-    cpc: float | None = None
+    viewability_rate: Decimal | None = None
+    cpc: Decimal | None = None
     pageviews: int | None = None
-    ecpm_after_deduct: float | None = None
-    ecpm_before_deduct: float | None = None
-    revenue_after_deduct: float | None = None
-    revenue_before_deduct: float | None = None
+    ecpm_after_deduct: Decimal | None = None
+    ecpm_before_deduct: Decimal | None = None
+    revenue_after_deduct: Decimal | None = None
+    revenue_before_deduct: Decimal | None = None
     data_source: str | None = None
     upstream_account: str | None = None
     report_type: str | None = None

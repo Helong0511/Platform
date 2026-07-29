@@ -7,12 +7,15 @@
 
 说明：CPL 子系统接口，涵盖广告主（上游）、渠道（下游）、Offer、Cap、扣量与转化。"""
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import Field, ConfigDict
+
+from app.schemas.base import BaseSchema
 
 
-class AffiliateTestBase(BaseModel):
+class AffiliateTestBase(BaseSchema):
     """
     下游测试基础模型
     
@@ -53,7 +56,7 @@ class AffiliateTestResponse(AffiliateTestBase):
     """
     id: int
     offer_name: Optional[str] = None
-    price: Optional[float] = None
+    price: Optional[Decimal] = None
     country: Optional[str] = None
     platform: Optional[str] = None
     postback_time: Optional[datetime] = None

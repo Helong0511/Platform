@@ -428,20 +428,20 @@ def format_error_details(errors: list[Any], row_prefix: str = "第", row_suffix:
 async def find_or_create_default_client(
     db: AsyncSession,
     user_id: int,
-    default_name: str = "默认客户（导入数据）"
+    default_name: str = "临时挂靠"
 ) -> Any:
     """
-    查找或创建默认客户（用于导入数据）
+    查找或创建「临时挂靠」客户（用于导入/删除产品时挂靠未归属数据）
     
     查找逻辑：
     1. 首先在数据库中查找
     2. 如果数据库中没有，检查会话中是否有待提交的对象
-    3. 如果都没有，创建新的默认客户
+    3. 如果都没有，创建新的临时挂靠客户
     
     Args:
         db: 数据库会话
         user_id: 用户ID（用于创建新客户时关联）
-        default_name: 默认客户名称（默认为 "默认客户（导入数据）"）
+        default_name: 临时挂靠客户名称（默认为 "临时挂靠"）
     
     Returns:
         客户对象（Client）
@@ -453,7 +453,7 @@ async def find_or_create_default_client(
     # 延迟导入，避免循环导入
     from app.models.models import Client
     
-    # 步骤1: 先查找数据库中的默认客户
+    # 步骤1: 先查找数据库中的临时挂靠客户
     client_query = select(Client).where(Client.company_name == default_name).limit(1)
     client_result = await db.execute(client_query)
     default_client = client_result.scalars().first()
@@ -461,7 +461,7 @@ async def find_or_create_default_client(
     if default_client:
         return default_client
     
-    # 步骤2: 检查会话中是否已经有待提交的默认客户对象
+    # 步骤2: 检查会话中是否已经有待提交的临时挂靠客户对象
     pending_default_client = None
     try:
         # 检查会话中的新对象（待提交的对象）
@@ -482,7 +482,7 @@ async def find_or_create_default_client(
     if pending_default_client:
         return pending_default_client
     
-    # 步骤3: 如果确实没有找到，创建新的默认客户
+    # 步骤3: 如果确实没有找到，创建新的临时挂靠客户
     client_key = str(uuid.uuid4())
     default_client = Client(
         user_id=user_id,

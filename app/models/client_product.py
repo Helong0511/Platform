@@ -1,7 +1,7 @@
 """
 客户、产品、广告数据与产品分配 ORM 模型。
 """
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, Enum, Text, Index, \
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
     UniqueConstraint, Date, Numeric
 from sqlalchemy.orm import foreign, relationship
 from datetime import datetime
@@ -79,8 +79,15 @@ class Product(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='产品ID')
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
     name = Column(String(100), nullable=False, comment='产品名称')
-    ecpm_deduct_ratio = Column(Float, default=0.0, comment='eCPM减扣比例')
-    revenue_deduct_ratio = Column(Float, default=0.0, comment='收益减扣比例')
+    ecpm_deduct_ratio = Column(
+        Numeric(12, 4), nullable=False, default=0, server_default='0', comment='eCPM减扣比例'
+    )
+    revenue_deduct_ratio = Column(
+        Numeric(12, 4), nullable=False, default=0, server_default='0', comment='收益减扣比例'
+    )
+    cplpo_deduct_ratio = Column(
+        Numeric(12, 4), nullable=False, default=0, server_default='0', comment='CPL PO减扣比例 '
+    )
     downstream_postback_url = Column(String(500), nullable=True, comment='下游 Postback URL（可选，配置后将自动转发转化数据）')
     downstream_postback_method = Column(String(10), default='GET', comment='下游 Postback 请求方式：GET 或 POST（默认GET）')
     downstream_postback_success_check = Column(Text, nullable=True, comment='下游转发成功检查配置（JSON格式，用于检查响应内容是否表示成功）')

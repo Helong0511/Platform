@@ -1,8 +1,8 @@
 """
 CPL 广告主、渠道、Offer、Cap、扣量 ORM 模型。
 """
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, Enum, Text, Index, \
-    UniqueConstraint, Date
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
+    UniqueConstraint, Date, Numeric
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -50,7 +50,10 @@ class Publisher(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='渠道ID')
     publisher_name = Column(String(100), nullable=False, index=True, comment='渠道名称')
     email = Column(String(255), nullable=True, comment='邮箱（可选）')
-    price_discount = Column(Float, default=0.0, comment='渠道级别的价格折扣比例（0-100），用于旧价格折扣系统，计算给渠道的最终金额（affiliate_payout）')
+    price_discount = Column(
+        Numeric(5, 2), nullable=True, default=0, server_default='0.00',
+        comment='渠道级别的价格扣量比例（0-100）',
+    )
     postback_url = Column(Text, nullable=True, comment='Postback URL（渠道的Postback配置）')
     postback_method = Column(String(10), default='GET', comment='Postback请求方式：GET/POST')
     postback_success_check = Column(Text, nullable=True, comment='转发成功检查配置（JSON格式，用于检查响应内容是否表示成功）')
@@ -86,8 +89,8 @@ class Offer(Base):
     advertiser_offer_id = Column(String(100), nullable=True, comment='上游系统中的Offer ID（ADV Offer ID）')
     advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="RESTRICT"), nullable=False, index=True, comment='关联的广告主ID')
     preview_link = Column(Text, nullable=True, comment='预览链接')
-    payout = Column(Float, nullable=True, comment='上游支付金额（PO）')
-    affiliate_payout = Column(Float, nullable=True, comment='扣价后给渠道的金额（PO扣价后）')
+    payout = Column(Numeric(10, 2), nullable=True, comment='上游支付金额（PO）')
+    affiliate_payout = Column(Numeric(10, 2), nullable=True, comment='扣价后给渠道的金额（PO扣价后）')
     country = Column(String(50), nullable=True, index=True, comment='国家')
     category = Column(String(50), nullable=True, comment='分类')
     type = Column(String(50), nullable=True, comment='类型')
@@ -131,7 +134,10 @@ class OfferPublisherAssignment(Base):
     offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False, index=True, comment='Offer ID')
     publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="CASCADE"), nullable=False, index=True, comment='渠道ID')
     downstream_cap = Column(Integer, nullable=True, comment='该渠道的下游每天转化个数的限制，如果渠道转化超过了这个值就不通知渠道了。客户登录查看时，也只显示真实的（真实不超过【下游Cap】的）转化')
-    affiliate_payout = Column(Float, nullable=True, comment='该渠道的转化金额（不是金额的扣减比例）。如果上游通知的金额大于这个金额，就按照【下游PO】的金额通知渠道')
+    affiliate_payout = Column(
+        Numeric(10, 2), nullable=True,
+        comment='该渠道的转化金额（不是金额的扣减比例）。如果上游通知的金额大于这个金额，就按照【下游PO】的金额通知渠道',
+    )
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
     updated_at = Column(DateTime, default=get_app_now_naive,
@@ -267,7 +273,7 @@ class OfferDiscount(Base):
     discount_type = Column(String(50), nullable=False, index=True, comment='扣量类型：offer/channel')
     offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=True, index=True, comment='Offer ID（如果是offer类型）')
     publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="CASCADE"), nullable=False, index=True, comment='渠道ID')
-    discount_ratio = Column(Float, nullable=False, comment='扣量比例（0-100）')
+    discount_ratio = Column(Numeric(12, 4), nullable=False, comment='扣量比例（0-100）')
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
     updated_at = Column(DateTime, default=get_app_now_naive,
@@ -299,7 +305,7 @@ class AdvertiserTest(Base):
     advertiser_offer_id = Column(String(100), nullable=True, comment='上游系统中的Offer ID')
     offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False, index=True, comment='平台内的Offer ID')
     offer_name = Column(String(200), nullable=True, comment='Offer名称')
-    price = Column(Float, nullable=True, comment='价格')
+    price = Column(Numeric(12, 4), nullable=True, comment='价格')
     country = Column(String(50), nullable=True, comment='国家')
     click_id = Column(String(255), nullable=True, comment='测试生成的Click ID')
     click_url = Column(Text, nullable=True, comment='测试生成的Click Url')
@@ -330,7 +336,7 @@ class AffiliateTest(Base):
     click_id = Column(String(255), nullable=False, index=True, comment='下游提供的Click ID')
     offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False, index=True, comment='Offer ID')
     offer_name = Column(String(200), nullable=True, comment='Offer名称')
-    price = Column(Float, nullable=True, comment='价格')
+    price = Column(Numeric(12, 4), nullable=True, comment='价格')
     country = Column(String(50), nullable=True, comment='国家')
     platform = Column(String(50), nullable=True, comment='平台')
     postback_time = Column(DateTime, nullable=True, index=True, comment='Postback发送时间')

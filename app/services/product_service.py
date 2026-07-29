@@ -4,10 +4,10 @@
 功能说明：
 - 产品 CRUD 与分页列表（客户用户仅可见归属产品）
 - 创建时初始化 ProductAssignment；客户变更时 transfer_product_assignment
-- 删除：有 AdData 则转移至「默认客户（导入数据）」，否则物理删除
+- 删除：有 AdData 则转移至「临时挂靠」，否则物理删除
 
 特殊逻辑：
-- 创建时若同名产品属于默认客户，则改绑 client_id 复用历史广告数据
+- 创建时若同名产品属于临时挂靠，则改绑 client_id 复用历史广告数据
 
 在系统中的位置：
 - 被管理端产品 API 调用；继承 ``BaseService[Product]``
@@ -209,7 +209,7 @@ class ProductService(BaseService[Product]):
         """
         创建产品（仅管理员）。
 
-        若已存在同名且归属「默认客户（导入数据）」的产品，则更新其 client_id
+        若已存在同名且归属「临时挂靠」的产品，则更新其 client_id
         与扣减比例（复用历史 AdData），否则新建并 initialize_product_assignment。
 
         Args:
@@ -263,7 +263,7 @@ class ProductService(BaseService[Product]):
                 detail=f"客户ID {client_id} 已存在同名产品：{product_data['name']}。请使用不同的产品名称或更新现有产品"
             )
 
-        # ====== 默认客户（导入数据）同名产品改绑逻辑 ======
+        # ====== 临时挂靠同名产品改绑逻辑 ======
         product_with_client_query = select(Product, Client).join(
             Client, Product.client_id == Client.id
         ).where(
@@ -272,18 +272,18 @@ class ProductService(BaseService[Product]):
         product_with_client_result = await self.db.execute(product_with_client_query)
         products_with_clients = product_with_client_result.unique().all()
 
-        # 查找属于默认客户（导入数据）的产品
+        # 查找属于临时挂靠的产品
         admin_default_product = None
         for product_obj, client_obj in products_with_clients:
-            if client_obj.company_name == "默认客户（导入数据）":
+            if client_obj.company_name == "临时挂靠":
                 admin_default_product = product_obj
                 break
 
-        # 如果找到属于默认客户（导入数据）的产品，更新client_id而不是创建新产品
+        # 如果找到属于临时挂靠的产品，更新client_id而不是创建新产品
         if admin_default_product:
             old_client_id = admin_default_product.client_id
             logger.info(
-                f"产品名称 '{product_data['name']}' 属于默认客户（导入数据）（产品ID: {admin_default_product.id}，"
+                f"产品名称 '{product_data['name']}' 属于临时挂靠（产品ID: {admin_default_product.id}，"
                 f"原客户ID: {old_client_id}），将更新为客户ID: {client_id}"
             )
 
@@ -317,25 +317,25 @@ class ProductService(BaseService[Product]):
             except Exception as e:
                 await self.db.rollback()
                 logger.error(
-                    f"默认客户同名产品改绑时更新分配历史失败: product_id={admin_default_product.id}, err={e}",
+                    f"临时挂靠同名产品改绑时更新分配历史失败: product_id={admin_default_product.id}, err={e}",
                     exc_info=True,
                 )
                 raise_api_exception(
                     ErrorCode.OPERATION_FAILED,
-                    detail="产品从默认客户改绑时更新分配历史失败，请稍后重试",
+                    detail="产品从临时挂靠改绑时更新分配历史失败，请稍后重试",
                 )
 
             await self.db.flush()
             await self.db.refresh(admin_default_product)
 
             logger.info(
-                f"产品 '{product_data['name']}' 已从默认客户（导入数据）转移到客户ID {client_id}，"
+                f"产品 '{product_data['name']}' 已从临时挂靠转移到客户ID {client_id}，"
                 f"并更新了扣减比例与分配历史"
             )
 
             return admin_default_product
 
-        # 如果没有找到属于管理员默认客户的产品，创建新产品
+        # 如果没有找到属于临时挂靠的产品，创建新产品
         product = Product(
             client_id=client_id,
             name=product_data['name'],
@@ -555,7 +555,7 @@ class ProductService(BaseService[Product]):
         删除或软转移产品（仅管理员）。
 
         删除规则：
-        1. 有关联 AdData → 转移至「默认客户（导入数据）」并清零扣减比例
+        1. 有关联 AdData → 转移至「临时挂靠」并清零扣减比例
         2. 无关联数据 → 物理删除
 
         Args:
@@ -578,19 +578,19 @@ class ProductService(BaseService[Product]):
         ad_data_count = count_result.scalar() or 0
 
         if ad_data_count > 0:
-            # 有关联广告数据：将产品转移到默认客户（导入数据）
+            # 有关联广告数据：将产品转移到临时挂靠
             logger.info(
                 f"产品 {product.name} (ID: {product_id}) 关联了 {ad_data_count} 条广告数据，"
-                f"将转移到默认客户（导入数据）"
+                f"将转移到临时挂靠"
             )
 
-            # 查找或创建默认客户
+            # 查找或创建临时挂靠客户
             admin_default_client = await find_or_create_default_client(self.db, current_user.id)
 
             # 保存旧客户ID
             old_client_id = product.client_id
 
-            # 检查管理员的默认客户是否已有同名产品
+            # 检查临时挂靠客户是否已有同名产品
             existing_product_result = await self.db.execute(
                 select(Product).where(
                     Product.client_id == admin_default_client.id,
@@ -602,7 +602,7 @@ class ProductService(BaseService[Product]):
 
             if existing_product:
                 logger.warning(
-                    f"默认客户（导入数据）已存在同名产品 '{product.name}' (ID: {existing_product.id})，"
+                    f"临时挂靠已存在同名产品 '{product.name}' (ID: {existing_product.id})，"
                     f"将产品转移到该客户（ID: {admin_default_client.id}）"
                 )
                 product.client_id = admin_default_client.id
@@ -624,7 +624,7 @@ class ProductService(BaseService[Product]):
                 )
                 logger.info(
                     f"产品 {product.id} 的分配历史已更新："
-                    f"从客户 {old_client_id} 转移到默认客户 {admin_default_client.id}"
+                    f"从客户 {old_client_id} 转移到临时挂靠 {admin_default_client.id}"
                 )
             except Exception as e:
                 await self.db.rollback()
@@ -645,7 +645,7 @@ class ProductService(BaseService[Product]):
 
             return {
                 "transferred": True,
-                "message": f"产品已转移到默认客户（导入数据）（该产品关联了 {ad_data_count} 条广告数据）",
+                "message": f"产品已转移到临时挂靠（该产品关联了 {ad_data_count} 条广告数据）",
                 "new_client_id": admin_default_client.id
             }
         else:
