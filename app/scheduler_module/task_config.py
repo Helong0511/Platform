@@ -286,6 +286,20 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         ),
     },
 
+    # ========== FlyMobi API获取数据任务 ==========
+    "FlyMobi API获取数据": {
+        "task_name": "FlyMobi API获取数据",
+        "task_module": "app.scheduler_module.tasks.flymobi_task",
+        "task_function": "flymobi_api_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "*/30 * * * *",
+        "description": (
+            "每隔30分钟执行一次，从 FlyMobi API 拉取 Ad Manager 报表"
+            "（默认 countryList；FLYMOBI_API_FETCH_UNIT / DAILY 控制）"
+        ),
+    },
+
     # ========== Google API获取数据任务（GAM） ==========
     "Google API获取数据": {
         "task_name": "Google API获取数据",

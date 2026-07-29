@@ -660,6 +660,21 @@ class Settings(BaseSettings):
         "yes",
     ]
 
+    # FlyMobi（ads.gofinds.xyz，Bearer Token 鉴权）
+    FLYMOBI_API_BASE_URL: str = os.getenv(
+        "FLYMOBI_API_BASE_URL", "https://ads.gofinds.xyz/prod-api"
+    ).rstrip("/")
+    FLYMOBI_API_TOKEN: str = os.getenv("FLYMOBI_API_TOKEN", "")
+    FLYMOBI_API_FETCH_COUNTRY: bool = os.getenv("FLYMOBI_API_FETCH_COUNTRY", "true").lower() in [
+        "true", "1", "yes",
+    ]
+    FLYMOBI_API_FETCH_UNIT: bool = os.getenv("FLYMOBI_API_FETCH_UNIT", "false").lower() in [
+        "true", "1", "yes",
+    ]
+    FLYMOBI_API_FETCH_DAILY: bool = os.getenv("FLYMOBI_API_FETCH_DAILY", "false").lower() in [
+        "true", "1", "yes",
+    ]
+
     @staticmethod
     def _coerce_zhisuo_fetch_bool(value: object, default: bool) -> bool:
         if isinstance(value, bool):

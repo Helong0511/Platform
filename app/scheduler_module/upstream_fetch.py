@@ -975,3 +975,75 @@ async def fetch_aya_rows(
     if not isinstance(rows, list):
         rows = []
     return UpstreamFetchResult.from_rows(rows)
+
+
+# FlyMobi 广告系统 API（ads.gofinds.xyz）
+# 文档：countryList / adUnitList / dayList，Bearer Token 鉴权，30次/小时限速
+
+async def fetch_flymobi_rows(
+    *,
+    base_url: str,
+    token: str,
+    start: str,
+    end: str,
+    path: str,
+    label: str = "FlyMobi API",
+    limit: int = 500,
+) -> UpstreamFetchResult:
+    """
+    FlyMobi 拉数：POST JSON + Bearer Token 鉴权，按 total 全量分页。
+
+    响应 code==200 成功，code==201 暂无数据（视为空），其余抛异常。
+    """
+    url = f"{base_url.rstrip('/')}{path}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    all_rows: List[Any] = []
+    page = 1
+    last_total = 0
+
+    while True:
+        json_data = await post_json(
+            url,
+            json_body={
+                "startDate": start,
+                "endDate": end,
+                "pageSize": limit,
+                "pageNum": page,
+            },
+            headers=headers,
+            label=f"{label} (page={page})",
+        )
+        code = json_data.get("code")
+        if code == 201:
+            break
+        raise_unless_api_success(json_data, {200}, label=label, code_key="code")
+
+        rows = json_data.get("data") or []
+        if not isinstance(rows, list):
+            rows = []
+        all_rows.extend(rows)
+
+        total = int(json_data.get("total") or 0)
+        last_total = total or last_total
+        if _should_break_upstream_pagination(
+            rows,
+            total=total,
+            collected=len(all_rows),
+            page=page,
+            total_pages=0,
+            limit=limit,
+        ):
+            break
+        page += 1
+
+    stats = _build_fetch_stats(
+        pages_fetched=page,
+        total_pages=0,
+        rows_fetched=len(all_rows),
+        total_rows=last_total,
+        limit=limit,
+    )
+    return UpstreamFetchResult(rows=all_rows, stats=stats)
