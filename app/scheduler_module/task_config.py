@@ -272,6 +272,20 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "description": "每隔30分钟执行一次，从 H5 Deer API 获取广告明细数据",
     },
 
+    # ========== Aya API获取数据任务 ==========
+    "Aya API获取数据": {
+        "task_name": "Aya API获取数据",
+        "task_module": "app.scheduler_module.tasks.aya_task",
+        "task_function": "aya_api_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "*/30 * * * *",
+        "description": (
+            "每隔30分钟执行一次，从 Aya API 拉取日报/国家/广告单元报表"
+            "（默认仅国家维度；AYA_API_FETCH_DAILY / COUNTRY / UNIT 控制）"
+        ),
+    },
+
     # ========== Google API获取数据任务（GAM） ==========
     "Google API获取数据": {
         "task_name": "Google API获取数据",

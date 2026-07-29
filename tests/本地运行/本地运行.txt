@@ -38,3 +38,18 @@ npm run dev
 
 
 DELETE FROM `ad_data` WHERE `DATE` >= '2026-07-01';
+
+
+本地启动Redis
+
+用管理员打开 PowerShell：
+
+
+
+Start-Service Redis
+Get-Service Redis
+& "D:\Program Files\Redis\redis-cli.exe" ping
+Start-Sleep -Seconds 3
+Get-Service Redis
+
+

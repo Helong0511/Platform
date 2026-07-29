@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
-from app.scheduler_module.upstream_http import get_json, post_json, raise_unless_api_success
+from app.scheduler_module.upstream_http import get_json, post_form, post_json, raise_unless_api_success
 
 UPSTREAM_PAGINATION_MAX_PAGES = 500
 
@@ -938,3 +938,40 @@ async def fetch_h5deer_rows(
         limit=page_size,
     )
     return UpstreamFetchResult(rows=all_rows, stats=stats)
+
+
+# Aya / AB Data 开放 API（参见 tests/API/ab_data_API文档(1).pdf）
+AYA_PATH_DAILY = "/api/advertData/getDay"
+AYA_PATH_COUNTRY = "/api/advertData/getAdsDataCountry"
+AYA_PATH_UNIT = "/api/advertData/getAdsDataUnit"
+
+
+async def fetch_aya_rows(
+    *,
+    base_url: str,
+    secret_key: str,
+    start: str,
+    end: str,
+    path: str,
+    label: str = "Aya API",
+) -> UpstreamFetchResult:
+    """
+    Aya 拉数：POST application/x-www-form-urlencoded，成功码 code=200，行在 data 数组。
+
+    文档虽写 post，但服务端要求 form 参数而非 JSON Body。
+    """
+    url = f"{base_url.rstrip('/')}{path}"
+    json_data = await post_form(
+        url,
+        form_body={
+            "secretKey": secret_key,
+            "startDate": start,
+            "endDate": end,
+        },
+        label=label,
+    )
+    raise_unless_api_success(json_data, {200}, label=label, code_key="code")
+    rows = json_data.get("data") or []
+    if not isinstance(rows, list):
+        rows = []
+    return UpstreamFetchResult.from_rows(rows)

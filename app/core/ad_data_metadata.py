@@ -22,6 +22,7 @@ DATA_SOURCE_SKYMOBI = "skymobi"
 DATA_SOURCE_HUGUANG = "huguang"
 DATA_SOURCE_TQT = "tqt"
 DATA_SOURCE_TBSJ = "tbsj"  # yangyangdeyi / 通百世家
+DATA_SOURCE_AYA = "aya"
 DATA_SOURCE_EXCEL = "excel"
 DATA_SOURCE_UNKNOWN = "unknown"
 DATA_SOURCE_LEGACY = "legacy"
@@ -37,6 +38,7 @@ UPSTREAM_API_DATA_SOURCES: tuple[str, ...] = (
     DATA_SOURCE_HUGUANG,
     DATA_SOURCE_TQT,
     DATA_SOURCE_TBSJ,
+    DATA_SOURCE_AYA,
 )
 
 VALID_DATA_SOURCES = frozenset({
@@ -182,6 +184,7 @@ DATA_SOURCE_LABELS: dict[str, str] = {
     DATA_SOURCE_HUGUANG: "Huguang",
     DATA_SOURCE_TQT: "TQT",
     DATA_SOURCE_TBSJ: "通百世家(yangyangdeyi)",
+    DATA_SOURCE_AYA: "Aya",
     DATA_SOURCE_EXCEL: "Excel 导入",
     DATA_SOURCE_LEGACY: "历史",
     DATA_SOURCE_UNKNOWN: "未知",
@@ -204,10 +207,10 @@ REPORT_TYPE_DETAIL_OPTIONS: tuple[str, ...] = (
 )
 
 REPORT_TYPE_HINTS: dict[str, str] = {
-    REPORT_TYPE_UNIT: "按广告单元，无国家；智索 channelunit、GAM ad_unit",
-    REPORT_TYPE_COUNTRY: "按国家，无广告单元；智索 channelcountry、TQT、Huguang",
+    REPORT_TYPE_UNIT: "按广告单元，无国家；智索 channelunit、GAM ad_unit、Aya getAdsDataUnit",
+    REPORT_TYPE_COUNTRY: "按国家，无广告单元；智索 channelcountry、TQT、Huguang、Aya",
     REPORT_TYPE_CROSS: "国家+广告单元；智索 channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、GAM country",
-    REPORT_TYPE_DAILY: "日汇总，无国家无单元；智索 channeldaily 兜底、GAM daily",
+    REPORT_TYPE_DAILY: "日汇总，无国家无单元；智索 channeldaily 兜底、GAM daily、Aya getDay",
     REPORT_TYPE_LEGACY: "历史或未标注；新入库会自动按行形态推断",
 }
 
@@ -222,6 +225,7 @@ UPSTREAM_DEFAULT_REPORT_TYPES: dict[str, str] = {
     DATA_SOURCE_HUGUANG: REPORT_TYPE_LEGACY,
     DATA_SOURCE_TQT: REPORT_TYPE_LEGACY,
     DATA_SOURCE_TBSJ: REPORT_TYPE_LEGACY,
+    DATA_SOURCE_AYA: REPORT_TYPE_LEGACY,
     DATA_SOURCE_EXCEL: REPORT_TYPE_LEGACY,
 }
 

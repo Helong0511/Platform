@@ -329,6 +329,7 @@ export const AD_DATA_SOURCE_LABELS = {
   huguang: 'Huguang',
   tqt: 'TQT',
   tbsj: '通百世家(yangyangdeyi)',
+  aya: 'Aya',
   excel: 'Excel 导入',
   legacy: '历史',
   unknown: '未知'
@@ -344,7 +345,8 @@ export const UPSTREAM_API_DATA_SOURCES = [
   'skymobi',
   'huguang',
   'tqt',
-  'tbsj'
+  'tbsj',
+  'aya'
 ];
 
 /** 明细维护编辑：其它来源（手工/历史） */
@@ -367,10 +369,10 @@ export const AD_DATA_REPORT_TYPE_OTHER_OPTIONS = ['legacy'];
 
 /** 各类型说明（与后端 REPORT_TYPE_HINTS 一致） */
 export const AD_DATA_REPORT_TYPE_HINTS = {
-  unit: '按广告单元，无国家；智索 channelunit、GAM ad_unit',
-  country: '按国家，无广告单元；智索 channelcountry、TQT、Huguang',
+  unit: '按广告单元，无国家；智索 channelunit、GAM ad_unit、Aya getAdsDataUnit',
+  country: '按国家，无广告单元；智索 channelcountry、TQT、Huguang、Aya',
   cross: '国家+广告单元；智索 channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、GAM country',
-  daily: '日汇总，无国家无单元；智索 channeldaily 兜底、GAM daily',
+  daily: '日汇总，无国家无单元；智索 channeldaily 兜底、GAM daily、Aya getDay',
   legacy: '历史或未标注；新入库会自动按行形态推断'
 };
 

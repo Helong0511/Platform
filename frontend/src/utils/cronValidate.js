@@ -82,6 +82,7 @@ export const DATE_RELATED_TASK_NAMES = [
   'TQT API获取数据',
   'Pomiad API获取数据',
   'H5 Deer API获取数据',
+  'Aya API获取数据',
   'Huguang API获取数据',
 ];
 

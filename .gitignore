@@ -236,3 +236,4 @@ scripts/keys/
 tests/*
 !tests/test_*.py
 !tests/scan_route_order.py
+dump.rdb

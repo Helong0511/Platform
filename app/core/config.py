@@ -639,6 +639,27 @@ class Settings(BaseSettings):
     )
     H5DEER_API_LIMIT: int = int(os.getenv("H5DEER_API_LIMIT", "500"))
 
+    # Aya / AB Data（dashboard.abdatas.com，POST form-urlencoded）
+    AYA_API_BASE_URL: str = os.getenv(
+        "AYA_API_BASE_URL", "https://dashboard.abdatas.com/prod-api"
+    ).rstrip("/")
+    AYA_API_SECRET_KEY: str = os.getenv("AYA_API_SECRET_KEY", "")
+    AYA_API_FETCH_DAILY: bool = os.getenv("AYA_API_FETCH_DAILY", "false").lower() in [
+        "true",
+        "1",
+        "yes",
+    ]
+    AYA_API_FETCH_COUNTRY: bool = os.getenv("AYA_API_FETCH_COUNTRY", "true").lower() in [
+        "true",
+        "1",
+        "yes",
+    ]
+    AYA_API_FETCH_UNIT: bool = os.getenv("AYA_API_FETCH_UNIT", "false").lower() in [
+        "true",
+        "1",
+        "yes",
+    ]
+
     @staticmethod
     def _coerce_zhisuo_fetch_bool(value: object, default: bool) -> bool:
         if isinstance(value, bool):
@@ -929,6 +950,8 @@ if settings.is_production:
         logger.warning("生产环境未配置 TQT_APP_KEY，TQT 定时任务将跳过")
     if not settings.H5DEER_API_USERNAME.strip():
         logger.warning("生产环境未配置 H5DEER_API_USERNAME，H5 Deer 定时任务将跳过")
+    if not settings.AYA_API_SECRET_KEY.strip():
+        logger.warning("生产环境未配置 AYA_API_SECRET_KEY，Aya 定时任务将跳过")
 else:
     # 开发环境：不显示警告，仅在需要时提示
     # SECRET_KEY 验证已在 validate_secret_key 中处理，这里不需要额外提示
