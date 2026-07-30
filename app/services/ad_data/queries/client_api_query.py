@@ -2,7 +2,8 @@
 客户开放 API（/client_data）广告数据查询。
 
 按 data_type 返回明细或日汇总；可选 dimension 与后台报表口径一致。
-明细（all）维度优先按 country_code / ad_unit 字段有无筛选；日汇总（day）另见 build_daily_summary_dimension_filter。
+明细（all）交叉维度与日汇总选源对齐（report_type=cross / legacy 交叉形态）；
+日汇总（day）见 build_daily_summary_dimension_filter。
 """
 from __future__ import annotations
 
@@ -123,7 +124,10 @@ class ClientAdDataQuery:
             return query
 
         dim_filter = maybe_build_ad_data_dimension_filter(
-            AdData.country_code, AdData.ad_unit, dimension
+            AdData.country_code,
+            AdData.ad_unit,
+            dimension,
+            report_type_column=AdData.report_type,
         )
         if dim_filter is not None:
             query = query.where(dim_filter)
@@ -137,7 +141,8 @@ class ClientAdDataQuery:
         use_assignment_table: bool,
         dimension: Optional[str],
     ) -> int:
-        count_query = select(func.count(AdData.id))
+        # distinct：避免 product_assignments 重叠时 count 放大
+        count_query = select(func.count(func.distinct(AdData.id)))
         count_query = self._apply_client_product_scope(count_query, client, use_assignment_table)
         count_query = self._apply_date_and_dimension(count_query, start_date, end_date, dimension)
         return int((await self.db.execute(count_query)).scalar() or 0)
@@ -156,21 +161,41 @@ class ClientAdDataQuery:
             client, start_date, end_date, use_assignment_table, dimension
         )
 
-        query = select(AdData, Product.name, CountryInfo.country_name_zh)
-        query = self._apply_client_product_scope(query, client, use_assignment_table)
-        query = query.outerjoin(
-            CountryInfo,
-            AdData.country_code.collate("utf8mb4_unicode_ci")
-            == CountryInfo.alpha_2_code.collate("utf8mb4_unicode_ci"),
+        # 先按 AdData.id 稳定分页，再补国家名；避免 countries JOIN 放大导致漏行/重复翻页
+        # distinct：product_assignments 一对多时避免同一 id 占多页位
+        id_query = select(AdData.id, AdData.date).distinct()
+        id_query = self._apply_client_product_scope(id_query, client, use_assignment_table)
+        id_query = self._apply_date_and_dimension(id_query, start_date, end_date, dimension)
+        id_query = (
+            id_query.order_by(AdData.date.asc(), AdData.id.asc())
+            .offset(offset)
+            .limit(page_size)
         )
-        query = self._apply_date_and_dimension(query, start_date, end_date, dimension)
-        query = query.order_by(AdData.date.asc()).offset(offset).limit(page_size)
+        id_rows = (await self.db.execute(id_query)).all()
+        page_ids = [row[0] for row in id_rows]
+        if not page_ids:
+            return [], total
 
+        query = (
+            select(AdData, Product.name, CountryInfo.country_name_zh)
+            .join(Product, AdData.product_id == Product.id)
+            .outerjoin(
+                CountryInfo,
+                AdData.country_code.collate("utf8mb4_unicode_ci")
+                == CountryInfo.alpha_2_code.collate("utf8mb4_unicode_ci"),
+            )
+            .where(AdData.id.in_(page_ids))
+            .order_by(AdData.date.asc(), AdData.id.asc())
+        )
         rows = (await self.db.execute(query)).all()
 
         result: list[dict[str, Any]] = []
+        seen_ids: set[int] = set()
         for row in rows:
             ad_data, product_name, country_name_zh = row[0], row[1], row[2]
+            if ad_data.id in seen_ids:
+                continue
+            seen_ids.add(ad_data.id)
 
             date_obj = normalize_date_for_ad_data(ad_data.date)
             date_str = date_obj.isoformat()

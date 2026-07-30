@@ -1,10 +1,11 @@
 """
 广告数据统计维度筛选条件。
 
-明细列表（data_type=all / 明细维护，优先按字段有无互斥筛选）：
+明细列表（data_type=all / 明细维护）：
 - country：国家有值且 ad_unit 为空（含 AA/ZZ）
 - ad_unit：ad_unit 有值且国家为空（NULL/空串）
-- ad_unit_country：国家与 ad_unit 均有值
+- ad_unit_country：与日汇总交叉选源对齐——report_type=cross，
+  或 legacy 行且国家与 ad_unit 均有值（避免 day 能拉到、all 拉不到）
 
 每日汇总使用 build_daily_summary_dimension_filter：
 - 优先按 report_type 选源（country > cross > unit > daily）
@@ -106,13 +107,18 @@ def maybe_build_ad_data_dimension_filter(
     country_code_column: Any,
     ad_unit_column: Any,
     dimension: Optional[str],
+    *,
+    report_type_column: Any = None,
 ) -> Any | None:
     """未传 dimension 时返回 None；传入合法 dimension 时返回筛选条件。"""
     dim = parse_optional_dimension(dimension)
     if dim is None:
         return None
     return build_ad_data_dimension_filter(
-        country_code_column, ad_unit_column, dim, report_type_column=None
+        country_code_column,
+        ad_unit_column,
+        dim,
+        report_type_column=report_type_column,
     )
 
 
@@ -263,18 +269,26 @@ def build_ad_data_dimension_filter(
     *,
     report_type_column: Any = None,
 ) -> Any:
-    """构建明细列表用统计维度筛选：优先按 country_code / ad_unit 字段有无互斥筛选。
+    """构建明细列表用统计维度筛选。
 
-    report_type_column 保留以兼容既有调用方；明细口径不再用 report_type 放宽条件。
-    日汇总互斥选源见 build_daily_summary_dimension_filter。
+    - country / ad_unit：按字段有无互斥筛选
+    - ad_unit_country：与日汇总交叉选源对齐（report_type=cross 或 legacy 交叉形态），
+      避免出现 day 能汇总、all 明细却为空的情况
     """
-    del report_type_column  # 明细维度仅以字段形态为准
     if is_all_list_dimension(dimension):
         from sqlalchemy import true
 
         return true()
 
     dim = normalize_dimension(dimension)
+    if dim == CROSS_DIMENSION and report_type_column is not None:
+        return or_(
+            report_type_column == REPORT_TYPE_CROSS,
+            and_(
+                _legacy_row_condition(report_type_column),
+                _cross_row_condition(country_code_column, ad_unit_column),
+            ),
+        )
     return _shape_dimension_filter(country_code_column, ad_unit_column, dim)
 
 
