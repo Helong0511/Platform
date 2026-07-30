@@ -161,8 +161,8 @@ class ClientAdDataQuery:
             client, start_date, end_date, use_assignment_table, dimension
         )
 
-        # 先按 AdData.id 稳定分页，再补国家名；避免 countries JOIN 放大导致漏行/重复翻页
-        # distinct：product_assignments 一对多时避免同一 id 占多页位
+        # 两阶段分页：先按 date+id 稳定取唯一 id，再回表；国家名单独查表。
+        # 避免 countries / product_assignments JOIN 放大导致 LIMIT 漏行、本页条数变少。
         id_query = select(AdData.id, AdData.date).distinct()
         id_query = self._apply_client_product_scope(id_query, client, use_assignment_table)
         id_query = self._apply_date_and_dimension(id_query, start_date, end_date, dimension)
@@ -177,26 +177,22 @@ class ClientAdDataQuery:
             return [], total
 
         query = (
-            select(AdData, Product.name, CountryInfo.country_name_zh)
+            select(AdData, Product.name)
             .join(Product, AdData.product_id == Product.id)
-            .outerjoin(
-                CountryInfo,
-                AdData.country_code.collate("utf8mb4_unicode_ci")
-                == CountryInfo.alpha_2_code.collate("utf8mb4_unicode_ci"),
-            )
             .where(AdData.id.in_(page_ids))
             .order_by(AdData.date.asc(), AdData.id.asc())
         )
         rows = (await self.db.execute(query)).all()
 
-        result: list[dict[str, Any]] = []
-        seen_ids: set[int] = set()
-        for row in rows:
-            ad_data, product_name, country_name_zh = row[0], row[1], row[2]
-            if ad_data.id in seen_ids:
-                continue
-            seen_ids.add(ad_data.id)
+        country_codes = {
+            (ad_data.country_code or "").strip()
+            for ad_data, _ in rows
+            if (ad_data.country_code or "").strip()
+        }
+        country_name_map = await self._load_country_name_zh(country_codes)
 
+        result: list[dict[str, Any]] = []
+        for ad_data, product_name in rows:
             date_obj = normalize_date_for_ad_data(ad_data.date)
             date_str = date_obj.isoformat()
 
@@ -234,6 +230,7 @@ class ClientAdDataQuery:
                 ad_data.viewability_rate if ad_data.viewability_rate is not None else Decimal('0')
             )
             country_code_str = ad_data.country_code or ""
+            country_name_zh = country_name_map.get(country_code_str)
 
             if country_name_zh:
                 final_country_name = country_name_zh
@@ -269,6 +266,24 @@ class ClientAdDataQuery:
             )
         return result, total
 
+    async def _load_country_name_zh(self, country_codes: set[str]) -> dict[str, str]:
+        """按国家码批量取中文名；同码多行时取第一条，避免 JOIN 放大。"""
+        if not country_codes:
+            return {}
+        rows = (
+            await self.db.execute(
+                select(CountryInfo.alpha_2_code, CountryInfo.country_name_zh).where(
+                    CountryInfo.alpha_2_code.in_(country_codes)
+                )
+            )
+        ).all()
+        out: dict[str, str] = {}
+        for code, name in rows:
+            key = (code or "").strip()
+            if key and key not in out and name:
+                out[key] = name
+        return out
+
     async def _fetch_daily_summary(
         self,
         client: Client,
@@ -296,12 +311,11 @@ class ClientAdDataQuery:
         """对分组聚合结果分页：总数与当前页均基于同一 subquery。"""
         subq = query.subquery()
         total = int((await self.db.execute(select(func.count()).select_from(subq))).scalar() or 0)
-        page_query = (
-            select(subq)
-            .order_by(subq.c.date.asc(), subq.c.product_id.asc())
-            .offset(offset)
-            .limit(page_size)
-        )
+        # 排序键需覆盖分组维度，否则同产品多广告单元时 OFFSET 翻页会漏/重
+        order_cols = [subq.c.date.asc(), subq.c.product_id.asc()]
+        if hasattr(subq.c, "ad_unit"):
+            order_cols.append(subq.c.ad_unit.asc())
+        page_query = select(subq).order_by(*order_cols).offset(offset).limit(page_size)
         rows = (await self.db.execute(page_query)).all()
         return rows, total
 
@@ -334,7 +348,7 @@ class ClientAdDataQuery:
             Product.id,
             Product.name,
             AdData.ad_unit,
-        ).order_by(AdData.date.asc(), Product.id.asc())
+        ).order_by(AdData.date.asc(), Product.id.asc(), AdData.ad_unit.asc())
 
         rows, total = await self._paginate_grouped_query(query, offset, page_size)
         return [self._daily_row_to_dict(row, dim=None) for row in rows], total
@@ -380,9 +394,10 @@ class ClientAdDataQuery:
         query = self._apply_date_and_dimension(
             query, start_date, end_date, dimension, daily_summary=True
         )
-        query = query.group_by(*group_cols).order_by(
-            AdData.date.asc(), Product.id.asc()
-        )
+        order_cols: list[Any] = [AdData.date.asc(), Product.id.asc()]
+        if group_by_ad_unit:
+            order_cols.append(AdData.ad_unit.asc())
+        query = query.group_by(*group_cols).order_by(*order_cols)
 
         rows, total = await self._paginate_grouped_query(query, offset, page_size)
         return [self._daily_row_to_dict(row, dim=dimension) for row in rows], total
