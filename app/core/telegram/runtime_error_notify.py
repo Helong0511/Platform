@@ -47,6 +47,17 @@ _NOISE_SUBSTRINGS = (
     "Telegram 轮询冲突",
     "发送 Telegram 通知整体超时",
     "Bot 不可用，无法发送消息",
+    # 上游广告 API 瞬时故障（已重试耗尽后的软容错；非本程序逻辑错误）
+    "All connection attempts failed",
+    "UpstreamTransientError",
+    "软跳过: 上游暂时不可达",
+    "请求超时: 超过",
+    " 请求失败: ",
+    "HTTP错误: 状态码=429",
+    "HTTP错误: 状态码=500",
+    "HTTP错误: 状态码=502",
+    "HTTP错误: 状态码=503",
+    "HTTP错误: 状态码=504",
 )
 
 

@@ -18,6 +18,7 @@ from app.scheduler_module.upstream_fetch import (
     UpstreamFetchStats,
     fetch_skymobi_rows,
 )
+from app.scheduler_module.upstream_http import UpstreamTransientError
 from app.scheduler_module.upstream_task_runner import run_upstream_import_task
 
 SKYMOBI_FIELD_MAPPING = {
@@ -53,11 +54,17 @@ async def skymobi_api_task(
         all_rows = []
         stats_list: list[UpstreamFetchStats] = []
         while current <= end:
-            result = await fetch_skymobi_rows(
-                api_id=api_id,
-                api_key=api_key,
-                date_str=current.strftime("%Y-%m-%d"),
-            )
+            try:
+                result = await fetch_skymobi_rows(
+                    api_id=api_id,
+                    api_key=api_key,
+                    date_str=current.strftime("%Y-%m-%d"),
+                )
+            except UpstreamTransientError:
+                # 已拉到的日期仍入库；若一天都没有则上抛由 runner 软跳过
+                if all_rows:
+                    break
+                raise
             all_rows.extend(result.rows)
             stats_list.append(result.stats)
             current += timedelta(days=1)

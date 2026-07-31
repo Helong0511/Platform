@@ -4,6 +4,7 @@
 功能说明：
 - 提供 ``post_json`` / ``get_json`` 及业务成功码校验
 - 对 HTTP 5xx、429 自动重试，超时与连接错误记录日志
+- 重试耗尽后的超时/网络错误抛 ``UpstreamTransientError``（可软容错，勿当程序崩溃）
 
 在系统中的位置：
 - 被 ``upstream_fetch`` 与各上游 task 直接调用
@@ -28,6 +29,15 @@ SuccessCheck = Union[set[Any], Callable[[Dict[str, Any]], bool]]
 
 # 重试间隔（秒）：第 1 次失败后等 2s，第 2 次 5s …
 _UPSTREAM_RETRY_DELAYS = (2.0, 5.0, 10.0)
+
+
+class UpstreamTransientError(Exception):
+    """
+    上游瞬时网络/超时故障（重试已耗尽）。
+
+    属对端或链路问题，非本程序逻辑错误；调度层应软跳过并等待下次 cron，
+    避免按「程序运行错误」推送 Telegram。
+    """
 
 
 def _httpx_timeout(total: float) -> httpx.Timeout:
@@ -125,24 +135,30 @@ async def _request_json(
                 )
             if response.status_code != 200:
                 text = (response.text or "")[:500]
-                if _is_retriable_http_status(response.status_code) and attempt < attempts - 1:
-                    delay = _UPSTREAM_RETRY_DELAYS[min(attempt, len(_UPSTREAM_RETRY_DELAYS) - 1)]
-                    logger.warning(
-                        "%s HTTP %s (尝试 %s/%s)，%.0fs 后重试 body=%s",
-                        label,
-                        response.status_code,
-                        attempt + 1,
-                        attempts,
-                        delay,
-                        text[:100],
+                if _is_retriable_http_status(response.status_code):
+                    if attempt < attempts - 1:
+                        delay = _UPSTREAM_RETRY_DELAYS[
+                            min(attempt, len(_UPSTREAM_RETRY_DELAYS) - 1)
+                        ]
+                        logger.warning(
+                            "%s HTTP %s (尝试 %s/%s)，%.0fs 后重试 body=%s",
+                            label,
+                            response.status_code,
+                            attempt + 1,
+                            attempts,
+                            delay,
+                            text[:100],
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    # 5xx/429 重试耗尽：视为上游瞬时故障，可软容错
+                    msg = (
+                        f"{label} HTTP错误: 状态码={response.status_code}, "
+                        f"响应={text[:100]}（已重试 {attempts} 次）"
                     )
-                    await asyncio.sleep(delay)
-                    continue
-                ensure_http_ok(
-                    response,
-                    label=label,
-                    attempts=attempts if _is_retriable_http_status(response.status_code) else None,
-                )
+                    logger.warning(msg)
+                    raise UpstreamTransientError(msg)
+                ensure_http_ok(response, label=label)
             json_data = parse_json_response(response, label=label)
             if attempt > 0:
                 logger.info("%s 第 %s 次重试成功", label, attempt + 1)
@@ -163,10 +179,9 @@ async def _request_json(
                 )
                 await asyncio.sleep(delay)
                 continue
-            logger.error("%s 请求超时: 超过 %.0f 秒未响应 (%s 次尝试)", label, total_timeout, attempts)
-            raise Exception(
-                f"{label} 请求超时: 超过{total_timeout}秒未响应（已重试 {attempts} 次）"
-            ) from e
+            msg = f"{label} 请求超时: 超过{total_timeout}秒未响应（已重试 {attempts} 次）"
+            logger.warning(msg)
+            raise UpstreamTransientError(msg) from e
         except httpx.RequestError as e:
             last_error = e
             if attempt < attempts - 1:
@@ -181,10 +196,11 @@ async def _request_json(
                 )
                 await asyncio.sleep(delay)
                 continue
-            logger.error("%s 请求错误: %s", label, e)
-            raise Exception(f"{label} 请求失败: {e}") from e
+            msg = f"{label} 请求失败: {e}"
+            logger.warning(msg)
+            raise UpstreamTransientError(msg) from e
 
-    raise Exception(f"{label} 请求失败: {last_error}")
+    raise UpstreamTransientError(f"{label} 请求失败: {last_error}")
 
 
 async def post_json(

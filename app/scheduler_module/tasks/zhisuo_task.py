@@ -4,11 +4,12 @@ zhisuo 上游广告数据拉取定时任务。
 - 按天循环拉取 unit / country / data（交叉），避免区间查询漏数
 - 写入 data_source / report_type / upstream_account 元数据
 - 当某日某产品 unit/country/data 均无数据时，用 channeldaily 日报兜底
+- 瞬时网络故障：已成功维度保留入库，不整段丢弃
 """
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from app.core.ad_data_metadata import DATA_SOURCE_ZHISUO
 from app.core.config import settings
@@ -16,6 +17,7 @@ from app.scheduler_module.task_names import ZHISUO_API_TASK_NAME
 from app.scheduler_module.task_result_store import set_task_result
 from app.scheduler_module.task_utils import (
     get_current_time_str,
+    log_scheduled_task_skip,
     log_task_start,
     resolve_upstream_date_range,
     truncate_task_error_message,
@@ -26,6 +28,7 @@ from app.scheduler_module.upstream_fetch import (
     fetch_zhisuo_data_rows,
     fetch_zhisuo_unit_rows,
 )
+from app.scheduler_module.upstream_http import UpstreamTransientError
 from app.scheduler_module.upstream_import import import_upstream_ad_data
 
 logger = logging.getLogger(__name__)
@@ -135,136 +138,148 @@ async def _import_zhisuo_account(
     start: str,
     end: str,
     current_time_str: str,
-) -> list[str]:
-    """单账号：按天拉 unit/country/data，条件兜底 daily，分别入库。"""
+) -> tuple[list[str], Optional[UpstreamTransientError]]:
+    """
+    单账号：按维度边拉边入库。
+
+    某维度瞬时故障时：已成功维度保留入库；停止后续维度请求；
+    返回 (摘要列表, 瞬时异常或 None)。
+    """
     client_id = str(account["client_id"])
     api_key = str(account["api_key"])
     summaries: list[str] = []
-
-    unit_rows: list[Any] = []
-    if account.get("fetch_unit"):
-        unit_result = await fetch_zhisuo_unit_rows(
-            base_url=base_url,
-            client_id=client_id,
-            api_key=api_key,
-            start=start,
-            end=end,
-        )
-        unit_rows = list(unit_result.rows)
-        logger.info("Zhisuo 广告单元 账号 %s 拉取 %d 条", client_id, len(unit_rows))
-
-    country_rows: list[Any] = []
-    if account.get("fetch_country"):
-        country_result = await fetch_zhisuo_country_rows(
-            base_url=base_url,
-            client_id=client_id,
-            api_key=api_key,
-            start=start,
-            end=end,
-        )
-        country_rows = list(country_result.rows)
-        logger.info("Zhisuo 国家报告 账号 %s 拉取 %d 条", client_id, len(country_rows))
-
-    data_rows: list[Any] = []
-    if account.get("fetch_data"):
-        data_result = await fetch_zhisuo_data_rows(
-            base_url=base_url,
-            client_id=client_id,
-            api_key=api_key,
-            start=start,
-            end=end,
-        )
-        data_rows = list(data_result.rows)
-        logger.info("Zhisuo 国家+广告单元 账号 %s 拉取 %d 条", client_id, len(data_rows))
-
-    covered = (
-        _zhisuo_product_date_keys(unit_rows)
-        | _zhisuo_product_date_keys(country_rows)
-        | _zhisuo_product_date_keys(data_rows)
-    )
-    daily_fallback: list[Any] = []
-    if account.get("fetch_daily_fallback"):
-        daily_result = await fetch_zhisuo_daily_rows(
-            base_url=base_url,
-            client_id=client_id,
-            api_key=api_key,
-            start=start,
-            end=end,
-        )
-        daily_fallback = _daily_fallback_rows(list(daily_result.rows), covered)
-        if daily_fallback:
-            logger.info(
-                "Zhisuo 日报兜底 账号 %s: %d 行（已覆盖 %d 个产品+日）",
-                client_id,
-                len(daily_fallback),
-                len(covered),
-            )
-
+    transient: Optional[UpstreamTransientError] = None
+    covered: set[tuple[str, str]] = set()
     notify_base = {"起始日期": start, "终止日期": end, "账号": client_id}
 
-    if unit_rows:
-        unit_summary = await import_upstream_ad_data(
-            task_name=ZHISUO_API_TASK_NAME,
-            data=unit_rows,
-            field_mapping=ZHISUO_UNIT_FIELD_MAPPING,
-            source="zhisuo定时任务-广告单元",
-            current_time_str=current_time_str,
-            notify_title=f"zhisuo-{client_id}-广告单元",
-            update_task_result=False,
-            notify_params={**notify_base},
-            data_source=DATA_SOURCE_ZHISUO,
-            upstream_account=client_id,
-        )
-        summaries.append(f"unit: {unit_summary}")
+    async def _fetch_import_dimension(
+        *,
+        enabled: bool,
+        key: str,
+        fetch_factory,
+        field_mapping: dict[str, str],
+        source: str,
+        notify_title: str,
+        rows_to_covered: bool = True,
+        transform_rows=None,
+    ) -> None:
+        nonlocal transient, covered
+        if not enabled:
+            return
+        if transient is not None:
+            summaries.append(f"{key}: 跳过(上游不可达)")
+            return
+        try:
+            result = await fetch_factory()
+            rows = list(result.rows)
+            if transform_rows is not None:
+                rows = transform_rows(rows)
+            logger.info("Zhisuo %s 账号 %s 拉取 %d 条", key, client_id, len(rows))
+            if rows_to_covered:
+                covered |= _zhisuo_product_date_keys(rows)
+            if not rows:
+                return
+            summary = await import_upstream_ad_data(
+                task_name=ZHISUO_API_TASK_NAME,
+                data=rows,
+                field_mapping=field_mapping,
+                source=source,
+                current_time_str=current_time_str,
+                notify_title=notify_title,
+                update_task_result=False,
+                notify_params={**notify_base},
+                data_source=DATA_SOURCE_ZHISUO,
+                upstream_account=client_id,
+            )
+            summaries.append(f"{key}: {summary}")
+        except UpstreamTransientError as e:
+            transient = e
+            summaries.append(f"{key}: 软跳过")
+            logger.warning(
+                "Zhisuo %s 账号 %s 上游瞬时故障，保留已入库维度: %s",
+                key,
+                client_id,
+                e,
+            )
 
-    if country_rows:
-        country_summary = await import_upstream_ad_data(
-            task_name=ZHISUO_API_TASK_NAME,
-            data=country_rows,
-            field_mapping=ZHISUO_COUNTRY_FIELD_MAPPING,
-            source="zhisuo定时任务-国家报告",
-            current_time_str=current_time_str,
-            notify_title=f"zhisuo-{client_id}-国家报告",
-            update_task_result=False,
-            notify_params={**notify_base},
-            data_source=DATA_SOURCE_ZHISUO,
-            upstream_account=client_id,
-        )
-        summaries.append(f"country: {country_summary}")
+    await _fetch_import_dimension(
+        enabled=bool(account.get("fetch_unit")),
+        key="unit",
+        fetch_factory=lambda: fetch_zhisuo_unit_rows(
+            base_url=base_url,
+            client_id=client_id,
+            api_key=api_key,
+            start=start,
+            end=end,
+        ),
+        field_mapping=ZHISUO_UNIT_FIELD_MAPPING,
+        source="zhisuo定时任务-广告单元",
+        notify_title=f"zhisuo-{client_id}-广告单元",
+    )
+    await _fetch_import_dimension(
+        enabled=bool(account.get("fetch_country")),
+        key="country",
+        fetch_factory=lambda: fetch_zhisuo_country_rows(
+            base_url=base_url,
+            client_id=client_id,
+            api_key=api_key,
+            start=start,
+            end=end,
+        ),
+        field_mapping=ZHISUO_COUNTRY_FIELD_MAPPING,
+        source="zhisuo定时任务-国家报告",
+        notify_title=f"zhisuo-{client_id}-国家报告",
+    )
+    await _fetch_import_dimension(
+        enabled=bool(account.get("fetch_data")),
+        key="data",
+        fetch_factory=lambda: fetch_zhisuo_data_rows(
+            base_url=base_url,
+            client_id=client_id,
+            api_key=api_key,
+            start=start,
+            end=end,
+        ),
+        field_mapping=ZHISUO_DATA_FIELD_MAPPING,
+        source="zhisuo定时任务-国家+广告单元",
+        notify_title=f"zhisuo-{client_id}-国家+广告单元",
+    )
 
-    if data_rows:
-        data_summary = await import_upstream_ad_data(
-            task_name=ZHISUO_API_TASK_NAME,
-            data=data_rows,
-            field_mapping=ZHISUO_DATA_FIELD_MAPPING,
-            source="zhisuo定时任务-国家+广告单元",
-            current_time_str=current_time_str,
-            notify_title=f"zhisuo-{client_id}-国家+广告单元",
-            update_task_result=False,
-            notify_params={**notify_base},
-            data_source=DATA_SOURCE_ZHISUO,
-            upstream_account=client_id,
-        )
-        summaries.append(f"data: {data_summary}")
+    if account.get("fetch_daily_fallback") and transient is None:
 
-    if daily_fallback:
-        daily_summary = await import_upstream_ad_data(
-            task_name=ZHISUO_API_TASK_NAME,
-            data=daily_fallback,
+        def _fallback_only(rows: list[Any]) -> list[Any]:
+            filtered = _daily_fallback_rows(rows, covered)
+            if filtered:
+                logger.info(
+                    "Zhisuo 日报兜底 账号 %s: %d 行（已覆盖 %d 个产品+日）",
+                    client_id,
+                    len(filtered),
+                    len(covered),
+                )
+            return filtered
+
+        await _fetch_import_dimension(
+            enabled=True,
+            key="daily",
+            fetch_factory=lambda: fetch_zhisuo_daily_rows(
+                base_url=base_url,
+                client_id=client_id,
+                api_key=api_key,
+                start=start,
+                end=end,
+            ),
             field_mapping=ZHISUO_DAILY_FIELD_MAPPING,
             source="zhisuo定时任务-日报兜底",
-            current_time_str=current_time_str,
             notify_title=f"zhisuo-{client_id}-日报兜底",
-            update_task_result=False,
-            notify_params={**notify_base},
-            data_source=DATA_SOURCE_ZHISUO,
-            upstream_account=client_id,
+            rows_to_covered=False,
+            transform_rows=_fallback_only,
         )
-        summaries.append(f"daily: {daily_summary}")
+    elif account.get("fetch_daily_fallback") and transient is not None:
+        summaries.append("daily: 跳过(上游不可达)")
 
     if not summaries:
         summaries.append("无数据")
-    return summaries
+    return summaries, transient
 
 
 async def zhisuo_api_task(
@@ -308,7 +323,7 @@ async def zhisuo_api_task(
     try:
         for account in active:
             client_id = str(account["client_id"])
-            parts = await _import_zhisuo_account(
+            parts, transient = await _import_zhisuo_account(
                 account,
                 base_url=base_url,
                 start=zhisuo_start,
@@ -316,6 +331,15 @@ async def zhisuo_api_task(
                 current_time_str=current_time_str,
             )
             phase_summaries.append(f"{client_id}[{'; '.join(parts)}]")
+            if transient is not None:
+                prefix = f"部分成功: {'; '.join(phase_summaries)} | "
+                soft_msg = f"{prefix}软跳过: 上游暂时不可达，等待下次调度 | {transient}"
+                logger.warning("[%s] %s", ZHISUO_API_TASK_NAME, soft_msg)
+                log_scheduled_task_skip(
+                    ZHISUO_API_TASK_NAME, "上游网络瞬时故障", detail=str(transient)
+                )
+                set_task_result(ZHISUO_API_TASK_NAME, soft_msg)
+                return
 
         set_task_result(
             ZHISUO_API_TASK_NAME,
@@ -323,6 +347,7 @@ async def zhisuo_api_task(
         )
     except Exception as e:
         error_detail = truncate_task_error_message(str(e))
-        logger.error("%s 执行失败: %s", ZHISUO_API_TASK_NAME, error_detail, exc_info=True)
+        # 不带 exc_info，避免与调度器失败日志重复触发 Telegram
+        logger.error("%s 执行失败: %s", ZHISUO_API_TASK_NAME, error_detail)
         set_task_result(ZHISUO_API_TASK_NAME, error_detail)
         raise

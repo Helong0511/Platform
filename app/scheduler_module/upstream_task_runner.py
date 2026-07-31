@@ -8,20 +8,31 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable, Mapping
+from enum import Enum
 from typing import Any, Optional, Union
 
 from app.scheduler_module.task_result_store import set_task_result
 from app.scheduler_module.task_utils import (
     get_current_time_str,
+    log_scheduled_task_skip,
     log_task_start,
     upstream_credential_missing,
 )
 from app.scheduler_module.upstream_fetch import UpstreamFetchResult, unwrap_upstream_fetch_result
+from app.scheduler_module.upstream_http import UpstreamTransientError
 from app.scheduler_module.upstream_import import import_upstream_ad_data
 
 logger = logging.getLogger(__name__)
 
 DataTransform = Optional[Callable[[list], list]]
+
+
+class UpstreamTaskOutcome(str, Enum):
+    """run_upstream_import_task 执行结果（避免用 bool/文案猜测）。"""
+
+    SUCCESS = "success"
+    SKIPPED_CONFIG = "skipped_config"
+    SKIPPED_TRANSIENT = "skipped_transient"
 
 
 async def run_upstream_import_task(
@@ -39,31 +50,26 @@ async def run_upstream_import_task(
     data_source: str = "unknown",
     report_type: str = "legacy",
     upstream_account: str = "",
-) -> None:
+) -> UpstreamTaskOutcome:
     """
     上游拉数任务标准流程：未配置则跳过 → 拉数 → import_upstream_ad_data 入库。
 
     report_type 保留兼容；入库时按每行 ad_unit / country_code 自动推断 unit/country/cross/daily。
 
-    参数:
-        task_name: 调度任务名（与 task_names 常量一致）
-        credentials: 上游凭证元组，任一为空则跳过；为 None 时跳过凭证校验（调用方已校验）
-        skip_hint: 跳过时的说明（写入 task_result）
-        fetch_data: 异步拉数函数，返回原始行列表
-        field_mapping: 平台字段 → 上游字段映射
-        source: 入库来源标识
-        notify_title: Telegram 通知标题
-        data_transform: 入库前可选预处理（就地修改列表）
-        log_label: 错误日志中的业务标签，默认等于 task_name
-        notify_params: 可选任务参数，写入 Telegram 完成通知
+    上游超时/连不上（``UpstreamTransientError``）时软跳过：写入结果说明、不抛异常、
+    不按程序崩溃告警，等待下次 cron 自动重试。
+
+    Returns:
+        UpstreamTaskOutcome：SUCCESS / SKIPPED_CONFIG / SKIPPED_TRANSIENT
     """
     if credentials is not None and upstream_credential_missing(*credentials):
         logger.warning(skip_hint)
         set_task_result(task_name, skip_hint)
-        return
+        return UpstreamTaskOutcome.SKIPPED_CONFIG
 
     current_time_str = get_current_time_str()
     log_task_start(task_name)
+    label = log_label or task_name
 
     try:
         fetch_result = await fetch_data()
@@ -82,9 +88,17 @@ async def run_upstream_import_task(
             report_type=report_type,
             upstream_account=upstream_account,
         )
+        return UpstreamTaskOutcome.SUCCESS
+    except UpstreamTransientError as e:
+        # 上游不可达：已 HTTP 重试耗尽；软跳过，避免「程序运行错误」刷屏
+        soft_msg = f"软跳过: 上游暂时不可达，等待下次调度 | {e}"
+        logger.warning("[%s] %s", label, soft_msg)
+        log_scheduled_task_skip(task_name, "上游网络瞬时故障", detail=str(e))
+        set_task_result(task_name, soft_msg)
+        return UpstreamTaskOutcome.SKIPPED_TRANSIENT
     except Exception as e:
-        label = log_label or task_name
+        # 不带 exc_info：调度器会统一 log_scheduled_task_failure(exc_info=True)，避免双份 Telegram
         error_msg = f"{task_name} 执行失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        logger.warning(f"[{label}] {error_msg}")
+        logger.error(error_msg)
+        logger.warning("[%s] %s", label, error_msg)
         raise

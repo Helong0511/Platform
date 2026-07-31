@@ -18,11 +18,14 @@ from app.core.ad_data_metadata import DATA_SOURCE_FLYMOBI
 from app.core.config import settings
 from app.scheduler_module.task_names import FLYMOBI_API_TASK_NAME
 from app.scheduler_module.task_result_store import set_task_result
-from app.scheduler_module.task_utils import resolve_upstream_date_range
 from app.scheduler_module.upstream_fetch import (
     fetch_flymobi_rows,
 )
-from app.scheduler_module.upstream_task_runner import run_upstream_import_task
+from app.scheduler_module.upstream_task_runner import (
+    UpstreamTaskOutcome,
+    run_upstream_import_task,
+)
+from app.scheduler_module.task_utils import log_scheduled_task_skip, resolve_upstream_date_range
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +161,8 @@ async def flymobi_api_task(
         return
 
     summaries: list[str] = []
-    errors: list[str] = []
+    transient_errors: list[str] = []
+    hard_errors: list[str] = []
 
     for report in enabled_reports:
         report_label = report["label"]
@@ -173,7 +177,7 @@ async def flymobi_api_task(
                     label=lb,
                 )
 
-            await run_upstream_import_task(
+            outcome = await run_upstream_import_task(
                 FLYMOBI_API_TASK_NAME,
                 credentials=None,
                 fetch_data=_make_fetch,
@@ -189,18 +193,49 @@ async def flymobi_api_task(
                 log_label=report_label,
                 notify_params=notify_params,
             )
-            summaries.append(f"{report_label}: 成功")
+            if outcome == UpstreamTaskOutcome.SUCCESS:
+                summaries.append(f"{report_label}: 成功")
+            elif outcome == UpstreamTaskOutcome.SKIPPED_TRANSIENT:
+                transient_errors.append(f"{report_label}: 上游暂时不可达")
+            else:
+                # SKIPPED_CONFIG（本任务 credentials=None，正常不会到这里）
+                transient_errors.append(f"{report_label}: 已跳过({outcome.value})")
         except Exception as exc:
             err = f"{report_label}: {exc}"
-            errors.append(err)
-            logger.error("FlyMobi 报表拉数失败 - %s", err, exc_info=True)
+            hard_errors.append(err)
+            # 不带 exc_info：汇总后若需失败再由调度器统一记录堆栈
+            logger.error("FlyMobi 报表拉数失败 - %s", err)
 
-    if errors and not summaries:
-        msg = f"执行失败: {'; '.join(errors)}"
+    if hard_errors and not summaries and not transient_errors:
+        msg = f"执行失败: {'; '.join(hard_errors)}"
         set_task_result(FLYMOBI_API_TASK_NAME, msg)
         raise RuntimeError(msg)
 
-    if errors:
-        msg = f"部分失败: {'; '.join(errors)} | 成功: {'; '.join(summaries)}"
+    if hard_errors:
+        msg = (
+            f"部分失败: {'; '.join(hard_errors)}"
+            + (f" | 软跳过: {'; '.join(transient_errors)}" if transient_errors else "")
+            + (f" | 成功: {'; '.join(summaries)}" if summaries else "")
+        )
         set_task_result(FLYMOBI_API_TASK_NAME, msg)
         raise RuntimeError(msg)
+
+    if transient_errors and not summaries:
+        soft_msg = f"软跳过: 上游暂时不可达，等待下次调度 | {'; '.join(transient_errors)}"
+        logger.warning("[%s] %s", FLYMOBI_API_TASK_NAME, soft_msg)
+        log_scheduled_task_skip(
+            FLYMOBI_API_TASK_NAME, "上游网络瞬时故障", detail="; ".join(transient_errors)
+        )
+        set_task_result(FLYMOBI_API_TASK_NAME, soft_msg)
+        return
+
+    if transient_errors and summaries:
+        msg = (
+            f"部分跳过(上游暂时不可达): {'; '.join(transient_errors)} "
+            f"| 成功: {'; '.join(summaries)}"
+        )
+        logger.warning("[%s] %s", FLYMOBI_API_TASK_NAME, msg)
+        set_task_result(FLYMOBI_API_TASK_NAME, msg)
+        return
+
+    set_task_result(FLYMOBI_API_TASK_NAME, "执行成功: " + "; ".join(summaries))

@@ -20,6 +20,7 @@ from app.scheduler_module.task_names import AYA_API_TASK_NAME
 from app.scheduler_module.task_result_store import set_task_result
 from app.scheduler_module.task_utils import (
     get_current_time_str,
+    log_scheduled_task_skip,
     log_task_start,
     resolve_upstream_date_range,
     truncate_task_error_message,
@@ -30,6 +31,7 @@ from app.scheduler_module.upstream_fetch import (
     AYA_PATH_UNIT,
     fetch_aya_rows,
 )
+from app.scheduler_module.upstream_http import UpstreamTransientError
 from app.scheduler_module.upstream_import import import_upstream_ad_data
 
 logger = logging.getLogger(__name__)
@@ -220,8 +222,18 @@ async def aya_api_task(
             AYA_API_TASK_NAME,
             "执行成功: " + "; ".join(phase_summaries),
         )
+    except UpstreamTransientError as e:
+        prefix = (
+            f"部分成功: {'; '.join(phase_summaries)} | " if phase_summaries else ""
+        )
+        soft_msg = f"{prefix}软跳过: 上游暂时不可达，等待下次调度 | {e}"
+        logger.warning("[%s] %s", AYA_API_TASK_NAME, soft_msg)
+        log_scheduled_task_skip(AYA_API_TASK_NAME, "上游网络瞬时故障", detail=str(e))
+        set_task_result(AYA_API_TASK_NAME, soft_msg)
+        return
     except Exception as e:
         error_detail = truncate_task_error_message(str(e))
-        logger.error("%s 执行失败: %s", AYA_API_TASK_NAME, error_detail, exc_info=True)
+        # 不带 exc_info，避免与调度器失败日志重复触发 Telegram
+        logger.error("%s 执行失败: %s", AYA_API_TASK_NAME, error_detail)
         set_task_result(AYA_API_TASK_NAME, error_detail)
         raise

@@ -6,9 +6,9 @@ import logging
 from app.core.ad_data_metadata import DATA_SOURCE_TBSJ
 from app.core.config import settings
 from app.scheduler_module.task_names import TBSJ_API_TASK_NAME
-from app.scheduler_module.task_utils import log_task_error, resolve_upstream_date_range
+from app.scheduler_module.task_utils import resolve_upstream_date_range
 from app.scheduler_module.upstream_fetch import fetch_tbsj_rows
-from app.scheduler_module.upstream_http import post_form, post_json
+from app.scheduler_module.upstream_http import post_form, post_json, UpstreamTransientError
 from app.scheduler_module.upstream_task_runner import run_upstream_import_task
 
 logger = logging.getLogger(__name__)
@@ -58,10 +58,13 @@ async def _fetch_tbsj_token(username: str, password: str) -> str:
             label="TBSJ Token API",
             verify=False,
         )
+    except UpstreamTransientError:
+        # 瞬时网络故障直接上抛，由 run_upstream_import_task 软跳过
+        raise
     except Exception as json_err:
         err_text = str(json_err)
-        # 404 或明显客户端错误时尝试 form；其它错误直接抛出
-        if "状态码=404" not in err_text and "status=404" not in err_text and "404" not in err_text:
+        # 仅真正的 HTTP 404 才改走 form；避免响应体/其它错误文案误含 "404"
+        if "状态码=404" not in err_text and "status=404" not in err_text:
             raise
         logger.warning(
             "TBSJ Token JSON 提交失败（%s），改用 form 重试 URL=%s",
@@ -106,19 +109,14 @@ async def tbsj_api_task(
             headers=auth_headers,
         )
 
-    try:
-        await run_upstream_import_task(
-            TBSJ_API_TASK_NAME,
-            credentials=(username, password),
-            skip_hint="跳过: TBSJ API 未配置（请在 .env 设置 TBSJ_API_USERNAME / TBSJ_API_PASSWORD）",
-            fetch_data=fetch_data,
-            field_mapping=TBSJ_FIELD_MAPPING,
-            source="yangyangdeyi定时任务",
-            notify_title="yangyangdeyi",
-            data_source=DATA_SOURCE_TBSJ,
-            notify_params=notify_params,
-        )
-    except Exception as e:
-        log_timeout = "请求超时" in str(e) or "请求失败" in str(e)
-        log_task_error(TBSJ_API_TASK_NAME, str(e), exc_info=not log_timeout)
-        raise
+    await run_upstream_import_task(
+        TBSJ_API_TASK_NAME,
+        credentials=(username, password),
+        skip_hint="跳过: TBSJ API 未配置（请在 .env 设置 TBSJ_API_USERNAME / TBSJ_API_PASSWORD）",
+        fetch_data=fetch_data,
+        field_mapping=TBSJ_FIELD_MAPPING,
+        source="yangyangdeyi定时任务",
+        notify_title="yangyangdeyi",
+        data_source=DATA_SOURCE_TBSJ,
+        notify_params=notify_params,
+    )
