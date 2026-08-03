@@ -5,6 +5,7 @@
 - 对匹配记录做 SUM 聚合，计算漏斗总量与衍生指标
 - 衍生指标口径与前端广告数据表格「合计行」一致（useAdDataTableFormat）
 - 管理员额外返回减扣前 eCPM/收益；结果带 Redis 缓存
+- 默认按日汇总 country 互斥选源，避免同日多报表来源重复统计
 
 在系统中的位置：
 - 被 ``AdDataService.get_ad_data_summary`` 与 Telegram 统计菜单调用
@@ -25,6 +26,7 @@ from app.core.infrastructure.cache_compat import (
 from app.core.query_utils import apply_date_range_filter, check_use_assignment_table
 from app.core.security import is_admin
 from app.models.models import AdData, Client, Product, User
+from app.services.ad_data.queries.dimension_filter import kpi_mutual_source_filter
 from app.services.ad_data.queries.join_helpers import join_product_and_client
 
 logger = logging.getLogger(__name__)
@@ -336,6 +338,9 @@ class AdDataSummaryQuery:
         if product_id:
             query = query.where(AdData.product_id == product_id)
 
+        query = query.where(
+            kpi_mutual_source_filter(start_date=start_date, end_date=end_date)
+        )
         return apply_date_range_filter(
             query, AdData.date, start_date, end_date, default_to_current_month=True
         )
@@ -360,6 +365,9 @@ class AdDataSummaryQuery:
         if product_id:
             admin_query = admin_query.where(AdData.product_id == product_id)
 
+        admin_query = admin_query.where(
+            kpi_mutual_source_filter(start_date=start_date, end_date=end_date)
+        )
         return apply_date_range_filter(
             admin_query, AdData.date, start_date, end_date, default_to_current_month=True
         )
@@ -416,6 +424,9 @@ class AdDataSummaryQuery:
             query = query.where(Client.id == client_id)
 
         query = query.where(Product.is_active == True)
+        query = query.where(
+            kpi_mutual_source_filter(start_date=start_date, end_date=end_date)
+        )
 
         query = apply_date_range_filter(
             query, AdData.date, start_date, end_date, default_to_current_month=True

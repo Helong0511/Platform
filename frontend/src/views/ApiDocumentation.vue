@@ -68,7 +68,7 @@
             <li><code>/client_data</code> 接口的 <code>data_type</code> 参数是必填的，必须包含在签名计算中</li>
             <li><code>dimension</code> 为可选参数；传入时须参与签名。取值：<code>country</code>（按国家）、<code>ad_unit</code>（按广告单元）、<code>ad_unit_country</code>（按广告单元+国家，<code>country_ad_unit</code> 为兼容别名）</li>
             <li><code>page</code> / <code>page_size</code> 为可选分页参数；仅当请求体中<strong>显式传入</strong>时才参与签名；不传则服务端默认 <code>page=1</code>、<code>page_size=1000</code>（最大 5000），且默认值不参与签名</li>
-            <li>若同时存在国家 API 与广告单元 API 数据，强烈建议传入 <code>dimension</code>，否则不传时返回全量行可能重复统计</li>
+            <li>若同时存在国家 API 与广告单元 API 数据，建议传入 <code>dimension</code>；日汇总未传时已互斥选源，明细未传仍可能返回多来源行</li>
             <li>只有非空参数才参与签名计算。如果未提供可选参数，则不包含在签名中</li>
             <li>时间戳允许误差为 ±15 秒（服务器与客户端时钟须大致同步）</li>
           </ul>
@@ -446,15 +446,16 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
             </ul>
             <p><strong>统计维度（dimension，可选）</strong>：</p>
             <ul>
-              <li><code>country</code>：国家有值且 <code>ad_unit</code> 为空（含 AA/ZZ）</li>
-              <li><code>ad_unit</code>：<code>ad_unit</code> 有值且国家为空（NULL/空串）</li>
-              <li><code>ad_unit_country</code>：国家与 <code>ad_unit</code> 均有值（<code>country_ad_unit</code> 为兼容别名）</li>
-              <li>不传：返回库中全部匹配行（兼容旧版；双 API 场景可能重复统计）</li>
+              <li><code>country</code>：具体国家有值且 <code>ad_unit</code> 为空（含 AA；不含 ZZ）</li>
+              <li><code>ad_unit</code>：<code>ad_unit</code> 有值且无具体国家（NULL/空串/ZZ）</li>
+              <li><code>ad_unit_country</code>：具体国家与 <code>ad_unit</code> 均有值（不含 ZZ；<code>country_ad_unit</code> 为兼容别名）</li>
+              <li><code>ZZ</code>（全部区域）：有广告单元算广告单元维度；无广告单元算日报维度</li>
+              <li>不传：明细（all）仍返回库中全部匹配行；日汇总（day）按「日期+产品+广告单元」分组，但互斥选源（等同 country），避免双 API 重复统计</li>
             </ul>
             <p><strong>数据模式说明</strong>：</p>
             <ul>
               <li><strong>data_type='all'（详细数据）</strong>：返回明细行；配合 <code>dimension</code> 时与后台「详细报表」一致</li>
-              <li><strong>data_type='day'（每日汇总）</strong>：按日汇总；配合 <code>dimension</code> 时与后台「每日统计」一致；未传 <code>dimension</code> 时仍按「日期+产品+广告单元」汇总（历史行为）</li>
+              <li><strong>data_type='day'（每日汇总）</strong>：按日汇总；配合 <code>dimension</code> 时与后台「每日统计」一致（<code>ad_unit_country</code> 会按国家分组并返回实际国家码）；未传 <code>dimension</code> 时按「日期+产品+广告单元」分组并互斥选源</li>
             </ul>
             <p><strong>广告单元（ad_unit）说明</strong>：</p>
             <ul>
@@ -611,7 +612,7 @@ const adDataResponseFields = [
   { field: 'date', type: 'string', description: '数据日期（ISO格式：YYYY-MM-DD）' },
   { field: 'product_name', type: 'string', description: '产品名称（确保不为null）' },
   { field: 'ad_unit', type: 'string', description: '广告单元（可为空字符串）' },
-  { field: 'country_code', type: 'string', description: '国家二字代码；dimension=country 时为实际国家；dimension=ad_unit 或 day 未传 dimension 时多为 ZZ；dimension=ad_unit_country 时为实际国家' },
+  { field: 'country_code', type: 'string', description: '国家二字代码；dimension=country / ad_unit_country 时为实际国家；dimension=ad_unit 或 day 未传 dimension 时多为 ZZ' },
   { field: 'country_name_zh', type: 'string', description: '国家中文名称；与 country_code 对应，无国家拆分时为「全部区域」' },
   { field: 'request_count', type: 'int', description: '请求数（整数）' },
   { field: 'match_count', type: 'int', description: '匹配数（整数）' },

@@ -2,15 +2,19 @@
 ad_data 上游元数据：数据来源、报表维度、账号。
 
 report_type 枚举（与客户报表维度、唯一键一致）：
-- unit    广告单元明细（有 ad_unit、无 country）— 智索 unit API、GAM ad_unit
-- country 国家明细（有 country、无 ad_unit）— 智索 country API、TQT/Huguang 等
-- cross   国家+广告单元交叉 — Addermobi、Skymobi、Pomiad、GAM country 等
-- daily   日汇总（无 country、无 ad_unit）— 智索 daily 兜底、GAM daily
+- unit    广告单元明细（有 ad_unit、无具体国家；含 country=ZZ）— 智索 unit API、GAM ad_unit
+- country 国家明细（有具体国家、无 ad_unit；不含 ZZ）— 智索 country API、TQT/Huguang 等
+- cross   具体国家+广告单元交叉（不含 ZZ）— Addermobi、Skymobi、Pomiad、GAM country 等
+- daily   日汇总（无具体国家、无 ad_unit；含 country=ZZ）— 智索 daily 兜底、GAM daily
 - legacy  历史/待标注；新入库一律按行形态自动推断为 unit/country/cross/daily
+
+ZZ（全部区域）不算具体国家：ZZ+有广告单元→unit；ZZ+无广告单元→daily。
 """
 from __future__ import annotations
 
 from typing import Optional
+
+from app.core.country_code import has_concrete_country_code
 
 # 数据来源（与定时拉数任务 / 入库 data_source 字段一致，使用小写英文 slug）
 DATA_SOURCE_ZHISUO = "zhisuo"
@@ -72,7 +76,8 @@ DIMENSION_REPORT_TYPES: dict[str, tuple[str, ...]] = {
     "ad_unit_country": (REPORT_TYPE_CROSS,),
 }
 
-# 每日汇总选源优先级（同一产品+日期只计一套）
+# 每日汇总选源优先级（同一产品+日期 API 侧只计一套；Excel 日报可与国家相加）
+# country > cross > unit > daily（API 日报）；实现见 dimension_filter
 SUMMARY_REPORT_TYPE_PRIORITY: tuple[str, ...] = (
     REPORT_TYPE_COUNTRY,
     REPORT_TYPE_CROSS,
@@ -107,9 +112,13 @@ def infer_report_type_from_shape(
     ad_unit: str = "",
     country_code: Optional[str] = None,
 ) -> str:
-    """根据行形态推断报表维度（历史回填与 legacy 入库自动标注）。"""
+    """
+    根据行形态推断报表维度（历史回填与 legacy 入库自动标注）。
+
+    ZZ（全部区域）视为无具体国家：有广告单元→unit，无广告单元→daily。
+    """
     has_unit = bool(str(ad_unit or "").strip())
-    has_country = bool(str(country_code or "").strip())
+    has_country = has_concrete_country_code(country_code)
     if has_unit and has_country:
         return REPORT_TYPE_CROSS
     if has_country:
@@ -210,10 +219,10 @@ REPORT_TYPE_DETAIL_OPTIONS: tuple[str, ...] = (
 )
 
 REPORT_TYPE_HINTS: dict[str, str] = {
-    REPORT_TYPE_UNIT: "按广告单元，无国家；智索 channelunit、GAM ad_unit、Aya getAdsDataUnit",
-    REPORT_TYPE_COUNTRY: "按国家，无广告单元；智索 channelcountry、TQT、Huguang、Aya",
-    REPORT_TYPE_CROSS: "国家+广告单元；智索 channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、GAM country",
-    REPORT_TYPE_DAILY: "日汇总，无国家无单元；智索 channeldaily 兜底、GAM daily、Aya getDay",
+    REPORT_TYPE_UNIT: "按广告单元，无具体国家（含 ZZ）；智索 channelunit、GAM ad_unit、Aya getAdsDataUnit",
+    REPORT_TYPE_COUNTRY: "按具体国家，无广告单元（不含 ZZ）；智索 channelcountry、TQT、Huguang、Aya",
+    REPORT_TYPE_CROSS: "具体国家+广告单元（不含 ZZ）；智索 channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、GAM country",
+    REPORT_TYPE_DAILY: "日汇总，无具体国家无单元（含 ZZ）；智索 channeldaily 兜底、GAM daily、Aya getDay",
     REPORT_TYPE_LEGACY: "历史或未标注；新入库会自动按行形态推断",
 }
 

@@ -269,9 +269,10 @@ class AdDataListQuery:
             sort_by = "date"
 
         sort_column = valid_sort_fields[sort_by]
+        # 附加 AdData.id 作为稳定 tie-breaker，避免 OFFSET 翻页漏/重
         if sort_order.lower() == "desc":
-            return query.order_by(sort_column.desc())
-        return query.order_by(sort_column.asc())
+            return query.order_by(sort_column.desc(), AdData.id.desc())
+        return query.order_by(sort_column.asc(), AdData.id.asc())
 
     async def _count_total(
         self,

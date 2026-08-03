@@ -249,6 +249,26 @@ def collect_country_filter_values(
     return candidates
 
 
+# 全部区域占位码：无具体国家（与 NULL 同类，用于筛选/展示；维度推断见 has_concrete_country_code）
+ALL_REGIONS_COUNTRY_CODE = "ZZ"
+
+
+def is_all_regions_country_code(country_code: Optional[str]) -> bool:
+    """是否为全部区域占位码 ZZ。"""
+    return str(country_code or "").strip() == ALL_REGIONS_COUNTRY_CODE
+
+
+def has_concrete_country_code(country_code: Optional[str]) -> bool:
+    """
+    是否有具体国家代码（用于报表维度/report_type 行形态推断）。
+
+    - NULL / 空串 / ZZ（全部区域）→ False
+    - AA（未知区域）及真实 ISO 码 → True
+    """
+    code = str(country_code or "").strip()
+    return bool(code) and code != ALL_REGIONS_COUNTRY_CODE
+
+
 def build_ad_data_country_equality(country_code_column: Any, country_code: Optional[str]) -> Any:
     """
     单行 country_code 等值条件（入库去重、Excel 查重）。
@@ -257,9 +277,15 @@ def build_ad_data_country_equality(country_code_column: Any, country_code: Optio
     用户显式筛选/写入 ZZ（全部区域）时同样兼容 NULL。
     """
     if country_code is None or (isinstance(country_code, str) and not country_code.strip()):
-        return or_(country_code_column.is_(None), country_code_column == "ZZ")
-    if country_code == "ZZ":
-        return or_(country_code_column == "ZZ", country_code_column.is_(None))
+        return or_(
+            country_code_column.is_(None),
+            country_code_column == ALL_REGIONS_COUNTRY_CODE,
+        )
+    if is_all_regions_country_code(country_code):
+        return or_(
+            country_code_column == ALL_REGIONS_COUNTRY_CODE,
+            country_code_column.is_(None),
+        )
     return country_code_column == country_code
 
 

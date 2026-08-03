@@ -11,12 +11,13 @@
 注意事项：
 1. 客户用户仅统计已分配产品相关数据
 2. 趋势图日期序列须补全缺失日期，避免折线断裂
+3. AdData 聚合默认走日汇总 country 互斥选源，避免同日多报表来源重复统计
 """
 import logging
-from datetime import timedelta
-from typing import Dict, Any
+from datetime import date, timedelta
+from typing import Dict, Any, Optional
 
-from sqlalchemy import select, func, case, Float, and_
+from sqlalchemy import select, func, case, Float
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.infrastructure.cache_compat import (
@@ -27,9 +28,14 @@ from app.core.infrastructure.cache_compat import (
 )
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
-from app.core.query_utils import date_range_condition, product_assignment_join_condition, check_use_assignment_table
+from app.core.query_utils import date_range_condition, check_use_assignment_table
 from app.core.utils import get_app_now_naive
-from app.models.models import User, AdData, Product, Client, UserRole, ProductAssignment
+from app.models.models import User, AdData, Product, Client, UserRole
+from app.services.ad_data.queries.dimension_filter import kpi_mutual_source_filter
+from app.services.ad_data.queries.join_helpers import (
+    join_resolved_client,
+    outerjoin_best_product_assignment,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +51,13 @@ class DashboardService:
     def __init__(self, db: AsyncSession):
         """注入异步数据库会话。"""
         self.db = db
+
+    @staticmethod
+    def _apply_kpi_source_filter(query, start_date: Optional[date], end_date: Optional[date]):
+        """与日汇总默认 country 口径一致的互斥选源。"""
+        return query.where(
+            kpi_mutual_source_filter(start_date=start_date, end_date=end_date)
+        )
 
     async def get_dashboard_stats(
             self,
@@ -135,6 +148,7 @@ class DashboardService:
         date_condition = date_range_condition(AdData.date, start_date, end_date)
         if date_condition is not None:
             query = query.where(date_condition)
+        query = self._apply_kpi_source_filter(query, start_date, end_date)
 
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(self.db)
@@ -143,18 +157,8 @@ class DashboardService:
         query = query.join(Product, AdData.product_id == Product.id)
         if current_user.role != UserRole.ADMIN:
             if use_assignment_table:
-                query = query.join(
-                    ProductAssignment,
-                    and_(
-                        ProductAssignment.product_id == Product.id,
-                        product_assignment_join_condition(
-                            AdData.date,
-                            ProductAssignment.start_date,
-                            ProductAssignment.end_date
-                        )
-                    )
-                )
-                query = query.join(Client, ProductAssignment.client_id == Client.id)
+                query = outerjoin_best_product_assignment(query, AdData.date)
+                query = join_resolved_client(query)
             else:
                 query = query.join(Client, Product.client_id == Client.id)
             query = query.where(Client.user_id == current_user.id)
@@ -222,22 +226,15 @@ class DashboardService:
         date_condition_prev = date_range_condition(AdData.date, start_date_prev, end_date_prev)
         if date_condition_prev is not None:
             query_prev = query_prev.where(date_condition_prev)
+        query_prev = self._apply_kpi_source_filter(
+            query_prev, start_date_prev, end_date_prev
+        )
 
         query_prev = query_prev.join(Product, AdData.product_id == Product.id)
         if current_user.role != UserRole.ADMIN:
             if use_assignment_table:
-                query_prev = query_prev.join(
-                    ProductAssignment,
-                    and_(
-                        ProductAssignment.product_id == Product.id,
-                        product_assignment_join_condition(
-                            AdData.date,
-                            ProductAssignment.start_date,
-                            ProductAssignment.end_date
-                        )
-                    )
-                )
-                query_prev = query_prev.join(Client, ProductAssignment.client_id == Client.id)
+                query_prev = outerjoin_best_product_assignment(query_prev, AdData.date)
+                query_prev = join_resolved_client(query_prev)
             else:
                 query_prev = query_prev.join(Client, Product.client_id == Client.id)
             query_prev = query_prev.where(Client.user_id == current_user.id)
@@ -409,6 +406,7 @@ class DashboardService:
             date_condition = date_range_condition(AdData.date, start_date, end_date)
             if date_condition is not None:
                 query = query.where(date_condition)
+            query = self._apply_kpi_source_filter(query, start_date, end_date)
 
             # 检查是否使用产品分配历史表
             use_assignment_table = await check_use_assignment_table(self.db)
@@ -416,18 +414,8 @@ class DashboardService:
             # 根据用户角色过滤
             if current_user.role != UserRole.ADMIN:
                 if use_assignment_table:
-                    query = query.join(
-                        ProductAssignment,
-                        and_(
-                            ProductAssignment.product_id == Product.id,
-                            product_assignment_join_condition(
-                                AdData.date,
-                                ProductAssignment.start_date,
-                                ProductAssignment.end_date
-                            )
-                        )
-                    )
-                    query = query.join(Client, ProductAssignment.client_id == Client.id)
+                    query = outerjoin_best_product_assignment(query, AdData.date)
+                    query = join_resolved_client(query)
                 else:
                     query = query.join(Client, Product.client_id == Client.id)
                 query = query.where(Client.user_id == current_user.id)
@@ -552,6 +540,7 @@ class DashboardService:
         date_condition = date_range_condition(AdData.date, start_date, end_date)
         if date_condition is not None:
             query = query.where(date_condition)
+        query = self._apply_kpi_source_filter(query, start_date, end_date)
 
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(self.db)
@@ -560,18 +549,8 @@ class DashboardService:
         query = query.join(Product, AdData.product_id == Product.id)
         if current_user.role != UserRole.ADMIN:
             if use_assignment_table:
-                query = query.join(
-                    ProductAssignment,
-                    and_(
-                        ProductAssignment.product_id == Product.id,
-                        product_assignment_join_condition(
-                            AdData.date,
-                            ProductAssignment.start_date,
-                            ProductAssignment.end_date
-                        )
-                    )
-                )
-                query = query.join(Client, ProductAssignment.client_id == Client.id)
+                query = outerjoin_best_product_assignment(query, AdData.date)
+                query = join_resolved_client(query)
             else:
                 query = query.join(Client, Product.client_id == Client.id)
             query = query.where(Client.user_id == current_user.id)

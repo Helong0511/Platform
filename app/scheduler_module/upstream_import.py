@@ -26,6 +26,9 @@ from app.core.ad_data_processor import process_api_ad_data, send_pending_data_de
 from app.core.ad_data_metadata import format_report_type_counts_for_notify
 from app.core.product_assignment import format_assignment_gap_telegram_message
 from app.core.telegram import send_telegram_notify_async
+from app.services.ad_data.dual_dimension_check import (
+    format_country_unit_mismatch_telegram_message,
+)
 from app.core.database import AsyncSessionLocal
 from app.scheduler_module.task_result_store import set_task_result
 from app.scheduler_module.task_utils import (
@@ -113,6 +116,8 @@ async def finalize_upstream_import(
     error_count = result.get("error_count", 0)
     assignment_gaps = result.get("assignment_gaps") or []
     assignment_orphan_total = int(result.get("assignment_orphan_total") or 0)
+    country_unit_mismatches = result.get("country_unit_mismatches") or []
+    country_unit_mismatch_total = int(result.get("country_unit_mismatch_total") or 0)
     report_type_line = format_report_type_counts_for_notify(
         result.get("report_type_counts")
     )
@@ -161,6 +166,20 @@ async def finalize_upstream_import(
             await send_telegram_notify_async(gap_msg)
         except Exception as notify_err:
             logger.warning(f"发送产品分配空窗 Telegram 告警失败: {task_name}: {notify_err}")
+
+    if country_unit_mismatch_total > 0:
+        mismatch_msg = format_country_unit_mismatch_telegram_message(
+            notify_title=notify_title,
+            mismatches=country_unit_mismatches,
+            total=country_unit_mismatch_total,
+        )
+        try:
+            await send_telegram_notify_async(mismatch_msg)
+        except Exception as notify_err:
+            logger.warning(
+                f"发送国家/广告单元同日收益不一致 Telegram 告警失败: "
+                f"{task_name}: {notify_err}"
+            )
 
     # ---------- 写入任务结果供调度器持久化 ----------
     if update_task_result:

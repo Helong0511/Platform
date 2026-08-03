@@ -14,20 +14,25 @@ from typing import Any, List, Optional, Tuple
 
 from app.core.utils import normalize_date_for_ad_data
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.constants import CLIENT_API_DEFAULT_PAGE_SIZE, CLIENT_API_MAX_PAGE_SIZE
-from app.core.query_utils import check_use_assignment_table, date_range_condition, product_assignment_join_condition
-from app.models.models import AdData, Client, CountryInfo, Product, ProductAssignment
+from app.core.country_code import resolve_country_name
+from app.core.query_utils import check_use_assignment_table, date_range_condition
+from app.models.models import AdData, Client, CountryInfo, Product
 from app.services.ad_data.queries.dimension_filter import (
-    CROSS_DIMENSION,
+    DEFAULT_DIMENSION,
     build_daily_summary_dimension_filter,
     is_cross_dimension,
     maybe_build_ad_data_dimension_filter,
     normalize_dimension,
     parse_optional_dimension,
+)
+from app.services.ad_data.queries.join_helpers import (
+    outerjoin_best_product_assignment,
+    resolved_client_id_expr,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,18 +85,9 @@ class ClientAdDataQuery:
         query = query.where(Product.is_active == True)
 
         if use_assignment_table:
-            query = query.join(
-                ProductAssignment,
-                and_(
-                    ProductAssignment.product_id == Product.id,
-                    product_assignment_join_condition(
-                        AdData.date,
-                        ProductAssignment.start_date,
-                        ProductAssignment.end_date,
-                    ),
-                ),
-            )
-            query = query.where(ProductAssignment.client_id == client.id)
+            # 最多一条分配 + 空窗回退 Product.client_id，避免整批漏出 / JOIN 放大
+            query = outerjoin_best_product_assignment(query, AdData.date)
+            query = query.where(resolved_client_id_expr() == client.id)
         else:
             query = query.where(Product.client_id == client.id)
         return query
@@ -141,8 +137,7 @@ class ClientAdDataQuery:
         use_assignment_table: bool,
         dimension: Optional[str],
     ) -> int:
-        # distinct：避免 product_assignments 重叠时 count 放大
-        count_query = select(func.count(func.distinct(AdData.id)))
+        count_query = select(func.count(AdData.id))
         count_query = self._apply_client_product_scope(count_query, client, use_assignment_table)
         count_query = self._apply_date_and_dimension(count_query, start_date, end_date, dimension)
         return int((await self.db.execute(count_query)).scalar() or 0)
@@ -311,10 +306,12 @@ class ClientAdDataQuery:
         """对分组聚合结果分页：总数与当前页均基于同一 subquery。"""
         subq = query.subquery()
         total = int((await self.db.execute(select(func.count()).select_from(subq))).scalar() or 0)
-        # 排序键需覆盖分组维度，否则同产品多广告单元时 OFFSET 翻页会漏/重
+        # 排序键需覆盖分组维度，否则同产品多广告单元/国家时 OFFSET 翻页会漏/重
         order_cols = [subq.c.date.asc(), subq.c.product_id.asc()]
         if hasattr(subq.c, "ad_unit"):
             order_cols.append(subq.c.ad_unit.asc())
+        if hasattr(subq.c, "country_code"):
+            order_cols.append(subq.c.country_code.asc())
         page_query = select(subq).order_by(*order_cols).offset(offset).limit(page_size)
         rows = (await self.db.execute(page_query)).all()
         return rows, total
@@ -328,6 +325,10 @@ class ClientAdDataQuery:
         offset: int,
         page_size: int,
     ) -> tuple[list[dict[str, Any]], int]:
+        """
+        兼容旧版：仍按 date+product+ad_unit 分组，但互斥选源（默认 country），
+        避免双 API 多来源行被 SUM 重复统计。
+        """
         query = select(
             AdData.date.label("date"),
             Product.id.label("product_id"),
@@ -342,7 +343,9 @@ class ClientAdDataQuery:
             func.sum(AdData.revenue_after_deduct).label("revenue"),
         )
         query = self._apply_client_product_scope(query, client, use_assignment_table)
-        query = self._apply_date_and_dimension(query, start_date, end_date, None)
+        query = self._apply_date_and_dimension(
+            query, start_date, end_date, DEFAULT_DIMENSION, daily_summary=True
+        )
         query = query.group_by(
             AdData.date,
             Product.id,
@@ -363,7 +366,9 @@ class ClientAdDataQuery:
         offset: int,
         page_size: int,
     ) -> tuple[list[dict[str, Any]], int]:
-        group_by_ad_unit = dimension == "ad_unit" or is_cross_dimension(dimension)
+        dim = normalize_dimension(dimension)
+        group_by_ad_unit = dim == "ad_unit" or is_cross_dimension(dim)
+        group_by_country = dim == "country" or is_cross_dimension(dim)
 
         select_cols: list[Any] = [
             AdData.date.label("date"),
@@ -379,6 +384,9 @@ class ClientAdDataQuery:
         if group_by_ad_unit:
             select_cols.append(AdData.ad_unit.label("ad_unit"))
             group_cols.append(AdData.ad_unit)
+        if group_by_country:
+            select_cols.append(AdData.country_code.label("country_code"))
+            group_cols.append(AdData.country_code)
 
         query = select(
             *select_cols,
@@ -392,20 +400,32 @@ class ClientAdDataQuery:
         )
         query = self._apply_client_product_scope(query, client, use_assignment_table)
         query = self._apply_date_and_dimension(
-            query, start_date, end_date, dimension, daily_summary=True
+            query, start_date, end_date, dim, daily_summary=True
         )
         order_cols: list[Any] = [AdData.date.asc(), Product.id.asc()]
         if group_by_ad_unit:
             order_cols.append(AdData.ad_unit.asc())
+        if group_by_country:
+            order_cols.append(AdData.country_code.asc())
         query = query.group_by(*group_cols).order_by(*order_cols)
 
         rows, total = await self._paginate_grouped_query(query, offset, page_size)
-        return [self._daily_row_to_dict(row, dim=dimension) for row in rows], total
+        country_codes = {
+            (getattr(row, "country_code", None) or "").strip()
+            for row in rows
+            if (getattr(row, "country_code", None) or "").strip()
+        }
+        country_name_map = await self._load_country_name_zh(country_codes)
+        return [
+            self._daily_row_to_dict(row, dim=dim, country_name_map=country_name_map)
+            for row in rows
+        ], total
 
     def _daily_row_to_dict(
         self,
         row: Any,
         dim: Optional[str],
+        country_name_map: Optional[dict[str, str]] = None,
     ) -> dict[str, Any]:
         date_obj = normalize_date_for_ad_data(row.date)
         date_str = date_obj.isoformat()
@@ -433,14 +453,15 @@ class ClientAdDataQuery:
         cpc = round((total_revenue / total_click_count) if total_click_count > 0 else 0.0, 2)
         ecpm = round((total_revenue / total_display_count * 1000) if total_display_count > 0 else 0.0, 2)
 
-        if dim is None:
-            ad_unit = row.ad_unit or ""
+        if dim is None or dim == "ad_unit":
+            ad_unit = getattr(row, "ad_unit", "") or ""
             country_code = "ZZ"
             country_name_zh = "全部区域"
-        elif dim in ("country", "ad_unit", CROSS_DIMENSION):
-            ad_unit = getattr(row, "ad_unit", "") or "" if dim != "country" else ""
-            country_code = "ZZ"
-            country_name_zh = "全部区域"
+        elif dim == "country" or is_cross_dimension(dim):
+            ad_unit = getattr(row, "ad_unit", "") or "" if is_cross_dimension(dim) else ""
+            country_code = (getattr(row, "country_code", None) or "").strip() or "ZZ"
+            mapped = (country_name_map or {}).get(country_code)
+            country_name_zh = mapped or resolve_country_name(None, country_code) or "全部区域"
         else:
             ad_unit = getattr(row, "ad_unit", "") or ""
             country_code = "ZZ"

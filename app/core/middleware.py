@@ -21,14 +21,15 @@
 
 API限流（RateLimitMiddleware）：
 - 已登录用户（有效 access_token，含管理员与客户）：不限流
-
-慢请求（PerformanceMonitoringMiddleware）：
-- 2–3s：INFO；3–8s：WARNING；>8s：ERROR
-- 未登录：默认限流 100次/分钟（可配置）
+- 客户开放 API（/client_data、/client_products）：独立桶，默认 2000次/分钟
+- 未登录其它接口：默认限流 100次/分钟（可配置）
 - 登录接口（未带有效令牌）：5次/分钟（防止暴力破解）
 - 短链接路由：不限流（支持高并发）
 - 存储方式：优先使用Redis，降级到内存存储
 - 限流标识：使用客户端IP地址
+
+慢请求（PerformanceMonitoringMiddleware）：
+- 2–3s：INFO；3–8s：WARNING；>8s：ERROR
 
 安全响应头（SecurityHeadersMiddleware）：
 - X-Content-Type-Options: nosniff（防止MIME类型嗅探）
@@ -158,6 +159,13 @@ DEFAULT_RATE_WINDOW = 60  # 秒
 LOGIN_RATE_LIMIT = getattr(settings, 'LOGIN_RATE_LIMIT', 5)
 LOGIN_RATE_WINDOW = 60
 
+# 客户开放 API（签名鉴权）：独立桶 + 更高配额，避免翻页压测被普通 100/分钟限死
+CLIENT_OPEN_API_RATE_LIMIT = getattr(settings, 'CLIENT_OPEN_API_RATE_LIMIT', 200)
+_CLIENT_OPEN_API_PATHS = frozenset({
+    "/api/v1/client_data",
+    "/api/v1/client_products",
+})
+
 
 def _rate_limit_bucket(path: str, method: str) -> str:
     """按接口类别隔离限流计数，避免普通匿名请求耗尽登录配额。"""
@@ -165,6 +173,8 @@ def _rate_limit_bucket(path: str, method: str) -> str:
         return "login"
     if path == "/api/v1/audit-logs/client-error":
         return "client-error"
+    if path in _CLIENT_OPEN_API_PATHS:
+        return "client-open-api"
     return "api"
 
 
@@ -211,12 +221,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             logger.warning(f"获取客户端IP失败: {e}，使用默认IP 'testclient'")
             client_ip = "testclient"
 
-        # ====== 检查是否为登录接口 ======
-        # 登录接口使用更严格的限流策略（防止暴力破解）
+        # ====== 按接口类别选择配额 ======
         bucket = _rate_limit_bucket(path, request.method)
-        is_login = bucket == "login"
-        limit = LOGIN_RATE_LIMIT if is_login else DEFAULT_RATE_LIMIT
-        window = LOGIN_RATE_WINDOW if is_login else DEFAULT_RATE_WINDOW
+        if bucket == "login":
+            limit, window = LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW
+        elif bucket == "client-open-api":
+            limit, window = CLIENT_OPEN_API_RATE_LIMIT, DEFAULT_RATE_WINDOW
+        else:
+            limit, window = DEFAULT_RATE_LIMIT, DEFAULT_RATE_WINDOW
 
         # ====== 生产环境：对敏感接口增加额外限流 ======
         if settings.is_production:

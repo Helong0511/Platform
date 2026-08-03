@@ -252,11 +252,26 @@ class Settings(BaseSettings):
         "true" if is_production_env_name(detect_production_env()) else "false",
     ).lower() in ("true", "1", "yes")
     # 只有请求直接来自这些反向代理时才读取 X-Real-IP/X-Forwarded-For。
-    TRUSTED_PROXY_IPS: list[str] = [
-        ip.strip()
-        for ip in os.getenv("TRUSTED_PROXY_IPS", "127.0.0.1,::1").split(",")
-        if ip.strip()
-    ]
+    # 用 str 承接环境变量（逗号分隔），避免 pydantic-settings 把 list 当 JSON 解析失败。
+    # 示例：TRUSTED_PROXY_IPS=127.0.0.1,::1
+    TRUSTED_PROXY_IPS: str = Field(
+        default="127.0.0.1,::1",
+        description="可信反向代理 IP，逗号分隔",
+    )
+
+    def get_trusted_proxy_ips(self) -> list[str]:
+        """解析 TRUSTED_PROXY_IPS 为 IP 列表（支持逗号分隔或 JSON 数组）。"""
+        raw = (self.TRUSTED_PROXY_IPS or "").strip()
+        if not raw:
+            return ["127.0.0.1", "::1"]
+        if raw.startswith("["):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    return [str(ip).strip() for ip in parsed if str(ip).strip()]
+            except json.JSONDecodeError:
+                pass
+        return [ip.strip() for ip in raw.split(",") if ip.strip()]
 
     # JWT算法配置
     # RS256（推荐，非对称加密）或 HS256（对称加密）
@@ -468,6 +483,8 @@ class Settings(BaseSettings):
     API_RATE_LIMIT: int = int(os.getenv("API_RATE_LIMIT", "100"))
     # 登录接口限流：每分钟请求数（防止暴力破解）
     LOGIN_RATE_LIMIT: int = int(os.getenv("LOGIN_RATE_LIMIT", "5"))
+    # 客户开放 API（签名鉴权，非 JWT）：每分钟请求数；翻页拉数场景远高于普通匿名接口
+    CLIENT_OPEN_API_RATE_LIMIT: int = int(os.getenv("CLIENT_OPEN_API_RATE_LIMIT", "2000"))
 
     # ====== 文件上传配置 ======
     # 最大文件大小（字节）：10MB

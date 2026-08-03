@@ -14,12 +14,27 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+async def lock_product_for_assignment(db: AsyncSession, product_id: int) -> Product:
+    """
+    锁定产品行，串行化同一产品的分配写入，避免并发 check-then-act 写出重叠区间。
+    """
+    result = await db.execute(
+        select(Product).where(Product.id == product_id).with_for_update()
+    )
+    product = result.scalar_one_or_none()
+    if product is None:
+        raise ValueError(f"产品ID {product_id} 不存在")
+    return product
+
+
 async def create_product_assignment(
     db: AsyncSession,
     product_id: int,
     client_id: int,
     start_date: date | None = None,
-    end_date: date | None = None
+    end_date: date | None = None,
+    *,
+    skip_product_lock: bool = False,
 ) -> ProductAssignment:
     """
     创建产品分配记录
@@ -30,6 +45,7 @@ async def create_product_assignment(
         client_id: 客户ID
         start_date: 分配开始日期（如果为None，使用当前日期）
         end_date: 分配结束日期（如果为None，表示当前有效）
+        skip_product_lock: 调用方已持有产品行锁时传 True，避免重复加锁
     
     Returns:
         ProductAssignment: 创建的分配记录
@@ -42,6 +58,9 @@ async def create_product_assignment(
         raise ValueError(
             f"日期逻辑错误：开始日期（{start_date}）不能晚于结束日期（{end_date}）"
         )
+
+    if not skip_product_lock:
+        await lock_product_for_assignment(db, product_id)
 
     # 检查是否存在重叠的分配记录（确保没有重复占用时间）
     # 重叠条件：两个日期范围有交集
@@ -226,6 +245,9 @@ async def transfer_product_assignment(
             f"期望值：{expected_new_start}，当前差值：{(new_start_date - old_end_date).days}天"
         )
     
+    # 锁定产品行，保证关闭旧区间 + 创建新区间与并发写入互斥
+    await lock_product_for_assignment(db, product_id)
+
     # 先读取当前有效记录，提前拦截「结束日早于开始日」——否则会写成倒挂区间，
     # 后续 validate 会误报与新记录「重叠」（如 start=07-23、end=07-21）
     active_query = select(ProductAssignment).where(
@@ -337,7 +359,8 @@ async def transfer_product_assignment(
             product_id=product_id,
             client_id=new_client_id,
             start_date=new_start_date,
-            end_date=None  # 当前有效
+            end_date=None,  # 当前有效
+            skip_product_lock=True,
         )
     
     # 验证转移后的分配记录完整性（捕获验证过程中的异常）

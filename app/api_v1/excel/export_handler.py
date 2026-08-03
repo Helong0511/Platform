@@ -10,7 +10,7 @@ from calendar import monthrange
 from datetime import date, datetime
 from fastapi import Depends
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, and_, or_
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -19,10 +19,10 @@ from app.services.ad_data.queries.filter_conditions import apply_ad_data_scope_f
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
-from app.core.query_utils import check_use_assignment_table, product_assignment_join_condition
+from app.core.query_utils import check_use_assignment_table
 from app.core.security import get_current_user
 from app.core.excel_io import excel_streaming_response
-from app.models.models import User, Client, Product, AdData, UserRole, ProductAssignment, CountryInfo
+from app.models.models import User, Client, Product, AdData, UserRole, CountryInfo
 from app.services.ad_data.queries.dimension_filter import (
     build_ad_data_dimension_filter,
     is_cross_dimension,
@@ -256,26 +256,18 @@ async def export_ad_data_handler(
         )
         # ---------- 条件分支 ----------
         if use_assignment_table_for_count:
-            # 使用产品分配历史表（优化：避免在 AdData.date 上使用 func.date()）
-            # 使用与 ad_data.py 完全相同的方式，将日期范围条件放在 JOIN 条件中
-            # 注意：不在JOIN条件中直接过滤client_id，而是先JOIN，然后在WHERE子句中过滤
-            data_count_query = data_count_query.join(
-                ProductAssignment,
-                and_(
-                    ProductAssignment.product_id == Product.id,
-                    product_assignment_join_condition(
-                        AdData.date,
-                        ProductAssignment.start_date,
-                        ProductAssignment.end_date,
-                    ),
-                )
+            from app.services.ad_data.queries.join_helpers import (
+                join_resolved_client,
+                outerjoin_best_product_assignment,
+                resolved_client_id_expr,
             )
-            # JOIN Client表，然后通过WHERE子句过滤客户ID（与 ad_data.py 保持一致）
-            data_count_query = data_count_query.join(Client, ProductAssignment.client_id == Client.id)
-            # 在WHERE子句中过滤客户ID（如果指定了客户ID）
-            # ---------- 条件分支 ----------
+
+            data_count_query = outerjoin_best_product_assignment(data_count_query, AdData.date)
+            data_count_query = join_resolved_client(data_count_query)
             if target_client_id is not None:
-                data_count_query = data_count_query.where(Client.id == target_client_id)
+                data_count_query = data_count_query.where(
+                    resolved_client_id_expr() == target_client_id
+                )
         else:
             # 旧的查询方式
             # ---------- 条件分支 ----------
@@ -333,23 +325,14 @@ async def export_ad_data_handler(
 
     # ---------- 条件分支 ----------
     if use_assignment_table:
-        # 使用产品分配历史表：根据日期范围匹配正确的客户归属（优化：避免在 AdData.date 上使用 func.date()）
-        # 注意：导出时需要考虑日期范围，确保只导出该客户在该时间段内的数据
-        # 使用与 ad_data.py 完全相同的方式，将日期范围条件放在 JOIN 条件中
-        # 注意：不在JOIN条件中直接过滤client_id，而是先JOIN，然后在WHERE子句中过滤
-        query = query.join(
-            ProductAssignment,
-            and_(
-                ProductAssignment.product_id == Product.id,
-                product_assignment_join_condition(
-                    AdData.date,
-                    ProductAssignment.start_date,
-                    ProductAssignment.end_date,
-                ),
-            )
+        # 最多一条分配 + 空窗回退 Product.client_id（与 join_product_and_client 一致）
+        from app.services.ad_data.queries.join_helpers import (
+            join_resolved_client,
+            outerjoin_best_product_assignment,
         )
-        # JOIN Client表，然后通过WHERE子句过滤客户ID（与 ad_data.py 保持一致）
-        query = query.join(Client, ProductAssignment.client_id == Client.id)
+
+        query = outerjoin_best_product_assignment(query, AdData.date)
+        query = join_resolved_client(query)
     else:
         query = query.join(Client, Product.client_id == Client.id)
 

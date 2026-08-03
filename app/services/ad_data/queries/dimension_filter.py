@@ -2,13 +2,18 @@
 广告数据统计维度筛选条件。
 
 明细列表（data_type=all / 明细维护）：
-- country：国家有值且 ad_unit 为空（含 AA/ZZ）
-- ad_unit：ad_unit 有值且国家为空（NULL/空串）
+- country：有具体国家且 ad_unit 为空（含 AA；不含 ZZ）
+- ad_unit：ad_unit 有值且无具体国家（NULL/空串/ZZ）
 - ad_unit_country：与日汇总交叉选源对齐——report_type=cross，
-  或 legacy 行且国家与 ad_unit 均有值（避免 day 能拉到、all 拉不到）
+  或 legacy 行且具体国家与 ad_unit 均有值（避免 day 能拉到、all 拉不到）
+
+ZZ（全部区域）规则：
+- ZZ + 广告单元非空 → 广告单元维度
+- ZZ + 广告单元为空 → 日报维度（日汇总 country 选源时作为 daily 纳入）
 
 每日汇总使用 build_daily_summary_dimension_filter：
 - 优先按 report_type 选源（country > cross > unit > daily）
+- 同日 API 国家 + API 日报：只留国家；Excel 日报与 API 国家仍相加
 - legacy 行仍按行形态互斥选源，与迁移前行为兼容
 """
 from datetime import date
@@ -18,12 +23,17 @@ from sqlalchemy import and_, exists, not_, or_, select, tuple_
 from sqlalchemy.orm import aliased
 
 from app.core.ad_data_metadata import (
+    DATA_SOURCE_EXCEL,
     DIMENSION_REPORT_TYPES,
     REPORT_TYPE_COUNTRY,
     REPORT_TYPE_CROSS,
     REPORT_TYPE_DAILY,
     REPORT_TYPE_LEGACY,
     REPORT_TYPE_UNIT,
+)
+from app.core.country_code import (
+    ALL_REGIONS_COUNTRY_CODE,
+    has_concrete_country_code,
 )
 
 CROSS_DIMENSION = "ad_unit_country"
@@ -131,48 +141,50 @@ def _non_empty_ad_unit_condition(ad_unit_column: Any) -> Any:
 
 
 def _no_country_condition(country_code_column: Any) -> Any:
-    """无国家：country_code 为 NULL 或空串。"""
+    """无具体国家：NULL、空串或 ZZ（全部区域）。"""
     return or_(
         country_code_column.is_(None),
         country_code_column == "",
+        country_code_column == ALL_REGIONS_COUNTRY_CODE,
     )
 
 
 def _has_country_condition(country_code_column: Any) -> Any:
-    """有国家：country_code 非空（含 AA、ZZ 等特殊代码）。"""
+    """有具体国家：非空且非 ZZ（含 AA 等特殊代码）。"""
     return and_(
         country_code_column.isnot(None),
         country_code_column != "",
+        country_code_column != ALL_REGIONS_COUNTRY_CODE,
     )
 
 
 def row_has_country(country_code: Optional[str]) -> bool:
-    """行级判断：是否有国家代码（含 AA、ZZ）。"""
-    return bool((country_code or "").strip())
+    """行级判断：是否有具体国家代码（含 AA；不含 ZZ）。"""
+    return has_concrete_country_code(country_code)
 
 
 def row_has_no_country(country_code: Optional[str]) -> bool:
-    """行级判断：是否无国家代码。"""
+    """行级判断：是否无具体国家代码（NULL/空串/ZZ）。"""
     return not row_has_country(country_code)
 
 
 def row_is_country_only(country_code: Optional[str], ad_unit: Optional[str]) -> bool:
-    """纯国家明细（如 Zhisuo 国家报告、无广告单元）。"""
+    """纯国家明细（如 Zhisuo 国家报告、无广告单元；不含 ZZ）。"""
     return row_has_country(country_code) and not (ad_unit or "").strip()
 
 
 def row_is_ad_unit_only(country_code: Optional[str], ad_unit: Optional[str]) -> bool:
-    """纯广告单元明细（如 Zhisuo 广告单元报告、无国家代码）。"""
+    """纯广告单元明细（无具体国家；含 ZZ + 有广告单元）。"""
     return row_has_no_country(country_code) and bool((ad_unit or "").strip())
 
 
 def row_is_cross_row(country_code: Optional[str], ad_unit: Optional[str]) -> bool:
-    """交叉明细（如 Addermobi 单行同时含国家与广告单元）。"""
+    """交叉明细（具体国家 + 广告单元；不含 ZZ）。"""
     return row_has_country(country_code) and bool((ad_unit or "").strip())
 
 
 def row_is_plain_summary(country_code: Optional[str], ad_unit: Optional[str]) -> bool:
-    """Excel 手工导入等：无国家、无广告单元的汇总行。"""
+    """日报/手工汇总行：无具体国家、无广告单元（含 ZZ）。"""
     return row_has_no_country(country_code) and not (ad_unit or "").strip()
 
 
@@ -199,6 +211,11 @@ def build_dual_api_source_index(rows: list[dict]) -> Tuple[Set[ProductDateKey], 
         if row_is_ad_unit_only(cc, au):
             ad_unit_only_keys.add(key)
     return country_only_keys, ad_unit_only_keys
+
+
+def row_is_excel_data_source(data_source: Optional[str]) -> bool:
+    """是否为 Excel 导入来源（与 API 日报区分：Excel 可与 API 国家同日相加）。"""
+    return str(data_source or "").strip().lower() == DATA_SOURCE_EXCEL
 
 
 def row_matches_daily_summary_dimension_row(
@@ -229,6 +246,11 @@ def row_matches_daily_summary_dimension_row(
         if row_is_country_only(cc, au):
             return True
         if row_is_plain_summary(cc, au):
+            # Excel 日报始终可与 API 国家相加；API 日报仅在无国家行时兜底
+            if row_is_excel_data_source(row.get("data_source")):
+                return True
+            if country_only_keys is not None and pd_key is not None:
+                return pd_key not in country_only_keys
             return True
         if row_is_cross_row(cc, au):
             if country_only_keys is not None and pd_key is not None:
@@ -282,8 +304,12 @@ def build_ad_data_dimension_filter(
 
     dim = normalize_dimension(dimension)
     if dim == CROSS_DIMENSION and report_type_column is not None:
+        # 必须同时满足交叉行形态，避免历史误标 report_type=cross 的 ZZ 行混入
         return or_(
-            report_type_column == REPORT_TYPE_CROSS,
+            and_(
+                report_type_column == REPORT_TYPE_CROSS,
+                _cross_row_condition(country_code_column, ad_unit_column),
+            ),
             and_(
                 _legacy_row_condition(report_type_column),
                 _cross_row_condition(country_code_column, ad_unit_column),
@@ -336,10 +362,43 @@ def _cross_row_condition(country_code_column: Any, ad_unit_column: Any) -> Any:
 
 
 def _plain_summary_row_condition(country_code_column: Any, ad_unit_column: Any) -> Any:
-    """无国家且无广告单元（典型 Excel 手工导入行）。"""
+    """无国家且无广告单元（典型 Excel 手工导入行 / API 日报）。"""
     return and_(
         _no_country_condition(country_code_column),
         _empty_ad_unit_condition(ad_unit_column),
+    )
+
+
+def _excel_data_source_condition(data_source_column: Any) -> Any:
+    return data_source_column == DATA_SOURCE_EXCEL
+
+
+def _plain_summary_for_country_dimension(
+    country_code_column: Any,
+    ad_unit_column: Any,
+    model: Any,
+    start_date: Optional[date],
+    end_date: Optional[date],
+) -> Any:
+    """
+    country 日汇总中的日报/plain 行：
+
+    - Excel：始终纳入（可与 API 国家同日相加）
+    - 非 Excel（API 日报等）：仅当同产品同日无国家行时兜底
+    """
+    plain = _plain_summary_row_condition(country_code_column, ad_unit_column)
+    data_source_col = getattr(model, "data_source", None)
+    no_country_same_day = _outer_row_not_in_country_only_product_dates(
+        model, start_date, end_date
+    )
+    if data_source_col is None:
+        return and_(plain, no_country_same_day)
+    return and_(
+        plain,
+        or_(
+            _excel_data_source_condition(data_source_col),
+            no_country_same_day,
+        ),
     )
 
 
@@ -493,6 +552,31 @@ def _exists_ad_unit_only_same_product_date(ad_data_model: Any) -> Any:
     ).correlate(ad_data_model)
 
 
+def kpi_mutual_source_filter(
+    *,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    dimension: Optional[str] = None,
+    ad_data_model: Any = None,
+) -> Any:
+    """
+    KPI / 仪表盘 / Telegram 汇总用互斥选源。
+
+    默认与日汇总不传 dimension 一致（country），避免同日多报表来源 SUM 重复。
+    """
+    from app.models.models import AdData
+
+    model = ad_data_model or AdData
+    return build_daily_summary_dimension_filter(
+        model.country_code,
+        model.ad_unit,
+        normalize_dimension(dimension),
+        ad_data_model=model,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
 def build_daily_summary_dimension_filter(
     country_code_column: Any,
     ad_unit_column: Any,
@@ -522,16 +606,34 @@ def build_daily_summary_dimension_filter(
 
     if dim == CROSS_DIMENSION:
         return or_(
-            rt_col == REPORT_TYPE_CROSS,
+            and_(
+                rt_col == REPORT_TYPE_CROSS,
+                _cross_row_condition(country_code_column, ad_unit_column),
+            ),
             and_(legacy_shape, _cross_row_condition(country_code_column, ad_unit_column)),
         )
 
     if dim == "country":
+        plain_for_country = _plain_summary_for_country_dimension(
+            country_code_column,
+            ad_unit_column,
+            model,
+            start_date,
+            end_date,
+        )
         return or_(
-            rt_col == REPORT_TYPE_COUNTRY,
-            rt_col == REPORT_TYPE_DAILY,
+            # 类型与行形态同时满足，避免误标 country 的 ZZ 空单元行混入
+            and_(
+                rt_col == REPORT_TYPE_COUNTRY,
+                _country_only_row_condition(country_code_column, ad_unit_column),
+            ),
+            # Excel 日报可与国家相加；API 日报仅在无国家行时纳入
+            and_(rt_col == REPORT_TYPE_DAILY, plain_for_country),
+            # 兼容历史误标 report_type 的 plain 行
+            plain_for_country,
             and_(
                 rt_col == REPORT_TYPE_CROSS,
+                _cross_row_condition(country_code_column, ad_unit_column),
                 _outer_row_not_in_report_type_product_dates(
                     model, REPORT_TYPE_COUNTRY, start_date, end_date
                 ),
@@ -540,7 +642,6 @@ def build_daily_summary_dimension_filter(
                 legacy_shape,
                 or_(
                     _country_only_row_condition(country_code_column, ad_unit_column),
-                    _plain_summary_row_condition(country_code_column, ad_unit_column),
                     and_(
                         _cross_row_condition(country_code_column, ad_unit_column),
                         _outer_row_not_in_country_only_product_dates(
@@ -553,22 +654,25 @@ def build_daily_summary_dimension_filter(
 
     if dim == "ad_unit":
         return or_(
-            rt_col == REPORT_TYPE_UNIT,
+            and_(
+                rt_col == REPORT_TYPE_UNIT,
+                _ad_unit_only_row_condition(country_code_column, ad_unit_column),
+            ),
+            # ZZ/无国家+有单元：按广告单元纳入（兼容历史误标为 cross 等）
+            _ad_unit_only_row_condition(country_code_column, ad_unit_column),
             and_(
                 rt_col == REPORT_TYPE_CROSS,
+                _cross_row_condition(country_code_column, ad_unit_column),
                 _outer_row_not_in_report_type_product_dates(
                     model, REPORT_TYPE_UNIT, start_date, end_date
                 ),
             ),
             and_(
                 legacy_shape,
-                or_(
-                    _ad_unit_only_row_condition(country_code_column, ad_unit_column),
-                    and_(
-                        _cross_row_condition(country_code_column, ad_unit_column),
-                        _outer_row_not_in_ad_unit_only_product_dates(
-                            model, start_date, end_date
-                        ),
+                and_(
+                    _cross_row_condition(country_code_column, ad_unit_column),
+                    _outer_row_not_in_ad_unit_only_product_dates(
+                        model, start_date, end_date
                     ),
                 ),
             ),
@@ -592,7 +696,13 @@ def _legacy_daily_summary_dimension_filter(
     if dim == "country":
         return or_(
             _country_only_row_condition(country_code_column, ad_unit_column),
-            _plain_summary_row_condition(country_code_column, ad_unit_column),
+            _plain_summary_for_country_dimension(
+                country_code_column,
+                ad_unit_column,
+                model,
+                start_date,
+                end_date,
+            ),
             and_(
                 _cross_row_condition(country_code_column, ad_unit_column),
                 _outer_row_not_in_country_only_product_dates(model, start_date, end_date),

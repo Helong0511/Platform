@@ -22,7 +22,12 @@ from sqlalchemy.orm import selectinload
 
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
-from app.core.product_assignment import validate_product_assignments, cleanup_invalid_assignments
+from app.core.product_assignment import (
+    lock_product_for_assignment,
+    validate_product_assignments,
+    cleanup_invalid_assignments,
+)
+from app.core.query_utils import invalidate_assignment_table_cache
 from app.models.models import ProductAssignment, Product, Client, User, UserRole
 from app.services.base_service import BaseService
 
@@ -342,6 +347,9 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
                 detail=f"分配记录ID {assignment_id} 不存在"
             )
 
+        # 锁定产品行，避免与并发创建/转移写出重叠区间
+        await lock_product_for_assignment(self.db, assignment.product_id)
+
         # 保存原始值用于回滚
         original_start_date = assignment.start_date
         original_end_date = assignment.end_date
@@ -361,6 +369,7 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
         assignment.start_date = new_start_date
         assignment.end_date = new_end_date
         await self.db.flush()
+        invalidate_assignment_table_cache()
 
         # 验证更新后的分配记录连贯性
         try:
@@ -494,6 +503,16 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
         # 创建ID到记录的映射
         assignment_map = {a.id: a for a in assignments}
 
+        # 校验并锁定同一产品，串行化并发日期变更
+        product_id = assignments[0].product_id
+        for assignment in assignments:
+            if assignment.product_id != product_id:
+                raise_api_exception(
+                    ErrorCode.VALIDATION_ERROR,
+                    detail="批量更新只能更新同一产品的分配记录"
+                )
+        await lock_product_for_assignment(self.db, product_id)
+
         # 保存原始值用于日志
         original_values = {}
         for assignment in assignments:
@@ -523,16 +542,7 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
 
         # 刷新到数据库（但不提交）
         await self.db.flush()
-
-        # 获取产品ID（所有记录应该属于同一个产品）
-        product_id = assignments[0].product_id
-        for assignment in assignments:
-            if assignment.product_id != product_id:
-                await self.db.rollback()
-                raise_api_exception(
-                    ErrorCode.VALIDATION_ERROR,
-                    detail="批量更新只能更新同一产品的分配记录"
-                )
+        invalidate_assignment_table_cache()
 
         # 验证所有更新后的分配记录连贯性
         try:

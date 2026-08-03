@@ -623,6 +623,9 @@ async def process_api_ad_data(
     # 导入build_product_maps和find_or_create_product函数
     from app.api_v1.excel.import_handler import build_product_maps, find_or_create_product
     from app.core.product_assignment import find_ad_data_assignment_gaps
+    from app.services.ad_data.dual_dimension_check import (
+        find_country_unit_revenue_mismatches,
+    )
 
     # ========== 构建产品映射（与Excel导入逻辑一致） ==========
     product_map, product_name_map = await build_product_maps(db)
@@ -1667,12 +1670,24 @@ async def process_api_ad_data(
 
     assignment_gaps: list[dict[str, Any]] = []
     assignment_orphan_total = 0
+    country_unit_mismatches: list[dict[str, Any]] = []
+    country_unit_mismatch_total = 0
     if import_date_min and import_date_max and (inserted_count > 0 or updated_count > 0):
+        written_pids = sorted(written_product_ids) if written_product_ids else None
         assignment_gaps, assignment_orphan_total = await find_ad_data_assignment_gaps(
             db,
             start_date=import_date_min,
             end_date=import_date_max,
-            product_ids=sorted(written_product_ids) if written_product_ids else None,
+            product_ids=written_pids,
+        )
+        (
+            country_unit_mismatches,
+            country_unit_mismatch_total,
+        ) = await find_country_unit_revenue_mismatches(
+            db,
+            start_date=import_date_min,
+            end_date=import_date_max,
+            product_ids=written_pids,
         )
 
     return {
@@ -1684,6 +1699,8 @@ async def process_api_ad_data(
         "report_type_counts": dict(report_type_counts),
         "assignment_gaps": assignment_gaps,
         "assignment_orphan_total": assignment_orphan_total,
+        "country_unit_mismatches": country_unit_mismatches,
+        "country_unit_mismatch_total": country_unit_mismatch_total,
         "metric_decreases": pending_metric_decreases,
         "traffic_decreases": pending_traffic_decreases,
     }

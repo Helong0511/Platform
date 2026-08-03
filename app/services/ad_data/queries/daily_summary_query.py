@@ -247,19 +247,22 @@ class DailySummaryQuery:
         memory_sort_fields = {"ecpm_before_deduct"}
         need_memory_sort = sort_by in memory_sort_fields
 
+        # 稳定排序：主排序键 + 全部分组维度，避免 OFFSET 跨页漏/重
+        tie_breakers: List[Any] = [AdData.date.asc(), Product.id.asc()]
+        if group_by_ad_unit:
+            tie_breakers.append(AdData.ad_unit.asc())
+        if group_by_country:
+            tie_breakers.append(AdData.country_code.asc())
+
         if sort_by in valid_sort_fields:
             sort_column = valid_sort_fields[sort_by]
-            if sort_order.lower() == "desc":
-                query = query.order_by(sort_column.desc())
-            else:
-                query = query.order_by(sort_column.asc())
+            primary = sort_column.desc() if sort_order.lower() == "desc" else sort_column.asc()
+            query = query.order_by(primary, *tie_breakers)
         elif not need_memory_sort:
             sort_by = "date"
             sort_column = valid_sort_fields[sort_by]
-            if sort_order.lower() == "desc":
-                query = query.order_by(sort_column.desc())
-            else:
-                query = query.order_by(sort_column.asc())
+            primary = sort_column.desc() if sort_order.lower() == "desc" else sort_column.asc()
+            query = query.order_by(primary, *tie_breakers)
 
         total = 0
         if not need_memory_sort:
@@ -388,8 +391,15 @@ class DailySummaryQuery:
         if need_memory_sort:
             reverse_order = sort_order.lower() == "desc"
             if sort_by == "ecpm_before_deduct":
+                # 主排序 + 分组维度稳定键，避免同 eCPM 时切片漏/重
                 ad_data_responses.sort(
-                    key=lambda x: x.get("ecpm_before_deduct", 0) or 0,
+                    key=lambda x: (
+                        x.get("ecpm_before_deduct", 0) or 0,
+                        str(x.get("date") or ""),
+                        int(x.get("product_id") or 0),
+                        str(x.get("ad_unit") or ""),
+                        str(x.get("country_code") or ""),
+                    ),
                     reverse=reverse_order,
                 )
             total = len(ad_data_responses)

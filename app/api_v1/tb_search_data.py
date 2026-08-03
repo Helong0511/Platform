@@ -45,7 +45,6 @@ from app.schemas.base import ResponseBaseSchema, ListResponseBaseSchema, Paginat
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.query_utils import (
-    product_assignment_join_condition, 
     check_use_assignment_table, 
     join_country_info as join_country_info_util,
     apply_date_range_filter
@@ -115,23 +114,16 @@ async def get_tb_search_data(
     # 使用LEFT JOIN确保即使关联数据缺失也能查询到TB搜索数据
     # ---------- 条件分支 ----------
     if use_assignment_table:
-        # 使用产品分配历史表进行查询
+        # 最多一条分配 + 空窗回退 Product.client_id，避免整批漏出 / JOIN 放大
+        from app.services.ad_data.queries.join_helpers import (
+            join_resolved_client,
+            outerjoin_best_product_assignment,
+        )
+
         query = select(TBSearchData, Product, Client, User, ProductAssignment, CountryInfo)
         query = query.outerjoin(Product, TBSearchData.product_id == Product.id)
-        # 关联产品分配历史表：根据TB搜索数据的日期匹配正确的分配记录
-        query = query.outerjoin(
-            ProductAssignment,
-            and_(
-                ProductAssignment.product_id == Product.id,
-                product_assignment_join_condition(
-                    TBSearchData.date,
-                    ProductAssignment.start_date,
-                    ProductAssignment.end_date
-                )
-            )
-        )
-        # 通过产品分配历史表关联客户
-        query = query.outerjoin(Client, ProductAssignment.client_id == Client.id)
+        query = outerjoin_best_product_assignment(query, TBSearchData.date)
+        query = join_resolved_client(query)
         query = query.outerjoin(User, Client.user_id == User.id)
         query = join_country_info(query)
     else:
@@ -205,10 +197,11 @@ async def get_tb_search_data(
     
     sort_col = sort_fields.get(sort_by, TBSearchData.date)
     # ---------- 条件分支 ----------
+    # 附加 id 稳定排序，避免 OFFSET 翻页漏/重
     if sort_order == "desc":
-        query = query.order_by(sort_col.desc())
+        query = query.order_by(sort_col.desc(), TBSearchData.id.desc())
     else:
-        query = query.order_by(sort_col.asc())
+        query = query.order_by(sort_col.asc(), TBSearchData.id.asc())
 
     # 计数
     # 简化计数查询，使用LEFT JOIN确保即使关联数据缺失也能正确计数
@@ -217,19 +210,13 @@ async def get_tb_search_data(
     
     # ---------- 条件分支 ----------
     if use_assignment_table:
-        # 使用产品分配历史表
-        count_query = count_query.outerjoin(
-            ProductAssignment,
-            and_(
-                ProductAssignment.product_id == Product.id,
-                product_assignment_join_condition(
-                    TBSearchData.date,
-                    ProductAssignment.start_date,
-                    ProductAssignment.end_date
-                )
-            )
+        from app.services.ad_data.queries.join_helpers import (
+            join_resolved_client,
+            outerjoin_best_product_assignment,
         )
-        count_query = count_query.outerjoin(Client, ProductAssignment.client_id == Client.id)
+
+        count_query = outerjoin_best_product_assignment(count_query, TBSearchData.date)
+        count_query = join_resolved_client(count_query)
     else:
         # 旧的查询方式
         count_query = count_query.outerjoin(Client, Product.client_id == Client.id)
@@ -731,22 +718,16 @@ async def get_clients_with_tb_search_data(
         # 构建基础查询 - 返回 Client.id 和 User.full_name
         # ---------- 条件分支 ----------
         if use_assignment_table:
-            # 使用产品分配历史表
+            from app.services.ad_data.queries.join_helpers import (
+                join_resolved_client,
+                outerjoin_best_product_assignment,
+            )
+
             query = select(func.distinct(Client.id), User.full_name, User.username, Client.user_id)
             query = query.select_from(TBSearchData)
             query = query.join(Product, TBSearchData.product_id == Product.id)
-            query = query.join(
-                ProductAssignment,
-                and_(
-                    ProductAssignment.product_id == Product.id,
-                    product_assignment_join_condition(
-                        TBSearchData.date,
-                        ProductAssignment.start_date,
-                        ProductAssignment.end_date
-                    )
-                )
-            )
-            query = query.join(Client, ProductAssignment.client_id == Client.id)
+            query = outerjoin_best_product_assignment(query, TBSearchData.date)
+            query = join_resolved_client(query)
         else:
             # 旧的查询方式
             query = select(func.distinct(Client.id), User.full_name, User.username, Client.user_id)
@@ -904,22 +885,16 @@ async def get_countries_with_tb_search_data(
         # 构建基础查询
         # ---------- 条件分支 ----------
         if use_assignment_table:
-            # 使用产品分配历史表
+            from app.services.ad_data.queries.join_helpers import (
+                join_resolved_client,
+                outerjoin_best_product_assignment,
+            )
+
             query = select(func.distinct(TBSearchData.country_code), CountryInfo.country_name_zh)
             query = query.select_from(TBSearchData)
             query = query.join(Product, TBSearchData.product_id == Product.id)
-            query = query.join(
-                ProductAssignment,
-                and_(
-                    ProductAssignment.product_id == Product.id,
-                    product_assignment_join_condition(
-                        TBSearchData.date,
-                        ProductAssignment.start_date,
-                        ProductAssignment.end_date
-                    )
-                )
-            )
-            query = query.join(Client, ProductAssignment.client_id == Client.id)
+            query = outerjoin_best_product_assignment(query, TBSearchData.date)
+            query = join_resolved_client(query)
         else:
             # 旧的查询方式
             query = select(func.distinct(TBSearchData.country_code), CountryInfo.country_name_zh)

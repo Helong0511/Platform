@@ -4,11 +4,12 @@
 功能说明：
 - 统一 Product / Client / ProductAssignment / CountryInfo 关联路径
 - 供 list、detail、filter、batch_delete 等 query 模块复用
+- 分配历史模式：按日期最多匹配一条分配（min id），空窗回退 Product.client_id
 """
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import and_, func, select
-from sqlalchemy.orm import load_only
+from sqlalchemy import ColumnElement, and_, func, select
+from sqlalchemy.orm import aliased, load_only
 
 from app.core.query_utils import (
     join_country_info as join_country_info_util,
@@ -34,6 +35,63 @@ def join_country_info_for_ad_data(query):
     return join_country_info_util(query, AdData.country_code)
 
 
+def best_product_assignment_id_subquery(
+    date_column,
+    product_id_column=None,
+) -> ColumnElement:
+    """
+    标量子查询：为 (product, date) 选取一条匹配的分配记录（id 最小）。
+
+    避免分配区间重叠时 JOIN 放大导致 SUM/COUNT 重复累加。
+    """
+    pa = aliased(ProductAssignment)
+    product_col = product_id_column if product_id_column is not None else Product.id
+    return (
+        select(pa.id)
+        .where(
+            pa.product_id == product_col,
+            product_assignment_join_condition(date_column, pa.start_date, pa.end_date),
+        )
+        .order_by(pa.id.asc())
+        .limit(1)
+        .correlate_except(pa)
+        .scalar_subquery()
+    )
+
+
+def resolved_client_id_expr():
+    """分配命中用分配客户，空窗回退产品当前归属。"""
+    return func.coalesce(ProductAssignment.client_id, Product.client_id)
+
+
+def outerjoin_best_product_assignment(query, date_column, product_id_column=None):
+    """
+    外连接最多一条匹配的 ProductAssignment（空窗时 assignment 为 NULL）。
+
+    ON 条件必须显式包含 product_id + 日期区间，否则 SQLAlchemy 会告警
+    product_assignments 与 ad_data 之间存在笛卡尔积。
+    """
+    product_col = product_id_column if product_id_column is not None else Product.id
+    best_id = best_product_assignment_id_subquery(date_column, product_col)
+    return query.outerjoin(
+        ProductAssignment,
+        and_(
+            ProductAssignment.product_id == product_col,
+            product_assignment_join_condition(
+                date_column,
+                ProductAssignment.start_date,
+                ProductAssignment.end_date,
+            ),
+            ProductAssignment.id == best_id,
+        ),
+    )
+
+
+def join_resolved_client(query):
+    """按解析后的 client_id 内连接 Client（空窗回退 Product.client_id）。"""
+    return query.join(Client, Client.id == resolved_client_id_expr())
+
+
 def join_product_and_client(query, use_assignment_table: bool):
     """
     从已含 AdData 的查询出发，关联 Product 与 Client。
@@ -44,18 +102,8 @@ def join_product_and_client(query, use_assignment_table: bool):
     """
     query = query.join(Product, AdData.product_id == Product.id)
     if use_assignment_table:
-        query = query.join(
-            ProductAssignment,
-            and_(
-                ProductAssignment.product_id == Product.id,
-                product_assignment_join_condition(
-                    AdData.date,
-                    ProductAssignment.start_date,
-                    ProductAssignment.end_date,
-                ),
-            ),
-        )
-        query = query.join(Client, ProductAssignment.client_id == Client.id)
+        query = outerjoin_best_product_assignment(query, AdData.date)
+        query = join_resolved_client(query)
     else:
         query = query.join(Client, Product.client_id == Client.id)
     return query
@@ -65,23 +113,13 @@ def join_ad_data_and_client_from_product(query, use_assignment_table: bool):
     """
     从已含 Product 的查询出发，关联 AdData 与 Client。
 
-    分配历史表模式：Product → AdData → ProductAssignment → Client
+    分配历史表模式：Product → AdData → ProductAssignment(可选) → Client(COALESCE)
     旧模式：Product → Client → AdData
     """
     if use_assignment_table:
         query = query.join(AdData, AdData.product_id == Product.id)
-        query = query.join(
-            ProductAssignment,
-            and_(
-                ProductAssignment.product_id == Product.id,
-                product_assignment_join_condition(
-                    AdData.date,
-                    ProductAssignment.start_date,
-                    ProductAssignment.end_date,
-                ),
-            ),
-        )
-        query = query.join(Client, ProductAssignment.client_id == Client.id)
+        query = outerjoin_best_product_assignment(query, AdData.date)
+        query = join_resolved_client(query)
     else:
         query = query.join(Client, Product.client_id == Client.id)
         query = query.join(AdData, AdData.product_id == Product.id)
@@ -92,25 +130,15 @@ def join_tb_search_and_client_from_product(query, use_assignment_table: bool):
     """
     从已含 Product 的查询出发，关联 TB 搜索数据与 Client。
 
-    分配历史模式：Product → TBSearchData → ProductAssignment → Client
+    分配历史模式：Product → TBSearchData → ProductAssignment(可选) → Client(COALESCE)
     旧模式：Product → Client → TBSearchData
     """
     from app.models.models import TBSearchData
 
     if use_assignment_table:
         query = query.join(TBSearchData, TBSearchData.product_id == Product.id)
-        query = query.join(
-            ProductAssignment,
-            and_(
-                ProductAssignment.product_id == Product.id,
-                product_assignment_join_condition(
-                    TBSearchData.date,
-                    ProductAssignment.start_date,
-                    ProductAssignment.end_date,
-                ),
-            ),
-        )
-        query = query.join(Client, ProductAssignment.client_id == Client.id)
+        query = outerjoin_best_product_assignment(query, TBSearchData.date)
+        query = join_resolved_client(query)
     else:
         query = query.join(Client, Product.client_id == Client.id)
         query = query.join(TBSearchData, TBSearchData.product_id == Product.id)

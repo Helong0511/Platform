@@ -81,7 +81,8 @@ def get_client_ip(request: Request) -> str:
 
         # ASGI Server 必须关闭自身 proxy_headers 解析，保留真实直连对端。
         # 仅当直连对端在可信代理白名单时，读取由 Nginx 覆盖写入的真实 IP 头。
-        trusted_proxies = set(getattr(settings, "TRUSTED_PROXY_IPS", []) or [])
+        get_ips = getattr(settings, "get_trusted_proxy_ips", None)
+        trusted_proxies = set(get_ips() if callable(get_ips) else [])
         if settings.TRUST_PROXY_HEADERS and peer_ip in trusted_proxies:
             candidates = [
                 request.headers.get("X-Real-IP"),

@@ -25,7 +25,7 @@ from app.core.infrastructure.cache_compat import (
 )
 from app.core.query_utils import apply_date_range_filter, check_use_assignment_table
 from app.core.security import is_admin
-from app.models.models import AdData, Client, CountryInfo, Product, ProductAssignment, User
+from app.models.models import AdData, Client, CountryInfo, Product, User
 from app.services.ad_data.queries.filter_conditions import (
     apply_ad_data_scope_filters,
     apply_client_ids_filter,
