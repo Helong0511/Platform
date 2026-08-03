@@ -85,6 +85,7 @@ def get_client_ip(request: Request) -> str:
         trusted_proxies = set(get_ips() if callable(get_ips) else [])
         if settings.TRUST_PROXY_HEADERS and peer_ip in trusted_proxies:
             candidates = [
+                request.headers.get("CF-Connecting-IP"),
                 request.headers.get("X-Real-IP"),
                 # Nginx 已配置为覆盖而非追加；仍只接受首个合法值。
                 (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip(),

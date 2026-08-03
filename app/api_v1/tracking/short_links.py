@@ -19,7 +19,7 @@ import logging
 from typing import Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query, Path, Request, HTTPException, BackgroundTasks, Body
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, APP_TIMEZONE
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -443,9 +443,6 @@ async def diagnose_short_link_sync(
     注意：此接口需要管理员权限
     """
     # ---------- 入口：参数与依赖准备 ----------
-    from app.core.short_link_click_counter import get_click_counter_stats
-    from app.core.constants import APP_TIMEZONE
-    
     diagnosis = {
         "short_code": short_code,
         "exists": False,

@@ -9,6 +9,11 @@
     "preview": "vite preview",
     "lint": "eslint --ext .js,.vue src --quiet"
   },
+  "browserslist": [
+    "defaults",
+    "not IE 11",
+    "fully supports es6-module"
+  ],
   "dependencies": {
     "@element-plus/icons-vue": "2.3.2",
     "axios": "1.18.1",
@@ -23,7 +28,7 @@
     "eslint": "8.57.0",
     "eslint-plugin-vue": "9.28.0",
     "linkedom": "^0.18.12",
-    "postcss": "^8.5.23",
+    "postcss": "8.5.6",
     "vite": "7.3.6"
   }
 }

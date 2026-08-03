@@ -4,8 +4,9 @@
 功能说明：
 - ``resolve_offer_id``：按主键或上游 Offer ID 解析 Offer 与广告主，并回写 Offer 缓存
 - ``offer_id_from_numeric_dp``：斗篷场景下纯数字 dp 与平台 Offer 主键对齐
-- ``resolve_cloak_click_offer_and_publisher``：/report 写入 clicks 时的 offer、渠道归因
+- ``resolve_cloak_click_offer_and_publisher``：/report 写入 clicks 时的 offer、渠道归因（含分配校验）
 - ``resolve_default_publisher_for_offer``：短链未绑渠道时按产品分配回退 publisher
+- ``resolve_attributed_publisher_for_offer``：校验 Offer–渠道分配后再归因
 - ``create_click_record``：异步创建点击记录（Redis 队列或 BackgroundTasks）
 
 在系统中的位置：
@@ -98,14 +99,20 @@ async def resolve_cloak_click_offer_and_publisher(
 ) -> tuple[Optional[int], Optional[int]]:
     """
     斗篷 /report 写入 clicks 时的 offer_id、publisher_id。
-    数字 dp 覆盖短链 offer；渠道为空时按产品绑定回退。
+
+    数字 dp 覆盖短链 offer；渠道须对最终 Offer 存在启用分配，否则回退默认渠道
+   （与 /s、/change 的 resolve_attributed_publisher_for_offer 一致）。
     """
     offer_for = offer_id_from_numeric_dp(resolved_dp)
     if offer_for is None:
         offer_for = short_link_offer_id
-    pub_for = short_link_channel_id
-    if pub_for is None and offer_for is not None:
-        pub_for = await resolve_default_publisher_for_offer(offer_for, db)
+    # 短链自带 channel：若与最终 Offer 无分配关系则回退，禁止错误归因
+    pub_for = await resolve_attributed_publisher_for_offer(
+        offer_for,
+        short_link_channel_id,
+        db,
+        channel_from_query=False,
+    )
     return offer_for, pub_for
 
 
@@ -136,6 +143,60 @@ async def resolve_default_publisher_for_offer(offer_id: int, db: AsyncSession) -
             e,
         )
         return None
+
+
+async def is_offer_publisher_assigned(
+    offer_id: int,
+    publisher_id: int,
+    db: AsyncSession,
+) -> bool:
+    """Offer 是否存在对该渠道的启用分配。"""
+    if not offer_id or not publisher_id:
+        return False
+    try:
+        row = await db.execute(
+            select(OfferPublisherAssignment.id)
+            .where(
+                OfferPublisherAssignment.offer_id == offer_id,
+                OfferPublisherAssignment.publisher_id == publisher_id,
+                OfferPublisherAssignment.is_active.is_(True),
+            )
+            .limit(1)
+        )
+        return row.scalar_one_or_none() is not None
+    except Exception as e:
+        logger.warning(
+            "校验 Offer-渠道分配失败: offer_id=%s publisher_id=%s error=%s",
+            offer_id,
+            publisher_id,
+            e,
+        )
+        return False
+
+
+async def resolve_attributed_publisher_for_offer(
+    offer_id: Optional[int],
+    channel_id: Optional[int],
+    db: AsyncSession,
+    *,
+    channel_from_query: bool = False,
+) -> Optional[int]:
+    """
+    解析可用于点击归因的渠道 ID。
+
+    - 有渠道且已分配：采用该渠道
+    - 查询参数伪造未分配渠道：返回 None（调用方应拒绝跳转）
+    - 短链自带渠道失效：回退到该 Offer 的默认启用分配
+    """
+    if not offer_id:
+        return None
+    if channel_id is not None:
+        if await is_offer_publisher_assigned(offer_id, channel_id, db):
+            return channel_id
+        if channel_from_query:
+            return None
+        return await resolve_default_publisher_for_offer(offer_id, db)
+    return await resolve_default_publisher_for_offer(offer_id, db)
 
 
 async def create_click_record(

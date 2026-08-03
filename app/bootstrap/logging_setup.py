@@ -35,10 +35,38 @@ from app.core.log_queue import (
 
 warnings.filterwarnings('ignore', message='.*pkg_resources is deprecated.*', category=UserWarning)
 
+
+def _ensure_windows_utf8_stdio() -> None:
+    """
+    Windows 控制台默认多为 GBK(cp936)，而 Cursor/VS Code 终端按 UTF-8 捕获输出，
+    会导致中文日志显示为「���」乱码。启动时统一切到 UTF-8。
+    """
+    os.environ.setdefault("PYTHONUTF8", "1")
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        ctypes.windll.kernel32.SetConsoleCP(65001)
+    except Exception:
+        pass
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_ensure_windows_utf8_stdio()
+
 # 标记本模块创建的 Handler，便于幂等重建
 _PLATFORM_HANDLER_ATTR = "_platform_log_handler"
 
 # 重定向前保留真实标准流，供控制台 Handler 使用，避免「日志→stderr→LoggingStream→再记日志」回环
+# 须在 UTF-8 重配置之后捕获，否则开发终端仍按 GBK 解码中文
 _ORIGINAL_STDOUT = sys.stdout
 _ORIGINAL_STDERR = sys.stderr
 
@@ -222,10 +250,18 @@ def _setup_logging() -> None:
 
     def _create_console_handler(formatter: logging.Formatter, level: int = logging.INFO) -> logging.StreamHandler:
         # 必须写到「真实 stderr」，不能写到已被 LoggingStream 劫持的 sys.stderr
+        # Windows：确保流为 UTF-8，避免 Cursor 终端按 UTF-8 解读 GBK 字节导致乱码
+        stream = _ORIGINAL_STDERR
+        try:
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
         class _ConsoleHandler(SafeStderrHandleErrorMixin, logging.StreamHandler):
             pass
 
-        handler = _ConsoleHandler(_ORIGINAL_STDERR)
+        handler = _ConsoleHandler(stream)
         handler.setFormatter(formatter)
         handler.setLevel(level)
         if bool(getattr(settings, "LOG_SENSITIVE_FILTER_ENABLED", True)):

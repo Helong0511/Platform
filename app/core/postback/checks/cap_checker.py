@@ -89,16 +89,20 @@ class CapChecker:
         publisher_id: Optional[int],
         advertiser_id: Optional[int],
         db: AsyncSession,
-    ) -> bool:
+    ) -> Tuple[bool, str]:
         """
         增加 Cap 计数（仅 flush，由 PostbackProcessor 统一 commit）。
+
+        Returns:
+            (ok, status)：status 为 cap_ok / cap_exceeded / cap_check_error
         """
         if not offer_id:
             logger.debug("没有 Offer ID，跳过 Cap 计数递增")
-            return True
+            return True, "cap_ok"
 
+        redis_reserved = False
         try:
-            passed = await increment_cap_count(
+            passed, status = await increment_cap_count(
                 offer_id=offer_id,
                 publisher_id=publisher_id,
                 advertiser_id=advertiser_id,
@@ -107,16 +111,27 @@ class CapChecker:
             )
             if not passed:
                 logger.warning(
-                    "Cap 计数递增未通过：offer_id=%s publisher_id=%s",
+                    "Cap 计数递增未通过：offer_id=%s publisher_id=%s status=%s",
                     offer_id,
                     publisher_id,
+                    status,
                 )
-                return False
+                return False, status or "cap_exceeded"
+            # increment_cap_count 已成功预留 Redis；其后异常须由本层回退，避免与
+            # increment 内部 except 的 reserved 回退叠加成双重 DECR。
+            redis_reserved = True
             await db.flush()
             logger.debug(
                 f"Cap 计数已增加：offer_id={offer_id}, publisher_id={publisher_id}"
             )
-            return True
+            return True, "cap_ok"
         except Exception as e:
+            if redis_reserved:
+                await rollback_cap_redis_counts(
+                    db=db,
+                    offer_id=offer_id,
+                    publisher_id=publisher_id,
+                    advertiser_id=advertiser_id,
+                )
             logger.error(f"增加 Cap 计数失败：{e}", exc_info=True)
             raise

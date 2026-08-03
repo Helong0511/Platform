@@ -62,18 +62,28 @@ def _csrf_allowed_hosts(request: Request) -> list[str]:
 
 
 def _host_matches_allowed(netloc: str, allowed_hosts: list[str]) -> bool:
-    """校验 netloc（可含端口）是否落在允许列表。"""
+    """校验 netloc（可含端口）是否落在允许列表。
+
+    仅精确匹配（含端口变体），禁止 ``evil.btfrx.online`` 凭借父域后缀蒙混过关。
+    若需放行子域，请在 BACKEND_CORS_ORIGINS 中显式列出完整 Origin。
+    """
     host = (netloc or "").lower()
     if not host:
         return False
+    host_no_port = host.split(":")[0]
     for allowed in allowed_hosts:
-        if host == allowed or host.endswith("." + allowed):
+        allowed = (allowed or "").lower()
+        if not allowed:
+            continue
+        if host == allowed:
             return True
-        # 允许「配置无端口、请求带端口」的本地开发匹配
-        host_no_port = host.split(":")[0]
         allowed_no_port = allowed.split(":")[0]
-        if host_no_port == allowed_no_port or host_no_port.endswith("." + allowed_no_port):
-            if allowed_no_port in {"localhost", "127.0.0.1", "testserver", "::1"}:
+        # 配置无端口、请求带端口（或相反）时按主机名精确匹配
+        if host_no_port == allowed_no_port:
+            return True
+        # 本机开发：localhost / 127.0.0.1 任意端口互通
+        if allowed_no_port in {"localhost", "127.0.0.1", "testserver", "::1"}:
+            if host_no_port == allowed_no_port:
                 return True
     return False
 

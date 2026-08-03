@@ -40,7 +40,7 @@ from app.routes.short_link.url_builder import build_final_url
 from app.routes.short_link.errors import raise_short_link_bad_config, raise_short_link_not_found
 from app.routes.short_link.utils import (
     resolve_offer_id,
-    resolve_default_publisher_for_offer,
+    resolve_attributed_publisher_for_offer,
     create_click_record,
 )
 
@@ -160,18 +160,24 @@ async def handle_cached_redirect(
 
     request_info = collect_request_info(request) if request else {}
 
+    # 记录查询参数是否显式传入 channel_id（伪造未分配渠道时应拒绝）
+    channel_from_query = channel_id is not None
+
     # 如果没有从URL参数传入，从短链接记录中获取offer_id和channel_id
     if not offer_id:
         offer_id = cached_data.get("offer_id")
     if not channel_id:
         channel_id = cached_data.get("channel_id")
 
-    final_channel_id = channel_id
     final_offer_id, advertiser_id = await resolve_offer_id(offer_id, db)
-    if final_channel_id is None and final_offer_id is not None:
-        fb = await resolve_default_publisher_for_offer(final_offer_id, db)
-        if fb is not None:
-            final_channel_id = fb
+    final_channel_id = await resolve_attributed_publisher_for_offer(
+        final_offer_id,
+        channel_id,
+        db,
+        channel_from_query=channel_from_query,
+    )
+    if final_offer_id is not None and channel_from_query and final_channel_id is None:
+        raise_short_link_not_found("Offer 未分配给该渠道")
 
     click_id = generate_click_id_unified(
         offer_id=final_offer_id,
@@ -297,18 +303,23 @@ async def handle_database_redirect(
 
     request_info = collect_request_info(request) if request else {}
 
+    channel_from_query = channel_id is not None
+
     # 如果没有从URL参数传入，从短链接记录中获取offer_id和channel_id
     if not offer_id:
         offer_id = short_link.offer_id
     if not channel_id:
         channel_id = short_link.channel_id
 
-    final_channel_id = channel_id
     final_offer_id, advertiser_id = await resolve_offer_id(offer_id, db)
-    if final_channel_id is None and final_offer_id is not None:
-        fb = await resolve_default_publisher_for_offer(final_offer_id, db)
-        if fb is not None:
-            final_channel_id = fb
+    final_channel_id = await resolve_attributed_publisher_for_offer(
+        final_offer_id,
+        channel_id,
+        db,
+        channel_from_query=channel_from_query,
+    )
+    if final_offer_id is not None and channel_from_query and final_channel_id is None:
+        raise_short_link_not_found("Offer 未分配给该渠道")
 
     click_id = generate_click_id_unified(
         offer_id=final_offer_id,

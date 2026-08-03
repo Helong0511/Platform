@@ -103,18 +103,27 @@ def verify_signature(
         page, page_size,
     )
 
+    provided = (sign or "").lower()
+
     # HMAC-SHA256（推荐）
     hmac_sign = hmac.new(
         secret_key.encode("utf-8"),
         sign_string.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest().lower()
-    if hmac_sign == sign.lower():
+    if hmac.compare_digest(hmac_sign, provided):
         return True
 
-    # MD5（向后兼容）
+    # MD5（向后兼容；生产可通过 CLIENT_API_ALLOW_MD5=false 关闭）
+    try:
+        from app.core.config import settings
+        allow_md5 = bool(getattr(settings, "CLIENT_API_ALLOW_MD5", True))
+    except Exception:
+        allow_md5 = True
+    if not allow_md5:
+        return False
     calculated_sign = hashlib.md5(sign_string.encode("utf-8")).hexdigest().lower()
-    return calculated_sign == sign.lower()
+    return hmac.compare_digest(calculated_sign, provided)
 
 
 async def verify_client_request(

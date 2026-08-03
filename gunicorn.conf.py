@@ -60,8 +60,8 @@ max_requests = 5000  # 每个 worker 处理的最大请求数（提高以支持�
 max_requests_jitter = 250  # 随机抖动，避免所有 worker 同时重启
 
 # ====== 超时配置 ======
-# Ubuntu 22.04.5 生产环境优化（高并发场景）
-timeout = 60  # Worker 超时时间（秒），短链接重定向应该很快，减少超时时间
+# 与 Nginx location /api/ 的 proxy_read_timeout=120s 对齐，避免 Worker 先杀导致 502
+timeout = int(os.getenv("GUNICORN_TIMEOUT", "120"))
 keepalive = 10  # Keep-alive 连接时间（秒），增加以支持高并发短连接复用
 graceful_timeout = 30  # 优雅关闭超时时间（秒），确保任务完成
 timeout_graceful_shutdown = 30  # 优雅关闭超时（秒），等待 worker 完成当前请求

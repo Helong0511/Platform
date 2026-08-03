@@ -52,6 +52,43 @@ MAX_KEYS_PER_SYNC = int(os.getenv("SHORT_LINK_SYNC_MAX_KEYS", "500"))
 ITEM_LOCK_PREFIX = "short_link:item_lock:"  # 细粒度分布式锁前缀（每个short_code一个锁）
 ITEM_LOCK_TIMEOUT = 10  # 细粒度锁超时时间（秒），10秒足够完成单个更新
 
+# MySQL 默认 innodb_lock_wait_timeout；刷盘临时调低后必须还原，避免连接池污染
+MYSQL_DEFAULT_LOCK_WAIT_TIMEOUT = 50
+
+
+async def _tune_session_for_click_sync(
+    db: AsyncSession,
+    *,
+    lock_wait_timeout: int,
+) -> None:
+    """
+    为点击刷盘临时调整事务参数。
+
+    - 隔离级别用 SET TRANSACTION（仅下一事务），避免 SET SESSION 污染连接池
+    - lock_wait 仍为 SESSION 级，调用方必须在 finally 中 _restore_session_after_click_sync
+    """
+    try:
+        # 不带 SESSION：只影响紧接着开始的下一个事务
+        await db.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
+    except Exception as e:
+        logger.debug(f"设置事务隔离级别失败（可忽略）: {e}")
+    try:
+        await db.execute(
+            text(f"SET SESSION innodb_lock_wait_timeout = {int(lock_wait_timeout)}")
+        )
+    except Exception as e:
+        logger.debug(f"设置锁等待超时失败（可忽略）: {e}")
+
+
+async def _restore_session_after_click_sync(db: AsyncSession) -> None:
+    """还原刷盘临时改动的 SESSION 级参数，防止连接归还池后污染其它请求。"""
+    try:
+        await db.execute(
+            text(f"SET SESSION innodb_lock_wait_timeout = {MYSQL_DEFAULT_LOCK_WAIT_TIMEOUT}")
+        )
+    except Exception as e:
+        logger.debug(f"还原锁等待超时失败（可忽略）: {e}")
+
 
 async def cleanup_click_counter(short_code: str) -> bool:
     """
@@ -830,17 +867,8 @@ async def _batch_update_click_counts_with_retry(
         )
     
     try:
-        # 设置事务隔离级别为READ COMMITTED，减少锁竞争
-        try:
-            await db.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED"))
-        except Exception as e:
-            logger.debug(f"设置事务隔离级别失败（可忽略）: {e}")
-        
-        # 设置锁等待超时为0，使用SKIP LOCKED避免等待
-        try:
-            await db.execute(text("SET SESSION innodb_lock_wait_timeout = 0"))
-        except Exception as e:
-            logger.debug(f"设置锁等待超时失败（可忽略）: {e}")
+        # 事务级 RC + 临时锁等待；finally 必须还原 SESSION，避免连接池污染
+        await _tune_session_for_click_sync(db, lock_wait_timeout=0)
         
         # 使用SELECT FOR UPDATE SKIP LOCKED先锁定记录，避免死锁
         # 这样可以确保只更新能够立即锁定的记录，跳过已被其他事务锁定的记录
@@ -898,15 +926,8 @@ async def _batch_update_click_counts_with_retry(
                 await db.rollback()
                 # 等待一小段时间，让其他事务完成
                 await asyncio.sleep(LOCK_RETRY_DELAY)
-                # 重新设置事务隔离级别和锁等待超时（SQLAlchemy会在下次查询时自动开始新事务）
-                try:
-                    await db.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED"))
-                except Exception as e:
-                    logger.debug(f"设置事务隔离级别失败（可忽略）: {e}")
-                try:
-                    await db.execute(text("SET SESSION innodb_lock_wait_timeout = 0"))
-                except Exception as e:
-                    logger.debug(f"设置锁等待超时失败（可忽略）: {e}")
+                # 回滚后下一事务需重新 SET TRANSACTION（仅下一事务生效）
+                await _tune_session_for_click_sync(db, lock_wait_timeout=0)
                 # 重置成功列表，因为已经回滚，需要重新锁定
                 successfully_locked_batch = []
             elif remaining_batch:
@@ -1219,6 +1240,8 @@ async def _batch_update_click_counts_with_retry(
         # 注意：由于现在不再在获取时删除计数器，计数器仍然存在，无需恢复
         # 计数器会在下次同步时重试
         return 0, [], batch
+    finally:
+        await _restore_session_after_click_sync(db)
     
     # 如果所有重试都失败，返回失败
     await _release_item_locks(redis, acquired_locks)
@@ -1243,81 +1266,82 @@ async def _update_click_count_with_retry(
     Returns:
         是否更新成功
     """
-    for attempt in range(max_retries):
-        try:
-            # 设置事务隔离级别为READ COMMITTED，减少锁竞争
+    try:
+        for attempt in range(max_retries):
             try:
-                await db.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED"))
-            except Exception as e:
-                logger.debug(f"设置事务隔离级别失败（可忽略）: {e}")
-            
-            # 设置锁等待超时，避免长时间等待
-            try:
-                await db.execute(text("SET SESSION innodb_lock_wait_timeout = 5"))
-            except Exception as e:
-                logger.debug(f"设置锁等待超时失败（可忽略）: {e}")
-            
-            # 使用原子更新，按 short_code 排序（虽然只有一条，但保持一致性）
-            result = await db.execute(
-                text("""
-                    UPDATE short_links 
-                    SET click_count = click_count + :count
-                    WHERE short_code = :code
-                """),
-                {"count": count_value, "code": short_code}
-            )
-            
-            if result.rowcount > 0:
-                # 提交事务，确保更新立即生效
-                # 注意：这里提交是为了避免长时间持有锁，减少死锁概率
-                await db.commit()
-                logger.debug(
-                    f"原子更新短链接点击次数: short_code={short_code}, "
-                    f"增量={count_value}"
-                )
-                return True
-            else:
-                # 短链接不存在，回滚事务
-                await db.rollback()
-                logger.warning(f"短链接不存在: short_code={short_code}")
-                return False
+                await _tune_session_for_click_sync(db, lock_wait_timeout=5)
                 
-        except OperationalError as e:
-            # 检查死锁错误：MySQL错误码1213或错误消息包含"Deadlock"
-            error_code = e.orig.args[0] if hasattr(e.orig, 'args') and e.orig.args else None
-            error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
-            is_deadlock = (
-                error_code == 1213 or  # MySQL死锁错误码
-                "Deadlock" in error_msg or  # 错误消息包含Deadlock
-                "deadlock" in error_msg.lower()  # 错误消息包含deadlock（小写）
-            )
-            
-            if is_deadlock:
-                if attempt < max_retries - 1:
-                    # 指数退避 + 随机抖动（增加随机范围，减少并发冲突）
-                    delay = DEADLOCK_RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.3)
-                    logger.warning(
-                        f"更新短链接点击次数时检测到死锁: short_code={short_code}, "
-                        f"第 {attempt + 1}/{max_retries} 次重试，等待 {delay:.2f} 秒后重试..."
+                # 使用原子更新，按 short_code 排序（虽然只有一条，但保持一致性）
+                result = await db.execute(
+                    text("""
+                        UPDATE short_links 
+                        SET click_count = click_count + :count
+                        WHERE short_code = :code
+                    """),
+                    {"count": count_value, "code": short_code}
+                )
+                
+                if result.rowcount > 0:
+                    # 提交事务，确保更新立即生效
+                    # 注意：这里提交是为了避免长时间持有锁，减少死锁概率
+                    await db.commit()
+                    logger.debug(
+                        f"原子更新短链接点击次数: short_code={short_code}, "
+                        f"增量={count_value}"
                     )
-                    await asyncio.sleep(delay)
-                    # MySQL在死锁时会自动回滚其中一个事务，但为了安全起见，显式回滚
-                    try:
-                        await db.rollback()
-                    except Exception as rollback_error:
-                        logger.debug(f"死锁重试时回滚失败（可忽略）: {rollback_error}")
-                    # 继续重试
-                    continue
+                    return True
                 else:
+                    # 短链接不存在，回滚事务
+                    await db.rollback()
+                    logger.warning(f"短链接不存在: short_code={short_code}")
+                    return False
+                    
+            except OperationalError as e:
+                # 检查死锁错误：MySQL错误码1213或错误消息包含"Deadlock"
+                error_code = e.orig.args[0] if hasattr(e.orig, 'args') and e.orig.args else None
+                error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+                is_deadlock = (
+                    error_code == 1213 or  # MySQL死锁错误码
+                    "Deadlock" in error_msg or  # 错误消息包含Deadlock
+                    "deadlock" in error_msg.lower()  # 错误消息包含deadlock（小写）
+                )
+                
+                if is_deadlock:
+                    if attempt < max_retries - 1:
+                        # 指数退避 + 随机抖动（增加随机范围，减少并发冲突）
+                        delay = DEADLOCK_RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.3)
+                        logger.warning(
+                            f"更新短链接点击次数时检测到死锁: short_code={short_code}, "
+                            f"第 {attempt + 1}/{max_retries} 次重试，等待 {delay:.2f} 秒后重试..."
+                        )
+                        await asyncio.sleep(delay)
+                        # MySQL在死锁时会自动回滚其中一个事务，但为了安全起见，显式回滚
+                        try:
+                            await db.rollback()
+                        except Exception as rollback_error:
+                            logger.debug(f"死锁重试时回滚失败（可忽略）: {rollback_error}")
+                        # 继续重试
+                        continue
+                    else:
+                        logger.error(
+                            f"更新短链接点击次数失败（死锁，已重试 {max_retries} 次）: "
+                            f"short_code={short_code}, error={e}",
+                            exc_info=True
+                        )
+                        # 死锁时MySQL已自动回滚，不需要手动回滚
+                        return False
+                else:
+                    # 其他数据库错误，需要回滚
                     logger.error(
-                        f"更新短链接点击次数失败（死锁，已重试 {max_retries} 次）: "
-                        f"short_code={short_code}, error={e}",
+                        f"更新短链接点击次数失败: short_code={short_code}, error={e}",
                         exc_info=True
                     )
-                    # 死锁时MySQL已自动回滚，不需要手动回滚
+                    try:
+                        await db.rollback()
+                    except Exception:
+                        pass
                     return False
-            else:
-                # 其他数据库错误，需要回滚
+            except Exception as e:
                 logger.error(
                     f"更新短链接点击次数失败: short_code={short_code}, error={e}",
                     exc_info=True
@@ -1327,18 +1351,10 @@ async def _update_click_count_with_retry(
                 except Exception:
                     pass
                 return False
-        except Exception as e:
-            logger.error(
-                f"更新短链接点击次数失败: short_code={short_code}, error={e}",
-                exc_info=True
-            )
-            try:
-                await db.rollback()
-            except Exception:
-                pass
-            return False
-    
-    return False
+        
+        return False
+    finally:
+        await _restore_session_after_click_sync(db)
 
 
 async def _commit_with_retry(db: AsyncSession, synced_count: int, max_retries: int = MAX_DEADLOCK_RETRIES) -> bool:

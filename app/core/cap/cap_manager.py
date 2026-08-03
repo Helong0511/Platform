@@ -100,17 +100,19 @@ async def check_cap(
                         actual_count = int(redis_val)
                     else:
                         # Redis 未命中（冷启动），从 DB 初始化
-                        # 使用原子 SQL 查询避免大表 COUNT
-                        # 注意：这里为了性能，如果 DB 也很大，可以直接信任 OfferCap 表的缓存字段 current_daily_count
-                        # 或者只在 Redis 失效时查一次大表
                         if cap.cap_start_date and cap.cap_start_date.date() == today_start.date():
                              actual_count = cap.current_daily_count
                         else:
                              actual_count = 0
                         
-                        # 回写 Redis (设置过期时间)
+                        # SET NX：禁止覆盖并发路径已写入的计数
                         try:
-                            await redis.setex(redis_key, 48 * 3600, actual_count)
+                            await redis.set(
+                                redis_key,
+                                actual_count,
+                                ex=48 * 3600,
+                                nx=True,
+                            )
                         except Exception as e:
                             logger.warning(f"Redis回写失败: {e}")
                 else:
@@ -123,10 +125,25 @@ async def check_cap(
                 if actual_count >= cap.daily_cap:
                     return False, f"已达到每日Cap限制: {cap.daily_cap} (当前: {actual_count})"
             
-            # 检查总 Cap
+            # 检查总 Cap（与 increment 一致：优先读 Redis total key）
             if cap.total_cap:
-                # 使用 DB 缓存字段优化
                 actual_total_count = cap.current_total_count
+                redis = await get_redis_client()
+                if redis:
+                    try:
+                        total_key = get_total_cap_key(cap.offer_id, cap.publisher_id)
+                        redis_val = await redis.get(total_key)
+                        if redis_val is not None:
+                            actual_total_count = int(redis_val)
+                        else:
+                            await redis.set(
+                                total_key,
+                                actual_total_count,
+                                ex=30 * 24 * 3600,
+                                nx=True,
+                            )
+                    except Exception as e:
+                        logger.warning(f"读取 Redis 总Cap失败，回退 DB 字段: {e}")
                 if actual_total_count >= cap.total_cap:
                      return False, f"已达到总Cap限制: {cap.total_cap} (当前: {actual_total_count})"
         
@@ -139,6 +156,25 @@ async def check_cap(
         return False, "cap_check_error"
 
 
+async def _rollback_reserved_redis(
+    reserved: list[tuple[str, int, Optional[int]]],
+) -> None:
+    for kind, oid, pid in reserved:
+        if kind == "daily":
+            await RedisCapManager.decrement_daily(oid, pid)
+        else:
+            await RedisCapManager.decrement_total(oid, pid)
+
+
+async def _refresh_offer_caps(db: AsyncSession, caps: list) -> None:
+    """丢弃会话中未提交的 Cap ORM 脏写，避免超限/失败路径误 commit。"""
+    for cap in caps:
+        try:
+            await db.refresh(cap)
+        except Exception as e:
+            logger.debug("刷新 OfferCap 失败（可忽略）: id=%s err=%s", getattr(cap, "id", None), e)
+
+
 async def increment_cap_count(
     db: AsyncSession,
     offer_id: int,
@@ -146,7 +182,7 @@ async def increment_cap_count(
     advertiser_id: Optional[int] = None,
     *,
     session_flush: bool = True,
-) -> bool:
+) -> Tuple[bool, str]:
     """
     增加 Cap 计数 (线程/进程安全版本)
     
@@ -157,11 +193,15 @@ async def increment_cap_count(
         advertiser_id: 广告主ID（可选）
         
     Returns:
-        bool: True=计数增加成功且未超限, False=计数增加后发现超限
+        (是否预留成功, 状态)：
+        - (True, "cap_ok")
+        - (False, "cap_exceeded") 真超限
+        - (False, "cap_check_error") 基础设施失败（调用方应拒绝入库并允许重试）
     """
+    caps = []
+    reserved: list[tuple[str, int, Optional[int]]] = []
     try:
         # 1. 查询所有相关的 Cap 配置，使用 with_for_update() 进行行级锁定
-        # 这一步非常重要，确保在并发环境下，同一时间只有一个进程在处理此 Cap 配置的更新
         query = select(OfferCap).where(
             and_(
                 OfferCap.offer_id == offer_id,
@@ -193,12 +233,10 @@ async def increment_cap_count(
             query = query.where(OfferCap.cap_type == 'offer')
         
         result = await db.execute(query)
-        caps = result.scalars().all()
+        caps = list(result.scalars().all())
         
         now = get_app_now_naive()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        
-        all_passed = True
         
         for cap in caps:
             # 2. 处理每日计数（Redis 先预留名额，成功后再更新 DB）
@@ -207,11 +245,8 @@ async def increment_cap_count(
                     not cap.cap_start_date
                     or cap.cap_start_date.date() < today_start.date()
                 )
-                if is_new_day:
-                    cap.cap_start_date = today_start
-                    redis_init_val = 0
-                else:
-                    redis_init_val = cap.current_daily_count
+                # 先算 init，预留成功后再写 ORM，避免失败路径脏写
+                redis_init_val = 0 if is_new_day else (cap.current_daily_count or 0)
 
                 try:
                     passed = await RedisCapManager.check_and_increment_daily(
@@ -223,25 +258,32 @@ async def increment_cap_count(
                 except Exception as e:
                     logger.warning(f"Redis计数递增同步失败: {e}")
                     if settings.CAP_FAIL_OPEN:
-                        passed = True
+                        # fail-open：不改 Redis/ORM 日计数，继续处理 total
+                        logger.warning("Cap 日计数 Redis 失败，fail-open 跳过日计数")
+                        passed = None
                     else:
-                        passed = False
+                        await _rollback_reserved_redis(reserved)
+                        await _refresh_offer_caps(db, caps)
+                        return False, "cap_check_error"
 
-                if not passed:
-                    all_passed = False
+                if passed is False:
                     logger.warning(
                         f"每日Cap超限: offer={cap.offer_id}, limit={cap.daily_cap}, "
                         f"current={redis_init_val}"
                     )
-                else:
+                    await _rollback_reserved_redis(reserved)
+                    await _refresh_offer_caps(db, caps)
+                    return False, "cap_exceeded"
+
+                if passed is True:
+                    reserved.append(("daily", cap.offer_id, cap.publisher_id))
+                    if is_new_day:
+                        cap.cap_start_date = today_start
                     cap.current_daily_count = redis_init_val + 1
             
             # 3. 处理总计数（Redis 先预留，成功后再更新 DB）
             if cap.total_cap:
-                if not cap.cap_start_date:
-                    cap.cap_start_date = now
-
-                redis_init_val = cap.current_total_count
+                redis_init_val = cap.current_total_count or 0
 
                 try:
                     passed = await RedisCapManager.check_and_increment_total(
@@ -253,26 +295,41 @@ async def increment_cap_count(
                 except Exception as e:
                     logger.warning(f"Redis总计数递增同步失败: {e}")
                     if settings.CAP_FAIL_OPEN:
-                        passed = True
+                        logger.warning("Cap 总计数 Redis 失败，fail-open 跳过总计数")
+                        passed = None
                     else:
-                        passed = False
+                        await _rollback_reserved_redis(reserved)
+                        await _refresh_offer_caps(db, caps)
+                        return False, "cap_check_error"
 
-                if not passed:
-                    all_passed = False
+                if passed is False:
                     logger.warning(
                         f"总Cap超限: offer={cap.offer_id}, limit={cap.total_cap}, "
                         f"current={redis_init_val}"
                     )
-                else:
+                    await _rollback_reserved_redis(reserved)
+                    await _refresh_offer_caps(db, caps)
+                    return False, "cap_exceeded"
+
+                if passed is True:
+                    reserved.append(("total", cap.offer_id, cap.publisher_id))
+                    if not cap.cap_start_date:
+                        cap.cap_start_date = now
                     cap.current_total_count = redis_init_val + 1
         
         # 由调用方控制外层事务时可选跳过 flush，与转化入库同一 commit
         if session_flush:
             await db.flush()
-        return all_passed
+        return True, "cap_ok"
         
     except Exception as e:
         logger.error(f"增加Cap计数失败: {str(e)}", exc_info=True)
+        try:
+            await _rollback_reserved_redis(reserved)
+        except Exception:
+            pass
+        if caps:
+            await _refresh_offer_caps(db, caps)
         raise
 
 

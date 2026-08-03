@@ -346,6 +346,15 @@ export const setupResponseInterceptor = () => {
                 : refreshResponse?.data;
               if (payload?.user) {
                 sessionStorage.setItem('userInfo', JSON.stringify(payload.user));
+                try {
+                  const { useAuthStore } = await import('../store');
+                  const authStore = useAuthStore();
+                  authStore.userInfo = payload.user;
+                  authStore.isAuthenticated = true;
+                  authStore.userInfoFetchedAt = Date.now();
+                } catch (storeErr) {
+                  logger.warn('刷新后同步 Pinia userInfo 失败:', storeErr);
+                }
                 error.config._authRetried = true;
                 return axios(error.config);
               }

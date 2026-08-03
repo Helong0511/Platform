@@ -51,20 +51,24 @@ def detect_production_env(explicit: str | None = None) -> str:
     """
     推断运行环境。
 
-    - 单测（UNIT_TEST=1）：尊重环境变量 PRODUCTION_ENV
-    - Windows：development（本地开发）
-    - Linux（含 Ubuntu）：production
-    - 其它系统：development
+    - Windows（非单测）：固定 development，避免本机 .env 误写 production 关掉本地调试能力
+    - 其它系统：优先显式参数 / PRODUCTION_ENV；未设置则 development
+      （生产 Linux 必须 PRODUCTION_ENV=production|prod）
+    - UNIT_TEST=1：始终尊重显式 / PRODUCTION_ENV，便于单测覆盖
     """
     if os.getenv("UNIT_TEST") == "1":
         raw = explicit if explicit is not None else os.getenv("PRODUCTION_ENV", "development")
-        return str(raw).lower() if raw else "development"
+        return str(raw).strip().lower() if raw and str(raw).strip() else "development"
 
     system = platform.system()
     if system == "Windows":
         return "development"
-    if system == "Linux":
-        return "production"
+
+    raw = explicit if explicit is not None else os.getenv("PRODUCTION_ENV")
+    if raw is not None and str(raw).strip() != "":
+        return str(raw).strip().lower()
+
+    # Linux 等未显式配置时不得自动当生产
     return "development"
 
 
@@ -82,7 +86,7 @@ def _resolve_cap_fail_open() -> bool:
     explicit = os.getenv("CAP_FAIL_OPEN")
     if explicit is not None and str(explicit).strip() != "":
         return str(explicit).strip().lower() in ["true", "1", "yes"]
-    return detect_production_env() != "production"
+    return not is_production_env_name(detect_production_env())
 
 
 def _resolve_deduction_fail_open() -> bool:
@@ -95,7 +99,8 @@ def _resolve_deduction_fail_open() -> bool:
     explicit = os.getenv("DEDUCTION_FAIL_OPEN")
     if explicit is not None and str(explicit).strip() != "":
         return str(explicit).strip().lower() in ["true", "1", "yes"]
-    return detect_production_env() != "production"
+    return not is_production_env_name(detect_production_env())
+
 
 
 # Windows 本机开发默认 Bot Token（仅 development 使用，生产须通过环境变量配置）
@@ -115,31 +120,18 @@ class Settings(BaseSettings):
     )
 
     # ====== 环境配置 ======
-    # 按运行平台自动推断：Windows → development，Linux（Ubuntu）→ production
-    # 单测可通过 UNIT_TEST=1 + PRODUCTION_ENV 覆盖
+    # 优先 PRODUCTION_ENV（.env / systemd）；未设置时 Windows/Linux 默认 development
+    # 生产必须显式 PRODUCTION_ENV=production
     PRODUCTION_ENV: str = Field(
         default_factory=lambda: detect_production_env(),
-        description="环境类型：由操作系统推断，或由单测环境变量覆盖",
+        description="环境类型：优先环境变量，未设置则 development",
     )
     
     @field_validator("PRODUCTION_ENV", mode="before")
     @classmethod
     def validate_production_env(cls, v):
-        """规范化环境配置值（平台优先于 .env 中的 PRODUCTION_ENV）。"""
-        resolved = detect_production_env(v)
-        env_from_file = os.getenv("PRODUCTION_ENV")
-        if (
-            os.getenv("UNIT_TEST") != "1"
-            and env_from_file
-            and env_from_file.lower() != resolved
-        ):
-            logger.info(
-                "已按运行平台(%s)使用 PRODUCTION_ENV=%s（忽略 .env 中的 %s）",
-                platform.system(),
-                resolved,
-                env_from_file,
-            )
-        return resolved
+        """规范化环境配置：尊重显式 PRODUCTION_ENV / 字段值。"""
+        return detect_production_env(v if v is not None and str(v).strip() != "" else None)
 
     @property
     def is_production(self) -> bool:
@@ -493,10 +485,14 @@ class Settings(BaseSettings):
     ALLOWED_UPLOAD_EXTENSIONS: list[str] = ["xlsx", "xls", "csv"]
 
     # ====== CSRF配置 ======
-    # 是否启用CSRF防护（默认启用）
+    # 是否启用CSRF防护（默认启用；生产环境在 main.py 强制开启）
     ENABLE_CSRF: bool = os.getenv("ENABLE_CSRF", "true").lower() in ["true", "1", "yes"]
     # CSRF 令牌过期时间（秒）：8 小时 = 28800 秒
     CSRF_TOKEN_EXPIRE_SECONDS: int = int(os.getenv("CSRF_TOKEN_EXPIRE_SECONDS", "28800"))
+
+    # 客户开放 API 是否仍接受 MD5 签名（HMAC-SHA256 始终可用；比较已改为 compare_digest）
+    # 默认 true 保持兼容；生产可在 systemd/.env 设 CLIENT_API_ALLOW_MD5=false 强制仅 HMAC
+    CLIENT_API_ALLOW_MD5: bool = os.getenv("CLIENT_API_ALLOW_MD5", "true").lower() in ["true", "1", "yes"]
 
     # ====== 定时任务配置 ======
     # 最大并发定时任务数（同一进程同时执行的任务数量）

@@ -418,7 +418,8 @@ def extract_access_token_from_request(request: Request) -> str | None:
 async def is_authenticated_request(request: Request) -> bool:
     """
     判断请求是否携带有效的访问令牌（管理员、客户登录后均视为已认证）。
-    用于限流等中间件：已登录不限流，未登录仍按 IP 限流。
+
+    用于限流中间件：已认证请求计入独立高配额桶（auth-api），未登录按 IP/接口类别限流。
     不查黑名单（db=None），业务接口仍由 get_current_user 完整校验。
     """
     token = extract_access_token_from_request(request)

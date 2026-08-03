@@ -161,6 +161,8 @@ LOGIN_RATE_WINDOW = 60
 
 # 客户开放 API（签名鉴权）：独立桶 + 更高配额，避免翻页压测被普通 100/分钟限死
 CLIENT_OPEN_API_RATE_LIMIT = getattr(settings, 'CLIENT_OPEN_API_RATE_LIMIT', 200)
+# 已登录用户 API 配额（高于匿名，但仍有上限，防 Cookie 被盗滥用）
+AUTHENTICATED_RATE_LIMIT = getattr(settings, 'AUTHENTICATED_RATE_LIMIT', 600)
 _CLIENT_OPEN_API_PATHS = frozenset({
     "/api/v1/client_data",
     "/api/v1/client_products",
@@ -196,22 +198,25 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         Returns:
             429 JSON 响应或下游处理器响应（附带 X-RateLimit-* 头）
         """
-        # ====== 排除短链接路由和上报路由（不限流） ======
-        # 短链接访问和点击上报需要高并发支持，不能限流
+        # ====== 仅公开跳转/上报豁免限流；管理端短链 CRUD 仍受限流 ======
+        # 已登录请求计入 auth-api 高配额桶（不再完全跳过）
         path = request.url.path
-        is_short_link = (
-            path.startswith("/s/") or  # /s/{short_code} 路由
-            path.startswith("/api/v1/short-links/") or  # /api/v1/short-links/{short_code} 路由
-            path.startswith("/report")  # /report 路由（点击上报）
+        is_public_tracking = (
+            path.startswith("/s/")  # 公开短链重定向
+            or path.startswith("/report")  # 点击上报
+            or path.startswith("/change")  # 斗篷桥页切换
         )
+        # 公开按 code 解析的只读接口（若存在）可豁免；管理列表/写操作不豁免
+        if path.startswith("/api/v1/short-links/"):
+            # /api/v1/short-links/{code} 形式的公开解析已迁到 /s/；此处一律按管理 API 限流
+            is_public_tracking = False
         
-        if is_short_link:
+        if is_public_tracking:
             response = await call_next(request)
             return response
 
-        # 已登录（管理员 / 客户）：不限流
-        if await is_authenticated_request(request):
-            return await call_next(request)
+        # 已登录：仍计入独立高配额桶，避免被盗用 Cookie 时无限打爆（不再完全跳过）
+        authenticated = await is_authenticated_request(request)
         
         # ====== 获取客户端标识 ======
         # 使用IP地址作为限流标识（生产环境可结合用户ID）
@@ -221,14 +226,21 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             logger.warning(f"获取客户端IP失败: {e}，使用默认IP 'testclient'")
             client_ip = "testclient"
 
-        # ====== 按接口类别选择配额 ======
+        # ====== 按接口类别选择配额（运行时读 settings，便于本地压测提额） ======
         bucket = _rate_limit_bucket(path, request.method)
-        if bucket == "login":
-            limit, window = LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW
+        if authenticated and bucket == "api":
+            bucket = "auth-api"
+            limit = int(getattr(settings, "AUTHENTICATED_RATE_LIMIT", AUTHENTICATED_RATE_LIMIT) or AUTHENTICATED_RATE_LIMIT)
+            window = DEFAULT_RATE_WINDOW
+        elif bucket == "login":
+            limit = int(getattr(settings, "LOGIN_RATE_LIMIT", LOGIN_RATE_LIMIT) or LOGIN_RATE_LIMIT)
+            window = LOGIN_RATE_WINDOW
         elif bucket == "client-open-api":
-            limit, window = CLIENT_OPEN_API_RATE_LIMIT, DEFAULT_RATE_WINDOW
+            limit = int(getattr(settings, "CLIENT_OPEN_API_RATE_LIMIT", CLIENT_OPEN_API_RATE_LIMIT) or CLIENT_OPEN_API_RATE_LIMIT)
+            window = DEFAULT_RATE_WINDOW
         else:
-            limit, window = DEFAULT_RATE_LIMIT, DEFAULT_RATE_WINDOW
+            limit = int(getattr(settings, "API_RATE_LIMIT", DEFAULT_RATE_LIMIT) or DEFAULT_RATE_LIMIT)
+            window = DEFAULT_RATE_WINDOW
 
         # ====== 生产环境：对敏感接口增加额外限流 ======
         if settings.is_production:
@@ -444,9 +456,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # X-Content-Type-Options: 防止MIME类型嗅探
         response.headers["X-Content-Type-Options"] = "nosniff"
 
-        # 注意：X-Frame-Options 和 X-XSS-Protection 已过时
-        # 使用 Content-Security-Policy 的 frame-ancestors 替代 X-Frame-Options
-        # 现代浏览器已内置 XSS 保护，X-XSS-Protection 已不再需要
+        # X-Frame-Options: 防点击劫持（与 CSP frame-ancestors 双轨；扫描器/旧浏览器仍依赖此头）
+        if not response.headers.get("X-Frame-Options"):
+            response.headers["X-Frame-Options"] = "DENY"
+
+        # 现代浏览器优先遵循 Content-Security-Policy 的 frame-ancestors
+        # X-XSS-Protection 已过时，不再设置
 
         # Referrer-Policy: 控制referrer信息，防止信息泄露
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
@@ -928,7 +943,10 @@ class SensitivePathGuardMiddleware(BaseHTTPMiddleware):
         except Exception:
             client_ip = "unknown"
 
-        if await self._is_blocked_ip(client_ip):
+        # 本机回环永不按黑名单拒绝，避免本地联调/安全回归被锁死
+        from app.core.sensitive_path_guard import _is_loopback_ip
+
+        if (not _is_loopback_ip(client_ip)) and await self._is_blocked_ip(client_ip):
             logger.warning("黑名单IP请求已拦截: path=%s ip=%s", request.url.path, client_ip)
             return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,

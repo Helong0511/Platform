@@ -11,7 +11,7 @@
 
 注意事项：
 1. 落库与 Redis 去重、Facebook 上报解耦，关闭 DB 持久化不影响前台上报链路
-2. offer/publisher 解析复用 ``resolve_cloak_click_offer_and_publisher``，与 /change 归因规则一致
+2. offer/publisher 解析复用 ``resolve_cloak_click_offer_and_publisher``（内部走分配校验，与 /s、/change 一致）
 3. url_params 字段约定勿随意变更，postback 处理器依赖 dp 找回斗篷像素配置
 """
 import json

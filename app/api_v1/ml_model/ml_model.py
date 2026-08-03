@@ -1226,7 +1226,7 @@ async def validate_excel_columns(
 
 @router.get("/status", response_model=ResponseBaseSchema[dict], summary="获取映射规则状态")
 async def get_mapping_status(
-        current_user: User = Depends(get_current_user)
+        current_user: User = Depends(require_admin)
 ):
     """
     获取映射规则的状态信息
@@ -1265,7 +1265,7 @@ async def get_mapping_status(
 
 @router.get("/timezone", response_model=ResponseBaseSchema[dict], summary="获取应用时区配置")
 async def get_timezone_config(
-        current_user: User = Depends(get_current_user)
+        current_user: User = Depends(require_admin)
 ):
     """
     获取应用全局时区配置（如 Asia/Shanghai）。

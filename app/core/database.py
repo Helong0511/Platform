@@ -189,6 +189,30 @@ async def get_postback_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+async def get_db_readonly() -> AsyncGenerator[AsyncSession, None]:
+    """
+    只读查询专用会话：成功路径 rollback 而非 commit。
+
+    用于转化汇总等 GET 接口，防止业务层误 flush/update 被 get_db 自动提交。
+    """
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.rollback()
+        except HTTPException:
+            await session.rollback()
+            raise
+        except RequestValidationError:
+            await session.rollback()
+            raise
+        except Exception as e:
+            logger.error(f"只读数据库会话错误: {str(e)}", exc_info=True)
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
 # 创建数据库表
 async def create_tables():
     """

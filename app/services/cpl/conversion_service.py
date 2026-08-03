@@ -205,90 +205,15 @@ class ConversionService:
         if advertiser_id:
             click_conditions.append(Click.advertiser_id == advertiser_id)
 
-        # 统计总点击数量
+        # 统计总点击数量（也可由下方分组 sum，保留一次 COUNT 以兼容无分组维度的空结果）
         click_query = select(func.count(Click.id)).where(and_(*click_conditions))
         total_clicks = (await self.db.execute(click_query)).scalar() or 0
 
-        # --- 全局转化计数：主路径 click_id JOIN，仅 Active Offer ---
-        click_alias_for_count = aliased(Click)
-        offer_alias_for_count = aliased(Offer)
-
-        # 方式1：通过 click_id 关联 Click（主要方式）
-        count_conditions_1 = list(conversion_conditions)
-        count_conditions_1.append(PostbackConversion.click_id.isnot(None))
-        count_conditions_1.append(PostbackConversion.click_id == click_alias_for_count.click_id)
-        count_conditions_1.append(click_alias_for_count.offer_id == offer_alias_for_count.id)
-        count_conditions_1.append(offer_alias_for_count.is_active == True)
-        count_conditions_1.append(offer_alias_for_count.status == 'Active')
-
-        if client_publisher_ids is not None:
-            count_conditions_1.append(click_alias_for_count.publisher_id.in_(client_publisher_ids))
-        if offer_id is not None:
-            count_conditions_1.append(click_alias_for_count.offer_id == offer_id)
-        if publisher_id is not None:
-            count_conditions_1.append(click_alias_for_count.publisher_id == publisher_id)
-        if advertiser_id is not None:
-            count_conditions_1.append(click_alias_for_count.advertiser_id == advertiser_id)
-
-        conversion_query_1 = select(func.count(PostbackConversion.id)).join(
-            click_alias_for_count, PostbackConversion.click_id == click_alias_for_count.click_id
-        ).join(
-            offer_alias_for_count, click_alias_for_count.offer_id == offer_alias_for_count.id
-        ).where(and_(*count_conditions_1))
-
-        count_1 = (await self.db.execute(conversion_query_1)).scalar() or 0
-
-        # 方式2：通过 gid 字段匹配 publisher_id（备用方式，仅客户登录时使用）
-        # 统计 click_id 存在但无法关联到 Click，但 gid 匹配的记录
-        # 注意：这些记录无法获取 offer_id，所以不统计（保持与主要方式一致，只统计有 offer_id 的记录）
-        # 如果需要统计这些记录，需要在后续版本中扩展支持
-
-        # 方式3：通过 client_id 直接匹配（备用方式，仅客户登录时使用）
-        # 注意：同样，如果 click_id 为空或无法关联，无法获取 offer_id，所以不统计这些记录
-
-        # 合并统计结果（当前主要使用方式1，确保所有统计的转化都有有效的 click_id 和 offer_id）
-        # 注意：total_conversions 将在分组统计后从分组结果汇总计算，确保与分组统计一致
-        # 这里先计算一个初始值，后续会被更新
-        total_conversions = count_1
-
-        # --- 全局 PO 汇总（扣减后 payout，口径同转化计数）---
-        click_alias_for_po = aliased(Click)
-        offer_alias_for_po = aliased(Offer)
-
-        # 方式1：通过 click_id 关联 Click（主要方式）
-        po_conditions_1 = list(conversion_conditions)
-        po_conditions_1.append(PostbackConversion.click_id.isnot(None))
-        po_conditions_1.append(PostbackConversion.click_id == click_alias_for_po.click_id)
-        po_conditions_1.append(click_alias_for_po.offer_id == offer_alias_for_po.id)
-        po_conditions_1.append(offer_alias_for_po.is_active == True)
-        po_conditions_1.append(offer_alias_for_po.status == 'Active')
-
-        if client_publisher_ids is not None:
-            po_conditions_1.append(click_alias_for_po.publisher_id.in_(client_publisher_ids))
-        if offer_id is not None:
-            po_conditions_1.append(click_alias_for_po.offer_id == offer_id)
-        if publisher_id is not None:
-            po_conditions_1.append(click_alias_for_po.publisher_id == publisher_id)
-        if advertiser_id is not None:
-            po_conditions_1.append(click_alias_for_po.advertiser_id == advertiser_id)
-
-        po_query_1 = select(func.sum(PostbackConversion.payout)).join(
-            click_alias_for_po, PostbackConversion.click_id == click_alias_for_po.click_id
-        ).join(
-            offer_alias_for_po, click_alias_for_po.offer_id == offer_alias_for_po.id
-        ).where(and_(*po_conditions_1))
-
-        # 执行查询并获取结果，确保结果为浮点数
-        po_1 = float((await self.db.execute(po_query_1)).scalar() or 0)
-
-        # 方式2和方式3：通过 gid 或 client_id（备用方式，当前暂不统计，因为无法获取 offer_id）
-        # 注意：如果 click_id 为空或无法关联，无法获取 offer_id，所以不统计这些记录
-        # 在后续版本中可以扩展支持
-
-        # 合并统计结果（当前主要使用方式1，确保所有统计的转化都有有效的 click_id 和 offer_id）
-        total_po = po_1
-        # 扣价后的总支付金额
-        total_po_after_discount = po_1
+        # 全局转化 COUNT/SUM 已删除：结果会被分组汇总覆盖，重复扫大表无收益。
+        # totals 仅从下方 GROUP BY 路径汇总，保证与明细一致。
+        total_conversions = 0
+        total_po = 0.0
+        total_po_after_discount = 0.0
 
         # --- 分组统计：先聚合点击，再合并转化 ---
         click_group_query = select(
@@ -534,10 +459,11 @@ class ConversionService:
         total_po_after_discount = calculated_total_po_after_discount
         total_profit = total_po - total_po_after_discount
 
-        # --- 客户角色：downstream_cap 裁剪与触顶关短链 ---
+        # --- 客户角色：downstream_cap 仅裁剪展示（只读，不关短链）---
+        # 关短链由 Postback Cap 流水线负责；GET 汇总不写库。
         conversion_cap = 0
         if current_user.role == UserRole.CLIENT and client_id:
-            # 查询客户关联的所有渠道的下游CAP限制
+            # 展示口径：客户全量渠道 downstream_cap 之和（与筛选结果集无关）
             client_cap_result = await self.db.execute(
                 select(func.sum(OfferPublisherAssignment.downstream_cap))
                 .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
@@ -550,16 +476,21 @@ class ConversionService:
                     )
                 )
             )
-            client_cap = client_cap_result.scalar()
-            conversion_cap = client_cap or 0
+            conversion_cap = int(client_cap_result.scalar() or 0)
+
+            # 行级裁剪仍用已加载的 assignment map
+            has_row_caps = any(
+                a.downstream_cap is not None
+                for a in offer_publisher_assignments_map.values()
+            )
             
             # 对于客户用户，应用转化上限：每个(offer_id, publisher_id)组合的转化数不能超过其downstream_cap
-            if conversion_cap > 0:
+            if has_row_caps or conversion_cap > 0:
                 # 重新计算总转化数和总收益
                 total_conversions = 0
                 total_po_after_discount = 0.0
                 
-                # 对每个(offer_id, publisher_id)组合应用downstream_cap限制
+                # 对每个(offer_id, publisher_id)组合应用downstream_cap限制（仅内存裁剪）
                 for key, stat in stats_dict.items():
                     offer_id_val, publisher_id_val = key
                     # 查找该(offer_id, publisher_id)组合的downstream_cap
@@ -580,32 +511,6 @@ class ConversionService:
                             if stat["click_count"] > 0:
                                 cr_val = (stat["conversion_count"] / stat["click_count"] * 100)
                                 stat["cr"] = round(cr_val, 2)
-                            
-                            # 检查Offer是否处于激活状态
-                            offer = offers_map.get(offer_id_val)
-                            if offer and offer.is_active and offer.status == 'Active':
-                                # 如果达到downstream_cap上限，关闭该渠道的offer关联的短链接
-                                logger.info(f"达到downstream_cap上限，关闭渠道 {publisher_id_val} 的Offer {offer_id_val} 关联的短链接")
-                                try:
-                                    from app.models.models import ShortLink
-                                    from sqlalchemy import update
-                                    
-                                    # 关闭与该offer和渠道关联的短链接
-                                    update_stmt = update(ShortLink).where(
-                                        ShortLink.offer_id == offer_id_val,
-                                        ShortLink.channel_id == publisher_id_val,
-                                        ShortLink.is_active == True
-                                    ).values(is_active=False)
-                                    
-                                    result = await self.db.execute(update_stmt)
-                                    # 注意：这里不执行commit，因为事务管理应该由调用方处理
-                                    # 只执行flush操作，确保更改被发送到数据库
-                                    await self.db.flush()
-                                    logger.info(f"成功关闭 {result.rowcount} 个短链接")
-                                except Exception as e:
-                                    logger.error(f"关闭短链接失败: {str(e)}")
-                            else:
-                                logger.debug(f"Offer {offer_id_val} 不是激活状态，跳过关闭短链接操作")
                     
                     # 累加总转化数和总收益
                     total_conversions += stat["conversion_count"]

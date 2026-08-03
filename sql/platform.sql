@@ -400,6 +400,8 @@ CREATE TABLE IF NOT EXISTS `conversion_deduction_logs`  (
   INDEX `idx_publisher_id`(`publisher_id` ASC) USING BTREE,
   INDEX `idx_created_at`(`created_at` ASC) USING BTREE,
   INDEX `idx_deduction_config_id`(`deduction_config_id` ASC) USING BTREE,
+  INDEX `idx_cdl_offer_pub_created`(`offer_id` ASC, `publisher_id` ASC, `created_at` ASC) USING BTREE,
+  INDEX `idx_cdl_adv_created`(`advertiser_id` ASC, `created_at` ASC) USING BTREE,
   CONSTRAINT `conversion_deduction_logs_ibfk_1` FOREIGN KEY (`advertiser_id`) REFERENCES `advertisers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `conversion_deduction_logs_ibfk_2` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `conversion_deduction_logs_ibfk_3` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
@@ -471,6 +473,7 @@ CREATE TABLE IF NOT EXISTS `offer_caps`  (
   INDEX `idx_publisher_id`(`publisher_id` ASC) USING BTREE,
   INDEX `idx_is_active`(`is_active` ASC) USING BTREE,
   INDEX `idx_cap_type`(`cap_type` ASC) USING BTREE,
+  INDEX `idx_offer_caps_lookup`(`offer_id` ASC, `publisher_id` ASC, `is_active` ASC, `cap_type` ASC) USING BTREE,
   CONSTRAINT `offer_caps_ibfk_1` FOREIGN KEY (`advertiser_id`) REFERENCES `advertisers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `offer_caps_ibfk_2` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `offer_caps_ibfk_3` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT

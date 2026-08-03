@@ -43,16 +43,31 @@ logger = logging.getLogger(__name__)
 
 def _sanitize_offer_response_for_client(
         offer_data: OfferResponse,
-        current_user: User
+        current_user: User,
+        *,
+        client_id: int | None = None,
 ) -> OfferResponse:
-    """客户响应不得暴露上游价格、Cap、Offer ID、Tracklink 或内部 Postback。"""
+    """客户响应不得暴露上游价格、Cap、广告主、他渠 PO/Cap、Tracklink 或内部 Postback。"""
     if current_user.role != UserRole.CLIENT:
         return offer_data
+    offer_data.advertiser_id = None
+    offer_data.advertiser_name = None
     offer_data.advertiser_offer_id = None
     offer_data.payout = None
     offer_data.upstream_cap = None
+    offer_data.affiliate_payout = None
+    offer_data.downstream_cap = None
     offer_data.advertiser_tracklink = None
     offer_data.postback_url = None
+    # 仅保留本客户关联渠道的分配明细（下游 PO/Cap）
+    assignments = offer_data.assigned_publishers or []
+    if client_id is not None:
+        offer_data.assigned_publishers = [
+            a for a in assignments
+            if isinstance(a, dict) and a.get("client_id") == client_id
+        ]
+    else:
+        offer_data.assigned_publishers = []
     return offer_data
 
 
@@ -635,6 +650,7 @@ async def get_offers(
     )
 
     # 构建响应数据（广告主信息已通过joinedload预加载，渠道分配已批量加载）
+    client_id = await get_client_id_for_user(db, current_user)
     offer_list = []
     # ---------- 循环处理 ----------
     for offer in offers:
@@ -643,7 +659,9 @@ async def get_offers(
         offer_data.advertiser_name = offer.advertiser.advertiser_name if offer.advertiser else None
         # 从批量查询的结果中获取渠道分配
         offer_data.assigned_publishers = assignments_map.get(offer.id, [])
-        offer_data = _sanitize_offer_response_for_client(offer_data, current_user)
+        offer_data = _sanitize_offer_response_for_client(
+            offer_data, current_user, client_id=client_id
+        )
 
         offer_list.append(offer_data)
 
@@ -914,7 +932,10 @@ async def get_offer(
     # 从已加载的关联中获取广告主名称
     offer_data.advertiser_name = offer.advertiser.advertiser_name if offer.advertiser else None
     offer_data.assigned_publishers = assignments
-    offer_data = _sanitize_offer_response_for_client(offer_data, current_user)
+    client_id = await get_client_id_for_user(db, current_user)
+    offer_data = _sanitize_offer_response_for_client(
+        offer_data, current_user, client_id=client_id
+    )
 
     return ResponseBaseSchema.success(data=offer_data)
 

@@ -136,7 +136,8 @@ export default defineConfig({
     // 禁用压缩大小报告（加快构建速度）
     reportCompressedSize: false,
     // 设置构建目标（现代浏览器，减少转译）
-    target: 'es2015',
+    // 现代浏览器基线；配合 package.json browserslist
+    target: 'es2020',
     // 启用 CSS 代码分割
     cssCodeSplit: true,
     // 减少构建输出信息（加快构建速度）

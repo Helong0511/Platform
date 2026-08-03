@@ -372,7 +372,7 @@ export const useAuthStore = defineStore('auth', {
       return this.isAuthenticated;
     },
     async fetchUserInfo(options = {}) {
-      const { silent = false, force = false } = options;
+      const { silent = false, force = false, failClosed = false } = options;
       const USER_INFO_CACHE_TTL_MS = 30_000;
 
       if (!force && !this.isAuthenticated) return;
@@ -419,6 +419,12 @@ export const useAuthStore = defineStore('auth', {
             router.push('/login').catch(() => { });
           }
           return;
+        }
+
+        // 权限敏感路由：非 401 也不得继续信任本地篡改的 role
+        if (failClosed) {
+          logger.warn('获取用户信息失败（failClosed）:', err);
+          throw err;
         }
 
         // 非认证类错误：保留登录态，仅记录（避免 API 文档等页误触发整站登出）

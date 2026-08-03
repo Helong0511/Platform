@@ -221,6 +221,12 @@ async def send_webhook_notification(
         是否发送成功
     """
     try:
+        from app.core.ssrf_guard import validate_outbound_url
+
+        allowed, reason = validate_outbound_url(url)
+        if not allowed:
+            logger.error("Webhook URL 未通过 SSRF 校验: %s", reason)
+            return False
 
         # 构建通知数据
         payload = {
@@ -228,7 +234,7 @@ async def send_webhook_notification(
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
             response = await client.post(
                 url,
                 json=payload,

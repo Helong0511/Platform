@@ -423,6 +423,41 @@ function hasPublisherAccess(authStore) {
 }
 
 /**
+ * 以服务端 /users/me 刷新本地 userInfo，失败则不得继续做角色判断。
+ * @returns {Promise<boolean>} true=已同步；false=无法验证
+ */
+async function syncUserInfoOrDeny(authStore) {
+  try {
+    await authStore.fetchUserInfo({ silent: true, force: true, failClosed: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function roleGuardFallback(from, authStore) {
+  if (from.path && from.path !== '/login' && from.path.startsWith('/app')) {
+    return from.path;
+  }
+  return getDefaultRoute(authStore.userInfo) || '/app/dashboard';
+}
+
+/**
+ * 权限同步失败时的安全回退：取消导航或去仅需登录的仪表盘，避免受保护路由间振荡。
+ */
+function roleSyncFailureFallback(from, to) {
+  if (
+    from.path
+    && from.path.startsWith('/app')
+    && from.path !== '/login'
+    && from.path !== to.path
+  ) {
+    return false; // 取消本次跳转，留在当前页
+  }
+  return '/app/dashboard';
+}
+
+/**
  * 路由守卫 - 全局前置守卫
  * 
  * 功能说明：
@@ -524,13 +559,15 @@ router.beforeEach(async (to, from, next) => {
         return next('/login');
       }
 
+      if (!(await syncUserInfoOrDeny(authStore))) {
+        ElMessage.warning('无法验证管理员权限，请稍后重试');
+        return next(roleSyncFailureFallback(from, to));
+      }
+
       // 检查管理员权限
       if (!authStore.isAdmin) {
-        const fallbackPath = from.path && from.path !== '/login' && from.path.startsWith('/app')
-          ? from.path
-          : '/app/dashboard';
         ElMessage.warning('无权访问该页面，需要管理员权限');
-        return next(fallbackPath);
+        return next(roleGuardFallback(from, authStore));
       }
     }
 
@@ -541,12 +578,13 @@ router.beforeEach(async (to, from, next) => {
         ElMessage.warning('请先登录');
         return next('/login');
       }
+      if (!(await syncUserInfoOrDeny(authStore))) {
+        ElMessage.warning('无法验证访问权限，请稍后重试');
+        return next(roleSyncFailureFallback(from, to));
+      }
       if (authStore.isAdmin) {
-        const fallbackPath = from.path && from.path !== '/login' && from.path.startsWith('/app')
-          ? from.path
-          : '/app/dashboard';
         ElMessage.warning('该页面仅供客户访问');
-        return next(fallbackPath);
+        return next(roleGuardFallback(from, authStore));
       }
     }
 
@@ -557,13 +595,13 @@ router.beforeEach(async (to, from, next) => {
         ElMessage.warning('请先登录');
         return next('/login');
       }
-
+      if (!(await syncUserInfoOrDeny(authStore))) {
+        ElMessage.warning('无法验证访问权限，请稍后重试');
+        return next(roleSyncFailureFallback(from, to));
+      }
       if (!hasPublisherAccess(authStore)) {
-        const fallbackPath = from.path && from.path !== '/login' && from.path.startsWith('/app')
-          ? from.path
-          : getDefaultRoute(authStore.userInfo);
         ElMessage.warning('无权访问该页面');
-        return next(fallbackPath);
+        return next(roleGuardFallback(from, authStore));
       }
     }
 
@@ -574,10 +612,13 @@ router.beforeEach(async (to, from, next) => {
         ElMessage.warning('请先登录');
         return next('/login');
       }
+      if (!(await syncUserInfoOrDeny(authStore))) {
+        ElMessage.warning('无法验证访问权限，请稍后重试');
+        return next(roleSyncFailureFallback(from, to));
+      }
       if (!authStore.isAdmin && hasPublisherAccess(authStore)) {
-        const fallbackPath = getDefaultRoute(authStore.userInfo);
         ElMessage.warning('无权访问广告数据页面');
-        return next(fallbackPath);
+        return next(getDefaultRoute(authStore.userInfo));
       }
     }
 
@@ -588,10 +629,13 @@ router.beforeEach(async (to, from, next) => {
         ElMessage.warning('请先登录');
         return next('/login');
       }
+      if (!(await syncUserInfoOrDeny(authStore))) {
+        ElMessage.warning('无法验证访问权限，请稍后重试');
+        return next(roleSyncFailureFallback(from, to));
+      }
       if (!authStore.isAdmin && !authStore.userInfo?.api_enabled) {
-        const fallbackPath = getDefaultRoute(authStore.userInfo);
         ElMessage.warning('API 对接未开启，请联系管理员');
-        return next(fallbackPath);
+        return next(getDefaultRoute(authStore.userInfo));
       }
     }
 

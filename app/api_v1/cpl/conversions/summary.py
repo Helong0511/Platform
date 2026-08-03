@@ -13,7 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import get_db_readonly
 from app.core.dependencies import get_conversion_service
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
@@ -36,7 +36,7 @@ async def get_conversion_summary(
         offer_id: Optional[int] = Query(None, description="Offer ID过滤"),
         publisher_id: Optional[int] = Query(None, description="渠道ID过滤"),
         advertiser_id: Optional[int] = Query(None, description="广告主ID过滤"),
-        db: AsyncSession = Depends(get_db),
+        db: AsyncSession = Depends(get_db_readonly),
         current_user: User = Depends(get_current_user)
 ):
     """
@@ -90,7 +90,7 @@ async def get_conversion_summary(
 async def get_summary_by_offer(
         start_date: Optional[str] = Query(None, description="开始日期（YYYY-MM-DD）"),
         end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
-        db: AsyncSession = Depends(get_db),
+        db: AsyncSession = Depends(get_db_readonly),
         current_user: User = Depends(get_current_user)
 ):
     """

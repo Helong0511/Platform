@@ -132,6 +132,19 @@ class SensitivePathHitTracker:
 
 _hit_tracker = SensitivePathHitTracker()
 
+# 本机回环地址：开发/健康检查探测不应写入黑名单，否则本地联调会被自己锁死
+_LOOPBACK_IPS = frozenset({"127.0.0.1", "::1", "localhost", "0.0.0.0"})
+
+
+def _is_loopback_ip(ip: str) -> bool:
+    """判断是否为本机回环地址（含 IPv4/IPv6 常见写法）。"""
+    value = (ip or "").strip().lower()
+    if not value:
+        return False
+    if value in _LOOPBACK_IPS or value.startswith("127."):
+        return True
+    return value.startswith("::ffff:127.")
+
 
 async def _upsert_blocked_ip(ip: str, reason: str) -> bool:
     """写入或激活 IP 黑名单，返回是否新封禁。"""
@@ -252,7 +265,13 @@ async def handle_probe_hit(
     action_taken = "blocked_404"
 
     threshold = policy.auto_block_threshold
-    if threshold > 0 and hit_count >= threshold and client_ip and client_ip != "unknown":
+    if (
+        threshold > 0
+        and hit_count >= threshold
+        and client_ip
+        and client_ip != "unknown"
+        and not _is_loopback_ip(client_ip)
+    ):
         reason = (
             f"自动封禁：{level_label(int(match.level))}探测"
             f" {hit_count} 次/{_hit_tracker._window}s，规则 {match.matched_rule}"
@@ -267,6 +286,13 @@ async def handle_probe_hit(
                 hit_count,
                 match.matched_rule,
             )
+    elif threshold > 0 and hit_count >= threshold and _is_loopback_ip(client_ip):
+        logger.info(
+            "敏感路径命中达阈值但跳过封禁本机回环: ip=%s hits=%s rule=%s",
+            client_ip,
+            hit_count,
+            match.matched_rule,
+        )
 
     if policy.telegram_alert:
         await _send_critical_alert(

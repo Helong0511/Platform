@@ -138,6 +138,8 @@ class OfferUpdate(BaseSchema):
 class OfferResponse(OfferBase):
     """Offer响应。用于 API 请求/响应序列化与 OpenAPI 文档生成。"""
     id: int
+    # 客户角色消毒后可能清空广告主标识
+    advertiser_id: Optional[int] = None
     downstream_tracklink: Optional[str] = None
     click_validity_hours: Optional[int] = None
     created_at: datetime

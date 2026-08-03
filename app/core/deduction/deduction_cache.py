@@ -52,19 +52,23 @@ class DeductionConfigCache:
         
         if cached_data and isinstance(cached_data, dict):
             try:
-                # 从缓存字典重建配置对象
+                # 从缓存字典重建配置对象（字段与 ORM 对齐）
                 config = ConversionDeductionConfig(
                     id=cached_data.get('id'),
                     offer_id=cached_data.get('offer_id'),
                     publisher_id=cached_data.get('publisher_id'),
                     advertiser_id=cached_data.get('advertiser_id'),
-                    volume_deduction_ratio=float(cached_data.get('volume_deduction_ratio', 0)),
-                    amount_deduction_ratio=float(cached_data.get('amount_deduction_ratio', 0)),
-                    priority=int(cached_data.get('priority', 0)),
+                    volume_deduction_ratio=float(cached_data.get('volume_deduction_ratio', 0) or 0),
+                    amount_deduction_ratio=float(cached_data.get('amount_deduction_ratio', 0) or 0),
+                    priority=int(cached_data.get('priority', 0) or 0),
                     is_active=bool(cached_data.get('is_active', True)),
-                    strategy=cached_data.get('strategy', 'random'),
+                    deduction_strategy=cached_data.get('deduction_strategy')
+                    or cached_data.get('strategy')
+                    or 'random',
+                    enable_volume_deduction=bool(cached_data.get('enable_volume_deduction', False)),
+                    enable_amount_deduction=bool(cached_data.get('enable_amount_deduction', False)),
                     created_at=cached_data.get('created_at'),
-                    updated_at=cached_data.get('updated_at')
+                    updated_at=cached_data.get('updated_at'),
                 )
                 logger.debug(f"缓存命中：deduction_config:{level}:{target_id}")
                 return config
@@ -131,13 +135,15 @@ class DeductionConfigCache:
             'offer_id': config.offer_id,
             'publisher_id': config.publisher_id,
             'advertiser_id': config.advertiser_id,
-            'volume_deduction_ratio': config.volume_deduction_ratio,
-            'amount_deduction_ratio': config.amount_deduction_ratio,
+            'volume_deduction_ratio': float(config.volume_deduction_ratio or 0),
+            'amount_deduction_ratio': float(config.amount_deduction_ratio or 0),
             'priority': config.priority,
             'is_active': config.is_active,
-            'strategy': config.strategy,
+            'deduction_strategy': config.deduction_strategy or 'random',
+            'enable_volume_deduction': bool(config.enable_volume_deduction),
+            'enable_amount_deduction': bool(config.enable_amount_deduction),
             'created_at': str(config.created_at) if config.created_at else None,
-            'updated_at': str(config.updated_at) if config.updated_at else None
+            'updated_at': str(config.updated_at) if config.updated_at else None,
         }
         
         await set_cached(cache_key, config_dict, ttl=CONFIG_CACHE_TTL, key_prefix='deduction')

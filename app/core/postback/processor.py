@@ -3,7 +3,7 @@ Postback 统一处理器模块（重构版）
 
 协调各子模块完成 Postback 处理流程：
 1. IP 验证 → 2. 数据验证 → 3. 数据标准化 → 4. Click 关联 → 5. 重复检测
-6. Cap 检查 → 7. 扣量计算 → 8. 保存记录 → 9. 渠道转发 → 10. 通知发送
+6. 扣量计算 → 7. Cap 原子预留 → 8. 保存记录 → 9. 渠道转发 → 10. 通知发送
 
 说明：入库 commit 后，渠道/产品转发改为后台任务（独立 DB 会话），
 避免下游慢/超时时阻塞上游 PostBack 回调响应。
@@ -27,7 +27,6 @@ from app.core.postback.pipeline import (
     PostbackPipelineContext,
     step_apply_discount,
     step_associate_click,
-    step_check_cap,
     step_check_duplicate,
     step_save_conversion,
     deactivate_short_links_on_cap_exceeded,
@@ -162,23 +161,11 @@ class PostbackProcessor:
                     "retryable": False,
                 }
 
-            # ========== 第 6–8 步：Cap / 扣量 / 保存（pipeline） ==========
-            logger.info("=== 第 6 步：Cap 检查 ====")
+            # ========== 第 6–8 步：扣量 / Cap 原子预留 / 保存 ==========
+            # Cap 不再先 peek 再 increment（TOCTOU）；扣量命中不占 Cap 名额，
+            # 故仍先扣量，再对需入库转化做 Redis Lua 原子预留。
+            logger.info("=== 第 6/7 步：扣量计算（Cap 预留延后至入库前） ===")
             pipe_ctx.click_association = click_association
-            cap_ok, cap_status = await step_check_cap(pipe_ctx)
-            conversion_status = pipe_ctx.conversion_status
-            logger.info(f"Cap 检查结果：{cap_ok}, 状态：{conversion_status}")
-
-            if not cap_ok and cap_status == "cap_check_error":
-                await db.rollback()
-                logger.error("Cap 检查基础设施失败，拒绝入库并请求上游重试")
-                return {
-                    "success": False,
-                    "message": "Cap 检查失败，请重试",
-                    "retryable": True,
-                }
-
-            logger.info("=== 第 7 步：扣量计算 ===")
             try:
                 final_payout, deduction_info, skip_save_and_forward = await step_apply_discount(pipe_ctx)
             except DeductionProcessingError as ded_err:
@@ -204,65 +191,67 @@ class PostbackProcessor:
                     "payout": 0.0,
                 }
 
-            if not cap_ok:
-                pipe_ctx.final_payout = 0.0
-                final_payout = 0.0
-
             offer_id, publisher_id, advertiser_id = attribution_ids_from_association(
                 click_association
             )
 
-            # Cap 递增须在转化入库之前，失败则不写入转化记录
-            if cap_ok:
-                try:
-                    cap_incremented = await CapChecker.increment(
-                        offer_id=offer_id,
-                        publisher_id=publisher_id,
-                        advertiser_id=advertiser_id,
-                        db=db,
-                    )
-                except Exception:
-                    await CapChecker.rollback_redis(
-                        offer_id=offer_id,
-                        publisher_id=publisher_id,
-                        advertiser_id=advertiser_id,
-                        db=db,
-                    )
-                    await db.rollback()
-                    logger.error(
-                        "Cap 计数递增异常，已回滚：offer_id=%s publisher_id=%s",
-                        offer_id,
-                        publisher_id,
-                        exc_info=True,
-                    )
-                    return {
-                        "success": False,
-                        "message": "Cap 计数更新失败，转化未入库",
-                        "retryable": True,
-                    }
-                if not cap_incremented:
-                    await CapChecker.rollback_redis(
-                        offer_id=offer_id,
-                        publisher_id=publisher_id,
-                        advertiser_id=advertiser_id,
-                        db=db,
-                    )
-                    await db.rollback()
-                    logger.error(
-                        "Cap 计数递增未通过，已回滚：offer_id=%s publisher_id=%s",
-                        offer_id,
-                        publisher_id,
-                    )
-                    return {
-                        "success": False,
-                        "message": "Cap 计数更新失败，转化未入库",
-                        "retryable": True,
-                    }
+            # Cap 原子预留（替代原先 check + increment 分离）
+            cap_ok = True
+            cap_status = "cap_ok"
+            logger.info("=== Cap 原子预留 ===")
+            try:
+                cap_incremented, cap_status = await CapChecker.increment(
+                    offer_id=offer_id,
+                    publisher_id=publisher_id,
+                    advertiser_id=advertiser_id,
+                    db=db,
+                )
+            except Exception:
+                # CapChecker/increment_cap_count 已按实际预留回退 Redis，此处勿再全量 DECR
+                await db.rollback()
+                logger.error(
+                    "Cap 计数递增异常，已回滚：offer_id=%s publisher_id=%s",
+                    offer_id,
+                    publisher_id,
+                    exc_info=True,
+                )
+                return {
+                    "success": False,
+                    "message": "Cap 计数更新失败，转化未入库",
+                    "retryable": True,
+                }
 
-            # Cap 超限时与转化记录同一事务内关闭短链
-            if not cap_ok and cap_status != "cap_check_error":
+            if not cap_incremented and cap_status == "cap_check_error":
+                await db.rollback()
+                logger.error(
+                    "Cap 基础设施失败，拒绝入库：offer_id=%s publisher_id=%s",
+                    offer_id,
+                    publisher_id,
+                )
+                return {
+                    "success": False,
+                    "message": "Cap 检查失败，请重试",
+                    "retryable": True,
+                }
+
+            if not cap_incremented:
+                # 真超限：ORM 已 refresh，按 CapExceeded 入库（0 金额 + 关短链）
+                cap_ok = False
+                pipe_ctx.cap_ok = False
+                pipe_ctx.conversion_status = f"CapExceeded({cap_status or 'cap_exceeded'})"
+                pipe_ctx.final_payout = 0.0
+                final_payout = 0.0
+                logger.warning(
+                    "Cap 预留失败（已超限），按 CapExceeded 入库：offer_id=%s publisher_id=%s",
+                    offer_id,
+                    publisher_id,
+                )
                 if offer_id and publisher_id:
                     await deactivate_short_links_on_cap_exceeded(db, offer_id, publisher_id)
+            else:
+                pipe_ctx.cap_ok = True
+                pipe_ctx.conversion_status = "Pending"
+                logger.info("Cap 预留成功：offer_id=%s publisher_id=%s", offer_id, publisher_id)
 
             logger.info("=== 第 8 步：保存转化记录 ====")
             try:

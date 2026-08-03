@@ -43,7 +43,7 @@ app = FastAPI(
     docs_url=None if settings.is_production else f"{settings.API_V1_STR}/docs",
     redoc_url=None if settings.is_production else f"{settings.API_V1_STR}/redoc",
     openapi_url=None if settings.is_production else f"{settings.API_V1_STR}/openapi.json",
-    lifespan=lifespan  # 使用 lifespan 替代已弃用的 @app.on_event()
+    lifespan=lifespan,  # 使用 lifespan 替代已弃用的 @app.on_event()
 )
 
 # ====== 添加安全中间件 ======
@@ -75,9 +75,15 @@ app.add_middleware(RequestLoggingMiddleware)
 # app.add_middleware(CompressionMiddleware)
 
 # 5. CSRF防护中间件（防止CSRF攻击）
-if settings.ENABLE_CSRF:
+# 生产环境强制启用，忽略 ENABLE_CSRF=false（防止误关）
+_csrf_enabled = settings.ENABLE_CSRF or settings.is_production
+if settings.is_production and not settings.ENABLE_CSRF:
+    logger.warning("生产环境检测到 ENABLE_CSRF=false，已强制启用 CSRF 防护")
+if _csrf_enabled:
     app.add_middleware(CSRFMiddleware)
     logger.info("CSRF防护已启用")
+else:
+    logger.warning("CSRF防护已关闭（仅非生产环境允许）")
 
 # 6. API限流中间件（防止API滥用）
 app.add_middleware(RateLimitMiddleware)
@@ -169,9 +175,14 @@ app.include_router(short_link_redirect_router)
 if __name__ == "__main__":
     import uvicorn
 
+    # 直接 python -m / 本文件启动仅供本机开发；生产必须走 Gunicorn+Nginx
+    _dev_host = "127.0.0.1" if settings.is_production else os.getenv("DEV_BIND_HOST", "127.0.0.1")
+    if settings.is_production:
+        logger.error("生产环境禁止以 __main__ + reload 方式启动，请使用 Gunicorn")
+        raise SystemExit(1)
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0",
+        host=_dev_host,
         port=8960,
         reload=True,
         reload_dirs=["app"],

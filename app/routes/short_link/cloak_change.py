@@ -47,7 +47,7 @@ from app.routes.short_link.short_code_validate import validate_route_short_code
 from app.routes.short_link.utils import (
     create_click_record,
     offer_id_from_numeric_dp,
-    resolve_default_publisher_for_offer,
+    resolve_attributed_publisher_for_offer,
     resolve_offer_id,
 )
 
@@ -116,6 +116,7 @@ def register_cloak_change_routes(router: APIRouter) -> None:
             request_params = {k.lower(): v for k, v in request.query_params.items()}
             offer_id_q: Optional[int] = None
             channel_id_q: Optional[int] = None
+            channel_from_query = False
             for key, raw in (
                 ("offer_id", request.query_params.get("offer_id")),
                 ("channel_id", request.query_params.get("channel_id")),
@@ -128,6 +129,7 @@ def register_cloak_change_routes(router: APIRouter) -> None:
                         offer_id_q = val
                     else:
                         channel_id_q = val
+                        channel_from_query = True
                 except (TypeError, ValueError):
                     pass
             meta = cached_data if cached_data else {}
@@ -160,20 +162,17 @@ def register_cloak_change_routes(router: APIRouter) -> None:
 
             # ---------- 5. 生成 click_id 并构建最终跳转 URL（占位符 + 查询参数合并） ----------
             request_info_cloak = collect_request_info(request) if request else {}
-            final_channel_id_cloak = channel_id_q
             final_offer_id_cloak, advertiser_id_cloak = await resolve_offer_id(offer_id_q, db)
-            # 短链未填 channel_id 时，从该产品已绑定的启用渠道中回退（使用解析后的 Offer 主键）
-            if final_channel_id_cloak is None and final_offer_id_cloak is not None:
-                fallback_pub = await resolve_default_publisher_for_offer(final_offer_id_cloak, db)
-                if fallback_pub is not None:
-                    final_channel_id_cloak = fallback_pub
-                    channel_id_q = fallback_pub
-                    logger.info(
-                        "[斗篷服务] 短链未配置渠道，已按产品绑定回退: short_code=%s offer_id=%s publisher_id=%s",
-                        short_code,
-                        final_offer_id_cloak,
-                        fallback_pub,
-                    )
+            final_channel_id_cloak = await resolve_attributed_publisher_for_offer(
+                final_offer_id_cloak,
+                channel_id_q,
+                db,
+                channel_from_query=channel_from_query,
+            )
+            if final_offer_id_cloak is not None and channel_from_query and final_channel_id_cloak is None:
+                from fastapi.responses import PlainTextResponse
+                return PlainTextResponse("Offer 未分配给该渠道", status_code=404)
+            channel_id_q = final_channel_id_cloak
             # click_id 必须在渠道回退之后生成，否则令牌可能缺少 publisher_id，导致后续展示“未关联渠道”
             click_id_cloak = generate_click_id_unified(
                 offer_id=final_offer_id_cloak,
