@@ -67,7 +67,8 @@ sudo rm -rf dist
 sudo rm -rf node_modules
 # 保留 package-lock.json，确保 npm install 版本可重复、避免 workspace:* 解析失败
 
-sudo rm -rf /data/Platform/logs/*
+# 禁止清空应用日志目录（由定时任务「清理文件日志」按保留策略超期清理）
+# sudo rm -rf /data/Platform/logs/*
 
 echo "=== 构建前端 ==="
 npm ci || npm install

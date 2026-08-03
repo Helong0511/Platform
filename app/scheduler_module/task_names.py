@@ -22,8 +22,11 @@
 # 数据归档任务
 ARCHIVE_DATA_TASK_NAME = "数据归档任务"
 
-# 清理旧日志任务
+# 清理旧日志任务（DB 审计）
 CLEANUP_LOGS_TASK_NAME = "清理旧日志"
+
+# 清理文件日志任务（logs/ 磁盘文件）
+CLEANUP_FILE_LOGS_TASK_NAME = "清理文件日志"
 
 # 清理过期会话和黑名单任务
 CLEANUP_SESSIONS_TASK_NAME = "清理过期会话和黑名单"
@@ -73,6 +76,7 @@ RESET_DAILY_CAPS_TASK_NAME = "每日Cap重置"
 TASK_NAME_MAP = {
     "archive_old_data": ARCHIVE_DATA_TASK_NAME,
     "cleanup_old_logs": CLEANUP_LOGS_TASK_NAME,
+    "cleanup_file_logs": CLEANUP_FILE_LOGS_TASK_NAME,
     "cleanup_expired_sessions": CLEANUP_SESSIONS_TASK_NAME,
     "cleanup_sensitive_path_probes": CLEANUP_SENSITIVE_PROBES_TASK_NAME,
     "tqt_task": TQT_API_TASK_NAME,
@@ -97,6 +101,7 @@ ALL_TASK_NAMES = [
     CLEANUP_SESSIONS_TASK_NAME,
     CLEANUP_SENSITIVE_PROBES_TASK_NAME,
     CLEANUP_LOGS_TASK_NAME,
+    CLEANUP_FILE_LOGS_TASK_NAME,
     TQT_API_TASK_NAME,
     SKYMOBI_API_TASK_NAME,
     TBSJ_API_TASK_NAME,

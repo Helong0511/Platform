@@ -80,6 +80,7 @@
             <el-option label="激活" value="ACTIVATE"></el-option>
             <el-option label="禁用" value="DEACTIVATE"></el-option>
             <el-option label="定时任务运行" value="TASK_RUN"></el-option>
+            <el-option label="清理" value="CLEANUP"></el-option>
             <el-option label="API访问" value="API_ACCESS"></el-option>
             <el-option label="程序运行错误" value="RUNTIME_ERROR"></el-option>
             <el-option label="撤销会话" value="REVOKE_SESSION"></el-option>
@@ -95,6 +96,7 @@
             <el-option label="产品" value="PRODUCT"></el-option>
             <el-option label="广告数据" value="AD_DATA"></el-option>
             <el-option label="定时任务" value="SCHEDULED_TASK"></el-option>
+            <el-option label="文件日志" value="FILE_LOGS"></el-option>
             <el-option label="系统" value="SYSTEM"></el-option>
             <el-option label="前端" value="FRONTEND"></el-option>
             <el-option label="会话" value="SESSION"></el-option>

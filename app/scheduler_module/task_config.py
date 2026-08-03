@@ -89,6 +89,17 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "description": "清理90天前的用户操作日志，减少日志表数据量",
     },
 
+    # ========== 清理文件日志任务 ==========
+    "清理文件日志": {
+        "task_name": "清理文件日志",
+        "task_module": "app.scheduler_module.tasks.cleanup_file_logs",
+        "task_function": "cleanup_file_logs",
+        "result_getter_module": "app.scheduler_module.tasks.cleanup_file_logs",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "30 3 * * *",  # 每天凌晨 3:30
+        "description": "清理超期文件日志：轮转备份归档/删除、archive 超期清理、gunicorn 溢出轮转与磁盘守卫",
+    },
+
     # ========== 清理过期会话和黑名单任务 ==========
     "清理过期会话和黑名单": {
         "task_name": "清理过期会话和黑名单",

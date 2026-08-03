@@ -133,10 +133,20 @@
             <select v-model="newRule.metric_name" required>
               <option value="api.average_duration">API平均响应时间</option>
               <option value="api.error_rate">API错误率</option>
+              <option value="api.slow_request_rate">API慢请求率</option>
+              <option value="api.response_time_p95">API P95响应时间</option>
+              <option value="api.response_time_p99">API P99响应时间</option>
               <option value="api.qps">API QPS</option>
               <option value="system.cpu_usage">CPU使用率</option>
               <option value="system.memory_usage">内存使用率</option>
               <option value="system.disk_usage">磁盘使用率</option>
+              <option value="system.logs_usage_ratio_soft">日志目录/软限制（1=触顶）</option>
+              <option value="system.logs_usage_ratio_hard">日志目录/硬限制（1=触顶）</option>
+              <option value="system.logs_usage_mb">日志目录用量(MB)</option>
+              <option value="system.log_queue_dropped_delta">日志队列本进程窗口丢弃数</option>
+              <option value="system.log_queue_usage_ratio">日志队列本进程积压比例</option>
+              <option value="system.log_queue_qsize">日志队列本进程当前长度</option>
+              <option value="system.log_queue_dropped">日志队列本进程累计丢弃数</option>
             </select>
           </div>
           <div class="form-group">

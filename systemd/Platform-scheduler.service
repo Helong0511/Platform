@@ -19,9 +19,10 @@ Environment="WORKERS=1"
 
 ExecStartPre=/bin/mkdir -p /data/Platform/logs
 ExecStartPre=/bin/chown -R www-data:www-data /data/Platform/logs
-ExecStartPre=/bin/touch /data/Platform/logs/gunicorn_scheduler.pid /data/Platform/logs/gunicorn_scheduler_access.log /data/Platform/logs/gunicorn_scheduler_error.log
-ExecStartPre=/bin/chown www-data:www-data /data/Platform/logs/gunicorn_scheduler.pid /data/Platform/logs/gunicorn_scheduler_access.log /data/Platform/logs/gunicorn_scheduler_error.log
-ExecStartPre=/bin/chmod 644 /data/Platform/logs/gunicorn_scheduler.pid /data/Platform/logs/gunicorn_scheduler_access.log /data/Platform/logs/gunicorn_scheduler_error.log
+# 预创建常用日志（默认不创建 gunicorn_scheduler_access.log）
+ExecStartPre=/bin/touch /data/Platform/logs/gunicorn_scheduler.pid /data/Platform/logs/gunicorn_scheduler_error.log /data/Platform/logs/error.log /data/Platform/logs/warning.log /data/Platform/logs/app.log /data/Platform/logs/scheduler.log
+ExecStartPre=/bin/chown www-data:www-data /data/Platform/logs/gunicorn_scheduler.pid /data/Platform/logs/gunicorn_scheduler_error.log /data/Platform/logs/error.log /data/Platform/logs/warning.log /data/Platform/logs/app.log /data/Platform/logs/scheduler.log
+ExecStartPre=/bin/chmod 644 /data/Platform/logs/gunicorn_scheduler.pid /data/Platform/logs/gunicorn_scheduler_error.log /data/Platform/logs/error.log /data/Platform/logs/warning.log /data/Platform/logs/app.log /data/Platform/logs/scheduler.log
 
 # 使用独立 pid/日志（gunicorn.conf.py 根据 GUNICORN_ROLE=scheduler 切换）
 ExecStart=/data/Platform/venv/bin/gunicorn \

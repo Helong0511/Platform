@@ -39,10 +39,10 @@ API限流（RateLimitMiddleware）：
 - Content-Security-Policy: 限制资源加载来源
 
 请求日志（RequestLoggingMiddleware）：
-- 记录所有API请求的详细信息
-- 支持中文路径解码
-- 记录请求方法、路径、参数、响应状态码、处理时间
-- 生产环境只记录错误请求，开发环境记录所有请求
+- 开发环境：记录请求开始/完成（含查询参数）
+- 生产环境默认降噪：不记「请求开始」；仅记录 4xx/5xx、慢请求（LOG_ACCESS_SLOW_SECONDS）、异常
+- /health 等探针成功请求可跳过；LOG_ACCESS_FULL_IN_PRODUCTION=true 可临时恢复全量
+- 支持中文路径解码；生产不记录查询参数
 
 响应压缩（CompressionMiddleware）：
 - 使用gzip压缩响应内容
@@ -538,23 +538,45 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """
-    请求日志中间件
-    记录所有API请求的详细信息，用于审计和调试
+    请求访问日志中间件。
+
+    开发环境：记录请求开始/完成（含查询参数）。
+    生产环境默认降噪：不记「请求开始」；仅记录异常、4xx/5xx、或超过慢请求阈值的完成日志。
+    健康检查等探针路径可跳过。可通过 LOG_ACCESS_FULL_IN_PRODUCTION=true 恢复全量。
     """
+
+    # 生产环境默认可跳过的低价值路径（精确或前缀）
+    _SKIP_PATH_SUFFIXES = (
+        "/health",
+        "/favicon.ico",
+    )
 
     def __init__(self, app: ASGIApp):
         """绑定 access 专用 logger，与业务 logger 分离。"""
         super().__init__(app)
         self.app = app
-        # 获取访问日志记录器
-        self.access_logger = logging.getLogger('access')
+        self.access_logger = logging.getLogger("access")
+
+    def _should_skip_path(self, path: str) -> bool:
+        path_l = (path or "").lower()
+        return any(path_l.endswith(suffix) for suffix in self._SKIP_PATH_SUFFIXES)
+
+    def _slow_threshold_seconds(self) -> float:
+        try:
+            return float(getattr(settings, "LOG_ACCESS_SLOW_SECONDS", 3.0) or 3.0)
+        except (TypeError, ValueError):
+            return 3.0
+
+    def _full_access_logging(self) -> bool:
+        """是否全量记录 access（开发默认全量；生产需显式打开）。"""
+        if not settings.is_production:
+            return True
+        return bool(getattr(settings, "LOG_ACCESS_FULL_IN_PRODUCTION", False))
 
     async def dispatch(self, request: Request, call_next):
-        """记录请求方法、路径、状态码与耗时；生产环境仅记录错误请求。"""
-        # ====== 记录请求开始时间 ======
+        """记录请求方法、路径、状态码与耗时；生产默认仅记录异常/错误/慢请求。"""
         start_time = time.time()
 
-        # ====== 获取请求信息 ======
         try:
             client_ip = get_client_ip(request)
         except Exception as e:
@@ -562,54 +584,62 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             client_ip = "testclient"
 
         method = request.method
-        # URL 解码路径，使中文可读
         path = unquote(request.url.path)
-        # 生产环境不记录查询参数（可能包含敏感信息）
         query_params = str(request.query_params) if request.query_params and not settings.is_production else ""
-        # 获取用户代理
         user_agent = request.headers.get("User-Agent", "未知")
-        # 获取设备类型
         try:
             device_type = get_device_type(request)
         except Exception:
             device_type = "未知"
 
-        # ====== 记录请求日志（生产环境简化） ======
-        if settings.is_production:
-            # 生产环境：只记录关键信息，不记录敏感数据
-            self.access_logger.info(
-                f"请求开始: {method} {path} | IP: {client_ip} | 设备: {device_type} | UA: {user_agent}"
-            )
-        else:
-            # 开发环境：记录详细信息
-            self.access_logger.info(
-                f"请求开始: {method} {path} | IP: {client_ip} | 设备: {device_type} | UA: {user_agent} | 查询参数: {query_params}"
-            )
+        skip_path = self._should_skip_path(path)
+        full_logging = self._full_access_logging()
 
-        # ====== 处理请求 ======
+        if full_logging and not skip_path:
+            if settings.is_production:
+                self.access_logger.info(
+                    f"请求开始: {method} {path} | IP: {client_ip} | 设备: {device_type} | UA: {user_agent}"
+                )
+            else:
+                self.access_logger.info(
+                    f"请求开始: {method} {path} | IP: {client_ip} | 设备: {device_type} | "
+                    f"UA: {user_agent} | 查询参数: {query_params}"
+                )
+
         try:
             response = await call_next(request)
-            # ====== 计算处理时间 ======
             process_time = time.time() - start_time
+            status_code = int(getattr(response, "status_code", 0) or 0)
+            slow = process_time >= self._slow_threshold_seconds()
+            is_error_status = status_code >= 400
 
-            # ====== 记录响应日志 ======
-            self.access_logger.info(
-                f"请求完成: {method} {path} | "
-                f"状态码: {response.status_code} | "
-                f"处理时间: {process_time:.3f}秒 | "
-                f"IP: {client_ip} | 设备: {device_type}"
-            )
+            should_log_complete = False
+            if skip_path:
+                should_log_complete = is_error_status
+            elif full_logging:
+                should_log_complete = True
+            else:
+                # 生产降噪：仅错误状态或慢请求
+                should_log_complete = is_error_status or slow
 
-            # ====== 添加处理时间响应头 ======
+            if should_log_complete:
+                msg = (
+                    f"请求完成: {method} {path} | "
+                    f"状态码: {status_code} | "
+                    f"处理时间: {process_time:.3f}秒 | "
+                    f"IP: {client_ip} | 设备: {device_type}"
+                )
+                if is_error_status:
+                    self.access_logger.warning(msg)
+                elif slow:
+                    self.access_logger.warning(msg)
+                else:
+                    self.access_logger.info(msg)
+
             response.headers["X-Process-Time"] = f"{process_time:.3f}"
-
             return response
         except Exception as e:
-            # ====== 记录异常 ======
-            # 注意：详细的异常信息会由全局异常处理器记录，这里只记录简要信息
-            # 避免重复记录完整的堆栈跟踪
             process_time = time.time() - start_time
-            # 只记录简要信息，详细错误由全局异常处理器记录
             self.access_logger.warning(
                 f"请求异常: {method} {path} | "
                 f"错误类型: {type(e).__name__} | "

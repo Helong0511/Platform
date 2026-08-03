@@ -92,6 +92,39 @@
             <span class="resource-range">({{ (metrics.resources.disk?.min || 0).toFixed(1) }}% - {{ (metrics.resources.disk?.max || 0).toFixed(1) }}%)</span>
           </div>
         </div>
+        <div class="resource-card" :class="{ 'resource-warn': logsSoftHit, 'resource-critical': logsHardHit }">
+          <div class="resource-header">
+            <span class="resource-icon">📜</span>
+            <span class="resource-name">应用日志</span>
+            <button
+              type="button"
+              class="logs-cleanup-btn"
+              :disabled="logsCleanupLoading"
+              title="清理超期备份/归档；冷却优先走 Redis 跨进程"
+              @click="handleLogsCleanup"
+            >
+              {{ logsCleanupLoading ? '清理中…' : '立即清理' }}
+            </button>
+          </div>
+          <div class="resource-bar-container">
+            <div
+              class="resource-bar logs"
+              :class="{ warn: logsSoftHit, critical: logsHardHit }"
+              :style="{ width: Math.min(logsUsagePercent, 100) + '%' }"
+            ></div>
+          </div>
+          <div class="resource-info">
+            <span class="resource-value">{{ logsUsageMb.toFixed(1) }} / {{ logsSoftLimitMb }} MB</span>
+            <span class="resource-range">
+              软 {{ logsSoftLimitMb }} / 硬 {{ logsHardLimitMb }}
+              <template v-if="logsHardHit"> · 硬限制</template>
+              <template v-else-if="logsSoftHit"> · 软限制</template>
+              <template v-if="logQueueDroppedDelta > 0"> · 本进程队列丢弃 +{{ logQueueDroppedDelta }}</template>
+              <template v-else-if="logQueueUsageRatio >= 0.8"> · 本进程队列积压</template>
+            </span>
+          </div>
+          <p v-if="logsCleanupHint" class="logs-cleanup-hint">{{ logsCleanupHint }}</p>
+        </div>
       </div>
     </div>
 
@@ -224,8 +257,9 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { getMonitoringMetrics } from '@/api/monitoring'
-import { handleApiError } from '@/utils/api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { getMonitoringMetrics, cleanupFileLogsNow } from '@/api/monitoring'
+import { extractErrorMessage, handleApiError, isErrorHandled } from '@/utils/api'
 
 const metrics = ref({
   api: {},
@@ -237,10 +271,22 @@ const metrics = ref({
 
 let updateInterval = null
 let metricsLoading = false
+const logsCleanupLoading = ref(false)
+const logsCleanupHint = ref('')
 
 const unacknowledgedCount = computed(() => {
   return metrics.value.alerts?.filter(a => !a.acknowledged).length || 0
 })
+
+const logsInfo = computed(() => metrics.value.resources?.logs || {})
+const logsUsageMb = computed(() => Number(logsInfo.value.usage_mb || 0))
+const logsSoftLimitMb = computed(() => Number(logsInfo.value.soft_limit_mb || 2048))
+const logsHardLimitMb = computed(() => Number(logsInfo.value.hard_limit_mb || 4096))
+const logsUsagePercent = computed(() => Number(logsInfo.value.usage_percent_soft || 0))
+const logsSoftHit = computed(() => Boolean(logsInfo.value.soft_limit_hit))
+const logsHardHit = computed(() => Boolean(logsInfo.value.hard_limit_hit))
+const logQueueDroppedDelta = computed(() => Number(logsInfo.value.queue_dropped_delta || 0))
+const logQueueUsageRatio = computed(() => Number(logsInfo.value.queue_usage_ratio || 0))
 
 const formatTime = (timestamp) => {
   if (!timestamp) return '-'
@@ -263,6 +309,63 @@ const fetchMetrics = async () => {
     handleApiError(error, '获取监控数据失败', { logContext: '监控仪表盘' })
   } finally {
     metricsLoading = false
+  }
+}
+
+const handleLogsCleanup = async () => {
+  if (logsCleanupLoading.value) return
+  try {
+    await ElMessageBox.confirm(
+      '将清理超期轮转备份、归档 gzip、孤儿文件，并执行磁盘守卫。不会删除正在写入的活跃日志主文件。\n\n冷却默认 60 秒（优先 Redis 跨进程；Redis 不可用时仅本进程生效）。是否继续？',
+      '立即清理文件日志',
+      {
+        confirmButtonText: '开始清理',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+  } catch {
+    return
+  }
+
+  logsCleanupLoading.value = true
+  logsCleanupHint.value = ''
+  try {
+    const data = await cleanupFileLogsNow()
+    const result = data?.result || data || {}
+    const deleted = Number(result.deleted_count || 0)
+    const archived = Number(result.archived_count || 0)
+    const freedMb = Number(result.bytes_freed || 0) / (1024 * 1024)
+    const msg =
+      data?.message ||
+      result.message ||
+      `清理完成：删除 ${deleted}，归档 ${archived}，释放约 ${freedMb.toFixed(1)} MB`
+    const errors = Array.isArray(result.errors) ? result.errors.filter(Boolean) : []
+    logsCleanupHint.value = errors.length ? `${msg}；部分失败：${errors.slice(0, 3).join('；')}` : msg
+    if (errors.length) {
+      ElMessage.warning(logsCleanupHint.value)
+    } else {
+      ElMessage.success(msg)
+    }
+    if (result.logs_stats) {
+      metrics.value = {
+        ...metrics.value,
+        resources: {
+          ...(metrics.value.resources || {}),
+          logs: result.logs_stats,
+        },
+      }
+    } else {
+      await fetchMetrics()
+    }
+  } catch (error) {
+    const errMsg = extractErrorMessage(error) || '清理失败'
+    logsCleanupHint.value = errMsg
+    if (!isErrorHandled(error)) {
+      ElMessage.error(errMsg)
+    }
+  } finally {
+    logsCleanupLoading.value = false
   }
 }
 
@@ -436,6 +539,35 @@ onUnmounted(() => {
   color: #374151;
 }
 
+.logs-cleanup-btn {
+  margin-left: auto;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.logs-cleanup-btn:hover:not(:disabled) {
+  border-color: #9ca3af;
+  background: #f9fafb;
+}
+
+.logs-cleanup-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.logs-cleanup-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
 .resource-bar-container {
   height: 8px;
   background: #e5e7eb;
@@ -460,6 +592,26 @@ onUnmounted(() => {
 
 .resource-bar.disk {
   background: linear-gradient(90deg, #f59e0b, #d97706);
+}
+
+.resource-bar.logs {
+  background: linear-gradient(90deg, #6366f1, #818cf8);
+}
+
+.resource-bar.logs.warn {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+}
+
+.resource-bar.logs.critical {
+  background: linear-gradient(90deg, #ef4444, #f87171);
+}
+
+.resource-card.resource-warn {
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.35);
+}
+
+.resource-card.resource-critical {
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.45);
 }
 
 .resource-info {

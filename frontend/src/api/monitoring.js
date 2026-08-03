@@ -3,6 +3,7 @@
  * 使用统一 request 封装，自动携带 Cookie 与 CSRF。
  */
 import { request } from '../utils/api';
+import { withCsrfMutate } from '../utils/csrfMutate';
 
 const BASE = '/api/v1/monitoring';
 
@@ -82,4 +83,27 @@ export function acknowledgeAllAlerts() {
     url: `${BASE}/alerts/acknowledge-all`,
     method: 'put',
   }, { returnDataOnly: true });
+}
+
+/**
+ * 获取应用日志目录用量与异步队列状态。
+ */
+export function getLogsStats(force = false) {
+  return request({
+    url: `${BASE}/logs/stats`,
+    method: 'get',
+    params: { force: force ? true : undefined },
+  }, { returnDataOnly: true, timeout: MONITORING_TIMEOUT });
+}
+
+/**
+ * 立即执行文件日志超期清理（返回统计结果）。
+ */
+export function cleanupFileLogsNow() {
+  return withCsrfMutate(() =>
+    request({
+      url: `${BASE}/logs/cleanup`,
+      method: 'post',
+    }, { returnDataOnly: true, timeout: 120000 })
+  );
 }

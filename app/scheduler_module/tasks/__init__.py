@@ -13,11 +13,13 @@
 2. 上游拉数任务通常只需在 task_config 填写 module 路径即可
 """
 from app.scheduler_module.tasks.cleanup_expired_sessions import cleanup_expired_sessions
+from app.scheduler_module.tasks.cleanup_file_logs import cleanup_file_logs
 from app.scheduler_module.tasks.cleanup_old_logs import cleanup_old_audit_logs
 from app.scheduler_module.tasks.cleanup_sensitive_path_probes import cleanup_sensitive_path_probe_logs
 
 __all__ = [
     "cleanup_expired_sessions",
+    "cleanup_file_logs",
     "cleanup_old_audit_logs",
     "cleanup_sensitive_path_probe_logs",
 ]

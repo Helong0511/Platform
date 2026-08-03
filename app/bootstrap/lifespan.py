@@ -346,3 +346,10 @@ async def lifespan(app: FastAPI):
         logger.warning(f"关闭数据库连接池时出现错误: {e}")
     finally:
         logger.info("应用已关闭")
+        # 排空异步日志队列，减少优雅关闭时尾部日志丢失
+        try:
+            from app.core.log_queue import shutdown_log_queue
+
+            shutdown_log_queue(timeout_sec=2.0)
+        except Exception:
+            pass

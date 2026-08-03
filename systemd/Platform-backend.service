@@ -19,10 +19,10 @@ Environment="ENABLE_SCHEDULER=false"
 ExecStartPre=/bin/mkdir -p /data/Platform/logs
 ExecStartPre=/bin/chown -R www-data:www-data /data/Platform/logs
 ExecStartPre=/bin/chmod 755 /data/Platform/logs
-# 确保 Gunicorn 日志文件存在并设置权限
-ExecStartPre=/bin/touch /data/Platform/logs/gunicorn_access.log /data/Platform/logs/gunicorn_error.log /data/Platform/logs/gunicorn.pid
-ExecStartPre=/bin/chown www-data:www-data /data/Platform/logs/gunicorn_access.log /data/Platform/logs/gunicorn_error.log /data/Platform/logs/gunicorn.pid
-ExecStartPre=/bin/chmod 644 /data/Platform/logs/gunicorn_access.log /data/Platform/logs/gunicorn_error.log /data/Platform/logs/gunicorn.pid
+# 预创建常用日志文件（默认不创建 gunicorn_*_access.log：GUNICORN_ACCESSLOG_ENABLED=false）
+ExecStartPre=/bin/touch /data/Platform/logs/gunicorn_error.log /data/Platform/logs/gunicorn.pid /data/Platform/logs/error.log /data/Platform/logs/warning.log /data/Platform/logs/app.log /data/Platform/logs/tracking.log /data/Platform/logs/auth.log /data/Platform/logs/access.log
+ExecStartPre=/bin/chown www-data:www-data /data/Platform/logs/gunicorn_error.log /data/Platform/logs/gunicorn.pid /data/Platform/logs/error.log /data/Platform/logs/warning.log /data/Platform/logs/app.log /data/Platform/logs/tracking.log /data/Platform/logs/auth.log /data/Platform/logs/access.log
+ExecStartPre=/bin/chmod 644 /data/Platform/logs/gunicorn_error.log /data/Platform/logs/gunicorn.pid /data/Platform/logs/error.log /data/Platform/logs/warning.log /data/Platform/logs/app.log /data/Platform/logs/tracking.log /data/Platform/logs/auth.log /data/Platform/logs/access.log
 
 # 启动命令
 # 使用 Gunicorn 配置文件（推荐，统一管理所有配置）

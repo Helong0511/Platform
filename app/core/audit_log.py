@@ -30,6 +30,7 @@ ALLOWED_ACTION_TYPES = {
     "ACTIVATE",  # 激活
     "DEACTIVATE",  # 禁用
     "TASK_RUN",  # 定时任务运行
+    "CLEANUP",  # 清理（如文件日志超期清理）
     "API_ACCESS",  # 客户API访问
     "RUNTIME_ERROR",  # 程序运行错误
     "REVOKE_SESSION",  # 撤销会话

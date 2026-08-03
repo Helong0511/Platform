@@ -57,10 +57,9 @@ API_RATE_LIMIT_DEFAULT = 100
 LOGIN_RATE_LIMIT_DEFAULT = 5
 
 # ====== 日志相关常量 ======
-# 日志文件最大大小（字节）：5MB
-LOG_FILE_MAX_BYTES = 5 * 1024 * 1024
-# 日志文件备份数量
-LOG_FILE_BACKUP_COUNT = 5
+# 以下两项仅为 settings 不可用时的回退；正常路径请使用 settings.LOG_MAX_BYTES / LOG_BACKUP_COUNT
+LOG_FILE_MAX_BYTES = 10 * 1024 * 1024
+LOG_FILE_BACKUP_COUNT = 10
 # 日志目录权限
 LOG_DIR_MODE = 0o755
 

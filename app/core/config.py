@@ -511,15 +511,64 @@ class Settings(BaseSettings):
     MAX_CONCURRENT_SCHEDULED_TASKS: int = int(os.getenv("MAX_CONCURRENT_SCHEDULED_TASKS", "2"))
 
     # ====== 日志配置 ======
-    # 日志级别
+    # 根日志级别：DEBUG / INFO / WARNING / ERROR / CRITICAL（app.log 仍默认只收 WARNING+）
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
-    # 日志文件路径
+    # 主日志路径（主要用于推导 logs 目录；分类文件由 logging_setup 写入）
     LOG_FILE: str = os.getenv("LOG_FILE", "logs/app.log")
-    # 日志文件最大大小（字节）：10MB
+    # 单文件大小上限（字节），默认 10MB；超过后轮转 .1/.2…
     LOG_MAX_BYTES: int = int(os.getenv("LOG_MAX_BYTES", "10485760"))
-    # 日志文件备份数量
-    LOG_BACKUP_COUNT: int = int(os.getenv("LOG_BACKUP_COUNT", "5"))
-    
+    # 普通分类日志轮转备份份数
+    LOG_BACKUP_COUNT: int = int(os.getenv("LOG_BACKUP_COUNT", "10"))
+    # 错误日志 error.log 轮转备份份数（建议多于普通日志）
+    LOG_ERROR_BACKUP_COUNT: int = int(os.getenv("LOG_ERROR_BACKUP_COUNT", "20"))
+    # 是否启用 logs/error.log（ERROR+）
+    LOG_ERROR_FILE_ENABLED: bool = os.getenv("LOG_ERROR_FILE_ENABLED", "true").lower() in ["true", "1", "yes"]
+    # 是否启用 logs/warning.log（仅 WARNING）
+    LOG_WARNING_FILE_ENABLED: bool = os.getenv("LOG_WARNING_FILE_ENABLED", "true").lower() in ["true", "1", "yes"]
+    # 是否启用 logs/info.log（仅 INFO；默认关，防磁盘暴涨）
+    LOG_INFO_FILE_ENABLED: bool = os.getenv("LOG_INFO_FILE_ENABLED", "false").lower() in ["true", "1", "yes"]
+    # 落盘消息轻量敏感字段打码（password/token/authorization 等）
+    LOG_SENSITIVE_FILTER_ENABLED: bool = os.getenv("LOG_SENSITIVE_FILTER_ENABLED", "true").lower() in ["true", "1", "yes"]
+    # 是否启用 logs/tracking.log（追踪/短链模块）
+    LOG_TRACKING_FILE_ENABLED: bool = os.getenv("LOG_TRACKING_FILE_ENABLED", "true").lower() in ["true", "1", "yes"]
+    # 是否启用 logs/auth.log（登录/鉴权模块）
+    LOG_AUTH_FILE_ENABLED: bool = os.getenv("LOG_AUTH_FILE_ENABLED", "true").lower() in ["true", "1", "yes"]
+    # 生产环境是否全量记录 access（默认 false：仅 4xx/5xx/慢请求/异常）
+    LOG_ACCESS_FULL_IN_PRODUCTION: bool = os.getenv("LOG_ACCESS_FULL_IN_PRODUCTION", "false").lower() in ["true", "1", "yes"]
+    # access 慢请求阈值（秒）；生产降噪模式下超过该值也会写入 access.log
+    LOG_ACCESS_SLOW_SECONDS: float = float(os.getenv("LOG_ACCESS_SLOW_SECONDS", "3.0"))
+    # 进程内异步队列写盘（QueueHandler+QueueListener）；false 则文件 Handler 直挂 logger
+    LOG_QUEUE_ENABLED: bool = os.getenv("LOG_QUEUE_ENABLED", "true").lower() in ["true", "1", "yes"]
+    # 异步队列最大条数；满则丢弃新记录并计数（防日志风暴 OOM）；<=0 表示无界
+    LOG_QUEUE_MAXSIZE: int = int(os.getenv("LOG_QUEUE_MAXSIZE", "20000"))
+
+    # ====== 文件日志超期清理（定时任务「清理文件日志」，与 DB 审计清理独立）======
+    LOG_FILE_CLEANUP_ENABLED: bool = os.getenv("LOG_FILE_CLEANUP_ENABLED", "true").lower() in ["true", "1", "yes"]
+    # 超期备份是否先 gzip 归档（access/info 等类别仍可能直接删）
+    LOG_FILE_ARCHIVE: bool = os.getenv("LOG_FILE_ARCHIVE", "true").lower() in ["true", "1", "yes"]
+    LOG_ARCHIVE_DIR: str = os.getenv("LOG_ARCHIVE_DIR", "logs/archive")
+    LOG_RETENTION_ERROR_DAYS: int = int(os.getenv("LOG_RETENTION_ERROR_DAYS", "90"))
+    LOG_RETENTION_WARNING_DAYS: int = int(os.getenv("LOG_RETENTION_WARNING_DAYS", "30"))
+    LOG_RETENTION_APP_DAYS: int = int(os.getenv("LOG_RETENTION_APP_DAYS", "14"))
+    LOG_RETENTION_ACCESS_DAYS: int = int(os.getenv("LOG_RETENTION_ACCESS_DAYS", "7"))
+    LOG_RETENTION_INFO_DAYS: int = int(os.getenv("LOG_RETENTION_INFO_DAYS", "3"))
+    LOG_RETENTION_GUNICORN_DAYS: int = int(os.getenv("LOG_RETENTION_GUNICORN_DAYS", "14"))
+    # logs/ 下非标准文件（孤儿）保留天数
+    LOG_RETENTION_ORPHAN_DAYS: int = int(os.getenv("LOG_RETENTION_ORPHAN_DAYS", "7"))
+    # archive 内 gzip 保留天数（error 用此值；其它类别上限约 60 天）
+    LOG_ARCHIVE_RETENTION_DAYS: int = int(os.getenv("LOG_ARCHIVE_RETENTION_DAYS", "180"))
+    LOG_DISK_SOFT_LIMIT_MB: int = int(os.getenv("LOG_DISK_SOFT_LIMIT_MB", "2048"))
+    LOG_DISK_HARD_LIMIT_MB: int = int(os.getenv("LOG_DISK_HARD_LIMIT_MB", "4096"))
+    LOG_DISK_EMERGENCY_KEEP_ERROR_DAYS: int = int(os.getenv("LOG_DISK_EMERGENCY_KEEP_ERROR_DAYS", "30"))
+    # 磁盘软/硬限制是否推送管理员 Telegram
+    LOG_DISK_TELEGRAM_NOTIFY: bool = os.getenv("LOG_DISK_TELEGRAM_NOTIFY", "true").lower() in ["true", "1", "yes"]
+    # 磁盘限制 Telegram 防抖秒数（进程内；多 worker 可能各推一次）
+    LOG_DISK_TELEGRAM_DEBOUNCE_SECONDS: int = int(os.getenv("LOG_DISK_TELEGRAM_DEBOUNCE_SECONDS", "3600"))
+    # /metrics 中日志用量统计缓存秒数（避免频繁 walk logs/）
+    LOG_DISK_STATS_CACHE_SECONDS: int = int(os.getenv("LOG_DISK_STATS_CACHE_SECONDS", "30"))
+    # 监控页「立即清理」冷却秒数；优先 Redis 跨进程，否则本进程
+    LOG_MANUAL_CLEANUP_COOLDOWN_SECONDS: int = int(os.getenv("LOG_MANUAL_CLEANUP_COOLDOWN_SECONDS", "60"))
+
     # ====== 审计日志配置 ======
     # 审计日志保留天数（超过此天数的日志将被清理）
     # 默认 90 天（3个月），可根据需要调整

@@ -470,6 +470,7 @@ def build_flat_monitoring_metrics(
     cpu = resources.get('cpu') or {}
     memory = resources.get('memory') or {}
     disk = resources.get('disk') or {}
+    logs = resources.get('logs') or {}
 
     def _float(value: Any, default: float = 0.0) -> float:
         try:
@@ -490,6 +491,15 @@ def build_flat_monitoring_metrics(
         'system.cpu_usage': _float(cpu.get('current')),
         'system.memory_usage': _float(memory.get('current')),
         'system.disk_usage': _float(disk.get('current')),
+        # 日志目录相对软/硬限制的占用比例（1.0 = 100%）
+        'system.logs_usage_ratio_soft': _float(logs.get('usage_ratio_soft')),
+        'system.logs_usage_ratio_hard': _float(logs.get('usage_ratio_hard')),
+        'system.logs_usage_mb': _float(logs.get('usage_mb')),
+        # 异步日志队列（本进程）
+        'system.log_queue_dropped': _float(logs.get('queue_dropped')),
+        'system.log_queue_dropped_delta': _float(logs.get('queue_dropped_delta')),
+        'system.log_queue_qsize': _float(logs.get('queue_qsize')),
+        'system.log_queue_usage_ratio': _float(logs.get('queue_usage_ratio')),
     }
 
 # ====== 监控器核心类 ======
@@ -552,7 +562,22 @@ class SystemMonitor:
         # 资源监控任务状态
         self._resource_monitor_task = None
         self._resource_monitor_running = False
-    
+        # 日志目录用量缓存（避免每次 /metrics 全量 walk）
+        self._logs_stats_cache: Optional[Dict[str, Any]] = None
+        self._logs_stats_cache_ts: float = 0.0
+        try:
+            from app.core.config import settings as _settings
+
+            self._logs_stats_cache_ttl_sec: float = float(
+                getattr(_settings, "LOG_DISK_STATS_CACHE_SECONDS", None)
+                or os.getenv("LOG_DISK_STATS_CACHE_SECONDS", "30")
+                or 30
+            )
+        except Exception:
+            self._logs_stats_cache_ttl_sec = float(os.getenv("LOG_DISK_STATS_CACHE_SECONDS", "30") or 30)
+        # 异步日志队列丢弃增量（相对上次采样）
+        self._log_queue_dropped_prev: int = 0
+
     def _init_default_alert_rules(self):
         """初始化默认告警规则"""
         self.alert_rules = [
@@ -647,7 +672,44 @@ class SystemMonitor:
                 level=AlertLevel.WARNING,
                 description="磁盘使用率超过80%",
                 window_seconds=300
-            )
+            ),
+            # 应用日志目录用量（相对 soft/hard 限制，1.0=触顶）
+            AlertRule(
+                name="logs_soft_limit",
+                metric_name="system.logs_usage_ratio_soft",
+                operator=">=",
+                threshold=1.0,
+                level=AlertLevel.WARNING,
+                description="应用日志目录达到软限制",
+                window_seconds=300
+            ),
+            AlertRule(
+                name="logs_hard_limit",
+                metric_name="system.logs_usage_ratio_hard",
+                operator=">=",
+                threshold=1.0,
+                level=AlertLevel.CRITICAL,
+                description="应用日志目录达到硬限制",
+                window_seconds=300
+            ),
+            AlertRule(
+                name="log_queue_dropped",
+                metric_name="system.log_queue_dropped_delta",
+                operator=">",
+                threshold=50.0,
+                level=AlertLevel.WARNING,
+                description="应用日志异步队列本进程采样窗口丢弃过多（非全 worker 汇总）",
+                window_seconds=60
+            ),
+            AlertRule(
+                name="log_queue_pressure",
+                metric_name="system.log_queue_usage_ratio",
+                operator=">=",
+                threshold=0.8,
+                level=AlertLevel.WARNING,
+                description="应用日志异步队列本进程积压接近上限（非全 worker 汇总）",
+                window_seconds=60
+            ),
         ]
     
     def _append_duration(self, stats: PerformanceStatistics, duration: float) -> None:
@@ -777,6 +839,76 @@ class SystemMonitor:
     
     # ====== 系统资源监控 ======
     
+    def _refresh_logs_disk_stats(self, *, force: bool = False) -> Dict[str, Any]:
+        """获取（可缓存）日志目录用量，并写入自定义指标供告警评估。"""
+        now = time.time()
+        if (
+            not force
+            and self._logs_stats_cache is not None
+            and (now - self._logs_stats_cache_ts) < self._logs_stats_cache_ttl_sec
+        ):
+            return self._logs_stats_cache
+        try:
+            from app.core.log_file_cleanup import get_logs_disk_stats
+
+            stats = dict(get_logs_disk_stats())
+        except Exception as exc:
+            logger.warning("采集日志目录用量失败: %s", exc)
+            stats = {"error": str(exc)}
+
+        # 合并本进程异步日志队列状态（不走磁盘 walk 缓存语义之外：每次刷新都更新）
+        try:
+            from app.core.log_queue import get_log_queue_stats
+
+            qstats = get_log_queue_stats()
+            dropped = int(qstats.get("dropped") or 0)
+            delta = max(0, dropped - int(self._log_queue_dropped_prev or 0))
+            self._log_queue_dropped_prev = dropped
+            stats["queue_running"] = bool(qstats.get("running"))
+            stats["queue_dropped"] = dropped
+            stats["queue_dropped_delta"] = delta
+            stats["queue_qsize"] = int(qstats.get("qsize") or 0)
+            stats["queue_maxsize"] = qstats.get("maxsize")
+            stats["queue_usage_ratio"] = float(qstats.get("usage_ratio") or 0.0)
+        except Exception:
+            stats.setdefault("queue_dropped", 0)
+            stats.setdefault("queue_dropped_delta", 0)
+            stats.setdefault("queue_qsize", 0)
+            stats.setdefault("queue_usage_ratio", 0.0)
+
+        self._logs_stats_cache = stats
+        self._logs_stats_cache_ts = now
+        try:
+            soft_ratio = float(stats.get("usage_ratio_soft") or 0.0)
+            hard_ratio = float(stats.get("usage_ratio_hard") or 0.0)
+            usage_mb = float(stats.get("usage_mb") or 0.0)
+            self.record_metric("system.logs_usage_ratio_soft", soft_ratio, MetricType.GAUGE)
+            self.record_metric("system.logs_usage_ratio_hard", hard_ratio, MetricType.GAUGE)
+            self.record_metric("system.logs_usage_mb", usage_mb, MetricType.GAUGE)
+            self.record_metric(
+                "system.log_queue_dropped",
+                float(stats.get("queue_dropped") or 0),
+                MetricType.GAUGE,
+            )
+            self.record_metric(
+                "system.log_queue_dropped_delta",
+                float(stats.get("queue_dropped_delta") or 0),
+                MetricType.GAUGE,
+            )
+            self.record_metric(
+                "system.log_queue_qsize",
+                float(stats.get("queue_qsize") or 0),
+                MetricType.GAUGE,
+            )
+            self.record_metric(
+                "system.log_queue_usage_ratio",
+                float(stats.get("queue_usage_ratio") or 0.0),
+                MetricType.GAUGE,
+            )
+        except Exception:
+            pass
+        return stats
+
     def _collect_resource_metrics(self):
         """收集系统资源指标"""
         try:
@@ -787,8 +919,13 @@ class SystemMonitor:
             memory = psutil.virtual_memory()
             memory_pct = memory.percent
             
-            # 磁盘使用率
-            disk = psutil.disk_usage('/')
+            # 磁盘使用率（优先项目根所在盘，Windows 本地避免 '/' 误导）
+            try:
+                from pathlib import Path
+                project_root = Path(__file__).resolve().parents[2]
+                disk = psutil.disk_usage(str(project_root))
+            except Exception:
+                disk = psutil.disk_usage('/')
             disk_pct = disk.percent
             
             # 网络IO
@@ -808,6 +945,8 @@ class SystemMonitor:
             self.record_metric("system.cpu_usage", cpu_pct, MetricType.GAUGE)
             self.record_metric("system.memory_usage", memory_pct, MetricType.GAUGE)
             self.record_metric("system.disk_usage", disk_pct, MetricType.GAUGE)
+            # 日志目录用量（有 TTL 缓存，不每秒 walk）
+            self._refresh_logs_disk_stats(force=False)
             
         except Exception as e:
             logger.error(f"收集资源指标失败: {e}")
@@ -969,11 +1108,17 @@ class SystemMonitor:
 
             if rule.evaluate(value):
                 alert_key = f"{rule.name}:{rule.level}"
-                interval = (
+                # 冷却：取全局级别间隔与规则 window_seconds 的较大值，使窗口配置生效
+                base_interval = (
                     self.config.alert_interval_critical
                     if rule.level == AlertLevel.CRITICAL
                     else self.config.alert_interval
                 )
+                try:
+                    rule_window = int(getattr(rule, "window_seconds", 0) or 0)
+                except (TypeError, ValueError):
+                    rule_window = 0
+                interval = max(base_interval, rule_window)
                 should_trigger = False
                 with self._stats_lock:
                     last_alert_time = self.last_alert_times.get(alert_key, 0.0)
@@ -1193,9 +1338,12 @@ class SystemMonitor:
             } for r in sorted_requests[:limit]]
     
     def get_resource_stats(self) -> Dict[str, Any]:
-        """获取系统资源统计（持锁读取，与后台采样线程安全）。"""
+        """获取系统资源统计（持锁读取，与后台采样线程安全），并附带 logs/ 用量。"""
         with self._stats_lock:
-            return self.resource_stats.get_summary()
+            summary = self.resource_stats.get_summary()
+        summary = dict(summary)
+        summary["logs"] = self._refresh_logs_disk_stats(force=False)
+        return summary
     
     def get_realtime_metrics(self) -> Dict[str, Any]:
         """获取实时监控指标"""
@@ -1436,10 +1584,13 @@ class SystemMonitoringMiddleware(BaseHTTPMiddleware):
         return response
 
 # ====== 监控路由 ======
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import get_db
 from app.core.security import require_admin
+from app.models.models import User
 
 
 def _normalize_alert_operator(operator: str) -> str:
@@ -1540,7 +1691,7 @@ async def get_slow_requests(limit: int = Query(20, ge=1, le=100)):
 
 @monitoring_router.get("/metrics/resources", summary="获取系统资源统计")
 async def get_resource_metrics():
-    """获取系统资源使用情况（CPU、内存、磁盘、网络）"""
+    """获取系统资源使用情况（CPU、内存、磁盘、网络，含 logs/ 目录用量）。"""
     return system_monitor.get_resource_stats()
 
 @monitoring_router.get("/metrics/trends", summary="获取趋势数据")
@@ -1770,6 +1921,122 @@ async def stop_resource_monitor():
     """停止系统资源监控"""
     await system_monitor.stop_resource_monitor()
     return {"message": "资源监控已停止"}
+
+
+@monitoring_router.get("/logs/stats", summary="获取应用日志用量与队列状态")
+async def get_logs_stats(force: bool = Query(False, description="是否强制刷新缓存")):
+    """返回 logs/ 目录用量与本进程异步日志队列状态（管理员）。"""
+    return system_monitor._refresh_logs_disk_stats(force=force)
+
+
+_logs_cleanup_lock = asyncio.Lock()
+_logs_cleanup_last_ts = 0.0
+_LOGS_CLEANUP_REDIS_KEY = "platform:logs:manual_cleanup_cooldown"
+
+
+async def _try_acquire_manual_cleanup_slot(cooldown: int) -> tuple[bool, str]:
+    """
+    跨进程冷却（优先 Redis SET NX）；失败则回退进程内时间戳。
+
+    Returns:
+        (允许执行, 拒绝时的说明)
+    """
+    global _logs_cleanup_last_ts
+    if cooldown <= 0:
+        return True, ""
+
+    # Redis 跨 worker 冷却
+    try:
+        from app.core.redis_client import get_redis_client
+
+        redis = await get_redis_client()
+        if redis is not None:
+            ok = await redis.set(_LOGS_CLEANUP_REDIS_KEY, str(os.getpid()), nx=True, ex=int(cooldown))
+            if not ok:
+                ttl = await redis.ttl(_LOGS_CLEANUP_REDIS_KEY)
+                remain = max(int(ttl or cooldown), 1)
+                return False, f"清理过于频繁（跨进程冷却），请 {remain} 秒后再试"
+            return True, ""
+    except Exception:
+        pass
+
+    # 回退：本进程冷却
+    now = time.time()
+    if _logs_cleanup_last_ts and (now - _logs_cleanup_last_ts) < cooldown:
+        remain = int(cooldown - (now - _logs_cleanup_last_ts)) + 1
+        return False, f"清理过于频繁，请 {remain} 秒后再试"
+    return True, ""
+
+
+@monitoring_router.post("/logs/cleanup", summary="立即清理文件日志")
+async def cleanup_file_logs_now(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    立即执行文件日志超期清理（归档/删除轮转备份、孤儿文件、磁盘守卫等）。
+
+    不会删除正在写入的活跃 ``*.log`` 主文件。与定时任务「清理文件日志」同一套逻辑；
+    在 API 进程同步执行并返回统计，便于监控页一键运维。
+
+    冷却：优先 Redis 跨进程；Redis 不可用时回退为本进程冷却。
+    """
+    global _logs_cleanup_last_ts
+
+    from app.core.config import settings
+    from app.core.errors import ErrorCode
+    from app.core.exceptions import raise_api_exception
+    from app.core.log_file_cleanup import run_file_log_cleanup
+    from app.core.audit_log import log_user_action, commit_audit_log
+
+    cooldown = max(0, int(getattr(settings, "LOG_MANUAL_CLEANUP_COOLDOWN_SECONDS", 60) or 0))
+    if _logs_cleanup_lock.locked():
+        raise_api_exception(ErrorCode.TOO_MANY_REQUESTS, detail="文件日志清理正在进行中，请稍候")
+
+    async with _logs_cleanup_lock:
+        allowed, deny_msg = await _try_acquire_manual_cleanup_slot(cooldown)
+        if not allowed:
+            raise_api_exception(ErrorCode.TOO_MANY_REQUESTS, detail=deny_msg)
+
+        result = await asyncio.to_thread(run_file_log_cleanup)
+        _logs_cleanup_last_ts = time.time()
+        try:
+            logs_stats = system_monitor._refresh_logs_disk_stats(force=True)
+            result = dict(result)
+            result["logs_stats"] = logs_stats
+        except Exception:
+            result = dict(result)
+
+        try:
+            await log_user_action(
+                db=db,
+                action_type="CLEANUP",
+                user=current_user,
+                resource_type="FILE_LOGS",
+                resource_name="logs/",
+                request=request,
+                success=not bool(result.get("errors")),
+                error_message="; ".join(result.get("errors") or [])[:500] or None,
+                details={
+                    "deleted_count": result.get("deleted_count"),
+                    "archived_count": result.get("archived_count"),
+                    "bytes_freed": result.get("bytes_freed"),
+                    "skipped": result.get("skipped"),
+                    "soft_limit_hit": result.get("soft_limit_hit"),
+                    "hard_limit_hit": result.get("hard_limit_hit"),
+                    "message": result.get("message"),
+                },
+            )
+            await commit_audit_log(db)
+        except Exception as audit_exc:
+            logger.warning("记录文件日志清理审计失败: %s", audit_exc)
+
+        return {
+            "message": result.get("message") or "清理完成",
+            "result": result,
+        }
+
 
 # ====== 定期任务 ======
 

@@ -241,6 +241,16 @@ def notify_from_log_record(record: logging.LogRecord) -> bool:
         stack_trace = "".join(traceback.format_exception(*record.exc_info))
         if not error_message and record.exc_info[1]:
             error_message = str(record.exc_info[1])
+    elif getattr(record, "exc_text", None):
+        # 异步队列兜底：exc_info 可能被清空，但 prepare 已写入 exc_text
+        stack_trace = str(record.exc_text)
+        for line in stack_trace.splitlines():
+            if line.startswith("Traceback") or not line.strip():
+                continue
+            # 典型尾行：ValueError: xxx
+            if ":" in line and "File " not in line:
+                error_type = line.split(":", 1)[0].strip() or error_type
+            break
 
     location = {
         "module": record.name,

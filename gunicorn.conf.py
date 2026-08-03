@@ -81,15 +81,19 @@ except (OSError, PermissionError) as e:
     logger.warning(f"无法创建日志目录 {log_dir}: {e}")
 
 # 日志文件路径（调度进程与 API 进程分离，避免争用同一文件）
+# GUNICORN_ACCESSLOG_ENABLED=false 时可关闭 access（应用侧已有 access.log 且生产已降噪）
+_accesslog_enabled = os.getenv("GUNICORN_ACCESSLOG_ENABLED", "false").lower() in ("true", "1", "yes")
 if GUNICORN_ROLE == "scheduler":
-    accesslog = os.path.join(log_dir, "gunicorn_scheduler_access.log")
+    accesslog = os.path.join(log_dir, "gunicorn_scheduler_access.log") if _accesslog_enabled else None
     errorlog = os.path.join(log_dir, "gunicorn_scheduler_error.log")
 else:
-    accesslog = os.path.join(log_dir, "gunicorn_access.log")
+    accesslog = os.path.join(log_dir, "gunicorn_access.log") if _accesslog_enabled else None
     errorlog = os.path.join(log_dir, "gunicorn_error.log")
 
 # 尝试创建日志文件并设置权限（如果可能）
 for log_file in [accesslog, errorlog]:
+    if not log_file:
+        continue
     try:
         # 如果文件不存在，创建空文件
         if not os.path.exists(log_file):
@@ -174,12 +178,9 @@ raw_env = [
 ]
 
 # ====== 访问日志配置 ======
-# 注意：uvicorn worker 的访问日志会显示 URL 编码的路径
-# 我们已经在 RequestLoggingMiddleware 中解码了路径，应用日志（logs/app.log）会显示正确的中文路径
-# Gunicorn 访问日志（logs/gunicorn_access.log）仍会显示 URL 编码，但应用日志已解码
-# 
-# 如果需要完全禁用 Gunicorn 访问日志，只使用应用日志，可以设置：
-# accesslog = "-"
+# 默认 GUNICORN_ACCESSLOG_ENABLED=false：不写 gunicorn_*_access.log，避免与应用 access.log 双写。
+# 应用侧 RequestLoggingMiddleware 已解码路径并按生产降噪策略写入 logs/access.log。
+# 需要对照 Nginx/Gunicorn 原始 access 时再设 GUNICORN_ACCESSLOG_ENABLED=true。
 
 # ====== Hook 函数 ======
 # 多进程环境优化：每个 hook 都会在每个 worker 中执行
@@ -210,6 +211,15 @@ def post_fork(server, worker):
         f"Worker {worker.pid} 已启动（父进程: {os.getppid()}，"
         f"role={GUNICORN_ROLE}，SCHEDULER_WORKER={os.environ['SCHEDULER_WORKER']}）"
     )
+    # preload 时 master 已起 QueueListener，fork 后线程失效，必须在 worker 内重建
+    if preload_app and getattr(settings, "LOG_QUEUE_ENABLED", True):
+        try:
+            from app.bootstrap.logging_setup import configure_logging
+
+            configure_logging()
+            worker.log.info("Worker %s 已重建异步日志队列（preload 安全）", worker.pid)
+        except Exception as e:
+            worker.log.warning("Worker %s 重建日志队列失败: %s", worker.pid, e)
 
 def worker_int(worker):
     """Worker 中断时的回调（每个 worker 进程）"""
@@ -219,7 +229,22 @@ def worker_abort(worker):
     """Worker 异常退出时的回调（每个 worker 进程）"""
     worker.log.error("Worker %s 异常退出", worker.pid)
 
+def worker_exit(server, worker):
+    """Worker 退出前排空异步日志队列（max_requests 轮转 / 优雅停机）。"""
+    try:
+        from app.core.log_queue import shutdown_log_queue
+
+        shutdown_log_queue(timeout_sec=2.0)
+    except Exception:
+        pass
+
 def on_exit(server):
     """服务器退出时的回调（主进程）"""
     server.log.info("Platform Backend 正在退出...")
+    try:
+        from app.core.log_queue import shutdown_log_queue
+
+        shutdown_log_queue(timeout_sec=1.0)
+    except Exception:
+        pass
 
