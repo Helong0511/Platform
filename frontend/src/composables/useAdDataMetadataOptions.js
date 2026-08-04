@@ -1,6 +1,7 @@
 /**
  * 广告数据「来源 / 报表类型」下拉：从后端 metadata-options 拉取并缓存。
- * 新增上游只需改 app/core/ad_data_metadata.py，不必再改前端常量表。
+ * 新增上游只需改 app/core/ad_data_metadata.py。
+ * 前端常量仅保留手工来源 + 稳定报表枚举作离线兜底，不再维护完整上游列表。
  */
 import { computed, reactive } from 'vue';
 import { getAdDataMetadataOptions } from '../api/ad-data';

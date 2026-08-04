@@ -318,46 +318,26 @@ export function applyDimensionColumnDefaults(columnVisibility, dimension, option
   return result;
 }
 
-/** ad_data 数据来源中文标签（前端兜底；运行时优先用 GET /ad-data/metadata-options） */
+/**
+ * 前端兜底（仅手工来源）。上游 slug/中文名一律以后端
+ * GET /api/v1/ad-data/metadata-options（ad_data_metadata）为准，勿在此再维护完整上游列表。
+ */
 export const AD_DATA_SOURCE_LABELS = {
-  zhisuo: '智索',
-  gam: 'GAM',
-  pomiad: 'Pomiad',
-  h5deer: 'H5 Deer',
-  addermobi: 'Addermobi',
-  skymobi: 'Skymobi',
-  huguang: 'Huguang',
-  tqt: 'TQT',
-  tbsj: '通百世家(yangyangdeyi)',
-  aya: 'Aya',
-  flymobi: 'FlyMobi',
   excel: 'Excel 导入',
   legacy: '历史',
   unknown: '未知'
 };
 
-/**
- * 上游 API 拉数来源（前端兜底顺序）。
- * 正式环境请走 useAdDataMetadataOptions()，与后端 ad_data_metadata 对齐。
- */
-export const UPSTREAM_API_DATA_SOURCES = [
-  'zhisuo',
-  'gam',
-  'pomiad',
-  'h5deer',
-  'addermobi',
-  'skymobi',
-  'huguang',
-  'tqt',
-  'tbsj',
-  'aya',
-  'flymobi'
-];
+/** @deprecated 上游列表已空；请用 useAdDataMetadataOptions().upstreamSources */
+export const UPSTREAM_API_DATA_SOURCES = [];
 
 /** 明细维护编辑：其它来源（手工/历史） */
 export const AD_DATA_SOURCE_MANUAL_OPTIONS = ['excel', 'legacy', 'unknown'];
 
-/** ad_data 报表维度中文标签（与 app/core/ad_data_metadata.py 一致） */
+/**
+ * 报表维度中文标签（稳定枚举；完整 hints 以后端 metadata-options 为准）。
+ * 枚举本身不随上游增减变化，可作离线兜底。
+ */
 export const AD_DATA_REPORT_TYPE_LABELS = {
   unit: '广告单元',
   country: '国家',
@@ -372,12 +352,12 @@ export const AD_DATA_REPORT_TYPE_DETAIL_OPTIONS = ['unit', 'country', 'cross', '
 /** 其它报表类型 */
 export const AD_DATA_REPORT_TYPE_OTHER_OPTIONS = ['legacy'];
 
-/** 各类型说明（与后端 REPORT_TYPE_HINTS 一致） */
+/** 各类型说明（精简兜底；运行时以后端 REPORT_TYPE_HINTS 为准） */
 export const AD_DATA_REPORT_TYPE_HINTS = {
-  unit: '按广告单元，无国家；智索 channelunit、GAM ad_unit、Aya getAdsDataUnit',
-  country: '按国家，无广告单元；智索 channelcountry、TQT、Huguang、Aya',
-  cross: '国家+广告单元；智索 channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、FlyMobi countryList、GAM country',
-  daily: '日汇总，无国家无单元；智索 channeldaily 兜底、GAM daily、Aya getDay',
+  unit: '按广告单元，无具体国家',
+  country: '按具体国家，无广告单元',
+  cross: '具体国家+广告单元',
+  daily: '日汇总，无具体国家无单元',
   legacy: '历史或未标注；新入库会自动按行形态推断'
 };
 
@@ -391,12 +371,11 @@ export function formatAdDataReportTypeLabel(value) {
   return AD_DATA_REPORT_TYPE_LABELS[key] || key;
 }
 
-/** 明细维护编辑：数据来源选项（上游 API + 手工/历史） */
+/**
+ * 离线兜底：仅手工来源 + 当前值；完整上游目录请用 useAdDataMetadataOptions().buildSourceOptions
+ */
 export function buildAdDataSourceOptions(currentValue) {
-  const keys = new Set([
-    ...UPSTREAM_API_DATA_SOURCES,
-    ...AD_DATA_SOURCE_MANUAL_OPTIONS
-  ]);
+  const keys = new Set([...UPSTREAM_API_DATA_SOURCES, ...AD_DATA_SOURCE_MANUAL_OPTIONS]);
   const raw = String(currentValue || '').trim().toLowerCase();
   if (raw) keys.add(raw);
   const ordered = [
@@ -412,10 +391,10 @@ export function buildAdDataSourceOptions(currentValue) {
   }));
 }
 
-/** @deprecated 使用 buildAdDataSourceOptions */
+/** @deprecated 使用 buildAdDataSourceOptions / useAdDataMetadataOptions */
 export const AD_DATA_SOURCE_OPTIONS = buildAdDataSourceOptions();
 
-/** 明细维护编辑：报表类型选项（统计维度 + 历史） */
+/** 离线兜底报表类型；正式环境请用 useAdDataMetadataOptions().buildReportTypeOptions */
 export function buildAdDataReportTypeOptions(currentValue) {
   const keys = new Set([
     ...AD_DATA_REPORT_TYPE_DETAIL_OPTIONS,
@@ -439,5 +418,5 @@ export function buildAdDataReportTypeOptions(currentValue) {
   }));
 }
 
-/** @deprecated 使用 buildAdDataReportTypeOptions */
+/** @deprecated 使用 buildAdDataReportTypeOptions / useAdDataMetadataOptions */
 export const AD_DATA_REPORT_TYPE_OPTIONS = buildAdDataReportTypeOptions();
