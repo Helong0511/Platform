@@ -2,10 +2,10 @@
 ad_data 上游元数据：数据来源、报表维度、账号。
 
 report_type 枚举（与客户报表维度、唯一键一致）：
-- unit    广告单元明细（有 ad_unit、无具体国家；含 country=ZZ）— 智索 unit API、GAM ad_unit
-- country 国家明细（有具体国家、无 ad_unit；不含 ZZ）— 智索 country API、TQT/Huguang 等
+- unit    广告单元明细（有 ad_unit、无具体国家；含 country=ZZ）— ZhiSuo unit API、GAM ad_unit
+- country 国家明细（有具体国家、无 ad_unit；不含 ZZ）— ZhiSuo country API、TQT/Huguang 等
 - cross   具体国家+广告单元交叉（不含 ZZ）— Addermobi、Skymobi、Pomiad、GAM country 等
-- daily   日汇总（无具体国家、无 ad_unit；含 country=ZZ）— 智索 daily 兜底、GAM daily
+- daily   日汇总（无具体国家、无 ad_unit；含 country=ZZ）— ZhiSuo daily 兜底、GAM daily
 - legacy  历史/待标注；新入库一律按行形态自动推断为 unit/country/cross/daily
 
 ZZ（全部区域）不算具体国家：ZZ+有广告单元→unit；ZZ+无广告单元→daily。
@@ -186,7 +186,7 @@ def gam_report_key_to_report_type(report_key: str) -> str:
 
 # 管理端展示用中文标签
 DATA_SOURCE_LABELS: dict[str, str] = {
-    DATA_SOURCE_ZHISUO: "智索",
+    DATA_SOURCE_ZHISUO: "ZhiSuo",
     DATA_SOURCE_GAM: "GAM",
     DATA_SOURCE_POMIAD: "Pomiad",
     DATA_SOURCE_H5DEER: "H5 Deer",
@@ -219,10 +219,10 @@ REPORT_TYPE_DETAIL_OPTIONS: tuple[str, ...] = (
 )
 
 REPORT_TYPE_HINTS: dict[str, str] = {
-    REPORT_TYPE_UNIT: "按广告单元，无具体国家（含 ZZ）；智索 channelunit、GAM ad_unit、Aya getAdsDataUnit",
-    REPORT_TYPE_COUNTRY: "按具体国家，无广告单元（不含 ZZ）；智索 channelcountry、TQT、Huguang、Aya",
-    REPORT_TYPE_CROSS: "具体国家+广告单元（不含 ZZ）；智索 channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、FlyMobi countryList、GAM country",
-    REPORT_TYPE_DAILY: "日汇总，无具体国家无单元（含 ZZ）；智索 channeldaily 兜底、GAM daily、Aya getDay",
+    REPORT_TYPE_UNIT: "按广告单元，无具体国家（含 ZZ）；ZhiSuo channelunit、GAM ad_unit、Aya getAdsDataUnit",
+    REPORT_TYPE_COUNTRY: "按具体国家，无广告单元（不含 ZZ）；ZhiSuo channelcountry、TQT、Huguang、Aya",
+    REPORT_TYPE_CROSS: "具体国家+广告单元（不含 ZZ）；ZhiSuo channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、FlyMobi countryList、GAM country",
+    REPORT_TYPE_DAILY: "日汇总，无具体国家无单元（含 ZZ）；ZhiSuo channeldaily 兜底、GAM daily、Aya getDay",
     REPORT_TYPE_LEGACY: "历史或未标注；新入库会自动按行形态推断",
 }
 

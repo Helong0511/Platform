@@ -651,10 +651,13 @@ class Settings(BaseSettings):
     ZHISUO_API_KEY_3: str = os.getenv("ZHISUO_API_KEY_3", "")
     ZHISUO_API_CLIENT_ID_4: str = os.getenv("ZHISUO_API_CLIENT_ID_4", "")
     ZHISUO_API_KEY_4: str = os.getenv("ZHISUO_API_KEY_4", "")
+    ZHISUO_API_CLIENT_ID_5: str = os.getenv("ZHISUO_API_CLIENT_ID_5", "")
+    ZHISUO_API_KEY_5: str = os.getenv("ZHISUO_API_KEY_5", "")
     # 可选 JSON 数组，格式 [{"client_id":"...","api_key":"..."}]；若设置则优先于上述单账号变量
     ZHISUO_API_ACCOUNTS: str = os.getenv("ZHISUO_API_ACCOUNTS", "")
     ZHISUO_API_BASE_URL: str = os.getenv("ZHISUO_API_BASE_URL", "https://ch.tecnee.xyz")
     # 广告单元 / 国家报告拉数全局默认（未在 ZHISUO_API_ACCOUNT_FETCH 中配置的账号使用）
+    # 推荐：优先交叉(channeldata)，次之国家(channelcountry，交叉未覆盖时补)
     ZHISUO_API_FETCH_UNIT: bool = os.getenv("ZHISUO_API_FETCH_UNIT", "true").lower() in [
         "true",
         "1",
@@ -854,6 +857,7 @@ class Settings(BaseSettings):
             (self.ZHISUO_API_CLIENT_ID_2, self.ZHISUO_API_KEY_2),
             (self.ZHISUO_API_CLIENT_ID_3, self.ZHISUO_API_KEY_3),
             (self.ZHISUO_API_CLIENT_ID_4, self.ZHISUO_API_KEY_4),
+            (self.ZHISUO_API_CLIENT_ID_5, self.ZHISUO_API_KEY_5),
         ):
             cid = (client_id or "").strip()
             key = (api_key or "").strip()

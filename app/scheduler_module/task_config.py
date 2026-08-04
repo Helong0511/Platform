@@ -250,15 +250,15 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "description": "每隔30分钟执行一次，从Huguang API获取广告数据",
     },
 
-    # ========== zhisuo API获取数据任务 ==========
-    "zhisuo API获取数据": {
-        "task_name": "zhisuo API获取数据",
+    # ========== ZhiSuo API获取数据任务 ==========
+    "ZhiSuo API获取数据": {
+        "task_name": "ZhiSuo API获取数据",
         "task_module": "app.scheduler_module.tasks.zhisuo_task",
         "task_function": "zhisuo_api_task",
         "result_getter_module": "app.scheduler_module.task_result_store",
         "result_getter_function": "get_task_result",
         "cron_expression": "*/30 * * * *",
-        "description": "每隔30分钟执行一次，从 zhisuo API 按账号拉取日报/国家/广告单元/交叉报告（ZHISUO_API_ACCOUNT_FETCH 按 clientId 配置）",
+        "description": "每隔30分钟执行一次，从 ZhiSuo/tecnee API 按账号拉取；优先交叉(channeldata)，次之国家(channelcountry 补未覆盖)，可选单元/日报兜底（ZHISUO_API_ACCOUNT_FETCH 按 clientId 配置）",
     },
 
     # ========== Pomiad API获取数据任务 ==========

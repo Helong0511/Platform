@@ -124,7 +124,7 @@ const AD_DATA_DETAIL_DIMENSION_VALUES = new Set(
 
 export const AD_DATA_DIMENSION_HINTS = {
   [AD_DATA_DETAIL_ALL_DIMENSION]:
-    '显示全部行级明细（含智索 unit/country、GAM 交叉等），适合维护与核对。统计汇总请用每日统计子菜单。',
+    '显示全部行级明细（含 ZhiSuo unit/country、GAM 交叉等），适合维护与核对。统计汇总请用每日统计子菜单。',
   country:
     '按日期+产品汇总（合并所有国家）。Zhisuo 双 API 客户仅计入国家报告；Addermobi 等仅交叉数据时自动使用交叉行。',
   ad_unit:

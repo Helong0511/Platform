@@ -49,8 +49,8 @@ ADDERMOBI_API_TASK_NAME = "Addermobi API获取数据"
 # Huguang API获取数据任务
 HUGUANG_API_TASK_NAME = "Huguang API获取数据"
 
-# zhisuo API获取数据任务
-ZHISUO_API_TASK_NAME = "zhisuo API获取数据"
+# ZhiSuo API获取数据任务
+ZHISUO_API_TASK_NAME = "ZhiSuo API获取数据"
 
 # Pomiad API获取数据任务
 POMIAD_API_TASK_NAME = "Pomiad API获取数据"

@@ -1,9 +1,9 @@
 """
 zhisuo 上游广告数据拉取定时任务。
 
-- 按天循环拉取 unit / country / data（交叉），避免区间查询漏数
+- 按账号拉取 tecnee channel*：优先 data（国家+广告单元交叉），次之 country，可选 unit / daily 兜底
 - 写入 data_source / report_type / upstream_account 元数据
-- 当某日某产品 unit/country/data 均无数据时，用 channeldaily 日报兜底
+- 当某日某产品细粒度均无数据时，可用 channeldaily 日报兜底
 - 瞬时网络故障：已成功维度保留入库，不整段丢弃
 """
 from __future__ import annotations
@@ -174,7 +174,7 @@ async def _import_zhisuo_account(
             rows = list(result.rows)
             if transform_rows is not None:
                 rows = transform_rows(rows)
-            logger.info("Zhisuo %s 账号 %s 拉取 %d 条", key, client_id, len(rows))
+            logger.info("ZhiSuo %s 账号 %s 拉取 %d 条", key, client_id, len(rows))
             if rows_to_covered:
                 covered |= _zhisuo_product_date_keys(rows)
             if not rows:
@@ -196,40 +196,12 @@ async def _import_zhisuo_account(
             transient = e
             summaries.append(f"{key}: 软跳过")
             logger.warning(
-                "Zhisuo %s 账号 %s 上游瞬时故障，保留已入库维度: %s",
+                "ZhiSuo %s 账号 %s 上游瞬时故障，保留已入库维度: %s",
                 key,
                 client_id,
                 e,
             )
 
-    await _fetch_import_dimension(
-        enabled=bool(account.get("fetch_unit")),
-        key="unit",
-        fetch_factory=lambda: fetch_zhisuo_unit_rows(
-            base_url=base_url,
-            client_id=client_id,
-            api_key=api_key,
-            start=start,
-            end=end,
-        ),
-        field_mapping=ZHISUO_UNIT_FIELD_MAPPING,
-        source="zhisuo定时任务-广告单元",
-        notify_title=f"zhisuo-{client_id}-广告单元",
-    )
-    await _fetch_import_dimension(
-        enabled=bool(account.get("fetch_country")),
-        key="country",
-        fetch_factory=lambda: fetch_zhisuo_country_rows(
-            base_url=base_url,
-            client_id=client_id,
-            api_key=api_key,
-            start=start,
-            end=end,
-        ),
-        field_mapping=ZHISUO_COUNTRY_FIELD_MAPPING,
-        source="zhisuo定时任务-国家报告",
-        notify_title=f"zhisuo-{client_id}-国家报告",
-    )
     await _fetch_import_dimension(
         enabled=bool(account.get("fetch_data")),
         key="data",
@@ -241,8 +213,52 @@ async def _import_zhisuo_account(
             end=end,
         ),
         field_mapping=ZHISUO_DATA_FIELD_MAPPING,
-        source="zhisuo定时任务-国家+广告单元",
-        notify_title=f"zhisuo-{client_id}-国家+广告单元",
+        source="ZhiSuo定时任务-国家+广告单元",
+        notify_title=f"ZhiSuo-{client_id}-国家+广告单元",
+    )
+
+    # 国家：与交叉同时开启时，仅补交叉未覆盖的产品+日（次之）
+    def _country_rows(rows: list[Any]) -> list[Any]:
+        if not account.get("fetch_data"):
+            return rows
+        filtered = _daily_fallback_rows(rows, covered)
+        if filtered:
+            logger.info(
+                "ZhiSuo 国家次级 账号 %s: %d 行（交叉已覆盖 %d 个产品+日）",
+                client_id,
+                len(filtered),
+                len(covered),
+            )
+        return filtered
+
+    await _fetch_import_dimension(
+        enabled=bool(account.get("fetch_country")),
+        key="country",
+        fetch_factory=lambda: fetch_zhisuo_country_rows(
+            base_url=base_url,
+            client_id=client_id,
+            api_key=api_key,
+            start=start,
+            end=end,
+        ),
+        field_mapping=ZHISUO_COUNTRY_FIELD_MAPPING,
+        source="ZhiSuo定时任务-国家报告",
+        notify_title=f"ZhiSuo-{client_id}-国家报告",
+        transform_rows=_country_rows,
+    )
+    await _fetch_import_dimension(
+        enabled=bool(account.get("fetch_unit")),
+        key="unit",
+        fetch_factory=lambda: fetch_zhisuo_unit_rows(
+            base_url=base_url,
+            client_id=client_id,
+            api_key=api_key,
+            start=start,
+            end=end,
+        ),
+        field_mapping=ZHISUO_UNIT_FIELD_MAPPING,
+        source="ZhiSuo定时任务-广告单元",
+        notify_title=f"ZhiSuo-{client_id}-广告单元",
     )
 
     if account.get("fetch_daily_fallback") and transient is None:
@@ -251,7 +267,7 @@ async def _import_zhisuo_account(
             filtered = _daily_fallback_rows(rows, covered)
             if filtered:
                 logger.info(
-                    "Zhisuo 日报兜底 账号 %s: %d 行（已覆盖 %d 个产品+日）",
+                    "ZhiSuo 日报兜底 账号 %s: %d 行（已覆盖 %d 个产品+日）",
                     client_id,
                     len(filtered),
                     len(covered),
@@ -269,8 +285,8 @@ async def _import_zhisuo_account(
                 end=end,
             ),
             field_mapping=ZHISUO_DAILY_FIELD_MAPPING,
-            source="zhisuo定时任务-日报兜底",
-            notify_title=f"zhisuo-{client_id}-日报兜底",
+            source="ZhiSuo定时任务-日报兜底",
+            notify_title=f"ZhiSuo-{client_id}-日报兜底",
             rows_to_covered=False,
             transform_rows=_fallback_only,
         )
@@ -292,8 +308,8 @@ async def zhisuo_api_task(
 
     if not accounts:
         msg = (
-            "跳过: Zhisuo API 未配置（请在 .env 设置 ZHISUO_API_CLIENT_ID / ZHISUO_API_KEY，"
-            "或 ZHISUO_API_CLIENT_ID_2~4 / ZHISUO_API_KEY_2~4，或 ZHISUO_API_ACCOUNTS）"
+            "跳过: ZhiSuo API 未配置（请在 .env 设置 ZHISUO_API_CLIENT_ID / ZHISUO_API_KEY，"
+            "或 ZHISUO_API_CLIENT_ID_2~5 / ZHISUO_API_KEY_2~5，或 ZHISUO_API_ACCOUNTS）"
         )
         logger.warning(msg)
         set_task_result(ZHISUO_API_TASK_NAME, msg)
@@ -302,7 +318,7 @@ async def zhisuo_api_task(
     active = [acc for acc in accounts if _account_has_any_fetch(acc)]
     if not active:
         msg = (
-            "跳过: 所有 Zhisuo 账号均未启用广告单元、国家、交叉或日报兜底拉数"
+            "跳过: 所有 ZhiSuo 账号均未启用广告单元、国家、交叉或日报兜底拉数"
             "（请检查 ZHISUO_API_FETCH_UNIT / ZHISUO_API_FETCH_COUNTRY / "
             "ZHISUO_API_FETCH_DATA / ZHISUO_API_FETCH_DAILY_FALLBACK / ZHISUO_API_ACCOUNT_FETCH）"
         )

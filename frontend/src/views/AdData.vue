@@ -304,7 +304,7 @@ const detailEmptyText = computed(() => {
     return '当前为「按广告单元」维度，仅显示无国家代码的纯广告单元行。若库中均为交叉明细，请切换为「按广告单元+国家」或「全部明细」。';
   }
   if (dim === AD_UNIT_COUNTRY_DIMENSION) {
-    return '当前为「按广告单元+国家」，仅显示同时含国家与广告单元的交叉行。智索 unit/country 数据请选「全部明细」。';
+    return '当前为「按广告单元+国家」，仅显示同时含国家与广告单元的交叉行。ZhiSuo unit/country 数据请选「全部明细」。';
   }
   return '暂无数据';
 });
