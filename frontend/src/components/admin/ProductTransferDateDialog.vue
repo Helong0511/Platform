@@ -32,7 +32,13 @@
         <div style="margin-top: 8px; color: #909399; font-size: 12px;">
           新客户开始拥有该产品的日期（修改后会自动更新旧客户结束日期）
           <template v-if="lastClientStartDate">
-            ；不能早于当前有效分配开始日的次日（{{ formatDate(minNewClientStartDate) }}）
+            ；可同日更换归属（{{ formatDate(lastClientStartDate) }}）
+            <template v-if="canNormalTransferFromNextDay">
+              ，或从其次日（{{ formatDate(minNormalTransferStartDate) }}）起正常转移
+            </template>
+            <template v-else>
+              ；当前有效分配从今天开始，仅支持同日更换归属客户
+            </template>
           </template>
         </div>
       </el-form-item>
@@ -50,7 +56,14 @@
           @update:model-value="emit('end-date-change', $event)"
         />
         <div style="margin-top: 8px; color: #909399; font-size: 12px;">
-          上一个客户拥有该产品的结束日期（修改后会自动更新新客户开始日期；最多选到昨天，且不能早于该客户开始日：{{ lastClientStartDate ? formatDate(lastClientStartDate) : '未设置' }}）
+          上一个客户拥有该产品的结束日期（修改后会自动更新新客户开始日期；最多选到昨天
+          <template v-if="lastClientStartDate">
+            ；正常转移不能早于该客户开始日 {{ formatDate(lastClientStartDate) }}，同日替换可选其前一日
+          </template>
+          <template v-else>
+            ；当前有效分配开始日：未加载到，请取消后重试
+          </template>
+          ）
         </div>
       </el-form-item>
       <el-form-item v-if="productAssignments.length > 0" label="产品变更历史">
@@ -154,10 +167,10 @@ function formatYmd(d) {
 }
 
 /**
- * 新客户最早可开始日 = 当前有效分配开始日 + 1 天
- * （旧客户结束日不能早于其开始日，故新客户开始日至少为其开始日次日）
+ * 正常转移最早开始日 = 当前有效分配开始日 + 1
+ * （同日替换另允许选择 lastClientStartDate 本身）
  */
-const minNewClientStartDate = computed(() => {
+const minNormalTransferStartDate = computed(() => {
   const start = toLocalMidnight(props.lastClientStartDate);
   if (!start) return null;
   const next = new Date(start);
@@ -165,13 +178,21 @@ const minNewClientStartDate = computed(() => {
   return formatYmd(next);
 });
 
+/** 次日若不晚于今天，才提示「可正常转移」；否则只能同日替换 */
+const canNormalTransferFromNextDay = computed(() => {
+  const minStart = toLocalMidnight(minNormalTransferStartDate.value);
+  const today = toLocalMidnight(new Date());
+  return Boolean(minStart && today && minStart <= today);
+});
+
 function disabledStartDate(date) {
   const check = toLocalMidnight(date);
   if (!check) return true;
   const today = toLocalMidnight(new Date());
   if (check > today) return true;
-  const minStart = toLocalMidnight(minNewClientStartDate.value);
-  if (minStart && check < minStart) return true;
+  const lastStart = toLocalMidnight(props.lastClientStartDate);
+  // 允许：同日替换（= lastStart）或正常转移（>= lastStart）
+  if (lastStart && check < lastStart) return true;
   return false;
 }
 
@@ -182,7 +203,12 @@ function disabledEndDate(date) {
   // 结束日若选「今天」，开始日会变成明天，违反「开始日不能是未来」；故最多选到昨天
   if (check >= today) return true;
   const start = toLocalMidnight(props.lastClientStartDate);
-  if (start && check < start) return true;
+  if (start) {
+    const dayBeforeStart = new Date(start);
+    dayBeforeStart.setDate(dayBeforeStart.getDate() - 1);
+    // 允许 end === start-1（同日替换）或 end >= start（正常关闭）
+    if (check < dayBeforeStart) return true;
+  }
   return false;
 }
 </script>

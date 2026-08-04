@@ -153,13 +153,11 @@ const DEFAULT_CONFIG = {
 };
 
 /**
- * 默认 GET 缓存白名单（配置类、筛选器下拉数据；不含广告/监控实时数据）
+ * 默认 GET 缓存白名单（配置类下拉；不含会随上游入库变化的筛选项）。
+ * products/clients/countries-with-data 已移出：入库后若不失效，管理端强刷前看不到新产品。
  */
 export const DEFAULT_GET_CACHE_URL_PATTERNS = [
   /^\/api\/v1\/countries(?:\/|$)/,
-  /\/products-with-data$/,
-  /\/clients-with-data$/,
-  /\/countries-with-data$/,
 ];
 
 /**

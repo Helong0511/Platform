@@ -448,12 +448,11 @@ export function useProductForm(props, emit) {
     // 选择其他客户产品时仅预填日期，须用户确认后才视为转移完成
     if (!pendingTransferData.value?.endDate) {
       productIdToUpdate = selectedProduct.value.id;
-      if (productAssignments.value.length === 0) {
-        try {
-          await fetchProductAssignments(selectedProduct.value.id, true);
-        } catch (error) {
-          logger.warn('打开日期选择对话框时获取产品分配历史失败:', error);
-        }
+      try {
+        // 打开对话框前强制拉最新分配历史，避免空缓存导致「开始日未设置」
+        await fetchProductAssignments(selectedProduct.value.id, false);
+      } catch (error) {
+        logger.warn('打开日期选择对话框时获取产品分配历史失败:', error);
       }
       return { productIdToUpdate, isTransferProduct: true, needsDateDialog: true };
     }
@@ -580,7 +579,8 @@ export function useProductForm(props, emit) {
   };
 
   /**
-   * 新客户最早开始日 = 当前有效分配开始日 + 1（与对话框 disabledStartDate 一致）
+   * 新客户最早「正常转移」开始日 = 当前有效分配开始日 + 1
+   * （同日替换允许 start === lastStart，不走此下限）
    */
   const getMinNewClientStartDate = () => {
     const lastStart = toDateStringOnly(lastClientStartDate.value);
@@ -588,11 +588,30 @@ export function useProductForm(props, emit) {
   };
 
   /**
+   * 若默认「昨天结束」早于当前有效开始日，校准为同日替换：
+   * 新客户开始日 = 当前有效开始日，旧客户结束日 = 开始日前一天（仅连续约定，后端不写 end_date）
+   */
+  const adjustTransferDatesForActiveStart = (lastStartRaw) => {
+    const lastStart = toDateStringOnly(lastStartRaw);
+    if (!lastStart) return;
+
+    const today = getTodayDateString();
+    const currentEnd = toDateStringOnly(
+      transferDateForm.lastClientEndDate || getYesterdayDateString(),
+    );
+    if (!currentEnd || currentEnd >= lastStart) return;
+    if (lastStart > today) return;
+
+    transferDateForm.startDate = lastStart;
+    transferDateForm.lastClientEndDate = addDaysToDateString(lastStart, -1);
+  };
+
+  /**
    * 校验「新客户开始日 / 旧客户结束日」是否同时满足：
    * - 连续：start === end + 1
-   * - 开始日不早于 minNewClientStartDate
    * - 开始日不晚于今天
-   * - 结束日不早于当前有效分配开始日
+   * - 同日替换：start === 当前有效开始日（后端直接改 client_id）
+   * - 正常转移：结束日不早于当前有效开始日，开始日不早于其次日
    */
   const getTransferDatePairError = (startStr, endStr) => {
     const start = toDateStringOnly(startStr);
@@ -605,13 +624,17 @@ export function useProductForm(props, emit) {
     }
 
     const lastStart = toDateStringOnly(lastClientStartDate.value);
-    if (lastStart && end < lastStart) {
-      return `旧客户结束日期（${end}）不能早于当前有效分配开始日（${formatDate(lastClientStartDate.value)}）`;
+    const isSameDayReplace = Boolean(lastStart && start === lastStart);
+
+    if (lastStart && !isSameDayReplace && end < lastStart) {
+      return `旧客户结束日期（${end}）不能早于当前有效分配开始日（${formatDate(lastClientStartDate.value)}）`
+        + `；若需从该日起直接换客户，请将新客户开始日期设为 ${lastStart}`;
     }
 
     const minStart = getMinNewClientStartDate();
-    if (minStart && start < minStart) {
-      return `新客户开始日期（${start}）不能早于 ${minStart}（当前有效分配开始日的次日）`;
+    if (!isSameDayReplace && minStart && start < minStart) {
+      return `新客户开始日期（${start}）不能早于 ${minStart}（当前有效分配开始日的次日）`
+        + `；同日更换归属可将开始日期设为 ${lastStart}`;
     }
 
     const expectedStart = addDaysToDateString(end, 1);
@@ -660,6 +683,28 @@ export function useProductForm(props, emit) {
     transferDateForm.startDate = startStr;
   };
 
+  /**
+   * 解析 getProductAssignments（returnDataOnly: true）的返回值。
+   * 常见形态：直接数组；或 { data: [...] }。
+   */
+  const parseAssignmentsResponse = (result) => {
+    if (Array.isArray(result)) {
+      return result;
+    }
+    if (result?.data) {
+      if (Array.isArray(result.data)) {
+        return result.data;
+      }
+      if (Array.isArray(result.data.data)) {
+        return result.data.data;
+      }
+    }
+    if (result && typeof result === 'object' && result.start_date !== undefined) {
+      return [result];
+    }
+    return [];
+  };
+
   const fetchProductAssignments = async (productId, useCache = false) => {
     if (!productId) {
       return;
@@ -671,6 +716,7 @@ export function useProductForm(props, emit) {
         const currentAssignment = assignments.find((a) => !a.end_date) || assignments[0];
         if (currentAssignment) {
           lastClientStartDate.value = currentAssignment.start_date;
+          adjustTransferDatesForActiveStart(currentAssignment.start_date);
         }
       }
     };
@@ -697,14 +743,7 @@ export function useProductForm(props, emit) {
 
     try {
       const result = await getProductAssignments(productId);
-      let assignments = [];
-      if (result?.data) {
-        if (Array.isArray(result.data)) {
-          assignments = result.data;
-        } else if (result.data.data && Array.isArray(result.data.data)) {
-          assignments = result.data.data;
-        }
-      }
+      const assignments = parseAssignmentsResponse(result);
 
       assignments.sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
       applyAssignments(assignments);
@@ -713,9 +752,9 @@ export function useProductForm(props, emit) {
         const firstKey = productAssignmentsCache.value.keys().next().value;
         productAssignmentsCache.value.delete(firstKey);
       }
-      productAssignmentsCache.value.set(productId, assignments);
-
+      // 空结果不缓存，避免误解析/瞬时失败后长期「未设置」开始日
       if (assignments.length > 0) {
+        productAssignmentsCache.value.set(productId, assignments);
         logger.info(`成功获取产品 ${productId} 的分配历史，共 ${assignments.length} 条记录`);
       } else {
         logger.warn(`产品 ${productId} 没有分配历史记录`);
@@ -723,9 +762,7 @@ export function useProductForm(props, emit) {
     } catch (error) {
       logger.warn('获取产品分配历史失败:', error);
       productAssignments.value = [];
-      if (error.response?.status !== 429) {
-        productAssignmentsCache.value.set(productId, []);
-      }
+      // 失败不写入空缓存，便于下次重试拉到真实历史
     } finally {
       loadingAssignments.value = false;
       fetchingAssignments.value.delete(productId);
@@ -764,8 +801,8 @@ export function useProductForm(props, emit) {
       return;
     }
 
-    if (startDateStr > getTodayDateString()) {
-      ElMessage.warning('开始日期不能是未来日期');
+    if (!toDateStringOnly(lastClientStartDate.value)) {
+      ElMessage.warning('未能加载当前有效分配开始日，请取消后重试或刷新页面');
       return;
     }
 
@@ -773,30 +810,14 @@ export function useProductForm(props, emit) {
       transferDateForm.lastClientEndDate || getYesterdayDateString(),
     );
 
-    const lastStartDateStr = toDateStringOnly(lastClientStartDate.value);
-    if (lastStartDateStr && lastClientEndDate < lastStartDateStr) {
-      ElMessage.warning(`最后一个客户的结束日期不能小于该客户的开始日期（${formatDate(lastClientStartDate.value)}）`);
-      return;
-    }
-
-    // 旧客户结束日必须严格早于新客户开始日（默认：昨天 < 今天）
-    if (lastClientEndDate >= startDateStr) {
-      ElMessage.warning('最后一个客户的结束日期必须早于新客户的开始日期');
-      return;
-    }
-
-    // 核心业务：新客户开始日 = 旧客户结束日 + 1 天（恰好相差 1 天，无空窗）
-    const expectedStartDateStr = addDaysToDateString(lastClientEndDate, 1);
-    if (startDateStr !== expectedStartDateStr) {
-      ElMessage.warning(
-        `日期连续性错误：新客户开始日期（${startDateStr}）必须是旧客户结束日期（${lastClientEndDate}）+ 1天，`
-        + `期望值：${expectedStartDateStr}，以确保广告数据无空窗期`,
-      );
+    const pairError = getTransferDatePairError(startDateStr, lastClientEndDate);
+    if (pairError) {
+      ElMessage.warning(pairError);
       return;
     }
 
     if (pendingTransferData.value) {
-      pendingTransferData.value.startDate = transferDateForm.startDate;
+      pendingTransferData.value.startDate = startDateStr;
       pendingTransferData.value.endDate = lastClientEndDate;
     }
 

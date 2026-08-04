@@ -250,6 +250,8 @@ async def transfer_product_assignment(
 
     # 先读取当前有效记录，提前拦截「结束日早于开始日」——否则会写成倒挂区间，
     # 后续 validate 会误报与新记录「重叠」（如 start=07-23、end=07-21）
+    # 例外：同日替换（new_start == 当前有效 start）不关闭旧区间，直接改 client_id，
+    # 此时 old_end = start-1 仅用于日期连续约定，不用于写入 end_date。
     active_query = select(ProductAssignment).where(
         and_(
             ProductAssignment.product_id == product_id,
@@ -258,11 +260,16 @@ async def transfer_product_assignment(
     )
     active_result = await db.execute(active_query)
     active_assignment = active_result.scalars().first()
-    if active_assignment and old_end_date < active_assignment.start_date:
+    if (
+        active_assignment
+        and old_end_date < active_assignment.start_date
+        and new_start_date != active_assignment.start_date
+    ):
         raise ValueError(
             f"日期逻辑错误：旧客户结束日期（{old_end_date}）早于当前有效分配的开始日期"
             f"（记录ID {active_assignment.id}，开始于 {active_assignment.start_date}）。"
             f"请将新客户开始日期设为不早于 {active_assignment.start_date + timedelta(days=1)}，"
+            f"或设为与当前有效开始日相同（{active_assignment.start_date}）以同日更换归属，"
             f"或先在分配历史中调整当前有效记录的开始日期后再转移。"
         )
 

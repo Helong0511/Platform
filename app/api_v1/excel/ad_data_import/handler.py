@@ -216,6 +216,14 @@ async def import_ad_data_handler(
             metric_decreases=result.get("metric_decreases") or [],
         )
 
+        if int(result.get("success_rows") or 0) > 0:
+            try:
+                from app.services.ad_data.query_cache import invalidate_ad_data_query_caches
+
+                await invalidate_ad_data_query_caches(reason="excel_import")
+            except Exception as cache_exc:
+                logger.warning("Excel 导入后清理广告数据查询缓存失败: %s", cache_exc)
+
         # 构建响应：使用统一的错误详情格式化函数
         error_details = format_error_details(result.get("errors", []))
 

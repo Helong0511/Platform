@@ -44,6 +44,12 @@ class AdDataDeleteCommand:
         await self.db.delete(ad_data)
         await self.db.flush()
         logger.info("广告数据已删除: ID=%s", data_id)
+        try:
+            from app.services.ad_data.query_cache import invalidate_ad_data_query_caches
+
+            await invalidate_ad_data_query_caches(reason=f"ad_data_delete:{data_id}")
+        except Exception as cache_exc:
+            logger.warning("删除广告数据后清理查询缓存失败: %s", cache_exc)
 
 
 class AdDataBatchDeleteCommand:
@@ -83,6 +89,14 @@ class AdDataBatchDeleteCommand:
                 deleted_count,
                 current_user.username,
             )
+            try:
+                from app.services.ad_data.query_cache import invalidate_ad_data_query_caches
+
+                await invalidate_ad_data_query_caches(
+                    reason=f"ad_data_batch_delete:{deleted_count}"
+                )
+            except Exception as cache_exc:
+                logger.warning("批量删除广告数据后清理查询缓存失败: %s", cache_exc)
             return deleted_count
         except Exception as e:
             await self.db.rollback()

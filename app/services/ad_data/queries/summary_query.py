@@ -19,7 +19,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.infrastructure.cache_compat import (
-    generate_cache_key,
     legacy_get_cached as get_cached,
     legacy_set_cached as set_cached,
 )
@@ -28,6 +27,7 @@ from app.core.security import is_admin
 from app.models.models import AdData, Client, Product, User
 from app.services.ad_data.queries.dimension_filter import kpi_mutual_source_filter
 from app.services.ad_data.queries.join_helpers import join_product_and_client
+from app.services.ad_data.query_cache import build_ad_data_query_cache_key
 
 logger = logging.getLogger(__name__)
 
@@ -235,8 +235,13 @@ class AdDataSummaryQuery:
         product_id: Optional[int] = None,
         skip_cache: bool = False,
     ) -> Dict[str, Any]:
-        cache_key = generate_cache_key(
-            "ad_data_summary", current_user.id, start_date, end_date, client_id, product_id
+        cache_key = build_ad_data_query_cache_key(
+            "summary",
+            current_user.id,
+            start_date,
+            end_date,
+            client_id,
+            product_id,
         )
         if not skip_cache:
             cached = await get_cached(cache_key, key_prefix="ad_data")

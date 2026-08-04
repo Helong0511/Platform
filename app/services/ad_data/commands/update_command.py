@@ -131,6 +131,12 @@ class AdDataUpdateCommand:
                 detail=f"更新广告数据失败：{error_msg}。请检查数据格式或联系管理员",
             )
         logger.info("广告数据已更新: ID=%s", data_id)
+        try:
+            from app.services.ad_data.query_cache import invalidate_ad_data_query_caches
+
+            await invalidate_ad_data_query_caches(reason=f"ad_data_update:{data_id}")
+        except Exception as cache_exc:
+            logger.warning("更新广告数据后清理查询缓存失败: %s", cache_exc)
 
     async def _handle_integrity_error(
         self,

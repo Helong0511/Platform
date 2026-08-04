@@ -19,7 +19,6 @@ from sqlalchemy.future import select
 from app.core.db_errors import run_with_mysql_schema_retry
 from app.core.country_code import resolve_country_name
 from app.core.infrastructure.cache_compat import (
-    generate_cache_key,
     legacy_get_cached as get_cached,
     legacy_set_cached as set_cached,
 )
@@ -44,6 +43,7 @@ from app.services.ad_data.queries.join_helpers import (
     join_product_and_client,
     merge_product_options_with_ownership,
 )
+from app.services.ad_data.query_cache import build_ad_data_query_cache_key
 logger = logging.getLogger(__name__)
 
 
@@ -84,7 +84,9 @@ class FilterOptionsQuery:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
     ) -> List[Dict[str, Any]]:
-        cache_key = generate_cache_key("clients_with_data", current_user.id, start_date, end_date)
+        cache_key = build_ad_data_query_cache_key(
+            "clients_with_data", current_user.id, start_date, end_date
+        )
         cached = await get_cached(cache_key, key_prefix="ad_data")
         if cached:
             return cached.get("data", [])
@@ -243,7 +245,7 @@ class FilterOptionsQuery:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
     ) -> List[Dict[str, Any]]:
-        cache_key = generate_cache_key(
+        cache_key = build_ad_data_query_cache_key(
             "products_with_data",
             "assignment_and_current_v2",
             current_user.id,

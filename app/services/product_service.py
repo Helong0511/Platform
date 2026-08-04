@@ -370,6 +370,12 @@ class ProductService(BaseService[Product]):
         await self.db.refresh(product)
 
         logger.info(f"产品已创建: {product.name} (ID: {product.id})")
+        try:
+            from app.services.ad_data.query_cache import invalidate_ad_data_query_caches
+
+            await invalidate_ad_data_query_caches(reason=f"product_create:{product.id}")
+        except Exception as cache_exc:
+            logger.warning("创建产品后清理广告数据查询缓存失败: %s", cache_exc)
         return product
 
     async def update_product(

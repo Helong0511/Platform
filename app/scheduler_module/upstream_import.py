@@ -37,6 +37,7 @@ from app.scheduler_module.task_utils import (
     get_admin_user,
     merge_notify_params_with_fetch_stats,
 )
+from app.services.ad_data.query_cache import invalidate_ad_data_query_caches
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,15 @@ async def finalize_upstream_import(
         await db.rollback()
         logger.error(f"数据提交失败，已回滚: {commit_error}", exc_info=True)
         raise Exception(f"数据提交失败: {commit_error}") from commit_error
+
+    # 入库成功后失效筛选项/汇总缓存，避免管理端产品下拉仍显示旧列表
+    if int(result.get("inserted_count") or 0) > 0 or int(result.get("updated_count") or 0) > 0:
+        try:
+            await invalidate_ad_data_query_caches(
+                reason=f"upstream_import:{notify_title or task_name}"
+            )
+        except Exception as cache_exc:
+            logger.warning("上游入库后清理广告数据查询缓存失败: %s", cache_exc)
 
     await send_pending_data_decrease_warnings(
         traffic_decreases=result.get("traffic_decreases") or [],
