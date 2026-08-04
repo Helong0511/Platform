@@ -149,3 +149,12 @@ export const getAdDataDateRange = async (clientId = null) => {
     params
   }, { returnDataOnly: true });
 };
+
+/**
+ * 明细维护：数据来源 / 报表类型下拉目录（后端 ad_data_metadata 为真相源）
+ */
+export const getAdDataMetadataOptions = async () =>
+  request(
+    { url: '/api/v1/ad-data/metadata-options', method: 'get' },
+    { returnDataOnly: true }
+  );

@@ -28,7 +28,11 @@ from app.core.config import settings
 from app.core.constants import MAX_PAGE_SIZE, ECPM_MULTIPLIER, PERCENTAGE_MULTIPLIER
 from app.models.models import AdData, Client, Product, User, UserRole, ProductAssignment, CountryInfo
 from sqlalchemy import and_, or_
-from app.core.ad_data_metadata import format_data_source_label, format_report_type_label
+from app.core.ad_data_metadata import (
+    build_ad_data_metadata_catalog,
+    format_data_source_label,
+    format_report_type_label,
+)
 from app.core.country_code import resolve_country_name
 from app.core.query_utils import (
     product_assignment_join_condition, 
@@ -424,6 +428,24 @@ async def get_ad_data_date_range(
             ErrorCode.OPERATION_FAILED,
             detail=f"获取日期范围失败: {str(e)}"
         )
+
+
+@router.get(
+    "/metadata-options",
+    response_model=ResponseBaseSchema[dict],
+    summary="广告数据来源/报表类型下拉目录",
+)
+async def get_ad_data_metadata_options(
+    current_user: User = Depends(require_admin),
+):
+    """
+    返回明细维护「来源 / 报表类型」下拉选项。
+
+    以后端 ``app.core.ad_data_metadata`` 为唯一真相源；新增上游只需改后端常量，
+    无需再改前端硬编码列表。
+    """
+    _ = current_user
+    return ResponseBaseSchema.success(data=build_ad_data_metadata_catalog())
 
 
 @router.get("/summary", response_model=ResponseBaseSchema[AdDataSummaryResponse], summary="获取广告数据汇总")

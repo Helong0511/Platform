@@ -159,6 +159,7 @@ import {
 import AdDataFilterCard from '../components/ad-data/AdDataFilterCard.vue';
 import AdDataDetailTable from '../components/ad-data/AdDataDetailTable.vue';
 import AdDataEditDialog from '../components/ad-data/AdDataEditDialog.vue';
+import { ensureAdDataMetadataOptions } from '../composables/useAdDataMetadataOptions';
 import { navigateToProductManagement } from '../utils/navigateProductManagement';
 
 // 路由实例
@@ -930,10 +931,15 @@ onMounted(async () => {
   // 路由守卫已经处理了认证检查，这里不需要重复检查
   // 延迟加载数据，让页面先渲染出来
   await nextTick();
-  
+
+  // 管理员：提前拉取来源/报表类型目录（以后端为准，避免每增上游改前端）
+  if (isAdmin.value) {
+    ensureAdDataMetadataOptions();
+  }
+
   // 加载列显示设置
   loadColumnVisibility();
-  
+
   mountedTimeoutId = setTimeout(async () => {
     await loadPageData();
     // 初始化完成后，启用分页 watch

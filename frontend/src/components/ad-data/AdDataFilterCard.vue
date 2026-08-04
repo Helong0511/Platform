@@ -178,20 +178,17 @@
 </template>
 
 <script setup>
-import { computed, nextTick } from 'vue';
+import { computed, nextTick, onMounted } from 'vue';
 import { InfoFilled } from '@element-plus/icons-vue';
 import ProductFilterSelect from './ProductFilterSelect.vue';
 import {
   AD_DATA_DIMENSION_HINTS,
   AD_DATA_DIMENSION_OPTIONS,
-  AD_DATA_SOURCE_MANUAL_OPTIONS,
   DEFAULT_AD_DATA_DIMENSION,
-  UPSTREAM_API_DATA_SOURCES,
-  buildAdDataReportTypeOptions,
-  buildAdDataSourceOptions,
   showAdUnitFilterForDimension,
   showCountryFilterForDimension
 } from '../../constants/adDataDimension';
+import { useAdDataMetadataOptions } from '../../composables/useAdDataMetadataOptions';
 import {
   hasProductOwnershipLabels,
   PRODUCT_OWNERSHIP_HINT,
@@ -236,6 +233,20 @@ const emit = defineEmits([
   'ad-unit-change'
 ]);
 
+const {
+  upstreamSources,
+  manualSources,
+  buildSourceOptions,
+  buildReportTypeOptions,
+  ensureAdDataMetadataOptions
+} = useAdDataMetadataOptions();
+
+onMounted(() => {
+  if (props.isAdmin && props.showMetadataFilters) {
+    ensureAdDataMetadataOptions();
+  }
+});
+
 /** 等待 v-model 同步后再通知父组件刷新级联筛选项 */
 const handleDateRangePickerChange = async () => {
   await nextTick();
@@ -264,14 +275,14 @@ const showAdUnit = computed(() => {
   return props.showDimension && showAdUnitFilterForDimension(dimension.value);
 });
 
-const allSourceOptions = computed(() => buildAdDataSourceOptions(searchForm.value?.dataSource));
+const allSourceOptions = computed(() => buildSourceOptions(searchForm.value?.dataSource));
 const upstreamSourceOptions = computed(() =>
-  allSourceOptions.value.filter((item) => UPSTREAM_API_DATA_SOURCES.includes(item.value))
+  allSourceOptions.value.filter((item) => upstreamSources.value.includes(item.value))
 );
 const manualSourceOptions = computed(() =>
-  allSourceOptions.value.filter((item) => AD_DATA_SOURCE_MANUAL_OPTIONS.includes(item.value))
+  allSourceOptions.value.filter((item) => manualSources.value.includes(item.value))
 );
-const reportTypeOptions = computed(() => buildAdDataReportTypeOptions(searchForm.value?.reportType));
+const reportTypeOptions = computed(() => buildReportTypeOptions(searchForm.value?.reportType));
 
 const showProductOwnershipLegend = computed(() =>
   hasProductOwnershipLabels(

@@ -318,7 +318,7 @@ export function applyDimensionColumnDefaults(columnVisibility, dimension, option
   return result;
 }
 
-/** ad_data 数据来源中文标签（与 app/core/ad_data_metadata.py 一致） */
+/** ad_data 数据来源中文标签（前端兜底；运行时优先用 GET /ad-data/metadata-options） */
 export const AD_DATA_SOURCE_LABELS = {
   zhisuo: '智索',
   gam: 'GAM',
@@ -330,12 +330,16 @@ export const AD_DATA_SOURCE_LABELS = {
   tqt: 'TQT',
   tbsj: '通百世家(yangyangdeyi)',
   aya: 'Aya',
+  flymobi: 'FlyMobi',
   excel: 'Excel 导入',
   legacy: '历史',
   unknown: '未知'
 };
 
-/** 上游 API 拉数来源（编辑下拉优先顺序） */
+/**
+ * 上游 API 拉数来源（前端兜底顺序）。
+ * 正式环境请走 useAdDataMetadataOptions()，与后端 ad_data_metadata 对齐。
+ */
 export const UPSTREAM_API_DATA_SOURCES = [
   'zhisuo',
   'gam',
@@ -346,7 +350,8 @@ export const UPSTREAM_API_DATA_SOURCES = [
   'huguang',
   'tqt',
   'tbsj',
-  'aya'
+  'aya',
+  'flymobi'
 ];
 
 /** 明细维护编辑：其它来源（手工/历史） */
@@ -371,7 +376,7 @@ export const AD_DATA_REPORT_TYPE_OTHER_OPTIONS = ['legacy'];
 export const AD_DATA_REPORT_TYPE_HINTS = {
   unit: '按广告单元，无国家；智索 channelunit、GAM ad_unit、Aya getAdsDataUnit',
   country: '按国家，无广告单元；智索 channelcountry、TQT、Huguang、Aya',
-  cross: '国家+广告单元；智索 channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、GAM country',
+  cross: '国家+广告单元；智索 channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、FlyMobi countryList、GAM country',
   daily: '日汇总，无国家无单元；智索 channeldaily 兜底、GAM daily、Aya getDay',
   legacy: '历史或未标注；新入库会自动按行形态推断'
 };

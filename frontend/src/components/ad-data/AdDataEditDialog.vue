@@ -80,7 +80,7 @@
             />
           </el-option-group>
         </el-select>
-        <div class="form-tip">与库字段 data_source 一致，如 zhisuo / pomiad / addermobi / gam 等</div>
+        <div class="form-tip">与库字段 data_source 一致；选项由后端目录下发，新增上游无需改前端</div>
       </el-form-item>
       <el-form-item label="账号" prop="upstream_account">
         <el-input
@@ -193,15 +193,8 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue';
-import {
-  AD_DATA_SOURCE_MANUAL_OPTIONS,
-  UPSTREAM_API_DATA_SOURCES,
-  buildAdDataSourceOptions,
-  buildAdDataReportTypeOptions,
-  AD_DATA_REPORT_TYPE_DETAIL_OPTIONS,
-  AD_DATA_REPORT_TYPE_OTHER_OPTIONS
-} from '../../constants/adDataDimension';
+import { computed, onMounted, ref } from 'vue';
+import { useAdDataMetadataOptions } from '../../composables/useAdDataMetadataOptions';
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -210,37 +203,53 @@ const props = defineProps({
   users: { type: Array, default: () => [] },
   products: { type: Array, default: () => [] },
   isMobile: { type: Boolean, default: false },
-  reportTypeOptions: { type: Array, default: () => buildAdDataReportTypeOptions() },
+  reportTypeOptions: { type: Array, default: null },
+});
+
+const {
+  upstreamSources,
+  manualSources,
+  reportDetailTypes,
+  reportOtherTypes,
+  buildSourceOptions,
+  buildReportTypeOptions,
+  ensureAdDataMetadataOptions
+} = useAdDataMetadataOptions();
+
+onMounted(() => {
+  ensureAdDataMetadataOptions();
 });
 
 const allReportTypeOptions = computed(() =>
-  buildAdDataReportTypeOptions(props.editForm?.report_type)
+  (props.reportTypeOptions?.length
+    ? props.reportTypeOptions
+    : buildReportTypeOptions(props.editForm?.report_type))
 );
 
 const detailReportTypeOptions = computed(() =>
   allReportTypeOptions.value.filter((item) =>
-    AD_DATA_REPORT_TYPE_DETAIL_OPTIONS.includes(item.value)
+    reportDetailTypes.value.includes(item.value)
   )
 );
 
 const otherReportTypeOptions = computed(() =>
   allReportTypeOptions.value.filter((item) =>
-    AD_DATA_REPORT_TYPE_OTHER_OPTIONS.includes(item.value) ||
-    (!AD_DATA_REPORT_TYPE_DETAIL_OPTIONS.includes(item.value) &&
-      !AD_DATA_REPORT_TYPE_OTHER_OPTIONS.includes(item.value))
+    reportOtherTypes.value.includes(item.value) ||
+    (!reportDetailTypes.value.includes(item.value) &&
+      !reportOtherTypes.value.includes(item.value))
   )
 );
 
 const allSourceOptions = computed(() =>
-  buildAdDataSourceOptions(props.editForm?.data_source)
+  buildSourceOptions(props.editForm?.data_source)
 );
 
 const upstreamSourceOptions = computed(() =>
-  allSourceOptions.value.filter((item) => UPSTREAM_API_DATA_SOURCES.includes(item.value))
+  allSourceOptions.value.filter((item) => upstreamSources.value.includes(item.value))
 );
 
 const manualSourceOptions = computed(() =>
-  allSourceOptions.value.filter((item) => AD_DATA_SOURCE_MANUAL_OPTIONS.includes(item.value))
+  allSourceOptions.value.filter((item) => manualSources.value.includes(item.value))
 );
 
 const emit = defineEmits(['update:visible', 'save', 'cancel', 'product-change', 'country-help']);

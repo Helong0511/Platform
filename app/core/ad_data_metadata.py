@@ -221,7 +221,7 @@ REPORT_TYPE_DETAIL_OPTIONS: tuple[str, ...] = (
 REPORT_TYPE_HINTS: dict[str, str] = {
     REPORT_TYPE_UNIT: "按广告单元，无具体国家（含 ZZ）；智索 channelunit、GAM ad_unit、Aya getAdsDataUnit",
     REPORT_TYPE_COUNTRY: "按具体国家，无广告单元（不含 ZZ）；智索 channelcountry、TQT、Huguang、Aya",
-    REPORT_TYPE_CROSS: "具体国家+广告单元（不含 ZZ）；智索 channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、GAM country",
+    REPORT_TYPE_CROSS: "具体国家+广告单元（不含 ZZ）；智索 channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、FlyMobi countryList、GAM country",
     REPORT_TYPE_DAILY: "日汇总，无具体国家无单元（含 ZZ）；智索 channeldaily 兜底、GAM daily、Aya getDay",
     REPORT_TYPE_LEGACY: "历史或未标注；新入库会自动按行形态推断",
 }
@@ -251,6 +251,45 @@ def format_data_source_label(value: Optional[str]) -> str:
 def format_report_type_label(value: Optional[str]) -> str:
     key = normalize_report_type(value)
     return REPORT_TYPE_LABELS.get(key, key)
+
+
+def build_ad_data_metadata_catalog() -> dict:
+    """
+    管理端下拉目录：数据来源 / 报表类型（以后端 ad_data_metadata 为唯一真相源）。
+
+    前端应调用 GET /api/v1/ad-data/metadata-options 拉取，避免每增上游就改前端常量。
+    """
+    manual_sources = (
+        DATA_SOURCE_EXCEL,
+        DATA_SOURCE_LEGACY,
+        DATA_SOURCE_UNKNOWN,
+    )
+    detail_report_types = tuple(REPORT_TYPE_DETAIL_OPTIONS)
+    other_report_types = (REPORT_TYPE_LEGACY,)
+
+    def _source_item(slug: str) -> dict:
+        return {"value": slug, "label": format_data_source_label(slug)}
+
+    def _report_item(slug: str) -> dict:
+        return {
+            "value": slug,
+            "label": format_report_type_label(slug),
+            "hint": REPORT_TYPE_HINTS.get(slug, ""),
+        }
+
+    return {
+        "data_sources": {
+            "upstream": [_source_item(s) for s in UPSTREAM_API_DATA_SOURCES],
+            "manual": [_source_item(s) for s in manual_sources],
+            "labels": {k: format_data_source_label(k) for k in VALID_DATA_SOURCES},
+        },
+        "report_types": {
+            "detail": [_report_item(t) for t in detail_report_types],
+            "other": [_report_item(t) for t in other_report_types],
+            "labels": {k: format_report_type_label(k) for k in VALID_REPORT_TYPES},
+            "hints": dict(REPORT_TYPE_HINTS),
+        },
+    }
 
 
 # DECIMAL(7,4) 比率字段合法范围（百分比数值）

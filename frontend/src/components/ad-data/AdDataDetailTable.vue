@@ -190,11 +190,12 @@
 </template>
 
 <script setup>
+import { onMounted } from 'vue';
 import { Setting, Right } from '@element-plus/icons-vue';
-import {
-  formatAdDataSourceLabel as formatSourceLabel,
-  formatAdDataReportTypeLabel as formatReportTypeLabel
-} from '../../constants/adDataDimension';
+import { useAdDataMetadataOptions } from '../../composables/useAdDataMetadataOptions';
+
+const { formatSourceLabel, formatReportTypeLabel, ensureAdDataMetadataOptions } =
+  useAdDataMetadataOptions();
 
 /** 优先展示与库字段一致的 raw 值，API 仅返回 label 时回退 */
 function pickMetadataRaw(row, rawKey, labelKey) {
@@ -233,7 +234,7 @@ function metadataTooltip(raw, labelFn) {
 
 const paginationModel = defineModel('pagination', { type: Object, required: true });
 
-defineProps({
+const props = defineProps({
   loading: { type: Boolean, default: false },
   adDataList: { type: Array, default: () => [] },
   columnVisibility: { type: Object, required: true },
@@ -243,6 +244,12 @@ defineProps({
   formatCurrency: { type: Function, required: true },
   getSummaries: { type: Function, required: true },
   emptyText: { type: String, default: '暂无数据' },
+});
+
+onMounted(() => {
+  if (props.isAdmin) {
+    ensureAdDataMetadataOptions();
+  }
 });
 
 const emit = defineEmits([
