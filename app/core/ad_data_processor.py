@@ -2,7 +2,7 @@
 广告数据（AdData）导入与聚合处理工具。
 
 职责：解析上游 API/Excel 原始行、国家代码映射、比率计算、批量入库；
-eCPM Telegram：上游 API 真实 eCPM 对比本地库未扣减 eCPM，有减少才通知；
+Telegram 减少告警：仅收益（减扣前/后）与流量指标；eCPM 为比率指标易自然波动，不再告警。
 收益按减扣前/后汇总（扣减为 0 时不重复发减扣后）；流量指标汇总一条。
 
 在系统中的位置：``app.core.ad_data_processor``，由定时拉取任务与管理端导入 API 调用。
@@ -200,14 +200,14 @@ APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
 
 METRIC_DECREASE_CATEGORIES: tuple[tuple[str, str, str], ...] = (
-    ("ecpm_before", "⚠️ eCPM减少汇总（上游 vs 本地未扣减）", "eCPM"),
     ("revenue_before", "⚠️ 收益(减扣前)减少汇总", "收益(减扣前)"),
     ("revenue_after", "⚠️ 收益(减扣后)减少汇总", "收益(减扣后)"),
 )
 
 _METRIC_DECREASE_NOTICE = (
-    "⚠️ 注意：API获取的数据正常情况下应该比上一次获得的数据大（累积增长）\n"
-    "如果 eCPM / 收益减少，可能是数据源异常或数据被重置，请检查数据源。"
+    "⚠️ 注意：API获取的收益正常情况下应该比上一次获得的数据大（累积增长）\n"
+    "如果收益减少，可能是数据源异常或数据被重置，请检查数据源。\n"
+    "（eCPM 为比率指标，自然波动，已不再单独告警）"
 )
 
 
@@ -330,8 +330,11 @@ async def build_data_decrease_warning(
     检查待更新数据是否比原有数据减少。
 
     返回字典（无减少时返回 None）：
-    - metric_items: eCPM（上游 vs 本地未扣减）/ 收益减少条目
+    - metric_items: 收益（减扣前/后）减少条目；eCPM 不再告警
     - traffic_item: 流量类指标减少条目，供批次汇总（可无）
+
+    说明：``new_ecpm_before`` / ``new_ecpm_after`` 仍由调用方传入以保持签名兼容，
+    但 eCPM 为比率指标、上游重拉时自然波动频繁，已关闭其 Telegram 减少告警。
     """
     try:
         traffic_fields: list[str] = []
@@ -340,6 +343,7 @@ async def build_data_decrease_warning(
         resolved_ad_unit = normalize_ad_unit(
             ad_unit or getattr(existing_data, "ad_unit", "") or ""
         )
+        _ = (new_ecpm_before, new_ecpm_after)  # 保留入参兼容，不参与告警
 
         request_decrease = existing_data.request_count - new_request_count
         if request_decrease > 0:
@@ -360,20 +364,6 @@ async def build_data_decrease_warning(
         if click_decrease > 0:
             traffic_fields.append(
                 f"点击数: 原有 {existing_data.click_count} → 新获取 {new_click_count} (减少 {click_decrease})")
-
-        # eCPM：仅「上游 API 真实 eCPM」对比「本地库未扣减 eCPM」，有减少才 Telegram
-        old_ecpm_before = _as_float(existing_data.ecpm_before_deduct)
-        new_ecpm_before_f = _as_float(new_ecpm_before)
-        ecpm_before_decrease = old_ecpm_before - new_ecpm_before_f
-        if ecpm_before_decrease > float_threshold:
-            metric_items.append({
-                "metric_type": "ecpm_before",
-                "fields": [
-                    f"本地未扣减 {old_ecpm_before:.2f} → "
-                    f"上游API {new_ecpm_before_f:.2f} (减少 {ecpm_before_decrease:.2f})"
-                ],
-                "decrease": ecpm_before_decrease,
-            })
 
         old_revenue_before = _as_float(existing_data.revenue_before_deduct)
         new_revenue_before_f = _as_float(new_revenue_before)
@@ -531,7 +521,7 @@ async def send_pending_data_decrease_warnings(
 ) -> None:
     """事务提交成功后发送数据减少告警。
 
-    - eCPM：上游 API 真实 eCPM vs 本地未扣减 eCPM，有减少才汇总发送
+    - eCPM：已关闭（比率指标易自然波动，不再 Telegram）
     - 收益：按减扣前/后各汇总一条（过长则连续拆分；扣减为 0 时不重复减扣后）
     - 请求/匹配/展示/点击：汇总为一条（过长则连续拆分）
     """
