@@ -1693,4 +1693,5 @@ async def process_api_ad_data(
         "country_unit_mismatch_total": country_unit_mismatch_total,
         "metric_decreases": pending_metric_decreases,
         "traffic_decreases": pending_traffic_decreases,
+        "data_source": resolved_data_source,
     }

@@ -15,6 +15,7 @@ from .cloak_configs import router as cloak_configs_router
 from .sensitive_path_probes import router as sensitive_path_probes_router
 from .cache_management import router as cache_management_router
 from .countries import router as countries_router
+from .ad_data_health import router as ad_data_health_router
 
 __all__ = [
     'scheduled_tasks_router',
@@ -26,5 +27,6 @@ __all__ = [
     'sensitive_path_probes_router',
     'cache_management_router',
     'countries_router',
+    'ad_data_health_router',
 ]
 

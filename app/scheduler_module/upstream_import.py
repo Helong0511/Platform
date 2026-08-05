@@ -92,6 +92,34 @@ async def finalize_upstream_import(
         metric_decreases=result.get("metric_decreases") or [],
     )
 
+    # 倒扣：入库后对已冻结的历史日，现库汇总 vs 日标准（请求数+收益扣前）
+    if int(result.get("inserted_count") or 0) > 0 or int(result.get("updated_count") or 0) > 0:
+        try:
+            from datetime import timedelta
+
+            from app.core.utils import get_app_now
+            from app.services.ad_data import baseline_service as baseline_svc
+            from app.core.telegram_utils import split_long_message
+
+            today = get_app_now().date()
+            touched = [today - timedelta(days=1), today - timedelta(days=2)]
+            baseline_alerts = await baseline_svc.compare_frozen_dates_after_import(
+                db,
+                touched_dates=touched,
+                today=today,
+                data_source=str(result.get("data_source") or "") or None,
+            )
+            if baseline_alerts:
+                await db.commit()
+                cfg = await baseline_svc.load_settings_view(db)
+                if cfg.enable_telegram:
+                    msg = baseline_svc.format_baseline_drop_telegram(baseline_alerts)
+                    if msg:
+                        for part in split_long_message(msg):
+                            await send_telegram_notify_async(part)
+        except Exception as baseline_exc:
+            logger.warning("倒扣标准对比失败（不影响入库）: %s", baseline_exc)
+
     # ---------- 汇总统计 ----------
     inserted_count = result.get("inserted_count", 0)
     updated_count = result.get("updated_count", 0)

@@ -102,6 +102,71 @@ CREATE TABLE IF NOT EXISTS `ad_data_archive`  (
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '广告数据归档表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
+-- Table structure for ad_data_day_baseline
+-- ----------------------------
+DROP TABLE IF EXISTS `ad_data_day_baseline`;
+CREATE TABLE IF NOT EXISTS `ad_data_day_baseline`  (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `stat_date` DATE NOT NULL COMMENT '标准日（业务日）',
+  `product_id` INT NOT NULL COMMENT '产品ID',
+  `data_source` VARCHAR(32) NOT NULL COMMENT '数据来源 zhisuo/gam/...',
+  `request_count` INT NOT NULL DEFAULT 0 COMMENT '汇总请求数',
+  `revenue_before` DECIMAL(14, 4) NOT NULL DEFAULT 0.0000 COMMENT '汇总收益扣前',
+  `row_count` INT NOT NULL DEFAULT 0 COMMENT '明细行数',
+  `frozen_at` DATETIME NOT NULL COMMENT '冻结时间',
+  `freeze_batch_id` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '冻结批次',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uq_ad_data_day_baseline`(`stat_date` ASC, `product_id` ASC, `data_source` ASC) USING BTREE,
+  INDEX `idx_baseline_stat_date`(`stat_date` ASC) USING BTREE,
+  INDEX `idx_baseline_product`(`product_id` ASC) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '广告数据日标准快照（倒扣对比用）' ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Table structure for ad_data_health_alert
+-- ----------------------------
+DROP TABLE IF EXISTS `ad_data_health_alert`;
+CREATE TABLE IF NOT EXISTS `ad_data_health_alert`  (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `alert_type` VARCHAR(32) NOT NULL COMMENT 'baseline_drop/missing/streak/today_gap/dod_drop',
+  `stat_date` DATE NOT NULL COMMENT '相关业务日',
+  `product_id` INT NOT NULL COMMENT '产品ID',
+  `product_name` VARCHAR(100) NOT NULL DEFAULT '' COMMENT '产品名快照',
+  `data_source` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '数据来源',
+  `metric` VARCHAR(32) NOT NULL DEFAULT '' COMMENT 'request_count/revenue_before/revenue_after/...',
+  `baseline_value` DECIMAL(14, 4) NULL DEFAULT NULL COMMENT '标准值或对照值',
+  `current_value` DECIMAL(14, 4) NULL DEFAULT NULL COMMENT '当前值',
+  `drop_ratio` DECIMAL(10, 6) NULL DEFAULT NULL COMMENT '下降比例 0~1',
+  `detail` TEXT NULL COMMENT '可读说明',
+  `batch_id` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '触发批次',
+  `notified` TINYINT NOT NULL DEFAULT 0 COMMENT '是否已Telegram',
+  `created_at` DATETIME NOT NULL COMMENT '创建时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_health_alert_date_type`(`stat_date` ASC, `alert_type` ASC) USING BTREE,
+  INDEX `idx_health_alert_created`(`created_at` ASC) USING BTREE,
+  INDEX `idx_health_alert_product`(`product_id` ASC) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '广告数据健康巡检告警' ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Table structure for ad_data_health_settings
+-- ----------------------------
+DROP TABLE IF EXISTS `ad_data_health_settings`;
+CREATE TABLE IF NOT EXISTS `ad_data_health_settings`  (
+  `id` INT NOT NULL DEFAULT 1 COMMENT '固定单行 id=1',
+  `drop_ratio` DECIMAL(8, 4) NOT NULL DEFAULT 0.0200 COMMENT '跌幅阈值',
+  `request_floor` INT NOT NULL DEFAULT 100 COMMENT '请求数地板',
+  `revenue_floor` DECIMAL(12, 4) NOT NULL DEFAULT 1.0000 COMMENT '收益地板',
+  `enable_baseline_drop` TINYINT NOT NULL DEFAULT 1 COMMENT '倒扣vs标准',
+  `enable_missing` TINYINT NOT NULL DEFAULT 1 COMMENT '昨天缺数',
+  `enable_streak` TINYINT NOT NULL DEFAULT 1 COMMENT '连续断档',
+  `enable_today_gap` TINYINT NOT NULL DEFAULT 1 COMMENT '昨有今无',
+  `enable_dod_drop` TINYINT NOT NULL DEFAULT 1 COMMENT '昨天vs前天日环比',
+  `enable_telegram` TINYINT NOT NULL DEFAULT 1 COMMENT '是否发Telegram',
+  `cooldown_hours` INT NOT NULL DEFAULT 24 COMMENT '同类告警冷却小时',
+  `updated_at` DATETIME NOT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '广告数据健康巡检配置' ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
 -- Table structure for admin_notification_configs
 -- ----------------------------
 DROP TABLE IF EXISTS `admin_notification_configs`;

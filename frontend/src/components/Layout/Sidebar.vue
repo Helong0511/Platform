@@ -38,6 +38,9 @@
       <el-menu-item v-if="isAdmin" index="/app/admin/ad-data-rows">
         <span>明细维护</span>
       </el-menu-item>
+      <el-menu-item v-if="isAdmin" index="/app/admin/ad-data-health">
+        <span>健康巡检</span>
+      </el-menu-item>
     </el-sub-menu>
 
     <el-menu-item v-if="isAdmin" index="/app/admin/postback">

@@ -359,6 +359,26 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "cron_expression": "0 0 * * *",  # 每天 00:00 执行
         "description": "每天执行一次，汇总并发送 daily 频率的客户通知",
     },
+
+    # ========== 广告数据健康巡检 ==========
+    "广告数据标准日冻结": {
+        "task_name": "广告数据标准日冻结",
+        "task_module": "app.scheduler_module.tasks.ad_data_health_task",
+        "task_function": "ad_data_baseline_freeze_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "30 0 * * *",  # 每天 00:30 冻结昨天
+        "description": "每天 00:30 将昨天 ad_data 按「日期+产品+来源」冻结为倒扣标准（请求数+收益扣前）",
+    },
+    "广告数据健康巡检": {
+        "task_name": "广告数据健康巡检",
+        "task_module": "app.scheduler_module.tasks.ad_data_health_task",
+        "task_function": "ad_data_health_scan_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "0 1 * * *",  # 每天 01:00
+        "description": "缺数/断档/昨有今无/昨天vs前天结算收益跌幅/倒扣vs日标准（请求数与收益扣前）",
+    },
     #     "description": "任务描述",
     # },
 }

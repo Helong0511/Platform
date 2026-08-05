@@ -70,6 +70,10 @@ GAM_API_TASK_NAME = "Google API获取数据"
 # CPL 系统定时任务
 RESET_DAILY_CAPS_TASK_NAME = "每日Cap重置"
 
+# 广告数据健康巡检
+AD_DATA_BASELINE_FREEZE_TASK_NAME = "广告数据标准日冻结"
+AD_DATA_HEALTH_SCAN_TASK_NAME = "广告数据健康巡检"
+
 # ==================== 任务名称映射 ====================
 # 用于快速查找任务名称，格式：{任务模块名: 任务名称常量}
 
@@ -91,6 +95,7 @@ TASK_NAME_MAP = {
     "flymobi_task": FLYMOBI_API_TASK_NAME,
     "gam_task": GAM_API_TASK_NAME,
     "cpl_tasks": RESET_DAILY_CAPS_TASK_NAME,
+    "ad_data_health_task": AD_DATA_HEALTH_SCAN_TASK_NAME,
 }
 
 # ==================== 所有任务名称列表 ====================
@@ -114,6 +119,8 @@ ALL_TASK_NAMES = [
     FLYMOBI_API_TASK_NAME,
     GAM_API_TASK_NAME,
     RESET_DAILY_CAPS_TASK_NAME,
+    AD_DATA_BASELINE_FREEZE_TASK_NAME,
+    AD_DATA_HEALTH_SCAN_TASK_NAME,
 ]
 
 

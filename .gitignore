@@ -237,3 +237,6 @@ tests/*
 !tests/test_*.py
 !tests/scan_route_order.py
 dump.rdb
+# sql/：仅上传全量结构 platform.sql；其它增量/备份脚本仅本地保留
+sql/*
+!sql/platform.sql

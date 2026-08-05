@@ -82,6 +82,7 @@ const NotFound = createAsyncComponent(() => import(/* webpackChunkName: "not-fou
 const UserManagement = createAsyncComponent(() => import(/* webpackChunkName: "user-management" */ '../views/admin/UserManagement.vue'), 'UserManagement');
 const ProductManagement = createAsyncComponent(() => import(/* webpackChunkName: "product-management" */ '../views/admin/ProductManagement.vue'), 'ProductManagement');
 const ScheduledTaskManagement = createAsyncComponent(() => import(/* webpackChunkName: "scheduled-task" */ '../views/admin/ScheduledTaskManagement.vue'), 'ScheduledTaskManagement');
+const AdDataHealth = createAsyncComponent(() => import(/* webpackChunkName: "ad-data-health" */ '../views/admin/AdDataHealth.vue'), 'AdDataHealth');
 const GamSchedulerConfig = createAsyncComponent(() => import(/* webpackChunkName: "gam-scheduler-config" */ '../views/admin/GamSchedulerConfig.vue'), 'GamSchedulerConfig');
 const AuditLogManagement = createAsyncComponent(() => import(/* webpackChunkName: "audit-log" */ '../views/admin/AuditLogManagement.vue'), 'AuditLogManagement');
 const PostbackManagement = createAsyncComponent(() => import(/* webpackChunkName: "postback-management" */ '../views/admin/PostbackManagement.vue'), 'PostbackManagement');
@@ -200,6 +201,12 @@ const routes = [
         name: 'AdminAdDataRows',
         component: AdData,
         meta: { requiresAdmin: true, requiresAdDataAccess: true }
+      },
+      {
+        path: 'admin/ad-data-health',
+        name: 'AdDataHealth',
+        component: AdDataHealth,
+        meta: { requiresAdmin: true }
       },
       {
         path: 'admin/users',

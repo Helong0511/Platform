@@ -57,6 +57,7 @@ from app.api_v1.system import (
     sensitive_path_probes_router as sensitive_path_probes,
     cache_management_router as cache_management,
     countries_router as countries,
+    ad_data_health_router as ad_data_health,
 )
 from app.api_v1.system.telegram_status import router as telegram_status
 
@@ -126,6 +127,7 @@ api_router.include_router(cloak_configs, prefix="/cloak-configs", tags=["斗篷�
 api_router.include_router(sensitive_path_probes, prefix="/sensitive-path-probes", tags=["敏感路径拦截日志"])
 api_router.include_router(cache_management, prefix="/cache", tags=["缓存管理"])
 api_router.include_router(countries, prefix="/countries", tags=["国家维护"])
+api_router.include_router(ad_data_health, prefix="/ad-data-health", tags=["广告数据健康巡检"])
 
 # ---------- 外部接口模块 ----------
 # 客户API路由（通过API密钥访问，无前缀）

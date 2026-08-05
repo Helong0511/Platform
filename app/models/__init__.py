@@ -12,6 +12,11 @@ from app.models.client_product import (
     TBSearchData,
     ProductAssignment,
 )
+from app.models.ad_data_health import (
+    AdDataDayBaseline,
+    AdDataHealthAlert,
+    AdDataHealthSettings,
+)
 from app.models.system import ScheduledTask, UserAuditLog, CountryInfo, CountryAlias
 from app.models.postback import (
     PostbackConversion,
@@ -55,6 +60,9 @@ __all__ = [
     "AdData",
     "TBSearchData",
     "ProductAssignment",
+    "AdDataDayBaseline",
+    "AdDataHealthAlert",
+    "AdDataHealthSettings",
     "ScheduledTask",
     "UserAuditLog",
     "CountryInfo",
