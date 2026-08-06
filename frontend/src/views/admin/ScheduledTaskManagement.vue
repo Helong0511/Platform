@@ -2,8 +2,8 @@
   定时任务管理页面（ScheduledTaskManagement.vue）
 
   功能区块：
-  1. 统计卡片：总任务数、启用/运行中/失败数量
-  2. 筛选区：任务名称、启用状态
+  1. 统计卡片：总任务数；启用/运行中/失败为当前页统计
+  2. 筛选区：任务名/描述、启用状态、运行状态
   3. 任务表格：Cron 表达式、上次/下次执行、手动触发
   4. 编辑弹窗：配置任务参数与 Cron 调度规则
 
@@ -22,15 +22,15 @@
             <span class="stat-value">{{ stats.total || 0 }}</span>
           </span>
           <span class="stat-item">
-            <span class="stat-label">启用：</span>
+            <span class="stat-label">本页启用：</span>
             <span class="stat-value success">{{ stats.active || 0 }}</span>
           </span>
           <span class="stat-item">
-            <span class="stat-label">运行中：</span>
+            <span class="stat-label">本页运行中：</span>
             <span class="stat-value warning">{{ stats.running || 0 }}</span>
           </span>
           <span class="stat-item">
-            <span class="stat-label">失败：</span>
+            <span class="stat-label">本页失败：</span>
             <span class="stat-value danger">{{ stats.error || 0 }}</span>
           </span>
           <span class="stat-item" v-if="stats.queueRunning !== null">
@@ -53,13 +53,13 @@
     <el-card class="filter-card" shadow="never">
       <!-- 表单区域 -->
       <el-form :inline="true" :model="searchForm" class="filter-form">
-        <el-form-item label="任务名称">
+        <el-form-item label="任务名/描述">
           <el-input 
             v-model="searchForm.task_name" 
-            placeholder="输入任务名称搜索" 
+            placeholder="按任务名或描述搜索" 
             clearable
             @keyup.enter="() => fetchTasks(true)"
-            style="width: 200px;"
+            style="width: 220px;"
             name="task_name"
           >
             <template #prefix>
@@ -120,7 +120,7 @@
         border
         stripe
         style="width: 100%"
-        default-sort="{ prop: 'id', order: 'descending' }"
+        :default-sort="{ prop: 'id', order: 'descending' }"
       >
         <el-table-column prop="id" label="ID" width="80" sortable align="center">
           <template #default="scope">

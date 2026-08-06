@@ -71,10 +71,9 @@ def build_fulltext_query(
             # 构建字段列表（已验证安全）
             fields_str = ", ".join(validated_fields)
             
-            # 使用参数化查询，search_term通过bindparams绑定，安全
-            # 注意：MATCH AGAINST的参数需要特殊处理，但我们已经通过bindparams绑定
+            # 普通自然语言模式；勿用 WITH QUERY EXPANSION（小表会近乎全表命中）
             match_clause = text(
-                f"MATCH({fields_str}) AGAINST(:search_term IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION)"
+                f"MATCH({fields_str}) AGAINST(:search_term IN NATURAL LANGUAGE MODE)"
             )
             # 转义特殊字符，防止SQL注入（虽然使用参数绑定，但MATCH AGAINST可能需要转义）
             escaped_term = search_term.replace("'", "''").replace("\\", "\\\\")
@@ -118,6 +117,18 @@ def build_like_query_conditions(
     return conditions
 
 
+def apply_like_search(base_query, model_class, search_fields: list[str], search_term: str):
+    """对查询挂上 LIKE 条件；无有效字段时原样返回。"""
+    like_conditions = build_like_query_conditions(
+        model_class,
+        search_fields,
+        search_term,
+    )
+    if like_conditions:
+        return base_query.where(or_(*like_conditions))
+    return base_query
+
+
 async def search_with_fulltext(
     db: AsyncSession,
     model_class,
@@ -127,26 +138,28 @@ async def search_with_fulltext(
     use_fulltext: bool = True
 ):
     """
-    执行全文搜索查询
-    
+    构建带关键词条件的查询（优先 FULLTEXT，否则 LIKE）。
+
+    注意：本函数只组装 SQL，不执行。无索引等执行期错误须由调用方捕获后
+    以 ``use_fulltext=False`` 重试，或直接使用 ``apply_like_search``。
+    小表（如 scheduled_tasks）建议 ``use_fulltext=False``。
+
     参数:
-        db: 数据库会话
+        db: 数据库会话（保留以兼容调用方；当前未使用）
         model_class: SQLAlchemy模型类
         search_fields: 要搜索的字段列表
         search_term: 搜索关键词
         base_query: 基础查询（可选）
         use_fulltext: 是否使用FULLTEXT索引（默认True）
-    
+
     返回:
         查询对象
     """
     if base_query is None:
         base_query = select(model_class)
-    
-    # 获取表名（用于日志记录）
+
     table_name = model_class.__tablename__
-    
-    # 尝试使用全文搜索
+
     if use_fulltext:
         fulltext_condition = build_fulltext_query(
             table_name,
@@ -154,27 +167,14 @@ async def search_with_fulltext(
             search_term,
             use_fulltext=True
         )
-        
+
         # SQLAlchemy ClauseElement 禁止用 if clause 做真值判断，须显式 is not None
         if fulltext_condition is not None:
             try:
-                # 使用MATCH AGAINST查询
-                # 注意：需要确保表有对应的全文索引
-                base_query = base_query.where(fulltext_condition)
-                return base_query
+                # 使用 MATCH AGAINST；调用方须保证表有对应全文索引
+                return base_query.where(fulltext_condition)
             except Exception as e:
-                logger.warning(f"全文搜索查询失败: {e}，回退到LIKE查询")
-                # 回退到LIKE查询
-    
-    # 使用LIKE查询（回退方案）
-    like_conditions = build_like_query_conditions(
-        model_class,
-        search_fields,
-        search_term
-    )
-    
-    if like_conditions:
-        base_query = base_query.where(or_(*like_conditions))
-    
-    return base_query
+                logger.warning(f"全文搜索条件构建失败: {e}，回退到LIKE查询")
+
+    return apply_like_search(base_query, model_class, search_fields, search_term)
 

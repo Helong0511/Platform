@@ -63,14 +63,14 @@ class ScheduledTaskService:
         """
         分页查询定时任务配置。
 
-        任务名搜索优先全文索引，回退 LIKE；count 与列表查询均设 QUERY_TIMEOUT 超时保护。
+        任务名/描述关键词走 LIKE（小表，避免全文扩展误命中）；count 与列表条件对称，均设 QUERY_TIMEOUT。
 
         Args:
             page: 页码
             page_size: 每页数量
             is_active: 是否启用
             is_running: 是否运行中（持锁）
-            task_name: 任务名称关键词
+            task_name: 任务名称/描述关键词
 
         Returns:
             (任务列表, 总条数)
@@ -85,7 +85,7 @@ class ScheduledTaskService:
         # 构建查询
         query = select(ScheduledTask)
 
-        # 任务名称搜索（优先使用全文搜索，回退到LIKE）
+        # 任务名/描述关键词：小表直走 LIKE（全文 EXPANSION/停用词会导致漏筛或近全表）
         if task_name:
             cleaned_task_name = sanitize_input(task_name.strip(), max_length=MAX_TASK_NAME_LENGTH)
             if cleaned_task_name:
@@ -95,20 +95,19 @@ class ScheduledTaskService:
                     search_fields=["task_name", "description"],
                     search_term=cleaned_task_name,
                     base_query=query,
-                    use_fulltext=True
+                    use_fulltext=False,
                 )
 
         # 其他过滤条件
         if conditions:
             query = query.where(and_(*conditions))
 
-        # 排序：按ID升序（最新的任务ID最大）
-        query = query.order_by(ScheduledTask.id.asc())
+        # 排序：ID 降序（新任务在前）
+        query = query.order_by(ScheduledTask.id.desc())
 
         # 获取总数
         count_query = select(func.count()).select_from(ScheduledTask)
 
-        # 任务名称搜索（优先使用全文搜索，回退到LIKE）
         if task_name:
             cleaned_task_name = sanitize_input(task_name.strip(), max_length=MAX_TASK_NAME_LENGTH)
             if cleaned_task_name:
@@ -118,7 +117,7 @@ class ScheduledTaskService:
                     search_fields=["task_name", "description"],
                     search_term=cleaned_task_name,
                     base_query=count_query,
-                    use_fulltext=True
+                    use_fulltext=False,
                 )
 
         # 其他过滤条件
