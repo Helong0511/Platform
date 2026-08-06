@@ -1,10 +1,16 @@
 """
 yangyangdeyi（TBSJ）上游广告数据拉取定时任务。
+
+维度：仅国家+广告单元交叉（cross）。
+上游接口路径为 /adunit，但响应同时含 country_code 与 ad_unit（非纯广告单元报表）。
+不拉取 /unit_data（仅单元）、/country（仅国家）、/data（日汇总）。
 """
 import logging
+from typing import Any
 
-from app.core.ad_data_metadata import DATA_SOURCE_TBSJ
+from app.core.ad_data_metadata import DATA_SOURCE_TBSJ, REPORT_TYPE_CROSS
 from app.core.config import settings
+from app.core.country_code import has_concrete_country_code
 from app.scheduler_module.task_names import TBSJ_API_TASK_NAME
 from app.scheduler_module.task_utils import resolve_upstream_date_range
 from app.scheduler_module.upstream_fetch import fetch_tbsj_rows
@@ -32,6 +38,29 @@ TBSJ_FIELD_MAPPING = {
     "click_rate": "ctr",
     "revenue_before_deduct": "earnings",
 }
+
+
+def _keep_tbsj_cross_rows(rows: list[Any]) -> list[Any]:
+    """只保留同时具备具体国家 + 广告单元的行，保证入库 report_type=cross。"""
+    kept: list[Any] = []
+    dropped = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            dropped += 1
+            continue
+        country = row.get("country_code")
+        ad_unit = str(row.get("ad_unit") or "").strip()
+        if has_concrete_country_code(country) and ad_unit:
+            kept.append(row)
+        else:
+            dropped += 1
+    if dropped:
+        logger.info(
+            "TBSJ 交叉过滤：保留 %d 条，丢弃无国家或无广告单元 %d 条",
+            len(kept),
+            dropped,
+        )
+    return kept
 
 
 def _extract_access_token(token_json: dict) -> str:
@@ -89,7 +118,7 @@ async def tbsj_api_task(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> None:
-    """yangyangdeyi 定时任务：Token 鉴权后拉数并入库。"""
+    """yangyangdeyi 定时任务：Token 鉴权后拉取国家+广告单元交叉并入库。"""
     username = settings.TBSJ_API_USERNAME
     password = settings.TBSJ_API_PASSWORD
     tbsj_start, tbsj_end = resolve_upstream_date_range(
@@ -97,7 +126,7 @@ async def tbsj_api_task(
         end_date,
         early_morning_dual_day=True,
     )
-    notify_params = {"起始日期": tbsj_start, "终止日期": tbsj_end}
+    notify_params = {"起始日期": tbsj_start, "终止日期": tbsj_end, "维度": "国家+广告单元"}
 
     async def fetch_data():
         access_token = await _fetch_tbsj_token(username, password)
@@ -115,8 +144,10 @@ async def tbsj_api_task(
         skip_hint="跳过: TBSJ API 未配置（请在 .env 设置 TBSJ_API_USERNAME / TBSJ_API_PASSWORD）",
         fetch_data=fetch_data,
         field_mapping=TBSJ_FIELD_MAPPING,
+        data_transform=_keep_tbsj_cross_rows,
         source="yangyangdeyi定时任务",
         notify_title="yangyangdeyi",
         data_source=DATA_SOURCE_TBSJ,
+        report_type=REPORT_TYPE_CROSS,
         notify_params=notify_params,
     )

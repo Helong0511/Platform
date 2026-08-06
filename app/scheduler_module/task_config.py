@@ -224,7 +224,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "result_getter_function": "get_task_result",
         # 数据库配置
         "cron_expression": "*/30 * * * *",  # 每10分钟
-        "description": "每隔30分钟执行一次，从yangyangdeyi API获取广告数据",
+        "description": "每隔30分钟执行一次，从yangyangdeyi(/adunit)拉取国家+广告单元交叉数据",
     },
 
     # ========== Addermobi API获取数据任务 ==========

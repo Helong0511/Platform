@@ -327,7 +327,12 @@ async def fetch_tbsj_rows(
     headers: Dict[str, Any],
     limit: int = 1000,
 ) -> UpstreamFetchResult:
-    """TBSJ 广告单元接口（/adunit），按 total 全量分页，成功码 20000。"""
+    """
+    TBSJ 国家+广告单元交叉接口（路径名 /adunit，响应含 country_code + ad_unit）。
+
+    上游另有 /unit_data（仅单元）、/country（仅国家）、/data（日汇总），生产不接入。
+    按 total 全量分页，成功码 20000。
+    """
     base = base_url.rstrip("/")
     start_at, end_at = format_tbsj_datetime_range(start, end)
     all_rows: List[Any] = []
@@ -344,7 +349,7 @@ async def fetch_tbsj_rows(
                 "end": end_at,
             },
             headers=headers,
-            label=f"TBSJ API adunit (page={page})",
+            label=f"TBSJ API adunit/cross (page={page})",
             verify=False,
         )
         raise_unless_api_success(json_data, {20000}, label="TBSJ API", code_key="code")
