@@ -36,7 +36,9 @@
             <el-table-column prop="stat_date" label="业务日" width="110" />
             <el-table-column prop="product_name" label="产品" min-width="160" show-overflow-tooltip />
             <el-table-column prop="data_source" label="来源" width="100" />
-            <el-table-column prop="metric" label="指标" width="120" />
+            <el-table-column prop="metric" label="指标" width="120">
+              <template #default="{ row }">{{ metricLabel(row.metric) }}</template>
+            </el-table-column>
             <el-table-column label="标准→当前" width="160">
               <template #default="{ row }">
                 {{ fmtNum(row.baseline_value) }} → {{ fmtNum(row.current_value) }}
@@ -230,6 +232,17 @@ function alertTypeLabel(t) {
       today_gap: '昨有今无',
       dod_drop: '日环比跌幅',
     }[t] || t
+  )
+}
+
+function metricLabel(m) {
+  return (
+    {
+      presence: '有无数据',
+      revenue_after: '结算收益',
+      revenue_before: '收益(扣前)',
+      request_count: '请求数',
+    }[m] || m || '-'
   )
 }
 
