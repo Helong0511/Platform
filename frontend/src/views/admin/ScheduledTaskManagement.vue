@@ -41,7 +41,7 @@
             <span class="stat-label">调度器：</span>
             <span class="stat-value" :class="stats.schedulerRunning ? 'success' : 'danger'">
               {{ stats.schedulerRunning ? '运行中' : '已停止' }}
-              <template v-if="stats.schedulerJobs !== null">（{{ stats.schedulerJobs }} jobs）</template>
+              <template v-if="stats.schedulerJobs !== null">（{{ stats.schedulerJobs }} 个任务）</template>
             </span>
           </span>
         </div>
