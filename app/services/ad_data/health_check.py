@@ -7,8 +7,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
-from typing import Any, Mapping, Optional, Sequence
+from datetime import date, datetime, time, timedelta
+from typing import Any, Mapping, Optional, Sequence, Union
+
+# 「昨有今无」在此小时（含）之前不落库、不进 Telegram，避免凌晨巡检刷屏。
+# 业务时区以调用方传入的 now 为准（一般为 get_app_now()）。
+TODAY_GAP_ALERT_AFTER_HOUR = 12
 
 
 def _coerce_date(value: Any) -> date:
@@ -18,6 +22,33 @@ def _coerce_date(value: Any) -> date:
     if isinstance(value, date):
         return value
     return date.fromisoformat(str(value)[:10])
+
+
+def should_alert_today_gap(
+    now: Optional[Union[datetime, time, int]] = None,
+    *,
+    after_hour: int = TODAY_GAP_ALERT_AFTER_HOUR,
+) -> bool:
+    """
+    是否允许发出「昨有今无」告警。
+
+    - now 为 datetime：取 .hour
+    - now 为 time：取 .hour
+    - now 为 int：视为小时 0–23
+    - now 为 None：视为允许（由调用方决定是否传入当前时间）
+    """
+    if now is None:
+        return True
+    if isinstance(now, int):
+        hour = now
+    elif isinstance(now, datetime):
+        hour = now.hour
+    elif isinstance(now, time):
+        hour = now.hour
+    else:
+        return True
+    return hour >= after_hour
+
 
 
 @dataclass(frozen=True)
@@ -420,9 +451,14 @@ def format_health_report_text(
     report: AdDataHealthReport,
     *,
     max_items_per_section: int = 80,
+    baseline_alert_count: int = 0,
+    today_gap_suppressed: bool = False,
+    today_gap_suppress_hour: int = TODAY_GAP_ALERT_AFTER_HOUR,
 ) -> str:
     """生成可读巡检文案（控制台 / Telegram）。"""
     cfg = report.config
+    scan_alerts = report.total_alerts
+    combined_alerts = scan_alerts + max(0, int(baseline_alert_count or 0))
     lines: list[str] = [
         "📊 广告数据健康巡检",
         "",
@@ -430,13 +466,26 @@ def format_health_report_text(
         f"检查缺数日(昨天): {report.yesterday.isoformat()}",
         f"跌幅对照(前天): {report.day_before.isoformat()}",
         f"监控池: {report.pool_size} 个产品"
-        f"（最近 {cfg.lookback_days} 天内至少 {cfg.active_days} 天有数据、且产品启用）",
+        f"（最近 {cfg.lookback_days} 天内至少 {cfg.active_days} 天有数据）",
         f"规则: 连续≥{cfg.streak_days}天有数据后断档 | 结算收益跌幅≥{cfg.drop_ratio:.0%}"
         f"（前天结算收益≥{cfg.revenue_floor:g}）| 昨天有数据今天还没有"
+        f"（{today_gap_suppress_hour}:00 前不报）"
         f" | 倒扣巡查（相对日标准：请求数与收益扣前）",
-        f"告警合计: {report.total_alerts}",
+        f"告警合计: {combined_alerts}"
+        + (
+            f"（日级 {scan_alerts} + 倒扣 {baseline_alert_count}）"
+            if baseline_alert_count
+            else ""
+        ),
         "",
     ]
+    if today_gap_suppressed:
+        lines.append(
+            f"ℹ️ 「昨有今无」已跳过：当前早于 {today_gap_suppress_hour}:00"
+            f"（避免凌晨误报；下午仍无大面积数据时再告警）"
+        )
+        lines.append("")
+
 
     def _section(title: str, count: int) -> None:
         lines.append(f"{title}（{count}）")
@@ -531,11 +580,15 @@ def format_health_report_text(
             lines.append("  （无明细；详见告警表 baseline_drop）")
         lines.append("")
 
-    if report.total_alerts == 0:
+    if combined_alerts == 0:
         lines.append("✅ 巡检正常：无缺数/断档/今日未入库/跌幅/倒扣告警")
     else:
-        lines.append("ℹ️ 「今天还没有拉到」在上午比较常见；如果下午还大面积没有，优先排查拉数任务。")
-        lines.append("ℹ️ 倒扣巡查：正常调度不拉前天时，主动重拉前天上游与库内结算收益对比。")
+        if report.today_gaps:
+            lines.append(
+                f"ℹ️ 「今天还没有拉到」在 {today_gap_suppress_hour}:00 前通常不报；"
+                "若下午仍大面积没有，优先排查拉数任务。"
+            )
+        lines.append("ℹ️ 倒扣巡查：相对已冻结日标准对比请求数与收益扣前；入库后也会抽查昨天/前天。")
 
     return "\n".join(lines).rstrip() + "\n"
 

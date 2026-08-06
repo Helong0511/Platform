@@ -22,9 +22,11 @@ from app.services.ad_data import baseline_service as bs
 from app.services.ad_data.health_check import (
     AdDataHealthConfig,
     ProductDayAgg,
+    TODAY_GAP_ALERT_AFTER_HOUR,
     build_daily_map,
     detect_ad_data_health,
     format_health_report_text,
+    should_alert_today_gap,
     _coerce_date,
 )
 from app.services.ad_data.watch_products import (
@@ -223,7 +225,8 @@ async def run_daily_health_scan(
     send_telegram: Optional[bool] = None,
 ) -> dict[str, Any]:
     """执行完整日级巡检并可选发 Telegram。"""
-    today = today or get_app_now().date()
+    now = get_app_now()
+    today = today or now.date()
     yesterday = today - timedelta(days=1)
     cfg_view = await bs.load_settings_view(db)
     batch_id = f"health-{today.isoformat()}-{uuid.uuid4().hex[:8]}"
@@ -262,6 +265,22 @@ async def run_daily_health_scan(
     )
     report.backfill_date = yesterday
 
+    # 中午前不报「昨有今无」：01:00 定时巡检常见误报
+    today_gap_suppressed = False
+    suppressed_today_gap_count = 0
+    if not should_alert_today_gap(now):
+        suppressed_today_gap_count = len(report.today_gaps)
+        if suppressed_today_gap_count:
+            today_gap_suppressed = True
+            report.today_gaps = []
+            logger.info(
+                "健康巡检：当前 %02d:%02d 早于 %02d:00，跳过「昨有今无」%d 条",
+                now.hour,
+                now.minute,
+                TODAY_GAP_ALERT_AFTER_HOUR,
+                suppressed_today_gap_count,
+            )
+
     # 倒扣：昨天若已有标准，现库 vs 标准
     baseline_alerts: list[dict[str, Any]] = []
     if cfg_view.enable_baseline_drop:
@@ -283,7 +302,12 @@ async def run_daily_health_scan(
         db, report=report, settings_view=cfg_view, batch_id=batch_id
     )
 
-    text = format_health_report_text(report)
+    text = format_health_report_text(
+        report,
+        baseline_alert_count=len(baseline_alerts),
+        today_gap_suppressed=today_gap_suppressed,
+        today_gap_suppress_hour=TODAY_GAP_ALERT_AFTER_HOUR,
+    )
     if baseline_alerts:
         extra = bs.format_baseline_drop_telegram(baseline_alerts)
         if extra:
@@ -321,6 +345,9 @@ async def run_daily_health_scan(
         "report_alerts": report.total_alerts,
         "baseline_drop_alerts": len(baseline_alerts),
         "persisted_scan_alerts": persisted,
+        "today_gap_suppressed": today_gap_suppressed,
+        "today_gap_suppressed_count": suppressed_today_gap_count,
+        "today_gap_alert_after_hour": TODAY_GAP_ALERT_AFTER_HOUR,
         "telegram_sent": telegram_sent,
         "summary_text": text,
     }

@@ -235,6 +235,7 @@
             </el-form-item>
             <el-form-item label="昨有今无">
               <el-switch v-model="settings.enable_today_gap" />
+              <span class="hint">开启后仅 {{ settings.today_gap_alert_after_hour || 12 }}:00 起才告警（凌晨定时巡检默认跳过）</span>
             </el-form-item>
             <el-form-item label="昨天vs前天日环比">
               <el-switch v-model="settings.enable_dod_drop" />
@@ -254,6 +255,13 @@
 
         <!-- 手动执行 -->
         <el-tab-pane label="手动执行" name="run">
+          <el-alert
+            type="info"
+            :closable="false"
+            show-icon
+            class="mb-12"
+            title="凌晨定时巡检（01:00）与中午前的手动巡检，不会落库/通知「昨有今无」；12:00 后若开关开启才会报。"
+          />
           <el-space wrap>
             <el-button type="primary" :loading="running" @click="doRun(true)">跑巡检并发 Telegram</el-button>
             <el-button :loading="running" @click="doRun(false)">跑巡检（不发 Telegram）</el-button>
@@ -310,6 +318,7 @@ const settings = reactive({
   enable_missing: true,
   enable_streak: true,
   enable_today_gap: true,
+  today_gap_alert_after_hour: 12,
   enable_dod_drop: true,
   enable_telegram: true,
   cooldown_hours: 24,
@@ -401,7 +410,7 @@ async function loadSettings() {
     if (settings.watch_effective_date == null) settings.watch_effective_date = ''
     if (settings.watch_expire_date == null) settings.watch_expire_date = ''
   } catch (e) {
-    ElMessage.error(e?.message || '加载配置失败（请先执行 sql/ad_data_health_tables.sql）')
+    ElMessage.error(e?.message || '加载配置失败（请确认已同步 sql/platform.sql 中的健康巡检表）')
   } finally {
     settingsLoading.value = false
   }

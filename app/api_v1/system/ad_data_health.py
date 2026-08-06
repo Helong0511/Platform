@@ -19,6 +19,7 @@ from app.models.models import User
 from app.schemas.base import ResponseBaseSchema
 from app.services.ad_data import baseline_service as bs
 from app.services.ad_data.health_runner import run_daily_health_scan
+from app.services.ad_data.health_check import TODAY_GAP_ALERT_AFTER_HOUR
 from app.services.ad_data.watch_products import (
     build_watch_products_report,
     format_watch_products_telegram,
@@ -109,6 +110,11 @@ def _settings_payload(row) -> dict[str, Any]:
             "生效日期起（含）至失效日期止（含）自动盯数并发 Telegram；"
             "生效空=立即，失效空=长期"
         ),
+        "today_gap_hint": (
+            f"昨有今无：业务时 {TODAY_GAP_ALERT_AFTER_HOUR}:00 前不落库、不发 Telegram"
+            "（避免 01:00 巡检刷屏）；开关关闭则全天不报"
+        ),
+        "today_gap_alert_after_hour": TODAY_GAP_ALERT_AFTER_HOUR,
     }
 
 
