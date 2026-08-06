@@ -31,3 +31,10 @@ export function runHealthScan(data) {
     { returnDataOnly: true }
   )
 }
+
+export function runWatchProductsCheck(data) {
+  return request(
+    { url: `${BASE}/watch-check`, method: 'post', data: data || {} },
+    { returnDataOnly: true }
+  )
+}

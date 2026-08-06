@@ -412,6 +412,20 @@ async def _execute_task_with_lock_internal(
                     except Exception as close_error:
                         logger.warning(f"关闭审计日志数据库会话失败: {close_error}")
 
+            # 上游 API 拉数任务结束后：若本轮全部完成则发重点关注 Telegram
+            try:
+                from app.services.ad_data.watch_products import (
+                    on_upstream_api_task_finished,
+                )
+
+                await on_upstream_api_task_finished(task_name)
+            except Exception as watch_err:
+                logger.warning(
+                    "重点关注收尾钩子失败（不影响任务）: %s: %s",
+                    task_name,
+                    watch_err,
+                )
+
         except Exception as e:
             end_time = get_app_now_naive()
             execution_duration = (end_time - start_time).total_seconds()
@@ -491,6 +505,20 @@ async def _execute_task_with_lock_internal(
                         await audit_db.close()
                     except Exception as close_error:
                         logger.warning(f"关闭审计日志数据库会话失败: {close_error}")
+
+            # 失败也算本轮「已跑完」，避免卡死重点关注汇总通知
+            try:
+                from app.services.ad_data.watch_products import (
+                    on_upstream_api_task_finished,
+                )
+
+                await on_upstream_api_task_finished(task_name)
+            except Exception as watch_err:
+                logger.warning(
+                    "重点关注收尾钩子失败（不影响任务）: %s: %s",
+                    task_name,
+                    watch_err,
+                )
 
     finally:
         # 确保数据库会话被正确关闭

@@ -163,6 +163,9 @@ CREATE TABLE IF NOT EXISTS `ad_data_health_settings`  (
   `enable_dod_drop` TINYINT NOT NULL DEFAULT 1 COMMENT '昨天vs前天日环比',
   `enable_telegram` TINYINT NOT NULL DEFAULT 1 COMMENT '是否发Telegram',
   `cooldown_hours` INT NOT NULL DEFAULT 24 COMMENT '同类告警冷却小时',
+  `watch_products` TEXT NULL COMMENT '重点关注产品（每行一个域名/URL，支持带或不带 https://）',
+  `watch_effective_date` DATE NULL COMMENT '重点关注生效日期（含当天；空=立即生效）',
+  `watch_expire_date` DATE NULL COMMENT '重点关注失效日期（含当天；空=长期有效）',
   `updated_at` DATETIME NOT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '广告数据健康巡检配置' ROW_FORMAT = DYNAMIC;

@@ -7,7 +7,7 @@ import logging
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +27,11 @@ from app.services.ad_data.health_check import (
     format_health_report_text,
     _coerce_date,
 )
+from app.services.ad_data.watch_products import (
+    is_watch_window_active,
+    parse_watch_products_text,
+    resolve_watch_product_ids,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +41,7 @@ async def _load_product_daily_map(
     *,
     start: date,
     end: date,
+    extra_product_ids: Optional[Sequence[int]] = None,
 ) -> tuple[dict[int, str], dict[int, dict[date, ProductDayAgg]]]:
     names = {
         int(i): str(n)
@@ -43,6 +49,16 @@ async def _load_product_daily_map(
             await db.execute(select(Product.id, Product.name).where(Product.is_active == True))  # noqa: E712
         ).all()
     }
+    # 重点关注可能匹配到未启用产品，仍需纳入名称与日汇总
+    if extra_product_ids:
+        missing = [int(p) for p in extra_product_ids if int(p) not in names]
+        if missing:
+            for i, n in (
+                await db.execute(
+                    select(Product.id, Product.name).where(Product.id.in_(missing))
+                )
+            ).all():
+                names[int(i)] = str(n)
     rows = (
         await db.execute(
             select(
@@ -212,9 +228,24 @@ async def run_daily_health_scan(
     cfg_view = await bs.load_settings_view(db)
     batch_id = f"health-{today.isoformat()}-{uuid.uuid4().hex[:8]}"
 
+    watch_lines = parse_watch_products_text(cfg_view.watch_products)
+    force_ids: list[int] = []
+    watch_active, watch_window_status = is_watch_window_active(
+        today,
+        effective_date=cfg_view.watch_effective_date,
+        expire_date=cfg_view.watch_expire_date,
+    )
+    if watch_lines and watch_active:
+        matched = await resolve_watch_product_ids(db, watch_lines=watch_lines)
+        for pairs in matched.values():
+            force_ids.extend(pid for pid, _ in pairs)
+        force_ids = sorted(set(force_ids))
+
     lookback = 7
     start = yesterday - timedelta(days=lookback - 1)
-    names, daily_map = await _load_product_daily_map(db, start=start, end=today)
+    names, daily_map = await _load_product_daily_map(
+        db, start=start, end=today, extra_product_ids=force_ids
+    )
 
     report = detect_ad_data_health(
         today=today,
@@ -227,6 +258,7 @@ async def run_daily_health_scan(
             drop_ratio=cfg_view.drop_ratio,
             revenue_floor=cfg_view.revenue_floor,
         ),
+        force_product_ids=force_ids or None,
     )
     report.backfill_date = yesterday
 
@@ -284,6 +316,8 @@ async def run_daily_health_scan(
         "today": today.isoformat(),
         "batch_id": batch_id,
         "pool_size": report.pool_size,
+        "watch_force_products": len(force_ids),
+        "watch_window_status": watch_window_status,
         "report_alerts": report.total_alerts,
         "baseline_drop_alerts": len(baseline_alerts),
         "persisted_scan_alerts": persisted,

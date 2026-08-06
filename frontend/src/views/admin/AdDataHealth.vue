@@ -116,6 +116,101 @@
           </div>
         </el-tab-pane>
 
+        <!-- 重点关注 -->
+        <el-tab-pane label="重点关注" name="watch">
+          <el-alert
+            type="info"
+            :closable="false"
+            show-icon
+            class="mb-12"
+            title="支持回车、逗号（,，）、分号、空格等自动拆分。生效日（含）起盯，失效日（含）止；生效空=立即，失效空=长期。窗口内上游 API 全部跑完后单独发 Telegram；日常巡检也会强制纳入监控池。"
+          />
+          <el-form v-loading="settingsLoading" label-width="120px" class="watch-form">
+            <el-form-item label="生效日期">
+              <el-date-picker
+                v-model="settings.watch_effective_date"
+                type="date"
+                value-format="YYYY-MM-DD"
+                clearable
+                placeholder="空=立即生效"
+                style="width: 220px"
+              />
+            </el-form-item>
+            <el-form-item label="失效日期">
+              <el-date-picker
+                v-model="settings.watch_expire_date"
+                type="date"
+                value-format="YYYY-MM-DD"
+                clearable
+                placeholder="空=长期有效"
+                style="width: 220px"
+              />
+              <el-tag
+                v-if="settings.watch_window_status_label"
+                :type="settings.watch_window_active ? 'success' : 'info'"
+                size="small"
+                class="hint"
+              >
+                {{ settings.watch_window_status_label }}
+              </el-tag>
+            </el-form-item>
+            <el-form-item label="关注产品">
+              <el-input
+                v-model="settings.watch_products"
+                type="textarea"
+                :rows="10"
+                placeholder="粘贴即可，例如：&#10;https://top01.turskeserije.com.tr&#10;top02.turskeserije.com.tr, top03.turskeserije.com.tr&#10;或：top04.turskeserije.com.tr，top05.turskeserije.com.tr"
+              />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="settingsSaving" @click="saveWatchProducts">保存关注配置</el-button>
+              <el-button type="success" :loading="watchChecking" @click="doWatchCheck(true)">
+                立即检查并发 Telegram
+              </el-button>
+              <el-button :loading="watchChecking" @click="doWatchCheck(false)">仅检查不通知</el-button>
+              <span v-if="settings.updated_at" class="hint">上次更新：{{ settings.updated_at }}</span>
+            </el-form-item>
+          </el-form>
+          <el-table
+            v-if="watchItems.length"
+            :data="watchItems"
+            stripe
+            border
+            size="small"
+            class="mb-12"
+          >
+            <el-table-column prop="input_name" label="输入" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="product_name" label="匹配产品" min-width="160" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.product_name || '（库中暂无）' }}</template>
+            </el-table-column>
+            <el-table-column label="今日有数据" width="110">
+              <template #default="{ row }">
+                <el-tag :type="row.has_today_data ? 'success' : 'danger'" size="small">
+                  {{ row.has_today_data ? '有' : '无' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="row_count" label="行数" width="80" />
+            <el-table-column prop="request_count" label="请求数" width="100" />
+            <el-table-column label="收益(扣前)" width="120">
+              <template #default="{ row }">{{ fmtNum(row.revenue_before) }}</template>
+            </el-table-column>
+            <el-table-column label="来源" min-width="120" show-overflow-tooltip>
+              <template #default="{ row }">
+                {{ (row.data_sources || []).join(', ') || '-' }}
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-input
+            v-if="watchOutput"
+            v-model="watchOutput"
+            type="textarea"
+            :rows="12"
+            readonly
+            placeholder="检查结果摘要"
+          />
+        </el-tab-pane>
+
         <!-- 规则配置 -->
         <el-tab-pane label="规则配置" name="settings">
           <el-form v-loading="settingsLoading" label-width="160px" class="settings-form">
@@ -187,6 +282,7 @@ import {
   fetchHealthSettings,
   freezeHealthBaseline,
   runHealthScan,
+  runWatchProductsCheck,
   updateHealthSettings,
 } from '@/api/adDataHealth'
 
@@ -217,11 +313,20 @@ const settings = reactive({
   enable_dod_drop: true,
   enable_telegram: true,
   cooldown_hours: 24,
+  watch_products: '',
+  watch_effective_date: '',
+  watch_expire_date: '',
+  watch_window_active: false,
+  watch_window_status: '',
+  watch_window_status_label: '',
   updated_at: '',
 })
 
 const running = ref(false)
 const runOutput = ref('')
+const watchChecking = ref(false)
+const watchOutput = ref('')
+const watchItems = ref([])
 
 function alertTypeLabel(t) {
   return (
@@ -292,6 +397,9 @@ async function loadSettings() {
   try {
     const res = await fetchHealthSettings()
     Object.assign(settings, res)
+    if (settings.watch_products == null) settings.watch_products = ''
+    if (settings.watch_effective_date == null) settings.watch_effective_date = ''
+    if (settings.watch_expire_date == null) settings.watch_expire_date = ''
   } catch (e) {
     ElMessage.error(e?.message || '加载配置失败（请先执行 sql/ad_data_health_tables.sql）')
   } finally {
@@ -309,6 +417,44 @@ async function saveSettings() {
     ElMessage.error(e?.message || '保存失败')
   } finally {
     settingsSaving.value = false
+  }
+}
+
+async function saveWatchProducts() {
+  settingsSaving.value = true
+  try {
+    await updateHealthSettings({
+      watch_products: settings.watch_products || '',
+      watch_effective_date: settings.watch_effective_date || '',
+      watch_expire_date: settings.watch_expire_date || '',
+    })
+    ElMessage.success('重点关注配置已保存')
+    await loadSettings()
+  } catch (e) {
+    ElMessage.error(e?.message || '保存失败')
+  } finally {
+    settingsSaving.value = false
+  }
+}
+
+async function doWatchCheck(sendTelegram) {
+  watchChecking.value = true
+  try {
+    const res = await runWatchProductsCheck({ send_telegram: sendTelegram })
+    watchItems.value = res.items || []
+    watchOutput.value = res.summary_text || JSON.stringify(res, null, 2)
+    if (res.reason === 'empty_watch_list') {
+      ElMessage.warning('请先填写并保存重点关注产品')
+    } else {
+      ElMessage.success(
+        `检查完成：有数据 ${res.with_data || 0} / 无数据 ${res.without_data || 0}` +
+          (sendTelegram ? `，Telegram=${res.sent}` : '')
+      )
+    }
+  } catch (e) {
+    ElMessage.error(e?.message || '重点关注检查失败')
+  } finally {
+    watchChecking.value = false
   }
 }
 
@@ -358,7 +504,7 @@ async function doRun(sendTelegram) {
 watch(activeTab, (tab) => {
   if (tab === 'alerts') loadAlerts()
   if (tab === 'baselines') loadBaselines()
-  if (tab === 'settings') loadSettings()
+  if (tab === 'settings' || tab === 'watch') loadSettings()
 })
 
 onMounted(() => {
@@ -386,6 +532,9 @@ onMounted(() => {
 }
 .settings-form {
   max-width: 640px;
+}
+.watch-form {
+  max-width: 720px;
 }
 .hint {
   margin-left: 12px;

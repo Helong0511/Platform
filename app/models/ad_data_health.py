@@ -97,6 +97,21 @@ class AdDataHealthSettings(Base):
     enable_dod_drop = Column(Boolean, nullable=False, default=True, server_default="1")
     enable_telegram = Column(Boolean, nullable=False, default=True, server_default="1")
     cooldown_hours = Column(Integer, nullable=False, default=24, server_default="24")
+    watch_products = Column(
+        Text,
+        nullable=True,
+        comment="重点关注产品（每行一个域名/URL，支持带或不带 https://）",
+    )
+    watch_effective_date = Column(
+        Date,
+        nullable=True,
+        comment="重点关注生效日期（含当天；空=立即生效）",
+    )
+    watch_expire_date = Column(
+        Date,
+        nullable=True,
+        comment="重点关注失效日期（含当天；空=长期有效）",
+    )
     updated_at = Column(
         DateTime, nullable=False, default=get_app_now_naive, onupdate=get_app_now_naive
     )

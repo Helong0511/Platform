@@ -63,6 +63,23 @@ class HealthSettingsView:
     enable_dod_drop: bool = True
     enable_telegram: bool = True
     cooldown_hours: int = 24
+    watch_products: str = ""
+    watch_effective_date: Optional[date] = None
+    watch_expire_date: Optional[date] = None
+
+
+def _coerce_optional_date(value: Any) -> Optional[date]:
+    """把配置里的日期字段归一为 date；空串/None → None。"""
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    return date.fromisoformat(text[:10])
 
 
 async def get_or_create_settings(db: AsyncSession) -> AdDataHealthSettings:
@@ -88,6 +105,13 @@ async def load_settings_view(db: AsyncSession) -> HealthSettingsView:
         enable_dod_drop=bool(row.enable_dod_drop),
         enable_telegram=bool(row.enable_telegram),
         cooldown_hours=max(_as_int(row.cooldown_hours), 0),
+        watch_products=str(getattr(row, "watch_products", None) or ""),
+        watch_effective_date=_coerce_optional_date(
+            getattr(row, "watch_effective_date", None)
+        ),
+        watch_expire_date=_coerce_optional_date(
+            getattr(row, "watch_expire_date", None)
+        ),
     )
 
 
@@ -112,6 +136,25 @@ async def update_settings(
     for key, attr in mapping.items():
         if key in payload and payload[key] is not None:
             setattr(row, attr, payload[key])
+    if "watch_products" in payload:
+        from app.services.ad_data.watch_products import parse_watch_products_text
+
+        raw = payload.get("watch_products")
+        if raw is None:
+            row.watch_products = None
+        else:
+            lines = parse_watch_products_text(str(raw))
+            row.watch_products = "\n".join(lines) if lines else ""
+    if "watch_effective_date" in payload:
+        row.watch_effective_date = _coerce_optional_date(payload.get("watch_effective_date"))
+    if "watch_expire_date" in payload:
+        row.watch_expire_date = _coerce_optional_date(payload.get("watch_expire_date"))
+
+    eff = _coerce_optional_date(getattr(row, "watch_effective_date", None))
+    exp = _coerce_optional_date(getattr(row, "watch_expire_date", None))
+    if eff and exp and exp < eff:
+        raise ValueError("失效日期不能早于生效日期")
+
     row.updated_at = get_app_now_naive()
     await db.flush()
     return row

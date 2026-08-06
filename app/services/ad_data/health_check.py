@@ -161,11 +161,13 @@ def select_monitoring_pool(
     lookback_start: date,
     lookback_end: date,
     active_days: int,
+    force_product_ids: Optional[Sequence[int]] = None,
 ) -> set[int]:
     """
     正常跑产品池：lookback 窗口内「有数据的天数」>= active_days。
 
     lookback_end 一般为昨天（不含今天，避免半日数据影响入池）。
+    force_product_ids：重点关注产品，无视活跃天数强制入池。
     """
     pool: set[int] = set()
     window = set(_daterange(lookback_start, lookback_end))
@@ -174,6 +176,8 @@ def select_monitoring_pool(
         hit = sum(1 for d, agg in days.items() if d in window and agg.row_count > 0)
         if hit >= active_days:
             pool.add(pid)
+    if force_product_ids:
+        pool.update(int(pid) for pid in force_product_ids if pid is not None)
     return pool
 
 
@@ -209,6 +213,7 @@ def detect_ad_data_health(
     product_names: Mapping[int, str],
     daily_map: Mapping[int, Mapping[date, ProductDayAgg]],
     config: Optional[AdDataHealthConfig] = None,
+    force_product_ids: Optional[Sequence[int]] = None,
 ) -> AdDataHealthReport:
     """
     执行四类检测：
@@ -217,6 +222,8 @@ def detect_ad_data_health(
     2. 昨天缺数（入监控池且昨天无行；已在断档列表的不再重复进缺数列表）
     3. 昨天有数、今天尚未入库
     4. 昨天 vs 前天 结算收益跌幅 >= drop_ratio（两天都有数据，且前天收益 >= floor）
+
+    force_product_ids：重点关注产品强制纳入监控池。
     """
     cfg = config or AdDataHealthConfig()
     yesterday = today - timedelta(days=1)
@@ -224,12 +231,15 @@ def detect_ad_data_health(
     lookback_start = yesterday - timedelta(days=cfg.lookback_days - 1)
 
     product_ids = sorted(set(product_names.keys()) | set(daily_map.keys()))
+    if force_product_ids:
+        product_ids = sorted(set(product_ids) | {int(p) for p in force_product_ids})
     pool = select_monitoring_pool(
         product_ids=product_ids,
         daily_map=daily_map,
         lookback_start=lookback_start,
         lookback_end=yesterday,
         active_days=cfg.active_days,
+        force_product_ids=force_product_ids,
     )
 
     report = AdDataHealthReport(
