@@ -155,7 +155,8 @@ async def search_with_fulltext(
             use_fulltext=True
         )
         
-        if fulltext_condition:
+        # SQLAlchemy ClauseElement 禁止用 if clause 做真值判断，须显式 is not None
+        if fulltext_condition is not None:
             try:
                 # 使用MATCH AGAINST查询
                 # 注意：需要确保表有对应的全文索引
