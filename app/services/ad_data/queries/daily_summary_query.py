@@ -5,9 +5,10 @@
 - 按统计维度分组聚合：按国家→日期+产品（可选 split_by_country 按国家分行）；
   按广告单元→日期+产品+广告单元；按广告单元+国家→日期+产品+广告单元+国家
 - 支持权限过滤、分页、SQL/内存混合排序
+- Redis 短缓存（120s），与 KPI summary 共用 ad_data 失效前缀
 
 在系统中的位置：
-- 被 ``AdDataService.get_daily_summary`` 调用
+    - 被 ``AdDataService.get_daily_summary`` 调用
 """
 import logging
 from calendar import monthrange
@@ -19,6 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.constants import ECPM_MULTIPLIER, PERCENTAGE_MULTIPLIER
+from app.core.infrastructure.cache_compat import (
+    legacy_get_cached as get_cached,
+    legacy_set_cached as set_cached,
+)
 from app.core.utils import normalize_date_for_ad_data
 from app.core.country_code import resolve_country_name
 from app.core.query_utils import apply_date_range_filter, check_use_assignment_table
@@ -35,6 +40,7 @@ from app.services.ad_data.queries.dimension_filter import (
     normalize_dimension,
 )
 from app.services.ad_data.queries.join_helpers import join_country_info_for_ad_data, join_product_and_client
+from app.services.ad_data.query_cache import build_ad_data_query_cache_key
 from app.services.ad_data.queries.summary_query import (
     _empty_aggregate_raw,
     _row_to_aggregate_raw,
@@ -42,6 +48,9 @@ from app.services.ad_data.queries.summary_query import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 与 KPI summary 同量级；入库/改删会整前缀失效
+DAILY_SUMMARY_CACHE_TTL = 120
 
 
 def _effective_summary_date_range(
@@ -122,7 +131,8 @@ class DailySummaryQuery:
         split_by_country: bool = False,
         sort_by: str = "date",
         sort_order: str = "desc",
-    ) -> Tuple[List[Dict[str, Any]], int]:
+        skip_cache: bool = False,
+    ) -> Tuple[List[Dict[str, Any]], int, Dict[str, Any]]:
         """
         获取按统计维度分组的每日汇总列表（分页）。
 
@@ -130,9 +140,6 @@ class DailySummaryQuery:
             (汇总行字典列表, 分组总数, 全量合计指标)
         """
         dim = normalize_dimension(dimension)
-        use_assignment_table = await check_use_assignment_table(self.db)
-        group_by_ad_unit = dim == "ad_unit" or is_cross_dimension(dim)
-        group_by_country = split_by_country or is_cross_dimension(dim)
         dim_start, dim_end = _effective_summary_date_range(start_date, end_date)
 
         validate_ad_data_scope_filter_params(
@@ -143,6 +150,36 @@ class DailySummaryQuery:
             ad_unit=ad_unit,
         )
 
+        cache_key = build_ad_data_query_cache_key(
+            "daily_summary",
+            current_user.id,
+            page,
+            page_size,
+            start_date,
+            end_date,
+            client_id,
+            product_id,
+            country_code,
+            ad_unit,
+            dim,
+            bool(split_by_country),
+            sort_by,
+            sort_order,
+        )
+        if not skip_cache:
+            cached = await get_cached(cache_key, key_prefix="ad_data")
+            if (
+                isinstance(cached, dict)
+                and "items" in cached
+                and "total" in cached
+                and "grand_total" in cached
+            ):
+                return cached["items"], int(cached["total"] or 0), cached["grand_total"]
+
+        use_assignment_table = await check_use_assignment_table(self.db)
+        group_by_ad_unit = dim == "ad_unit" or is_cross_dimension(dim)
+        group_by_country = split_by_country or is_cross_dimension(dim)
+
         grand_total = await self.fetch_grand_totals(
             current_user=current_user,
             start_date=start_date,
@@ -151,7 +188,8 @@ class DailySummaryQuery:
             product_id=product_id,
             country_code=country_code,
             ad_unit=ad_unit,
-            dimension=dimension,
+            dimension=dim,
+            use_assignment_table=use_assignment_table,
         )
 
         metric_columns = [
@@ -406,6 +444,18 @@ class DailySummaryQuery:
             offset = (page - 1) * page_size
             ad_data_responses = ad_data_responses[offset : offset + page_size]
 
+        if not skip_cache:
+            await set_cached(
+                cache_key,
+                {
+                    "items": ad_data_responses,
+                    "total": total,
+                    "grand_total": grand_total,
+                },
+                ttl=DAILY_SUMMARY_CACHE_TTL,
+                key_prefix="ad_data",
+            )
+
         return ad_data_responses, total, grand_total
 
     async def fetch_grand_totals(
@@ -418,11 +468,13 @@ class DailySummaryQuery:
         country_code: Optional[str] = None,
         ad_unit: Optional[str] = None,
         dimension: Optional[str] = None,
+        use_assignment_table: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """当前筛选条件下全部明细的全量合计（供表格底部合计行，不受分页影响）。"""
         dim = normalize_dimension(dimension)
         dim_start, dim_end = _effective_summary_date_range(start_date, end_date)
-        use_assignment_table = await check_use_assignment_table(self.db)
+        if use_assignment_table is None:
+            use_assignment_table = await check_use_assignment_table(self.db)
         admin_user = is_admin(current_user)
         validate_ad_data_scope_filter_params(
             current_user=current_user,

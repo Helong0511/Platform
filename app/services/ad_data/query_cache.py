@@ -1,7 +1,8 @@
 """
 广告数据查询缓存键与失效。
 
-筛选项（products/clients with-data）与 KPI summary 使用 Redis（query_cache: 命名空间）。
+筛选项（products/clients with-data）、KPI summary、每日汇总 daily-summary
+使用 Redis（query_cache: 命名空间）。
 键格式带可读前缀，便于入库后按前缀批量失效；避免仅 MD5 时无法定向清理。
 """
 from __future__ import annotations

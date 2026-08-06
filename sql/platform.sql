@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS `ad_data`  (
   INDEX `idx_ad_data_product`(`product_id` ASC) USING BTREE COMMENT '外键 fk_ad_data_product 依赖，不可删',
   INDEX `idx_ad_data_country_code`(`country_code` ASC) USING BTREE,
   INDEX `idx_ad_data_source_type`(`data_source` ASC, `report_type` ASC) USING BTREE,
+  INDEX `idx_ad_data_date_report_type`(`date` ASC, `report_type` ASC, `product_id` ASC) USING BTREE COMMENT '日汇总互斥选源：日期+报表类型',
   CONSTRAINT `fk_ad_data_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '广告数据表' ROW_FORMAT = DYNAMIC;
 
