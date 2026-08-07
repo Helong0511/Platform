@@ -10,6 +10,7 @@ clear
 
 PLATFORM_ROOT="/data/Platform"
 FRONTEND_DIR="${PLATFORM_ROOT}/frontend"
+LOG_DIR="${PLATFORM_ROOT}/logs"
 MYSQL_WAIT_MAX="${MYSQL_WAIT_MAX:-60}"
 SERVICE_WAIT_MAX="${SERVICE_WAIT_MAX:-45}"
 
@@ -42,9 +43,91 @@ wait_for_mysql_ready() {
     echo "MySQL 已就绪"
 }
 
+# 判断是否为错误类日志文件名（含轮转备份）
+is_error_log_file() {
+    local base
+    base="$(basename "$1")"
+    case "$base" in
+        error.log|error.log.[0-9]*|error.log.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9])
+            return 0
+            ;;
+        gunicorn_error.log|gunicorn_error.log.*|gunicorn_scheduler_error.log|gunicorn_scheduler_error.log.*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# 文件是否含非空白内容
+file_has_content() {
+    local f="$1"
+    [ -f "$f" ] && [ -s "$f" ] && grep -q '[^[:space:]]' "$f" 2>/dev/null
+}
+
+# 更新前清理日志：清全部，但「有内容的错误日志」保留不删
+cleanup_logs_before_update() {
+    echo "=== 更新前清理日志 ==="
+    if [ ! -d "$LOG_DIR" ]; then
+        echo "日志目录不存在，跳过: ${LOG_DIR}"
+        return 0
+    fi
+
+    local f base deleted=0 kept=0
+    shopt -s nullglob
+    # 仅处理 logs/ 顶层活跃日志与轮转备份；保留 archive/ 交由定时任务策略
+    for f in \
+        "${LOG_DIR}"/*.log \
+        "${LOG_DIR}"/*.log.[0-9]* \
+        "${LOG_DIR}"/*.log.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9]
+    do
+        [ -f "$f" ] || continue
+        base="$(basename "$f")"
+        if is_error_log_file "$f" && file_has_content "$f"; then
+            echo "保留错误日志: ${base}"
+            kept=$((kept + 1))
+            continue
+        fi
+        echo "删除: ${base}"
+        rm -f -- "$f" || true
+        deleted=$((deleted + 1))
+    done
+    shopt -u nullglob
+
+    echo "日志清理完成：删除 ${deleted} 个，保留错误日志 ${kept} 个"
+}
+
+# 清理 Python / 前端构建相关缓存
+cleanup_caches() {
+    echo "=== 清理缓存 ==="
+    # Python 字节码缓存
+    find "$PLATFORM_ROOT" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
+    find "$PLATFORM_ROOT" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete 2>/dev/null || true
+    # 测试/工具缓存
+    find "$PLATFORM_ROOT" -type d \( -name ".pytest_cache" -o -name ".mypy_cache" -o -name ".ruff_cache" \) \
+        -prune -exec rm -rf {} + 2>/dev/null || true
+    # 项目级缓存目录
+    if [ -d "${PLATFORM_ROOT}/.cache" ]; then
+        rm -rf "${PLATFORM_ROOT}/.cache"
+        echo "已删除 ${PLATFORM_ROOT}/.cache"
+    fi
+    # 前端 Vite 缓存（保留 node_modules，构建前仍会重装/复用）
+    if [ -d "${FRONTEND_DIR}/node_modules/.vite" ]; then
+        rm -rf "${FRONTEND_DIR}/node_modules/.vite"
+        echo "已删除 frontend/node_modules/.vite"
+    fi
+    if [ -d "${FRONTEND_DIR}/.vite" ]; then
+        rm -rf "${FRONTEND_DIR}/.vite"
+        echo "已删除 frontend/.vite"
+    fi
+    echo "缓存清理完成"
+}
+
 cd "$PLATFORM_ROOT"
 
-find "$PLATFORM_ROOT" -type d -name "__pycache__" -exec rm -rf {} +
+cleanup_logs_before_update
+cleanup_caches
 
 git pull
 
@@ -62,13 +145,10 @@ wait_for_service_inactive Platform-backend.service || true
 
 sudo systemctl stop mysql
 
-# 保留 logs/ 便于排查；仅清理前端构建产物
+# 仅清理前端构建产物
 sudo rm -rf dist
 sudo rm -rf node_modules
 # 保留 package-lock.json，确保 npm install 版本可重复、避免 workspace:* 解析失败
-
-# 禁止清空应用日志目录（由定时任务「清理文件日志」按保留策略超期清理）
-# sudo rm -rf /data/Platform/logs/*
 
 echo "=== 构建前端 ==="
 npm ci || npm install
