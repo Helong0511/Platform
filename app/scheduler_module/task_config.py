@@ -311,6 +311,20 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         ),
     },
 
+    # ========== LeiYang API获取数据任务 ==========
+    "LeiYang API获取数据": {
+        "task_name": "LeiYang API获取数据",
+        "task_module": "app.scheduler_module.tasks.leiyang_task",
+        "task_function": "leiyang_api_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "*/30 * * * *",
+        "description": (
+            "每隔30分钟执行一次，从 LeiYang DataManager 拉取报表"
+            "（默认国家维度；LEIYANG_API_FETCH_COUNTRY / UNIT / DAILY 控制）"
+        ),
+    },
+
     # ========== Google API获取数据任务（GAM） ==========
     "Google API获取数据": {
         "task_name": "Google API获取数据",

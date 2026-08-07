@@ -239,12 +239,17 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="last_error" label="最后错误" min-width="200" show-overflow-tooltip>
+        <el-table-column prop="last_error" label="最后结果" min-width="220" show-overflow-tooltip>
           <template #default="scope">
-            <el-tag v-if="scope.row.last_error" type="danger" size="small" effect="plain">
+            <el-tag
+              v-if="scope.row.last_error"
+              :type="resolveLastResultTagType(scope.row.last_error)"
+              size="small"
+              effect="plain"
+            >
               {{ scope.row.last_error }}
             </el-tag>
-            <span v-else class="text-success">无错误</span>
+            <span v-else class="text-muted">暂无结果</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="360" fixed="right" align="center" class-name="action-column">
@@ -360,6 +365,7 @@ import { isTaskRunning } from '../../utils/scheduledTaskStatus';
 import { useDevice } from '../../composables/useDevice';
 import { useScheduledTasks } from '../../composables/useScheduledTasks';
 import { useScheduledTaskActions } from '../../composables/useScheduledTaskActions';
+import { resolveLastResultTagType } from '../../utils/scheduledTaskStatus';
 
 const router = useRouter();
 const { isMobile } = useDevice();
@@ -386,7 +392,7 @@ const {
   handleTrigger,
   confirmTrigger,
   handleReleaseLock,
-} = useScheduledTaskActions({ fetchTasks });
+} = useScheduledTaskActions({ fetchTasks, tasks });
 
 const goToGamSchedulerConfig = () => {
   router.push('/app/admin/gam-scheduler');
@@ -666,6 +672,10 @@ onUnmounted(() => {
 
 .text-success {
   color: var(--success-color);
+}
+
+.text-muted {
+  color: var(--el-text-color-secondary, #909399);
 }
 
 /* 函数信息样式 */

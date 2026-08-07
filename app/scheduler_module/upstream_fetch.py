@@ -1052,3 +1052,111 @@ async def fetch_flymobi_rows(
         limit=limit,
     )
     return UpstreamFetchResult(rows=all_rows, stats=stats)
+
+
+# LeiYang DataManager API（datamanager.leiyanggame.com）
+# 文档：country / ad-unit / all，X-API-Key 鉴权，默认 60 次/分钟；单次查询最长 90 天
+LEIYANG_PATH_COUNTRY = "/api/external/reports/country"
+LEIYANG_PATH_UNIT = "/api/external/reports/ad-unit"
+LEIYANG_PATH_DAILY = "/api/external/reports/all"
+LEIYANG_MAX_RANGE_DAYS = 90
+
+
+def _iter_leiyang_date_windows(start: str, end: str, *, max_days: int = LEIYANG_MAX_RANGE_DAYS):
+    """将日期区间切成不超过 max_days 的闭区间窗口（含起止日）。"""
+    from datetime import datetime, timedelta
+
+    start_d = datetime.strptime(start, "%Y-%m-%d").date()
+    end_d = datetime.strptime(end, "%Y-%m-%d").date()
+    if end_d < start_d:
+        start_d, end_d = end_d, start_d
+    # max_days=90 表示起止最多跨 89 天差（含两端共 90 天）
+    step = max(1, int(max_days) - 1)
+    cur = start_d
+    while cur <= end_d:
+        window_end = min(cur + timedelta(days=step), end_d)
+        yield cur.strftime("%Y-%m-%d"), window_end.strftime("%Y-%m-%d")
+        cur = window_end + timedelta(days=1)
+
+
+async def fetch_leiyang_rows(
+    *,
+    base_url: str,
+    api_key: str,
+    start: str,
+    end: str,
+    path: str,
+    label: str = "LeiYang API",
+    limit: int = 1000,
+) -> UpstreamFetchResult:
+    """
+    LeiYang 拉数：GET + X-API-Key，按 data.total / pageSize 全量分页。
+
+    响应 code==0 成功；data.list 为行，data.total/page/size 为分页信息。
+    上游限制单次查询最长 90 天，超长区间自动切窗合并。
+    """
+    url = f"{base_url.rstrip('/')}{path}"
+    headers = {"X-API-Key": api_key}
+    all_rows: List[Any] = []
+    page_size = max(1, min(int(limit or 1000), 1000))
+    stats_list: List[UpstreamFetchStats] = []
+
+    for window_start, window_end in _iter_leiyang_date_windows(start, end):
+        page = 1
+        last_total = 0
+        last_total_pages = 0
+        window_rows: List[Any] = []
+
+        while True:
+            json_data = await get_json(
+                url,
+                params={
+                    "start_date": window_start,
+                    "end_date": window_end,
+                    "page": page,
+                    "pageSize": page_size,
+                },
+                headers=headers,
+                label=f"{label} ({window_start}~{window_end} page={page})",
+            )
+            raise_unless_api_success(json_data, {0}, label=label, code_key="code")
+
+            payload = json_data.get("data") or {}
+            if not isinstance(payload, dict):
+                payload = {}
+            rows = payload.get("list") or []
+            if not isinstance(rows, list):
+                rows = []
+            window_rows.extend(rows)
+
+            total = int(payload.get("total") or 0)
+            last_total = total or last_total
+            if total > 0 and page_size > 0:
+                last_total_pages = math.ceil(total / page_size)
+
+            if _should_break_upstream_pagination(
+                rows,
+                total=total,
+                collected=len(window_rows),
+                page=page,
+                total_pages=last_total_pages,
+                limit=page_size,
+            ):
+                break
+            page += 1
+
+        all_rows.extend(window_rows)
+        stats_list.append(
+            _build_fetch_stats(
+                pages_fetched=page,
+                total_pages=last_total_pages,
+                rows_fetched=len(window_rows),
+                total_rows=last_total,
+                limit=page_size,
+            )
+        )
+
+    return UpstreamFetchResult(
+        rows=all_rows,
+        stats=UpstreamFetchStats.merge(*stats_list) if stats_list else UpstreamFetchStats(),
+    )

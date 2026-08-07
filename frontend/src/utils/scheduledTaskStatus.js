@@ -39,3 +39,37 @@ export function normalizeScheduledTaskRow(row) {
     is_active: toBoolFlag(row.is_active),
   };
 }
+
+/**
+ * 将 last_error 字段（实际承载成功/失败摘要）映射为标签类型。
+ * @param {string|null|undefined} message
+ * @returns {'success'|'warning'|'danger'|'info'}
+ */
+export function resolveLastResultTagType(message) {
+  const text = String(message || '').trim();
+  if (!text) return 'info';
+  if (
+    text.startsWith('执行成功')
+    || text.includes('执行成功:')
+    || text.includes('执行成功：')
+  ) {
+    return 'success';
+  }
+  if (
+    text.startsWith('跳过')
+    || text.startsWith('软跳过')
+    || text.includes('软跳过:')
+    || text.includes('部分跳过')
+  ) {
+    return 'warning';
+  }
+  if (
+    text.startsWith('执行失败')
+    || text.startsWith('部分失败')
+    || text.includes('错误:')
+    || text.includes('失败:')
+  ) {
+    return 'danger';
+  }
+  return 'info';
+}

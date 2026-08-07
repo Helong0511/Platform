@@ -740,6 +740,24 @@ class Settings(BaseSettings):
         "true", "1", "yes",
     ]
 
+    # LeiYang DataManager（datamanager.leiyanggame.com，X-API-Key 鉴权）
+    LEIYANG_API_BASE_URL: str = os.getenv(
+        "LEIYANG_API_BASE_URL", "https://datamanager.leiyanggame.com"
+    ).rstrip("/")
+    LEIYANG_API_KEY: str = os.getenv("LEIYANG_API_KEY", "")
+    LEIYANG_API_USERNAME: str = os.getenv("LEIYANG_API_USERNAME", "")
+    LEIYANG_API_PASSWORD: str = os.getenv("LEIYANG_API_PASSWORD", "")
+    LEIYANG_API_PAGE_SIZE: int = int(os.getenv("LEIYANG_API_PAGE_SIZE", "1000"))
+    LEIYANG_API_FETCH_COUNTRY: bool = os.getenv("LEIYANG_API_FETCH_COUNTRY", "true").lower() in [
+        "true", "1", "yes",
+    ]
+    LEIYANG_API_FETCH_UNIT: bool = os.getenv("LEIYANG_API_FETCH_UNIT", "false").lower() in [
+        "true", "1", "yes",
+    ]
+    LEIYANG_API_FETCH_DAILY: bool = os.getenv("LEIYANG_API_FETCH_DAILY", "false").lower() in [
+        "true", "1", "yes",
+    ]
+
     @staticmethod
     def _coerce_zhisuo_fetch_bool(value: object, default: bool) -> bool:
         if isinstance(value, bool):
@@ -1033,6 +1051,8 @@ if settings.is_production:
         logger.warning("生产环境未配置 H5DEER_API_USERNAME，H5 Deer 定时任务将跳过")
     if not settings.AYA_API_SECRET_KEY.strip():
         logger.warning("生产环境未配置 AYA_API_SECRET_KEY，Aya 定时任务将跳过")
+    if not settings.LEIYANG_API_KEY.strip():
+        logger.warning("生产环境未配置 LEIYANG_API_KEY，LeiYang 定时任务将跳过")
 else:
     # 开发环境：不显示警告，仅在需要时提示
     # SECRET_KEY 验证已在 validate_secret_key 中处理，这里不需要额外提示

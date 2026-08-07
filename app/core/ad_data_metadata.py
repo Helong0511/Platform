@@ -28,6 +28,7 @@ DATA_SOURCE_TQT = "tqt"
 DATA_SOURCE_TBSJ = "tbsj"  # yangyangdeyi / 通百世家
 DATA_SOURCE_AYA = "aya"
 DATA_SOURCE_FLYMOBI = "flymobi"
+DATA_SOURCE_LEIYANG = "leiyang"
 DATA_SOURCE_EXCEL = "excel"
 DATA_SOURCE_UNKNOWN = "unknown"
 DATA_SOURCE_LEGACY = "legacy"
@@ -45,6 +46,7 @@ UPSTREAM_API_DATA_SOURCES: tuple[str, ...] = (
     DATA_SOURCE_TBSJ,
     DATA_SOURCE_AYA,
     DATA_SOURCE_FLYMOBI,
+    DATA_SOURCE_LEIYANG,
 )
 
 VALID_DATA_SOURCES = frozenset({
@@ -197,6 +199,7 @@ DATA_SOURCE_LABELS: dict[str, str] = {
     DATA_SOURCE_TBSJ: "通百世家(yangyangdeyi)",
     DATA_SOURCE_AYA: "Aya",
     DATA_SOURCE_FLYMOBI: "FlyMobi",
+    DATA_SOURCE_LEIYANG: "LeiYang",
     DATA_SOURCE_EXCEL: "Excel 导入",
     DATA_SOURCE_LEGACY: "历史",
     DATA_SOURCE_UNKNOWN: "未知",
@@ -220,9 +223,9 @@ REPORT_TYPE_DETAIL_OPTIONS: tuple[str, ...] = (
 
 REPORT_TYPE_HINTS: dict[str, str] = {
     REPORT_TYPE_UNIT: "按广告单元，无具体国家（含 ZZ）；ZhiSuo channelunit、GAM ad_unit、Aya getAdsDataUnit",
-    REPORT_TYPE_COUNTRY: "按具体国家，无广告单元（不含 ZZ）；ZhiSuo channelcountry、TQT、Huguang、Aya",
-    REPORT_TYPE_CROSS: "具体国家+广告单元（不含 ZZ）；ZhiSuo channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、FlyMobi countryList、GAM country、TBSJ(yangyangdeyi)/adunit",
-    REPORT_TYPE_DAILY: "日汇总，无具体国家无单元（含 ZZ）；ZhiSuo channeldaily 兜底、GAM daily、Aya getDay",
+    REPORT_TYPE_COUNTRY: "按具体国家，无广告单元（不含 ZZ）；ZhiSuo channelcountry、TQT、Huguang、Aya、LeiYang country",
+    REPORT_TYPE_CROSS: "具体国家+广告单元（不含 ZZ）；ZhiSuo channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、FlyMobi countryList、GAM country、TBSJ(yangyangdeyi)/adunit、LeiYang ad-unit",
+    REPORT_TYPE_DAILY: "日汇总，无具体国家无单元（含 ZZ）；ZhiSuo channeldaily 兜底、GAM daily、Aya getDay、LeiYang all",
     REPORT_TYPE_LEGACY: "历史或未标注；新入库会自动按行形态推断",
 }
 
@@ -239,6 +242,7 @@ UPSTREAM_DEFAULT_REPORT_TYPES: dict[str, str] = {
     DATA_SOURCE_TBSJ: REPORT_TYPE_CROSS,  # /adunit 实为国家+广告单元交叉
     DATA_SOURCE_AYA: REPORT_TYPE_LEGACY,
     DATA_SOURCE_FLYMOBI: REPORT_TYPE_LEGACY,
+    DATA_SOURCE_LEIYANG: REPORT_TYPE_LEGACY,
     DATA_SOURCE_EXCEL: REPORT_TYPE_LEGACY,
 }
 

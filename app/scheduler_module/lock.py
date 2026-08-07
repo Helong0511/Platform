@@ -148,13 +148,16 @@ def _resolve_stale_running_lock(
 
 
 def _claim_task_lock(task_record: ScheduledTask) -> None:
-    """将任务标记为当前进程持有锁。"""
+    """将任务标记为当前进程持有锁。
+
+    不在抢锁时清空 last_error：保留上次执行结果，直到本次 release 时覆盖，
+    便于管理端手动触发后仍能看到结果摘要（列名「最后错误」实为结果展示位）。
+    """
     task_record.is_running = True
     task_record.last_run_pid = get_current_pid()
     task_record.last_run_host = CURRENT_HOST
     task_record.last_run_time = get_app_now_naive()
     task_record.run_count += 1
-    task_record.last_error = None
 
 
 async def acquire_task_lock(

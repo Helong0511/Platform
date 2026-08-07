@@ -54,6 +54,7 @@ from app.scheduler_module.task_registry import (
     get_task_function_by_name_or_path
 )
 from app.scheduler_module.task_result_registry import get_task_result, auto_register_task_results
+from app.scheduler_module.task_result_store import get_task_result as get_store_task_result
 from app.core.config import settings
 from app.core.db_errors import is_database_unreachable_error
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
@@ -155,6 +156,31 @@ def format_job_next_run_time(
         return next_run_time.strftime(fmt)
     except Exception:
         return str(next_run_time)
+
+
+def _resolve_task_result_message(task_name: str) -> Optional[str]:
+    """
+    读取任务执行摘要，供写入 scheduled_tasks.last_error。
+
+    优先走结果注册表；未注册或返回空时回退到进程内 task_result_store，
+    避免新任务未 reload 注册表时手动触发成功却清空「最后错误」列。
+    """
+    result_message = None
+    try:
+        result_message = get_task_result(task_name)
+    except Exception as e:
+        logger.debug("从任务结果注册表获取结果失败: %s", e)
+
+    if not result_message:
+        try:
+            result_message = get_store_task_result(task_name)
+        except Exception as e:
+            logger.debug("从 task_result_store 获取结果失败: %s", e)
+
+    if result_message:
+        text = str(result_message).strip()
+        return text or None
+    return None
 
 
 async def execute_task_with_lock(
@@ -357,13 +383,10 @@ async def _execute_task_with_lock_internal(
             execution_duration = (end_time - start_time).total_seconds()
 
             # 尝试从任务函数获取执行结果（如果任务保存了结果信息）
-            result_message = None
-            try:
-                result_message = get_task_result(task_name)
-            except (ImportError, AttributeError) as e:
-                logger.debug(f"从任务结果注册表获取结果失败: {e}")
-            except Exception as e:
-                logger.debug(f"获取任务执行结果失败: {e}")
+            result_message = _resolve_task_result_message(task_name)
+            if not result_message:
+                # 成功路径也必须写入摘要，避免「最后错误」列空白看不出手动触发结果
+                result_message = f"执行成功（耗时: {round(execution_duration, 2)}秒）"
 
             # 释放锁，标记成功
             # 如果任务提供了result_message，会保存到last_error字段
@@ -440,13 +463,7 @@ async def _execute_task_with_lock_internal(
             )
 
             # 尝试从任务函数获取执行结果（即使失败也可能有部分结果信息）
-            result_message = None
-            try:
-                result_message = get_task_result(task_name)
-            except (ImportError, AttributeError) as e:
-                logger.debug(f"从任务结果注册表获取结果失败: {e}")
-            except Exception as e:
-                logger.debug(f"获取任务执行结果失败: {e}")
+            result_message = _resolve_task_result_message(task_name)
 
             # 如果仍然没有结果，使用错误信息
             if not result_message:

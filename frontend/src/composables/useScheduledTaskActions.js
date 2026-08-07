@@ -2,7 +2,7 @@
  * 组合式函数 - 定时任务操作：启停/立即执行
  * @file composables/useScheduledTaskActions.js
  *
- * 运行中任务禁止切换启用状态；触发后立即刷新列表以展示「正在运行」。
+ * 运行中任务禁止切换启用状态；触发后轮询至结束，刷新「最后错误/结果」列。
  */
 import { ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -15,17 +15,57 @@ import { extractErrorMessage, isErrorHandled } from '../utils/api';
 import { taskSupportsManualDateRange } from '../utils/cronValidate';
 import { isTaskRunning } from '../utils/scheduledTaskStatus';
 
+const TRIGGER_POLL_INTERVAL_MS = 2000;
+const TRIGGER_POLL_MAX_MS = 5 * 60 * 1000;
+
 /**
  * 定时任务行操作：启停、手动触发、释放锁。
  */
-export function useScheduledTaskActions({ fetchTasks }) {
+export function useScheduledTaskActions({ fetchTasks, tasks }) {
   const triggerDialogVisible = ref(false);
   const currentTriggerTask = ref(null);
   const triggerParams = ref({ start_date: '', end_date: '' });
+  const triggerPollTimers = new Map();
 
   const scheduleRefresh = (ms = 800) => {
     // 触发后尽快拉取，使 is_running 反映到「正在运行」与禁用启用开关
     setTimeout(() => fetchTasks(true), ms);
+  };
+
+  const stopTriggerPoll = (taskName) => {
+    const timer = triggerPollTimers.get(taskName);
+    if (timer != null) {
+      clearInterval(timer);
+      triggerPollTimers.delete(taskName);
+    }
+  };
+
+  /**
+   * 手动触发后轮询列表，直到任务结束（is_running=false）或超时，
+   * 以便「最后错误」列展示本次执行结果摘要。
+   */
+  const pollUntilTaskFinished = (taskName) => {
+    if (!taskName) return;
+    stopTriggerPoll(taskName);
+    const startedAt = Date.now();
+    const timer = setInterval(async () => {
+      try {
+        await fetchTasks(true);
+        const rows = Array.isArray(tasks?.value) ? tasks.value : [];
+        const row = rows.find((item) => item?.task_name === taskName);
+        const finished = row ? !isTaskRunning(row) : Date.now() - startedAt > 15000;
+        if (finished || Date.now() - startedAt >= TRIGGER_POLL_MAX_MS) {
+          stopTriggerPoll(taskName);
+        }
+      } catch {
+        if (Date.now() - startedAt >= TRIGGER_POLL_MAX_MS) {
+          stopTriggerPoll(taskName);
+        }
+      }
+    }, TRIGGER_POLL_INTERVAL_MS);
+    triggerPollTimers.set(taskName, timer);
+    // 立即刷一次，再进入轮询
+    scheduleRefresh(300);
   };
 
   const handleToggleActive = async (task) => {
@@ -65,10 +105,10 @@ export function useScheduledTaskActions({ fetchTasks }) {
         type: 'warning',
       });
       await triggerScheduledTask(task.task_name);
-      ElMessage.success('任务已触发，正在后台执行');
+      ElMessage.success('任务已触发，正在后台执行；完成后结果会显示在「最后结果」列');
       // 乐观更新：立即显示运行中并禁用启用开关
       task.is_running = true;
-      scheduleRefresh();
+      pollUntilTaskFinished(task.task_name);
     } catch (error) {
       if (error !== 'cancel' && !isErrorHandled(error)) {
         ElMessage.error(extractErrorMessage(error));
@@ -87,11 +127,12 @@ export function useScheduledTaskActions({ fetchTasks }) {
       const params = {};
       if (triggerParams.value.start_date) params.start_date = triggerParams.value.start_date;
       if (triggerParams.value.end_date) params.end_date = triggerParams.value.end_date;
-      await triggerScheduledTask(currentTriggerTask.value.task_name, params);
-      ElMessage.success('任务已触发，正在后台执行');
+      const taskName = currentTriggerTask.value?.task_name;
+      await triggerScheduledTask(taskName, params);
+      ElMessage.success('任务已触发，正在后台执行；完成后结果会显示在「最后结果」列');
       if (task) task.is_running = true;
       triggerDialogVisible.value = false;
-      scheduleRefresh();
+      pollUntilTaskFinished(taskName);
     } catch (error) {
       if (!isErrorHandled(error)) {
         ElMessage.error(extractErrorMessage(error));
@@ -112,6 +153,7 @@ export function useScheduledTaskActions({ fetchTasks }) {
       );
       await releaseTaskLock(task.task_name);
       ElMessage.success('任务锁已释放');
+      stopTriggerPoll(task.task_name);
       scheduleRefresh(1000);
     } catch (error) {
       if (error !== 'cancel' && !isErrorHandled(error)) {
