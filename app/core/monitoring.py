@@ -278,6 +278,54 @@ class ResourceStatistics:
             list(self.memory_percentages),
         )
 
+    def windowed_metric(
+        self,
+        metric: str,
+        *,
+        window_seconds: int,
+        aggregation: str = "avg",
+    ) -> float:
+        """
+        按时间窗口聚合资源指标。
+
+        metric: cpu / memory
+        样本不足窗口时，用已有样本计算（至少 1 个）。
+        """
+        if metric == "cpu":
+            values = self.cpu_percentages
+        elif metric == "memory":
+            values = self.memory_percentages
+        else:
+            return 0.0
+        if not values or not self.timestamps:
+            return 0.0
+
+        try:
+            window = max(0, int(window_seconds or 0))
+        except (TypeError, ValueError):
+            window = 0
+
+        if window <= 0:
+            selected = list(values)
+        else:
+            cutoff = dt.now(timezone.utc) - timedelta(seconds=window)
+            selected = [
+                v for ts, v in zip(self.timestamps, values) if ts >= cutoff
+            ]
+            if not selected:
+                selected = [values[-1]]
+
+        agg = (aggregation or "avg").strip().lower()
+        if agg == "max":
+            return float(max(selected))
+        if agg == "min":
+            return float(min(selected))
+        if agg == "sum":
+            return float(sum(selected))
+        if agg == "count":
+            return float(len(selected))
+        return float(sum(selected) / len(selected))
+
     @staticmethod
     def _percent_series_summary(values: List[float]) -> Dict[str, float]:
         if not values:
@@ -627,15 +675,16 @@ class SystemMonitor:
                 description="P99响应时间超过5秒",
                 window_seconds=60
             ),
-            # 系统资源告警
+            # 系统资源告警（按 window 均值评估，避免 2 核机瞬时尖峰误报）
             AlertRule(
                 name="cpu_high",
                 metric_name="system.cpu_usage",
                 operator=">",
                 threshold=80.0,
                 level=AlertLevel.WARNING,
-                description="CPU使用率超过80%",
-                window_seconds=30
+                description="CPU使用率窗口均值超过80%",
+                aggregation="avg",
+                window_seconds=60
             ),
             AlertRule(
                 name="cpu_critical",
@@ -643,8 +692,9 @@ class SystemMonitor:
                 operator=">",
                 threshold=95.0,
                 level=AlertLevel.CRITICAL,
-                description="CPU使用率超过95%",
-                window_seconds=30
+                description="CPU使用率窗口均值超过95%",
+                aggregation="avg",
+                window_seconds=120
             ),
             AlertRule(
                 name="memory_high",
@@ -652,8 +702,9 @@ class SystemMonitor:
                 operator=">",
                 threshold=85.0,
                 level=AlertLevel.WARNING,
-                description="内存使用率超过85%",
-                window_seconds=30
+                description="内存使用率窗口均值超过85%",
+                aggregation="avg",
+                window_seconds=60
             ),
             AlertRule(
                 name="memory_critical",
@@ -661,8 +712,9 @@ class SystemMonitor:
                 operator=">",
                 threshold=95.0,
                 level=AlertLevel.CRITICAL,
-                description="内存使用率超过95%",
-                window_seconds=30
+                description="内存使用率窗口均值超过95%",
+                aggregation="avg",
+                window_seconds=120
             ),
             AlertRule(
                 name="disk_high",
@@ -1104,7 +1156,7 @@ class SystemMonitor:
             if not rule.enabled:
                 continue
 
-            value = metrics.get(rule.metric_name, 0.0)
+            value = self._resolve_alert_metric_value(rule, metrics)
 
             if rule.evaluate(value):
                 alert_key = f"{rule.name}:{rule.level}"
@@ -1127,6 +1179,31 @@ class SystemMonitor:
                         should_trigger = True
                 if should_trigger:
                     self._trigger_alert(rule, value)
+
+    def _resolve_alert_metric_value(
+        self,
+        rule: AlertRule,
+        metrics: Dict[str, float],
+    ) -> float:
+        """
+        解析告警用指标值。
+
+        CPU/内存优先按规则的 window_seconds + aggregation 做窗口聚合，
+        避免瞬时尖峰（重启、单次重查询）直接触发 CRITICAL。
+        """
+        metric_name = rule.metric_name
+        resource_key = {
+            "system.cpu_usage": "cpu",
+            "system.memory_usage": "memory",
+        }.get(metric_name)
+        if resource_key:
+            with self._stats_lock:
+                return self.resource_stats.windowed_metric(
+                    resource_key,
+                    window_seconds=int(getattr(rule, "window_seconds", 0) or 0),
+                    aggregation=str(getattr(rule, "aggregation", "avg") or "avg"),
+                )
+        return float(metrics.get(metric_name, 0.0) or 0.0)
     
     def _get_current_metrics(self) -> Dict[str, float]:
         """获取当前所有指标值"""

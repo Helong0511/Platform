@@ -6,10 +6,12 @@
   按广告单元→日期+产品+广告单元；按广告单元+国家→日期+产品+广告单元+国家
 - 支持权限过滤、分页、SQL/内存混合排序
 - Redis 短缓存（120s），与 KPI summary 共用 ad_data 失效前缀
+- 全量合计独立缓存，并与列表查询并行执行，降低冷路径墙钟时间
 
 在系统中的位置：
     - 被 ``AdDataService.get_daily_summary`` 调用
 """
+import asyncio
 import logging
 from calendar import monthrange
 from datetime import date
@@ -20,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.constants import ECPM_MULTIPLIER, PERCENTAGE_MULTIPLIER
+from app.core.database import AsyncSessionLocal
 from app.core.infrastructure.cache_compat import (
     legacy_get_cached as get_cached,
     legacy_set_cached as set_cached,
@@ -180,17 +183,46 @@ class DailySummaryQuery:
         group_by_ad_unit = dim == "ad_unit" or is_cross_dimension(dim)
         group_by_country = split_by_country or is_cross_dimension(dim)
 
-        grand_total = await self.fetch_grand_totals(
-            current_user=current_user,
-            start_date=start_date,
-            end_date=end_date,
-            client_id=client_id,
-            product_id=product_id,
-            country_code=country_code,
-            ad_unit=ad_unit,
-            dimension=dim,
-            use_assignment_table=use_assignment_table,
+        grand_cache_key = build_ad_data_query_cache_key(
+            "daily_summary_grand",
+            current_user.id,
+            start_date,
+            end_date,
+            client_id,
+            product_id,
+            country_code,
+            ad_unit,
+            dim,
         )
+
+        async def _load_grand_total() -> Dict[str, Any]:
+            if not skip_cache:
+                cached_grand = await get_cached(grand_cache_key, key_prefix="ad_data")
+                if isinstance(cached_grand, dict) and "grand_total" in cached_grand:
+                    return cached_grand["grand_total"]
+            async with AsyncSessionLocal() as session:
+                gt = await DailySummaryQuery(session).fetch_grand_totals(
+                    current_user=current_user,
+                    start_date=start_date,
+                    end_date=end_date,
+                    client_id=client_id,
+                    product_id=product_id,
+                    country_code=country_code,
+                    ad_unit=ad_unit,
+                    dimension=dim,
+                    use_assignment_table=use_assignment_table,
+                )
+            if not skip_cache:
+                await set_cached(
+                    grand_cache_key,
+                    {"grand_total": gt},
+                    ttl=DAILY_SUMMARY_CACHE_TTL,
+                    key_prefix="ad_data",
+                )
+            return gt
+
+        # 全量合计走独立会话，与列表/计数并行，缩短冷路径墙钟时间
+        grand_task = asyncio.create_task(_load_grand_total())
 
         metric_columns = [
             func.sum(AdData.request_count).label("request_count"),
@@ -443,6 +475,18 @@ class DailySummaryQuery:
             total = len(ad_data_responses)
             offset = (page - 1) * page_size
             ad_data_responses = ad_data_responses[offset : offset + page_size]
+
+        try:
+            grand_total = await grand_task
+        except Exception:
+            # 合计失败不应丢掉已算好的列表；回退空合计并记录
+            if not grand_task.done():
+                grand_task.cancel()
+            logger.exception("daily-summary 全量合计并行查询失败，回退空合计")
+            grand_total = build_table_grand_total_payload(
+                raw=_empty_aggregate_raw(),
+                for_admin=is_admin(current_user),
+            )
 
         if not skip_cache:
             await set_cached(
