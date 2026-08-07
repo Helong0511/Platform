@@ -4,7 +4,7 @@ zhisuo 上游广告数据拉取定时任务。
 - 按账号拉取 tecnee channel*：优先 data（国家+广告单元交叉），次之 country，可选 unit / daily 兜底
 - 写入 data_source / report_type / upstream_account 元数据
 - 当某日某产品细粒度均无数据时，可用 channeldaily 日报兜底
-- 瞬时网络故障：已成功维度保留入库，不整段丢弃
+- 单账号瞬时故障或硬错误：已成功维度/账号保留，隔离后继续其它账号（对齐 GAM）
 """
 from __future__ import annotations
 
@@ -314,7 +314,14 @@ async def zhisuo_api_task(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> None:
-    """zhisuo 定时拉数：按账号、按天拉取并写入带来源/维度的 ad_data。"""
+    """
+    zhisuo 定时拉数：按账号、按天拉取并写入带来源/维度的 ad_data。
+
+    容错（对齐 Google/GAM）：
+    - 单账号凭证无效 / 瞬时故障 / 硬错误：隔离该账号，继续处理后续账号
+    - 全部无效凭证或全部瞬时故障：软跳过（不抬 error_count）
+    - 存在硬错误：跑完所有账号后抛出「部分失败/全部失败」，写入 last_error
+    """
     accounts = settings.get_zhisuo_accounts()
     base_url = settings.ZHISUO_API_BASE_URL
 
@@ -348,66 +355,109 @@ async def zhisuo_api_task(
     log_task_start(ZHISUO_API_TASK_NAME)
 
     phase_summaries: list[str] = []
+    success_accounts: list[str] = []
     invalid_accounts: list[str] = []
-    try:
-        for account in active:
-            client_id = str(account["client_id"])
-            try:
-                parts, transient = await _import_zhisuo_account(
-                    account,
-                    base_url=base_url,
-                    start=zhisuo_start,
-                    end=zhisuo_end,
-                    current_time_str=current_time_str,
-                )
-            except Exception as e:
-                if _is_zhisuo_account_config_error(e):
-                    invalid_accounts.append(client_id)
-                    phase_summaries.append(f"{client_id}[跳过:无效凭证]")
-                    logger.warning(
-                        "[%s] 账号 %s 凭证无效，跳过并继续其它账号: %s",
-                        ZHISUO_API_TASK_NAME,
-                        client_id,
-                        truncate_task_error_message(str(e)),
-                    )
-                    continue
-                raise
-            phase_summaries.append(f"{client_id}[{'; '.join(parts)}]")
-            if transient is not None:
-                prefix = f"部分成功: {'; '.join(phase_summaries)} | "
-                soft_msg = f"{prefix}软跳过: 上游暂时不可达，等待下次调度 | {transient}"
-                logger.warning("[%s] %s", ZHISUO_API_TASK_NAME, soft_msg)
-                log_scheduled_task_skip(
-                    ZHISUO_API_TASK_NAME, "上游网络瞬时故障", detail=str(transient)
-                )
-                set_task_result(ZHISUO_API_TASK_NAME, soft_msg)
-                return
+    transient_notes: list[str] = []
+    hard_failures: list[str] = []
 
-        joined = "; ".join(phase_summaries)
-        if invalid_accounts and len(invalid_accounts) == len(active):
-            skip_msg = (
-                f"跳过: 全部账号凭证无效（{', '.join(invalid_accounts)}），"
-                f"请检查 ZHISUO_API_CLIENT_ID / KEY | {joined}"
+    for account in active:
+        client_id = str(account["client_id"])
+        try:
+            parts, transient = await _import_zhisuo_account(
+                account,
+                base_url=base_url,
+                start=zhisuo_start,
+                end=zhisuo_end,
+                current_time_str=current_time_str,
             )
-            logger.warning("[%s] %s", ZHISUO_API_TASK_NAME, skip_msg)
-            log_scheduled_task_skip(
+        except Exception as e:
+            if _is_zhisuo_account_config_error(e):
+                invalid_accounts.append(client_id)
+                phase_summaries.append(f"{client_id}[跳过:无效凭证]")
+                logger.warning(
+                    "[%s] 账号 %s 凭证无效，跳过并继续其它账号: %s",
+                    ZHISUO_API_TASK_NAME,
+                    client_id,
+                    truncate_task_error_message(str(e)),
+                )
+                continue
+            err = truncate_task_error_message(str(e))
+            hard_failures.append(f"{client_id}: {err}")
+            phase_summaries.append(f"{client_id}[失败]")
+            logger.error(
+                "[%s] 账号 %s 失败，跳过并继续其它账号: %s",
                 ZHISUO_API_TASK_NAME,
-                "账号凭证无效",
-                detail=", ".join(invalid_accounts),
+                client_id,
+                err,
             )
-            set_task_result(ZHISUO_API_TASK_NAME, skip_msg)
-            return
+            continue
 
-        if invalid_accounts:
-            set_task_result(
+        phase_summaries.append(f"{client_id}[{'; '.join(parts)}]")
+        if transient is not None:
+            note = f"{client_id}: {transient}"
+            transient_notes.append(note)
+            logger.warning(
+                "[%s] 账号 %s 上游瞬时故障，继续其它账号: %s",
                 ZHISUO_API_TASK_NAME,
-                f"部分成功(已跳过无效账号 {', '.join(invalid_accounts)}): {joined}",
+                client_id,
+                transient,
             )
         else:
-            set_task_result(ZHISUO_API_TASK_NAME, f"执行成功: {joined}")
-    except Exception as e:
-        error_detail = truncate_task_error_message(str(e))
-        # 不带 exc_info，避免与调度器失败日志重复触发 Telegram
-        logger.error("%s 执行失败: %s", ZHISUO_API_TASK_NAME, error_detail)
-        set_task_result(ZHISUO_API_TASK_NAME, error_detail)
-        raise
+            success_accounts.append(client_id)
+
+    joined = "; ".join(phase_summaries)
+
+    if invalid_accounts and len(invalid_accounts) == len(active):
+        skip_msg = (
+            f"跳过: 全部账号凭证无效（{', '.join(invalid_accounts)}），"
+            f"请检查 ZHISUO_API_CLIENT_ID / KEY | {joined}"
+        )
+        logger.warning("[%s] %s", ZHISUO_API_TASK_NAME, skip_msg)
+        log_scheduled_task_skip(
+            ZHISUO_API_TASK_NAME,
+            "账号凭证无效",
+            detail=", ".join(invalid_accounts),
+        )
+        set_task_result(ZHISUO_API_TASK_NAME, skip_msg)
+        return
+
+    if hard_failures and not success_accounts and not transient_notes:
+        message = truncate_task_error_message("拉数失败: " + "; ".join(hard_failures))
+        set_task_result(ZHISUO_API_TASK_NAME, message)
+        raise RuntimeError(message)
+
+    if hard_failures:
+        result = "部分失败: " + "; ".join(hard_failures)
+        if joined:
+            result += " | 账号摘要: " + joined
+        message = truncate_task_error_message(result)
+        set_task_result(ZHISUO_API_TASK_NAME, message)
+        raise RuntimeError(message)
+
+    if transient_notes and not success_accounts:
+        soft_msg = (
+            f"软跳过: 上游暂时不可达，等待下次调度 | {'; '.join(transient_notes)}"
+            f" | {joined}"
+        )
+        logger.warning("[%s] %s", ZHISUO_API_TASK_NAME, soft_msg)
+        log_scheduled_task_skip(
+            ZHISUO_API_TASK_NAME,
+            "上游网络瞬时故障",
+            detail="; ".join(transient_notes),
+        )
+        set_task_result(ZHISUO_API_TASK_NAME, soft_msg)
+        return
+
+    if transient_notes or invalid_accounts:
+        extras: list[str] = []
+        if invalid_accounts:
+            extras.append(f"已跳过无效账号 {', '.join(invalid_accounts)}")
+        if transient_notes:
+            extras.append(f"瞬时故障 {'; '.join(transient_notes)}")
+        set_task_result(
+            ZHISUO_API_TASK_NAME,
+            f"部分成功({'; '.join(extras)}): {joined}",
+        )
+        return
+
+    set_task_result(ZHISUO_API_TASK_NAME, f"执行成功: {joined}")

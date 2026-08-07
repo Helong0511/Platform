@@ -258,7 +258,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "result_getter_module": "app.scheduler_module.task_result_store",
         "result_getter_function": "get_task_result",
         "cron_expression": "*/30 * * * *",
-        "description": "每隔30分钟执行一次，从 ZhiSuo/tecnee API 按账号拉取；优先交叉(channeldata)，次之国家(channelcountry 补未覆盖)，可选单元/日报兜底（ZHISUO_API_ACCOUNT_FETCH 按 clientId 配置）",
+        "description": "每隔30分钟执行一次，从 ZhiSuo/tecnee API 按账号拉取；优先交叉(channeldata)，次之国家(channelcountry 补未覆盖)，可选单元/日报兜底；单账号失败隔离并继续其它账号（ZHISUO_API_ACCOUNT_FETCH 按 clientId 配置）",
     },
 
     # ========== Pomiad API获取数据任务 ==========
