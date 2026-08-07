@@ -136,8 +136,14 @@ def resolve_report_type_for_row(
     ad_unit: str = "",
     country_code: Optional[str] = None,
 ) -> str:
-    """入库单行 report_type：按 ad_unit / country_code 行形态自动推断。"""
-    del explicit
+    """
+    入库单行 report_type。
+
+    上游已明确维度（非 legacy）时直接使用；否则按 ad_unit / country_code 行形态推断。
+    """
+    normalized = normalize_report_type(explicit)
+    if normalized != REPORT_TYPE_LEGACY:
+        return normalized
     return infer_report_type_from_shape(ad_unit=ad_unit, country_code=country_code)
 
 
@@ -222,9 +228,9 @@ REPORT_TYPE_DETAIL_OPTIONS: tuple[str, ...] = (
 )
 
 REPORT_TYPE_HINTS: dict[str, str] = {
-    REPORT_TYPE_UNIT: "按广告单元，无具体国家（含 ZZ）；ZhiSuo channelunit、GAM ad_unit、Aya getAdsDataUnit",
+    REPORT_TYPE_UNIT: "按广告单元，无具体国家（含 ZZ）；ZhiSuo channelunit、GAM ad_unit、Aya getAdsDataUnit、LeiYang ad-unit",
     REPORT_TYPE_COUNTRY: "按具体国家，无广告单元（不含 ZZ）；ZhiSuo channelcountry、TQT、Huguang、Aya、LeiYang country",
-    REPORT_TYPE_CROSS: "具体国家+广告单元（不含 ZZ）；ZhiSuo channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、FlyMobi countryList、GAM country、TBSJ(yangyangdeyi)/adunit、LeiYang ad-unit",
+    REPORT_TYPE_CROSS: "具体国家+广告单元（不含 ZZ）；ZhiSuo channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、FlyMobi countryList、GAM country、TBSJ(yangyangdeyi)/adunit",
     REPORT_TYPE_DAILY: "日汇总，无具体国家无单元（含 ZZ）；ZhiSuo channeldaily 兜底、GAM daily、Aya getDay、LeiYang all",
     REPORT_TYPE_LEGACY: "历史或未标注；新入库会自动按行形态推断",
 }
@@ -243,7 +249,7 @@ UPSTREAM_DEFAULT_REPORT_TYPES: dict[str, str] = {
     DATA_SOURCE_AYA: REPORT_TYPE_LEGACY,
     DATA_SOURCE_FLYMOBI: REPORT_TYPE_LEGACY,
     DATA_SOURCE_LEIYANG: REPORT_TYPE_LEGACY,
-    DATA_SOURCE_EXCEL: REPORT_TYPE_LEGACY,
+    DATA_SOURCE_EXCEL: REPORT_TYPE_DAILY,
 }
 
 

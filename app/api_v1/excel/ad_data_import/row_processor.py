@@ -20,21 +20,33 @@ from app.api_v1.excel.ad_data_import.product_resolver import find_or_create_prod
 from app.api_v1.excel.utils import (
     is_valid_numeric_value, normalize_date_key, parse_date_value, safe_get_value,
 )
-from app.core.ad_data_metadata import DATA_SOURCE_EXCEL, infer_report_type_from_shape, normalize_upstream_account
+from app.core.ad_data_metadata import DATA_SOURCE_EXCEL, REPORT_TYPE_DAILY, normalize_upstream_account
 from app.core.ad_data_processor import build_data_decrease_warning
 from app.core.constants import ECPM_MULTIPLIER
 from app.core.country_code import (
     build_ad_data_country_equality,
-    find_country_code_by_any_format,
     normalize_ad_data_country_cache_key,
-    preserve_unrecognized_country_code,
 )
 from app.core.utils import (
-    normalize_ad_unit, normalize_date_for_ad_data, apply_deduct_ratio,
+    normalize_date_for_ad_data, apply_deduct_ratio,
 )
 from app.models.models import User, AdData
 
 logger = logging.getLogger(__name__)
+
+
+def _excel_row_has_ignored_dimension_values(row: pd.Series) -> tuple[bool, bool]:
+    """检测 Excel 是否填写了国家/广告单元（当前业务仅支持日报，这些列会被忽略）。"""
+    has_country = False
+    if excel_row_has_country_column(row):
+        has_country = bool(read_excel_country_cell_value(row))
+    has_unit = False
+    for col in ("ad_unit", "广告单元"):
+        if col in row.index and pd.notna(row.get(col)) and str(row.get(col)).strip():
+            has_unit = True
+            break
+    return has_country, has_unit
+
 
 async def resolve_excel_import_country_code(
         db: AsyncSession,
@@ -44,32 +56,12 @@ async def resolve_excel_import_country_code(
         date_hint: Any = None,
 ) -> str | None:
     """
-    Excel 导入专用国家解析：
-    - 有国家列且单元格有值：解析后写入（支持 ZZ/US/中文国名等）
-    - 无国家列，或国家列为空：入库 NULL（配合 report_type=daily 日汇总）
+    Excel 导入固定为日报维度：始终返回 NULL（不解析国家列）。
+
+    保留函数签名以兼容既有调用；国家/广告单元列若存在会被忽略并告警。
     """
-    if not excel_row_has_country_column(row):
-        return None
-
-    country_input = read_excel_country_cell_value(row)
-    if not country_input:
-        return None
-
-    upper = country_input.upper()
-    if upper in ("ZZ", "AA"):
-        return upper
-
-    found_country_code = await find_country_code_by_any_format(db, country_input)
-    if found_country_code:
-        return found_country_code
-
-    preserved = preserve_unrecognized_country_code(country_input)
-    logger.warning(
-        f"无法识别国家代码格式: {country_input}, "
-        f"日期={date_hint or row.get('date', '未知')}, 产品={product_name}, "
-        f"保留原始值 '{preserved}'"
-    )
-    return preserved
+    del db, row, product_name, date_hint
+    return None
 
 
 async def process_row_data(
@@ -145,22 +137,17 @@ async def process_row_data(
             ecpm_deduct_ratio = product_info["ecpm_deduct_ratio"]
             revenue_deduct_ratio = product_info["revenue_deduct_ratio"]
 
-        # 广告单元（可选）
-        ad_unit = ''
-        # ---------- 条件分支 ----------
-        if "ad_unit" in row.index and pd.notna(row.get("ad_unit")):
-            ad_unit = normalize_ad_unit(row["ad_unit"])
-        # ---------- 条件分支 ----------
-        elif "广告单元" in row.index and pd.notna(row.get("广告单元")):
-            ad_unit = normalize_ad_unit(row["广告单元"])
-
-        # 国家代码（Excel 导入：有国家列则读取，无列或空单元格入库 NULL → report_type=daily）
-        country_code = await resolve_excel_import_country_code(
-            db,
-            row,
-            product_name=product_name,
-            date_hint=row.get("date"),
-        )
+        # Excel 仅支持日报维度：无国家、无广告单元
+        has_country, has_unit = _excel_row_has_ignored_dimension_values(row)
+        if has_country or has_unit:
+            logger.warning(
+                "Excel 导入仅支持日报维度，已忽略国家/广告单元列: 行=%s 产品=%s",
+                row_num,
+                product_name,
+            )
+        ad_unit = ""
+        country_code = None
+        excel_report_type = REPORT_TYPE_DAILY
 
         country_condition = build_ad_data_country_equality(AdData.country_code, country_code)
 
@@ -249,10 +236,6 @@ async def process_row_data(
             f"产品: {product_name}, 客户ID: {product_info['client_id']}, "
             f"eCPM扣减比例: {ecpm_deduct_ratio}, 收益扣减比例: {revenue_deduct_ratio}, "
             f"eCPM: {ecpm_before} -> {ecpm_after}, 收益: {revenue_before} -> {revenue_after}"
-        )
-
-        excel_report_type = infer_report_type_from_shape(
-            ad_unit=ad_unit, country_code=country_code
         )
 
         # 检查是否已存在相同日期和产品的记录（使用预查询的结果或单独查询）

@@ -14,7 +14,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.core.ad_data_metadata import DATA_SOURCE_LEIYANG
+from app.core.ad_data_metadata import (
+    DATA_SOURCE_LEIYANG,
+    REPORT_TYPE_COUNTRY,
+    REPORT_TYPE_DAILY,
+    REPORT_TYPE_UNIT,
+)
 from app.core.config import settings
 from app.scheduler_module.task_names import LEIYANG_API_TASK_NAME
 from app.scheduler_module.task_result_store import set_task_result
@@ -67,18 +72,24 @@ _LEIYANG_REPORTS: list[dict[str, Any]] = [
         "path": LEIYANG_PATH_COUNTRY,
         "label": "LeiYang country",
         "mapping": LEIYANG_COUNTRY_FIELD_MAPPING,
+        "dimension": REPORT_TYPE_COUNTRY,
+        "report_type": REPORT_TYPE_COUNTRY,
     },
     {
         "env_flag": "LEIYANG_API_FETCH_UNIT",
         "path": LEIYANG_PATH_UNIT,
         "label": "LeiYang ad-unit",
         "mapping": LEIYANG_UNIT_FIELD_MAPPING,
+        "dimension": REPORT_TYPE_UNIT,
+        "report_type": REPORT_TYPE_UNIT,
     },
     {
         "env_flag": "LEIYANG_API_FETCH_DAILY",
         "path": LEIYANG_PATH_DAILY,
         "label": "LeiYang all",
         "mapping": LEIYANG_DAILY_FIELD_MAPPING,
+        "dimension": REPORT_TYPE_DAILY,
+        "report_type": REPORT_TYPE_DAILY,
     },
 ]
 
@@ -126,11 +137,14 @@ def _resolve_country(value: Any) -> str:
     if upper in {
         "ALL",
         "ALL REGIONS",
+        "WORLD",
         "ZZ",
         "全球",
         "全部",
         "全部区域",
         "-1",
+        "-2",
+        "-4",
         "NONE",
         "NULL",
         "N/A",
@@ -167,6 +181,93 @@ def preprocess_leiyang_rows(ad_data: list[Any]) -> list[Any]:
         )
         item["click_rate_resolved"] = _to_percent(_pick_first(item, "Ctr", "ctr", "CTR"))
     return ad_data
+
+
+def _resolve_leiyang_platform_label(item: dict[str, Any]) -> str:
+    """广告位缺失时，用平台名/平台 ID 作为兜底单元标识。"""
+    platform_name = str(_pick_first(item, "PlatformName", "platformName") or "").strip()
+    if platform_name:
+        return platform_name
+    platform_id = _pick_first(item, "PlatformID", "platformId", "PlatformId")
+    if platform_id is not None and str(platform_id).strip():
+        return f"platform_{platform_id}"
+    return ""
+
+
+def _shape_leiyang_country_rows(rows: list[Any]) -> list[Any]:
+    """国家维度：去掉广告位，整批按 country 入库。"""
+    shaped: list[Any] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        row["ad_unit_resolved"] = ""
+        shaped.append(row)
+    return shaped
+
+
+def _shape_leiyang_unit_rows(rows: list[Any]) -> list[Any]:
+    """
+    广告单元维度：去掉国家，补齐缺失 ad_unit，整批按 unit 入库。
+
+    上游 ad-unit 接口偶发空 AdUnitName，用 PlatformName/PlatformID 兜底。
+    """
+    kept: list[Any] = []
+    fallback_count = 0
+    dropped = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            dropped += 1
+            continue
+        row["country_resolved"] = ""
+        ad_unit = str(row.get("ad_unit_resolved") or "").strip()
+        if not ad_unit:
+            ad_unit = _resolve_leiyang_platform_label(row)
+            if ad_unit:
+                row["ad_unit_resolved"] = ad_unit
+                fallback_count += 1
+        if not str(row.get("ad_unit_resolved") or "").strip():
+            dropped += 1
+            continue
+        kept.append(row)
+    if fallback_count:
+        logger.info(
+            "LeiYang ad-unit 广告位兜底：%d 行使用 PlatformName/PlatformID 作为 ad_unit",
+            fallback_count,
+        )
+    if dropped:
+        logger.info(
+            "LeiYang ad-unit 过滤：丢弃 %d 行（无广告位且无法兜底）",
+            dropped,
+        )
+    return kept
+
+
+def _shape_leiyang_daily_rows(rows: list[Any]) -> list[Any]:
+    """日汇总维度：清除国家与广告位。"""
+    shaped: list[Any] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        row["country_resolved"] = ""
+        row["ad_unit_resolved"] = ""
+        shaped.append(row)
+    return shaped
+
+
+def make_leiyang_preprocess(dimension: str):
+    """按请求接口维度整理字段形态（report_type 由入库时显式指定）。"""
+
+    def _transform(ad_data: list[Any]) -> list[Any]:
+        rows = preprocess_leiyang_rows(ad_data)
+        if dimension == REPORT_TYPE_COUNTRY:
+            return _shape_leiyang_country_rows(rows)
+        if dimension == REPORT_TYPE_UNIT:
+            return _shape_leiyang_unit_rows(rows)
+        if dimension == REPORT_TYPE_DAILY:
+            return _shape_leiyang_daily_rows(rows)
+        return rows
+
+    return _transform
 
 
 async def leiyang_api_task(
@@ -225,8 +326,9 @@ async def leiyang_api_task(
                 field_mapping=report["mapping"],
                 source="LeiYang定时任务",
                 notify_title=f"LeiYang ({report_label.split()[-1]})",
-                data_transform=preprocess_leiyang_rows,
+                data_transform=make_leiyang_preprocess(report["dimension"]),
                 data_source=DATA_SOURCE_LEIYANG,
+                report_type=report["report_type"],
                 log_label=report_label,
                 notify_params=notify_params,
             )
