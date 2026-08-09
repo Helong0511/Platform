@@ -6,6 +6,17 @@ import { isExtensionError } from './errorFilter';
 import { logger } from './logger';
 
 /**
+ * ResizeObserver 在布局抖动时的浏览器已知良性告警（非业务故障）。
+ * Chrome 旧版：ResizeObserver loop limit exceeded
+ * Chrome 新版：ResizeObserver loop completed with undelivered notifications
+ */
+function isBenignResizeObserverError(message = '') {
+  const text = String(message || '');
+  return text.includes('ResizeObserver loop limit exceeded')
+    || text.includes('ResizeObserver loop completed with undelivered notifications');
+}
+
+/**
  * 鉴权失败 / 已由 axios 拦截器处理的请求错误，不应记为「程序运行错误」。
  * 典型文案：Request failed with status code 401
  */
@@ -98,7 +109,8 @@ export const initGlobalErrorHandler = () => {
       return;
     }
 
-    if (typeof errorMessage === 'string' && errorMessage.includes('ResizeObserver loop completed with undelivered notifications')) {
+    if (isBenignResizeObserverError(errorMessage)) {
+      event.preventDefault?.();
       return;
     }
 
@@ -191,7 +203,8 @@ export const initGlobalErrorHandler = () => {
       return;
     }
 
-    if (typeof errorMessage === 'string' && errorMessage.includes('ResizeObserver loop completed with undelivered notifications')) {
+    if (isBenignResizeObserverError(errorMessage)) {
+      event.preventDefault?.();
       return;
     }
 
