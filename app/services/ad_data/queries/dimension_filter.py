@@ -19,15 +19,13 @@ ZZ（全部区域）规则：
 from datetime import date
 from typing import Any, Optional, Set, Tuple
 
-from sqlalchemy import and_, exists, not_, or_, select, tuple_
+from sqlalchemy import and_, exists, func, or_, select, tuple_
 from sqlalchemy.orm import aliased
 
 from app.core.ad_data_metadata import (
     DATA_SOURCE_EXCEL,
-    DIMENSION_REPORT_TYPES,
     REPORT_TYPE_COUNTRY,
     REPORT_TYPE_CROSS,
-    REPORT_TYPE_DAILY,
     REPORT_TYPE_LEGACY,
     REPORT_TYPE_UNIT,
 )
@@ -41,7 +39,7 @@ LEGACY_CROSS_DIMENSION = "country_ad_unit"
 DETAIL_ALL_DIMENSION = "all"
 VALID_DIMENSIONS: Set[str] = frozenset({"country", "ad_unit", CROSS_DIMENSION})
 LIST_DIMENSIONS: Set[str] = VALID_DIMENSIONS | {DETAIL_ALL_DIMENSION, LEGACY_CROSS_DIMENSION}
-INPUT_DIMENSIONS: Set[str] = VALID_DIMENSIONS | {LEGACY_CROSS_DIMENSION}
+INPUT_DIMENSIONS: Set[str] = VALID_DIMENSIONS | {LEGACY_CROSS_DIMENSION, DETAIL_ALL_DIMENSION}
 DEFAULT_DIMENSION = "country"
 
 # 行级判断用：(product_id, date_iso) 是否存在纯国家 / 纯广告单元明细
@@ -92,6 +90,8 @@ def parse_optional_dimension(dimension: Optional[str]) -> Optional[str]:
     stripped = str(dimension).strip()
     if not stripped:
         return None
+    if stripped == DETAIL_ALL_DIMENSION:
+        return DETAIL_ALL_DIMENSION
     if stripped in INPUT_DIMENSIONS:
         return normalize_dimension(stripped)
     return None
@@ -108,8 +108,10 @@ def ensure_valid_optional_dimension(dimension: Optional[str]) -> Optional[str]:
         raise ValueError(
             f"无效的 dimension 参数: {stripped}，"
             f"可选值: country（按国家）、ad_unit（按广告单元）、"
-            f"ad_unit_country（按广告单元+国家）；country_ad_unit 为兼容别名"
+            f"ad_unit_country（按广告单元+国家）、all（原始全量明细）；country_ad_unit 为兼容别名"
         )
+    if stripped == DETAIL_ALL_DIMENSION:
+        return DETAIL_ALL_DIMENSION
     return normalize_dimension(stripped)
 
 
@@ -133,28 +135,32 @@ def maybe_build_ad_data_dimension_filter(
 
 
 def _empty_ad_unit_condition(ad_unit_column: Any) -> Any:
-    return or_(ad_unit_column.is_(None), ad_unit_column == "")
+    normalized = func.trim(ad_unit_column)
+    return or_(ad_unit_column.is_(None), normalized == "")
 
 
 def _non_empty_ad_unit_condition(ad_unit_column: Any) -> Any:
-    return and_(ad_unit_column.isnot(None), ad_unit_column != "")
+    normalized = func.trim(ad_unit_column)
+    return and_(ad_unit_column.isnot(None), normalized != "")
 
 
 def _no_country_condition(country_code_column: Any) -> Any:
     """无具体国家：NULL、空串或 ZZ（全部区域）。"""
+    normalized = func.trim(country_code_column)
     return or_(
         country_code_column.is_(None),
-        country_code_column == "",
-        country_code_column == ALL_REGIONS_COUNTRY_CODE,
+        normalized == "",
+        normalized == ALL_REGIONS_COUNTRY_CODE,
     )
 
 
 def _has_country_condition(country_code_column: Any) -> Any:
     """有具体国家：非空且非 ZZ（含 AA 等特殊代码）。"""
+    normalized = func.trim(country_code_column)
     return and_(
         country_code_column.isnot(None),
-        country_code_column != "",
-        country_code_column != ALL_REGIONS_COUNTRY_CODE,
+        normalized != "",
+        normalized != ALL_REGIONS_COUNTRY_CODE,
     )
 
 

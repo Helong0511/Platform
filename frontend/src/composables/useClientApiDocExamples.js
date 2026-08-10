@@ -318,7 +318,7 @@ import time
 client_id = ${cid.value}
 req_time = ${rt.value}  # 页面加载时的时间戳（10位秒级），实际请求请用 int(time.time())
 data_type = 'all'  # 必填参数：'all' 或 'day'
-dimension = 'country'  # 可选：country / ad_unit / ad_unit_country；不传则不过滤维度
+dimension = 'country'  # 可选：country / ad_unit / ad_unit_country / all；明细不传默认 country
 start_date = '${td.value}'  # 当天日期
 end_date = '${td.value}'  # 当天日期
 page = 1  # 可选；显式传入时须参与签名
@@ -435,8 +435,8 @@ def get_ad_data(data_type, start_date=None, end_date=None, dimension=None, page=
         data_type: 必填，'all' 明细 或 'day' 日汇总
         start_date: 可选，起始日期（格式：YYYY-MM-DD）
         end_date: 可选，终止日期（格式：YYYY-MM-DD）
-        dimension: 可选，country / ad_unit / ad_unit_country（与后台报表一致；建议双 API 客户必传）
-        page: 可选，页码（从 1 开始）；不传默认 1；显式传入须参与签名
+        dimension: 可选，country / ad_unit / ad_unit_country / all；all 仅用于原始全量明细
+        page: 可选，页码（1～100000）；不传默认 1；显式传入须参与签名
         page_size: 可选，每页条数；不传默认 1000，最大 5000；显式传入须参与签名
     """
     req_time = int(time.time())
@@ -475,11 +475,15 @@ def get_ad_data(data_type, start_date=None, end_date=None, dimension=None, page=
     return response.json()
 
 def get_all_ad_data(data_type, start_date=None, end_date=None, dimension=None, page_size=5000):
-    """分页拉全量广告数据"""
+    """分页拉取固定数据集；若拉取期间数据变化则中止并要求重试。"""
     all_rows = []
+    seen_detail_ids = set()
+    expected_total = None
     page = 1
     total_pages = 1
     while page <= total_pages:
+        if page > 100000:
+            raise RuntimeError('总页数超过接口上限 100000，请缩小日期范围')
         result = get_ad_data(
             data_type=data_type,
             start_date=start_date,
@@ -488,13 +492,29 @@ def get_all_ad_data(data_type, start_date=None, end_date=None, dimension=None, p
             page=page,
             page_size=page_size,
         )
+        if int(result.get('code') or 0) != 200:
+            raise RuntimeError(f"接口请求失败: {result.get('message') or result}")
         rows = result.get('data') or []
-        all_rows.extend(rows)
         total = int(result.get('total') or 0)
-        total_pages = int(result.get('total_pages') or 1)
+        if expected_total is None:
+            expected_total = total
+        elif total != expected_total:
+            raise RuntimeError('分页期间 total 发生变化，请从第 1 页重新拉取')
+        total_pages = int(result.get('total_pages') or (1 if total == 0 else 0))
+        for row in rows:
+            row_id = row.get('id')
+            if data_type == 'all' and row_id is not None:
+                if row_id in seen_detail_ids:
+                    raise RuntimeError('检测到跨页重复 ID，数据可能正在变化，请重新拉取')
+                seen_detail_ids.add(row_id)
+            all_rows.append(row)
         page += 1
         if not rows:
             break
+    if expected_total is not None and len(all_rows) != expected_total:
+        raise RuntimeError(
+            f'分页结果不完整：期望 {expected_total} 条，实际 {len(all_rows)} 条，请重新拉取'
+        )
     return {'total': len(all_rows), 'data': all_rows}
 
 # 使用示例（日期为当天 ${td.value}）
@@ -626,8 +646,8 @@ public class ClientAPI {
      * @param dataType 必填，'all' 明细 或 'day' 日汇总
      * @param startDate 可选，起始日期（格式：YYYY-MM-DD）
      * @param endDate 可选，终止日期（格式：YYYY-MM-DD）
-     * @param dimension 可选，country / ad_unit / ad_unit_country
-     * @param page 可选，页码（从 1 开始）；不传默认 1；显式传入须参与签名
+     * @param dimension 可选，country / ad_unit / ad_unit_country / all；all 仅用于原始全量明细
+     * @param page 可选，页码（1～100000）；不传默认 1；显式传入须参与签名
      * @param pageSize 可选，每页条数；不传默认 1000，最大 5000；显式传入须参与签名
      */
     public static String getAdData(String dataType, String startDate, String endDate, String dimension,

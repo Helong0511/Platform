@@ -66,9 +66,9 @@
           <p><strong>注意</strong>：</p>
           <ul>
             <li><code>/client_data</code> 接口的 <code>data_type</code> 参数是必填的，必须包含在签名计算中</li>
-            <li><code>dimension</code> 为可选参数；传入时须参与签名。取值：<code>country</code>（按国家）、<code>ad_unit</code>（按广告单元）、<code>ad_unit_country</code>（按广告单元+国家，<code>country_ad_unit</code> 为兼容别名）</li>
-            <li><code>page</code> / <code>page_size</code> 为可选分页参数；仅当请求体中<strong>显式传入</strong>时才参与签名；不传则服务端默认 <code>page=1</code>、<code>page_size=1000</code>（最大 5000），且默认值不参与签名</li>
-            <li>若同时存在国家 API 与广告单元 API 数据，建议传入 <code>dimension</code>；日汇总未传时已互斥选源，明细未传仍可能返回多来源行</li>
+            <li><code>dimension</code> 为可选参数；传入时须参与签名。取值：<code>country</code>（按国家）、<code>ad_unit</code>（按广告单元）、<code>ad_unit_country</code>（按广告单元+国家，<code>country_ad_unit</code> 为兼容别名）、<code>all</code>（原始全量明细，仅支持 <code>data_type=all</code>）</li>
+            <li><code>page</code> / <code>page_size</code> 为可选分页参数；仅当请求体中<strong>显式传入</strong>时才参与签名；不传则服务端默认 <code>page=1</code>、<code>page_size=1000</code>；<code>page</code> 最大 100000，<code>page_size</code> 最大 5000，默认值不参与签名</li>
+            <li>明细未传 <code>dimension</code> 时默认使用 <code>country</code> 互斥口径；需要原始全量明细时显式传入 <code>dimension=all</code></li>
             <li>只有非空参数才参与签名计算。如果未提供可选参数，则不包含在签名中</li>
             <li>时间戳允许误差为 ±15 秒（服务器与客户端时钟须大致同步）</li>
           </ul>
@@ -313,6 +313,8 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
   "message": "成功获取 30 条广告数据",
   "data": [
     {
+      "id": 10001,
+      "product_id": 101,
       "date": "2024-01-15",
       "product_name": "产品A",
       "ad_unit": "banner_us",
@@ -332,6 +334,8 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
       "revenue": 393.75
     },
     {
+      "id": 10002,
+      "product_id": 101,
       "date": "2024-01-15",
       "product_name": "产品A",
       "ad_unit": "",
@@ -363,6 +367,8 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
   "message": "成功获取 15 条广告数据",
   "data": [
     {
+      "id": null,
+      "product_id": 101,
       "date": "2024-01-15",
       "product_name": "产品A",
       "ad_unit": "",
@@ -382,6 +388,8 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
       "revenue": 1968.75
     },
     {
+      "id": null,
+      "product_id": 101,
       "date": "2024-01-15",
       "product_name": "产品A",
       "ad_unit": "slot_01",
@@ -401,6 +409,8 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
       "revenue": 477.0
     },
     {
+      "id": null,
+      "product_id": 101,
       "date": "2024-01-16",
       "product_name": "产品A",
       "ad_unit": "",
@@ -449,8 +459,9 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
               <li><code>country</code>：具体国家有值且 <code>ad_unit</code> 为空（含 AA；不含 ZZ）</li>
               <li><code>ad_unit</code>：<code>ad_unit</code> 有值且无具体国家（NULL/空串/ZZ）</li>
               <li><code>ad_unit_country</code>：具体国家与 <code>ad_unit</code> 均有值（不含 ZZ；<code>country_ad_unit</code> 为兼容别名）</li>
+              <li><code>all</code>：原始全量明细，仅支持 <code>data_type='all'</code>；<code>data_type='day'</code> 传入时返回参数错误</li>
               <li><code>ZZ</code>（全部区域）：有广告单元算广告单元维度；无广告单元算日报维度</li>
-              <li>不传：明细（all）仍返回库中全部匹配行；日汇总（day）按「日期+产品+广告单元」分组，但互斥选源（等同 country），避免双 API 重复统计</li>
+              <li>不传：明细（all）默认 <code>country</code> 互斥口径；日汇总（day）按「日期+产品+广告单元」分组并互斥选源（等同 country），避免双 API 重复统计</li>
             </ul>
             <p><strong>数据模式说明</strong>：</p>
             <ul>
@@ -477,15 +488,16 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
             <p><strong>分页说明</strong>：</p>
             <ul>
               <li>不传 <code>page</code> / <code>page_size</code>：默认第 1 页、每页 1000 条；默认值<strong>不参与</strong>签名</li>
-              <li>显式传入时：须把传入的值加入签名字符串；<code>page</code> ≥ 1，<code>page_size</code> 范围 1～5000</li>
+              <li>显式传入时：须把传入的值加入签名字符串；<code>page</code> 范围 1～100000，<code>page_size</code> 范围 1～5000</li>
               <li>响应中的 <code>total</code> 为符合条件的总条数；<code>data</code> 仅为当前页；可用 <code>total_pages</code> 判断是否需继续翻页</li>
               <li>拉全量时建议：固定 <code>page_size</code>（如 5000），从 <code>page=1</code> 递增直到 <code>page &gt;= total_pages</code></li>
+              <li>固定数据集下按稳定键排序，不会因同日多行产生跨页漏数或重复；若拉取期间发生新增、删除或排序字段更新，OFFSET 分页不提供跨 HTTP 请求的绝对快照，应校验各页 <code>total</code>、明细 <code>id</code> 与最终条数，异常时从第 1 页重试</li>
             </ul>
             <p><strong>注意事项</strong>：</p>
             <ul>
               <li>如果不提供 <code>start_date</code> 和 <code>end_date</code>，默认返回当前月的数据（从当月1日到最后一天）</li>
               <li>如果只提供 <code>start_date</code> 或 <code>end_date</code>，另一个使用当前月的对应日期</li>
-              <li>数据按日期升序排列</li>
+              <li>明细按 <code>date</code>、<code>id</code> 升序稳定排列；日汇总按日期、产品及实际分组维度稳定排列</li>
               <li>如果查询范围内没有数据，<code>data</code> 字段返回空数组 <code>[]</code>，而不是 <code>null</code></li>
               <li>所有数值类型明确（int/float），不会返回字符串</li>
               <li>浮点数保留2位小数</li>
@@ -588,10 +600,10 @@ const adDataRequestParams = [
   { name: 'client_id', type: 'int', required: '是', description: '客户ID' },
   { name: 'req_time', type: 'int', required: '是', description: '请求时间戳（10位秒级，Unix时间戳）' },
   { name: 'data_type', type: 'string', required: '是', description: '数据类型：\'all\' 明细，\'day\' 日汇总' },
-  { name: 'dimension', type: 'string', required: '否', description: '统计维度：country / ad_unit / ad_unit_country（country_ad_unit 为兼容别名）；与后台报表一致，双 API 客户建议必传' },
+  { name: 'dimension', type: 'string', required: '否', description: '统计维度：country / ad_unit / ad_unit_country / all（country_ad_unit 为兼容别名）；明细不传默认 country，all 表示原始全量明细且不支持 day' },
   { name: 'start_date', type: 'string', required: '否', description: '起始日期（格式：YYYY-MM-DD）；不提供则使用当前月第一天' },
   { name: 'end_date', type: 'string', required: '否', description: '终止日期（格式：YYYY-MM-DD）；不提供则使用当前月最后一天' },
-  { name: 'page', type: 'int', required: '否', description: '页码，从 1 开始；不传默认 1。显式传入时须参与签名' },
+  { name: 'page', type: 'int', required: '否', description: '页码，范围 1～100000；不传默认 1。显式传入时须参与签名' },
   { name: 'page_size', type: 'int', required: '否', description: '每页条数；不传默认 1000，最大 5000。显式传入时须参与签名' },
   { name: 'sign', type: 'string', required: '是', description: 'HMAC-SHA256 签名（小写十六进制），包含所有非空业务参数（含显式传入的 page / page_size）' }
 ];
@@ -609,6 +621,8 @@ const adDataPaginationFields = [
 
 // 广告数据响应字段
 const adDataResponseFields = [
+  { field: 'id', type: 'int|null', description: '广告数据记录 ID；明细用于稳定排序和跨页去重校验，日汇总为 null' },
+  { field: 'product_id', type: 'int|null', description: '产品 ID' },
   { field: 'date', type: 'string', description: '数据日期（ISO格式：YYYY-MM-DD）' },
   { field: 'product_name', type: 'string', description: '产品名称（确保不为null）' },
   { field: 'ad_unit', type: 'string', description: '广告单元（可为空字符串）' },
@@ -923,4 +937,3 @@ li {
   }
 }
 </style>
-

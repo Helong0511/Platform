@@ -64,7 +64,11 @@ def resolved_client_id_expr():
     return func.coalesce(ProductAssignment.client_id, Product.client_id)
 
 
-def outerjoin_best_product_assignment(query, date_column, product_id_column=None):
+def outerjoin_best_product_assignment(
+    query,
+    date_column,
+    product_id_column=None,
+):
     """
     外连接最多一条匹配的 ProductAssignment（空窗时 assignment 为 NULL）。
 

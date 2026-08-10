@@ -23,7 +23,11 @@ from sqlalchemy.future import select
 
 from app.core.api_auth import verify_client_request
 from app.core.audit_log import log_user_action, commit_audit_log
-from app.core.constants import CLIENT_API_DEFAULT_PAGE_SIZE, CLIENT_API_MAX_PAGE_SIZE
+from app.core.constants import (
+    CLIENT_API_DEFAULT_PAGE_SIZE,
+    CLIENT_API_MAX_PAGE,
+    CLIENT_API_MAX_PAGE_SIZE,
+)
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
@@ -155,18 +159,23 @@ class ClientDataRequest(ClientAPIBaseRequest):
     查询客户广告数据请求。
 
     data_type：all=明细，day=日汇总。
-    dimension（可选）：country / ad_unit / ad_unit_country（country_ad_unit 为兼容别名），与后台报表统计维度一致；不传则保持历史全量返回。
+    dimension（可选）：country / ad_unit / ad_unit_country / all（country_ad_unit 为兼容别名），与后台报表统计维度一致；明细不传默认 country，原始全量需显式传 all。
     日期缺省为当前自然月首尾。
     """
     data_type: str = Field(default="all",
                            description="数据类型：'all' 表示详细数据，'day' 表示每日汇总，默认为 'all'")
     dimension: str | None = Field(
         default=None,
-        description="统计维度（可选）：country=按国家，ad_unit=按广告单元，ad_unit_country=按广告单元+国家（country_ad_unit 为兼容别名）；不传则不过滤维度",
+        description="统计维度（可选）：country=按国家，ad_unit=按广告单元，ad_unit_country=按广告单元+国家，all=原始全量明细（country_ad_unit 为兼容别名）；明细不传默认按 country 互斥口径",
     )
     start_date: str | None = Field(default=None, description="起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天")
     end_date: str | None = Field(default=None, description="终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天")
-    page: int | None = Field(default=None, ge=1, description="页码，从 1 开始；不传默认 1")
+    page: int | None = Field(
+        default=None,
+        ge=1,
+        le=CLIENT_API_MAX_PAGE,
+        description="页码，从 1 开始；不传默认 1",
+    )
     page_size: int | None = Field(
         default=None,
         ge=1,
@@ -199,6 +208,8 @@ class AdDataItemResponse(BaseSchema):
     - 日期格式为ISO标准格式（YYYY-MM-DD）
     - 字符串字段确保不为null（空字符串代替）
     """
+    id: int | None = Field(default=None, description="广告数据记录 ID，用于跨页去重校验")
+    product_id: int | None = Field(default=None, description="产品 ID")
     date: str = Field(..., description="数据日期（ISO格式：YYYY-MM-DD）")
     product_name: str = Field(..., description="产品名称")
     ad_unit: str = Field(default="", description="广告单元（可为空）")
@@ -323,7 +334,7 @@ async def get_client_data(
     - client_id: 客户ID（必填）
     - req_time: 请求时间戳（必填）
     - data_type: 数据类型，'all' 表示详细数据，'day' 表示每日汇总，默认为 'all'
-    - dimension: 统计维度（可选），'country' / 'ad_unit' / 'ad_unit_country'（'country_ad_unit' 为兼容别名）；不传则保持历史行为
+    - dimension: 统计维度（可选），'country' / 'ad_unit' / 'ad_unit_country' / 'all'（'country_ad_unit' 为兼容别名）；明细不传默认按 country 互斥口径，原始全量请显式传 all
     - start_date: 起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天
     - end_date: 终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天
     - page / page_size: 分页参数（可选）；不传时默认第 1 页、每页 {CLIENT_API_DEFAULT_PAGE_SIZE} 条
@@ -332,7 +343,7 @@ async def get_client_data(
     返回说明：
     - data_type='all': 返回明细行；传入 dimension 时与后台「详细报表」口径一致
     - data_type='day': 返回日汇总；传入 dimension 时按维度分组，与后台「每日统计」一致
-    - 未传 dimension：返回库中全部匹配行（兼容旧版；若同时存在国家/单元 API 数据可能重复统计，建议传 dimension）
+    - 未传 dimension：明细默认 country 互斥口径；日汇总保持默认互斥选源口径
     """
     # ---------- 入口：参数与依赖准备 ----------
     # ---------- 异常处理 ----------
@@ -411,20 +422,28 @@ async def get_client_data(
                 ErrorCode.OPERATION_FAILED,
                 detail="data_type 参数无效，仅支持 'all' 或 'day'",
             )
+        if data_type == "day" and parsed_dimension == "all":
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail="data_type='day' 不支持 dimension='all'，请使用 country、ad_unit 或 ad_unit_country",
+            )
+        effective_dimension = (
+            parsed_dimension if parsed_dimension is not None else ("country" if data_type == "all" else None)
+        )
 
         raw_rows, total = await ClientAdDataQuery(db).fetch(
             client=client,
             start_date=start_date_obj,
             end_date=end_date_obj,
             data_type=data_type,
-            dimension=parsed_dimension,
+            dimension=effective_dimension,
             page=page,
             page_size=page_size,
         )
         data_list = [AdDataItemResponse(**row) for row in raw_rows]
 
         logger.info(
-            f"客户 {client.id} 查询广告数据（data_type={data_type}, dimension={parsed_dimension or '未指定'}, "
+            f"客户 {client.id} 查询广告数据（data_type={data_type}, dimension={effective_dimension or '未指定'}, "
             f"{start_date_obj} 至 {end_date_obj}，page={page}, page_size={page_size}），"
             f"返回 {len(data_list)}/{total} 条记录"
         )
@@ -439,8 +458,8 @@ async def get_client_data(
                 f"客户: {user_full_name}\n"
                 f"数据类型: {data_type}\n"
             )
-            if parsed_dimension:
-                telegram_msg += f"统计维度: {parsed_dimension}\n"
+            if effective_dimension:
+                telegram_msg += f"统计维度: {effective_dimension}\n"
             telegram_msg += f"✅ 成功获取: {len(data_list)}/{total} 条数据"
             if start_date_obj and end_date_obj:
                 telegram_msg += (
@@ -477,7 +496,7 @@ async def get_client_data(
                     "end": end_date_obj.isoformat(),
                 },
                 "data_type": data_type,
-                "dimension": parsed_dimension,
+                "dimension": effective_dimension,
                 "api_endpoint": "/client_data",
             },
             telegram_msg=telegram_msg,
@@ -500,5 +519,5 @@ async def get_client_data(
         logger.error(f"查询广告数据失败: {str(e)}", exc_info=True)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"查询广告数据失败：{str(e)}"
+            detail="查询广告数据失败，请稍后重试"
         )

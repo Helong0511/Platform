@@ -27,7 +27,7 @@ jobs:
         # 收集仓库中所有测试文件；没有测试时必须失败，禁止“无测试绿色通过”。
         run: |
           shopt -s nullglob
-          mapfile -t TEST_FILES < <(find tests -type f -name 'test_*.py' -not -path 'tests/manual/*' -print 2>/dev/null)
+          mapfile -t TEST_FILES < <(git ls-files 'tests/test_*.py' 'tests/**/test_*.py' | grep -v '^tests/manual/' || true)
           if [ ${#TEST_FILES[@]} -eq 0 ]; then
             echo "::error::No tests/test_*.py found; refusing to skip pytest."
             exit 1

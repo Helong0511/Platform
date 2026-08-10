@@ -1,15 +1,12 @@
 """
 客户、产品、广告数据与产品分配 ORM 模型。
 """
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Index, \
     UniqueConstraint, Date, Numeric
-from sqlalchemy.orm import foreign, relationship
-from datetime import datetime
-import enum
-import uuid
+from sqlalchemy.orm import relationship
 
 from app.core.utils import get_app_now_naive
-from app.models.base import Base, pwd_context, UserRole
+from app.models.base import Base
 
 class Client(Base):
     """
