@@ -131,7 +131,10 @@ async def get_bot_status(
         elif token_configured:
             status_message = "Token 已配置，但 Bot 未初始化"
         else:
-            status_message = "Token 未配置，请设置 TELEGRAM_TOKEN 环境变量"
+            status_message = (
+                "Token 未配置，请设置 TELEGRAM_TOKEN_LOCAL / "
+                "TELEGRAM_TOKEN_PRODUCTION 或 TELEGRAM_TOKEN"
+            )
 
         # 添加连接测试信息
         # ---------- 条件分支 ----------

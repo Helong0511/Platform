@@ -627,9 +627,7 @@ def build_daily_summary_dimension_filter(
                 rt_col == REPORT_TYPE_COUNTRY,
                 _country_only_row_condition(country_code_column, ad_unit_column),
             ),
-            # Excel 日报可与国家相加；API 日报仅在无国家行时纳入
-            and_(rt_col == REPORT_TYPE_DAILY, plain_for_country),
-            # 兼容历史误标 report_type 的 plain 行
+            # Excel 日报可与国家相加；API 日报仅在无国家行时纳入（含误标 report_type 的 plain）
             plain_for_country,
             and_(
                 rt_col == REPORT_TYPE_CROSS,

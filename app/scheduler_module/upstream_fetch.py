@@ -350,7 +350,6 @@ async def fetch_tbsj_rows(
             },
             headers=headers,
             label=f"TBSJ API adunit/cross (page={page})",
-            verify=False,
         )
         raise_unless_api_success(json_data, {20000}, label="TBSJ API", code_key="code")
 

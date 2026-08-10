@@ -2,7 +2,7 @@
 Offer仓储
 提供Offer相关的数据访问方法，优化查询性能
 """
-from typing import Optional, List
+from typing import Dict, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, and_, or_

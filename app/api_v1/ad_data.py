@@ -10,39 +10,28 @@
 说明：REST API 端点，统一 ResponseBaseSchema 响应；鉴权由各端点 Depends 声明。"""
 # 标准库导入
 import logging
-from calendar import monthrange
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, status
-from sqlalchemy import delete, func, text, literal_column, case, Float
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 # 本地导入
 from app.core.audit_log import log_update, log_delete, log_user_action, commit_audit_log
 from app.core.database import get_db
 from app.core.db_errors import is_table_definition_changed_error
 from app.core.security import get_current_user, require_admin, is_admin
-from app.core.config import settings
-from app.core.constants import MAX_PAGE_SIZE, ECPM_MULTIPLIER, PERCENTAGE_MULTIPLIER
-from app.models.models import AdData, Client, Product, User, UserRole, ProductAssignment, CountryInfo
-from sqlalchemy import and_, or_
+from app.core.constants import MAX_PAGE_SIZE
+from app.models.models import User
 from app.core.ad_data_metadata import (
     build_ad_data_metadata_catalog,
     format_data_source_label,
     format_report_type_label,
 )
 from app.core.country_code import resolve_country_name
-from app.core.query_utils import (
-    product_assignment_join_condition, 
-    check_use_assignment_table, 
-    join_country_info as join_country_info_util,
-    apply_date_range_filter
-)
 from app.core.dependencies import get_ad_data_service
 from app.core.utils import (
-    optimize_page_size_for_device, get_product_name, get_client_name, get_user_name,
+    optimize_page_size_for_device,
     calculate_coverage_rate, calculate_display_rate, calculate_click_rate,
     normalize_date_for_ad_data,
 )
@@ -78,18 +67,6 @@ def _serialize_ad_data_list_items(items: list[dict[str, Any]]) -> list[dict[str,
                 row[key] = value
         serialized.append(row)
     return serialized
-
-
-# 使用公共函数 join_country_info，传入 AdData.country_code 列
-def join_country_info(query):
-    """
-    辅助函数：统一处理 CountryInfo 的 JOIN，解决排序规则冲突问题
-    临时方案：使用 COLLATE 统一排序规则
-    永久方案：运行 scripts/fix_collation_issue.sql 修改表结构
-    
-    注意：此函数是对公共函数 join_country_info 的包装，传入 AdData.country_code
-    """
-    return join_country_info_util(query, AdData.country_code)
 
 
 @router.get("/", response_model=PaginatedResponseBaseSchema[list[dict[str, Any]]], summary="获取广告数据列表")

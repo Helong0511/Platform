@@ -103,10 +103,45 @@ def _resolve_deduction_fail_open() -> bool:
 
 
 
-# Windows 本机开发默认 Bot Token（仅 development 使用，生产须通过环境变量配置）
-WINDOWS_DEFAULT_TELEGRAM_TOKEN = "8790845059:AAE3FrEh9S1FQcgNv6YFo1r2NrwtMS7AFOo"
+def _resolve_client_api_allow_md5() -> bool:
+    """
+    客户 API 是否仍接受 MD5 签名。
+
+    - 显式设置 CLIENT_API_ALLOW_MD5 时以其为准
+    - 未设置：开发环境兼容开启，生产环境默认关闭（仅 HMAC）
+    """
+    explicit = os.getenv("CLIENT_API_ALLOW_MD5")
+    if explicit is not None and str(explicit).strip() != "":
+        return str(explicit).strip().lower() in ["true", "1", "yes"]
+    return not is_production_env_name(detect_production_env())
 
 
+def resolve_telegram_token(fallback: str | None = None) -> str | None:
+    """按当前环境解析 Bot Token。
+
+    - 生产：优先 TELEGRAM_TOKEN_PRODUCTION
+    - 非生产（含 Windows 强制 development）：优先 TELEGRAM_TOKEN_LOCAL
+    - 均未配置时回退 fallback / TELEGRAM_TOKEN
+    """
+    is_prod = is_production_env_name(detect_production_env())
+    environment_value = os.getenv(
+        "TELEGRAM_TOKEN_PRODUCTION" if is_prod else "TELEGRAM_TOKEN_LOCAL"
+    )
+    if environment_value and str(environment_value).strip():
+        return str(environment_value).strip()
+
+    if isinstance(fallback, str):
+        fallback = fallback.strip() or None
+    if fallback:
+        return fallback
+
+    raw = os.getenv("TELEGRAM_TOKEN")
+    if isinstance(raw, str):
+        raw = raw.strip() or None
+    return raw
+
+
+# Windows 本机开发勿在源码中硬编码 Bot Token；从 .env 的 TELEGRAM_TOKEN_LOCAL / _PRODUCTION / TELEGRAM_TOKEN 读取
 class Settings(BaseSettings):
     """
     应用配置类
@@ -491,8 +526,12 @@ class Settings(BaseSettings):
     CSRF_TOKEN_EXPIRE_SECONDS: int = int(os.getenv("CSRF_TOKEN_EXPIRE_SECONDS", "28800"))
 
     # 客户开放 API 是否仍接受 MD5 签名（HMAC-SHA256 始终可用；比较已改为 compare_digest）
-    # 默认 true 保持兼容；生产可在 systemd/.env 设 CLIENT_API_ALLOW_MD5=false 强制仅 HMAC
-    CLIENT_API_ALLOW_MD5: bool = os.getenv("CLIENT_API_ALLOW_MD5", "true").lower() in ["true", "1", "yes"]
+    # 未显式设置时：生产默认 false（仅 HMAC）；开发默认 true（兼容旧客户端）
+    # 生产若仍需 MD5，须在 systemd/.env 显式设 CLIENT_API_ALLOW_MD5=true
+    CLIENT_API_ALLOW_MD5: bool = Field(
+        default_factory=_resolve_client_api_allow_md5,
+        description="是否允许客户 API 使用 MD5 签名（生产默认关闭）",
+    )
 
     # ====== 定时任务配置 ======
     # 最大并发定时任务数（同一进程同时执行的任务数量）
@@ -920,30 +959,36 @@ class Settings(BaseSettings):
         os.getenv("SENSITIVE_PATH_ALERT_DEBOUNCE_SECONDS", "300")
     )
     
-    # Telegram Bot Token（从 BotFather 获取）
-    # 生产环境必须通过环境变量设置；Windows 本机开发见 validate_telegram_token
+    # Telegram Bot Token（从 BotFather 获取；仅环境变量 / .env，禁止源码硬编码）
+    # TELEGRAM_TOKEN_LOCAL：Windows 本机 / 非生产
+    # TELEGRAM_TOKEN_PRODUCTION：Linux 生产
+    # TELEGRAM_TOKEN：兼容旧部署；环境专用项缺失时回退
     TELEGRAM_TOKEN: str | None = os.getenv("TELEGRAM_TOKEN", None)
 
     @field_validator("TELEGRAM_TOKEN", mode="before")
     @classmethod
     def validate_telegram_token(cls, v: str | None) -> str | None:
-        """验证 Telegram Token；Windows 本机开发使用内置默认 Token。"""
+        """按环境选择 Bot Token，与 TELEGRAM_ADMIN 分流规则一致。"""
         is_prod = is_production_env_name(detect_production_env())
+        resolved = resolve_telegram_token(v)
 
-        if not is_prod and platform.system() == "Windows":
-            logger.info("Windows 本机开发环境，使用默认 TELEGRAM_TOKEN")
-            return WINDOWS_DEFAULT_TELEGRAM_TOKEN
+        if resolved:
+            return resolved
 
         if is_prod:
-            if v is not None and (not isinstance(v, str) or not v.strip()):
-                logger.warning("生产环境 TELEGRAM_TOKEN 为空，Telegram Bot 将无法启动")
-        elif v is None or (isinstance(v, str) and not v.strip()):
-            logger.info("开发环境未设置 TELEGRAM_TOKEN，Telegram Bot 功能将不可用")
-
-        return v
+            logger.warning(
+                "生产环境未配置 TELEGRAM_TOKEN_PRODUCTION / TELEGRAM_TOKEN，"
+                "Telegram Bot 将无法启动"
+            )
+        else:
+            logger.info(
+                "开发环境未配置 TELEGRAM_TOKEN_LOCAL / TELEGRAM_TOKEN，"
+                "Telegram Bot 功能将不可用"
+            )
+        return None
 
     # Telegram 管理员 Chat ID（用于接收系统通知）
-    # TELEGRAM_ADMIN_LOCAL 用于本地开发，TELEGRAM_ADMIN_PRODUCTION 用于生产；
+    # TELEGRAM_ADMIN_LOCAL 用于本地开发（含 Windows），TELEGRAM_ADMIN_PRODUCTION 用于生产；
     # 未配置环境专用值时回退到 TELEGRAM_ADMIN，兼容旧部署。
     TELEGRAM_ADMIN: str | None = os.getenv("TELEGRAM_ADMIN", None)
 

@@ -874,8 +874,6 @@ async def _batch_update_click_counts_with_retry(
         # 这样可以确保只更新能够立即锁定的记录，跳过已被其他事务锁定的记录
         # 增加重试机制：如果记录被锁定，等待一小段时间后重试，而不是立即跳过
         locked_short_codes = [code for code, _, _ in locked_batch]
-        where_placeholders = ", ".join([f":code_{i}" for i in range(len(locked_short_codes))])
-        select_params = {f"code_{i}": code for i, code in enumerate(locked_short_codes)}
         
         # 尝试锁定记录，带重试机制
         # 如果记录被短暂锁定，等待一小段时间后重试，而不是立即跳过

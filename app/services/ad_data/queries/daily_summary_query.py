@@ -5,7 +5,8 @@
 - 按统计维度分组聚合：按国家→日期+产品（可选 split_by_country 按国家分行）；
   按广告单元→日期+产品+广告单元；按广告单元+国家→日期+产品+广告单元+国家
 - 支持权限过滤、分页、SQL/内存混合排序
-- Redis 短缓存（120s），与 KPI summary 共用 ad_data 失效前缀
+- Redis 短缓存（300s），与 KPI summary 共用 ad_data 失效前缀
+- 列表查询用 COUNT(*) OVER() 带回分组总数，避免再跑一遍 GROUP BY 计数
 - 全量合计独立缓存，并与列表查询并行执行，降低冷路径墙钟时间
 
 在系统中的位置：
@@ -53,7 +54,7 @@ from app.services.ad_data.queries.summary_query import (
 logger = logging.getLogger(__name__)
 
 # 与 KPI summary 同量级；入库/改删会整前缀失效
-DAILY_SUMMARY_CACHE_TTL = 120
+DAILY_SUMMARY_CACHE_TTL = 300
 
 
 def _effective_summary_date_range(
@@ -334,24 +335,11 @@ class DailySummaryQuery:
             primary = sort_column.desc() if sort_order.lower() == "desc" else sort_column.asc()
             query = query.order_by(primary, *tie_breakers)
 
-        total = 0
+        # SQL 分页路径：窗口计数与列表同一次聚合，省掉独立 _count_groups 全表重扫
         if not need_memory_sort:
-            total = await self._count_groups(
-                use_assignment_table,
-                current_user,
-                client_id,
-                product_id,
-                country_code,
-                ad_unit,
-                dim,
-                dim_start,
-                dim_end,
-                start_date,
-                end_date,
-                group_by_ad_unit,
-                group_by_country,
-            )
+            query = query.add_columns(func.count().over().label("_group_total"))
 
+        total = 0
         if need_memory_sort:
             result = await self.db.execute(query)
             all_summary_data = result.all()
@@ -359,6 +347,25 @@ class DailySummaryQuery:
             offset = (page - 1) * page_size
             result = await self.db.execute(query.offset(offset).limit(page_size))
             all_summary_data = result.all()
+            if all_summary_data:
+                total = int(getattr(all_summary_data[0], "_group_total", 0) or 0)
+            else:
+                # 空页（无数据或 OFFSET 越界）仍需准确总数
+                total = await self._count_groups(
+                    use_assignment_table,
+                    current_user,
+                    client_id,
+                    product_id,
+                    country_code,
+                    ad_unit,
+                    dim,
+                    dim_start,
+                    dim_end,
+                    start_date,
+                    end_date,
+                    group_by_ad_unit,
+                    group_by_country,
+                )
 
         ad_data_responses = []
         for row in all_summary_data:

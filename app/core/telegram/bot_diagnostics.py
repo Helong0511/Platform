@@ -9,7 +9,7 @@ import os
 import importlib
 from typing import Dict, Any, List
 
-from app.core.config import settings
+from app.core.config import settings, detect_production_env, is_production_env_name
 from app.core.telegram.bot_state import (
     bot, bot_initialized, 
     _bot_instance_created, _bot_lock_file, _bot_lock_acquired
@@ -103,12 +103,23 @@ class TelegramBotDiagnostics:
             "telegram_chat_id_configured": False
         }
         
-        # 检查 Token
+        # 检查 Token（已按环境解析为 LOCAL / PRODUCTION / 回退值）
         telegram_token = getattr(settings, 'TELEGRAM_TOKEN', None)
         if telegram_token:
             config_status["telegram_token_configured"] = True
             config_status["token_length"] = len(telegram_token)
             config_status["token_prefix"] = telegram_token[:4] + "****" if len(telegram_token) > 4 else telegram_token
+            config_status["token_bot_id"] = (
+                telegram_token.split(":", 1)[0] if ":" in telegram_token else None
+            )
+            is_prod = is_production_env_name(detect_production_env())
+            env_key = "TELEGRAM_TOKEN_PRODUCTION" if is_prod else "TELEGRAM_TOKEN_LOCAL"
+            if os.getenv(env_key) and str(os.getenv(env_key)).strip():
+                config_status["token_source"] = env_key
+            elif os.getenv("TELEGRAM_TOKEN") and str(os.getenv("TELEGRAM_TOKEN")).strip():
+                config_status["token_source"] = "TELEGRAM_TOKEN"
+            else:
+                config_status["token_source"] = "unknown"
         
         # 检查管理员
         telegram_admin = getattr(settings, 'TELEGRAM_ADMIN', None)
@@ -225,7 +236,10 @@ class TelegramBotDiagnostics:
         if not config["telegram_enable"]:
             recommendations.append("在配置中启用 Telegram Bot: TELEGRAM_ENABLE=true")
         if not config["telegram_token_configured"]:
-            recommendations.append("配置 Telegram Bot Token: TELEGRAM_TOKEN=your_token")
+            recommendations.append(
+                "配置 Telegram Bot Token: TELEGRAM_TOKEN_LOCAL（本机）/"
+                "TELEGRAM_TOKEN_PRODUCTION（生产），或兼容项 TELEGRAM_TOKEN"
+            )
         if not config["telegram_admin_configured"]:
             recommendations.append("配置 Telegram 管理员 Chat ID: TELEGRAM_ADMIN=your_chat_id")
         

@@ -125,13 +125,13 @@ class PostbackNotifier:
                 product_config = result.scalars().first()
 
             # 3. 检查是否需要发送通知
-            should_notify, notification_type = should_notify(
+            need_notify, notification_type = should_notify(
                 conversion=conversion,
                 product_config=product_config,
                 client_config=client_config
             )
 
-            if not should_notify:
+            if not need_notify:
                 logger.debug(
                     f"根据配置不需要发送通知: conversion_id={conversion.id}, "
                     f"notification_type={notification_type}"

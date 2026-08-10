@@ -65,7 +65,7 @@ from app.api_v1.system.telegram_status import router as telegram_status
 from app.api_v1.external import client_api_router as client_api, telegram_router as telegram
 
 # ==================== Postback模块 ====================
-from app.api_v1.postback import router as postback, bft_router as bft_postback, ip_whitelist_router as ip_whitelist
+from app.api_v1.postback import router as postback, bft_router as bft_postback
 
 # ==================== 追踪模块 ====================
 from app.api_v1.tracking import router as tracking, short_links_router as short_links
@@ -139,9 +139,8 @@ api_router.include_router(telegram, prefix="/telegram", tags=["Telegram Bot"])
 # BFT S2S PostBack 路由（外部回调接口，保留向后兼容，无前缀）
 api_router.include_router(bft_postback, prefix="", tags=["BFT S2S"])
 # 统一 Postback 服务路由（推荐使用，无前缀）
+# 注意：IP 白名单已在 app.api_v1.postback 包内注册，此处勿再单独 include，否则会重复挂载同一批端点
 api_router.include_router(postback, prefix="", tags=["Postback服务"])
-# Postback IP 白名单管理路由
-api_router.include_router(ip_whitelist, prefix="", tags=["Postback IP白名单"])
 
 # ---------- 追踪模块 ----------
 # 点击追踪路由（必须在其他路由之前，避免路径冲突，无前缀）

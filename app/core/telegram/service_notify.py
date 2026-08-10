@@ -37,22 +37,32 @@ def should_run_telegram_polling() -> bool:
 
 def should_send_service_lifecycle_notify() -> bool:
     """
-    每个 Gunicorn 实例只由一个 worker 发送启停通知，避免重复刷屏。
+    每个实例只由一个 worker 发送启停通知，避免重复刷屏。
+
     - scheduler：仅 1 个 worker，始终发送
-    - api：由 post_fork 标记的 SCHEDULER_WORKER=1 的 worker 发送（首个 worker）
+    - api + Gunicorn：仅 post_fork 标记的 SCHEDULER_WORKER=1 发送
+    - 未设置 SCHEDULER_WORKER：本地 uvicorn / 单进程启动，应发送
     """
     if get_gunicorn_role() == "scheduler":
         return True
-    return os.getenv("SCHEDULER_WORKER", "").strip() == "1"
+    scheduler_worker = os.getenv("SCHEDULER_WORKER", "").strip()
+    if scheduler_worker == "1":
+        return True
+    if scheduler_worker == "0":
+        return False
+    # 本地 uvicorn（无 Gunicorn post_fork）不会设置该变量
+    return True
 
 
 def build_service_started_message() -> str:
-    """拼装服务启动通知正文（含系统名与监听地址）。"""
+    """拼装服务启动通知正文（含系统名、环境与监听地址）。"""
     label = get_service_display_name()
     port = get_service_port_hint()
+    env_label = "production" if settings.is_production else "development（本机）"
     return (
         f"🚀 【{label}】已启动\n"
         f"系统：{settings.SERVER_NAME}\n"
+        f"环境：{env_label}\n"
         f"监听：127.0.0.1:{port}"
     )
 

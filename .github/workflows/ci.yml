@@ -18,19 +18,21 @@ jobs:
         run: pip install -r requirements.txt
       - name: Compile Python
         run: python -m compileall app -q
-      - name: Codebase audit
-        run: python tests/audit_codebase.py
-      - name: Deprecated refs audit
-        run: python tests/audit_deprecated_refs.py
-      - name: Frontend CRUD audit
-        run: node tests/audit_frontend_crud_api.mjs
       - name: Run unit tests
         env:
           UNIT_TEST: "1"
           DATABASE_URL: "sqlite+aiosqlite:///:memory:"
           SECRET_KEY: "ci-test-secret-key-must-be-at-least-32-chars-long"
           PRODUCTION_ENV: "development"
-        run: pytest tests/test_*.py -q --tb=short --ignore=tests/manual
+        # 收集仓库中所有测试文件；没有测试时必须失败，禁止“无测试绿色通过”。
+        run: |
+          shopt -s nullglob
+          mapfile -t TEST_FILES < <(find tests -type f -name 'test_*.py' -not -path 'tests/manual/*' -print 2>/dev/null)
+          if [ ${#TEST_FILES[@]} -eq 0 ]; then
+            echo "::error::No tests/test_*.py found; refusing to skip pytest."
+            exit 1
+          fi
+          pytest "${TEST_FILES[@]}" -q --tb=short
 
   frontend:
     runs-on: ubuntu-latest

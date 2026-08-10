@@ -21,13 +21,11 @@
 说明：REST API 端点，统一 ResponseBaseSchema 响应；鉴权由各端点 Depends 声明。"""
 import logging
 from calendar import monthrange
-from datetime import date, datetime, timedelta
-from typing import Any
+from datetime import date
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, status, UploadFile, File
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, UploadFile, File
 from sqlalchemy import delete, func, select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-import uuid
 import pandas as pd
 
 from app.core.audit_log import log_update, log_delete, log_user_action
@@ -36,7 +34,7 @@ from app.core.security import get_current_user, is_admin
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.config import settings
 from app.core.validation import safe_strip
-from app.models.models import TBSearchData, Client, Product, User, UserRole, CountryInfo, ProductAssignment
+from app.models.models import TBSearchData, Client, Product, User, CountryInfo, ProductAssignment
 from app.schemas.tb_search_data import (
     TBSearchDataResponse,
     TBSearchDataUpdate,
@@ -60,7 +58,7 @@ from app.core.utils import (
 )
 from app.core.country_code import resolve_country_name, find_country_code_by_any_format, preserve_unrecognized_country_code
 from app.api_v1.excel.utils import (
-    allowed_file, ALLOWED_MIME_TYPES, parse_date_value, normalize_date_key, validate_excel_file
+    parse_date_value, normalize_date_key, validate_excel_file
 )
 
 router = APIRouter()
@@ -277,10 +275,9 @@ async def get_tb_search_data(
         # 根据是否使用产品分配历史表，解包不同的结果
         # ---------- 条件分支 ----------
         if use_assignment_table:
-            tb_data, product, client, user, product_assignment, country_info = row
+            tb_data, product, client, user, _product_assignment, country_info = row
         else:
             tb_data, product, client, user, country_info = row
-            product_assignment = None
         
         # 处理可能为None的关联数据
         # 即使产品不存在，也显示数据，但标记为"未知产品"

@@ -55,7 +55,6 @@ async def addermobi_api_task(
             json_body={"userName": username, "password": password},
             headers=headers,
             label="Addermobi Login API",
-            verify=False,
         )
         access_token = None
         if "data" in login_json and isinstance(login_json["data"], dict):

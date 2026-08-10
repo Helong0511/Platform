@@ -103,10 +103,8 @@ class TelegramNotificationService:
             msg += f"事件: {conversion.event_name}\n"
 
         msg += "\n💰 金额信息\n"
-        if conversion.original_payout is not None:
-            msg += f"• 原始收益 (PO): ${conversion.original_payout:.2f}\n"
         if conversion.payout is not None:
-            msg += f"• 扣后收益 (PO(扣)): ${conversion.payout:.2f}\n"
+            msg += f"• 结算收益: ${conversion.payout:.2f}\n"
 
         if conversion.created_at:
             time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
@@ -149,10 +147,8 @@ class TelegramNotificationService:
             msg += f"事件: {conversion.event_name}\n"
 
         msg += "\n💰 金额信息\n"
-        if conversion.original_payout is not None:
-            msg += f"• 原始收益 (PO): ${conversion.original_payout:.2f}\n"
         if conversion.payout is not None:
-            msg += f"• 扣后收益 (PO(扣)): ${conversion.payout:.2f}\n"
+            msg += f"• 结算收益: ${conversion.payout:.2f}\n"
         msg += f"• 阈值: ${threshold:.2f} ✅\n"
 
         if conversion.created_at:

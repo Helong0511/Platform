@@ -43,10 +43,8 @@ def build_notification_message(
     if conversion.event_value is not None:
         msg += f"价值：${conversion.event_value:.2f}\n"
 
-    if conversion.original_payout is not None:
-        msg += f"原始收益（PO）：${conversion.original_payout:.2f}\n"
     if conversion.payout is not None:
-        msg += f"扣后收益（PO(扣)）：${conversion.payout:.2f}\n"
+        msg += f"结算收益：${conversion.payout:.2f}\n"
 
     # 时间信息
     if conversion.created_at:
@@ -83,15 +81,12 @@ def build_batch_notification_message(
 
     # 统计信息
     total_count = len(conversions)
-    total_original_payout = sum(c.original_payout or 0 for c in conversions)
     total_payout = sum(c.payout or 0 for c in conversions)
     total_value = sum(c.event_value or 0 for c in conversions)
 
     msg += f"转化数量：{total_count} 条\n"
     msg += f"总价值：${total_value:.2f}\n"
-    if total_original_payout > 0:
-        msg += f"原始总收益（PO）：${total_original_payout:.2f}\n"
-    msg += f"扣后总收益（PO(扣)）：${total_payout:.2f}\n\n"
+    msg += f"结算总收益：${total_payout:.2f}\n\n"
 
     # 按平台统计
     platform_stats = {}
@@ -100,12 +95,10 @@ def build_batch_notification_message(
         if platform not in platform_stats:
             platform_stats[platform] = {
                 'count': 0,
-                'original_payout': 0,
                 'payout': 0,
                 'value': 0
             }
         platform_stats[platform]['count'] += 1
-        platform_stats[platform]['original_payout'] += conv.original_payout or 0
         platform_stats[platform]['payout'] += conv.payout or 0
         platform_stats[platform]['value'] += conv.event_value or 0
 
@@ -113,9 +106,7 @@ def build_batch_notification_message(
         msg += "平台统计：\n"
         for platform, stats in platform_stats.items():
             msg += f"  • {platform.upper()}: {stats['count']} 条"
-            if stats['original_payout'] > 0:
-                msg += f", PO: ${stats['original_payout']:.2f}"
-            msg += f", PO(扣): ${stats['payout']:.2f}\n"
+            msg += f", 结算收益: ${stats['payout']:.2f}\n"
 
     # 时间范围
     if conversions:

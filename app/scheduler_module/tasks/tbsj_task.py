@@ -85,7 +85,6 @@ async def _fetch_tbsj_token(username: str, password: str) -> str:
             json_body=creds,
             headers=TBSJ_HEADERS,
             label="TBSJ Token API",
-            verify=False,
         )
     except UpstreamTransientError:
         # 瞬时网络故障直接上抛，由 run_upstream_import_task 软跳过
@@ -105,7 +104,6 @@ async def _fetch_tbsj_token(username: str, password: str) -> str:
             form_body=creds,
             headers=None,
             label="TBSJ Token API(form)",
-            verify=False,
         )
 
     access_token = _extract_access_token(token_json)

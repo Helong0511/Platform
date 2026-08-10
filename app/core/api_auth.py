@@ -114,12 +114,14 @@ def verify_signature(
     if hmac.compare_digest(hmac_sign, provided):
         return True
 
-    # MD5（向后兼容；生产可通过 CLIENT_API_ALLOW_MD5=false 关闭）
+    # MD5（向后兼容；未配置时生产默认关闭，开发默认开启；可用 CLIENT_API_ALLOW_MD5 显式覆盖）
     try:
         from app.core.config import settings
         allow_md5 = bool(getattr(settings, "CLIENT_API_ALLOW_MD5", True))
     except Exception:
-        allow_md5 = True
+        # 配置读取失败时必须拒绝弱签名，避免异常路径重新放开 MD5。
+        logger.exception("读取 CLIENT_API_ALLOW_MD5 配置失败，已拒绝 MD5 签名")
+        allow_md5 = False
     if not allow_md5:
         return False
     calculated_sign = hashlib.md5(sign_string.encode("utf-8")).hexdigest().lower()

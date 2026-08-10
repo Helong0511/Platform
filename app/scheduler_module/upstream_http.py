@@ -163,7 +163,11 @@ async def _request_json(
             if attempt > 0:
                 logger.info("%s 第 %s 次重试成功", label, attempt + 1)
             else:
-                logger.info("%s 响应: %s", label, json_data)
+                logger.info(
+                    "%s 响应成功，字段=%s",
+                    label,
+                    sorted(json_data.keys()),
+                )
             return json_data
         except httpx.TimeoutException as e:
             last_error = e

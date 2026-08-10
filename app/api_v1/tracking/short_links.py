@@ -34,9 +34,7 @@ from app.core.errors import ErrorCode
 from app.core.dependencies import get_short_link_service
 from app.services.short_link_service import ShortLinkService
 from app.core.short_link.generator import (
-    generate_short_code,
-    generate_short_code_from_id,
-    generate_unique_short_code
+    generate_unique_short_code,
 )
 from app.core.short_link_click_counter import (
     sync_click_counts_to_db, 
@@ -64,8 +62,9 @@ logger = logging.getLogger(__name__)
 
 @router.get("/generate-code",
             summary="生成短链接代码")
-async def generate_short_code(
-    db: AsyncSession = Depends(get_db)
+async def generate_short_code_endpoint(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     生成唯一短链接代码。
@@ -122,7 +121,8 @@ async def generate_short_code(
             summary="检查短链接代码是否存在")
 async def check_short_code(
     short_code: str = Path(..., description="短链接代码"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     检查短链接代码是否已被占用。

@@ -21,6 +21,7 @@ from app.models.models import User
 
 # 创建路由实例
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/stats", response_model=ResponseBaseSchema[DashboardStatsResponse])
@@ -33,8 +34,6 @@ async def get_dashboard_stats(period: str = "week", db: AsyncSession = Depends(g
     - 客户只能查看自己的数据
     - 使用缓存提升性能（缓存 1 分钟）
     """
-    logger = logging.getLogger(__name__)
-
     # 使用服务层（业务逻辑在DashboardService中）
     dashboard_service: DashboardService = await get_dashboard_service(db)
 
@@ -101,8 +100,6 @@ async def get_trend_data(period: str = "week", db: AsyncSession = Depends(get_db
     - 客户只能查看自己的数据
     - 使用缓存提升性能（缓存 1 分钟）
     """
-    logger = logging.getLogger(__name__)
-
     # 使用服务层（业务逻辑在DashboardService中）
     dashboard_service: DashboardService = await get_dashboard_service(db)
 

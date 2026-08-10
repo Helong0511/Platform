@@ -1,10 +1,13 @@
-"""Telegram Bot 状态与重启 API
+"""Telegram Bot 运行时状态与重启 API
 
-职责：查询 Bot 运行状态、共享内存状态；管理员可触发后台线程重启。
+职责：查询 Bot 轮询线程/共享内存状态；管理员可触发后台线程重启。
+
+挂载前缀：``/telegram``（见 ``app.api_v1.__init__``）。
+与 ``app.api_v1.external.telegram`` 的 ``GET /telegram/status``（配置态摘要）并存，本模块使用独立路径避免冲突。
 
 权限：
-- GET  /telegram/status   任意调用方可查状态（路由层未强制登录，供监控使用）
-- POST /telegram/restart  仅管理员。
+- GET  /telegram/runtime-status  仅管理员可查状态
+- POST /telegram/restart         仅管理员。
 
 说明：系统运维接口，含定时任务、审计日志、会话、缓存、斗篷与敏感路径探测。"""
 from fastapi import APIRouter, Depends, Request
@@ -25,13 +28,16 @@ from fastapi import HTTPException
 router = APIRouter()
 
 
-@router.get("/telegram/status", response_model=ResponseBaseSchema[dict])
-async def get_telegram_status():
+@router.get("/runtime-status", response_model=ResponseBaseSchema[dict])
+async def get_telegram_status(
+    current_user: User = Depends(require_admin),
+):
     """
-    查询 Telegram Bot 运行状态。
+    查询 Telegram Bot 运行时状态（轮询线程 + 共享内存）。
 
     返回 bot_status（线程存活、最近轮询时间等）与 shared_state（内存共享状态）。
-    供监控面板或运维脚本探测，路由层未强制登录。
+    供管理员监控面板或运维脚本探测。
+    配置态摘要请用 GET /telegram/status（external.telegram，需管理员）。
     """
     status_info = get_bot_status_info()
     shared_state = get_shared_state()
@@ -45,7 +51,7 @@ async def get_telegram_status():
     )
 
 
-@router.post("/telegram/restart", response_model=ResponseBaseSchema[dict])
+@router.post("/restart", response_model=ResponseBaseSchema[dict])
 async def restart_telegram_bot(
     request: Request,
     db: AsyncSession = Depends(get_db),

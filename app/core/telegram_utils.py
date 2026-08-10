@@ -65,17 +65,15 @@ def split_long_message(message: str, max_length: int = MAX_TELEGRAM_MESSAGE_LENG
     Returns:
         消息列表（如果不需要分割，返回包含一条消息的列表）
     """
+    if max_length < 64:
+        raise ValueError("max_length 必须至少为 64，以容纳消息分片序号")
+
     if len(message) <= max_length:
         return [message]
     
     messages = []
     lines = message.split('\n')
     current_message = ""
-    part_number = 1
-    total_parts = None  # 先计算总部分数
-    
-    # 先估算需要分割成几部分
-    estimated_parts = (len(message) // max_length) + 1
     
     for line in lines:
         # 如果当前行加上当前消息会超过限制
@@ -84,7 +82,6 @@ def split_long_message(message: str, max_length: int = MAX_TELEGRAM_MESSAGE_LENG
             if current_message:
                 messages.append(current_message.strip())
                 current_message = ""
-                part_number += 1
         
         # 如果单行就超过限制，需要截断
         if len(line) > max_length - 50:  # 保留一些空间给提示信息
@@ -93,7 +90,6 @@ def split_long_message(message: str, max_length: int = MAX_TELEGRAM_MESSAGE_LENG
             if current_message:
                 messages.append(current_message.strip())
                 current_message = ""
-                part_number += 1
             current_message = truncated_line
         else:
             # 添加这一行
