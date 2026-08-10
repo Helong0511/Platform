@@ -511,7 +511,7 @@ Postback 转化管理页面
         <el-checkbox label="event_name">事件名称</el-checkbox>
         <el-checkbox label="event_value">事件价值</el-checkbox>
         <el-checkbox v-if="isAdmin" label="original_payout">PayOut</el-checkbox>
-        <el-checkbox label="payout">PayOut(扣)</el-checkbox>
+        <el-checkbox label="payout">{{ isAdmin ? 'PayOut(扣)' : 'PayOut' }}</el-checkbox>
         <el-checkbox label="devad_id">设备ID</el-checkbox>
         <el-checkbox label="os">操作系统</el-checkbox>
         <el-checkbox label="carrier">运营商</el-checkbox>

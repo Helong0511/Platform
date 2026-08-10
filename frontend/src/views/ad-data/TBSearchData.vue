@@ -239,9 +239,9 @@
         <el-checkbox label="searches">SEARCHES</el-checkbox>
         <el-checkbox label="monetized">MONETIZED</el-checkbox>
         <el-checkbox label="clicks">CLICKS</el-checkbox>
-        <el-checkbox label="revenue">REVENUE(扣)</el-checkbox>
+        <el-checkbox label="revenue">{{ isAdmin ? 'REVENUE(扣)' : 'REVENUE' }}</el-checkbox>
         <el-checkbox v-if="isAdmin" label="revenue_before_deduct">REVENUE</el-checkbox>
-        <el-checkbox label="rpm">RPM(扣)</el-checkbox>
+        <el-checkbox label="rpm">{{ isAdmin ? 'RPM(扣)' : 'RPM' }}</el-checkbox>
         <el-checkbox v-if="isAdmin" label="rpm_before_deduct">RPM</el-checkbox>
       </el-checkbox-group>
       <template #footer>

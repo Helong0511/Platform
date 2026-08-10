@@ -624,8 +624,8 @@ const adDataResponseFields = [
   { field: 'viewability_rate', type: 'float', description: '可见率（%，浮点数，保留2位小数）' },
   { field: 'cpc', type: 'float', description: 'CPC（浮点数，保留2位小数）' },
   { field: 'pageviews', type: 'int', description: 'PageViews（整数）' },
-  { field: 'ecpm', type: 'float', description: 'eCPM（减扣后，浮点数，保留2位小数）' },
-  { field: 'revenue', type: 'float', description: '收益（减扣后，浮点数，保留2位小数）' }
+  { field: 'ecpm', type: 'float', description: 'eCPM（浮点数，保留2位小数）' },
+  { field: 'revenue', type: 'float', description: '收益（浮点数，保留2位小数）' }
 ];
 
 // 错误码列表

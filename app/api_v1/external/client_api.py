@@ -214,8 +214,8 @@ class AdDataItemResponse(BaseSchema):
     viewability_rate: Decimal = Field(default=Decimal('0'), description="可见率（%）")
     cpc: Decimal = Field(..., description="CPC")
     pageviews: int = Field(..., description="PageViews（整数）")
-    ecpm: Decimal = Field(..., description="eCPM（减扣后）")
-    revenue: Decimal = Field(..., description="收益（减扣后）")
+    ecpm: Decimal = Field(..., description="eCPM")
+    revenue: Decimal = Field(..., description="收益")
 
     """
     查询客户的所有产品名称

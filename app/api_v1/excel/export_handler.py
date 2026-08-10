@@ -90,11 +90,12 @@ def build_daily_summary_export_row(
             "可见率": f"{viewability_rate}%",
             "CPC($)": round(row.get("cpc") or 0.0, 2),
             "PageViews": row.get("pageviews", 0) or 0,
-            "eCPM(扣)($)": round(row.get("ecpm_after_deduct") or 0.0, 4),
-            "收益(扣)($)": round(row.get("revenue_after_deduct") or 0.0, 4),
         }
     )
+    # 客户导出仅结算口径列名（不暴露「扣」）；管理员额外带减扣前/后对照
     if is_admin_user:
+        excel_row["eCPM(扣)($)"] = round(row.get("ecpm_after_deduct") or 0.0, 4)
+        excel_row["收益(扣)($)"] = round(row.get("revenue_after_deduct") or 0.0, 4)
         excel_row["eCPM($)"] = round(row.get("ecpm_before_deduct") or 0.0, 4)
         excel_row["收益($)"] = round(row.get("revenue_before_deduct") or 0.0, 4)
     else:

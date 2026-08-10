@@ -130,9 +130,9 @@
         <el-checkbox label="viewability_rate">可见率</el-checkbox>
         <el-checkbox label="cpc">CPC</el-checkbox>
         <el-checkbox label="pageviews">PageViews</el-checkbox>
-        <el-checkbox label="ecpm_after_deduct">eCPM(扣)</el-checkbox>
+        <el-checkbox label="ecpm_after_deduct">{{ isAdmin ? 'eCPM(扣)' : 'eCPM' }}</el-checkbox>
         <el-checkbox v-if="isAdmin" label="ecpm_before_deduct">eCPM</el-checkbox>
-        <el-checkbox label="revenue_after_deduct">收益(扣)</el-checkbox>
+        <el-checkbox label="revenue_after_deduct">{{ isAdmin ? '收益(扣)' : '收益' }}</el-checkbox>
         <el-checkbox v-if="isAdmin" label="revenue_before_deduct">收益</el-checkbox>
       </el-checkbox-group>
       <template #footer>

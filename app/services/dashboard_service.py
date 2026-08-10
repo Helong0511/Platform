@@ -297,6 +297,11 @@ class DashboardService:
             result_prev.total_revenue_undeducted if result_prev else 0
         )
 
+        # 根据角色组合指标（客户只看结算口径，文案不暴露「减扣后」）
+        is_admin = current_user.role == UserRole.ADMIN
+        ecpm_settled_label = "eCPM(减扣后)" if is_admin else "eCPM"
+        revenue_settled_label = "收益(减扣后)" if is_admin else "收益"
+
         # 构建基础指标
         base_stats = [
             {"id": "requests", "label": "请求数", "value": result.total_requests or 0, "trend": trend_requests,
@@ -316,16 +321,16 @@ class DashboardService:
             {"id": "ctr", "label": "点击率",
              "value": round(float(result.avg_ctr), 2) if (result and result.avg_ctr) else 0.0, "trend": trend_ctr,
              "precision": 2},
-            {"id": "ecpm_deducted", "label": "eCPM(减扣后)",
+            {"id": "ecpm_deducted", "label": ecpm_settled_label,
              "value": round(float(result.avg_ecpm_deducted), 2) if (result and result.avg_ecpm_deducted) else 0.0,
              "trend": trend_ecpm_deducted, "precision": 2},
-            {"id": "revenue_deducted", "label": "收益(减扣后)",
+            {"id": "revenue_deducted", "label": revenue_settled_label,
              "value": round(float(result.total_revenue_deducted), 2) if (
                      result and result.total_revenue_deducted) else 0.0, "trend": trend_revenue_deducted,
              "precision": 2}
         ]
 
-        # 构建管理员指标
+        # 构建管理员指标（未减扣仅管理员可见）
         admin_stats = [
             {"id": "ecpm_undeducted", "label": "eCPM(未减扣的)",
              "value": round(float(result.avg_ecpm_undeducted), 2) if (result and result.avg_ecpm_undeducted) else 0.0,
@@ -336,8 +341,6 @@ class DashboardService:
              "precision": 2}
         ]
 
-        # 根据角色组合指标
-        is_admin = current_user.role == UserRole.ADMIN
         if is_admin:
             stats_data = base_stats + admin_stats
         else:
