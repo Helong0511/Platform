@@ -50,7 +50,7 @@
         </el-form-item>
       </el-form>
       <div class="login-footer">
-        <span>© 2026/08/03 广告数据管理</span>
+        <span>© 2026/08/10 广告数据管理</span>
       </div>
     </div>
 
