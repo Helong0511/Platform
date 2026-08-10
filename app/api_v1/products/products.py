@@ -80,7 +80,7 @@ from sqlalchemy.future import select
 
 # 本地导入
 from app.core.database import get_db
-from app.core.security import get_current_user, require_admin
+from app.core.security import get_current_user, require_admin, is_admin
 from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate, commit_audit_log
 from app.core.validation import sanitize_input
 from app.core.constants import MAX_PAGE_SIZE
@@ -270,8 +270,12 @@ async def get_products(
         search=None,
     )
 
-    # 转换为响应模型
-    product_responses = [build_product_response(product) for product in products]
+    # 转换为响应模型（客户不返回减扣比例）
+    include_deduct = is_admin(current_user)
+    product_responses = [
+        build_product_response(product, include_deduct_ratios=include_deduct)
+        for product in products
+    ]
 
     return PaginatedResponseBaseSchema.success(
         data=product_responses,
@@ -291,14 +295,16 @@ async def get_product(
     获取指定产品的详细信息（已重构使用服务层）
     - 管理员可查看所有产品
     - 客户只能查看自己的产品
-    - 返回产品完整信息，包括减扣比例
+    - 减扣比例仅管理员可见
     - 使用服务层，业务逻辑已优化
     """
     # 使用服务层（业务逻辑在ProductService中）
     product_service: ProductService = await get_product_service(db)
     product = await product_service.get_product_by_id(product_id, current_user, include_client=True)
 
-    return ResponseBaseSchema.success(data=build_product_response(product))
+    return ResponseBaseSchema.success(
+        data=build_product_response(product, include_deduct_ratios=is_admin(current_user))
+    )
 
 
 @router.post("/", response_model=ResponseBaseSchema[ProductResponse], summary="创建产品")

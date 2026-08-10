@@ -299,7 +299,7 @@ async def get_tb_search_data(
 
         # 使用统一的名称获取函数
         
-        item = TBSearchDataResponse(
+        item_kwargs = dict(
             id=tb_data.id,
             date=date_val,
             product_id=product.id if product else tb_data.product_id,  # 使用原始product_id
@@ -312,14 +312,16 @@ async def get_tb_search_data(
             clicks=tb_data.clicks,
             revenue=tb_data.revenue,
             rpm=tb_data.rpm,
-            revenue_before_deduct=tb_data.revenue_before_deduct,
-            rpm_before_deduct=tb_data.rpm_before_deduct,
             created_at=tb_data.created_at,
             updated_at=tb_data.updated_at,
             client_id=client.id if client else 0,
             client_name=get_client_name(client),
             user_name=get_user_name(user)
         )
+        if is_admin(current_user):
+            item_kwargs["revenue_before_deduct"] = tb_data.revenue_before_deduct
+            item_kwargs["rpm_before_deduct"] = tb_data.rpm_before_deduct
+        item = TBSearchDataResponse(**item_kwargs)
         response_list.append(item)
 
     # ---------- 构建响应 ----------
@@ -673,7 +675,7 @@ async def update_tb_search_data(
     # 使用统一的名称获取函数
     
     # ---------- 构建响应 ----------
-    return ResponseBaseSchema.success(data=TBSearchDataResponse(
+    detail_kwargs = dict(
         id=tb_data.id,
         date=date_val,
         product_id=product.id,
@@ -686,14 +688,16 @@ async def update_tb_search_data(
         clicks=tb_data.clicks,
         revenue=tb_data.revenue,
         rpm=tb_data.rpm,
-        revenue_before_deduct=tb_data.revenue_before_deduct,
-        rpm_before_deduct=tb_data.rpm_before_deduct,
         created_at=tb_data.created_at,
         updated_at=tb_data.updated_at,
         client_id=client.id if client else 0,
         client_name=get_client_name(client),
         user_name=get_user_name(user)
-    ))
+    )
+    if is_admin(current_user):
+        detail_kwargs["revenue_before_deduct"] = tb_data.revenue_before_deduct
+        detail_kwargs["rpm_before_deduct"] = tb_data.rpm_before_deduct
+    return ResponseBaseSchema.success(data=TBSearchDataResponse(**detail_kwargs))
 
 @router.get("/clients-with-data", response_model=ListResponseBaseSchema[list[dict]], summary="获取有TB搜索数据的客户列表")
 async def get_clients_with_tb_search_data(

@@ -28,8 +28,9 @@ class TBSearchDataBase(BaseSchema):
     clicks: int | None = 0
     revenue: Decimal | None = Decimal('0')
     rpm: Decimal | None = Decimal('0')
-    revenue_before_deduct: Decimal | None = Decimal('0')
-    rpm_before_deduct: Decimal | None = Decimal('0')
+    # 减扣前字段仅管理员填充；客户响应保持 None，避免对照出扣减
+    revenue_before_deduct: Decimal | None = None
+    rpm_before_deduct: Decimal | None = None
 
 
 class TBSearchDataInDBBase(TBSearchDataBase):

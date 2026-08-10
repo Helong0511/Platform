@@ -523,7 +523,7 @@ async def get_ad_data_detail(
 
     country_name_zh = resolve_country_name(country_info, ad_data.country_code)
 
-    # 构建响应数据
+    # 构建响应数据（客户仅结算口径，不返回减扣前字段）
     response_data = {
         "id": ad_data.id,
         "date": date_value,
@@ -543,9 +543,7 @@ async def get_ad_data_detail(
         "click_count": ad_data.click_count,
         "click_rate": click_rate,
         "viewability_rate": round(float(ad_data.viewability_rate or 0), 2),
-        "ecpm_before_deduct": float(round(float(ad_data.ecpm_before_deduct or 0), 4)),
         "ecpm_after_deduct": float(round(float(ad_data.ecpm_after_deduct or 0), 4)),
-        "revenue_before_deduct": float(round(float(ad_data.revenue_before_deduct or 0), 4)),
         "revenue_after_deduct": float(round(float(ad_data.revenue_after_deduct or 0), 4)),
         "created_at": ad_data.created_at,
         "updated_at": ad_data.updated_at
@@ -553,6 +551,8 @@ async def get_ad_data_detail(
     if is_admin(current_user):
         response_data.update(
             {
+                "ecpm_before_deduct": float(round(float(ad_data.ecpm_before_deduct or 0), 4)),
+                "revenue_before_deduct": float(round(float(ad_data.revenue_before_deduct or 0), 4)),
                 "data_source": ad_data.data_source or "legacy",
                 "data_source_label": format_data_source_label(ad_data.data_source),
                 "upstream_account": ad_data.upstream_account or "",

@@ -98,8 +98,11 @@ class ProductResponse(ProductInDBBase):
     )
 
 
-def build_product_response(product) -> ProductResponse:
-    """将 ORM Product 转为响应；仅在 client 已预加载时填充 client_name（避免异步懒加载）。"""
+def build_product_response(product, *, include_deduct_ratios: bool = True) -> ProductResponse:
+    """将 ORM Product 转为响应；仅在 client 已预加载时填充 client_name（避免异步懒加载）。
+
+    include_deduct_ratios=False 时清空减扣比例，供客户角色使用（避免暴露扣减配置）。
+    """
     response = ProductResponse.model_validate(product)
     client = None
     try:
@@ -111,12 +114,19 @@ def build_product_response(product) -> ProductResponse:
             client = product.client
     except Exception:
         client = None
-    if client is None:
-        return response
-    company_name = getattr(client, "company_name", None)
-    if not company_name:
-        return response
-    return response.model_copy(update={"client_name": company_name})
+    if client is not None:
+        company_name = getattr(client, "company_name", None)
+        if company_name:
+            response = response.model_copy(update={"client_name": company_name})
+    if not include_deduct_ratios:
+        response = response.model_copy(
+            update={
+                "ecpm_deduct_ratio": None,
+                "revenue_deduct_ratio": None,
+                "cplpo_deduct_ratio": None,
+            }
+        )
+    return response
 
 
 class ProductListResponse(BaseSchema):

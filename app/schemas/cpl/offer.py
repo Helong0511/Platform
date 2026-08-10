@@ -68,7 +68,7 @@ class PublisherConfig(BaseSchema):
     downstream_cap: Optional[int] = Field(None, ge=0,
                                           description="该渠道的下游每天转化个数的限制，如果渠道转化超过了这个值就不通知渠道了。客户登录查看时，也只显示真实的（真实不超过【下游Cap】的）转化")
     affiliate_payout: Optional[Decimal] = Field(None, ge=0,
-                                              description="该渠道的转化金额（不是金额的扣减比例）。如果上游通知的金额大于这个金额，就按照【下游PO】的金额通知渠道")
+                                              description="该渠道的转化金额（固定金额，不是比例）。如果上游通知的金额大于这个金额，就按照【下游PO】的金额通知渠道")
 
 
 class OfferCreate(OfferBase):
