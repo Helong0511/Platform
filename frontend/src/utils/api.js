@@ -517,8 +517,11 @@ export const handleApiError = (error, defaultMessage = '操作失败', options =
  */
 export const refreshCsrfToken = async (endpoint = '/api/v1/dashboard/stats') => {
   try {
-    // 发送一个轻量级的GET请求来刷新CSRF令牌
-    const response = await axios.get(endpoint);
+    // 发送一个轻量级的GET请求来刷新CSRF令牌（静默：端点若仅管理员可用时不弹权限提示）
+    const response = await axios.get(endpoint, {
+      skipErrorMessage: true,
+      skipRequestCache: true,
+    });
     
     // 直接从响应头获取CSRF令牌（不依赖响应拦截器）
     extractAndSaveCsrfToken(response);

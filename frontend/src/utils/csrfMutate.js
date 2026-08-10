@@ -16,8 +16,8 @@ export const CSRF_REFRESH_DASHBOARD = '/api/v1/dashboard/stats';
 export const CSRF_REFRESH_CLIENTS = '/api/v1/clients/?page_size=1';
 /** 产品模块写操作前的 CSRF 刷新端点 */
 export const CSRF_REFRESH_PRODUCTS = '/api/v1/products/?page_size=1';
-/** 用户模块写操作前的 CSRF 刷新端点 */
-export const CSRF_REFRESH_USERS = '/api/v1/users/stats';
+/** 用户模块写操作前的 CSRF 刷新端点（须对任意登录角色可用；勿用 /users/stats） */
+export const CSRF_REFRESH_USERS = '/api/v1/users/me';
 /** 会话模块写操作前的 CSRF 刷新端点 */
 export const CSRF_REFRESH_SESSIONS = '/api/v1/sessions/me/sessions';
 

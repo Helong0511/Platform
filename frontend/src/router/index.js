@@ -443,9 +443,8 @@ async function syncUserInfoOrDeny(authStore) {
 }
 
 function roleGuardFallback(from, authStore) {
-  if (from.path && from.path !== '/login' && from.path.startsWith('/app')) {
-    return from.path;
-  }
+  // 权限不足时必须回角色首页，禁止 next(from.path)：
+  // 同一浏览器先登管理员再登客户时，历史栈里常是 /app/admin/*，回退会再次撞 requiresAdmin 并反复提示。
   return getDefaultRoute(authStore.userInfo) || '/app/dashboard';
 }
 
@@ -573,7 +572,11 @@ router.beforeEach(async (to, from, next) => {
 
       // 检查管理员权限
       if (!authStore.isAdmin) {
-        ElMessage.warning('无权访问该页面，需要管理员权限');
+        // 刚从登录页进入（角色切换）时静默重定向，避免「登录成功」后紧跟误报
+        const fromLogin = from.path === '/login' || from.path === '/' || from.name === 'Login';
+        if (!fromLogin) {
+          ElMessage.warning('无权访问该页面，需要管理员权限');
+        }
         return next(roleGuardFallback(from, authStore));
       }
     }

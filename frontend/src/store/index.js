@@ -77,6 +77,7 @@ import { logger } from '../utils/logger';
 import { request } from '../utils/api';
 import { loginOAuth2, logout as authLogout } from '../api/auth';
 import { clearCsrfToken } from '../utils/csrfToken';
+import { RequestCache } from '../utils/requestCache';
 
 
 
@@ -130,6 +131,8 @@ export const clearAuthData = () => {
     sessionStorage.removeItem('userInfo');
     // 退出/会话失效时同步清 CSRF，避免下一角色登录后仍用旧探测链路触发管理员接口 403
     clearCsrfToken();
+    // 清 GET 缓存，避免管理员页缓存的请求在客户会话下被复用/重放
+    RequestCache.clear();
     // 注意：refresh_token 和 access_token 存储在 HttpOnly Cookie 中，由后端在 logout 接口中清除
   } catch (e) {
     logger.warn('清除认证信息时出错:', e);
@@ -219,6 +222,10 @@ export const useAuthStore = defineStore('auth', {
         sessionStorage.setItem('userInfo', JSON.stringify(userInfoFromApi));
         // refresh_token 由后端设置到 HttpOnly Cookie 中，无需前端存储
 
+        // 角色切换：清 CSRF / GET 缓存，避免上一角色残留请求弹出「需要管理员权限」
+        clearCsrfToken();
+        RequestCache.clear();
+
         // 更新状态（使用camelCase）
         this.userInfo = userInfoFromApi;
         this.isAuthenticated = true;
@@ -232,27 +239,14 @@ export const useAuthStore = defineStore('auth', {
         });
 
         // 根据用户角色和菜单显示情况跳转到合适的页面
-        // 注意：路由守卫会检查token，所以这里直接跳转即可
-        const defaultRoute = getDefaultRoute(userInfoFromApi);
-        // 确保跳转路径正确
-        if (defaultRoute) {
-          router.push(defaultRoute).catch(err => {
-            // 忽略重复导航的错误（Vue Router 的特性）
-            if (err.name !== 'NavigationDuplicated') {
-              // 生产环境可以记录到错误监控服务
-              console.error('路由跳转失败:', err);
-              // 尝试使用 window.location.href 作为备用方案
-              window.location.href = defaultRoute;
-            }
-          });
-        } else {
-          // 如果没有默认路由，跳转到仪表盘
-          router.push('/app/dashboard').catch(err => {
-            if (err.name !== 'NavigationDuplicated') {
-              window.location.href = '/app/dashboard';
-            }
-          });
-        }
+        // 使用 replace，避免历史栈残留 /app/admin/*，浏览器后退再撞权限守卫
+        const defaultRoute = getDefaultRoute(userInfoFromApi) || '/app/dashboard';
+        router.replace(defaultRoute).catch(err => {
+          if (err.name !== 'NavigationDuplicated') {
+            console.error('路由跳转失败:', err);
+            window.location.replace(defaultRoute);
+          }
+        });
         return true;
       } catch (err) {
         // 处理错误信息
@@ -323,11 +317,10 @@ export const useAuthStore = defineStore('auth', {
       this.userInfoFetchedAt = 0;
 
       // ====== 跳转到登录页 ======
-      // 重定向到登录页面
-      router.push('/login').catch(err => {
-        // 忽略重复导航的错误（路由错误已由路由系统处理）
+      // replace：避免退出后历史栈仍指向管理员页，下一角色登录成功后误入
+      router.replace('/login').catch(err => {
         if (err.name !== 'NavigationDuplicated') {
-          // 路由跳转失败已由路由系统处理，无需额外日志
+          window.location.replace('/login');
         }
       });
 

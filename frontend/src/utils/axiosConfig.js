@@ -20,6 +20,24 @@ import { createCacheInterceptor, DEFAULT_GET_CACHE_URL_PATTERNS } from './reques
 /** 401 刷新单飞锁，避免并发请求重复刷新令牌 */
 let refreshTokenPromise = null;
 
+function isCurrentUserAdmin() {
+  try {
+    const raw = sessionStorage.getItem('userInfo');
+    if (!raw) return false;
+    const info = JSON.parse(raw);
+    return info?.role === 'admin';
+  } catch {
+    return false;
+  }
+}
+
+/** 非管理员收到「需要管理员权限」多为角色切换后的残留请求，不应弹窗打扰 */
+function shouldSuppressAdminOnlyForbidden(detail) {
+  if (isCurrentUserAdmin()) return false;
+  const text = String(detail || '');
+  return text.includes('需要管理员权限') || text.includes('仅管理员');
+}
+
 let lastDevNetworkErrorAt = 0;
 const DEV_NETWORK_ERROR_COOLDOWN_MS = 4000;
 /** 开发环境 health 探测缓存，避免每个失败请求都探测 */
@@ -416,8 +434,12 @@ export const setupResponseInterceptor = () => {
           }
           error._handled = true;
         } else if (!suppressErrorMessage) {
-          ElMessage.error(String(errorDetail));
-          error._handled = true;
+          if (shouldSuppressAdminOnlyForbidden(errorDetail)) {
+            error._handled = true;
+          } else {
+            ElMessage.error(String(errorDetail));
+            error._handled = true;
+          }
         } else {
           error._handled = true;
         }

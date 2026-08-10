@@ -271,7 +271,7 @@ const CSRF_PROBE_ENDPOINTS = [
   '/api/v1/health',
   '/api/v1/users/me',
   '/api/v1/dashboard/stats',
-  '/api/v1/products/?page_size=1',
+  // 勿加入仅管理员接口（如 /users/stats）；角色切换后探测失败会误报「需要管理员权限」
 ];
 
 /**
