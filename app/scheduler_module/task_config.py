@@ -321,7 +321,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "cron_expression": "*/30 * * * *",
         "description": (
             "每隔30分钟执行一次，从 LeiYang DataManager 拉取报表"
-            "（默认国家维度；LEIYANG_API_FETCH_COUNTRY / UNIT / DAILY 控制）"
+            "（默认 atomic 国家+广告单元；LEIYANG_API_FETCH_ATOMIC / COUNTRY / UNIT / DAILY 控制）"
         ),
     },
 

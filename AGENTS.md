@@ -14,6 +14,8 @@
 | `sync-platform-sql.mdc` | 新增/变更表或表结构必须同步 `sql/platform.sql` |
 | `production-env.mdc` | 本地/生产环境与凭据；**未经当次明确同意禁止连接或操作生产** |
 | `client-no-deduct-label.mdc` | 客户登录后可见信息**禁止**出现「扣减后」等扣减字样 |
+| `client-api-ad-data.mdc` | 客户 API（`/client_data`）`data_type` / `dimension` 口径（day/all、默认 country、全量须显式 all） |
+| `ad-data-dimension.mdc` | 广告数据 Excel/上游入库维度与日汇总互斥（country 优先） |
 
 若规则文件存在但上下文中未带上，Agent **仍须按上表执行**；不得以「未加载规则」为由省略。
 

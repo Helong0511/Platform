@@ -3,11 +3,11 @@ LeiYang 上游广告数据拉取定时任务。
 
 功能说明：
 - 从 DataManager（datamanager.leiyanggame.com）拉取外部报表
-- 默认拉取国家维度（/reports/country），可通过环境变量开启广告位 / 聚合维度
+- 默认拉取 atomic（国家+广告单元交叉 /reports/atomic），可通过环境变量开启其它维度
 - 经字段映射与去重写入 ad_data 表
 
 鉴权方式：X-API-Key
-接口文档：tests/LeiYang API/对接API文档.pdf
+接口文档：tests/LeiYang API/对外API文档.pdf
 """
 from __future__ import annotations
 
@@ -17,14 +17,17 @@ from typing import Any
 from app.core.ad_data_metadata import (
     DATA_SOURCE_LEIYANG,
     REPORT_TYPE_COUNTRY,
+    REPORT_TYPE_CROSS,
     REPORT_TYPE_DAILY,
     REPORT_TYPE_UNIT,
 )
 from app.core.config import settings
+from app.core.country_code import has_concrete_country_code
 from app.scheduler_module.task_names import LEIYANG_API_TASK_NAME
 from app.scheduler_module.task_result_store import set_task_result
 from app.scheduler_module.task_utils import log_scheduled_task_skip, resolve_upstream_date_range
 from app.scheduler_module.upstream_fetch import (
+    LEIYANG_PATH_ATOMIC,
     LEIYANG_PATH_COUNTRY,
     LEIYANG_PATH_DAILY,
     LEIYANG_PATH_UNIT,
@@ -52,6 +55,12 @@ LEIYANG_COMMON_FIELD_MAPPING: dict[str, str] = {
     "ecpm_before_deduct": "ecpm_resolved",
 }
 
+LEIYANG_ATOMIC_FIELD_MAPPING: dict[str, str] = {
+    **LEIYANG_COMMON_FIELD_MAPPING,
+    "country_code": "country_resolved",
+    "ad_unit": "ad_unit_resolved",
+}
+
 LEIYANG_COUNTRY_FIELD_MAPPING: dict[str, str] = {
     **LEIYANG_COMMON_FIELD_MAPPING,
     "country_code": "country_resolved",
@@ -67,6 +76,14 @@ LEIYANG_UNIT_FIELD_MAPPING: dict[str, str] = {
 LEIYANG_DAILY_FIELD_MAPPING: dict[str, str] = dict(LEIYANG_COMMON_FIELD_MAPPING)
 
 _LEIYANG_REPORTS: list[dict[str, Any]] = [
+    {
+        "env_flag": "LEIYANG_API_FETCH_ATOMIC",
+        "path": LEIYANG_PATH_ATOMIC,
+        "label": "LeiYang atomic",
+        "mapping": LEIYANG_ATOMIC_FIELD_MAPPING,
+        "dimension": REPORT_TYPE_CROSS,
+        "report_type": REPORT_TYPE_CROSS,
+    },
     {
         "env_flag": "LEIYANG_API_FETCH_COUNTRY",
         "path": LEIYANG_PATH_COUNTRY,
@@ -194,6 +211,40 @@ def _resolve_leiyang_platform_label(item: dict[str, Any]) -> str:
     return ""
 
 
+def _shape_leiyang_atomic_rows(rows: list[Any]) -> list[Any]:
+    """交叉维度：只保留具体国家 + 广告单元，保证入库 report_type=cross。"""
+    kept: list[Any] = []
+    fallback_count = 0
+    dropped = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            dropped += 1
+            continue
+        ad_unit = str(row.get("ad_unit_resolved") or "").strip()
+        if not ad_unit:
+            ad_unit = _resolve_leiyang_platform_label(row)
+            if ad_unit:
+                row["ad_unit_resolved"] = ad_unit
+                fallback_count += 1
+        country = row.get("country_resolved")
+        if has_concrete_country_code(country) and str(row.get("ad_unit_resolved") or "").strip():
+            kept.append(row)
+        else:
+            dropped += 1
+    if fallback_count:
+        logger.info(
+            "LeiYang atomic 广告位兜底：%d 行使用 PlatformName/PlatformID 作为 ad_unit",
+            fallback_count,
+        )
+    if dropped:
+        logger.info(
+            "LeiYang atomic 交叉过滤：保留 %d 条，丢弃无国家或无广告单元 %d 条",
+            len(kept),
+            dropped,
+        )
+    return kept
+
+
 def _shape_leiyang_country_rows(rows: list[Any]) -> list[Any]:
     """国家维度：去掉广告位，整批按 country 入库。"""
     shaped: list[Any] = []
@@ -259,6 +310,8 @@ def make_leiyang_preprocess(dimension: str):
 
     def _transform(ad_data: list[Any]) -> list[Any]:
         rows = preprocess_leiyang_rows(ad_data)
+        if dimension == REPORT_TYPE_CROSS:
+            return _shape_leiyang_atomic_rows(rows)
         if dimension == REPORT_TYPE_COUNTRY:
             return _shape_leiyang_country_rows(rows)
         if dimension == REPORT_TYPE_UNIT:
@@ -295,7 +348,7 @@ async def leiyang_api_task(
     if not enabled_reports:
         skip_msg = (
             "跳过: LeiYang 未开启任何报表维度"
-            "（LEIYANG_API_FETCH_COUNTRY / UNIT / DAILY 均为 false）"
+            "（LEIYANG_API_FETCH_ATOMIC / COUNTRY / UNIT / DAILY 均为 false）"
         )
         logger.warning(skip_msg)
         set_task_result(LEIYANG_API_TASK_NAME, skip_msg)

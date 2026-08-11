@@ -1054,7 +1054,8 @@ async def fetch_flymobi_rows(
 
 
 # LeiYang DataManager API（datamanager.leiyanggame.com）
-# 文档：country / ad-unit / all，X-API-Key 鉴权，默认 60 次/分钟；单次查询最长 90 天
+# 文档：atomic(推荐,国家+广告位) / country / ad-unit / all；X-API-Key；默认 60 次/分钟；单次最长 90 天
+LEIYANG_PATH_ATOMIC = "/api/external/reports/atomic"
 LEIYANG_PATH_COUNTRY = "/api/external/reports/country"
 LEIYANG_PATH_UNIT = "/api/external/reports/ad-unit"
 LEIYANG_PATH_DAILY = "/api/external/reports/all"

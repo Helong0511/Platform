@@ -787,7 +787,11 @@ class Settings(BaseSettings):
     LEIYANG_API_USERNAME: str = os.getenv("LEIYANG_API_USERNAME", "")
     LEIYANG_API_PASSWORD: str = os.getenv("LEIYANG_API_PASSWORD", "")
     LEIYANG_API_PAGE_SIZE: int = int(os.getenv("LEIYANG_API_PAGE_SIZE", "1000"))
-    LEIYANG_API_FETCH_COUNTRY: bool = os.getenv("LEIYANG_API_FETCH_COUNTRY", "true").lower() in [
+    # 默认仅拉 atomic（国家+广告单元交叉）；其余维度默认关闭
+    LEIYANG_API_FETCH_ATOMIC: bool = os.getenv("LEIYANG_API_FETCH_ATOMIC", "true").lower() in [
+        "true", "1", "yes",
+    ]
+    LEIYANG_API_FETCH_COUNTRY: bool = os.getenv("LEIYANG_API_FETCH_COUNTRY", "false").lower() in [
         "true", "1", "yes",
     ]
     LEIYANG_API_FETCH_UNIT: bool = os.getenv("LEIYANG_API_FETCH_UNIT", "false").lower() in [
