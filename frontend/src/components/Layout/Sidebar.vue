@@ -12,9 +12,10 @@
     :active-text-color="primaryColor"
     :router="false"
     @select="handleMenuSelect"
+    @open="handleSubMenuOpen"
   >
     <!-- 数据仪表：客户登录且渠道关联了客户时不显示 -->
-    <el-menu-item v-if="!hasClientPublisher" index="/app/dashboard">
+    <el-menu-item v-if="!hasClientPublisher" index="/app/dashboard" @mouseenter="prefetchMenu('/app/dashboard')">
       <template #icon><PieChart /></template>
       <span>数据仪表</span>
     </el-menu-item>
@@ -29,6 +30,7 @@
         v-for="item in dailyReportMenuItems"
         :key="item.path"
         :index="item.path"
+        @mouseenter="prefetchMenu(item.path)"
       >
         <span>{{ item.label }}</span>
       </el-menu-item>
@@ -43,11 +45,11 @@
       </el-menu-item>
     </el-sub-menu>
 
-    <el-menu-item v-if="isAdmin" index="/app/admin/postback">
+    <el-menu-item v-if="isAdmin" index="/app/admin/postback" @mouseenter="prefetchMenu('/app/admin/postback')">
       <template #icon><Connection /></template>
       <span>Postback管理</span>
     </el-menu-item>
-    <el-menu-item v-if="isAdmin" index="/app/admin/postback-ip-whitelist">
+    <el-menu-item v-if="isAdmin" index="/app/admin/postback-ip-whitelist" @mouseenter="prefetchMenu('/app/admin/postback-ip-whitelist')">
       <template #icon><Lock /></template>
       <span>Postback IP白名单</span>
     </el-menu-item>
@@ -90,33 +92,33 @@
     </el-sub-menu>
 
     <!-- 客户用户可见的CPL菜单：如果客户登录但没有关联渠道，则不显示 -->
-    <el-menu-item v-if="!isAdmin && hasClientPublisher" index="/app/admin/offers">
+    <el-menu-item v-if="!isAdmin && hasClientPublisher" index="/app/admin/offers" @mouseenter="prefetchMenu('/app/admin/offers')">
       <template #icon><Box /></template>
       <span>Offer管理</span>
     </el-menu-item>
 
     <!-- 转化总览：如果客户登录但没有关联渠道，则不显示 -->
-    <el-menu-item v-if="isAdmin || hasClientPublisher" index="/app/admin/conversion-summary">
+    <el-menu-item v-if="isAdmin || hasClientPublisher" index="/app/admin/conversion-summary" @mouseenter="prefetchMenu('/app/admin/conversion-summary')">
       <template #icon><DataAnalysis /></template>
       <span>转化总览</span>
     </el-menu-item>
 
-    <el-menu-item v-if="isAdmin" index="/app/admin/short-links">
+    <el-menu-item v-if="isAdmin" index="/app/admin/short-links" @mouseenter="prefetchMenu('/app/admin/short-links')">
       <template #icon><Link /></template>
       <span>短链接管理</span>
     </el-menu-item>
 
-    <el-menu-item v-if="isAdmin" index="/app/admin/import-training">
+    <el-menu-item v-if="isAdmin" index="/app/admin/import-training" @mouseenter="prefetchMenu('/app/admin/import-training')">
       <template #icon><Upload /></template>
       <span>训练导入</span>
     </el-menu-item>
 
-    <el-menu-item v-if="isAdmin" index="/app/admin/users">
+    <el-menu-item v-if="isAdmin" index="/app/admin/users" @mouseenter="prefetchMenu('/app/admin/users')">
       <template #icon><UserFilled /></template>
       <span>用户管理</span>
     </el-menu-item>
 
-    <el-menu-item v-if="isAdmin" index="/app/admin/products">
+    <el-menu-item v-if="isAdmin" index="/app/admin/products" @mouseenter="prefetchMenu('/app/admin/products')">
       <template #icon><Box /></template>
       <span>产品管理</span>
     </el-menu-item>
@@ -178,12 +180,12 @@
       </el-menu-item>
     </el-sub-menu>
     
-    <el-menu-item v-if="!isAdmin" index="/app/client/user-management">
+    <el-menu-item v-if="!isAdmin" index="/app/client/user-management" @mouseenter="prefetchMenu('/app/client/user-management')">
       <template #icon><UserFilled /></template>
       <span>用户管理</span>
     </el-menu-item>
 
-    <el-menu-item v-if="!isAdmin && apiEnabled" index="/app/api-documentation">
+    <el-menu-item v-if="!isAdmin && apiEnabled" index="/app/api-documentation" @mouseenter="prefetchMenu('/app/api-documentation')">
       <template #icon><Link /></template>
       <span>API对接文档</span>
     </el-menu-item>
@@ -192,7 +194,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../../store';
 import { ElMenu, ElMenuItem, ElSubMenu, ElIcon } from 'element-plus';
@@ -235,10 +237,10 @@ onMounted(() => {
   bgDark.value = getCSSVariable('--bg-dark') || '#2c3e50';
   textWhite.value = getCSSVariable('--text-white') || '#ffffff';
   primaryColor.value = getCSSVariable('--primary-color') || '#409eff';
-  // 开发模式：登录后后台预加载各菜单页 chunk，减少 Vite 首次点击等待
-  if (import.meta.env.DEV) {
-    prefetchAllRoutes();
-  }
+  // 登录后空闲预加载各菜单页 chunk，减少首次点击等待（开发/生产均启用）
+  prefetchAllRoutes();
+  // 预热用户信息缓存，避免首次点菜单时在守卫里等待 /users/me
+  authStore.fetchUserInfo({ silent: true, force: false }).catch(() => {});
 });
 // 检查客户API是否启用（从userInfo中获取api_enabled字段）
 const apiEnabled = computed(() => {
@@ -246,8 +248,23 @@ const apiEnabled = computed(() => {
   return authStore.userInfo?.api_enabled === true;  // 客户用户且API已启用
 });
 
+// 点击后立即高亮目标菜单，不等待路由守卫与 chunk 加载完成
+const pendingMenuPath = ref('');
+
+watch(
+  () => route.path,
+  (path) => {
+    if (!pendingMenuPath.value || pendingMenuPath.value === path) {
+      pendingMenuPath.value = '';
+    }
+  }
+);
+
 // 获取当前激活的菜单项
 const activeMenu = computed(() => {
+  if (pendingMenuPath.value) {
+    return pendingMenuPath.value;
+  }
   const path = route.path;
   // 如果是广告数据相关路由，返回对应的菜单项
   if (path.startsWith('/app/ad-data')) {
@@ -261,24 +278,77 @@ const activeMenu = computed(() => {
 // 我们只需要处理菜单点击事件（用于移动端关闭抽屉）
 const emit = defineEmits(['menu-click']);
 
-const handleMenuSelect = (index) => {
-  // 手动处理导航（因为 router 属性可能不工作）
-  if (index && typeof index === 'string') {
-    try {
-      prefetchRoute(index);
-      router.push(index).catch(err => {
-        // 忽略重复导航错误
-        if (err.name !== 'NavigationDuplicated') {
-          // 静默处理导航错误
-        }
-      });
-    } catch (e) {
-      // 静默处理导航异常
-    }
+const prefetchMenu = (path) => {
+  if (path && typeof path === 'string') {
+    prefetchRoute(path);
   }
-  
-  // 触发菜单点击事件（用于移动端关闭抽屉）
+};
+
+const SUBMENU_PREFETCH_PATHS = {
+  '/app/ad-data': () => [
+    ...dailyReportMenuItems.map((item) => item.path),
+    '/app/ad-data/tb-search-data',
+    ...(isAdmin.value ? ['/app/admin/ad-data-rows', '/app/admin/ad-data-health'] : [])
+  ],
+  '/app/admin/cpl': () => [
+    '/app/admin/advertisers',
+    '/app/admin/publishers',
+    '/app/admin/offers',
+    '/app/admin/caps',
+    '/app/admin/discounts',
+    '/app/admin/conversion-deductions',
+    '/app/admin/deduction-stats',
+    '/app/admin/deduction-logs',
+    '/app/admin/affiliate-test',
+    '/app/admin/click-log'
+  ],
+  '/app/admin/system-services': () => [
+    '/app/admin/scheduled-tasks',
+    '/app/admin/gam-scheduler',
+    '/app/admin/audit-logs',
+    '/app/admin/third-party-reports',
+    '/app/admin/telegram-notification-config',
+    '/app/admin/cache',
+    '/app/admin/cloak-management',
+    '/app/admin/sessions',
+    '/app/admin/sensitive-path-probes',
+    '/app/admin/countries'
+  ],
+  '/app/admin/monitoring': () => [
+    '/app/admin/monitoring',
+    '/app/admin/monitoring/alerts',
+    '/app/admin/monitoring/trends',
+    '/app/admin/optimization'
+  ]
+};
+
+const handleSubMenuOpen = (index) => {
+  const resolver = SUBMENU_PREFETCH_PATHS[index];
+  if (resolver) {
+    resolver().forEach(prefetchMenu);
+  }
+};
+
+const handleMenuSelect = (index) => {
   emit('menu-click');
+
+  if (!index || typeof index !== 'string') {
+    return;
+  }
+  // 已在当前页：无需重复导航
+  if (index === route.path) {
+    return;
+  }
+
+  // 立即切换菜单高亮，避免「点了没反应」体感
+  pendingMenuPath.value = index;
+  prefetchMenu(index);
+  router.push(index).catch((err) => {
+    pendingMenuPath.value = '';
+    if (err.name !== 'NavigationDuplicated') {
+      // 静默处理导航错误
+    }
+  });
 };
 </script>
 

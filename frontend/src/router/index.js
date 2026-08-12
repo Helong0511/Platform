@@ -31,6 +31,11 @@ import { createRouter, createWebHistory } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { useAuthStore, validateAuthData, clearAuthData, getDefaultRoute } from '../store';
 import { logger } from '../utils/logger';
+import {
+  beginRouteNavigation,
+  endRouteNavigation,
+  resetRouteNavigation
+} from '../composables/useRouteLoading';
 import MainLayout from '../components/Layout/MainLayout.vue';
 
 /**
@@ -429,13 +434,36 @@ function hasPublisherAccess(authStore) {
     || authStore.userInfo?.client?.has_publisher === true;
 }
 
+/** 目标路由是否需要已登录用户信息 */
+function routeNeedsUserInfo(to) {
+  return !!(
+    to.meta.requiresAuth
+    || to.meta.requiresAdmin
+    || to.meta.requiresClientAccess
+    || to.meta.requiresPublisher
+    || to.meta.requiresAdDataAccess
+    || to.meta.requiresApiEnabled
+  );
+}
+
+/** 目标路由是否含权限敏感 meta（非 401 时 failClosed） */
+function routeNeedsRoleCheck(to) {
+  return !!(
+    to.meta.requiresAdmin
+    || to.meta.requiresClientAccess
+    || to.meta.requiresPublisher
+    || to.meta.requiresAdDataAccess
+    || to.meta.requiresApiEnabled
+  );
+}
+
 /**
- * 以服务端 /users/me 刷新本地 userInfo，失败则不得继续做角色判断。
- * @returns {Promise<boolean>} true=已同步；false=无法验证
+ * 单次导航内复用 fetchUserInfo 30s 缓存，避免菜单切换重复阻塞 /users/me。
+ * @returns {Promise<boolean>} true=已同步或可信任缓存；false=无法验证
  */
-async function syncUserInfoOrDeny(authStore) {
+async function ensureUserInfo(authStore, { failClosed = false } = {}) {
   try {
-    await authStore.fetchUserInfo({ silent: true, force: true, failClosed: true });
+    await authStore.fetchUserInfo({ silent: true, force: false, failClosed });
     return true;
   } catch {
     return false;
@@ -496,6 +524,11 @@ function roleSyncFailureFallback(from, to) {
  * // 3. 如果已登录，允许访问
  */
 router.beforeEach(async (to, from, next) => {
+  const trackNavigation = to.fullPath !== from.fullPath;
+  if (trackNavigation) {
+    beginRouteNavigation();
+  }
+
   try {
     const authStore = useAuthStore();
 
@@ -514,8 +547,8 @@ router.beforeEach(async (to, from, next) => {
       return next();
     }
 
-    // ====== 需要认证的路由：先校验本地状态，再向服务端确认会话 ======
-    if (to.meta.requiresAuth) {
+    // ====== 需要认证/角色的路由：单次 fetchUserInfo（复用缓存），不再每次 force 刷新 ======
+    if (routeNeedsUserInfo(to)) {
       const isValid = validateAuthData();
       if (!isValid) {
         clearAuthData();
@@ -530,9 +563,14 @@ router.beforeEach(async (to, from, next) => {
         return next('/login');
       }
 
-      try {
-        await authStore.fetchUserInfo({ silent: true, force: false });
-      } catch {
+      const synced = await ensureUserInfo(authStore, {
+        failClosed: routeNeedsRoleCheck(to)
+      });
+      if (!synced) {
+        if (routeNeedsRoleCheck(to)) {
+          ElMessage.warning('无法验证访问权限，请稍后重试');
+          return next(roleSyncFailureFallback(from, to));
+        }
         clearAuthData();
         authStore.isAuthenticated = false;
         return next('/login');
@@ -565,11 +603,6 @@ router.beforeEach(async (to, from, next) => {
         return next('/login');
       }
 
-      if (!(await syncUserInfoOrDeny(authStore))) {
-        ElMessage.warning('无法验证管理员权限，请稍后重试');
-        return next(roleSyncFailureFallback(from, to));
-      }
-
       // 检查管理员权限
       if (!authStore.isAdmin) {
         // 刚从登录页进入（角色切换）时静默重定向，避免「登录成功」后紧跟误报
@@ -588,10 +621,6 @@ router.beforeEach(async (to, from, next) => {
         ElMessage.warning('请先登录');
         return next('/login');
       }
-      if (!(await syncUserInfoOrDeny(authStore))) {
-        ElMessage.warning('无法验证访问权限，请稍后重试');
-        return next(roleSyncFailureFallback(from, to));
-      }
       if (authStore.isAdmin) {
         ElMessage.warning('该页面仅供客户访问');
         return next(roleGuardFallback(from, authStore));
@@ -604,10 +633,6 @@ router.beforeEach(async (to, from, next) => {
         clearAuthData();
         ElMessage.warning('请先登录');
         return next('/login');
-      }
-      if (!(await syncUserInfoOrDeny(authStore))) {
-        ElMessage.warning('无法验证访问权限，请稍后重试');
-        return next(roleSyncFailureFallback(from, to));
       }
       if (!hasPublisherAccess(authStore)) {
         ElMessage.warning('无权访问该页面');
@@ -622,10 +647,6 @@ router.beforeEach(async (to, from, next) => {
         ElMessage.warning('请先登录');
         return next('/login');
       }
-      if (!(await syncUserInfoOrDeny(authStore))) {
-        ElMessage.warning('无法验证访问权限，请稍后重试');
-        return next(roleSyncFailureFallback(from, to));
-      }
       if (!authStore.isAdmin && hasPublisherAccess(authStore)) {
         ElMessage.warning('无权访问广告数据页面');
         return next(getDefaultRoute(authStore.userInfo));
@@ -639,10 +660,6 @@ router.beforeEach(async (to, from, next) => {
         ElMessage.warning('请先登录');
         return next('/login');
       }
-      if (!(await syncUserInfoOrDeny(authStore))) {
-        ElMessage.warning('无法验证访问权限，请稍后重试');
-        return next(roleSyncFailureFallback(from, to));
-      }
       if (!authStore.isAdmin && !authStore.userInfo?.api_enabled) {
         ElMessage.warning('API 对接未开启，请联系管理员');
         return next(getDefaultRoute(authStore.userInfo));
@@ -655,6 +672,7 @@ router.beforeEach(async (to, from, next) => {
     // 路由守卫出错，跳转到登录页
     // logger已在文件顶部导入，直接使用
     logger.error('路由守卫错误:', error);
+    endRouteNavigation();
     clearAuthData();
     if (to.path !== '/login') {
       ElMessage.error('系统错误，请重新登录');
@@ -663,6 +681,15 @@ router.beforeEach(async (to, from, next) => {
       next();
     }
   }
+});
+
+router.afterEach(() => {
+  endRouteNavigation();
+});
+
+router.onError((error) => {
+  logger.error('路由加载错误:', error);
+  resetRouteNavigation();
 });
 
 /** Vue Router 实例，包含全部路由规则与导航守卫 */

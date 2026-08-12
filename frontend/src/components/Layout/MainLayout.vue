@@ -73,7 +73,12 @@
         </div>
       </el-header>
       <el-main class="main-content">
-        <router-view />
+        <div v-if="routeNavigating" class="route-progress-bar" aria-hidden="true"></div>
+        <router-view v-slot="{ Component, route: viewRoute }">
+          <keep-alive :max="20">
+            <component :is="Component" :key="viewRoute.fullPath" />
+          </keep-alive>
+        </router-view>
       </el-main>
     </el-container>
   </el-container>
@@ -84,6 +89,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../../store';
 import { useDevice } from '../../composables/useDevice';
+import { routeNavigating } from '../../composables/useRouteLoading';
 import { ElContainer, ElAside, ElHeader, ElMain, ElIcon, ElButton, ElTag, ElMessageBox, ElDrawer } from 'element-plus';
 import { Menu, User, SwitchButton, Close } from '@element-plus/icons-vue';
 import Sidebar from './Sidebar.vue';
@@ -321,6 +327,34 @@ const handleLogout = async () => {
   background-color: var(--bg-page);
   min-height: calc(100vh - var(--header-height));
   -webkit-overflow-scrolling: touch; /* iOS平滑滚动 */
+  position: relative;
+}
+
+.route-progress-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 10;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--primary-color) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: route-progress-slide 1s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes route-progress-slide {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 /* 平板端优化 */

@@ -29,8 +29,15 @@ export function prefetchRoute(path) {
   }
 }
 
-/** 登录后空闲时预加载所有已注册路由组件 */
+/** 登录后空闲时预加载所有已注册路由组件（全局仅调度一次） */
+let allRoutesPrefetchScheduled = false;
+
 export function prefetchAllRoutes() {
+  if (allRoutesPrefetchScheduled) {
+    return;
+  }
+  allRoutesPrefetchScheduled = true;
+
   const schedule =
     typeof requestIdleCallback === 'function'
       ? (fn) => requestIdleCallback(fn, { timeout: 8000 })
