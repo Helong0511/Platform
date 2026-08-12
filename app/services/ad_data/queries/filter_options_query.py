@@ -152,6 +152,20 @@ class FilterOptionsQuery:
         if dim == "ad_unit":
             return []
 
+        cache_key = build_ad_data_query_cache_key(
+            "countries_with_data",
+            current_user.id,
+            client_id,
+            product_id,
+            start_date,
+            end_date,
+            dim,
+            ad_unit,
+        )
+        cached = await get_cached(cache_key, key_prefix="ad_data")
+        if isinstance(cached, dict) and "data" in cached:
+            return cached.get("data") or []
+
         use_assignment_table = await check_use_assignment_table(self.db)
 
         query = select(func.distinct(AdData.country_code), CountryInfo.country_name_zh).select_from(AdData)
@@ -192,6 +206,12 @@ class FilterOptionsQuery:
             countries_list.append({"code": country_code, "name_zh": display_name})
 
         countries_list.sort(key=lambda x: x["name_zh"])
+        await set_cached(
+            cache_key,
+            {"data": countries_list, "count": len(countries_list)},
+            ttl=300,
+            key_prefix="ad_data",
+        )
         return countries_list
 
     async def fetch_ad_units(
@@ -207,6 +227,20 @@ class FilterOptionsQuery:
         dim = normalize_dimension(dimension)
         if dim == "country":
             return []
+
+        cache_key = build_ad_data_query_cache_key(
+            "ad_units_with_data",
+            current_user.id,
+            client_id,
+            product_id,
+            start_date,
+            end_date,
+            dim,
+            country_code,
+        )
+        cached = await get_cached(cache_key, key_prefix="ad_data")
+        if isinstance(cached, dict) and "data" in cached:
+            return cached.get("data") or []
 
         use_assignment_table = await check_use_assignment_table(self.db)
 
@@ -236,6 +270,12 @@ class FilterOptionsQuery:
             if unit
         ]
         ad_units_list.sort(key=lambda x: x["label"])
+        await set_cached(
+            cache_key,
+            {"data": ad_units_list, "count": len(ad_units_list)},
+            ttl=300,
+            key_prefix="ad_data",
+        )
         return ad_units_list
 
     async def fetch_products(
@@ -323,6 +363,36 @@ class FilterOptionsQuery:
         current_user: User,
         client_id: Optional[str | int] = None,
     ) -> Dict[str, Optional[str]]:
+        cache_key = build_ad_data_query_cache_key(
+            "date_range",
+            current_user.id,
+            client_id,
+        )
+        cached = await get_cached(cache_key, key_prefix="ad_data")
+        if isinstance(cached, dict) and "min_date" in cached and "max_date" in cached:
+            return cached
+
+        # 管理员未指定客户时，日期范围只取有效产品对应的广告数据；
+        # 分配历史只影响归属，不影响数据是否存在，避免为每条 ad_data 解析 assignment。
+        if is_admin(current_user) and not client_id:
+            query = (
+                select(func.min(AdData.date).label("min_date"), func.max(AdData.date).label("max_date"))
+                .select_from(AdData)
+                .join(Product, AdData.product_id == Product.id)
+                .where(Product.is_active == True)
+            )
+            row = (await self.db.execute(query)).first()
+            result = (
+                {
+                    "min_date": row.min_date.isoformat() if row and row.min_date else None,
+                    "max_date": row.max_date.isoformat() if row and row.max_date else None,
+                }
+                if row
+                else {"min_date": None, "max_date": None}
+            )
+            await set_cached(cache_key, result, ttl=300, key_prefix="ad_data")
+            return result
+
         use_assignment_table = await check_use_assignment_table(self.db)
 
         query = select(
@@ -344,7 +414,7 @@ class FilterOptionsQuery:
 
         row = (await self.db.execute(query)).first()
         if row and row.min_date and row.max_date:
-            return {
+            result = {
                 "min_date": row.min_date.isoformat()
                 if hasattr(row.min_date, "isoformat")
                 else str(row.min_date),
@@ -352,4 +422,8 @@ class FilterOptionsQuery:
                 if hasattr(row.max_date, "isoformat")
                 else str(row.max_date),
             }
-        return {"min_date": None, "max_date": None}
+            await set_cached(cache_key, result, ttl=300, key_prefix="ad_data")
+            return result
+        result = {"min_date": None, "max_date": None}
+        await set_cached(cache_key, result, ttl=300, key_prefix="ad_data")
+        return result

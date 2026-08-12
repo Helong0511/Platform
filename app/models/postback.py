@@ -197,7 +197,7 @@ class ProductNotificationConfig(Base):
     __tablename__ = "product_notification_configs"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='通知配置ID')
-    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False, unique=True, index=True, comment='产品ID')
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False, unique=True, comment='产品ID')
     notification_enabled = Column(Boolean, default=True, comment='是否启用通知')
     notify_on_conversion = Column(Boolean, default=True, comment='转化时通知')
     notify_on_high_value = Column(Boolean, default=False, comment='高价值转化通知')
@@ -215,7 +215,6 @@ class ProductNotificationConfig(Base):
     product = relationship("Product", foreign_keys=[product_id])
 
     __table_args__ = (
-        Index("idx_product_notification_config_product", "product_id"),
         Index("idx_product_notification_config_enabled", "notification_enabled"),
     )
 
@@ -386,7 +385,7 @@ class ShortLink(Base):
     __tablename__ = "short_links"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='短链接 ID')
-    short_code = Column(String(20), unique=True, nullable=False, index=True, comment='短链接代码（唯一）')
+    short_code = Column(String(20), unique=True, nullable=False, comment='短链接代码（唯一）')
     original_url = Column(Text, nullable=False, comment='原始 URL')
     title = Column(String(200), nullable=True, comment='短链接标题（可选）')
     description = Column(Text, nullable=True, comment='短链接描述（可选）')
@@ -413,7 +412,6 @@ class ShortLink(Base):
     channel = relationship("Publisher", foreign_keys=[channel_id])
 
     __table_args__ = (
-        Index("idx_short_link_code", "short_code"),
         Index("idx_short_link_created_by", "created_by"),
         Index("idx_short_link_offer_id", "offer_id"),
         Index("idx_short_link_channel_id", "channel_id"),

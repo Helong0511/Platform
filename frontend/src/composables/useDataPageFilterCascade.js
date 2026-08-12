@@ -454,12 +454,14 @@ export function useDataPageFilterCascade({
       return;
     }
 
-    if (loadCountries) {
-      await fetchFilterCountries(clientId, productId);
-    }
-    if (loadAdUnits) {
-      await fetchFilterAdUnits(clientId, productId, getCountryFilterParam());
-    }
+    // 普通维度下两个下拉选项都只依赖当前客户/产品和日期范围，彼此没有级联依赖。
+    // 并行请求可将首屏等待时间从两次接口耗时之和降为较慢接口的耗时。
+    await Promise.all([
+      loadCountries ? fetchFilterCountries(clientId, productId) : Promise.resolve(),
+      loadAdUnits
+        ? fetchFilterAdUnits(clientId, productId, getCountryFilterParam())
+        : Promise.resolve()
+    ]);
   };
 
   const pruneFieldSelection = (field, options, getOptionValue) => {

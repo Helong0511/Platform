@@ -3,6 +3,7 @@
 
 薄编排层：CRUD 命令 + 查询模块委托。
 """
+import asyncio
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import date
 
@@ -14,6 +15,7 @@ from app.models.models import (
 from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.database import AsyncSessionLocal
 
 
 def join_country_info_for_ad_data(query):
@@ -202,35 +204,25 @@ class AdDataService(BaseService[AdData]):
     ) -> Tuple[List[Dict[str, Any]], int, Optional[Dict[str, Any]]]:
         from app.services.ad_data.queries.list_query import AdDataListQuery
 
-        list_query = AdDataListQuery(self.db)
-        rows, total = await list_query.fetch(
-            current_user=current_user,
-            page=page,
-            page_size=page_size,
-            start_date=start_date,
-            end_date=end_date,
-            client_id=client_id,
-            product_id=product_id,
-            country_code=country_code,
-            ad_unit=ad_unit,
-            dimension=dimension,
-            data_source=data_source,
-            upstream_account=upstream_account,
-            report_type=report_type,
-            sort_by=sort_by,
-            sort_order=sort_order,
-        )
-        grand_total = await list_query.fetch_grand_totals(
-            current_user=current_user,
-            start_date=start_date,
-            end_date=end_date,
-            client_id=client_id,
-            product_id=product_id,
-            country_code=country_code,
-            ad_unit=ad_unit,
-            dimension=dimension,
-            data_source=data_source,
-            upstream_account=upstream_account,
-            report_type=report_type,
-        )
+        async def load_list():
+            async with AsyncSessionLocal() as session:
+                return await AdDataListQuery(session).fetch(
+                    current_user=current_user, page=page, page_size=page_size,
+                    start_date=start_date, end_date=end_date, client_id=client_id,
+                    product_id=product_id, country_code=country_code, ad_unit=ad_unit,
+                    dimension=dimension, data_source=data_source,
+                    upstream_account=upstream_account, report_type=report_type,
+                    sort_by=sort_by, sort_order=sort_order,
+                )
+
+        async def load_grand_total():
+            async with AsyncSessionLocal() as session:
+                return await AdDataListQuery(session).fetch_grand_totals(
+                    current_user=current_user, start_date=start_date, end_date=end_date,
+                    client_id=client_id, product_id=product_id, country_code=country_code,
+                    ad_unit=ad_unit, dimension=dimension, data_source=data_source,
+                    upstream_account=upstream_account, report_type=report_type,
+                )
+
+        (rows, total), grand_total = await asyncio.gather(load_list(), load_grand_total())
         return rows, total, grand_total

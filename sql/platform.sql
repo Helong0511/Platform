@@ -1,10 +1,10 @@
 /*
  Navicat Premium Dump SQL
 
- Source Server         : 广告平台
+ Source Server         : Platform schema baseline
  Source Server Type    : MySQL
  Source Server Version : 80044 (8.0.44-0ubuntu0.22.04.2)
- Source Host           : 43.156.101.243:3306
+ Source Host           : omitted (environment-specific)
  Source Schema         : platform
 
  Target Server Type    : MySQL
@@ -57,10 +57,10 @@ CREATE TABLE IF NOT EXISTS `ad_data`  (
   `is_deducted` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否已被扣减',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uq_ad_data_identity`(`date` ASC, `product_id` ASC, `country_code` ASC, `ad_unit` ASC, `data_source` ASC, `report_type` ASC, `upstream_account` ASC) USING BTREE,
-  INDEX `idx_ad_data_product`(`product_id` ASC) USING BTREE COMMENT '外键 fk_ad_data_product 依赖，不可删',
   INDEX `idx_ad_data_country_code`(`country_code` ASC) USING BTREE,
   INDEX `idx_ad_data_source_type`(`data_source` ASC, `report_type` ASC) USING BTREE,
   INDEX `idx_ad_data_date_report_type`(`date` ASC, `report_type` ASC, `product_id` ASC) USING BTREE COMMENT '日汇总互斥选源：日期+报表类型',
+  INDEX `idx_ad_data_product_date_id`(`product_id` ASC, `date` ASC, `id` ASC) USING BTREE COMMENT '客户范围/产品+日期稳定分页',
   CONSTRAINT `fk_ad_data_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '广告数据表' ROW_FORMAT = DYNAMIC;
 
@@ -848,7 +848,6 @@ CREATE TABLE IF NOT EXISTS `product_assignments`  (
   `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '创建时间',
   `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
-  INDEX `idx_product_assignments_product`(`product_id` ASC) USING BTREE,
   INDEX `idx_product_assignments_client`(`client_id` ASC) USING BTREE,
   INDEX `idx_product_assignments_date`(`product_id` ASC, `start_date` ASC, `end_date` ASC) USING BTREE,
   INDEX `idx_product_assignments_active`(`product_id` ASC, `end_date` ASC) USING BTREE,
@@ -876,7 +875,6 @@ CREATE TABLE IF NOT EXISTS `product_notification_configs`  (
   `updated_at` DATETIME NULL DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `ix_product_notification_configs_product_id`(`product_id` ASC) USING BTREE,
-  INDEX `idx_product_notification_config_product`(`product_id` ASC) USING BTREE,
   INDEX `idx_product_notification_config_enabled`(`notification_enabled` ASC) USING BTREE,
   CONSTRAINT `product_notification_configs_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '产品通知配置表' ROW_FORMAT = Dynamic;
@@ -959,7 +957,6 @@ CREATE TABLE IF NOT EXISTS `scheduled_tasks`  (
   `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uq_scheduled_tasks_task_name`(`task_name` ASC) USING BTREE,
-  INDEX `idx_scheduled_task_name`(`task_name` ASC) USING BTREE,
   INDEX `idx_scheduled_task_is_running`(`is_running` ASC) USING BTREE,
   INDEX `idx_scheduled_task_is_active`(`is_active` ASC) USING BTREE,
   INDEX `idx_scheduled_task_status`(`status` ASC) USING BTREE,
@@ -997,7 +994,6 @@ CREATE TABLE IF NOT EXISTS `short_links`  (
   INDEX `idx_short_link_channel_id`(`channel_id` ASC) USING BTREE,
   INDEX `idx_short_links_created_by_active_created`(`created_by` ASC, `is_active` ASC, `created_at` DESC) USING BTREE,
   INDEX `idx_short_links_offer_channel`(`offer_id` ASC, `channel_id` ASC) USING BTREE,
-  INDEX `idx_short_link_code`(`short_code` ASC) USING BTREE,
   FULLTEXT INDEX `ft_title`(`title`),
   FULLTEXT INDEX `ft_description`(`description`),
   CONSTRAINT `short_links_ibfk_1` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
@@ -1521,15 +1517,8 @@ END
 ;;
 DELIMITER ;
 
-INSERT INTO `platform`.`users` (`id`, `username`, `hashed_password`, `full_name`, `email`, `role`, `is_active`, `login_restricted`, `login_message`, `created_at`, `updated_at`) VALUES 
--- yinghexinxi123
-(1, 'admin', '$2b$12$vyYyJeGeO78kuuSnDzGxVOEBtROi.Zjgo5E8/9iVMQl3yFxQk7piu', '管理员', 'admin@btfrx.online', 'admin', 1, 0, NULL, '2027-01-01 00:00:00.000000', '2027-01-01 00:00:00.000000'),
--- data123456
-(2, 'data', '$2b$12$vmprhJnHRorjT0ZdyZDO5uHfQ.pCHmOkaGf13SpqM32BhOIbRggA6', 'Data', 'data@btfrx.online', 'admin', 1, 0, NULL, '2027-01-01 00:00:00.000000', '2027-01-01 00:00:00.000000');
-
-INSERT INTO `platform`.`clients` 
-(`id`, `user_id`, `company_name`, `contact_person`, `phone`, `address`, `allowed_ips`, `key`, `is_active`, `api_enabled`, `password_change_enabled`, `chat_id`, `notify_url`, `created_at`, `updated_at`) VALUES 
-(1, 2, '临时挂靠', NULL, NULL, NULL, NULL, 'd09b252f-2326-4d78-bfa2-3d6f782dbc6d', 1, 0, 0, NULL, NULL, '2027-01-01 00:00:00.000000', '2027-01-01 00:00:00.000000');
+-- 管理员账号由应用首次启动时根据 FIRST_SUPERUSER / FIRST_SUPERUSER_PASSWORD 创建。
+-- 客户及 API key 必须通过平台业务流程生成，禁止在全量结构文件中固化凭据。
 
 INSERT INTO `countries` VALUES 
 (1, 'AA', 'AAA', '000', '未知区域', 'Unknown', '未知区域', 'Unknown', 1, '全球', '任意地区'),

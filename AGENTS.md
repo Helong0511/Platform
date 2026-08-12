@@ -12,6 +12,7 @@
 | `version-changelog.mdc` | 修问题 / 改行为必须写入 `平台版本迭代报告.md` 的 5.1 |
 | `sync-related-changes.mdc` | 改一处必须排查并同步所有关联处 |
 | `sync-platform-sql.mdc` | 新增/变更表或表结构必须同步 `sql/platform.sql` |
+| `local-db-upgrade-sql.mdc` | 测库只连本地 Windows；改表结构必须出升迁 SQL 并本地验证 |
 | `production-env.mdc` | 本地/生产环境与凭据；**未经当次明确同意禁止连接或操作生产** |
 | `client-no-deduct-label.mdc` | 客户登录后可见信息**禁止**出现「扣减后」等扣减字样 |
 | `client-api-ad-data.mdc` | 客户 API（`/client_data`）`data_type` / `dimension` 口径（day/all、默认 country、全量须显式 all） |
@@ -26,7 +27,7 @@
 1. 回复是否为简体中文？
 2. 关联的前后端 / 配置 / 测试是否已同步或已说明不同步原因？
 3. 是否已追加 `平台版本迭代报告.md` → 5.1？
-4. 若新增/变更了表或表结构，是否已同步 `sql/platform.sql`？
+4. 若新增/变更了表或表结构，是否已同步 `sql/platform.sql`，并已出升迁 SQL、在本地 Windows 库验证？
 5. 是否误连/误操作生产（须有当次明确同意），或在可提交文件中泄露密码？
 6. 客户可见文案/API/导出是否仍含「扣减后」「减扣后」「(扣)」等字样（须无）？
 

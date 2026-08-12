@@ -154,11 +154,11 @@ class AdData(Base):
                         onupdate=get_app_now_naive, comment='更新时间')
 
     __table_args__ = (
-        Index("idx_ad_data_product", "product_id"),
         Index("idx_ad_data_country_code", "country_code"),
         Index("idx_ad_data_source_type", "data_source", "report_type"),
         # 日汇总互斥选源子查询：按日期范围 + report_type 取 (product_id, date)
         Index("idx_ad_data_date_report_type", "date", "report_type", "product_id"),
+        Index("idx_ad_data_product_date_id", "product_id", "date", "id"),
         UniqueConstraint(
             "date", "product_id", "country_code", "ad_unit",
             "data_source", "report_type", "upstream_account",
@@ -279,7 +279,6 @@ class ProductAssignment(Base):
     client = relationship("Client")
 
     __table_args__ = (
-        Index("idx_product_assignments_product", "product_id"),
         Index("idx_product_assignments_client", "client_id"),
         Index("idx_product_assignments_start_date", "start_date"),
         Index("idx_product_assignments_end_date", "end_date"),

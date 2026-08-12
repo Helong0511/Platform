@@ -21,7 +21,7 @@ class ScheduledTask(Base):
     __tablename__ = "scheduled_tasks"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='定时任务ID')
-    task_name = Column(String(100), nullable=False, unique=True, index=True, comment='任务名称（唯一）')
+    task_name = Column(String(100), nullable=False, unique=True, comment='任务名称（唯一）')
     last_run_time = Column(DateTime, nullable=True, comment='上次开始执行时间')
     last_finish_time = Column(DateTime, nullable=True, comment='上次完成执行时间')
     is_running = Column(Boolean, default=False, comment='是否正在执行')
@@ -46,7 +46,6 @@ class ScheduledTask(Base):
                         onupdate=get_app_now_naive, comment='更新时间')
 
     __table_args__ = (
-        Index("idx_scheduled_task_name", "task_name"),
         Index("idx_scheduled_task_is_running", "is_running"),
         Index("idx_scheduled_task_is_active", "is_active"),
         Index("idx_scheduled_task_status", "status"),
