@@ -51,6 +51,7 @@ from app.core.auth_response import build_token_json_response, clear_auth_cookies
 from app.core.auth_user_payload import build_auth_user_payload
 from app.core.async_orm import get_first_loaded_collection_item
 from app.core.config import settings
+from app.core.csrf import issue_csrf_token_for_user
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.database import get_db
@@ -343,12 +344,14 @@ async def login(
     except Exception as e:
         logger.warning(f"记录登录日志失败: {e}")
 
-    return build_token_json_response(
+    response = build_token_json_response(
         access_token=access_token,
         refresh_token=refresh_token,
         user=user_payload,
         message="登录成功",
     )
+    await issue_csrf_token_for_user(request, response, user.id)
+    return response
 
 
 @router.post("/logout", summary="用户退出登录")

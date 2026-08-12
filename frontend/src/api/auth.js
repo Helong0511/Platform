@@ -8,6 +8,8 @@
 import axios from 'axios';
 import { request } from '../utils/api';
 import { parseAuthResponseData } from '../utils/authResponse';
+import { extractAndSaveCsrfToken } from '../utils/csrfToken';
+import { withCsrfMutate, CSRF_REFRESH_USERS } from '../utils/csrfMutate';
 
 /**
  * OAuth2 密码模式登录（application/x-www-form-urlencoded）
@@ -38,6 +40,8 @@ export const loginOAuth2 = async (username, password, options = {}) => {
     }
   );
 
+  extractAndSaveCsrfToken(response);
+
   const payload = parseAuthResponseData(response.data);
   if (!payload.user) {
     throw new Error('登录响应数据格式错误：缺少用户信息');
@@ -65,12 +69,15 @@ export const login = async (username, password) => {
 };
 
 /**
- * 用户登出
+ * 用户登出（写操作前刷新 CSRF，避免 session 切换后令牌与 Redis 不一致）
  * @returns {Promise<Object>} 登出响应
  */
 export const logout = async () => {
-  return request({
-    url: '/api/v1/auth/logout',
-    method: 'post'
-  }, { returnDataOnly: true, silent: true });
+  return withCsrfMutate(
+    () => request({
+      url: '/api/v1/auth/logout',
+      method: 'post'
+    }, { returnDataOnly: true, silent: true }),
+    CSRF_REFRESH_USERS
+  );
 };

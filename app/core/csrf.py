@@ -331,14 +331,14 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.app = app
     
-    async def _generate_session_id(self, request: Request) -> str:
+    async def _generate_session_id(self, request: Request, user_id_override: Optional[int] = None) -> str:
         """
         生成会话标识
         使用 IP:hash(User-Agent 核心部分) 或 user_id:IP:hash(User-Agent 核心部分)
-        改进：使用 User-Agent 的核心部分（浏览器类型 + 版本 + 操作系统），避免完整 UA 的哈希值不一致
+        user_id_override：登录/刷新响应下发 CSRF 时使用（此时请求 Cookie 可能尚无新 access_token）
         """
         client_ip = get_client_ip(request)
-        user_id = extract_user_id_from_token(request)
+        user_id = user_id_override if user_id_override is not None else extract_user_id_from_token(request)
         
         # 获取完整的 User-Agent
         full_user_agent = request.headers.get("User-Agent", "")
@@ -866,3 +866,24 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             # 其他异常，记录日志并重新抛出
             logger.error(f"CSRF验证过程中发生未预期的错误: {method} {path}，错误: {str(e)}", exc_info=True)
             raise
+
+
+_csrf_helper: Optional[CSRFMiddleware] = None
+
+
+def _get_csrf_helper() -> CSRFMiddleware:
+    global _csrf_helper
+    if _csrf_helper is None:
+        _csrf_helper = CSRFMiddleware(app=None)  # type: ignore[arg-type]
+    return _csrf_helper
+
+
+async def issue_csrf_token_for_user(request: Request, response: Response, user_id: int) -> None:
+    """
+    登录/刷新成功后为已认证用户签发 CSRF（session_id 含 user_id）。
+    解决登录前匿名 session 与登录后 session 不一致导致 logout 等写操作 CSRF 失败。
+    """
+    helper = _get_csrf_helper()
+    session_id = await helper._generate_session_id(request, user_id_override=user_id)
+    csrf_token = await helper._get_or_create_csrf_token(session_id, request)
+    await helper._add_csrf_token_to_response(response, csrf_token, request)

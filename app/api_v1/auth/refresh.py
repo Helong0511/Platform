@@ -29,6 +29,7 @@ from app.core.auth_response import (
 )
 from app.core.auth_user_payload import build_auth_user_payload
 from app.core.config import settings
+from app.core.csrf import issue_csrf_token_for_user
 from app.core.audit_log import log_user_action
 from app.core.database import get_db
 from app.core.errors import ErrorCode
@@ -181,12 +182,14 @@ async def refresh_token(
             request=request,
             details={"action": "refresh_token"},
         )
-        return build_token_json_response(
+        response = build_token_json_response(
             access_token=new_access_token,
             refresh_token=new_refresh_token,
             user=user_payload,
             message="令牌刷新成功",
         )
+        await issue_csrf_token_for_user(request, response, user.id)
+        return response
 
     except HTTPException as exc:
         await db.rollback()
