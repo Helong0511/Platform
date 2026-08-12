@@ -13,7 +13,6 @@ const {
   updateDeductionConfig,
   deleteDeductionConfig
 } = createCrudApi('/api/v1/conversion-deductions', {
-  listTrailingSlash: false,
   csrfOnMutate: true,
   include: ['list', 'create', 'update', 'delete'],
   methodNames: {

@@ -14,6 +14,25 @@ import {
 import { getAdvertisers } from '../api/advertiser';
 import { logger } from '../utils/logger';
 
+function isAuthHandled(error) {
+  const status = error?.response?.status;
+  return status === 401 || (status === 403 && error?._handled);
+}
+
+function buildListParams(pagination, searchForm) {
+  const params = {
+    page: pagination.page,
+    page_size: pagination.page_size,
+  };
+  if (searchForm.keyword) params.keyword = searchForm.keyword;
+  if (searchForm.level) params.level = searchForm.level;
+  if (searchForm.advertiser_id != null) params.advertiser_id = searchForm.advertiser_id;
+  if (searchForm.is_active !== null && searchForm.is_active !== undefined) {
+    params.is_active = searchForm.is_active;
+  }
+  return params;
+}
+
 /**
  * 转化扣减配置列表、筛选、分页与批量操作。
  */
@@ -62,6 +81,7 @@ export function useConversionDeductionList() {
 
       advertiserList.value = allAdvertisers;
     } catch (error) {
+      if (isAuthHandled(error)) return;
       logger.error('加载广告主列表失败:', error);
       ElMessage.error(`加载广告主列表失败：${error.message || '未知错误'}`);
     }
@@ -70,15 +90,11 @@ export function useConversionDeductionList() {
   const fetchData = async () => {
     loading.value = true;
     try {
-      const params = {
-        page: pagination.page,
-        page_size: pagination.page_size,
-        ...searchForm,
-      };
-      const response = await getDeductionConfigs(params);
+      const response = await getDeductionConfigs(buildListParams(pagination, searchForm));
       tableData.value = response.data || [];
       pagination.total = response.total || 0;
     } catch (error) {
+      if (isAuthHandled(error)) return;
       logger.error('获取配置列表失败:', error);
       ElMessage.error(`获取配置列表失败：${error.message || '未知错误'}`);
     } finally {
@@ -105,6 +121,7 @@ export function useConversionDeductionList() {
       ElMessage.success('状态更新成功');
     } catch (error) {
       row.is_active = !row.is_active;
+      if (isAuthHandled(error)) return;
       logger.error('状态更新失败:', error);
       ElMessage.error(`状态更新失败：${error.message || '未知错误'}`);
     }
@@ -135,6 +152,7 @@ export function useConversionDeductionList() {
       await fetchData();
     } catch (error) {
       if (error !== 'cancel') {
+        if (isAuthHandled(error)) return;
         logger.error(`${successLabel}失败:`, error);
         ElMessage.error(`${successLabel}失败：${error.message || '未知错误'}`);
       }
@@ -184,6 +202,7 @@ export function useConversionDeductionList() {
       await fetchData();
     } catch (error) {
       if (error !== 'cancel') {
+        if (isAuthHandled(error)) return;
         logger.error('删除失败:', error);
         ElMessage.error(`删除失败：${error.message || '未知错误'}`);
       }
@@ -206,6 +225,7 @@ export function useConversionDeductionList() {
       window.open(url, '_blank');
       ElMessage.success('导出请求已发送，请稍候...');
     } catch (error) {
+      if (isAuthHandled(error)) return;
       logger.error('导出失败:', error);
       ElMessage.error(`导出失败：${error.message || '未知错误'}`);
     } finally {
