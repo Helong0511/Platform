@@ -95,15 +95,24 @@ class PostbackLoggerFilter(logging.Filter):
 
 
 class SensitiveDataFilter(logging.Filter):
-    """对日志消息中的常见敏感键值做轻量打码（不解析结构化 extras）。"""
+    """对日志消息中的常见敏感键值 / Bearer / URL 参数做打码。"""
 
     _KEY_VALUE = re.compile(
         r"(?i)\b(password|passwd|pwd|token|access_token|refresh_token|"
-        r"authorization|secret|api[_-]?key|client_secret)\b(\s*[:=]\s*)([^\s,&;]+)"
+        r"authorization|secret|api[_-]?key|client_secret|private_key|"
+        r"rsa_private|jwt)\b(\s*[:=]\s*)([^\s,&;]+)"
     )
     _JSON_VALUE = re.compile(
         r'(?i)("(?:password|passwd|pwd|token|access_token|refresh_token|'
-        r'authorization|secret|api[_-]?key|client_secret)"\s*:\s*")([^"]*)(")'
+        r'authorization|secret|api[_-]?key|client_secret|private_key)"\s*:\s*")([^"]*)(")'
+    )
+    _BEARER = re.compile(r"(?i)(Bearer\s+)([A-Za-z0-9\-._~+/]+=*)")
+    _URL_QUERY = re.compile(
+        r"(?i)([?&](?:password|passwd|pwd|token|access_token|refresh_token|"
+        r"authorization|secret|api[_-]?key|client_secret)=)([^&#\s]+)"
+    )
+    _JWT_BLOB = re.compile(
+        r"\beyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\b"
     )
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -113,6 +122,9 @@ class SensitiveDataFilter(logging.Filter):
             return True
         redacted = self._KEY_VALUE.sub(r"\1\2***", msg)
         redacted = self._JSON_VALUE.sub(r"\1***\3", redacted)
+        redacted = self._BEARER.sub(r"\1***", redacted)
+        redacted = self._URL_QUERY.sub(r"\1***", redacted)
+        redacted = self._JWT_BLOB.sub("***JWT***", redacted)
         if redacted != msg:
             record.msg = redacted
             record.args = ()

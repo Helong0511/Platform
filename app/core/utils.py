@@ -19,6 +19,7 @@
 """
 import ipaddress
 import math
+from decimal import Decimal, ROUND_DOWN
 import uuid
 import pytz
 from datetime import date, datetime
@@ -60,50 +61,66 @@ def get_device_type(request: Request) -> str:
 
 def get_client_ip(request: Request) -> str:
     """
-    从请求中获取客户端IP地址
-    支持代理情况（X-Forwarded-For、X-Real-IP头）
-    
-    优先级：
-    1. 可信代理覆盖写入的 X-Real-IP
-    2. 可信代理覆盖写入的 X-Forwarded-For
-    3. request.client.host（直接连接）
-    
-    Args:
-        request: FastAPI请求对象
-        
-    Returns:
-        客户端IP地址字符串，如果无法获取则返回"unknown"
+    获取客户端真实 IP（防伪造）。
+
+    规则：
+    1. 默认只信任 ``request.client.host``（直连对端），**绝不盲目**信任
+       X-Forwarded-For / X-Real-IP。
+    2. 仅当 ``TRUST_PROXY_HEADERS=true`` 且直连对端属于
+       ``TRUSTED_PROXIES`` / ``TRUSTED_PROXY_IPS`` 时，才解析代理头。
+    3. 对 X-Forwarded-For 从右向左跳过可信代理，取第一个非可信 IP
+       （即「最右侧可信链之外的真实客户端」）。
+    4. 优先使用 Cloudflare 的 CF-Connecting-IP（由边缘节点覆盖写入）。
     """
     try:
         from app.core.config import settings
 
         peer_ip = request.client.host if request.client else ""
-
-        # ASGI Server 必须关闭自身 proxy_headers 解析，保留真实直连对端。
-        # 仅当直连对端在可信代理白名单时，读取由 Nginx 覆盖写入的真实 IP 头。
         get_ips = getattr(settings, "get_trusted_proxy_ips", None)
         trusted_proxies = set(get_ips() if callable(get_ips) else [])
-        if settings.TRUST_PROXY_HEADERS and peer_ip in trusted_proxies:
-            candidates = [
-                request.headers.get("CF-Connecting-IP"),
-                request.headers.get("X-Real-IP"),
-                # Nginx 已配置为覆盖而非追加；仍只接受首个合法值。
-                (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip(),
-            ]
-            for candidate in candidates:
-                if not candidate:
-                    continue
+
+        if not (
+            getattr(settings, "TRUST_PROXY_HEADERS", False)
+            and peer_ip
+            and peer_ip in trusted_proxies
+        ):
+            return peer_ip or "unknown"
+
+        # Cloudflare：边缘覆盖写入，可信代理后可直接采用
+        cf_ip = (request.headers.get("CF-Connecting-IP") or "").strip()
+        if cf_ip:
+            try:
+                return str(ipaddress.ip_address(cf_ip))
+            except ValueError:
+                pass
+
+        xff = (request.headers.get("X-Forwarded-For") or "").strip()
+        if xff:
+            parts = [p.strip() for p in xff.split(",") if p.strip()]
+            # 从右向左：跳过可信代理，第一个非可信即为客户端
+            for candidate in reversed(parts):
                 try:
-                    return str(ipaddress.ip_address(candidate.strip()))
+                    ip_str = str(ipaddress.ip_address(candidate))
                 except ValueError:
                     continue
+                if ip_str not in trusted_proxies:
+                    return ip_str
+            # 链上全是可信代理时，退回最左侧（原始客户端占位）
+            if parts:
+                try:
+                    return str(ipaddress.ip_address(parts[0]))
+                except ValueError:
+                    pass
 
-        if peer_ip:
-            return peer_ip
-        
-        return "unknown"
+        real_ip = (request.headers.get("X-Real-IP") or "").strip()
+        if real_ip:
+            try:
+                return str(ipaddress.ip_address(real_ip))
+            except ValueError:
+                pass
+
+        return peer_ip or "unknown"
     except (AttributeError, Exception):
-        # 处理request.client为None或其他异常情况
         return "unknown"
 
 
@@ -148,28 +165,35 @@ def optimize_page_size_for_device(request: Request, page_size: int, default_page
         return min(page_size, 15)
 
 
-def truncate_to_2_decimal(value: float) -> float:
+def truncate_to_2_decimal(value: float | int | str | Decimal | None) -> Decimal:
     """
-    截断浮点数到两位小数（砍掉第三位及之后的所有数字）
+    截断到两位小数（砍掉第三位及之后的所有数字）
     不使用四舍五入，直接向下截断
-    
+
     Args:
-        value: 要截断的浮点数
-    
+        value: 要截断的数值（float / int / str / Decimal）
+
     Returns:
-        截断到两位小数的浮点数
+        截断到两位小数的 Decimal
     """
-    return math.floor(value * 100) / 100
+    if value is None:
+        return Decimal("0")
+    d = Decimal(str(value))
+    return d.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
 
 
-def apply_deduct_ratio(amount: float, deduct_ratio: float) -> float:
+def apply_deduct_ratio(
+    amount: float | int | str | Decimal | None,
+    deduct_ratio: float | int | str | Decimal | None,
+) -> Decimal:
     """
     按产品扣减比例计算扣后金额。
 
     扣减比例为 0 时保留原始金额的全部小数位；有扣减时截断到两位小数（不四舍五入）。
+    使用 Decimal 运算避免 float 精度误差。
     """
-    value = float(amount or 0)
-    ratio = float(deduct_ratio or 0)
+    value = Decimal(str(amount or 0))
+    ratio = Decimal(str(deduct_ratio or 0))
     if ratio <= 0:
         return value
     return truncate_to_2_decimal(value * (1 - ratio))

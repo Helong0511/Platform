@@ -36,6 +36,8 @@ from sqlalchemy.future import select
 from app.scheduler_module.lock import (
     acquire_task_lock,
     release_task_lock,
+    acquire_redis_scheduler_lock,
+    release_redis_scheduler_lock,
     get_current_pid,
     CURRENT_HOST,
     DEFAULT_TIMEOUT_SECONDS,
@@ -336,9 +338,20 @@ async def _execute_task_with_lock_internal(
         *args: 任务函数位置参数
         **kwargs: 任务函数关键字参数
     """
-    # 尝试获取锁
+    # 先抢 Redis 锁，再抢 MySQL 行锁（双保险）
+    redis_token = await acquire_redis_scheduler_lock(task_name)
+    if redis_token is None:
+        log_scheduled_task_skip(
+            task_name,
+            "无法获取 Redis 调度锁",
+            detail=f"pid={get_current_pid()} host={CURRENT_HOST}",
+        )
+        return
+
+    # 尝试获取 MySQL 行锁
     acquired, lock_db = await acquire_task_lock(task_name)
     if not acquired:
+        await release_redis_scheduler_lock(task_name, redis_token)
         log_scheduled_task_skip(
             task_name,
             "无法获取任务锁",
@@ -349,6 +362,9 @@ async def _execute_task_with_lock_internal(
     # 确保数据库会话在 finally 中关闭
     task_record = None
     task_id = None
+    # 提前提取审计日志所需属性，避免 release_task_lock 后 ORM 对象过期触发 MissingGreenlet
+    task_description = None
+    task_cron_expression = None
     start_time = get_app_now_naive()  # 使用北京时间记录开始时间
 
     try:
@@ -360,6 +376,8 @@ async def _execute_task_with_lock_internal(
             task_record = result.scalar_one_or_none()
             if task_record:
                 task_id = task_record.id
+                task_description = task_record.description
+                task_cron_expression = task_record.cron_expression
         except Exception as e:
             logger.warning(f"查询任务信息失败（不影响任务执行）: {e}")
 
@@ -367,7 +385,7 @@ async def _execute_task_with_lock_internal(
             task_name,
             pid=get_current_pid(),
             host=CURRENT_HOST,
-            cron_expression=task_record.cron_expression if task_record else None,
+            cron_expression=task_cron_expression,
         )
 
         # 执行任务
@@ -416,8 +434,8 @@ async def _execute_task_with_lock_internal(
                         "execution_duration_seconds": round(execution_duration, 2),
                         "start_time": start_time.isoformat(),
                         "end_time": end_time.isoformat(),
-                        "description": task_record.description if task_record else None,
-                        "cron_expression": task_record.cron_expression if task_record else None
+                        "description": task_description,
+                        "cron_expression": task_cron_expression
                     }
                 )
                 await audit_db.commit()
@@ -458,7 +476,7 @@ async def _execute_task_with_lock_internal(
                 duration_seconds=execution_duration,
                 pid=get_current_pid(),
                 host=CURRENT_HOST,
-                cron_expression=task_record.cron_expression if task_record else None,
+                cron_expression=task_cron_expression,
                 exc_info=True,
             )
 
@@ -504,8 +522,8 @@ async def _execute_task_with_lock_internal(
                         "execution_duration_seconds": round(execution_duration, 2),
                         "start_time": start_time.isoformat(),
                         "end_time": end_time.isoformat(),
-                        "description": task_record.description if task_record else None,
-                        "cron_expression": task_record.cron_expression if task_record else None
+                        "description": task_description,
+                        "cron_expression": task_cron_expression
                     }
                 )
                 await audit_db.commit()
@@ -538,7 +556,7 @@ async def _execute_task_with_lock_internal(
                 )
 
     finally:
-        # 确保数据库会话被正确关闭
+        # 确保数据库会话被正确关闭，并释放 Redis 锁
         if lock_db:
             try:
                 await lock_db.close()
@@ -546,6 +564,10 @@ async def _execute_task_with_lock_internal(
                 logger.warning(
                     f"关闭任务 '{task_name}' 的数据库会话时出错: {e}"
                 )
+        try:
+            await release_redis_scheduler_lock(task_name, redis_token)
+        except Exception as e:
+            logger.debug("释放 Redis 调度锁异常: %s", e)
 
 
 def register_scheduled_task(

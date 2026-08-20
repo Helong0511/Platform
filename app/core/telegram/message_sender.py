@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # 消息发送配置
 MAX_RETRIES = 3  # 最大重试次数
 BASE_RETRY_DELAY = 2  # 基础重试延迟（秒）
-TIMEOUT_SECONDS = 15  # 超时时间（秒）
+TIMEOUT_SECONDS = 30  # 超时时间（秒），适当增大避免网络波动导致误判
 INTER_CHAT_DELAY = 0.35  # 同一批次向多个 Chat ID 发送时的间隔（秒）
 MIN_SEND_INTERVAL = 0.05  # 全局最小发送间隔（秒）
 MAX_RATE_LIMIT_WAIT = 120  # 429 限流时最长等待秒数

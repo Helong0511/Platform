@@ -41,6 +41,7 @@ class ScheduledTask(Base):
     function_path = Column(String(255), nullable=True,
                            comment='执行函数路径（例如：app.scheduler_module.tasks.simple_task.simple_info_task）')
     task_params = Column(JSON, nullable=True, comment='任务扩展参数（JSON）')
+    standard_report_type = Column(String(20), nullable=True, comment='标准数据维度（country/cross/unit/daily），用于多维度汇总选源')
     created_at = Column(DateTime, default=get_app_now_naive, comment='创建时间')
     updated_at = Column(DateTime, default=get_app_now_naive,
                         onupdate=get_app_now_naive, comment='更新时间')

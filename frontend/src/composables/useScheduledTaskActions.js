@@ -162,6 +162,43 @@ export function useScheduledTaskActions({ fetchTasks, tasks }) {
     }
   };
 
+  // 标准数据维度设置
+  const standardReportTypeDialogVisible = ref(false);
+  const currentStandardReportTypeTask = ref(null);
+  const standardReportTypeForm = ref({ standard_report_type: null });
+
+  const REPORT_TYPE_LABELS = {
+    country: '国家',
+    cross: '交叉（国家+广告单元）',
+    unit: '广告单元',
+    daily: '日报',
+  };
+
+  const handleSetStandardReportType = (task) => {
+    currentStandardReportTypeTask.value = task;
+    standardReportTypeForm.value = {
+      standard_report_type: task.standard_report_type || null,
+    };
+    standardReportTypeDialogVisible.value = true;
+  };
+
+  const confirmStandardReportType = async () => {
+    const task = currentStandardReportTypeTask.value;
+    if (!task) return;
+    try {
+      await updateScheduledTask(task.task_name, {
+        standard_report_type: standardReportTypeForm.value.standard_report_type,
+      });
+      ElMessage.success('标准数据维度已更新');
+      standardReportTypeDialogVisible.value = false;
+      fetchTasks(true);
+    } catch (error) {
+      if (!isErrorHandled(error)) {
+        ElMessage.error(extractErrorMessage(error));
+      }
+    }
+  };
+
   return {
     triggerDialogVisible,
     currentTriggerTask,
@@ -170,5 +207,10 @@ export function useScheduledTaskActions({ fetchTasks, tasks }) {
     handleTrigger,
     confirmTrigger,
     handleReleaseLock,
+    standardReportTypeDialogVisible,
+    currentStandardReportTypeTask,
+    standardReportTypeForm,
+    handleSetStandardReportType,
+    confirmStandardReportType,
   };
 }

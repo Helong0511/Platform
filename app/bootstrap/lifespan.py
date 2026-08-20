@@ -140,6 +140,14 @@ async def lifespan(app: FastAPI):
         logger.error(f"[Worker PID:{worker_pid}] 数据库初始化失败: {e}", exc_info=True)
         # 不抛出异常，允许应用继续启动
 
+    # 加载标准维度配置（scheduled_tasks.standard_report_type → 内存）
+    try:
+        from app.core.ad_data_metadata import refresh_standard_report_types
+        await refresh_standard_report_types()
+        logger.info(f"[Worker PID:{worker_pid}] 标准维度配置加载完成")
+    except Exception as e:
+        logger.warning(f"[Worker PID:{worker_pid}] 标准维度配置加载失败: {e}，使用内置默认值")
+
     # 初始化Redis连接（如果配置了）
     try:
         redis_client = await get_redis_client()

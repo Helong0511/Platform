@@ -4,6 +4,7 @@
 将不同平台的 Postback 数据格式转换为统一格式
 """
 import logging
+from decimal import Decimal, InvalidOperation
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -39,8 +40,8 @@ class DataNormalizer:
             'platform': platform,
             'conversion_id': str(conversion_id or ''),
             'event_name': str(raw_data.get('event_name') or 'default'),
-            'event_value': DataNormalizer._parse_float(raw_data.get('event_value')),
-            'payout': DataNormalizer._parse_float(raw_data.get('payout') or raw_data.get('amount')),
+            'event_value': DataNormalizer._parse_decimal(raw_data.get('event_value')),
+            'payout': DataNormalizer._parse_decimal(raw_data.get('payout') or raw_data.get('amount')),
             'devad_id': raw_data.get('devad_id'),
             'os': raw_data.get('os'),
             'carrier': raw_data.get('carrier'),
@@ -69,14 +70,24 @@ class DataNormalizer:
 
     @staticmethod
     def _parse_float(value: Any) -> Optional[float]:
-        """解析浮点数"""
+        """解析浮点数（非金额场景）"""
         if value is None:
             return None
         try:
             return float(value)
         except (ValueError, TypeError):
             return None
-    
+
+    @staticmethod
+    def _parse_decimal(value: Any) -> Optional[Decimal]:
+        """解析 Decimal（金额场景，避免 float 精度丢失）"""
+        if value is None:
+            return None
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            return None
+
     @staticmethod
     def _parse_int(value: Any) -> Optional[int]:
         """解析整数"""

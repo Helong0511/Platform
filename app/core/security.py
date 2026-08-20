@@ -342,23 +342,47 @@ class JWTUtils:
                 options={"verify_aud": False}  # 不验证受众（audience）
             )
             
-            # 检查token是否在黑名单中（如果提供了数据库会话）
-            if db:
-                jti = payload.get("jti")
-                if jti:
-                    result = await db.execute(
-                        select(TokenBlacklist).where(
-                            TokenBlacklist.token_jti == jti,
-                            TokenBlacklist.expires_at > get_app_now_naive()  # 使用北京时间比较
-                        )
-                    )
-                    blacklisted = result.scalars().first()
-                    if blacklisted:
-                        logger.warning(f"JWT令牌已被撤销: jti={jti[:8]}...")
+            # 检查token是否在黑名单中（Redis 优先，再查 MySQL）
+            jti = payload.get("jti")
+            if jti:
+                try:
+                    from app.core.token_blacklist_redis import is_jti_redis_blacklisted
+
+                    if await is_jti_redis_blacklisted(str(jti)):
+                        logger.warning("JWT令牌已被撤销(Redis): jti=%s...", str(jti)[:8])
                         _raise_auth(
                             "登录已失效，请重新登录",
                             error_code=ErrorCode.TOKEN_INVALID,
                         )
+                except HTTPException:
+                    # _raise_auth 抛出的 HTTPException 必须向上传播，不能被吞
+                    raise
+                except Exception as redis_exc:
+                    logger.debug("Redis JWT 黑名单查询跳过: %s", redis_exc)
+
+            if db and jti:
+                result = await db.execute(
+                    select(TokenBlacklist).where(
+                        TokenBlacklist.token_jti == jti,
+                        TokenBlacklist.expires_at > get_app_now_naive()  # 使用北京时间比较
+                    )
+                )
+                blacklisted = result.scalars().first()
+                if blacklisted:
+                    logger.warning(f"JWT令牌已被撤销: jti={str(jti)[:8]}...")
+                    # 回填 Redis，加速后续拦截
+                    try:
+                        from app.core.token_blacklist_redis import add_jti_to_redis_blacklist
+
+                        await add_jti_to_redis_blacklist(
+                            str(jti), blacklisted.expires_at, reason=blacklisted.reason or ""
+                        )
+                    except Exception:
+                        pass
+                    _raise_auth(
+                        "登录已失效，请重新登录",
+                        error_code=ErrorCode.TOKEN_INVALID,
+                    )
             
             return payload
         except HTTPException:

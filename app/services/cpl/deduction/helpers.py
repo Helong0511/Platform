@@ -99,10 +99,10 @@ def build_config_fields(
     """按层级组装 ConversionDeductionConfig 字段字典。"""
     fields = {
         "enable_volume_deduction": config_data.get("enable_volume_deduction", False),
-        "volume_deduction_ratio": config_data.get("volume_deduction_ratio", 0.0),
+        "volume_deduction_ratio": config_data.get("volume_deduction_ratio", 0),
         "deduction_strategy": config_data.get("deduction_strategy", "random"),
         "enable_amount_deduction": config_data.get("enable_amount_deduction", False),
-        "amount_deduction_ratio": config_data.get("amount_deduction_ratio", 0.0),
+        "amount_deduction_ratio": config_data.get("amount_deduction_ratio", 0),
         "priority": config_data.get("priority", 0),
         "is_active": config_data.get("is_active", True),
     }

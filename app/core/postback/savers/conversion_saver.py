@@ -5,6 +5,7 @@
 """
 import logging
 import json
+from decimal import Decimal
 from typing import Dict, Any, Optional
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +24,7 @@ class ConversionSaver:
     async def save(
         normalized_data: Dict[str, Any],
         click_association: Optional[Dict[str, Any]],
-        final_payout: float,
+        final_payout: Decimal | float | int | str,
         conversion_status: str,
         db: AsyncSession
     ) -> PostbackConversion:

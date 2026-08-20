@@ -155,14 +155,23 @@ class SessionService:
             )
 
         # 撤销双写：黑名单使 JWT 失效，is_active 便于列表过滤
+        reason = "用户主动撤销会话"
         blacklist_entry = TokenBlacklist(
             token_jti=session.token_jti,
             user_id=user_id,
             expires_at=session.expires_at,
-            reason="用户主动撤销会话"
+            reason=reason,
         )
         self.db.add(blacklist_entry)
         session.is_active = False
+        try:
+            from app.core.token_blacklist_redis import add_jti_to_redis_blacklist
+
+            await add_jti_to_redis_blacklist(
+                str(session.token_jti), session.expires_at, reason=reason
+            )
+        except Exception:
+            pass
 
         try:
             await self.db.flush()
@@ -373,15 +382,24 @@ class SessionService:
 
         revoked_count = 0
         for session in sessions:
+            reason = f"管理员 {current_user.username} 强制撤销所有会话"
             blacklist_entry = TokenBlacklist(
                 token_jti=session.token_jti,
                 user_id=user_id,
                 expires_at=session.expires_at,
-                reason=f"管理员 {current_user.username} 强制撤销所有会话"
+                reason=reason,
             )
             self.db.add(blacklist_entry)
             session.is_active = False
             revoked_count += 1
+            try:
+                from app.core.token_blacklist_redis import add_jti_to_redis_blacklist
+
+                await add_jti_to_redis_blacklist(
+                    str(session.token_jti), session.expires_at, reason=reason
+                )
+            except Exception:
+                pass
 
         try:
             await self.db.flush()
@@ -444,6 +462,13 @@ async def _blacklist_single_token(
             reason=reason,
         )
     )
+
+    try:
+        from app.core.token_blacklist_redis import add_jti_to_redis_blacklist
+
+        await add_jti_to_redis_blacklist(jti_str, expires_at, reason=reason)
+    except Exception as redis_exc:
+        logger.debug("Redis JWT 黑名单写入跳过: %s", redis_exc)
 
     session_result = await db.execute(
         select(UserSession).where(UserSession.token_jti == jti_str)

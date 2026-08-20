@@ -103,19 +103,19 @@ async def get_with_none_cache(
     return result
 
 
-def add_ttl_jitter(base_ttl: int, jitter_range: int = 30) -> int:
+def add_ttl_jitter(base_ttl: int, jitter_range: int = 300) -> int:
     """
     添加随机 TTL 偏移（防止缓存雪崩）
-    
+
     Args:
         base_ttl: 基础 TTL
-        jitter_range: 随机范围（±秒）
-    
+        jitter_range: 正向随机上限（秒），默认 +[1, 300]
+
     Returns:
         带随机偏移的 TTL
     """
-    jitter = random.randint(-jitter_range, jitter_range)
-    return max(1, base_ttl + jitter)  # 确保 TTL 至少为 1 秒
+    jitter = random.randint(1, max(1, jitter_range))
+    return max(1, base_ttl + jitter)
 
 
 async def set_with_jitter(

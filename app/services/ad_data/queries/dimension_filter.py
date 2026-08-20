@@ -26,8 +26,10 @@ from app.core.ad_data_metadata import (
     DATA_SOURCE_EXCEL,
     REPORT_TYPE_COUNTRY,
     REPORT_TYPE_CROSS,
+    REPORT_TYPE_DAILY,
     REPORT_TYPE_LEGACY,
     REPORT_TYPE_UNIT,
+    get_standard_report_type,
 )
 from app.core.country_code import (
     ALL_REGIONS_COUNTRY_CODE,
@@ -441,6 +443,29 @@ def _report_type_product_date_pairs_subquery(
     return query.distinct().subquery(f"rt_{col_prefix}_pd")
 
 
+def _report_type_product_date_pairs_by_source_subquery(
+    ad_data_model: Any,
+    report_type: str,
+    data_source: str,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+):
+    """指定 report_type + data_source 的 (product_id, date) 集合。"""
+    col_prefix = f"{report_type}_{data_source}"[:16]
+    query = (
+        select(
+            ad_data_model.product_id.label(f"{col_prefix}_product_id"),
+            ad_data_model.date.label(f"{col_prefix}_date"),
+        )
+        .where(
+            ad_data_model.report_type == report_type,
+            ad_data_model.data_source == data_source,
+        )
+    )
+    query = _apply_ad_data_date_bounds(query, ad_data_model, start_date, end_date)
+    return query.distinct().subquery(f"rt_{col_prefix}_pd")
+
+
 def _outer_row_not_in_report_type_product_dates(
     ad_data_model: Any,
     report_type: str,
@@ -449,6 +474,24 @@ def _outer_row_not_in_report_type_product_dates(
 ) -> Any:
     sq = _report_type_product_date_pairs_subquery(
         ad_data_model, report_type, start_date, end_date
+    )
+    pid_col = list(sq.c)[0]
+    date_col = list(sq.c)[1]
+    return tuple_(ad_data_model.product_id, ad_data_model.date).notin_(
+        select(pid_col, date_col)
+    )
+
+
+def _outer_row_not_in_report_type_for_source(
+    ad_data_model: Any,
+    report_type: str,
+    data_source: str,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> Any:
+    """排除指定数据源+report_type 存在的 (product_id, date) 组合。"""
+    sq = _report_type_product_date_pairs_by_source_subquery(
+        ad_data_model, report_type, data_source, start_date, end_date
     )
     pid_col = list(sq.c)[0]
     date_col = list(sq.c)[1]
@@ -564,11 +607,13 @@ def kpi_mutual_source_filter(
     end_date: Optional[date] = None,
     dimension: Optional[str] = None,
     ad_data_model: Any = None,
+    data_source: Optional[str] = None,
 ) -> Any:
     """
     KPI / 仪表盘 / Telegram 汇总用互斥选源。
 
     默认与日汇总不传 dimension 一致（country），避免同日多报表来源 SUM 重复。
+    支持按 data_source 指定标准维度（如 Aya 的标准维度为 daily）。
     """
     from app.models.models import AdData
 
@@ -580,6 +625,7 @@ def kpi_mutual_source_filter(
         ad_data_model=model,
         start_date=start_date,
         end_date=end_date,
+        data_source=data_source,
     )
 
 
@@ -591,22 +637,28 @@ def build_daily_summary_dimension_filter(
     ad_data_model: Any = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    data_source: Optional[str] = None,
 ) -> Any:
     """
     构建每日汇总用统计维度筛选（按产品+日期互斥选源，避免双 API 重复计数）。
 
     有 report_type 时按类型选源；legacy 行仍按行形态互斥。
+    支持按 data_source 指定标准维度（如 Aya 的标准维度为 daily）。
     """
     from app.models.models import AdData
 
     model = ad_data_model or AdData
     dim = normalize_dimension(dimension)
     rt_col = getattr(model, "report_type", None)
+    ds_col = getattr(model, "data_source", None)
 
     if rt_col is None:
         return _legacy_daily_summary_dimension_filter(
             country_code_column, ad_unit_column, dim, model, start_date, end_date
         )
+
+    standard_rt = get_standard_report_type(data_source) if data_source else None
+    has_source_standard = bool(standard_rt and ds_col is not None)
 
     legacy_shape = _legacy_row_condition(rt_col)
 
@@ -627,13 +679,59 @@ def build_daily_summary_dimension_filter(
             start_date,
             end_date,
         )
+
+        # 如果数据源有标准维度（如 Aya 标准= daily），则：
+        # 1. 标准维度的数据直接保留
+        # 2. 非标准维度的数据仅在标准维度不存在时保留
+        if has_source_standard:
+            source_standard = and_(
+                ds_col == data_source,
+                rt_col == standard_rt,
+                _plain_summary_row_condition(country_code_column, ad_unit_column),
+            )
+            source_fallback = and_(
+                ds_col == data_source,
+                rt_col != standard_rt,
+                _outer_row_not_in_report_type_for_source(
+                    model, standard_rt, data_source, start_date, end_date
+                ),
+            )
+            other_sources = and_(
+                ds_col != data_source,
+                or_(
+                    and_(
+                        rt_col == REPORT_TYPE_COUNTRY,
+                        _country_only_row_condition(country_code_column, ad_unit_column),
+                    ),
+                    plain_for_country,
+                    and_(
+                        rt_col == REPORT_TYPE_CROSS,
+                        _cross_row_condition(country_code_column, ad_unit_column),
+                        _outer_row_not_in_report_type_product_dates(
+                            model, REPORT_TYPE_COUNTRY, start_date, end_date
+                        ),
+                    ),
+                    and_(
+                        legacy_shape,
+                        or_(
+                            _country_only_row_condition(country_code_column, ad_unit_column),
+                            and_(
+                                _cross_row_condition(country_code_column, ad_unit_column),
+                                _outer_row_not_in_country_only_product_dates(
+                                    model, start_date, end_date
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+            return or_(source_standard, source_fallback, other_sources)
+
         return or_(
-            # 类型与行形态同时满足，避免误标 country 的 ZZ 空单元行混入
             and_(
                 rt_col == REPORT_TYPE_COUNTRY,
                 _country_only_row_condition(country_code_column, ad_unit_column),
             ),
-            # Excel 日报可与国家相加；API 日报仅在无国家行时纳入（含误标 report_type 的 plain）
             plain_for_country,
             and_(
                 rt_col == REPORT_TYPE_CROSS,
@@ -657,12 +755,55 @@ def build_daily_summary_dimension_filter(
         )
 
     if dim == "ad_unit":
+        # 如果数据源有标准维度（如 Aya 标准= daily），则：
+        # 1. 标准维度的数据直接保留
+        # 2. 非标准维度的数据仅在标准维度不存在时保留
+        if has_source_standard:
+            source_standard = and_(
+                ds_col == data_source,
+                rt_col == standard_rt,
+                _plain_summary_row_condition(country_code_column, ad_unit_column),
+            )
+            source_fallback = and_(
+                ds_col == data_source,
+                rt_col != standard_rt,
+                _outer_row_not_in_report_type_for_source(
+                    model, standard_rt, data_source, start_date, end_date
+                ),
+            )
+            other_sources = and_(
+                ds_col != data_source,
+                or_(
+                    and_(
+                        rt_col == REPORT_TYPE_UNIT,
+                        _ad_unit_only_row_condition(country_code_column, ad_unit_column),
+                    ),
+                    _ad_unit_only_row_condition(country_code_column, ad_unit_column),
+                    and_(
+                        rt_col == REPORT_TYPE_CROSS,
+                        _cross_row_condition(country_code_column, ad_unit_column),
+                        _outer_row_not_in_report_type_product_dates(
+                            model, REPORT_TYPE_UNIT, start_date, end_date
+                        ),
+                    ),
+                    and_(
+                        legacy_shape,
+                        and_(
+                            _cross_row_condition(country_code_column, ad_unit_column),
+                            _outer_row_not_in_ad_unit_only_product_dates(
+                                model, start_date, end_date
+                            ),
+                        ),
+                    ),
+                ),
+            )
+            return or_(source_standard, source_fallback, other_sources)
+
         return or_(
             and_(
                 rt_col == REPORT_TYPE_UNIT,
                 _ad_unit_only_row_condition(country_code_column, ad_unit_column),
             ),
-            # ZZ/无国家+有单元：按广告单元纳入（兼容历史误标为 cross 等）
             _ad_unit_only_row_condition(country_code_column, ad_unit_column),
             and_(
                 rt_col == REPORT_TYPE_CROSS,

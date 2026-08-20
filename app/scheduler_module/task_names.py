@@ -67,6 +67,9 @@ FLYMOBI_API_TASK_NAME = "FlyMobi API获取数据"
 # LeiYang API获取数据任务
 LEIYANG_API_TASK_NAME = "LeiYang API获取数据"
 
+# IDGTN API获取数据任务
+IDGTN_API_TASK_NAME = "IDGTN API获取数据"
+
 # Google Ad Manager API获取数据任务
 GAM_API_TASK_NAME = "Google API获取数据"
 
@@ -97,6 +100,7 @@ TASK_NAME_MAP = {
     "aya_task": AYA_API_TASK_NAME,
     "flymobi_task": FLYMOBI_API_TASK_NAME,
     "leiyang_task": LEIYANG_API_TASK_NAME,
+    "idgtn_task": IDGTN_API_TASK_NAME,
     "gam_task": GAM_API_TASK_NAME,
     "cpl_tasks": RESET_DAILY_CAPS_TASK_NAME,
     "ad_data_health_task": AD_DATA_HEALTH_SCAN_TASK_NAME,
@@ -122,6 +126,7 @@ ALL_TASK_NAMES = [
     AYA_API_TASK_NAME,
     FLYMOBI_API_TASK_NAME,
     LEIYANG_API_TASK_NAME,
+    IDGTN_API_TASK_NAME,
     GAM_API_TASK_NAME,
     RESET_DAILY_CAPS_TASK_NAME,
     AD_DATA_BASELINE_FREEZE_TASK_NAME,

@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.excel_io import read_excel_with_fallback
+from app.core.excel_security import ExcelSecurityError
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,11 @@ async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes
             filename_lower=filename_lower,
         )
         tried_engines.append(engine)
+    except ExcelSecurityError as e:
+        raise_api_exception(
+            ErrorCode.IMPORT_FILE_INVALID,
+            detail=f"Excel 安全校验失败：{e}",
+        )
     except Exception as e:
         last_error = e
         tried_engines.append(engine)

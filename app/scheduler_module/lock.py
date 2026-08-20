@@ -12,6 +12,7 @@
 1. 锁标识包含 host+pid，防止僵尸锁；异常退出依赖超时回收
 2. 任务执行时间超过 DEFAULT_TIMEOUT_SECONDS 可能导致锁被误释放，须合理设置超时
 """
+import asyncio
 import logging
 import os
 import socket
@@ -19,6 +20,7 @@ from typing import Optional
 
 import pytz
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -32,6 +34,7 @@ logger = logging.getLogger(__name__)
 # 常量配置
 DEFAULT_TIMEOUT_SECONDS = 300  # 默认超时时间（秒）
 MAX_ERROR_MESSAGE_LENGTH = 1000  # 错误信息最大长度
+_REDIS_LOCK_PREFIX = "scheduler:redis_lock:"
 
 # 主机名在模块加载时计算即可；进程 ID 必须在运行时获取（Gunicorn preload/fork 后不能缓存）
 CURRENT_HOST = socket.gethostname()
@@ -40,6 +43,59 @@ CURRENT_HOST = socket.gethostname()
 def get_current_pid() -> int:
     """获取当前进程 ID（勿使用模块级缓存，fork 后会变成 master PID）"""
     return os.getpid()
+
+
+async def acquire_redis_scheduler_lock(task_name: str, ttl_seconds: Optional[int] = None) -> Optional[str]:
+    """
+    Redis SET NX EX 分布式锁（与 MySQL 行锁互补，防多节点重复触发）。
+
+    Returns:
+        锁 token（释放时校验）；获取失败返回 None。
+    """
+    import uuid
+
+    from app.core.config import settings
+    from app.core.redis_client import get_redis_client
+
+    redis = await get_redis_client()
+    if not redis:
+        # Redis 不可用时不阻断：仍靠 MySQL 行锁
+        return "noop-no-redis"
+
+    ttl = int(ttl_seconds or getattr(settings, "SCHEDULER_REDIS_LOCK_TTL", DEFAULT_TIMEOUT_SECONDS))
+    token = f"{CURRENT_HOST}:{get_current_pid()}:{uuid.uuid4().hex}"
+    key = f"{_REDIS_LOCK_PREFIX}{task_name}"
+    try:
+        ok = await redis.set(key, token, nx=True, ex=max(30, ttl))
+        if not ok:
+            return None
+        return token
+    except Exception as exc:
+        logger.warning("获取 Redis 调度锁失败（回退仅 MySQL）: task=%s err=%s", task_name, exc)
+        return "noop-redis-error"
+
+
+async def release_redis_scheduler_lock(task_name: str, token: Optional[str]) -> None:
+    """释放 Redis 调度锁（仅持有者可删）。"""
+    if not token or token.startswith("noop-"):
+        return
+    from app.core.redis_client import get_redis_client
+
+    redis = await get_redis_client()
+    if not redis:
+        return
+    key = f"{_REDIS_LOCK_PREFIX}{task_name}"
+    # Lua：比对 token 后删除，避免误删他人锁
+    script = """
+    if redis.call('GET', KEYS[1]) == ARGV[1] then
+        return redis.call('DEL', KEYS[1])
+    end
+    return 0
+    """
+    try:
+        await redis.eval(script, 1, key, token)
+    except Exception as exc:
+        logger.debug("释放 Redis 调度锁失败: task=%s err=%s", task_name, exc)
 
 # 时区配置（从统一配置读取）
 UTC_TZ = pytz.UTC
@@ -240,6 +296,15 @@ async def acquire_task_lock(
         return False, None
 
 
+def _is_deadlock_or_lock_timeout(exc: OperationalError) -> bool:
+    """判断是否为 MySQL 死锁 (1213) 或锁等待超时 (1205)。"""
+    orig = exc.orig
+    if orig is None:
+        return False
+    errno = getattr(orig, "args", (None,))[0]
+    return errno in (1213, 1205)
+
+
 async def release_task_lock(
         db: AsyncSession,
         task_name: str,
@@ -251,6 +316,7 @@ async def release_task_lock(
     释放任务锁并更新执行结果
 
     使用行锁确保原子性更新，防止多进程环境下的竞态条件
+    遇到 MySQL 死锁（1213）时自动重试。
 
     Args:
         db: 数据库会话（应该是在 acquire_task_lock 中获取的同一个会话）
@@ -259,74 +325,91 @@ async def release_task_lock(
         error_message: 错误信息（如果失败，已废弃，使用result_message）
         result_message: 执行结果信息（成功或失败的详细信息，会保存到last_error字段）
     """
-    try:
-        # 使用行锁确保原子性更新
-        # 注意：这里使用同一个 db 会话，已经在 acquire_task_lock 中获取了锁
-        # 所以不需要再次获取锁，直接查询即可
-        result = await db.execute(
-            select(ScheduledTask)
-            .where(ScheduledTask.task_name == task_name)
-        )
-        task_record = result.scalar_one_or_none()
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            # 使用行锁确保原子性更新
+            # 注意：这里使用同一个 db 会话，已经在 acquire_task_lock 中获取了锁
+            # 所以不需要再次获取锁，直接查询即可
+            result = await db.execute(
+                select(ScheduledTask)
+                .where(ScheduledTask.task_name == task_name)
+            )
+            task_record = result.scalar_one_or_none()
 
-        if task_record:
-            # 严格验证锁的所有权（确保是当前进程持有的锁）
-            # 如果锁不属于当前进程，记录警告但不释放锁（防止误释放其他进程的锁）
-            current_pid = get_current_pid()
-            if task_record.last_run_pid != current_pid or task_record.last_run_host != CURRENT_HOST:
-                logger.warning(
-                    f"任务 {task_name} 锁的所有权不匹配，拒绝释放锁。"
-                    f"当前进程: {current_pid}@{CURRENT_HOST}, "
-                    f"锁持有者: {task_record.last_run_pid}@{task_record.last_run_host}"
-                )
-                await db.rollback()
-                return  # 不释放其他进程的锁
+            if task_record:
+                # 严格验证锁的所有权（确保是当前进程持有的锁）
+                # 如果锁不属于当前进程，记录警告但不释放锁（防止误释放其他进程的锁）
+                current_pid = get_current_pid()
+                if task_record.last_run_pid != current_pid or task_record.last_run_host != CURRENT_HOST:
+                    logger.warning(
+                        f"任务 {task_name} 锁的所有权不匹配，拒绝释放锁。"
+                        f"当前进程: {current_pid}@{CURRENT_HOST}, "
+                        f"锁持有者: {task_record.last_run_pid}@{task_record.last_run_host}"
+                    )
+                    await db.rollback()
+                    return  # 不释放其他进程的锁
 
-            # 原子性更新：在持有行锁的情况下更新状态
-            task_record.is_running = False
-            # 存储北京时间到数据库（数据库统一使用北京时间）
-            now_app = get_app_now_naive()
-            task_record.updated_at = now_app
-            task_record.last_finish_time = now_app
+                # 原子性更新：在持有行锁的情况下更新状态
+                task_record.is_running = False
+                # 存储北京时间到数据库（数据库统一使用北京时间）
+                now_app = get_app_now_naive()
+                task_record.updated_at = now_app
+                task_record.last_finish_time = now_app
 
-            if success:
-                task_record.success_count += 1
-            else:
-                task_record.error_count += 1
-
-            # 保存执行结果信息到last_error字段（无论成功还是失败）
-            # 优先使用result_message，如果没有则使用error_message（向后兼容）
-            result_info = result_message or error_message
-            if result_info:
-                # 限制信息长度，避免数据库字段溢出
-                task_record.last_error = result_info[:MAX_ERROR_MESSAGE_LENGTH]
-            else:
-                # 如果没有提供结果信息，成功时清除，失败时保留（向后兼容）
                 if success:
-                    task_record.last_error = None
-                # 失败时如果没有提供信息，last_error保持原值（可能是之前的错误）
+                    task_record.success_count += 1
+                else:
+                    task_record.error_count += 1
 
-            await db.commit()
-            if success:
-                logger.debug(
-                    f"任务 {task_name} 锁已释放，执行成功 "
-                    f"（进程ID: {get_current_pid()}, 主机: {CURRENT_HOST}）"
-                )
+                # 保存执行结果信息到last_error字段（无论成功还是失败）
+                # 优先使用 result_message，如果没有则使用 error_message（向后兼容）
+                result_info = result_message or error_message
+                if result_info:
+                    # 限制信息长度，避免数据库字段溢出
+                    task_record.last_error = result_info[:MAX_ERROR_MESSAGE_LENGTH]
+                else:
+                    # 如果没有提供结果信息，成功时清除，失败时保留（向后兼容）
+                    if success:
+                        task_record.last_error = None
+                    # 失败时如果没有提供信息，last_error 保持原值（可能是之前的错误）
+
+                await db.commit()
+                if success:
+                    logger.debug(
+                        f"任务 {task_name} 锁已释放，执行成功 "
+                        f"（进程ID: {get_current_pid()}, 主机: {CURRENT_HOST}）"
+                    )
+                else:
+                    from app.scheduler_module.task_utils import log_scheduled_task_failure_recorded
+
+                    log_scheduled_task_failure_recorded(
+                        task_name,
+                        result_info,
+                        error_count=task_record.error_count,
+                        success_count=task_record.success_count,
+                        run_count=task_record.run_count,
+                    )
             else:
-                from app.scheduler_module.task_utils import log_scheduled_task_failure_recorded
+                logger.warning(f"任务记录不存在: {task_name}")
+                await db.rollback()
+            return  # 成功完成，退出重试循环
 
-                log_scheduled_task_failure_recorded(
-                    task_name,
-                    result_info,
-                    error_count=task_record.error_count,
-                    success_count=task_record.success_count,
-                    run_count=task_record.run_count,
-                )
-        else:
-            logger.warning(f"任务记录不存在: {task_name}")
+        except OperationalError as e:
+            # MySQL 死锁 (1213) 或锁等待超时 (1205)：回滚后重试
             await db.rollback()
+            if attempt < max_retries and _is_deadlock_or_lock_timeout(e):
+                logger.warning(
+                    f"释放任务锁时遇到死锁/锁超时，{attempt}/{max_retries} 次重试: {task_name}"
+                )
+                await asyncio.sleep(0.2 * attempt)  # 递增退避
+                continue
+            # 非死锁错误或重试耗尽，跳出
+            logger.error(f"释放任务锁失败: {task_name}, 错误: {e}", exc_info=True)
+            return
 
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"释放任务锁失败: {task_name}, 错误: {e}", exc_info=True)
-        # 即使释放锁失败，也不抛出异常，避免影响任务执行结果
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"释放任务锁失败: {task_name}, 错误: {e}", exc_info=True)
+            # 即使释放锁失败，也不抛出异常，避免影响任务执行结果
+            return

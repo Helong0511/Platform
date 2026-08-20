@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any, Dict, Optional, Tuple
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.postback.checks.cap_checker import CapChecker
@@ -17,7 +18,7 @@ from app.core.postback.checks.discount_checker import DiscountChecker
 from app.core.postback.savers.conversion_saver import ConversionSaver
 from app.core.postback.transformers.click_associator import ClickAssociator
 from app.core.postback.validators.duplicate_checker import DuplicateChecker
-from app.models.models import PostbackConversion, ShortLink
+from app.models.models import Offer, PostbackConversion, ShortLink
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class PostbackPipelineContext:
     normalized_data: Dict[str, Any] = field(default_factory=dict)
     click_association: Optional[Dict[str, Any]] = None
     conversion_status: str = "Pending"
-    final_payout: float = 0.0
+    final_payout: Decimal = Decimal("0")
     conversion: Optional[PostbackConversion] = None
     cap_ok: bool = True
     skip_save_and_forward: bool = False
@@ -52,6 +53,50 @@ async def step_associate_click(ctx: PostbackPipelineContext) -> Optional[Dict[st
     click_id = ctx.normalized_data.get("click_id")
     ctx.click_association = await ClickAssociator.associate(click_id, ctx.db)
     return ctx.click_association
+
+
+async def step_validate_offer_status(ctx: PostbackPipelineContext) -> bool:
+    """
+    流水线步骤：校验关联的 Offer 是否仍处于激活状态。
+
+    Offer 下线（is_active=False 或 status != 'Active'）后，不再处理新转化，
+    避免 Cap 占用、通知发送和数据污染。
+
+    Args:
+        ctx: 流水线上下文
+
+    Returns:
+        True 表示 Offer 有效，可继续处理；False 表示 Offer 已下线，应跳过。
+    """
+    offer_id, _, _ = attribution_ids_from_association(ctx.click_association)
+    if not offer_id:
+        return True  # 无 Offer ID（如直连 postback），不阻断
+
+    # 优先使用关联结果中已加载的 ORM 对象
+    offer_obj = None
+    assoc = ctx.click_association or {}
+    if isinstance(assoc.get("offer"), Offer):
+        offer_obj = assoc["offer"]
+    else:
+        try:
+            r = await ctx.db.execute(
+                select(Offer).where(Offer.id == offer_id).limit(1)
+            )
+            offer_obj = r.scalars().first()
+        except Exception as e:
+            logger.warning("Offer 状态校验查询失败（放行）: offer_id=%s err=%s", offer_id, e)
+            return True  # 查询失败不阻断，避免基础设施故障导致转化丢失
+
+    if offer_obj and (not offer_obj.is_active or offer_obj.status != "Active"):
+        logger.warning(
+            "Offer 已下线，跳过转化处理: offer_id=%s is_active=%s status=%s",
+            offer_id,
+            offer_obj.is_active,
+            offer_obj.status,
+        )
+        return False
+
+    return True
 
 
 async def step_check_duplicate(ctx: PostbackPipelineContext) -> bool:
@@ -133,7 +178,7 @@ async def deactivate_short_links_on_cap_exceeded(
     return count
 
 
-async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[float, Any, bool]:
+async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[Decimal, Any, bool]:
     """
     流水线步骤：按扣量规则计算最终 payout，写入 ctx.final_payout。
 
@@ -144,7 +189,7 @@ async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[float, Any,
         (final_payout, discount_info, skip_save_and_forward)
     """
     offer_id, publisher_id, advertiser_id = attribution_ids_from_association(ctx.click_association)
-    original = ctx.normalized_data.get("payout") or 0.0
+    original = Decimal(str(ctx.normalized_data.get("payout") or 0))
     final_payout, info, skip_save = await DiscountChecker.calculate(
         original_payout=original,
         offer_id=offer_id,

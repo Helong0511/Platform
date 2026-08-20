@@ -148,8 +148,9 @@ def parse_publisher_configs(publisher_configs) -> List[PublisherConfigTuple]:
 
         if affiliate_payout is not None:
             try:
-                affiliate_payout = float(affiliate_payout)
-            except (ValueError, TypeError):
+                from decimal import Decimal, InvalidOperation
+                affiliate_payout = Decimal(str(affiliate_payout))
+            except (ValueError, TypeError, InvalidOperation):
                 raise_api_exception(
                     ErrorCode.INVALID_PARAMETER,
                     detail=f"渠道ID {pub_id} 的下游PO必须是数字，当前值: {affiliate_payout} (类型: {type(affiliate_payout).__name__})",

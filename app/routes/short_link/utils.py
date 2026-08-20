@@ -67,6 +67,13 @@ async def resolve_offer_id(offer_id: Optional[int], db: AsyncSession) -> tuple[O
             offer = offer_result.scalars().first()
 
         if offer:
+            # 校验 Offer 激活状态：下线 Offer 不再重定向
+            if not offer.is_active or offer.status != "Active":
+                logger.warning(
+                    "短链重定向拦截：Offer 已下线 offer_id=%s is_active=%s status=%s",
+                    offer.id, offer.is_active, offer.status,
+                )
+                return None, None
             await set_offer_cache(offer.id, offer.advertiser_id, offer.offer_name)
             return offer.id, offer.advertiser_id
     except Exception as e:
@@ -106,6 +113,25 @@ async def resolve_cloak_click_offer_and_publisher(
     offer_for = offer_id_from_numeric_dp(resolved_dp)
     if offer_for is None:
         offer_for = short_link_offer_id
+
+    # 校验 Offer 激活状态：下线 Offer 不记录点击
+    if offer_for:
+        try:
+            offer_result = await db.execute(
+                select(Offer.id, Offer.is_active, Offer.status)
+                .where(Offer.id == offer_for)
+                .limit(1)
+            )
+            offer_row = offer_result.first()
+            if offer_row and (not offer_row.is_active or offer_row.status != "Active"):
+                logger.warning(
+                    "斗篷点击拦截：Offer 已下线 offer_id=%s is_active=%s status=%s",
+                    offer_for, offer_row.is_active, offer_row.status,
+                )
+                return None, None
+        except Exception as e:
+            logger.warning("斗篷 Offer 状态校验查询失败: offer_id=%s err=%s", offer_for, e)
+
     # 短链自带 channel：若与最终 Offer 无分配关系则回退，禁止错误归因
     pub_for = await resolve_attributed_publisher_for_offer(
         offer_for,

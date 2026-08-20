@@ -312,59 +312,85 @@ def cached(key_pattern: str, ttl: int = 300):
 
 
 class CacheInvalidator:
-    """缓存失效管理器"""
-    
+    """缓存失效管理器（支持延迟双删）。"""
+
+    @staticmethod
+    async def _delete_patterns(patterns: list[str]) -> None:
+        cache = await get_cache_backend()
+        for pattern in patterns:
+            await cache.delete_pattern(pattern)
+
+    @staticmethod
+    async def _delayed_double_delete(patterns: list[str], extra_coros=None) -> None:
+        """先删一次，延迟后再删一次，降低并发回填脏缓存窗口。"""
+        from app.core.config import settings
+
+        delay = float(getattr(settings, "CACHE_DOUBLE_DELETE_DELAY_SECONDS", 1.0))
+
+        async def _second_pass() -> None:
+            try:
+                await asyncio.sleep(max(0.1, delay))
+                await CacheInvalidator._delete_patterns(patterns)
+                if extra_coros:
+                    for coro_factory in extra_coros:
+                        try:
+                            await coro_factory()
+                        except Exception as exc:
+                            logger.debug("延迟双删附加清理失败: %s", exc)
+            except Exception as exc:
+                logger.debug("延迟双删失败: %s", exc)
+
+        asyncio.create_task(_second_pass())
+
     @staticmethod
     async def invalidate_user_cache(user_id: int):
         """失效用户相关缓存"""
-        cache = await get_cache_backend()
         patterns = [
             f"user:{user_id}",
             "user:list:*",
             "user_stats",
         ]
-        for pattern in patterns:
-            await cache.delete_pattern(pattern)
-    
+        await CacheInvalidator._delete_patterns(patterns)
+        await CacheInvalidator._delayed_double_delete(patterns)
+
     @staticmethod
     async def invalidate_product_cache(product_id: int):
         """失效产品相关缓存"""
-        cache = await get_cache_backend()
         patterns = [
             f"product:{product_id}",
             "product:list:*",
             "stats:*",
         ]
-        for pattern in patterns:
-            await cache.delete_pattern(pattern)
-    
+        await CacheInvalidator._delete_patterns(patterns)
+        await CacheInvalidator._delayed_double_delete(patterns)
+
     @staticmethod
     async def invalidate_offer_cache(offer_id: int):
-        """失效Offer相关缓存"""
-        # offer_cache 使用独立的 offer:cache:{id} 键和标签索引，
-        # 必须与通用缓存一起失效，否则更新后仍可能读取旧数据。
+        """失效Offer相关缓存（先删 + 延迟双删）"""
         from app.core.offer_cache import invalidate_offer_cache as invalidate_hot_offer_cache
 
         await invalidate_hot_offer_cache(offer_id)
-        cache = await get_cache_backend()
         patterns = [
             f"offer:{offer_id}",
             "offer:list:*",
             "stats:*",
         ]
-        for pattern in patterns:
-            await cache.delete_pattern(pattern)
+        await CacheInvalidator._delete_patterns(patterns)
+
+        async def _hot_again():
+            await invalidate_hot_offer_cache(offer_id)
+
+        await CacheInvalidator._delayed_double_delete(patterns, extra_coros=[_hot_again])
 
     @staticmethod
     async def invalidate_advertiser_cache(advertiser_id: int):
         """失效广告主及依赖广告主数据的列表缓存"""
-        cache = await get_cache_backend()
         patterns = [
             f"advertiser:{advertiser_id}",
             "advertiser:list:*",
             "offer:list:*",
             "stats:*",
         ]
-        for pattern in patterns:
-            await cache.delete_pattern(pattern)
+        await CacheInvalidator._delete_patterns(patterns)
+        await CacheInvalidator._delayed_double_delete(patterns)
 

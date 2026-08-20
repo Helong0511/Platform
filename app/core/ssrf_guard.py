@@ -15,6 +15,16 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
+
+class SSRFForbiddenError(Exception):
+    """目标 URL 解析到私网/元数据等禁止地址时抛出。"""
+
+    def __init__(self, reason: str, url: str = ""):
+        self.reason = reason
+        self.url = url
+        super().__init__(reason)
+
+
 # 明确禁止的主机名（大小写不敏感）；含云元数据常见别名
 _BLOCKED_HOSTNAMES = frozenset(
     {
@@ -32,6 +42,9 @@ _EXTRA_BLOCKED_NETWORKS = (
     ipaddress.ip_network("169.254.169.254/32"),  # 云元数据
     ipaddress.ip_network("100.64.0.0/10"),  # CGNAT / 部分 VPC
     ipaddress.ip_network("0.0.0.0/8"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),  # IPv6 ULA
+    ipaddress.ip_network("fe80::/10"),  # IPv6 link-local
 )
 
 
@@ -51,7 +64,6 @@ def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
             if ip in network:
                 return True
         except TypeError:
-            # IPv4 / IPv6 与网段族不一致时跳过
             continue
     return False
 
@@ -70,8 +82,7 @@ def validate_outbound_url(url: str) -> Tuple[bool, str]:
     """
     校验出站 URL 是否允许发起服务端请求。
 
-    Args:
-        url: 完整 URL（可含查询串）
+    使用 ``socket.getaddrinfo`` 解析全部 A/AAAA，任一落在禁网段即拒绝。
 
     Returns:
         (是否允许, 拒绝原因；允许时原因为空串)
@@ -95,7 +106,6 @@ def validate_outbound_url(url: str) -> Tuple[bool, str]:
     if _hostname_blocked(hostname):
         return False, f"禁止的主机名: {hostname}"
 
-    # 主机名本身是字面量 IP
     try:
         literal_ip = ipaddress.ip_address(hostname)
         if _is_blocked_ip(literal_ip):
@@ -104,7 +114,6 @@ def validate_outbound_url(url: str) -> Tuple[bool, str]:
     except ValueError:
         pass
 
-    # DNS 解析后检查全部 A/AAAA，任一落在禁网段即拒绝
     try:
         addr_infos = socket.getaddrinfo(hostname, None)
     except socket.gaierror as exc:
@@ -131,3 +140,10 @@ def validate_outbound_url(url: str) -> Tuple[bool, str]:
             return False, f"解析结果落在禁网段: {addr}"
 
     return True, ""
+
+
+def assert_outbound_url_safe(url: str) -> None:
+    """校验失败时抛出 ``SSRFForbiddenError``。"""
+    ok, reason = validate_outbound_url(url)
+    if not ok:
+        raise SSRFForbiddenError(reason, url=url)

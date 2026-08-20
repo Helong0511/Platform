@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 from typing import Any, Mapping, Optional, Sequence, Union
 
 # 「昨有今无」在此小时（含）之前不落库、不进 Telegram，避免凌晨巡检刷屏。
@@ -145,10 +146,20 @@ class AdDataHealthReport:
 
 
 def _as_float(value: Any) -> float:
+    """安全转 float（仅用于比率/计数等非金额场景）。"""
     try:
         return float(value or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _as_decimal(value: Any) -> Decimal:
+    """安全转 Decimal（用于金额场景）。"""
+    from decimal import Decimal as _D
+    try:
+        return _D(str(value or 0))
+    except Exception:
+        return _D("0")
 
 
 def _daterange(start: date, end: date) -> list[date]:
@@ -387,8 +398,8 @@ def settle_upstream_revenue_by_product(
 
     from app.core.utils import apply_deduct_ratio
 
-    raw_by_pid: dict[int, float] = defaultdict(float)
-    deduct_by_pid: dict[int, float] = {}
+    raw_by_pid: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+    deduct_by_pid: dict[int, Decimal] = {}
     for row in rows:
         name = str(row.get(domain_key) or "").strip()
         if not name:
@@ -397,10 +408,10 @@ def settle_upstream_revenue_by_product(
         if not info:
             continue
         pid, deduct = info
-        raw_by_pid[pid] += _as_float(row.get(revenue_key))
-        deduct_by_pid[pid] = float(deduct or 0)
+        raw_by_pid[pid] += _as_decimal(row.get(revenue_key))
+        deduct_by_pid[pid] = _as_decimal(deduct)
     return {
-        pid: apply_deduct_ratio(raw, deduct_by_pid.get(pid, 0.0))
+        pid: apply_deduct_ratio(raw, deduct_by_pid.get(pid, Decimal("0")))
         for pid, raw in raw_by_pid.items()
     }
 

@@ -14,7 +14,12 @@ import logging
 from collections import defaultdict
 from typing import Any
 
-from app.core.ad_data_metadata import DATA_SOURCE_AYA
+from app.core.ad_data_metadata import (
+    DATA_SOURCE_AYA,
+    REPORT_TYPE_COUNTRY,
+    REPORT_TYPE_DAILY,
+    REPORT_TYPE_UNIT,
+)
 from app.core.config import settings
 from app.scheduler_module.task_names import AYA_API_TASK_NAME
 from app.scheduler_module.task_result_store import set_task_result
@@ -88,6 +93,7 @@ async def _import_aya_dimension(
     notify_title: str,
     current_time_str: str,
     notify_base: dict[str, str],
+    report_type: str,
     data_transform=None,
 ) -> list[str]:
     if not rows:
@@ -105,6 +111,7 @@ async def _import_aya_dimension(
             notify_params={**notify_base, "账号": cp_name},
             data_source=DATA_SOURCE_AYA,
             upstream_account=cp_name,
+            report_type=report_type,
             data_transform=data_transform,
         )
         summaries.append(f"{cp_name}: {summary}")
@@ -147,8 +154,12 @@ async def aya_api_task(
     log_task_start(AYA_API_TASK_NAME)
 
     phase_summaries: list[str] = []
-    try:
-        if fetch_daily:
+    dim_errors: list[str] = []
+    dim_soft_skips: list[str] = []
+
+    # ---- 日报维度（独立 try/except） ----
+    if fetch_daily:
+        try:
             daily_result = await fetch_aya_rows(
                 base_url=base_url,
                 secret_key=secret_key,
@@ -166,12 +177,22 @@ async def aya_api_task(
                 notify_title="Aya-日报",
                 current_time_str=current_time_str,
                 notify_base=notify_base,
+                report_type=REPORT_TYPE_DAILY,
             )
             phase_summaries.append(
                 "daily[" + ("; ".join(daily_parts) if daily_parts else "无数据") + "]"
             )
+        except UpstreamTransientError as e:
+            dim_soft_skips.append(f"daily: {e}")
+            logger.warning("Aya 日报维度软跳过: %s", e)
+        except Exception as e:
+            detail = truncate_task_error_message(str(e))
+            dim_errors.append(f"daily: {detail}")
+            logger.error("Aya 日报维度失败: %s", detail)
 
-        if fetch_country:
+    # ---- 国家维度（独立 try/except） ----
+    if fetch_country:
+        try:
             country_result = await fetch_aya_rows(
                 base_url=base_url,
                 secret_key=secret_key,
@@ -189,12 +210,22 @@ async def aya_api_task(
                 notify_title="Aya-国家",
                 current_time_str=current_time_str,
                 notify_base=notify_base,
+                report_type=REPORT_TYPE_COUNTRY,
             )
             phase_summaries.append(
                 "country[" + ("; ".join(country_parts) if country_parts else "无数据") + "]"
             )
+        except UpstreamTransientError as e:
+            dim_soft_skips.append(f"country: {e}")
+            logger.warning("Aya 国家维度软跳过: %s", e)
+        except Exception as e:
+            detail = truncate_task_error_message(str(e))
+            dim_errors.append(f"country: {detail}")
+            logger.error("Aya 国家维度失败: %s", detail)
 
-        if fetch_unit:
+    # ---- 广告单元维度（独立 try/except） ----
+    if fetch_unit:
+        try:
             unit_result = await fetch_aya_rows(
                 base_url=base_url,
                 secret_key=secret_key,
@@ -212,28 +243,53 @@ async def aya_api_task(
                 notify_title="Aya-广告单元",
                 current_time_str=current_time_str,
                 notify_base=notify_base,
+                report_type=REPORT_TYPE_UNIT,
                 data_transform=preprocess_aya_unit_rows,
             )
             phase_summaries.append(
                 "unit[" + ("; ".join(unit_parts) if unit_parts else "无数据") + "]"
             )
+        except UpstreamTransientError as e:
+            dim_soft_skips.append(f"unit: {e}")
+            logger.warning("Aya 广告单元维度软跳过: %s", e)
+        except Exception as e:
+            detail = truncate_task_error_message(str(e))
+            dim_errors.append(f"unit: {detail}")
+            logger.error("Aya 广告单元维度失败: %s", detail)
 
-        set_task_result(
-            AYA_API_TASK_NAME,
-            "执行成功: " + "; ".join(phase_summaries),
+    # ---- 汇总处理 ----
+    if phase_summaries and not dim_errors:
+        # 全部成功（可能有部分软跳过）
+        if dim_soft_skips:
+            soft_msg = (
+                f"部分成功: {'; '.join(phase_summaries)} | "
+                f"软跳过: {'; '.join(dim_soft_skips)}"
+            )
+            logger.warning("[%s] %s", AYA_API_TASK_NAME, soft_msg)
+            log_scheduled_task_skip(AYA_API_TASK_NAME, "部分维度上游网络瞬时故障")
+            set_task_result(AYA_API_TASK_NAME, soft_msg)
+        else:
+            set_task_result(
+                AYA_API_TASK_NAME,
+                "执行成功: " + "; ".join(phase_summaries),
+            )
+    elif phase_summaries and dim_errors:
+        # 部分成功 + 部分硬错误
+        msg = (
+            f"部分成功: {'; '.join(phase_summaries)} | "
+            f"失败: {'; '.join(dim_errors)}"
         )
-    except UpstreamTransientError as e:
-        prefix = (
-            f"部分成功: {'; '.join(phase_summaries)} | " if phase_summaries else ""
-        )
-        soft_msg = f"{prefix}软跳过: 上游暂时不可达，等待下次调度 | {e}"
+        logger.error("[%s] %s", AYA_API_TASK_NAME, msg)
+        set_task_result(AYA_API_TASK_NAME, msg)
+        raise RuntimeError(msg)
+    elif dim_soft_skips and not dim_errors:
+        # 全部为软跳过（无成功数据）
+        soft_msg = f"全部软跳过: {'; '.join(dim_soft_skips)}"
         logger.warning("[%s] %s", AYA_API_TASK_NAME, soft_msg)
-        log_scheduled_task_skip(AYA_API_TASK_NAME, "上游网络瞬时故障", detail=str(e))
+        log_scheduled_task_skip(AYA_API_TASK_NAME, "上游网络瞬时故障", detail=str(dim_soft_skips))
         set_task_result(AYA_API_TASK_NAME, soft_msg)
-        return
-    except Exception as e:
-        error_detail = truncate_task_error_message(str(e))
-        # 不带 exc_info，避免与调度器失败日志重复触发 Telegram
-        logger.error("%s 执行失败: %s", AYA_API_TASK_NAME, error_detail)
-        set_task_result(AYA_API_TASK_NAME, error_detail)
-        raise
+    elif dim_errors:
+        msg = f"全部失败: {'; '.join(dim_errors)}"
+        logger.error("[%s] %s", AYA_API_TASK_NAME, msg)
+        set_task_result(AYA_API_TASK_NAME, msg)
+        raise RuntimeError(msg)

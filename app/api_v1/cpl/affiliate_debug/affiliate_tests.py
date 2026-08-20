@@ -10,6 +10,7 @@
 import logging
 from typing import Optional
 
+from app.core.ssrf_guard import SSRFForbiddenError, assert_outbound_url_safe
 import httpx
 from fastapi import APIRouter, Depends, Query, Path, HTTPException, Request
 from sqlalchemy import func
@@ -106,8 +107,11 @@ async def create_affiliate_test(
             postback_url = postback_url.replace('{offer_id}', str(offer.id))
             postback_url = postback_url.replace('{publisher_id}', str(publisher.id))
 
+            # SSRF：联调出站前强制校验目标
+            assert_outbound_url_safe(postback_url)
+
             # ---------- 上下文管理 ----------
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
                 # ---------- 条件分支 ----------
                 if postback_method.upper() == 'POST':
                     response = await client.post(postback_url, json={
@@ -120,6 +124,10 @@ async def create_affiliate_test(
 
                 status = "Send Success" if response.status_code == 200 else "Failed"
                 affiliate_return_content = response.text[:1000]  # 限制长度
+        except SSRFForbiddenError as e:
+            logger.warning("联调 Postback 被 SSRF 拦截: %s", e.reason)
+            status = "Failed"
+            affiliate_return_content = f"SSRF blocked: {e.reason}"
         except Exception as e:
             logger.error(f"发送Postback失败: {str(e)}", exc_info=True)
             status = "Failed"

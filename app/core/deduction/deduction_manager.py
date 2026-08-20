@@ -10,10 +10,11 @@
 - 增强类型提示
 """
 import logging
-import random
+import hashlib
 from typing import Optional, Tuple, Dict, Any, Protocol
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_DOWN
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import and_, case, func
@@ -63,11 +64,11 @@ class DeductionResult:
     should_deduct_volume: bool = False
     should_deduct_amount: bool = False
     original_volume: int = 1
-    original_amount: float = 0.0
+    original_amount: Decimal = Decimal("0")
     final_volume: int = 1
-    final_amount: float = 0.0
+    final_amount: Decimal = Decimal("0")
     deducted_volume: int = 0
-    deducted_amount: float = 0.0
+    deducted_amount: Decimal = Decimal("0")
     deduction_type: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
@@ -92,7 +93,8 @@ class DeductionStrategy(ABC):
     def should_deduct(
         self,
         config: ConversionDeductionConfig,
-        stats: ConversionStats
+        stats: ConversionStats,
+        decision_key: str = "",
     ) -> bool:
         """
         判断是否应该扣减当前转化
@@ -100,6 +102,7 @@ class DeductionStrategy(ABC):
         Args:
             config: 扣减配置
             stats: 转化统计信息
+            decision_key: 确定性决策键（如 click_id）
             
         Returns:
             是否应该扣减
@@ -107,31 +110,35 @@ class DeductionStrategy(ABC):
         pass
 
 
-class RandomDeductionStrategy(DeductionStrategy):
-    """随机扣减策略"""
-    
+class DeterministicHashDeductionStrategy(DeductionStrategy):
+    """
+    基于 click_id（或决策键）确定性哈希的扣量策略。
+
+    多 Worker 下同一 click_id 结论一致；比例 = hash%10000 < ratio*10000。
+    不再使用进程内 random.random()。
+    """
+
     def should_deduct(
         self,
         config: ConversionDeductionConfig,
-        stats: ConversionStats
+        stats: ConversionStats,
+        decision_key: str = "",
     ) -> bool:
-        """随机扣减，但确保总体比例正确"""
-        if stats.total == 0:
+        ratio = float(config.volume_deduction_ratio or 0)
+        if ratio <= 0:
             return False
-        
-        should_deduct_count = int(stats.total * config.volume_deduction_ratio)
-        
-        if stats.deducted >= should_deduct_count:
-            return False
-        
-        remaining_to_deduct = should_deduct_count - stats.deducted
-        remaining_conversions = stats.total - stats.processed
-        
-        if remaining_conversions == 0:
-            return False
-        
-        probability = remaining_to_deduct / remaining_conversions
-        return random.random() < probability
+        if ratio >= 1.0:
+            return True
+        key = (decision_key or "").strip() or f"seq:{stats.processed}"
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        bucket = int(digest[:8], 16) % 10000
+        return bucket < int(ratio * 10000)
+
+
+class RandomDeductionStrategy(DeterministicHashDeductionStrategy):
+    """兼容旧配置名 random：内部改为确定性哈希，避免多进程偏差。"""
+
+    pass
 
 
 class ProportionalDeductionStrategy(DeductionStrategy):
@@ -140,7 +147,8 @@ class ProportionalDeductionStrategy(DeductionStrategy):
     def should_deduct(
         self,
         config: ConversionDeductionConfig,
-        stats: ConversionStats
+        stats: ConversionStats,
+        decision_key: str = "",
     ) -> bool:
         """按固定间隔扣量"""
         if config.volume_deduction_ratio <= 0:
@@ -163,7 +171,8 @@ class RoundRobinDeductionStrategy(DeductionStrategy):
     def should_deduct(
         self,
         config: ConversionDeductionConfig,
-        stats: ConversionStats
+        stats: ConversionStats,
+        decision_key: str = "",
     ) -> bool:
         """轮询方式扣量"""
         if config.volume_deduction_ratio <= 0:
@@ -186,6 +195,8 @@ class DeductionStrategyFactory:
     
     _strategies: Dict[str, DeductionStrategy] = {
         'random': RandomDeductionStrategy(),
+        'hash': DeterministicHashDeductionStrategy(),
+        'deterministic': DeterministicHashDeductionStrategy(),
         'proportional': ProportionalDeductionStrategy(),
         'round_robin': RoundRobinDeductionStrategy(),
     }
@@ -563,7 +574,8 @@ class DeductionManager:
     def should_deduct_volume(
         self,
         config: ConversionDeductionConfig,
-        stats: ConversionStats
+        stats: ConversionStats,
+        decision_key: str = "",
     ) -> bool:
         """
         判断是否应该扣减转化数量
@@ -571,6 +583,7 @@ class DeductionManager:
         Args:
             config: 扣减配置
             stats: 转化统计信息
+            decision_key: 确定性键（click_id），保证多进程一致
             
         Returns:
             是否应该扣减
@@ -579,29 +592,31 @@ class DeductionManager:
             return False
         
         strategy = DeductionStrategyFactory.get_strategy(config.deduction_strategy)
-        return strategy.should_deduct(config, stats)
+        return strategy.should_deduct(config, stats, decision_key=decision_key)
     
     def calculate_amount_deduction(
         self,
-        original_amount: float,
+        original_amount: Decimal | float | int | str | None,
         config: ConversionDeductionConfig
-    ) -> Tuple[float, float]:
+    ) -> Tuple[Decimal, Decimal]:
         """
         计算扣减后的金额
-        
+
         Args:
             original_amount: 原始金额
             config: 扣减配置
-            
+
         Returns:
             (扣减后金额, 扣减金额)
         """
         if not config.enable_amount_deduction or config.amount_deduction_ratio <= 0:
-            return original_amount, 0.0
-        
-        deduction_amount = original_amount * config.amount_deduction_ratio
-        final_amount = original_amount - deduction_amount
-        
+            return Decimal(str(original_amount or 0)), Decimal("0")
+
+        orig = Decimal(str(original_amount or 0))
+        ratio = Decimal(str(config.amount_deduction_ratio))
+        deduction_amount = orig * ratio
+        final_amount = orig - deduction_amount
+
         return final_amount, deduction_amount
     
     async def apply_deduction(
@@ -629,9 +644,9 @@ class DeductionManager:
         """
         result = DeductionResult(
             original_volume=1,
-            original_amount=conversion_data.get('original_payout', 0.0) or 0.0,
+            original_amount=Decimal(str(conversion_data.get('original_payout', 0) or 0)),
             final_volume=1,
-            final_amount=conversion_data.get('original_payout', 0.0) or 0.0,
+            final_amount=Decimal(str(conversion_data.get('original_payout', 0) or 0)),
         )
         
         # 获取转化统计（Redis 原子序号 + deducted，避免 60s 缓存竞态）
@@ -642,23 +657,34 @@ class DeductionManager:
             hours=24
         )
         
-        # 判断是否扣量
+        # 判断是否扣量（确定性哈希 / 间隔策略 + Redis 原子预留防超扣）
         if config.enable_volume_deduction:
             strategy_name = (config.deduction_strategy or "random").lower()
-            want_deduct = self.should_deduct_volume(config, stats)
+            decision_key = (click_id or "").strip() or f"offer:{offer_id}:seq:{stats.processed}"
+            want_deduct = self.should_deduct_volume(config, stats, decision_key=decision_key)
             if want_deduct:
-                if strategy_name == "random":
-                    # 随机策略：按目标比例原子预留，避免并发过量扣
+                if strategy_name in ("random", "hash", "deterministic"):
+                    # 哈希命中后仍按目标比例原子预留，避免并发过量扣
                     ratio = float(config.volume_deduction_ratio or 0)
-                    limit = int(stats.total * ratio)
-                    reserved = await self._reserve_volume_deduction(
-                        advertiser_id=advertiser_id,
-                        offer_id=offer_id,
-                        publisher_id=publisher_id,
-                        hours=24,
-                        limit=limit,
-                    )
-                    result.should_deduct_volume = reserved
+                    limit = int(stats.total * ratio) if stats.total > 0 else 10**9
+                    if stats.total <= 0:
+                        # 无总量窗口时仅按哈希结论 + 递增 deducted
+                        result.should_deduct_volume = True
+                        await self._incr_decision_deducted(
+                            advertiser_id=advertiser_id,
+                            offer_id=offer_id,
+                            publisher_id=publisher_id,
+                            hours=24,
+                        )
+                    else:
+                        reserved = await self._reserve_volume_deduction(
+                            advertiser_id=advertiser_id,
+                            offer_id=offer_id,
+                            publisher_id=publisher_id,
+                            hours=24,
+                            limit=limit,
+                        )
+                        result.should_deduct_volume = reserved
                 else:
                     result.should_deduct_volume = True
                     await self._incr_decision_deducted(
@@ -843,9 +869,9 @@ def should_deduct_volume(
 
 
 def calculate_amount_deduction(
-    original_amount: float,
+    original_amount: Decimal | float | int | str | None,
     config: ConversionDeductionConfig
-) -> Tuple[float, float]:
+) -> Tuple[Decimal, Decimal]:
     """计算扣减后的金额（向后兼容）"""
     manager = DeductionManager(None)  # 临时管理器，只用于调用方法
     return manager.calculate_amount_deduction(original_amount, config)

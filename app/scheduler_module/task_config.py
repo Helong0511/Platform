@@ -339,6 +339,21 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
             "需存在 config/gam_scheduler.json 且配置账号后才会执行"
         ),
     },
+
+    # ========== IDGTN API获取数据任务 ==========
+    "IDGTN API获取数据": {
+        "task_name": "IDGTN API获取数据",
+        "task_module": "app.scheduler_module.tasks.idgtn_task",
+        "task_function": "idgtn_api_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "*/30 * * * *",
+        "description": (
+            "每隔30分钟执行一次，从 IDGTN /download/country 拉取广告单元+日期+国家报表"
+            "（按平台 cross 维度入库；IDGTN_API_FETCH_COUNTRY 控制）"
+        ),
+    },
+
     # ==============================================================================
     # 添加新任务示例（取消注释并修改即可）
     # ==============================================================================

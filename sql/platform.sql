@@ -953,6 +953,7 @@ CREATE TABLE IF NOT EXISTS `scheduled_tasks`  (
   `description` TEXT NULL COMMENT '任务描述',
   `function_path` VARCHAR(255) NULL DEFAULT NULL COMMENT '执行函数路径（例如：app.scheduler_module.tasks.simple_task.simple_info_task）',
   `task_params` JSON NULL COMMENT '任务扩展参数（JSON），如 GAM 产品白名单',
+  `standard_report_type` VARCHAR(20) NULL DEFAULT NULL COMMENT '标准数据维度（country/cross/unit/daily），用于多维度汇总选源',
   `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '创建时间',
   `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,

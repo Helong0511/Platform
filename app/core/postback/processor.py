@@ -10,6 +10,7 @@ Postback 统一处理器模块（重构版）
 """
 import asyncio
 import logging
+from decimal import Decimal
 from typing import Dict, Any, Optional
 
 from sqlalchemy import select
@@ -29,6 +30,7 @@ from app.core.postback.pipeline import (
     step_associate_click,
     step_check_duplicate,
     step_save_conversion,
+    step_validate_offer_status,
     deactivate_short_links_on_cap_exceeded,
 )
 from app.core.postback.forwarder import PostbackForwarder
@@ -144,12 +146,23 @@ class PostbackProcessor:
 
             logger.info(f"Click 关联结果: {click_association}")
 
+            # ========== 第 4.5 步：Offer 激活状态校验 ==========
+            logger.info("=== 第 4.5 步：Offer 激活状态校验 ===")
+            offer_active = await step_validate_offer_status(pipe_ctx)
+            if not offer_active:
+                logger.warning("Offer 已下线，跳过转化处理：platform=%s", platform)
+                return {
+                    "success": True,
+                    "message": "Offer 已下线，转化未处理",
+                    "retryable": False,
+                }
+
             # ========== 第 5 步：重复检测 ==========
             logger.info("=== 第 5 步：重复检测 ===")
             conversion_id = normalized_data.get('conversion_id')
             event_name = normalized_data.get('event_name')
             logger.info(f"检测重复：conversion_id={conversion_id}, event_name={event_name}")
-            
+
             pipe_ctx.normalized_data = normalized_data
             is_dup = await step_check_duplicate(pipe_ctx)
 
@@ -188,7 +201,7 @@ class PostbackProcessor:
                     "success": True,
                     "message": "转化已扣量，未入库",
                     "platform": platform,
-                    "payout": 0.0,
+                    "payout": float(Decimal("0")),
                 }
 
             offer_id, publisher_id, advertiser_id = attribution_ids_from_association(
@@ -239,8 +252,8 @@ class PostbackProcessor:
                 cap_ok = False
                 pipe_ctx.cap_ok = False
                 pipe_ctx.conversion_status = f"CapExceeded({cap_status or 'cap_exceeded'})"
-                pipe_ctx.final_payout = 0.0
-                final_payout = 0.0
+                pipe_ctx.final_payout = Decimal("0")
+                final_payout = Decimal("0")
                 logger.warning(
                     "Cap 预留失败（已超限），按 CapExceeded 入库：offer_id=%s publisher_id=%s",
                     offer_id,

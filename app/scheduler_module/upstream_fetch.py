@@ -1160,3 +1160,41 @@ async def fetch_leiyang_rows(
         rows=all_rows,
         stats=UpstreamFetchStats.merge(*stats_list) if stats_list else UpstreamFetchStats(),
     )
+
+
+# IDGTN Business Intelligence（ops.idgtndmggroup.com）
+# 文档：tests/idgtn中国v1-4.pdf v1.9
+# 鉴权：header apiKey + apiSecret；成功 code=200，行在 data 数组
+# 接口3 /download/country：广告单元 + 日期 + 国家（按平台 cross 维度入库）
+IDGTN_PATH_COUNTRY = "/download/country"
+
+
+async def fetch_idgtn_rows(
+    *,
+    base_url: str,
+    api_key: str,
+    api_secret: str,
+    report_date: str,
+    path: str = IDGTN_PATH_COUNTRY,
+    label: str = "IDGTN API",
+) -> UpstreamFetchResult:
+    """
+    IDGTN 拉数：GET + header apiKey/apiSecret，单日数据，无分页。
+
+    响应 code==200 成功（data 为数组，可能为空），其余抛异常。
+    文档接口3 /download/country 不支持 timeZoneCode，仅 reportDate。
+    """
+    url = f"{base_url.rstrip('/')}{path}"
+    headers = {"apiKey": api_key, "apiSecret": api_secret}
+    json_data = await get_json(
+        url,
+        params={"reportDate": report_date},
+        headers=headers,
+        label=f"{label} ({report_date})",
+    )
+    raise_unless_api_success(json_data, {200}, label=label, code_key="code")
+    rows = json_data.get("data") or []
+    if not isinstance(rows, list):
+        rows = []
+    return UpstreamFetchResult.from_rows(rows)
+

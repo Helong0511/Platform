@@ -29,6 +29,7 @@ DATA_SOURCE_TBSJ = "tbsj"  # yangyangdeyi / 通百世家
 DATA_SOURCE_AYA = "aya"
 DATA_SOURCE_FLYMOBI = "flymobi"
 DATA_SOURCE_LEIYANG = "leiyang"
+DATA_SOURCE_IDGTN = "idgtn"
 DATA_SOURCE_EXCEL = "excel"
 DATA_SOURCE_UNKNOWN = "unknown"
 DATA_SOURCE_LEGACY = "legacy"
@@ -47,6 +48,7 @@ UPSTREAM_API_DATA_SOURCES: tuple[str, ...] = (
     DATA_SOURCE_AYA,
     DATA_SOURCE_FLYMOBI,
     DATA_SOURCE_LEIYANG,
+    DATA_SOURCE_IDGTN,
 )
 
 VALID_DATA_SOURCES = frozenset({
@@ -86,6 +88,108 @@ SUMMARY_REPORT_TYPE_PRIORITY: tuple[str, ...] = (
     REPORT_TYPE_UNIT,
     REPORT_TYPE_DAILY,
 )
+
+# 各数据源的标准维度（当该维度数据存在时，以它为准；其他维度仅在标准维度缺失时兜底）
+# 用于解决同一数据源多维度拉取时的优先级问题（如 Aya 同时拉 daily/country/unit，上游指定 daily 为标准）
+# 未配置的数据源回退到 SUMMARY_REPORT_TYPE_PRIORITY（country > cross > unit > daily）
+# 此字典为内置默认值；scheduled_tasks 表的 standard_report_type 字段可覆盖此配置
+STANDARD_REPORT_TYPE_BY_SOURCE: dict[str, str] = {
+    DATA_SOURCE_AYA: REPORT_TYPE_DAILY,       # Aya：日报为标准
+    DATA_SOURCE_FLYMOBI: REPORT_TYPE_CROSS,    # FlyMobi：交叉为标准
+    DATA_SOURCE_ZHISUO: REPORT_TYPE_CROSS,     # ZhiSuo：交叉为标准
+}
+
+# 任务名 → 数据源映射（用于从 scheduled_tasks 加载 standard_report_type）
+TASK_NAME_TO_DATA_SOURCE: dict[str, str] = {
+    "TQT API获取数据": DATA_SOURCE_TQT,
+    "Skymobi API获取数据": DATA_SOURCE_SKYMOBI,
+    "yangyangdeyi API获取数据": DATA_SOURCE_TBSJ,
+    "Addermobi API获取数据": DATA_SOURCE_ADDERMOBI,
+    "Huguang API获取数据": DATA_SOURCE_HUGUANG,
+    "ZhiSuo API获取数据": DATA_SOURCE_ZHISUO,
+    "Pomiad API获取数据": DATA_SOURCE_POMIAD,
+    "H5 Deer API获取数据": DATA_SOURCE_H5DEER,
+    "Aya API获取数据": DATA_SOURCE_AYA,
+    "FlyMobi API获取数据": DATA_SOURCE_FLYMOBI,
+    "LeiYang API获取数据": DATA_SOURCE_LEIYANG,
+    "IDGTN API获取数据": DATA_SOURCE_IDGTN,
+    "Google API获取数据": DATA_SOURCE_GAM,
+}
+
+# 数据库覆盖层（scheduled_tasks.standard_report_type），运行时由 refresh_standard_report_types 加载
+_db_standard_report_type_override: dict[str, str] = {}
+
+
+async def refresh_standard_report_types(db_session=None) -> None:
+    """
+    从 scheduled_tasks 表加载 standard_report_type，覆盖内置默认值。
+    
+    在应用启动和任务更新时调用。非阻塞：数据库异常时保留现有配置。
+    """
+    global _db_standard_report_type_override
+    try:
+        from sqlalchemy import select
+        from app.models.system import ScheduledTask
+
+        if db_session is None:
+            from app.core.database import AsyncSessionLocal
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(ScheduledTask.task_name, ScheduledTask.standard_report_type).where(
+                        ScheduledTask.standard_report_type.isnot(None)
+                    )
+                )
+                rows = result.all()
+        else:
+            result = await db_session.execute(
+                select(ScheduledTask.task_name, ScheduledTask.standard_report_type).where(
+                    ScheduledTask.standard_report_type.isnot(None)
+                )
+            )
+            rows = result.all()
+
+        override: dict[str, str] = {}
+        for task_name, rt in rows:
+            if not rt:
+                continue
+            rt_normalized = str(rt).strip().lower()
+            if rt_normalized not in VALID_REPORT_TYPES or rt_normalized == REPORT_TYPE_LEGACY:
+                continue
+            data_source = TASK_NAME_TO_DATA_SOURCE.get(str(task_name).strip())
+            if data_source:
+                override[data_source] = rt_normalized
+
+        _db_standard_report_type_override = override
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning("加载 standard_report_type 配置失败，使用内置默认值", exc_info=True)
+
+
+def get_standard_report_type(data_source: Optional[str]) -> Optional[str]:
+    """获取指定数据源的标准维度（数据库覆盖优先，然后内置默认，不存在返回 None）。"""
+    key = str(data_source or "").strip().lower()
+    # 数据库覆盖优先
+    if key in _db_standard_report_type_override:
+        return _db_standard_report_type_override[key]
+    return STANDARD_REPORT_TYPE_BY_SOURCE.get(key)
+
+
+def get_report_type_priority(data_source: Optional[str] = None) -> list[str]:
+    """
+    获取指定数据源的 report_type 优先级列表。
+    
+    - 有标准维度：标准维度排第一，其余按全局默认顺序
+    - 无标准维度：返回全局默认优先级
+    """
+    standard = get_standard_report_type(data_source)
+    if not standard:
+        return list(SUMMARY_REPORT_TYPE_PRIORITY)
+    
+    priority = [standard]
+    for rt in SUMMARY_REPORT_TYPE_PRIORITY:
+        if rt != standard:
+            priority.append(rt)
+    return priority
 
 
 def normalize_report_type(value: Optional[str]) -> str:
@@ -206,6 +310,7 @@ DATA_SOURCE_LABELS: dict[str, str] = {
     DATA_SOURCE_AYA: "Aya",
     DATA_SOURCE_FLYMOBI: "FlyMobi",
     DATA_SOURCE_LEIYANG: "LeiYang",
+    DATA_SOURCE_IDGTN: "IDGTN",
     DATA_SOURCE_EXCEL: "Excel 导入",
     DATA_SOURCE_LEGACY: "历史",
     DATA_SOURCE_UNKNOWN: "未知",
@@ -230,7 +335,7 @@ REPORT_TYPE_DETAIL_OPTIONS: tuple[str, ...] = (
 REPORT_TYPE_HINTS: dict[str, str] = {
     REPORT_TYPE_UNIT: "按广告单元，无具体国家（含 ZZ）；ZhiSuo channelunit、GAM ad_unit、Aya getAdsDataUnit、LeiYang ad-unit（默认关）",
     REPORT_TYPE_COUNTRY: "按具体国家，无广告单元（不含 ZZ）；ZhiSuo channelcountry、TQT、Huguang、Aya、LeiYang country（默认关）",
-    REPORT_TYPE_CROSS: "具体国家+广告单元（不含 ZZ）；ZhiSuo channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、FlyMobi countryList、GAM country、TBSJ(yangyangdeyi)/adunit、LeiYang atomic（推荐）",
+    REPORT_TYPE_CROSS: "具体国家+广告单元（不含 ZZ）；ZhiSuo channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、FlyMobi countryList、GAM country、TBSJ(yangyangdeyi)/adunit、LeiYang atomic（推荐）、IDGTN /download/country",
     REPORT_TYPE_DAILY: "日汇总，无具体国家无单元（含 ZZ）；ZhiSuo channeldaily 兜底、GAM daily、Aya getDay、LeiYang all（默认关）",
     REPORT_TYPE_LEGACY: "历史或未标注；新入库会自动按行形态推断",
 }
@@ -249,6 +354,7 @@ UPSTREAM_DEFAULT_REPORT_TYPES: dict[str, str] = {
     DATA_SOURCE_AYA: REPORT_TYPE_LEGACY,
     DATA_SOURCE_FLYMOBI: REPORT_TYPE_LEGACY,
     DATA_SOURCE_LEIYANG: REPORT_TYPE_CROSS,  # 默认 /reports/atomic（国家+广告单元）
+    DATA_SOURCE_IDGTN: REPORT_TYPE_CROSS,    # /download/country（具体国家+广告单元）
     DATA_SOURCE_EXCEL: REPORT_TYPE_DAILY,
 }
 

@@ -2,90 +2,85 @@
 Offer 信息 Redis 缓存模块。
 
 职责：缓存 offer_id → advertiser_id 等热点字段，降低 Postback/Tracklink 链路中的 DB 查询。
-
-在系统中的位置：``app.core.offer_cache``，由转化处理与 ``cache_manager`` 预热/失效逻辑调用。
+含 TTL 抖动与空值短缓存，降低雪崩/穿透。
 """
 import logging
 import json
-from typing import Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+import random
+from typing import Optional
+from datetime import datetime, timezone
 from app.core.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
 
-# Redis缓存键前缀
 OFFER_CACHE_PREFIX = "offer:cache:"
-# 缓存TTL：1小时（Offer信息变化不频繁）
 CACHE_TTL = 3600
+NONE_MARKER = "__none__"
+NONE_TTL = 60
+
+
+def _ttl_with_jitter(base: int = CACHE_TTL, jitter_max: int = 300) -> int:
+    """基础 TTL + [1, jitter_max] 随机抖动，防雪崩。"""
+    return max(1, int(base) + random.randint(1, max(1, jitter_max)))
 
 
 async def get_offer_advertiser_id(offer_id: int) -> Optional[int]:
-    """
-    从缓存获取Offer的advertiser_id
-    
-    Args:
-        offer_id: Offer ID
-        
-    Returns:
-        advertiser_id，如果不存在则返回None
-    """
+    """从缓存获取 Offer 的 advertiser_id；命中空值标记返回 None。"""
     redis = await get_redis_client()
     if not redis:
         return None
-    
+
     try:
         cache_key = f"{OFFER_CACHE_PREFIX}{offer_id}"
         cached_data = await redis.get(cache_key)
-        if cached_data:
-            data = json.loads(cached_data)
-            return data.get("advertiser_id")
+        if not cached_data:
+            return None
+        if isinstance(cached_data, bytes):
+            cached_data = cached_data.decode("utf-8")
+        if cached_data == NONE_MARKER:
+            return None
+        data = json.loads(cached_data)
+        return data.get("advertiser_id")
     except Exception as e:
         logger.debug(f"从缓存获取Offer信息失败: offer_id={offer_id}, error={e}")
-    
+
     return None
 
 
-async def set_offer_cache(offer_id: int, advertiser_id: int, offer_name: Optional[str] = None, add_tags: bool = True) -> bool:
-    """
-    缓存Offer信息
-    
-    Args:
-        offer_id: Offer ID
-        advertiser_id: 广告主ID
-        offer_name: Offer名称（可选）
-        add_tags: 是否添加缓存标签（用于精确失效）
-        
-    Returns:
-        是否设置成功
-    """
+async def set_offer_cache(
+    offer_id: int,
+    advertiser_id: Optional[int],
+    offer_name: Optional[str] = None,
+    add_tags: bool = True,
+) -> bool:
+    """缓存 Offer；advertiser_id 为 None 时写入短 TTL 空值标记。"""
     redis = await get_redis_client()
     if not redis:
         return False
-    
+
     try:
         cache_key = f"{OFFER_CACHE_PREFIX}{offer_id}"
+        if advertiser_id is None:
+            await redis.setex(cache_key, NONE_TTL, NONE_MARKER)
+            return True
+
         data = {
             "offer_id": offer_id,
             "advertiser_id": advertiser_id,
             "offer_name": offer_name,
-            "cached_at": datetime.now(timezone.utc).isoformat()
+            "cached_at": datetime.now(timezone.utc).isoformat(),
         }
-        data_str = json.dumps(data, default=str)
-        await redis.setex(cache_key, CACHE_TTL, data_str)
-        
-        # 添加缓存标签（用于精确失效）
+        await redis.setex(cache_key, _ttl_with_jitter(), json.dumps(data, default=str))
+
         if add_tags:
             try:
-                # 延迟导入，避免循环导入
                 from app.core.cache_manager import CacheManager
-                
-                tags = [f"offer:{offer_id}"]
-                if advertiser_id:
-                    tags.append(f"advertiser:{advertiser_id}")
+
+                tags = [f"offer:{offer_id}", f"advertiser:{advertiser_id}"]
                 await CacheManager.add_cache_tag(cache_key, tags)
             except Exception as tag_error:
                 logger.debug(f"添加缓存标签失败: {tag_error}，不影响缓存写入")
-        
+
         return True
     except Exception as e:
         logger.debug(f"缓存Offer信息失败: offer_id={offer_id}, error={e}")
@@ -93,24 +88,14 @@ async def set_offer_cache(offer_id: int, advertiser_id: int, offer_name: Optiona
 
 
 async def invalidate_offer_cache(offer_id: int) -> bool:
-    """
-    清除Offer缓存（当Offer被更新时）
-    
-    Args:
-        offer_id: Offer ID
-        
-    Returns:
-        是否清除成功
-    """
+    """清除 Offer 缓存。"""
     redis = await get_redis_client()
     if not redis:
         return False
-    
+
     try:
-        cache_key = f"{OFFER_CACHE_PREFIX}{offer_id}"
-        await redis.delete(cache_key)
+        await redis.delete(f"{OFFER_CACHE_PREFIX}{offer_id}")
         return True
     except Exception as e:
         logger.debug(f"清除Offer缓存失败: offer_id={offer_id}, error={e}")
         return False
-

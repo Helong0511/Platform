@@ -80,6 +80,18 @@ class RedisCapManager:
     return new_val
     """
 
+    # Lua：原子回滚（decr 后若 <0 则归零，避免并发 set 覆盖丢失计数）
+    # KEYS[1]: cap_key
+    # 返回: 回滚后的最终值
+    _DECREMENT_LUA = """
+    local val = redis.call('DECR', KEYS[1])
+    if val < 0 then
+        redis.call('SET', KEYS[1], 0)
+        return 0
+    end
+    return val
+    """
+
     @staticmethod
     async def check_and_increment_daily(
         offer_id: int, 
@@ -158,36 +170,50 @@ class RedisCapManager:
             
     @staticmethod
     async def decrement_daily(
-        offer_id: int, 
+        offer_id: int,
         publisher_id: Optional[int] = None
-    ):
+    ) -> int:
         """
-        减少每日计数 (用于回滚)
+        减少每日计数 (用于回滚，原子操作)
+
+        Returns:
+            int: 回滚后的最终计数值；Redis 不可用或异常返回 -1
         """
         redis = await get_redis_client()
-        if not redis: return
-        
+        if not redis:
+            return -1
+
         now = get_app_now_naive()
         key = get_daily_cap_key(offer_id, now, publisher_id)
         try:
-            val = await redis.decr(key)
-            # 避免减成负数 (虽然通常不会发生)
-            if val < 0:
-                await redis.set(key, 0)
+            # 使用 Lua 脚本原子化 decr + 负数归零，避免 TOCTOU 竞态
+            # （decr 后到 set(0) 之间若有 incr 会丢失计数或导致配额虚增）
+            val = await redis.eval(RedisCapManager._DECREMENT_LUA, 1, key)
+            return int(val)
         except Exception as e:
-            logger.error(f"Redis回滚失败: {e}")
+            logger.error(f"Redis回滚失败: {e}", exc_info=True)
+            return -1
 
     @staticmethod
     async def decrement_total(
-        offer_id: int, 
+        offer_id: int,
         publisher_id: Optional[int] = None
-    ):
-        """减少总计数 (用于回滚)"""
+    ) -> int:
+        """
+        减少总计数 (用于回滚，原子操作)
+
+        Returns:
+            int: 回滚后的最终计数值；Redis 不可用或异常返回 -1
+        """
         redis = await get_redis_client()
-        if not redis: return
-        
+        if not redis:
+            return -1
+
         key = get_total_cap_key(offer_id, publisher_id)
         try:
-            await redis.decr(key)
+            # 使用 Lua 脚本原子化 decr + 负数归零，避免并发 set 覆盖丢失计数
+            val = await redis.eval(RedisCapManager._DECREMENT_LUA, 1, key)
+            return int(val)
         except Exception as e:
-            logger.error(f"Redis回滚失败: {e}")
+            logger.error(f"Redis回滚失败: {e}", exc_info=True)
+            return -1

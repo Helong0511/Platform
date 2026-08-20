@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.core.ad_data_metadata import DATA_SOURCE_FLYMOBI
+from app.core.ad_data_metadata import DATA_SOURCE_FLYMOBI, REPORT_TYPE_COUNTRY, REPORT_TYPE_CROSS, REPORT_TYPE_DAILY, REPORT_TYPE_UNIT
 from app.core.config import settings
 from app.scheduler_module.task_names import FLYMOBI_API_TASK_NAME
 from app.scheduler_module.task_result_store import set_task_result
@@ -93,18 +93,21 @@ _FLYMOBI_REPORTS: list[dict[str, Any]] = [
         "path": FLYMOBI_PATH_COUNTRY,
         "label": "FlyMobi countryList",
         "mapping": FLYMOBI_COUNTRY_FIELD_MAPPING,
+        "report_type": REPORT_TYPE_CROSS,
     },
     {
         "env_flag": "FLYMOBI_API_FETCH_UNIT",
         "path": FLYMOBI_PATH_UNIT,
         "label": "FlyMobi adUnitList",
         "mapping": FLYMOBI_UNIT_FIELD_MAPPING,
+        "report_type": REPORT_TYPE_UNIT,
     },
     {
         "env_flag": "FLYMOBI_API_FETCH_DAILY",
         "path": FLYMOBI_PATH_DAILY,
         "label": "FlyMobi dayList",
         "mapping": FLYMOBI_DAILY_FIELD_MAPPING,
+        "report_type": REPORT_TYPE_DAILY,
     },
 ]
 
@@ -190,6 +193,7 @@ async def flymobi_api_task(
                     else None
                 ),
                 data_source=DATA_SOURCE_FLYMOBI,
+                report_type=report["report_type"],
                 log_label=report_label,
                 notify_params=notify_params,
             )

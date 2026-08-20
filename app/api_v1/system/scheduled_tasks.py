@@ -55,8 +55,11 @@ MAX_FUNCTION_PATH_LENGTH = 255
 
 def _enrich_scheduled_task_dict(task: ScheduledTask, task_dict: dict) -> dict:
     """补充函数信息与是否支持手动触发日期参数。（详见字段 Field description）。"""
+    from app.core.ad_data_metadata import TASK_NAME_TO_DATA_SOURCE
+
     task_dict["supports_manual_date_range"] = task_supports_manual_date_range(task.task_name)
     task_dict["supports_gam_scheduler_config"] = task.task_name == GAM_API_TASK_NAME
+    task_dict["supports_standard_report_type"] = task.task_name in TASK_NAME_TO_DATA_SOURCE
     try:
         func_info = get_task_function_info(task.task_name, task.function_path)
         if func_info:
@@ -96,17 +99,23 @@ class ScheduledTaskResponse(BaseSchema):
     function_path: Optional[str] = None  # 执行函数路径（数据库字段）
     supports_manual_date_range: bool = False  # 手动触发是否可选日期范围
     supports_gam_scheduler_config: bool = False  # 是否支持 GAM 多账号配置
+    supports_standard_report_type: bool = False  # 是否支持设置标准维度
+    standard_report_type: Optional[str] = None  # 标准数据维度（country/cross/unit/daily）
     created_at: datetime
     updated_at: datetime
 
 
 class ScheduledTaskUpdate(BaseModel):
     """
-    定时任务更新模型（仅支持启用/禁用）
+    定时任务更新模型
     
     更新请求体：字段均为可选，客户端仅提交需要修改的列。
     """
-    is_active: bool
+    is_active: Optional[bool] = None
+    standard_report_type: Optional[str] = Field(
+        default=None,
+        description="标准数据维度（country/cross/unit/daily）；传 null 清除，省略不更新",
+    )
 
 
 class GamAccountConfigItem(BaseModel):
@@ -220,6 +229,7 @@ async def get_scheduled_tasks(
                         "cron_expression": task.cron_expression,
                         "description": task.description,
                         "function_path": task.function_path,
+                        "standard_report_type": getattr(task, "standard_report_type", None),
                         "created_at": task.created_at,
                         "updated_at": task.updated_at,
                     }
@@ -511,7 +521,7 @@ async def get_scheduled_task(
 @router.patch(
     "/{task_name}",
     response_model=ResponseBaseSchema[ScheduledTaskResponse],
-    summary="更新定时任务状态"
+    summary="更新定时任务"
 )
 async def update_scheduled_task(
         request: Request,
@@ -521,30 +531,53 @@ async def update_scheduled_task(
         current_user: User = Depends(require_admin)
 ):
     """
-    更新定时任务状态（已重构使用服务层）
+    更新定时任务（已重构使用服务层）
     - 仅管理员可访问
-    - 仅支持启用/禁用定时任务
+    - 支持启用/禁用定时任务
+    - 支持设置标准数据维度（standard_report_type）
     """
-    # ---------- 入口：参数与依赖准备 ----------
-    # 使用服务层（业务逻辑在ScheduledTaskService中）
     task_service: ScheduledTaskService = await get_scheduled_task_service(db)
     
-    # ---------- 异常处理 ----------
     try:
         existing_task = await task_service.get_scheduled_task_by_name(task_name)
-        old_is_active = existing_task.is_active if existing_task else None
+        if not existing_task:
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail="定时任务不存在"
+            )
+        old_is_active = existing_task.is_active
 
-        task = await task_service.update_scheduled_task_status(
-            task_name=task_name,
-            is_active=task_update.is_active,
-            current_user=current_user
-        )
+        # 处理 is_active 更新
+        if task_update.is_active is not None:
+            task = await task_service.update_scheduled_task_status(
+                task_name=task_name,
+                is_active=task_update.is_active,
+                current_user=current_user
+            )
+        else:
+            task = existing_task
 
-        # ---------- 条件分支 ----------
+        # 处理 standard_report_type 更新
+        update_fields = task_update.model_dump(exclude_unset=True)
+        if "standard_report_type" in update_fields:
+            new_rt = update_fields["standard_report_type"]
+            if new_rt is not None:
+                new_rt = str(new_rt).strip().lower()
+                if new_rt not in ("country", "cross", "unit", "daily"):
+                    raise_api_exception(
+                        ErrorCode.VALIDATION_ERROR,
+                        detail=f"standard_report_type 无效，可选值：country / cross / unit / daily"
+                    )
+            task.standard_report_type = new_rt
+            await db.commit()
+            await db.refresh(task)
+            # 刷新内存中的标准维度配置
+            from app.core.ad_data_metadata import refresh_standard_report_types
+            await refresh_standard_report_types(db)
+
+        # 审计日志：启用/禁用变更
         if old_is_active is not None and old_is_active != task.is_active:
-            # ---------- 异常处理 ----------
             try:
-                # ---------- 条件分支 ----------
                 if task.is_active:
                     await log_activate(
                         db=db,
@@ -565,16 +598,35 @@ async def update_scheduled_task(
                     )
                 await commit_audit_log(db)
             except Exception as log_error:
-                # 日志记录失败不应该影响主操作
                 logger.warning(f"记录激活/禁用日志失败: {log_error}", exc_info=True)
 
+        # 审计日志：standard_report_type 变更
+        old_rt = getattr(existing_task, "standard_report_type", None)
+        new_rt_val = getattr(task, "standard_report_type", None)
+        if old_rt != new_rt_val:
+            try:
+                await log_user_action(
+                    db=db,
+                    action_type="UPDATE",
+                    user=current_user,
+                    resource_type="SCHEDULED_TASK",
+                    resource_id=task.id,
+                    resource_name=task.task_name,
+                    request=request,
+                    success=True,
+                    details={
+                        "standard_report_type": {"old": old_rt, "new": new_rt_val},
+                    },
+                )
+                await commit_audit_log(db)
+            except Exception as log_error:
+                logger.warning(f"记录标准维度变更日志失败: {log_error}", exc_info=True)
+
         # 转换为响应模型并添加函数信息
-        # ---------- 异常处理 ----------
         try:
             task_dict = ScheduledTaskResponse.model_validate(task).model_dump()
             _enrich_scheduled_task_dict(task, task_dict)
         except Exception as dict_error:
-            # 如果转换失败，使用基本字段构建响应
             logger.warning(f"转换任务响应模型失败: {dict_error}，使用基本字段", exc_info=True)
             task_dict = {
                 "id": task.id,
@@ -590,6 +642,7 @@ async def update_scheduled_task(
                 "success_count": task.success_count,
                 "error_count": task.error_count,
                 "last_error": task.last_error,
+                "standard_report_type": getattr(task, "standard_report_type", None),
                 "created_at": task.created_at,
                 "updated_at": task.updated_at,
             }

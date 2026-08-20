@@ -170,6 +170,8 @@ async def handle_cached_redirect(
         channel_id = cached_data.get("channel_id")
 
     final_offer_id, advertiser_id = await resolve_offer_id(offer_id, db)
+    if offer_id and final_offer_id is None:
+        raise_short_link_not_found("Offer 不存在或已下线")
     final_channel_id = await resolve_attributed_publisher_for_offer(
         final_offer_id,
         channel_id,
@@ -312,6 +314,8 @@ async def handle_database_redirect(
         channel_id = short_link.channel_id
 
     final_offer_id, advertiser_id = await resolve_offer_id(offer_id, db)
+    if offer_id and final_offer_id is None:
+        raise_short_link_not_found("Offer 不存在或已下线")
     final_channel_id = await resolve_attributed_publisher_for_offer(
         final_offer_id,
         channel_id,

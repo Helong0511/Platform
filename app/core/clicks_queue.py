@@ -13,13 +13,17 @@ from app.core.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
 
-# Redis 队列键：主队列 + 处理中队列（RPOPLPUSH 可靠消费）
+# Redis 队列键：主队列 + 处理中 + 死信
 CLICKS_QUEUE_KEY = "clicks:queue"
 CLICKS_PROCESSING_KEY = "clicks:processing"
+CLICKS_DLQ_KEY = "clicks:dead"
 # 队列最大长度（防止内存溢出）
 MAX_QUEUE_SIZE = 100000
 # 批量处理大小
 BATCH_SIZE = 1000
+# 默认最大重试（可被 settings.CLICKS_QUEUE_MAX_RETRIES 覆盖）
+DEFAULT_MAX_RETRIES = 5
+_RETRY_FIELD = "_queue_retry"
 
 
 async def enqueue_click(click_data: Dict[str, Any]) -> bool:
@@ -80,12 +84,41 @@ def _decode_click_payload(click_json: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _max_retries() -> int:
+    try:
+        from app.core.config import settings
+
+        return int(getattr(settings, "CLICKS_QUEUE_MAX_RETRIES", DEFAULT_MAX_RETRIES))
+    except Exception:
+        return DEFAULT_MAX_RETRIES
+
+
+async def move_to_dead_letter(raw: str, reason: str = "") -> bool:
+    """将原始消息移入死信队列并移出 processing。"""
+    redis = await get_redis_client()
+    if not redis:
+        return False
+    try:
+        envelope = {
+            "reason": reason or "unknown",
+            "failed_at": datetime.now(timezone.utc).isoformat(),
+            "raw": raw,
+        }
+        await redis.lrem(CLICKS_PROCESSING_KEY, 1, raw)
+        await redis.rpush(CLICKS_DLQ_KEY, json.dumps(envelope, default=str))
+        logger.error("点击消息已入死信队列: reason=%s raw=%s", reason, raw[:120])
+        return True
+    except Exception as e:
+        logger.error("写入死信队列失败: %s", e, exc_info=True)
+        return False
+
+
 async def reserve_clicks(count: int = BATCH_SIZE) -> list[tuple[str, Dict[str, Any]]]:
     """
     从主队列原子挪到 processing 队列（RPOPLPUSH），供批量落库。
 
     Returns:
-        [(raw_json, click_data), ...]；解析失败的条目会从 processing 中剔除。
+        [(raw_json, click_data), ...]；解析失败的条目进入 DLQ。
     """
     redis = await get_redis_client()
     if not redis:
@@ -103,7 +136,7 @@ async def reserve_clicks(count: int = BATCH_SIZE) -> list[tuple[str, Dict[str, A
                 click_json = click_json.decode("utf-8")
             click_data = _decode_click_payload(click_json)
             if click_data is None:
-                await redis.lrem(CLICKS_PROCESSING_KEY, 1, click_json)
+                await move_to_dead_letter(click_json, reason="invalid_json")
                 continue
             reserved.append((click_json, click_data))
 
@@ -130,25 +163,78 @@ async def acknowledge_reserved(raw_items: list[str]) -> None:
 
 
 async def requeue_reserved(raw_items: list[str]) -> int:
-    """落库失败时将 processing 中的原始 JSON 放回主队列（左侧入队优先重试）。"""
+    """
+    落库失败时回队；超过最大重试次数则进入死信队列。
+    """
     if not raw_items:
         return 0
     redis = await get_redis_client()
     if not redis:
         logger.error("Redis 不可用，无法回队 %s 条点击记录", len(raw_items))
         return 0
+
+    max_retries = _max_retries()
     requeued = 0
+    dead = 0
     try:
         for raw in raw_items:
             await redis.lrem(CLICKS_PROCESSING_KEY, 1, raw)
-            await redis.lpush(CLICKS_QUEUE_KEY, raw)
-            requeued += 1
+            data = _decode_click_payload(raw)
+            if data is None:
+                await redis.rpush(
+                    CLICKS_DLQ_KEY,
+                    json.dumps(
+                        {
+                            "reason": "invalid_json_on_requeue",
+                            "failed_at": datetime.now(timezone.utc).isoformat(),
+                            "raw": raw,
+                        },
+                        default=str,
+                    ),
+                )
+                dead += 1
+                continue
+
+            retry = int(data.get(_RETRY_FIELD, 0) or 0) + 1
+            data[_RETRY_FIELD] = retry
+            new_raw = json.dumps(data, default=str)
+            if retry > max_retries:
+                await redis.rpush(
+                    CLICKS_DLQ_KEY,
+                    json.dumps(
+                        {
+                            "reason": f"max_retries:{max_retries}",
+                            "failed_at": datetime.now(timezone.utc).isoformat(),
+                            "raw": new_raw,
+                        },
+                        default=str,
+                    ),
+                )
+                dead += 1
+            else:
+                await redis.lpush(CLICKS_QUEUE_KEY, new_raw)
+                requeued += 1
+
         if requeued:
             logger.warning("已将 %s 条点击记录回队等待重试", requeued)
+        if dead:
+            logger.error("已将 %s 条点击记录移入死信队列", dead)
         return requeued
     except Exception as e:
         logger.error("点击记录回队失败: error=%s", e, exc_info=True)
         return requeued
+
+
+async def get_dead_letter_length() -> int:
+    """死信队列长度。"""
+    redis = await get_redis_client()
+    if not redis:
+        return 0
+    try:
+        return await redis.llen(CLICKS_DLQ_KEY)
+    except Exception as e:
+        logger.error("获取死信队列长度失败: error=%s", e)
+        return 0
 
 
 async def recover_processing_queue() -> int:

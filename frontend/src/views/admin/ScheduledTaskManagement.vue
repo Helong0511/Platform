@@ -181,6 +181,21 @@
             <span v-else class="no-function">未注册</span>
           </template>
         </el-table-column>
+        <el-table-column prop="standard_report_type" label="标准维度" width="120" align="center">
+          <template #default="scope">
+            <template v-if="scope.row.supports_standard_report_type">
+              <el-tag
+                v-if="scope.row.standard_report_type"
+                :type="scope.row.standard_report_type === 'daily' ? 'warning' : 'success'"
+                size="small"
+              >
+                {{ reportTypeLabels[scope.row.standard_report_type] || scope.row.standard_report_type }}
+              </el-tag>
+              <span v-else class="text-muted">默认</span>
+            </template>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="is_active" label="状态" width="140" align="center">
           <template #default="scope">
             <!-- 运行中：展示「正在运行」，禁用启用开关，不可切换激活 -->
@@ -252,7 +267,7 @@
             <span v-else class="text-muted">暂无结果</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="360" fixed="right" align="center" class-name="action-column">
+        <el-table-column label="操作" width="420" fixed="right" align="center" class-name="action-column">
           <template #default="scope">
             <div class="action-buttons">
               <el-button
@@ -263,6 +278,16 @@
                 class="action-btn"
               >
                 账号配置
+              </el-button>
+              <el-button
+                v-if="scope.row.supports_standard_report_type"
+                type="info"
+                size="small"
+                @click="handleSetStandardReportType(scope.row)"
+                class="action-btn"
+                :icon="Setting"
+              >
+                标准维度
               </el-button>
               <el-button
                 type="primary"
@@ -351,6 +376,47 @@
       </template>
     </el-dialog>
 
+    <!-- 标准数据维度设置对话框 -->
+    <el-dialog
+      v-model="standardReportTypeDialogVisible"
+      title="设置标准数据维度"
+      width="520px"
+      :append-to-body="true"
+    >
+      <el-form :model="standardReportTypeForm" label-width="120px">
+        <el-form-item label="任务名称">
+          <span class="task-name-display">{{ currentStandardReportTypeTask?.task_name }}</span>
+        </el-form-item>
+        <el-form-item label="标准维度">
+          <el-select
+            v-model="standardReportTypeForm.standard_report_type"
+            placeholder="使用默认优先级（国家 > 交叉 > 广告单元 > 日报）"
+            clearable
+            style="width: 100%"
+          >
+            <el-option label="国家（country）" value="country" />
+            <el-option label="交叉（cross）" value="cross" />
+            <el-option label="广告单元（unit）" value="unit" />
+            <el-option label="日报（daily）" value="daily" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-alert type="info" :closable="false" show-icon>
+            <template #title>
+              <div>说明：</div>
+              <div>• 设置后，该任务的多维度数据汇总时以标准维度为准</div>
+              <div>• 其他维度数据仅在标准维度不存在时作为兜底</div>
+              <div>• 清空选择则恢复默认优先级（country > cross > unit > daily）</div>
+            </template>
+          </el-alert>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="standardReportTypeDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmStandardReportType">确定</el-button>
+      </template>
+    </el-dialog>
+
   </div>
 </template>
 
@@ -358,7 +424,7 @@
 import { onMounted, onUnmounted, onBeforeUnmount, nextTick } from 'vue';
 import { onBeforeRouteLeave, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { Search, Refresh, VideoPlay, Unlock, Document, Folder } from '@element-plus/icons-vue';
+import { Search, Refresh, VideoPlay, Unlock, Document, Folder, Setting } from '@element-plus/icons-vue';
 import { formatDateTime } from '../../utils/dateFormat';
 import { isGamSchedulerTask } from '../../constants/scheduledTasks';
 import { isTaskRunning } from '../../utils/scheduledTaskStatus';
@@ -392,7 +458,19 @@ const {
   handleTrigger,
   confirmTrigger,
   handleReleaseLock,
+  standardReportTypeDialogVisible,
+  currentStandardReportTypeTask,
+  standardReportTypeForm,
+  handleSetStandardReportType,
+  confirmStandardReportType,
 } = useScheduledTaskActions({ fetchTasks, tasks });
+
+const reportTypeLabels = {
+  country: '国家',
+  cross: '交叉',
+  unit: '广告单元',
+  daily: '日报',
+};
 
 const goToGamSchedulerConfig = () => {
   router.push('/app/admin/gam-scheduler');
@@ -714,6 +792,11 @@ onUnmounted(() => {
 .no-function {
   color: var(--text-secondary);
   font-style: italic;
+}
+
+.task-name-display {
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .pagination-container {

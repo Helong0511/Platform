@@ -4,6 +4,7 @@
 根据 OfferDiscount（比例扣价）与 ConversionDeductionConfig（扣量/扣金额）计算最终 payout。
 """
 import logging
+from decimal import Decimal
 from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +22,7 @@ class DiscountChecker:
 
     @staticmethod
     async def calculate(
-        original_payout: float,
+        original_payout: Decimal | float | int | str,
         offer_id: Optional[int],
         publisher_id: Optional[int],
         product_id: Optional[int],
@@ -29,7 +30,7 @@ class DiscountChecker:
         advertiser_id: Optional[int],
         click_id: Optional[str],
         db: AsyncSession,
-    ) -> Tuple[float, Dict[str, Any], bool]:
+    ) -> Tuple[Decimal, Dict[str, Any], bool]:
         """
         计算扣量后的金额。
 
@@ -42,7 +43,7 @@ class DiscountChecker:
             "deduction_config": None,
             "final_payout": original_payout,
         }
-        final_payout = float(original_payout or 0.0)
+        final_payout = Decimal(str(original_payout or 0))
         skip_save_and_forward = False
 
         # 1. OfferDiscount 比例扣价（offer / channel / publisher 默认）
@@ -97,7 +98,7 @@ class DiscountChecker:
 
                 if result.get("should_deduct_volume"):
                     skip_save_and_forward = True
-                    final_payout = 0.0
+                    final_payout = Decimal("0")
                     try:
                         await log_deduction(
                             db=db,
@@ -121,7 +122,7 @@ class DiscountChecker:
                         publisher_id,
                     )
                 else:
-                    final_payout = float(result.get("final_amount", final_payout))
+                    final_payout = Decimal(str(result.get("final_amount", final_payout)))
                     if result.get("should_deduct_amount"):
                         try:
                             await log_deduction(

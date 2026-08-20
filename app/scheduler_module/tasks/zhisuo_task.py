@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from app.core.ad_data_metadata import DATA_SOURCE_ZHISUO
+from app.core.ad_data_metadata import DATA_SOURCE_ZHISUO, REPORT_TYPE_COUNTRY, REPORT_TYPE_CROSS, REPORT_TYPE_DAILY, REPORT_TYPE_UNIT
 from app.core.config import settings
 from app.scheduler_module.task_names import ZHISUO_API_TASK_NAME
 from app.scheduler_module.task_result_store import set_task_result
@@ -172,6 +172,7 @@ async def _import_zhisuo_account(
         field_mapping: dict[str, str],
         source: str,
         notify_title: str,
+        report_type: str,
         rows_to_covered: bool = True,
         transform_rows=None,
     ) -> None:
@@ -202,6 +203,7 @@ async def _import_zhisuo_account(
                 notify_params={**notify_base},
                 data_source=DATA_SOURCE_ZHISUO,
                 upstream_account=client_id,
+                report_type=report_type,
             )
             summaries.append(f"{key}: {summary}")
         except UpstreamTransientError as e:
@@ -227,6 +229,7 @@ async def _import_zhisuo_account(
         field_mapping=ZHISUO_DATA_FIELD_MAPPING,
         source="ZhiSuo定时任务-国家+广告单元",
         notify_title=f"ZhiSuo-{client_id}-国家+广告单元",
+        report_type=REPORT_TYPE_CROSS,
     )
 
     # 国家：与交叉同时开启时，仅补交叉未覆盖的产品+日（次之）
@@ -256,6 +259,7 @@ async def _import_zhisuo_account(
         field_mapping=ZHISUO_COUNTRY_FIELD_MAPPING,
         source="ZhiSuo定时任务-国家报告",
         notify_title=f"ZhiSuo-{client_id}-国家报告",
+        report_type=REPORT_TYPE_COUNTRY,
         transform_rows=_country_rows,
     )
     await _fetch_import_dimension(
@@ -271,6 +275,7 @@ async def _import_zhisuo_account(
         field_mapping=ZHISUO_UNIT_FIELD_MAPPING,
         source="ZhiSuo定时任务-广告单元",
         notify_title=f"ZhiSuo-{client_id}-广告单元",
+        report_type=REPORT_TYPE_UNIT,
     )
 
     if account.get("fetch_daily_fallback") and transient is None:
@@ -299,6 +304,7 @@ async def _import_zhisuo_account(
             field_mapping=ZHISUO_DAILY_FIELD_MAPPING,
             source="ZhiSuo定时任务-日报兜底",
             notify_title=f"ZhiSuo-{client_id}-日报兜底",
+            report_type=REPORT_TYPE_DAILY,
             rows_to_covered=False,
             transform_rows=_fallback_only,
         )

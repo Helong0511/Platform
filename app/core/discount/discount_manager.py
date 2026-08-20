@@ -3,6 +3,7 @@
 用于计算扣量和处理优先级
 """
 import logging
+from decimal import Decimal
 from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -17,8 +18,8 @@ async def calculate_discount(
     db: AsyncSession,
     offer_id: int,
     publisher_id: int,
-    original_payout: float
-) -> Tuple[float, float, Optional[str]]:
+    original_payout: Decimal | float | int | str
+) -> Tuple[Decimal, Decimal, Optional[str]]:
     """
     计算扣量后的金额
     
@@ -33,6 +34,7 @@ async def calculate_discount(
     Returns:
         (扣量后金额, 扣量金额, 扣量类型说明)
     """
+    payout = Decimal(str(original_payout or 0))
     try:
         # 1. 优先查找 offer 级别的扣量配置
         offer_discount_result = await db.execute(
@@ -48,9 +50,9 @@ async def calculate_discount(
         offer_discount = offer_discount_result.scalars().first()
         
         if offer_discount:
-            discount_ratio = offer_discount.discount_ratio
-            discount_amount = original_payout * (discount_ratio / 100)
-            final_payout = original_payout - discount_amount
+            discount_ratio = Decimal(str(offer_discount.discount_ratio))
+            discount_amount = payout * (discount_ratio / Decimal("100"))
+            final_payout = payout - discount_amount
             return final_payout, discount_amount, f"Offer级别扣量: {discount_ratio}%"
         
         # 2. 如果没有 offer 级别，查找 channel 级别的扣量配置
@@ -66,9 +68,9 @@ async def calculate_discount(
         channel_discount = channel_discount_result.scalars().first()
         
         if channel_discount:
-            discount_ratio = channel_discount.discount_ratio
-            discount_amount = original_payout * (discount_ratio / 100)
-            final_payout = original_payout - discount_amount
+            discount_ratio = Decimal(str(channel_discount.discount_ratio))
+            discount_amount = payout * (discount_ratio / Decimal("100"))
+            final_payout = payout - discount_amount
             return final_payout, discount_amount, f"Channel级别扣量: {discount_ratio}%"
         
         # 3. 检查渠道级别的默认扣量（Publisher 表的 price_discount 字段）
@@ -78,18 +80,18 @@ async def calculate_discount(
         publisher = publisher_result.scalars().first()
         
         if publisher and publisher.price_discount and publisher.price_discount > 0:
-            discount_ratio = publisher.price_discount
-            discount_amount = original_payout * (discount_ratio / 100)
-            final_payout = original_payout - discount_amount
+            discount_ratio = Decimal(str(publisher.price_discount))
+            discount_amount = payout * (discount_ratio / Decimal("100"))
+            final_payout = payout - discount_amount
             return final_payout, discount_amount, f"渠道默认扣量: {discount_ratio}%"
         
         # 4. 没有扣量配置，返回原始金额
-        return original_payout, 0.0, None
+        return payout, Decimal("0"), None
         
     except Exception as e:
         logger.error(f"计算扣量失败: {str(e)}", exc_info=True)
         # 出错时返回原始金额，避免影响正常流程
-        return original_payout, 0.0, None
+        return payout, Decimal("0"), None
 
 
 async def get_discount_info(

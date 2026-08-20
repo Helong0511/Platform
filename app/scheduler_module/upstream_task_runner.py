@@ -54,7 +54,8 @@ async def run_upstream_import_task(
     """
     上游拉数任务标准流程：未配置则跳过 → 拉数 → import_upstream_ad_data 入库。
 
-    report_type 保留兼容；入库时按每行 ad_unit / country_code 自动推断 unit/country/cross/daily。
+    report_type 应由调用方显式传入（多维度任务必须传）；仅单维度任务可留空走
+    infer_report_type_from_shape 自动推断。
 
     上游超时/连不上（``UpstreamTransientError``）时软跳过：写入结果说明、不抛异常、
     不按程序崩溃告警，等待下次 cron 自动重试。

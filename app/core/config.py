@@ -273,21 +273,24 @@ class Settings(BaseSettings):
     # 刷新令牌过期时间（天），环境变量 REFRESH_TOKEN_EXPIRE_DAYS
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 
-    # 是否信任 X-Forwarded-For / X-Real-IP（生产环境在反向代理后应为 True）
+    # 是否信任代理头（仅当直连对端 ∈ TRUSTED_PROXIES / TRUSTED_PROXY_IPS 时生效）
     TRUST_PROXY_HEADERS: bool = os.getenv(
         "TRUST_PROXY_HEADERS",
         "true" if is_production_env_name(detect_production_env()) else "false",
     ).lower() in ("true", "1", "yes")
-    # 只有请求直接来自这些反向代理时才读取 X-Real-IP/X-Forwarded-For。
-    # 用 str 承接环境变量（逗号分隔），避免 pydantic-settings 把 list 当 JSON 解析失败。
-    # 示例：TRUSTED_PROXY_IPS=127.0.0.1,::1
+    # 可信反向代理 IP。优先读 TRUSTED_PROXIES，兼容旧名 TRUSTED_PROXY_IPS。
+    # 示例：TRUSTED_PROXIES=127.0.0.1,::1,10.0.0.1
     TRUSTED_PROXY_IPS: str = Field(
-        default="127.0.0.1,::1",
-        description="可信反向代理 IP，逗号分隔",
+        default_factory=lambda: (
+            os.getenv("TRUSTED_PROXIES")
+            or os.getenv("TRUSTED_PROXY_IPS")
+            or "127.0.0.1,::1"
+        ),
+        description="可信反向代理 IP（TRUSTED_PROXIES / TRUSTED_PROXY_IPS），逗号分隔",
     )
 
     def get_trusted_proxy_ips(self) -> list[str]:
-        """解析 TRUSTED_PROXY_IPS 为 IP 列表（支持逗号分隔或 JSON 数组）。"""
+        """解析可信代理列表（支持逗号分隔或 JSON 数组）。"""
         raw = (self.TRUSTED_PROXY_IPS or "").strip()
         if not raw:
             return ["127.0.0.1", "::1"]
@@ -514,10 +517,28 @@ class Settings(BaseSettings):
     CLIENT_OPEN_API_RATE_LIMIT: int = int(os.getenv("CLIENT_OPEN_API_RATE_LIMIT", "2000"))
 
     # ====== 文件上传配置 ======
-    # 最大文件大小（字节）：10MB
+    # 最大文件大小（字节）：10MB（压缩后体积）
     MAX_UPLOAD_SIZE: int = int(os.getenv("MAX_UPLOAD_SIZE", "10485760"))
+    # Excel 解压后最大体积（Zip Bomb 防御）
+    EXCEL_MAX_UNCOMPRESSED_BYTES: int = int(
+        os.getenv("EXCEL_MAX_UNCOMPRESSED_BYTES", str(80 * 1024 * 1024))
+    )
+    # Excel 最大读取行数
+    EXCEL_MAX_ROWS: int = int(os.getenv("EXCEL_MAX_ROWS", "100000"))
+    # Excel ZIP 最大压缩比
+    EXCEL_MAX_COMPRESSION_RATIO: float = float(
+        os.getenv("EXCEL_MAX_COMPRESSION_RATIO", "100")
+    )
     # 允许的文件类型
     ALLOWED_UPLOAD_EXTENSIONS: list[str] = ["xlsx", "xls", "csv"]
+    # 点击队列最大重试次数，超过进入死信队列
+    CLICKS_QUEUE_MAX_RETRIES: int = int(os.getenv("CLICKS_QUEUE_MAX_RETRIES", "5"))
+    # 定时任务 Redis 分布式锁 TTL（秒）
+    SCHEDULER_REDIS_LOCK_TTL: int = int(os.getenv("SCHEDULER_REDIS_LOCK_TTL", "300"))
+    # 缓存延迟双删间隔（秒）
+    CACHE_DOUBLE_DELETE_DELAY_SECONDS: float = float(
+        os.getenv("CACHE_DOUBLE_DELETE_DELAY_SECONDS", "1.0")
+    )
 
     # ====== CSRF配置 ======
     # 是否启用CSRF防护（默认启用；生产环境在 main.py 强制开启）
@@ -798,6 +819,20 @@ class Settings(BaseSettings):
         "true", "1", "yes",
     ]
     LEIYANG_API_FETCH_DAILY: bool = os.getenv("LEIYANG_API_FETCH_DAILY", "false").lower() in [
+        "true", "1", "yes",
+    ]
+
+    # IDGTN Business Intelligence（ops.idgtndmggroup.com，header apiKey/apiSecret 鉴权）
+    # 文档：tests/idgtn中国v1-4.pdf v1.9
+    # 接口3 /download/country 返回「广告单元 + 日期 + 国家」数据，按平台 cross 维度入库
+    IDGTN_API_BASE_URL: str = os.getenv(
+        "IDGTN_API_BASE_URL",
+        "https://ops.idgtndmggroup.com/prod-api/idgtn-business-report/openApi",
+    ).rstrip("/")
+    IDGTN_API_KEY: str = os.getenv("IDGTN_API_KEY", "")
+    IDGTN_API_SECRET: str = os.getenv("IDGTN_API_SECRET", "")
+    # 拉数维度开关：默认仅拉取 country（接口3，对应平台 cross 维度）
+    IDGTN_API_FETCH_COUNTRY: bool = os.getenv("IDGTN_API_FETCH_COUNTRY", "true").lower() in [
         "true", "1", "yes",
     ]
 

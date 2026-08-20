@@ -519,17 +519,17 @@ async def get_ad_data_detail(
         "display_rate": display_rate,
         "click_count": ad_data.click_count,
         "click_rate": click_rate,
-        "viewability_rate": round(float(ad_data.viewability_rate or 0), 2),
-        "ecpm_after_deduct": float(round(float(ad_data.ecpm_after_deduct or 0), 4)),
-        "revenue_after_deduct": float(round(float(ad_data.revenue_after_deduct or 0), 4)),
+        "viewability_rate": ad_data.viewability_rate or 0,
+        "ecpm_after_deduct": ad_data.ecpm_after_deduct or 0,
+        "revenue_after_deduct": ad_data.revenue_after_deduct or 0,
         "created_at": ad_data.created_at,
         "updated_at": ad_data.updated_at
     }
     if is_admin(current_user):
         response_data.update(
             {
-                "ecpm_before_deduct": float(round(float(ad_data.ecpm_before_deduct or 0), 4)),
-                "revenue_before_deduct": float(round(float(ad_data.revenue_before_deduct or 0), 4)),
+                "ecpm_before_deduct": ad_data.ecpm_before_deduct or 0,
+                "revenue_before_deduct": ad_data.revenue_before_deduct or 0,
                 "data_source": ad_data.data_source or "legacy",
                 "data_source_label": format_data_source_label(ad_data.data_source),
                 "upstream_account": ad_data.upstream_account or "",

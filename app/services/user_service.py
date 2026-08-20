@@ -507,6 +507,20 @@ class UserService(BaseService[User]):
         user.set_password(new_password)
         await self.db.flush()
 
+        # 改密后吊销该用户全部活跃会话（含 Redis/MySQL jti 黑名单）
+        try:
+            from app.services.session_service import SessionService
+
+            session_svc = SessionService(self.db)
+            revoked, _ = await session_svc.revoke_all_user_sessions(user_id, current_user)
+            logger.info(
+                "用户改密后已吊销会话: user_id=%s revoked=%s",
+                user_id,
+                revoked,
+            )
+        except Exception as revoke_exc:
+            logger.warning("改密后吊销会话失败（密码已更新）: %s", revoke_exc)
+
         # 记录审计日志
         await log_user_action(
             db=self.db,
