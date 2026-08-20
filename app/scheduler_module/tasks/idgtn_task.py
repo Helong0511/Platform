@@ -47,6 +47,8 @@ from app.scheduler_module.upstream_import import import_upstream_ad_data
 logger = logging.getLogger(__name__)
 
 # IDGTN /download/country 字段映射（具体国家+广告单元 → cross 维度）
+# 注：click_rate 映射的 adExchangeLineItemLevelCtr 会被 calculate_rates() 自动覆盖
+# （click_count/display_count*100），此处保留仅作回退，不影响最终值。
 IDGTN_COUNTRY_FIELD_MAPPING: dict[str, str] = {
     "date": "date",
     "product_name": "domain",
@@ -62,6 +64,23 @@ IDGTN_COUNTRY_FIELD_MAPPING: dict[str, str] = {
     "viewability_rate": "adExchangeActiveViewViewableImpressionsRate",
     "pageviews": "pv",
 }
+
+
+def _transform_idgtn_rows(rows: list) -> list:
+    """IDGTN 行数据预处理：可见率 0-1 小数 → 0-100 百分比（与平台口径一致）。
+
+    IDGTN 上游 adExchangeActiveViewViewableImpressionsRate 返回 0~1 的小数
+    （1.0 表示 100%），但平台 viewability_rate 为 0~100 百分比（100.0=100%）。
+    不转换会导致日汇总时 IDGTN 可见率被严重低估（1.0 被当作 1%）。
+    """
+    for row in rows:
+        val = row.get("adExchangeActiveViewViewableImpressionsRate")
+        if val is not None:
+            try:
+                row["adExchangeActiveViewViewableImpressionsRate"] = float(val) * 100
+            except (TypeError, ValueError):
+                pass
+    return rows
 
 
 def _iter_dates(start: str, end: str):
@@ -168,6 +187,7 @@ async def idgtn_api_task(
         report_type=REPORT_TYPE_CROSS,
         upstream_account="",
         notify_params=notify_params,
+        data_transform=_transform_idgtn_rows,
     )
 
     # ---------- 汇总结果 ----------

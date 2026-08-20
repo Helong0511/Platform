@@ -227,13 +227,16 @@ async def finalize_upstream_import(
 
 def preprocess_addermobi_match_counts(ad_data: List[Any]) -> List[Any]:
     """
-    Addermobi 数据预处理：修正匹配广告请求数。
+    Addermobi 数据预处理：修正匹配广告请求数 + viewability_rate 单位对齐。
 
-    部分上游返回 MatchedAdRequests=0 但 AdRequestsCoverage 非零，
-    此时按「请求数 × 覆盖率」推算匹配数，避免入库后指标异常。
+    1. 部分上游返回 MatchedAdRequests=0 但 AdRequestsCoverage 非零，
+       此时按「请求数 × 覆盖率」推算匹配数，避免入库后指标异常。
+    2. ActiveViewViewability 可能返回 0–1 小数（如 0.85=85%），
+       平台 viewability_rate 为 0–100 百分比，需 ×100 对齐口径。
+       与 AdRequestsCoverage 处理逻辑一致：值 > 1 视为百分比，值 ≤ 1 视为比例。
 
     参数:
-        ad_data: API 原始行列表（就地修改 MatchedAdRequests 字段）
+        ad_data: API 原始行列表（就地修改 MatchedAdRequests / ActiveViewViewability）
 
     返回:
         处理后的同一列表引用
@@ -254,6 +257,16 @@ def preprocess_addermobi_match_counts(ad_data: List[Any]) -> List[Any]:
                 # AdRequestsCoverage 可能是 0–1 比例或 0–100 百分比
                 rate = coverage_rate / 100.0 if coverage_rate > 1 else coverage_rate
                 item["MatchedAdRequests"] = int(request_count * rate)
+
+            # viewability_rate 单位对齐：0-1 小数 → 0-100 百分比
+            viewability = item.get("ActiveViewViewability")
+            if viewability is not None and viewability != "":
+                try:
+                    v_val = float(viewability)
+                    if 0 < v_val <= 1:
+                        item["ActiveViewViewability"] = v_val * 100
+                except (ValueError, TypeError):
+                    pass
         except Exception as e:
             logger.warning("Addermobi 预处理数据项失败: %s", e)
     return ad_data
