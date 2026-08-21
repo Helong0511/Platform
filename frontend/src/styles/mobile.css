@@ -916,3 +916,136 @@
     content-visibility: auto;
   }
 }
+
+/* ====== 移动端通用页面布局优化 ======
+ * 覆盖各管理页面通用的 .search-bar / .card-header / .page-card 等类名，
+ * 统一处理移动端的列堆叠、固定宽度内联样式溢出等问题。
+ */
+@media (max-width: 767px) {
+  /* 页面容器内边距统一为移动端间距 */
+  .cap-management,
+  .discount-management,
+  .advertiser-management,
+  .publisher-management,
+  .conversion-deduction-management,
+  .deduction-logs,
+  .deduction-stats,
+  .conversion-summary,
+  .click-log,
+  .affiliate-test,
+  .cache-management,
+  .product-management-page,
+  .client-user-management-container,
+  .api-documentation-container {
+    padding: var(--mobile-content-padding) !important;
+  }
+
+  /* 卡片标题栏：移动端列堆叠，左右两块各占整行 */
+  .card-header {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: var(--spacing-sm);
+  }
+
+  .card-header .header-left,
+  .card-header .header-right {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+  }
+
+  .card-header .header-title {
+    font-size: var(--font-size-lg);
+  }
+
+  .card-header .header-icon {
+    font-size: var(--font-size-lg);
+  }
+
+  /* 卡片标题栏右侧按钮组：移动端横向排列并允许换行 */
+  .card-header .header-right .el-button {
+    flex: 1 1 auto;
+    min-height: var(--touch-target-size);
+    margin: 0 !important;
+  }
+
+  /* page-card 高度自适应，避免移动端出现过高空白 */
+  .page-card {
+    min-height: auto !important;
+  }
+
+  /* 搜索栏：移动端强制列堆叠，覆盖内联固定宽度 */
+  .search-bar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: var(--spacing-sm) !important;
+    margin-bottom: var(--spacing-md) !important;
+  }
+
+  /* 覆盖搜索栏内联 style="width: 160px; min-width: 160px;" 等固定宽度 */
+  .search-bar .el-select,
+  .search-bar .el-input,
+  .search-bar .el-input-number,
+  .search-bar .el-date-editor,
+  .search-bar .el-cascader,
+  .search-bar .el-autocomplete {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  .search-bar .el-select .el-input__wrapper,
+  .search-bar .el-input .el-input__wrapper {
+    min-height: var(--touch-target-size);
+  }
+
+  /* 搜索栏按钮组：移动端横向两等分排列 */
+  .search-bar .el-button {
+    flex: 1 1 auto;
+    min-height: var(--touch-target-size);
+    margin-left: 0 !important;
+    margin-top: 0 !important;
+  }
+
+  /* 筛选表单（filter-bar / filter-form）：移动端列堆叠 */
+  .filter-bar,
+  .filter-form {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: var(--spacing-sm) !important;
+  }
+
+  .filter-bar .el-select,
+  .filter-bar .el-input,
+  .filter-bar .el-date-editor {
+    width: 100% !important;
+    min-width: 0 !important;
+    margin-left: 0 !important;
+  }
+
+  /* 表格头部操作区：移动端列堆叠 */
+  .table-header {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  /* 分页容器：移动端居中 */
+  .pagination-container {
+    justify-content: center !important;
+  }
+}
+
+/* ====== 移动端小屏手机 (< 480px) 额外优化 ====== */
+@media (max-width: 480px) {
+  /* 搜索栏按钮组：小屏时单列堆叠 */
+  .search-bar .el-button {
+    width: 100%;
+  }
+
+  /* 卡片标题栏按钮：小屏时单列堆叠 */
+  .card-header .header-right .el-button {
+    width: 100%;
+  }
+}

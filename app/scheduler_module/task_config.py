@@ -354,6 +354,20 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         ),
     },
 
+    # ========== PlayHorizonx API获取数据任务 ==========
+    "PlayHorizonx API获取数据": {
+        "task_name": "PlayHorizonx API获取数据",
+        "task_module": "app.scheduler_module.tasks.playhorizonx_task",
+        "task_function": "playhorizonx_api_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "*/30 * * * *",
+        "description": (
+            "每隔30分钟执行一次，从 PlayHorizonx /reports/index 拉取广告单元报表"
+            "（按平台 unit 维度入库；PLAYHORIZONX_API_FETCH_UNIT 控制）"
+        ),
+    },
+
     # ==============================================================================
     # 添加新任务示例（取消注释并修改即可）
     # ==============================================================================

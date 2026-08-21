@@ -30,6 +30,7 @@ DATA_SOURCE_AYA = "aya"
 DATA_SOURCE_FLYMOBI = "flymobi"
 DATA_SOURCE_LEIYANG = "leiyang"
 DATA_SOURCE_IDGTN = "idgtn"
+DATA_SOURCE_PLAYHORIZONX = "playhorizonx"
 DATA_SOURCE_EXCEL = "excel"
 DATA_SOURCE_UNKNOWN = "unknown"
 DATA_SOURCE_LEGACY = "legacy"
@@ -49,6 +50,7 @@ UPSTREAM_API_DATA_SOURCES: tuple[str, ...] = (
     DATA_SOURCE_FLYMOBI,
     DATA_SOURCE_LEIYANG,
     DATA_SOURCE_IDGTN,
+    DATA_SOURCE_PLAYHORIZONX,
 )
 
 VALID_DATA_SOURCES = frozenset({
@@ -113,6 +115,7 @@ TASK_NAME_TO_DATA_SOURCE: dict[str, str] = {
     "FlyMobi API获取数据": DATA_SOURCE_FLYMOBI,
     "LeiYang API获取数据": DATA_SOURCE_LEIYANG,
     "IDGTN API获取数据": DATA_SOURCE_IDGTN,
+    "PlayHorizonx API获取数据": DATA_SOURCE_PLAYHORIZONX,
     "Google API获取数据": DATA_SOURCE_GAM,
 }
 
@@ -311,6 +314,7 @@ DATA_SOURCE_LABELS: dict[str, str] = {
     DATA_SOURCE_FLYMOBI: "FlyMobi",
     DATA_SOURCE_LEIYANG: "LeiYang",
     DATA_SOURCE_IDGTN: "IDGTN",
+    DATA_SOURCE_PLAYHORIZONX: "PlayHorizonx",
     DATA_SOURCE_EXCEL: "Excel 导入",
     DATA_SOURCE_LEGACY: "历史",
     DATA_SOURCE_UNKNOWN: "未知",
@@ -333,7 +337,7 @@ REPORT_TYPE_DETAIL_OPTIONS: tuple[str, ...] = (
 )
 
 REPORT_TYPE_HINTS: dict[str, str] = {
-    REPORT_TYPE_UNIT: "按广告单元，无具体国家（含 ZZ）；ZhiSuo channelunit、GAM ad_unit、Aya getAdsDataUnit、LeiYang ad-unit（默认关）",
+    REPORT_TYPE_UNIT: "按广告单元，无具体国家（含 ZZ）；ZhiSuo channelunit、GAM ad_unit、Aya getAdsDataUnit、LeiYang ad-unit（默认关）、PlayHorizonx /reports/index",
     REPORT_TYPE_COUNTRY: "按具体国家，无广告单元（不含 ZZ）；ZhiSuo channelcountry、TQT、Huguang、Aya、LeiYang country（默认关）",
     REPORT_TYPE_CROSS: "具体国家+广告单元（不含 ZZ）；ZhiSuo channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、FlyMobi countryList、GAM country、TBSJ(yangyangdeyi)/adunit、LeiYang atomic（推荐）、IDGTN /download/country",
     REPORT_TYPE_DAILY: "日汇总，无具体国家无单元（含 ZZ）；ZhiSuo channeldaily 兜底、GAM daily、Aya getDay、LeiYang all（默认关）",
@@ -355,6 +359,7 @@ UPSTREAM_DEFAULT_REPORT_TYPES: dict[str, str] = {
     DATA_SOURCE_FLYMOBI: REPORT_TYPE_LEGACY,
     DATA_SOURCE_LEIYANG: REPORT_TYPE_CROSS,  # 默认 /reports/atomic（国家+广告单元）
     DATA_SOURCE_IDGTN: REPORT_TYPE_CROSS,    # /download/country（具体国家+广告单元）
+    DATA_SOURCE_PLAYHORIZONX: REPORT_TYPE_UNIT,  # /reports/index（广告单元+日期，无具体国家）
     DATA_SOURCE_EXCEL: REPORT_TYPE_DAILY,
 }
 

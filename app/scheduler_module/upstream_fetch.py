@@ -1198,3 +1198,90 @@ async def fetch_idgtn_rows(
         rows = []
     return UpstreamFetchResult.from_rows(rows)
 
+
+# PlayHorizonx API（api.h5gamegl.top）
+# 文档：POST /reports/index，md5(username+startDate+endDate+private_key) 作为 Header sign
+# 响应 status=0 成功，data.pages 分页，data.list 行数据
+PLAYHORIZONX_PATH_INDEX = "/reports/index"
+
+
+def _build_playhorizonx_sign(username: str, start_date: str, end_date: str, private_key: str) -> str:
+    """构造 PlayHorizonx 签名：md5(username + startDate + endDate + private_key)。"""
+    raw = f"{username}{start_date}{end_date}{private_key}"
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()
+
+
+async def fetch_playhorizonx_rows(
+    *,
+    base_url: str,
+    username: str,
+    private_key: str,
+    start_date: str,
+    end_date: str,
+    path: str = PLAYHORIZONX_PATH_INDEX,
+    label: str = "PlayHorizonx API",
+    page_size: int = 200,
+) -> UpstreamFetchResult:
+    """
+    PlayHorizonx 拉数：POST JSON + md5 签名鉴权，按 totalCount 全量分页。
+
+    响应 status==0 成功，其余抛异常。
+    """
+    url = f"{base_url.rstrip('/')}{path}"
+    sign = _build_playhorizonx_sign(username, start_date, end_date, private_key)
+    headers = {
+        "sign": sign,
+        "Content-Type": "application/json",
+    }
+    all_rows: List[Any] = []
+    page = 1
+    last_total = 0
+
+    while True:
+        json_data = await post_json(
+            url,
+            json_body={
+                "username": username,
+                "startDate": start_date,
+                "endDate": end_date,
+                "page": page,
+            },
+            headers=headers,
+            label=f"{label} (page={page})",
+        )
+        raise_unless_api_success(json_data, {0}, label=label, code_key="status")
+
+        data = json_data.get("data") or {}
+        if not isinstance(data, dict):
+            data = {}
+        pages = data.get("pages") or {}
+        if not isinstance(pages, dict):
+            pages = {}
+
+        rows = data.get("list") or []
+        if not isinstance(rows, list):
+            rows = []
+        all_rows.extend(rows)
+
+        total = int(pages.get("totalCount") or 0)
+        last_total = total or last_total
+        if _should_break_upstream_pagination(
+            rows,
+            total=total,
+            collected=len(all_rows),
+            page=page,
+            total_pages=0,
+            limit=page_size,
+        ):
+            break
+        page += 1
+
+    stats = _build_fetch_stats(
+        pages_fetched=page,
+        total_pages=0,
+        rows_fetched=len(all_rows),
+        total_rows=last_total,
+        limit=page_size,
+    )
+    return UpstreamFetchResult(rows=all_rows, stats=stats)
+

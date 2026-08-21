@@ -138,13 +138,58 @@ const handleLogout = async () => {
         zIndex: 3001 // 确保 z-index 高于对话框
       }
     );
-    
+
     // 执行退出登录
     authStore.logout();
   } catch {
     // 用户取消操作，不执行任何操作
   }
 };
+
+// ====== 移动端边缘滑动手势：左边缘右滑打开抽屉，左滑关闭 ======
+const EDGE_SWIPE_THRESHOLD = 50;   // 滑动距离阈值（px）
+const EDGE_DETECT_WIDTH = 30;      // 左边缘检测区域宽度（px）
+let touchStartX = 0;
+let touchStartY = 0;
+let touchStartTime = 0;
+
+const handleTouchStart = (e) => {
+  // 仅在移动端/平板端启用
+  if (!isMobile.value && !isTablet.value) return;
+  // 抽屉打开时由 ElDrawer 自身处理关闭，不重复监听
+  if (drawerVisible.value) return;
+  const touch = e.touches[0];
+  touchStartX = touch.clientX;
+  touchStartY = touch.clientY;
+  touchStartTime = Date.now();
+};
+
+const handleTouchEnd = (e) => {
+  if (!isMobile.value && !isTablet.value) return;
+  if (drawerVisible.value) return;
+  // 起点必须在左边缘检测区域内
+  if (touchStartX > EDGE_DETECT_WIDTH) return;
+
+  const touch = e.changedTouches[0];
+  const deltaX = touch.clientX - touchStartX;
+  const deltaY = Math.abs(touch.clientY - touchStartY);
+  const duration = Date.now() - touchStartTime;
+
+  // 水平滑动距离需大于阈值、且大于垂直滑动、时长在合理范围（< 500ms）
+  if (deltaX > EDGE_SWIPE_THRESHOLD && deltaX > deltaY * 1.5 && duration < 500) {
+    drawerVisible.value = true;
+  }
+};
+
+onMounted(() => {
+  document.addEventListener('touchstart', handleTouchStart, { passive: true });
+  document.addEventListener('touchend', handleTouchEnd, { passive: true });
+});
+
+onUnmounted(() => {
+  document.removeEventListener('touchstart', handleTouchStart);
+  document.removeEventListener('touchend', handleTouchEnd);
+});
 
 // useDevice composable 已经处理了窗口大小变化监听
 </script>
