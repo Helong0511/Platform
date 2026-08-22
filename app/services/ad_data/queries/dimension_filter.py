@@ -14,6 +14,7 @@ ZZ（全部区域）规则：
 每日汇总使用 build_daily_summary_dimension_filter：
 - 优先按 report_type 选源（country > cross > unit > daily）
 - 同日 API 国家 + API 日报：只留国家；Excel 日报与 API 国家仍相加
+- 仅 unit 上游：同产品同日无国家/交叉/日报时纳入 country 日汇总兜底
 - legacy 行仍按行形态互斥选源，与迁移前行为兼容
 """
 from datetime import date
@@ -214,11 +215,45 @@ def build_dual_api_source_index(rows: list[dict]) -> Tuple[Set[ProductDateKey], 
         key = (int(pid), d)
         cc = row.get("country_code")
         au = row.get("ad_unit")
-        if row_is_country_only(cc, au):
+        rt = str(row.get("report_type") or "").strip().lower()
+        if row_is_country_only(cc, au) or rt == REPORT_TYPE_COUNTRY:
             country_only_keys.add(key)
-        if row_is_ad_unit_only(cc, au):
+        if row_is_ad_unit_only(cc, au) or rt == REPORT_TYPE_UNIT:
             ad_unit_only_keys.add(key)
     return country_only_keys, ad_unit_only_keys
+
+
+def build_daily_summary_mutual_exclusion_index(
+    rows: list[dict],
+) -> Tuple[Set[ProductDateKey], Set[ProductDateKey], Set[ProductDateKey], Set[ProductDateKey]]:
+    """
+    日汇总互斥索引：纯国家 / 纯单元 / 日报 plain / 交叉 的 (product_id, date) 集合。
+    """
+    country_only_keys: Set[ProductDateKey] = set()
+    ad_unit_only_keys: Set[ProductDateKey] = set()
+    plain_summary_keys: Set[ProductDateKey] = set()
+    cross_product_date_keys: Set[ProductDateKey] = set()
+    for row in rows:
+        pid = row.get("product_id")
+        if pid is None:
+            continue
+        raw_date = row.get("date") or row.get("date_str")
+        if raw_date is None:
+            continue
+        d = raw_date.isoformat() if hasattr(raw_date, "isoformat") else str(raw_date)[:10]
+        key = (int(pid), d)
+        cc = row.get("country_code")
+        au = row.get("ad_unit")
+        rt = str(row.get("report_type") or "").strip().lower()
+        if row_is_country_only(cc, au) or rt == REPORT_TYPE_COUNTRY:
+            country_only_keys.add(key)
+        if row_is_ad_unit_only(cc, au) or rt == REPORT_TYPE_UNIT:
+            ad_unit_only_keys.add(key)
+        if row_is_plain_summary(cc, au) or rt == REPORT_TYPE_DAILY:
+            plain_summary_keys.add(key)
+        if row_is_cross_row(cc, au) or rt == REPORT_TYPE_CROSS:
+            cross_product_date_keys.add(key)
+    return country_only_keys, ad_unit_only_keys, plain_summary_keys, cross_product_date_keys
 
 
 def row_is_excel_data_source(data_source: Optional[str]) -> bool:
@@ -232,6 +267,8 @@ def row_matches_daily_summary_dimension_row(
     *,
     country_only_keys: Optional[Set[ProductDateKey]] = None,
     ad_unit_only_keys: Optional[Set[ProductDateKey]] = None,
+    plain_summary_keys: Optional[Set[ProductDateKey]] = None,
+    cross_product_date_keys: Optional[Set[ProductDateKey]] = None,
 ) -> bool:
     """
     行级判断：是否纳入每日汇总（镜像 build_daily_summary_dimension_filter 语义）。
@@ -263,6 +300,16 @@ def row_matches_daily_summary_dimension_row(
         if row_is_cross_row(cc, au):
             if country_only_keys is not None and pd_key is not None:
                 return pd_key not in country_only_keys
+            return True
+        if row_is_ad_unit_only(cc, au) or str(row.get("report_type") or "").strip().lower() == REPORT_TYPE_UNIT:
+            if pd_key is None:
+                return True
+            if country_only_keys and pd_key in country_only_keys:
+                return False
+            if cross_product_date_keys and pd_key in cross_product_date_keys:
+                return False
+            if plain_summary_keys and pd_key in plain_summary_keys:
+                return False
             return True
         return False
 
@@ -554,6 +601,33 @@ def _ad_unit_only_product_date_pairs_subquery(
     return query.distinct().subquery("ad_unit_only_pd")
 
 
+def _plain_summary_product_date_pairs_subquery(
+    ad_data_model: Any,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+):
+    """日报/plain 明细的 (product_id, date) 集合（report_type daily + legacy plain 形态）。"""
+    query = (
+        select(
+            ad_data_model.product_id.label("pl_product_id"),
+            ad_data_model.date.label("pl_date"),
+        )
+        .where(
+            or_(
+                ad_data_model.report_type == REPORT_TYPE_DAILY,
+                and_(
+                    _legacy_row_condition(ad_data_model.report_type),
+                    _plain_summary_row_condition(
+                        ad_data_model.country_code, ad_data_model.ad_unit
+                    ),
+                ),
+            )
+        )
+    )
+    query = _apply_ad_data_date_bounds(query, ad_data_model, start_date, end_date)
+    return query.distinct().subquery("plain_summary_pd")
+
+
 def _outer_row_not_in_country_only_product_dates(
     ad_data_model: Any,
     start_date: Optional[date] = None,
@@ -577,6 +651,18 @@ def _outer_row_not_in_ad_unit_only_product_dates(
     )
 
 
+def _outer_row_not_in_plain_summary_product_dates(
+    ad_data_model: Any,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> Any:
+    """当前行 product+date 不在日报/plain 集合中。"""
+    sq = _plain_summary_product_date_pairs_subquery(ad_data_model, start_date, end_date)
+    return tuple_(ad_data_model.product_id, ad_data_model.date).notin_(
+        select(sq.c.pl_product_id, sq.c.pl_date)
+    )
+
+
 def _unit_fallback_for_country_dimension(
     country_code_column: Any,
     ad_unit_column: Any,
@@ -588,9 +674,9 @@ def _unit_fallback_for_country_dimension(
     legacy_shape: Any = None,
 ) -> Any:
     """
-    country 日汇总兜底：同产品同日无国家/交叉数据时纳入纯单元行。
+    country 日汇总兜底：同产品同日无国家/交叉/日报数据时纳入纯单元行。
 
-    适用仅 unit 维度的上游（如 SweetStaste、PlayHorizonx）；互斥优先级 country > cross > unit。
+    适用仅 unit 维度的上游（如 SweetStaste、PlayHorizonx）；互斥优先级 country > cross > daily > unit。
     """
     unit_row = _ad_unit_only_row_condition(country_code_column, ad_unit_column)
     no_country = _outer_row_not_in_country_only_product_dates(
@@ -599,13 +685,16 @@ def _unit_fallback_for_country_dimension(
     no_cross = _outer_row_not_in_report_type_product_dates(
         model, REPORT_TYPE_CROSS, start_date, end_date
     )
+    no_plain = _outer_row_not_in_plain_summary_product_dates(
+        model, start_date, end_date
+    )
     if rt_col is not None and legacy_shape is not None:
         typed = or_(
             and_(rt_col == REPORT_TYPE_UNIT, unit_row),
             and_(legacy_shape, unit_row),
         )
-        return and_(typed, no_country, no_cross)
-    return and_(unit_row, no_country, no_cross)
+        return and_(typed, no_country, no_cross, no_plain)
+    return and_(unit_row, no_country, no_cross, no_plain)
 
 
 def _exists_country_only_same_product_date(ad_data_model: Any) -> Any:
