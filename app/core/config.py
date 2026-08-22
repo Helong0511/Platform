@@ -855,6 +855,16 @@ class Settings(BaseSettings):
         "true", "1", "yes",
     ]
 
+    # SweetStaste API（alldata.onesefuns.top，GET /api/v1/get-ad-data，Query api_key）
+    # 默认明细含 AdUnit、无国家，按平台 unit 维度入库
+    SWEETSTASTE_API_BASE_URL: str = os.getenv(
+        "SWEETSTASTE_API_BASE_URL",
+        "https://alldata.onesefuns.top",
+    ).rstrip("/")
+    SWEETSTASTE_API_KEY: str = os.getenv("SWEETSTASTE_API_KEY", "")
+    # 可选按站点过滤；空则拉账号下全部站点
+    SWEETSTASTE_API_SITE_NAME: str = os.getenv("SWEETSTASTE_API_SITE_NAME", "")
+
     @staticmethod
     def _coerce_zhisuo_fetch_bool(value: object, default: bool) -> bool:
         if isinstance(value, bool):
@@ -1156,6 +1166,8 @@ if settings.is_production:
         logger.warning("生产环境未配置 AYA_API_SECRET_KEY，Aya 定时任务将跳过")
     if not settings.LEIYANG_API_KEY.strip():
         logger.warning("生产环境未配置 LEIYANG_API_KEY，LeiYang 定时任务将跳过")
+    if not settings.SWEETSTASTE_API_KEY.strip():
+        logger.warning("生产环境未配置 SWEETSTASTE_API_KEY，SweetStaste 定时任务将跳过")
 else:
     # 开发环境：不显示警告，仅在需要时提示
     # SECRET_KEY 验证已在 validate_secret_key 中处理，这里不需要额外提示

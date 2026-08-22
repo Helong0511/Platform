@@ -577,6 +577,37 @@ def _outer_row_not_in_ad_unit_only_product_dates(
     )
 
 
+def _unit_fallback_for_country_dimension(
+    country_code_column: Any,
+    ad_unit_column: Any,
+    model: Any,
+    start_date: Optional[date],
+    end_date: Optional[date],
+    *,
+    rt_col: Any = None,
+    legacy_shape: Any = None,
+) -> Any:
+    """
+    country 日汇总兜底：同产品同日无国家/交叉数据时纳入纯单元行。
+
+    适用仅 unit 维度的上游（如 SweetStaste、PlayHorizonx）；互斥优先级 country > cross > unit。
+    """
+    unit_row = _ad_unit_only_row_condition(country_code_column, ad_unit_column)
+    no_country = _outer_row_not_in_country_only_product_dates(
+        model, start_date, end_date
+    )
+    no_cross = _outer_row_not_in_report_type_product_dates(
+        model, REPORT_TYPE_CROSS, start_date, end_date
+    )
+    if rt_col is not None and legacy_shape is not None:
+        typed = or_(
+            and_(rt_col == REPORT_TYPE_UNIT, unit_row),
+            and_(legacy_shape, unit_row),
+        )
+        return and_(typed, no_country, no_cross)
+    return and_(unit_row, no_country, no_cross)
+
+
 def _exists_country_only_same_product_date(ad_data_model: Any) -> Any:
     """同产品+同日是否已有纯国家明细（双 API 国家报告）。"""
     sibling = aliased(ad_data_model)
@@ -740,6 +771,15 @@ def build_daily_summary_dimension_filter(
                     model, REPORT_TYPE_COUNTRY, start_date, end_date
                 ),
             ),
+            _unit_fallback_for_country_dimension(
+                country_code_column,
+                ad_unit_column,
+                model,
+                start_date,
+                end_date,
+                rt_col=rt_col,
+                legacy_shape=legacy_shape,
+            ),
             and_(
                 legacy_shape,
                 or_(
@@ -851,6 +891,13 @@ def _legacy_daily_summary_dimension_filter(
             and_(
                 _cross_row_condition(country_code_column, ad_unit_column),
                 _outer_row_not_in_country_only_product_dates(model, start_date, end_date),
+            ),
+            _unit_fallback_for_country_dimension(
+                country_code_column,
+                ad_unit_column,
+                model,
+                start_date,
+                end_date,
             ),
         )
 

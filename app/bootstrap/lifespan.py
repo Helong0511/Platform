@@ -164,17 +164,20 @@ async def lifespan(app: FastAPI):
             "支持降级的组件使用内存存储，短链接/Offer缓存与预热已禁用"
         )
 
-    # 定时任务：仅调度 worker 启动（Gunicorn 多 worker 时由 SCHEDULER_WORKER=1 标识）
+    # 同步 task_config.py → scheduled_tasks 表（与是否启动 APScheduler 解耦）
+    # 本地 Windows 常见 ENABLE_SCHEDULER=false 仅跑 API，仍须写入新任务供管理端展示与后续启用调度
+    try:
+        await init_scheduled_tasks_in_db()
+        logger.info(f"[Worker PID:{worker_pid}] 定时任务配置已同步到数据库")
+    except Exception as db_init_error:
+        logger.warning(
+            f"[Worker PID:{worker_pid}] 同步任务到数据库失败: {db_init_error}，继续启动..."
+        )
+
+    # 定时任务调度器：仅调度 worker 启动（Gunicorn 多 worker 时由 SCHEDULER_WORKER=1 标识）
     if settings.should_run_scheduler():
         try:
-            logger.info(f"[Worker PID:{worker_pid}] 开始初始化定时任务...")
-
-            try:
-                await init_scheduled_tasks_in_db()
-            except Exception as db_init_error:
-                logger.warning(
-                    f"[Worker PID:{worker_pid}] 初始化任务到数据库失败: {db_init_error}，继续启动..."
-                )
+            logger.info(f"[Worker PID:{worker_pid}] 开始初始化定时任务调度器...")
 
             await init_scheduled_tasks()
             logger.info(f"[Worker PID:{worker_pid}] 定时任务初始化完成，正在启动调度器...")
@@ -186,7 +189,7 @@ async def lifespan(app: FastAPI):
     else:
         logger.info(
             f"[Worker PID:{worker_pid}] 跳过定时任务调度器"
-            f"（ENABLE_SCHEDULER/SCHEDULER_WORKER 未启用本 worker）"
+            f"（ENABLE_SCHEDULER/SCHEDULER_WORKER 未启用本 worker；任务记录已同步到数据库）"
         )
 
     # Telegram：调度进程只发启停通知；API 进程才启动 Bot 轮询（单实例文件锁）

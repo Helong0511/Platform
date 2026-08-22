@@ -15,12 +15,19 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
+from app.scheduler_module.sweetstaste_normalize import (
+    SweetStasteRemapStats,
+    remap_sweetstaste_rows,
+)
 from app.scheduler_module.upstream_http import get_json, post_form, post_json, raise_unless_api_success
+
+logger = logging.getLogger(__name__)
 
 UPSTREAM_PAGINATION_MAX_PAGES = 500
 
@@ -1282,6 +1289,100 @@ async def fetch_playhorizonx_rows(
         rows_fetched=len(all_rows),
         total_rows=last_total,
         limit=page_size,
+    )
+    return UpstreamFetchResult(rows=all_rows, stats=stats)
+
+
+# SweetStaste API（alldata.onesefuns.top）
+# 文档：GET /api/v1/get-ad-data，Query：api_key、page、start_date、end_date；
+# 可选 site_name、summary_type（date_link 为日期+链接汇总，广告单元会变成 0，拉数不要传）
+# 成功 code=1；分页看 last_page / per_page（data.total 语义待上游确认，勿用于分页或行数）
+SWEETSTASTE_PATH_AD_DATA = "/api/v1/get-ad-data"
+
+
+async def fetch_sweetstaste_rows(
+    *,
+    base_url: str,
+    api_key: str,
+    start_date: str,
+    end_date: str,
+    site_name: str = "",
+    path: str = SWEETSTASTE_PATH_AD_DATA,
+    label: str = "SweetStaste API",
+) -> UpstreamFetchResult:
+    """
+    SweetStaste 拉数：GET Query 鉴权，按 last_page 全量分页，哈希列经 display_names 还原。
+
+    不传 summary_type，保持广告单元明细。
+    """
+    url = f"{base_url.rstrip('/')}{path}"
+    all_rows: List[Any] = []
+    page = 1
+    last_page = 1
+    per_page = 10
+    remap_stats = SweetStasteRemapStats()
+    hit_page_cap = False
+
+    while True:
+        params: Dict[str, Any] = {
+            "api_key": api_key,
+            "page": page,
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+        if site_name and site_name.strip():
+            params["site_name"] = site_name.strip()
+        json_data = await get_json(
+            url,
+            params=params,
+            label=f"{label} (page={page})",
+        )
+        raise_unless_api_success(json_data, {1}, label=label, code_key="code")
+
+        payload = json_data.get("data") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        rows = payload.get("data") or []
+        if not isinstance(rows, list):
+            rows = []
+        display_names = payload.get("display_names") or {}
+        if not isinstance(display_names, dict):
+            display_names = {}
+        all_rows.extend(
+            remap_sweetstaste_rows(rows, display_names, stats=remap_stats)
+        )
+
+        last_page = int(payload.get("last_page") or 1)
+        per_page = int(payload.get("per_page") or per_page or 10)
+        if page >= last_page or not rows:
+            break
+        page += 1
+        if page > UPSTREAM_PAGINATION_MAX_PAGES:
+            hit_page_cap = True
+            logger.warning(
+                "%s 分页触顶：已达 %d 页上限，last_page=%d，已拉 %d 行，可能截断数据",
+                label,
+                UPSTREAM_PAGINATION_MAX_PAGES,
+                last_page,
+                len(all_rows),
+            )
+            break
+
+    if last_page > UPSTREAM_PAGINATION_MAX_PAGES and not hit_page_cap:
+        logger.warning(
+            "%s 上游 last_page=%d 超过平台分页上限 %d，仅拉取前 %d 页",
+            label,
+            last_page,
+            UPSTREAM_PAGINATION_MAX_PAGES,
+            UPSTREAM_PAGINATION_MAX_PAGES,
+        )
+
+    stats = _build_fetch_stats(
+        pages_fetched=page,
+        total_pages=last_page,
+        rows_fetched=len(all_rows),
+        total_rows=len(all_rows),
+        limit=per_page,
     )
     return UpstreamFetchResult(rows=all_rows, stats=stats)
 

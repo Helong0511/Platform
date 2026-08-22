@@ -368,6 +368,20 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         ),
     },
 
+    # ========== SweetStaste API获取数据任务 ==========
+    "SweetStaste API获取数据": {
+        "task_name": "SweetStaste API获取数据",
+        "task_module": "app.scheduler_module.tasks.sweetstaste_task",
+        "task_function": "sweetstaste_api_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "*/30 * * * *",
+        "description": (
+            "每隔30分钟执行一次，从 SweetStaste /api/v1/get-ad-data 拉取广告单元报表"
+            "（按平台 unit 维度入库；不传 summary_type，避免日期+链接汇总）"
+        ),
+    },
+
     # ==============================================================================
     # 添加新任务示例（取消注释并修改即可）
     # ==============================================================================

@@ -6,7 +6,8 @@
 - 新增配置自动 INSERT，已存在则可选更新 Cron/描述
 
 在系统中的位置：
-- 由 ``app.main`` lifespan 在调度器启动前调用
+- 由 ``app.main`` lifespan 在**每次应用启动**时调用（与 ENABLE_SCHEDULER 无关）
+- APScheduler 注册/启动仍仅在 ``should_run_scheduler()`` 为真时执行
 
 注意事项：
 1. 仅以 task_config 为真相源，手工改 DB 可能在下次 init 被覆盖

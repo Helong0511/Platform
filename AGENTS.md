@@ -17,6 +17,8 @@
 | `client-no-deduct-label.mdc` | 客户登录后可见信息**禁止**出现「扣减后」等扣减字样 |
 | `client-api-ad-data.mdc` | 客户 API（`/client_data`）`data_type` / `dimension` 口径（day/all、默认 country、全量须显式 all） |
 | `ad-data-dimension.mdc` | 广告数据 Excel/上游入库维度与日汇总互斥（country 优先） |
+| `upstream-api-integration.mdc` | **每次**上游 API 拉数须检查：字段映射、类型/单位/小数、逻辑、容错跳过、tests |
+| `project-conventions.mdc` | 测试目录、Aya/FlyMobi/ZhiSuo 显式 report_type、标准维度范围、生产环境摘要 |
 
 若规则文件存在但上下文中未带上，Agent **仍须按上表执行**；不得以「未加载规则」为由省略。
 
@@ -30,6 +32,7 @@
 4. 若新增/变更了表或表结构，是否已同步 `sql/platform.sql`，并已出升迁 SQL、在本地 Windows 库验证？
 5. 是否误连/误操作生产（须有当次明确同意），或在可提交文件中泄露密码？
 6. 客户可见文案/API/导出是否仍含「扣减后」「减扣后」「(扣)」等字样（须无）？
+7. 若涉及上游 API 拉数对接：是否已按 `upstream-api-integration.mdc` 逐项检查并补 tests？
 
 任一项未满足则不得视为任务完成。
 
