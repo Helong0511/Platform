@@ -6,7 +6,9 @@
   <!-- 页面主模板 -->
 <el-menu
     :default-active="activeMenu"
+    :default-openeds="defaultOpeneds"
     class="sidebar-menu"
+    :class="{ 'sidebar-menu--drawer': inDrawer }"
     :background-color="bgDark"
     :text-color="textWhite"
     :active-text-color="primaryColor"
@@ -161,7 +163,7 @@
     </el-sub-menu>
 
     <!-- 系统监控菜单 -->
-    <el-sub-menu v-if="isAdmin" index="/app/admin/monitoring">
+    <el-sub-menu v-if="isAdmin" index="submenu-monitoring">
       <template #title>
         <el-icon><DataLine /></el-icon>
         <span>系统监控</span>
@@ -203,6 +205,54 @@ import { prefetchRoute, prefetchAllRoutes } from '../../utils/prefetchRoutes';
 import { DAILY_REPORT_MENU_ITEMS } from '../../constants/adDataDimension';
 
 const dailyReportMenuItems = DAILY_REPORT_MENU_ITEMS;
+
+defineProps({
+  inDrawer: {
+    type: Boolean,
+    default: false
+  }
+});
+
+/** 子菜单 group index（须与子项 index 唯一，不可复用路由路径） */
+const SUBMENU_GROUP_INDEXES = new Set([
+  '/app/ad-data',
+  '/app/admin/cpl',
+  '/app/admin/system-services',
+  'submenu-monitoring'
+]);
+
+const CPL_MENU_PATHS = [
+  '/app/admin/advertisers',
+  '/app/admin/publishers',
+  '/app/admin/offers',
+  '/app/admin/caps',
+  '/app/admin/discounts',
+  '/app/admin/conversion-deductions',
+  '/app/admin/deduction-stats',
+  '/app/admin/deduction-logs',
+  '/app/admin/affiliate-test',
+  '/app/admin/click-log'
+];
+
+const SYSTEM_SERVICE_PATHS = [
+  '/app/admin/scheduled-tasks',
+  '/app/admin/gam-scheduler',
+  '/app/admin/audit-logs',
+  '/app/admin/third-party-reports',
+  '/app/admin/telegram-notification-config',
+  '/app/admin/cache',
+  '/app/admin/cloak-management',
+  '/app/admin/sessions',
+  '/app/admin/sensitive-path-probes',
+  '/app/admin/countries'
+];
+
+const MONITORING_PATHS = [
+  '/app/admin/monitoring',
+  '/app/admin/monitoring/alerts',
+  '/app/admin/monitoring/trends',
+  '/app/admin/optimization'
+];
 
 const authStore = useAuthStore();
 const route = useRoute();
@@ -273,6 +323,30 @@ const activeMenu = computed(() => {
   return path;
 });
 
+// 根据当前路由自动展开所在子菜单，便于移动端 drawer 内直接看到当前项
+const defaultOpeneds = computed(() => {
+  const path = route.path;
+  const opened = [];
+
+  if (
+    path.startsWith('/app/ad-data') ||
+    path.startsWith('/app/admin/ad-data')
+  ) {
+    opened.push('/app/ad-data');
+  }
+  if (CPL_MENU_PATHS.some((p) => path === p || path.startsWith(`${p}/`))) {
+    opened.push('/app/admin/cpl');
+  }
+  if (SYSTEM_SERVICE_PATHS.some((p) => path === p || path.startsWith(`${p}/`))) {
+    opened.push('/app/admin/system-services');
+  }
+  if (MONITORING_PATHS.some((p) => path === p || path.startsWith(`${p}/`))) {
+    opened.push('submenu-monitoring');
+  }
+
+  return opened;
+});
+
 // 处理菜单选择事件
 // 注意：当 el-menu 设置了 router 属性时，它会自动处理路由导航
 // 我们只需要处理菜单点击事件（用于移动端关闭抽屉）
@@ -314,7 +388,7 @@ const SUBMENU_PREFETCH_PATHS = {
     '/app/admin/sensitive-path-probes',
     '/app/admin/countries'
   ],
-  '/app/admin/monitoring': () => [
+  'submenu-monitoring': () => [
     '/app/admin/monitoring',
     '/app/admin/monitoring/alerts',
     '/app/admin/monitoring/trends',
@@ -330,15 +404,23 @@ const handleSubMenuOpen = (index) => {
 };
 
 const handleMenuSelect = (index) => {
-  emit('menu-click');
-
   if (!index || typeof index !== 'string') {
     return;
   }
-  // 已在当前页：无需重复导航
-  if (index === route.path) {
+
+  // 子菜单 group index 不应触发导航或关闭 drawer
+  if (SUBMENU_GROUP_INDEXES.has(index)) {
     return;
   }
+
+  // 已在当前页：关闭 drawer 但无需重复导航
+  if (index === route.path) {
+    emit('menu-click');
+    return;
+  }
+
+  // 叶子菜单项：关闭 drawer 并导航
+  emit('menu-click');
 
   // 立即切换菜单高亮，避免「点了没反应」体感
   pendingMenuPath.value = index;
@@ -417,6 +499,39 @@ const handleMenuSelect = (index) => {
 
 .sidebar-menu :deep(.el-sub-menu .el-menu-item) {
   padding-left: var(--spacing-xl) !important;
+}
+
+/* 抽屉内菜单：滚动由外层 drawer-menu-scroll 承担，增大触控区域 */
+.sidebar-menu--drawer {
+  height: auto;
+  min-height: min-content;
+  padding-top: var(--spacing-md);
+  padding-bottom: var(--spacing-xl);
+}
+
+.sidebar-menu--drawer :deep(.el-menu-item),
+.sidebar-menu--drawer :deep(.el-sub-menu__title) {
+  min-height: 48px;
+  padding-top: var(--spacing-sm) !important;
+  padding-bottom: var(--spacing-sm) !important;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+}
+
+.sidebar-menu--drawer :deep(.el-menu-item:hover),
+.sidebar-menu--drawer :deep(.el-sub-menu__title:hover),
+.sidebar-menu--drawer :deep(.el-menu-item:active),
+.sidebar-menu--drawer :deep(.el-sub-menu__title:active) {
+  transform: none !important;
+}
+
+.sidebar-menu--drawer :deep(.el-menu-item span),
+.sidebar-menu--drawer :deep(.el-sub-menu__title span) {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  line-height: var(--line-height-base);
 }
 
 /* 移动端优化 */
@@ -507,14 +622,20 @@ const handleMenuSelect = (index) => {
   }
 }
 
-/* 触摸设备优化 */
+/* 触摸设备优化：禁用 transform，避免 iOS/Android 点击偏移 */
 @media (hover: none) and (pointer: coarse) {
-  .sidebar-menu :deep(.el-menu-item) {
-    min-height: var(--touch-target-size);
+  .sidebar-menu :deep(.el-menu-item),
+  .sidebar-menu :deep(.el-sub-menu__title) {
+    min-height: 48px;
+    touch-action: manipulation;
   }
   
-  .sidebar-menu :deep(.el-menu-item:active) {
-    opacity: 0.8;
+  .sidebar-menu :deep(.el-menu-item:hover),
+  .sidebar-menu :deep(.el-sub-menu__title:hover),
+  .sidebar-menu :deep(.el-menu-item:active),
+  .sidebar-menu :deep(.el-sub-menu__title:active) {
+    transform: none !important;
+    opacity: 0.85;
     background-color: var(--bg-dark-hover);
   }
 }

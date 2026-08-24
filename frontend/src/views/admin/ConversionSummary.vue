@@ -448,9 +448,9 @@ onMounted(() => {
   gap: 10px;
 }
 
-/* 日期选择器宽度 */
+/* 筛选日期：桌面合理宽度；移动端由 mobile.css 覆盖为 100% */
 .filter-date-picker {
-  width: 100px !important;
+  width: 240px !important;
 }
 
 /* 筛选下拉框统一宽度 */

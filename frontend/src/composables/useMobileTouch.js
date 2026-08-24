@@ -322,7 +322,9 @@ export function disableDoubleTapZoom() {
  */
 export function useViewportHeight() {
   const setViewportHeight = () => {
-    const vh = window.innerHeight * 0.01;
+    // iOS Safari 地址栏伸缩时 visualViewport 比 innerHeight 更准确
+    const height = window.visualViewport?.height ?? window.innerHeight;
+    const vh = height * 0.01;
     document.documentElement.style.setProperty('--vh', `${vh}px`);
   };
 
@@ -330,11 +332,15 @@ export function useViewportHeight() {
     setViewportHeight();
     window.addEventListener('resize', setViewportHeight);
     window.addEventListener('orientationchange', setViewportHeight);
+    window.visualViewport?.addEventListener('resize', setViewportHeight);
+    window.visualViewport?.addEventListener('scroll', setViewportHeight);
   });
 
   onUnmounted(() => {
     window.removeEventListener('resize', setViewportHeight);
     window.removeEventListener('orientationchange', setViewportHeight);
+    window.visualViewport?.removeEventListener('resize', setViewportHeight);
+    window.visualViewport?.removeEventListener('scroll', setViewportHeight);
   });
 
   return {

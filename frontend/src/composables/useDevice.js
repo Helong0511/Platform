@@ -32,16 +32,26 @@ function detectDeviceType(width) {
   }
 }
 
+/** 是否 iOS / iPadOS（含桌面模式 iPad） */
+export function detectIOS() {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  if (/iPad|iPhone|iPod/.test(ua)) return true;
+  // iPadOS 13+ 桌面 UA
+  return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+}
+
 /**
  * 设备检测 Composable
  * @returns {Object} 设备信息和方法
  */
 export function useDevice() {
-  // deviceType 响应式状态
-  const deviceType = ref(DeviceType.DESKTOP);
-  const windowWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1024);
-  // windowHeight 响应式状态
-  const windowHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 768);
+  const initialWidth = typeof window !== 'undefined' ? window.innerWidth : 1024;
+  const initialHeight = typeof window !== 'undefined' ? window.innerHeight : 768;
+  // deviceType 响应式状态（须与 windowWidth 同步初始化，避免首屏误判为 desktop）
+  const deviceType = ref(detectDeviceType(initialWidth));
+  const windowWidth = ref(initialWidth);
+  const windowHeight = ref(initialHeight);
 
   // 更新设备类型
   const updateDeviceType = () => {
@@ -57,6 +67,7 @@ export function useDevice() {
   const isTablet = computed(() => deviceType.value === DeviceType.TABLET);
   const isMobile = computed(() => deviceType.value === DeviceType.MOBILE);
   const isMobileOrTablet = computed(() => isMobile.value || isTablet.value);
+  const isIOS = computed(() => detectIOS());
 
   // 防抖处理窗口大小变化
   let resizeTimer = null;
@@ -94,6 +105,7 @@ export function useDevice() {
     isTablet,
     isMobile,
     isMobileOrTablet,
+    isIOS,
     updateDeviceType,
     DeviceType,
     BREAKPOINTS

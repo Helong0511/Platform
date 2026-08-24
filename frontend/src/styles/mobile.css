@@ -3,7 +3,109 @@
  * 提供统一的移动端适配方案
  */
 
-/* ====== 移动端基础优化 ====== */
+/* ====== 侧栏抽屉布局（移动端 + 平板，teleport 须全局样式） ====== */
+.mobile-drawer.el-drawer {
+  max-width: 320px !important;
+  height: calc(var(--vh, 1vh) * 100) !important;
+  max-height: calc(var(--vh, 1vh) * 100);
+}
+
+.mobile-drawer.el-drawer .el-drawer__body {
+  padding: 0 !important;
+  background-color: var(--bg-dark);
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  min-height: 0 !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.drawer-menu-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: scroll;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+.drawer-header {
+  flex-shrink: 0;
+}
+
+/* 抽屉打开时锁定背景（MainLayout watch 添加 class） */
+body.drawer-open-scroll-lock {
+  position: fixed;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* ====== iOS / iPadOS 侧栏抽屉专项 ====== */
+@supports (-webkit-touch-callout: none) {
+  .mobile-drawer.el-drawer {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+  }
+
+  .drawer-header {
+    padding-top: max(var(--spacing-lg), env(safe-area-inset-top));
+  }
+
+  .drawer-menu-scroll {
+    padding-bottom: max(var(--spacing-lg), env(safe-area-inset-bottom));
+  }
+
+  .mobile-drawer .el-menu-item,
+  .mobile-drawer .el-sub-menu__title {
+    min-height: 48px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(255, 255, 255, 0.12);
+    cursor: pointer;
+    transform: none !important;
+  }
+
+  .mobile-drawer .el-sub-menu__title {
+    min-width: auto;
+  }
+
+  /* 抽屉内禁止 hover/active 位移，避免 iOS 触控命中偏移 */
+  .sidebar-menu--drawer .el-menu-item:hover,
+  .sidebar-menu--drawer .el-sub-menu__title:hover,
+  .sidebar-menu--drawer .el-menu-item:active,
+  .sidebar-menu--drawer .el-sub-menu__title:active {
+    transform: none !important;
+  }
+}
+
+/* ====== 顶栏菜单按钮（MainLayout，全局兜底防 flex 裁切） ====== */
+@media (max-width: 1024px) {
+  .header {
+    padding-left: max(var(--spacing-md), env(safe-area-inset-left, 0px));
+    padding-right: max(var(--spacing-md), env(safe-area-inset-right, 0px));
+  }
+
+  .header-content {
+    gap: var(--spacing-sm);
+  }
+
+  .header .menu-trigger {
+    display: inline-flex !important;
+    visibility: visible !important;
+    flex-shrink: 0 !important;
+    min-width: 72px !important;
+    order: -1;
+  }
+
+  .header-left {
+    overflow: visible !important;
+    min-width: 0;
+  }
+}
+
 @media (max-width: 767px) {
   /* 全局字体优化 */
   body {
@@ -22,6 +124,7 @@
   button,
   .el-button,
   .el-menu-item,
+  .el-sub-menu__title,
   .el-select,
   .el-input,
   a,
@@ -194,12 +297,6 @@
     max-width: 400px !important;
   }
 
-  /* 抽屉优化 */
-  .el-drawer {
-    width: 85% !important;
-    max-width: 320px !important;
-  }
-
   /* 开关优化 */
   .el-switch {
     min-width: 44px;
@@ -314,6 +411,20 @@
     width: 100%;
     margin-right: 0;
     margin-bottom: var(--spacing-md);
+  }
+
+  .el-form--inline .el-form-item__content {
+    width: 100%;
+  }
+
+  .el-form--inline .el-select,
+  .el-form--inline .el-input,
+  .el-form--inline .el-input-number,
+  .el-form--inline .el-date-editor,
+  .el-form--inline .el-cascader,
+  .el-form--inline .el-autocomplete {
+    width: 100% !important;
+    min-width: 0 !important;
   }
 
   /* 筛选卡片优化 */
@@ -568,9 +679,8 @@
     scrollbar-width: thin;
   }
 
-  /* 对话框内容滚动优化 */
-  .el-dialog__body,
-  .el-drawer__body {
+  /* 对话框等内容滚动优化（抽屉滚动见 .drawer-menu-scroll） */
+  .el-dialog__body {
     -webkit-overflow-scrolling: touch;
     overflow-scrolling: touch;
     overscroll-behavior: contain;
@@ -782,19 +892,10 @@
 
 /* ====== 移动端性能优化 ====== */
 @media (max-width: 767px) {
-  /* 启用硬件加速 */
-  .el-card,
-  .el-table,
-  .el-dialog,
-  .el-drawer {
+  /* 对话框硬件加速；抽屉禁用 transform，避免 iOS 菜单项触控偏移 */
+  .el-dialog {
     transform: translateZ(0);
     will-change: transform;
-  }
-
-  /* 优化动画性能 */
-  * {
-    -webkit-transform: translateZ(0);
-    transform: translateZ(0);
   }
 
   /* 减少重绘 */
@@ -936,7 +1037,19 @@
   .cache-management,
   .product-management-page,
   .client-user-management-container,
-  .api-documentation-container {
+  .api-documentation-container,
+  .postback-management-container,
+  .audit-log-management-container,
+  .third-party-report-management-container,
+  .session-management-container,
+  .country-management,
+  .ad-data-health-page,
+  .cloak-management,
+  .gam-scheduler-page,
+  .scheduled-task-management-container,
+  .ip-whitelist-container,
+  .user-management-container,
+  .telegram-notification-config {
     padding: var(--mobile-content-padding) !important;
   }
 
@@ -1009,20 +1122,145 @@
     margin-top: 0 !important;
   }
 
-  /* 筛选表单（filter-bar / filter-form）：移动端列堆叠 */
+  /* 筛选表单（filter-bar / filter-form / filters / toolbar）：移动端列堆叠 + 覆盖内联宽度 */
   .filter-bar,
-  .filter-form {
+  .filter-form,
+  .filters,
+  .toolbar {
     flex-direction: column !important;
     align-items: stretch !important;
     gap: var(--spacing-sm) !important;
   }
 
+  .search-bar .el-select,
+  .search-bar .el-input,
+  .search-bar .el-input-number,
+  .search-bar .el-date-editor,
+  .search-bar .el-cascader,
+  .search-bar .el-autocomplete,
   .filter-bar .el-select,
   .filter-bar .el-input,
-  .filter-bar .el-date-editor {
+  .filter-bar .el-input-number,
+  .filter-bar .el-date-editor,
+  .filter-bar .el-cascader,
+  .filter-bar .el-autocomplete,
+  .filter-form .el-select,
+  .filter-form .el-input,
+  .filter-form .el-input-number,
+  .filter-form .el-date-editor,
+  .filter-form .el-cascader,
+  .filter-form .el-autocomplete,
+  .filters .el-select,
+  .filters .el-input,
+  .filters .el-input-number,
+  .filters .el-date-editor,
+  .filters .el-cascader,
+  .filters .el-autocomplete,
+  .toolbar .el-select,
+  .toolbar .el-input,
+  .toolbar .el-input-number,
+  .toolbar .el-date-editor {
     width: 100% !important;
     min-width: 0 !important;
+    max-width: 100% !important;
     margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  .filter-form .el-form-item,
+  .filter-bar .el-form-item,
+  .filters .el-form-item {
+    width: 100%;
+    margin-right: 0;
+    margin-bottom: var(--spacing-sm);
+  }
+
+  .filter-form .el-form-item__label,
+  .filter-bar .el-form-item__label,
+  .filters .el-form-item__label {
+    width: auto !important;
+    justify-content: flex-start;
+    padding-bottom: var(--spacing-xs);
+  }
+
+  .filter-form .el-form-item__content,
+  .filter-bar .el-form-item__content,
+  .filters .el-form-item__content {
+    width: 100% !important;
+    margin-left: 0 !important;
+  }
+
+  .filter-bar .el-button,
+  .filter-form .el-button,
+  .filters .el-button,
+  .toolbar .el-button {
+    width: 100%;
+    min-height: var(--touch-target-size);
+    margin-left: 0 !important;
+  }
+
+  /* 卡片内 inline 表单（无 filter-form 类名页面兜底，如 Cloak / AdDataList） */
+  .page-card .el-form--inline .el-form-item,
+  .el-card .el-form--inline .el-form-item {
+    display: block;
+    width: 100%;
+    margin-right: 0;
+  }
+
+  .page-card .el-form--inline .el-select,
+  .page-card .el-form--inline .el-input,
+  .page-card .el-form--inline .el-input-number,
+  .page-card .el-form--inline .el-date-editor,
+  .el-card .el-form--inline .el-select,
+  .el-card .el-form--inline .el-input,
+  .el-card .el-form--inline .el-input-number,
+  .el-card .el-form--inline .el-date-editor {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  /* 日期范围选择器 */
+  .el-date-editor--daterange,
+  .el-date-editor--datetimerange,
+  .el-date-editor--monthrange {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .el-date-editor .el-range-input {
+    font-size: var(--font-size-sm);
+  }
+
+  .el-date-editor .el-range-separator {
+    padding: 0 var(--spacing-xs);
+  }
+
+  /* 列设置 / 文本链接按钮：增大触控区 */
+  .card-header .el-button.is-link,
+  .table-header .el-button.is-link,
+  .table-header .el-button--text,
+  .card-header .el-button--text {
+    min-height: var(--touch-target-size);
+    width: 100%;
+    justify-content: center;
+    margin-left: 0 !important;
+  }
+
+  /* 折叠筛选面板 */
+  .filter-collapse .el-collapse-item__header {
+    min-height: var(--touch-target-size);
+    font-size: var(--font-size-base);
+    padding: var(--spacing-sm) var(--spacing-md);
+  }
+
+  .filter-collapse .el-form-item {
+    width: 100%;
+  }
+
+  .filter-collapse .el-select,
+  .filter-collapse .el-input,
+  .filter-collapse .el-date-editor {
+    width: 100% !important;
   }
 
   /* 表格头部操作区：移动端列堆叠 */
@@ -1047,5 +1285,55 @@
   /* 卡片标题栏按钮：小屏时单列堆叠 */
   .card-header .header-right .el-button {
     width: 100%;
+  }
+
+  .menu-trigger-label {
+    display: inline;
+  }
+}
+
+/* ====== 平板端筛选列堆叠（768–1024px，与手机一致） ====== */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .search-bar,
+  .filter-bar,
+  .filter-form,
+  .filters,
+  .toolbar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: var(--spacing-sm) !important;
+  }
+
+  .search-bar .el-select,
+  .search-bar .el-input,
+  .search-bar .el-input-number,
+  .search-bar .el-date-editor,
+  .filter-bar .el-select,
+  .filter-bar .el-input,
+  .filter-bar .el-input-number,
+  .filter-bar .el-date-editor,
+  .filter-form .el-select,
+  .filter-form .el-input,
+  .filter-form .el-input-number,
+  .filter-form .el-date-editor,
+  .filters .el-select,
+  .filters .el-input,
+  .filters .el-date-editor,
+  .toolbar .el-select,
+  .toolbar .el-input,
+  .toolbar .el-date-editor,
+  .el-date-editor--daterange,
+  .el-date-editor--datetimerange {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    margin-left: 0 !important;
+  }
+
+  .filter-bar .el-button,
+  .filter-form .el-button,
+  .filters .el-button,
+  .search-bar .el-button {
+    min-height: var(--touch-target-size);
   }
 }

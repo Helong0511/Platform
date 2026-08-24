@@ -6,7 +6,7 @@
   <!-- 页面主模板 -->
 <el-container class="main-container">
     <!-- 桌面端侧边栏 -->
-    <el-aside width="200px" class="sidebar desktop-sidebar" v-if="isAuthenticated">
+    <el-aside width="200px" class="sidebar desktop-sidebar" v-if="isAuthenticated && isDesktop">
       <Sidebar />
     </el-aside>
     
@@ -15,7 +15,7 @@
       v-model="drawerVisible"
       :with-header="false"
       direction="ltr"
-      :size="isTablet ? '320px' : '280px'"
+      :size="isTablet ? '320px' : '85%'"
       class="mobile-drawer"
       :z-index="1080"
       :modal="true"
@@ -34,22 +34,31 @@
           aria-label="关闭菜单"
         ></el-button>
       </div>
-      <Sidebar @menu-click="handleMenuClick" />
+      <div class="drawer-menu-scroll">
+        <Sidebar
+          v-if="drawerVisible"
+          :key="drawerMenuKey"
+          in-drawer
+          @menu-click="handleMenuClick"
+        />
+      </div>
     </el-drawer>
     
     <el-container>
       <el-header class="header">
         <div class="header-content">
+          <!-- 菜单按钮独立于 header-left，避免 flex 压缩 + overflow 裁切 -->
+          <el-button
+            @click="toggleSidebar"
+            class="menu-trigger"
+            type="primary"
+            aria-label="打开导航菜单"
+            title="打开导航菜单"
+          >
+            <el-icon class="menu-trigger-icon"><Menu /></el-icon>
+            <span class="menu-trigger-label">菜单</span>
+          </el-button>
           <div class="header-left">
-            <el-button 
-              @click="toggleSidebar" 
-              class="menu-icon" 
-              :icon="Menu"
-              text
-              circle
-              aria-label="切换侧边栏菜单"
-              title="切换侧边栏菜单"
-            ></el-button>
             <h1 class="header-title">广告数据平台</h1>
           </div>
           <div class="header-right">
@@ -85,21 +94,54 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { useRoute } from 'vue-router';
 import { useAuthStore } from '../../store';
 import { useDevice } from '../../composables/useDevice';
+import { disableDoubleTapZoom, useViewportHeight } from '../../composables/useMobileTouch';
+import { detectIOS } from '../../composables/useDevice';
 import { routeNavigating } from '../../composables/useRouteLoading';
 import { ElContainer, ElAside, ElHeader, ElMain, ElIcon, ElButton, ElTag, ElMessageBox, ElDrawer } from 'element-plus';
 import { Menu, User, SwitchButton, Close } from '@element-plus/icons-vue';
 import Sidebar from './Sidebar.vue';
 
-const router = useRouter();
+const route = useRoute();
 const authStore = useAuthStore();
-const { deviceType, isDesktop, isTablet, isMobile } = useDevice();
+const { isDesktop, isTablet, isMobile, isMobileOrTablet } = useDevice();
+useViewportHeight();
 const isAuthenticated = computed(() => authStore.isAuthenticated);
-const isSidebarOpen = ref(true);
 const drawerVisible = ref(false);
+const drawerOpenSeq = ref(0);
+
+// 每次打开 drawer 强制 remount 菜单，确保 default-openeds 与当前路由一致（iOS 尤其需要）
+const drawerMenuKey = computed(() => `${route.path}-${drawerOpenSeq.value}`);
+
+watch(drawerVisible, (open) => {
+  if (open) {
+    drawerOpenSeq.value += 1;
+  }
+});
+
+// iOS / 移动端：抽屉打开时锁定背景滚动（Safari 下 Element Plus lock-scroll 常失效）
+let lockedScrollY = 0;
+watch(drawerVisible, async (open) => {
+  if (!isMobileOrTablet.value) return;
+
+  if (open) {
+    lockedScrollY = window.scrollY;
+    document.body.classList.add('drawer-open-scroll-lock');
+    document.body.style.top = `-${lockedScrollY}px`;
+    await nextTick();
+    setTimeout(() => {
+      document.querySelector('.drawer-menu-scroll .el-menu-item.is-active')
+        ?.scrollIntoView({ block: 'center' });
+    }, 120);
+  } else {
+    document.body.classList.remove('drawer-open-scroll-lock');
+    document.body.style.top = '';
+    window.scrollTo(0, lockedScrollY);
+  }
+});
 
 // 用户显示名称（优先显示全名，否则显示用户名）
 const userDisplayName = computed(() => {
@@ -107,20 +149,14 @@ const userDisplayName = computed(() => {
   return userInfo?.full_name || userInfo?.username || '用户';
 });
 
-// 切换侧边栏/抽屉
+// 切换抽屉菜单（仅移动端/平板端）
 const toggleSidebar = () => {
-  if (isMobile.value || isTablet.value) {
-    drawerVisible.value = !drawerVisible.value;
-  } else {
-    isSidebarOpen.value = !isSidebarOpen.value;
-  }
+  drawerVisible.value = !drawerVisible.value;
 };
 
-// 处理菜单点击（移动端/平板端点击后关闭抽屉）
+// 处理叶子菜单项点击（移动端/平板端点击后关闭抽屉）
 const handleMenuClick = () => {
-  if (isMobile.value || isTablet.value) {
-    drawerVisible.value = false;
-  }
+  drawerVisible.value = false;
 };
 
 // 处理退出登录
@@ -182,6 +218,11 @@ const handleTouchEnd = (e) => {
 };
 
 onMounted(() => {
+  if (isMobileOrTablet.value) {
+    disableDoubleTapZoom();
+  }
+  // iOS 左边缘为 Safari 返回手势，不再注册边缘滑开菜单，避免冲突
+  if (detectIOS()) return;
   document.addEventListener('touchstart', handleTouchStart, { passive: true });
   document.addEventListener('touchend', handleTouchEnd, { passive: true });
 });
@@ -189,6 +230,8 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('touchstart', handleTouchStart);
   document.removeEventListener('touchend', handleTouchEnd);
+  document.body.classList.remove('drawer-open-scroll-lock');
+  document.body.style.top = '';
 });
 
 // useDevice composable 已经处理了窗口大小变化监听
@@ -197,6 +240,7 @@ onUnmounted(() => {
 <style scoped>
 .main-container {
   height: 100vh;
+  height: calc(var(--vh, 1vh) * 100);
 }
 
 .sidebar {
@@ -221,14 +265,7 @@ onUnmounted(() => {
   }
 }
 
-/* 移动端抽屉样式 */
-.mobile-drawer :deep(.el-drawer__body) {
-  padding: 0;
-  background-color: var(--bg-dark);
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
+/* 移动端抽屉：el-drawer__body 样式见全局 mobile.css（teleport 场景） */
 
 .drawer-header {
   display: flex;
@@ -287,25 +324,39 @@ onUnmounted(() => {
   min-width: 0; /* 允许flex子元素收缩 */
 }
 
-.menu-icon {
-  font-size: var(--font-size-xl);
-  cursor: pointer;
-  color: var(--text-primary);
-  transition: var(--transition-base);
+  .menu-trigger {
   flex-shrink: 0;
-  min-width: var(--touch-target-size);
-  min-height: var(--touch-target-size);
-  display: flex;
+  min-height: 48px;
+  min-width: 72px;
+  padding: 0 var(--spacing-md);
+  font-weight: var(--font-weight-semibold);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-light);
+  touch-action: manipulation;
+  display: none;
   align-items: center;
-  justify-content: center;
+  gap: var(--spacing-xs);
+  z-index: 2;
 }
 
-.menu-icon:hover {
-  color: var(--primary-color);
+/* 移动端/平板：CSS 控制显示，不依赖 JS v-if，避免首屏或检测异常时菜单消失 */
+@media (max-width: 1024px) {
+  .menu-trigger {
+    display: inline-flex !important;
+  }
 }
 
-.menu-icon:active {
-  opacity: 0.7;
+.menu-trigger-icon {
+  font-size: var(--font-size-xl);
+}
+
+.menu-trigger-label {
+  font-size: var(--font-size-base);
+  line-height: 1;
+}
+
+.menu-trigger:active {
+  opacity: 0.85;
 }
 
 .header-title {
@@ -479,17 +530,19 @@ onUnmounted(() => {
   /* 移动端头部优化 */
   .header-content {
     flex-wrap: nowrap;
+    gap: var(--spacing-sm);
   }
 
   .header-left {
     flex: 1;
     min-width: 0;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .header-title {
     font-size: var(--font-size-base);
-    max-width: 150px;
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
