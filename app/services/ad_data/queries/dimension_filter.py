@@ -676,7 +676,7 @@ def _unit_fallback_for_country_dimension(
     """
     country 日汇总兜底：同产品同日无国家/交叉/日报数据时纳入纯单元行。
 
-    适用仅 unit 维度的上游（如 SweetStaste、PlayHorizonx）；互斥优先级 country > cross > daily > unit。
+    适用仅 unit 维度的上游（如 SweetStaste）；互斥优先级 country > cross > daily > unit。
     """
     unit_row = _ad_unit_only_row_condition(country_code_column, ad_unit_column)
     no_country = _outer_row_not_in_country_only_product_dates(

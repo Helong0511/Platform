@@ -507,6 +507,8 @@ const handleMenuSelect = (index) => {
   min-height: min-content;
   padding-top: var(--spacing-md);
   padding-bottom: var(--spacing-xl);
+  overflow: visible !important;
+  flex: none !important;
 }
 
 .sidebar-menu--drawer :deep(.el-menu-item),
@@ -536,7 +538,7 @@ const handleMenuSelect = (index) => {
 
 /* 移动端优化 */
 @media (max-width: 767px) {
-  .sidebar-menu {
+  .sidebar-menu:not(.sidebar-menu--drawer) {
     padding-top: var(--spacing-md);
     padding-bottom: var(--spacing-lg);
     overflow-y: auto;

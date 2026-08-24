@@ -838,20 +838,20 @@ class Settings(BaseSettings):
 
     # PlayHorizonx API（api.h5gamegl.top，POST /reports/index，md5签名鉴权）
     # 文档：POST /reports/index，md5(username+startDate+endDate+private_key) 作为 Header sign
-    # 响应字段：date、url、com_name、requests、matched_queries、viewsCount、clicks、channel_revenue
-    # 按平台 unit 维度入库（广告单元+日期，无具体国家字段）
+    # 响应字段：date、url、com_name、country_code、requests、matched_queries、viewsCount、clicks、channel_revenue
+    # 默认按 cross（国家+广告单元）入库；PLAYHORIZONX_API_FETCH_CROSS 控制
     PLAYHORIZONX_API_BASE_URL: str = os.getenv(
         "PLAYHORIZONX_API_BASE_URL",
         "http://api.h5gamegl.top",
     ).rstrip("/")
     PLAYHORIZONX_API_USERNAME: str = os.getenv("PLAYHORIZONX_API_USERNAME", "")
     PLAYHORIZONX_API_PRIVATE_KEY: str = os.getenv("PLAYHORIZONX_API_PRIVATE_KEY", "")
-    # 拉数维度开关：默认开启 unit（接口 /reports/index，对应平台 unit 维度）
-    PLAYHORIZONX_API_FETCH_UNIT: bool = os.getenv("PLAYHORIZONX_API_FETCH_UNIT", "true").lower() in [
+    # cross 维度（国家+广告单元）：默认开启
+    PLAYHORIZONX_API_FETCH_CROSS: bool = os.getenv("PLAYHORIZONX_API_FETCH_CROSS", "true").lower() in [
         "true", "1", "yes",
     ]
-    # cross 维度默认关闭（接口无 country 字段，如后续上游增加国家维度可开启）
-    PLAYHORIZONX_API_FETCH_CROSS: bool = os.getenv("PLAYHORIZONX_API_FETCH_CROSS", "false").lower() in [
+    # unit 维度（仅广告单元，剥离 country_code）：默认关闭
+    PLAYHORIZONX_API_FETCH_UNIT: bool = os.getenv("PLAYHORIZONX_API_FETCH_UNIT", "false").lower() in [
         "true", "1", "yes",
     ]
 

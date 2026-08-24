@@ -25,11 +25,12 @@ const BREAKPOINTS = {
 function detectDeviceType(width) {
   if (width < BREAKPOINTS.MOBILE) {
     return DeviceType.MOBILE;
-  } else if (width < BREAKPOINTS.TABLET) {
-    return DeviceType.TABLET;
-  } else {
-    return DeviceType.DESKTOP;
   }
+  // 与 CSS max-width:1024px 对齐：1024px 仍视为平板（抽屉菜单），非桌面侧栏
+  if (width <= BREAKPOINTS.TABLET) {
+    return DeviceType.TABLET;
+  }
+  return DeviceType.DESKTOP;
 }
 
 /** 是否 iOS / iPadOS（含桌面模式 iPad） */

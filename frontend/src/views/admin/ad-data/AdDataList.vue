@@ -15,7 +15,7 @@
     <!-- 筛选区 -->
     <el-card class="filter-card">
       <!-- 表单区域 -->
-      <el-form :model="filterForm" :inline="true">
+      <el-form :model="filterForm" :inline="true" class="filter-form">
         <el-form-item label="产品">
           <el-select v-model="filterForm.product_id" placeholder="全部" clearable filterable>
             <el-option v-for="p in products" :key="p.id" :label="p.name" :value="p.id" />
@@ -31,6 +31,7 @@
       </el-form>
     </el-card>
     <el-card class="table-card">
+      <div class="table-wrapper">
       <!-- 数据表格 -->
       <el-table v-loading="loading" :data="data" border>
         <el-table-column prop="date" label="日期" width="120" />
@@ -42,6 +43,7 @@
         <el-table-column prop="ecpm_after_deduct" label="eCPM" width="100" />
         <el-table-column prop="revenue_after_deduct" label="收益" width="100" />
       </el-table>
+      </div>
       <!-- 分页 -->
       <el-pagination v-model:current-page="page" :total="total" :page-size="20" layout="total,prev,pager,next" @current-change="loadData" />
     </el-card>
@@ -88,4 +90,13 @@ onMounted(() => { loadProducts(); loadData(); });
 .ad-data-list { padding: 20px; }
 .filter-card { margin-bottom: 20px; }
 .table-card { margin-top: 20px; }
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+@media (max-width: 767px) {
+  .ad-data-list { padding: var(--mobile-content-padding); }
+  .table-wrapper :deep(.el-table) { min-width: 720px; }
+}
 </style>

@@ -26,7 +26,7 @@
     <!-- 工具栏 -->
     <el-card shadow="never" class="toolbar-card">
       <!-- 表单区域 -->
-      <el-form :inline="true" :model="searchForm">
+      <el-form :inline="true" :model="searchForm" class="filter-form">
         <el-form-item label="斗篷名称">
           <el-input
             v-model="searchForm.cloak_name"
@@ -45,6 +45,7 @@
 
     <!-- 斗篷配置列表：可用性由后端 bridge_html_present / is_usable 决定 -->
     <el-card shadow="never">
+      <div class="table-wrapper">
       <!-- 数据表格 -->
       <el-table v-loading="loading" :data="tableData" border stripe>
         <el-table-column prop="cloak_name" label="斗篷名称" min-width="130" />
@@ -116,6 +117,7 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
 
       <div class="pagination">
         <el-pagination
@@ -474,6 +476,22 @@ const {
 .pagination {
   margin-top: 16px;
   text-align: right;
+}
+
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 767px) {
+  .table-wrapper :deep(.el-table) {
+    min-width: 960px;
+  }
+
+  .pagination {
+    text-align: center;
+  }
 }
 
 .switch-hint {

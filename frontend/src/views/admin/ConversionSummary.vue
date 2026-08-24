@@ -567,6 +567,12 @@ onMounted(() => {
     margin-left: 0 !important;
   }
 
+  .filter-date-picker,
+  .filter-select {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
   .stats-cards {
     grid-template-columns: 1fr;
     gap: 10px;
@@ -581,8 +587,9 @@ onMounted(() => {
     font-size: 12px;
   }
 
-.table-wrapper :deep(.el-table__cell) {
-  padding: 8px 4px;
+  .table-wrapper :deep(.el-table__cell) {
+    padding: 8px 4px;
+  }
 }
 
 /* 汇总行样式 */
@@ -598,6 +605,5 @@ onMounted(() => {
   background-color: #f5f7fa;
   font-weight: 600;
   color: #303133;
-}
 }
 </style>

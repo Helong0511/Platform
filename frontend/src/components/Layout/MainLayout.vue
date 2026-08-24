@@ -81,7 +81,7 @@
           </div>
         </div>
       </el-header>
-      <el-main class="main-content">
+      <el-main ref="mainContentRef" class="main-content">
         <div v-if="routeNavigating" class="route-progress-bar" aria-hidden="true"></div>
         <router-view v-slot="{ Component, route: viewRoute }">
           <keep-alive :max="20">
@@ -112,6 +112,7 @@ useViewportHeight();
 const isAuthenticated = computed(() => authStore.isAuthenticated);
 const drawerVisible = ref(false);
 const drawerOpenSeq = ref(0);
+const mainContentRef = ref(null);
 
 // 每次打开 drawer 强制 remount 菜单，确保 default-openeds 与当前路由一致（iOS 尤其需要）
 const drawerMenuKey = computed(() => `${route.path}-${drawerOpenSeq.value}`);
@@ -122,24 +123,47 @@ watch(drawerVisible, (open) => {
   }
 });
 
-// iOS / 移动端：抽屉打开时锁定背景滚动（Safari 下 Element Plus lock-scroll 常失效）
+// iOS / 移动端：抽屉打开时锁定背景滚动（body + el-main 双锁定，Safari 下 Element Plus lock-scroll 常失效）
 let lockedScrollY = 0;
+let lockedMainScrollTop = 0;
+
+const getMainContentEl = () => mainContentRef.value?.$el ?? mainContentRef.value;
+
+const scrollActiveMenuIntoView = () => {
+  requestAnimationFrame(() => {
+    document.querySelector('.drawer-menu-scroll .el-menu-item.is-active')
+      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  });
+};
+
 watch(drawerVisible, async (open) => {
   if (!isMobileOrTablet.value) return;
 
+  const mainEl = getMainContentEl();
+
   if (open) {
     lockedScrollY = window.scrollY;
+    lockedMainScrollTop = mainEl?.scrollTop ?? 0;
     document.body.classList.add('drawer-open-scroll-lock');
     document.body.style.top = `-${lockedScrollY}px`;
+    mainEl?.classList.add('drawer-open-scroll-lock');
     await nextTick();
-    setTimeout(() => {
-      document.querySelector('.drawer-menu-scroll .el-menu-item.is-active')
-        ?.scrollIntoView({ block: 'center' });
-    }, 120);
+    setTimeout(scrollActiveMenuIntoView, 180);
   } else {
     document.body.classList.remove('drawer-open-scroll-lock');
     document.body.style.top = '';
     window.scrollTo(0, lockedScrollY);
+    mainEl?.classList.remove('drawer-open-scroll-lock');
+    if (mainEl) {
+      mainEl.scrollTop = lockedMainScrollTop;
+    }
+  }
+});
+
+// 窗口拉宽到桌面时自动关闭抽屉
+watch(isDesktop, (desktop) => {
+  if (desktop) {
+    drawerVisible.value = false;
   }
 });
 
@@ -217,10 +241,11 @@ const handleTouchEnd = (e) => {
   }
 };
 
+if (isMobileOrTablet.value) {
+  disableDoubleTapZoom();
+}
+
 onMounted(() => {
-  if (isMobileOrTablet.value) {
-    disableDoubleTapZoom();
-  }
   // iOS 左边缘为 Safari 返回手势，不再注册边缘滑开菜单，避免冲突
   if (detectIOS()) return;
   document.addEventListener('touchstart', handleTouchStart, { passive: true });
@@ -232,6 +257,7 @@ onUnmounted(() => {
   document.removeEventListener('touchend', handleTouchEnd);
   document.body.classList.remove('drawer-open-scroll-lock');
   document.body.style.top = '';
+  getMainContentEl()?.classList.remove('drawer-open-scroll-lock');
 });
 
 // useDevice composable 已经处理了窗口大小变化监听

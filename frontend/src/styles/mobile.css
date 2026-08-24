@@ -43,6 +43,13 @@ body.drawer-open-scroll-lock {
   overflow: hidden;
 }
 
+/* 主内容区才是实际滚动容器，须单独锁定 */
+.main-content.drawer-open-scroll-lock {
+  overflow: hidden !important;
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
 /* ====== iOS / iPadOS 侧栏抽屉专项 ====== */
 @supports (-webkit-touch-callout: none) {
   .mobile-drawer.el-drawer {
@@ -52,11 +59,7 @@ body.drawer-open-scroll-lock {
   }
 
   .drawer-header {
-    padding-top: max(var(--spacing-lg), env(safe-area-inset-top));
-  }
-
-  .drawer-menu-scroll {
-    padding-bottom: max(var(--spacing-lg), env(safe-area-inset-bottom));
+    flex-shrink: 0;
   }
 
   .mobile-drawer .el-menu-item,
@@ -73,10 +76,10 @@ body.drawer-open-scroll-lock {
   }
 
   /* 抽屉内禁止 hover/active 位移，避免 iOS 触控命中偏移 */
-  .sidebar-menu--drawer .el-menu-item:hover,
-  .sidebar-menu--drawer .el-sub-menu__title:hover,
-  .sidebar-menu--drawer .el-menu-item:active,
-  .sidebar-menu--drawer .el-sub-menu__title:active {
+  .mobile-drawer .el-menu-item:hover,
+  .mobile-drawer .el-sub-menu__title:hover,
+  .mobile-drawer .el-menu-item:active,
+  .mobile-drawer .el-sub-menu__title:active {
     transform: none !important;
   }
 }
@@ -86,6 +89,7 @@ body.drawer-open-scroll-lock {
   .header {
     padding-left: max(var(--spacing-md), env(safe-area-inset-left, 0px));
     padding-right: max(var(--spacing-md), env(safe-area-inset-right, 0px));
+    padding-top: max(0px, env(safe-area-inset-top, 0px));
   }
 
   .header-content {
@@ -930,10 +934,7 @@ body.drawer-open-scroll-lock {
       margin-right: max(var(--spacing-md), env(safe-area-inset-right));
     }
 
-    .el-drawer {
-      padding-top: max(0px, env(safe-area-inset-top));
-      padding-bottom: max(0px, env(safe-area-inset-bottom));
-    }
+    /* 抽屉 safe-area 仅由 .mobile-drawer 负责，避免与通用 .el-drawer 叠加 */
   }
 }
 
@@ -1335,5 +1336,141 @@ body.drawer-open-scroll-lock {
   .filters .el-button,
   .search-bar .el-button {
     min-height: var(--touch-target-size);
+  }
+}
+
+/* ====== 移动端深度复查补充（2026-08-24） ====== */
+
+/* 通用表格横向滚动容器（页面未自建 table-wrapper 时兜底） */
+@media (max-width: 767px) {
+  .table-wrapper,
+  .el-card .el-table,
+  .table-card .el-table {
+    display: block;
+    width: 100%;
+  }
+
+  .table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+
+  /* scoped !important 固定宽度筛选控件：全局强制全宽 */
+  .filter-bar .filter-date-picker,
+  .filter-bar .filter-select,
+  .filters .el-date-editor,
+  .filters .el-select,
+  .filters .el-input {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  /* 工具栏卡片内 inline 表单（CloakManagement 等） */
+  .toolbar-card .el-form--inline,
+  .filter-card .el-form--inline {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--spacing-sm);
+  }
+
+  .toolbar-card .el-form--inline .el-form-item,
+  .filter-card .el-form--inline .el-form-item {
+    display: block;
+    width: 100%;
+    margin-right: 0;
+    margin-bottom: var(--spacing-sm);
+  }
+
+  .toolbar-card .el-form--inline .el-form-item__content,
+  .filter-card .el-form--inline .el-form-item__content {
+    width: 100% !important;
+    margin-left: 0 !important;
+  }
+
+  .toolbar-card .el-select,
+  .toolbar-card .el-input,
+  .toolbar-card .el-date-editor,
+  .filter-card .el-select,
+  .filter-card .el-input,
+  .filter-card .el-date-editor {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .toolbar-card .el-button,
+  .filter-card .el-button {
+    width: 100%;
+    min-height: var(--touch-target-size);
+    margin-left: 0 !important;
+  }
+
+  /* 扣减统计：4 列统计卡 → 2 列 */
+  .deduction-stats .stats-cards {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: var(--spacing-md);
+  }
+
+  /* 告警页统计横排 */
+  .stats-row {
+    flex-wrap: wrap !important;
+    gap: var(--spacing-sm);
+  }
+
+  /* 敏感路径等 .page 容器 */
+  .page {
+    padding: var(--mobile-content-padding) !important;
+  }
+
+  .ad-data-list {
+    padding: var(--mobile-content-padding) !important;
+  }
+
+  /* 卡片头批量操作区 */
+  .card-header {
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+  }
+
+  .card-header .batch-actions {
+    flex-wrap: wrap;
+    width: 100%;
+    gap: var(--spacing-xs);
+  }
+
+  /* 分页精简：隐藏 sizes/jumper 溢出 */
+  .el-pagination .el-pagination__sizes,
+  .el-pagination .el-pagination__jump {
+    margin-top: var(--spacing-xs);
+  }
+
+  .pagination {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1024px) {
+  .toolbar-card .el-form--inline,
+  .filter-card .el-form--inline {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  .toolbar-card .el-form--inline .el-form-item,
+  .filter-card .el-form--inline .el-form-item {
+    width: 100%;
+    margin-right: 0;
+  }
+
+  .toolbar-card .el-select,
+  .toolbar-card .el-input,
+  .toolbar-card .el-date-editor,
+  .filter-card .el-select,
+  .filter-card .el-input,
+  .filter-card .el-date-editor {
+    width: 100% !important;
   }
 }

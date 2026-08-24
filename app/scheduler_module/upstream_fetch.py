@@ -1209,6 +1209,7 @@ async def fetch_idgtn_rows(
 # PlayHorizonx API（api.h5gamegl.top）
 # 文档：POST /reports/index，md5(username+startDate+endDate+private_key) 作为 Header sign
 # 响应 status=0 成功，data.pages 分页，data.list 行数据
+# 实测 list 含 date、url、com_name、country_code 及指标字段
 PLAYHORIZONX_PATH_INDEX = "/reports/index"
 
 

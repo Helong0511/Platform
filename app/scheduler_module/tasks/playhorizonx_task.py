@@ -4,8 +4,8 @@ PlayHorizonx 上游广告数据拉取定时任务。
 功能说明：
 - 从 PlayHorizonx（api.h5gamegl.top）API 获取上游报表数据
 - 接口 POST /reports/index，md5 签名鉴权
-- 默认按 unit 维度入库；可开启 cross 维度（同一接口数据，入库维度不同）
-- 经字段映射与去重写入 ad_data 表
+- 默认按 cross（国家+广告单元）维度入库；可选 unit（剥离国家，仅广告单元）
+- 经字段映射、规范化与去重写入 ad_data 表
 
 接口文档：PlayHorizonx API Report Query v1.0
 鉴权方式：Header sign（md5(username + startDate + endDate + private_key)）
@@ -21,6 +21,7 @@ from app.core.ad_data_metadata import (
     REPORT_TYPE_UNIT,
 )
 from app.core.config import settings
+from app.scheduler_module.playhorizonx_normalize import make_playhorizonx_transform
 from app.scheduler_module.task_names import PLAYHORIZONX_API_TASK_NAME
 from app.scheduler_module.task_result_store import set_task_result
 from app.scheduler_module.upstream_fetch import (
@@ -34,12 +35,8 @@ from app.scheduler_module.task_utils import log_scheduled_task_skip, resolve_ups
 
 logger = logging.getLogger(__name__)
 
-# PlayHorizonx /reports/index 字段映射（响应字段 → 平台 ad_data 字段）
-# 响应含：date、url、com_name、requests、matched_queries、viewsCount、clicks、channel_revenue
-# 无 country 字段
-# unit 维度：按广告单元入库（国家为 ZZ）
-# cross 维度：同接口数据，若后续上游增加 country 字段则按 cross 入库
-PLAYHORIZONX_FIELD_MAPPING: dict[str, str] = {
+# 公共指标字段（响应 → 平台 ad_data）
+_PLAYHORIZONX_METRIC_MAPPING: dict[str, str] = {
     "date": "date",
     "product_name": "url",
     "ad_unit": "com_name",
@@ -50,19 +47,28 @@ PLAYHORIZONX_FIELD_MAPPING: dict[str, str] = {
     "revenue_before_deduct": "channel_revenue",
 }
 
+# cross：实测含 country_code（ISO 二字母）
+PLAYHORIZONX_CROSS_FIELD_MAPPING: dict[str, str] = {
+    **_PLAYHORIZONX_METRIC_MAPPING,
+    "country_code": "country_code",
+}
+
+# unit（兼容）：无国家列映射，规范化阶段会剥离 country_code
+PLAYHORIZONX_UNIT_FIELD_MAPPING: dict[str, str] = dict(_PLAYHORIZONX_METRIC_MAPPING)
+
 # 报表维度配置
 _PLAYHORIZONX_REPORTS: list[dict[str, Any]] = [
     {
-        "env_flag": "PLAYHORIZONX_API_FETCH_UNIT",
-        "label": "PlayHorizonx /reports/index (unit)",
-        "mapping": PLAYHORIZONX_FIELD_MAPPING,
-        "report_type": REPORT_TYPE_UNIT,
-    },
-    {
         "env_flag": "PLAYHORIZONX_API_FETCH_CROSS",
         "label": "PlayHorizonx /reports/index (cross)",
-        "mapping": PLAYHORIZONX_FIELD_MAPPING,
+        "mapping": PLAYHORIZONX_CROSS_FIELD_MAPPING,
         "report_type": REPORT_TYPE_CROSS,
+    },
+    {
+        "env_flag": "PLAYHORIZONX_API_FETCH_UNIT",
+        "label": "PlayHorizonx /reports/index (unit)",
+        "mapping": PLAYHORIZONX_UNIT_FIELD_MAPPING,
+        "report_type": REPORT_TYPE_UNIT,
     },
 ]
 
@@ -99,7 +105,7 @@ async def playhorizonx_api_task(
 
     enabled_reports = [r for r in _PLAYHORIZONX_REPORTS if _is_report_enabled(r["env_flag"])]
     if not enabled_reports:
-        skip_msg = "跳过: PlayHorizonx 未开启任何维度（PLAYHORIZONX_API_FETCH_UNIT/CROSS 均为 false）"
+        skip_msg = "跳过: PlayHorizonx 未开启任何维度（PLAYHORIZONX_API_FETCH_CROSS/UNIT 均为 false）"
         logger.warning(skip_msg)
         set_task_result(PLAYHORIZONX_API_TASK_NAME, skip_msg)
         return
@@ -110,6 +116,7 @@ async def playhorizonx_api_task(
 
     for report in enabled_reports:
         report_label = report["label"]
+        report_type = report["report_type"]
         try:
             async def _make_fetch(lb=report_label):
                 return await fetch_playhorizonx_rows(
@@ -129,7 +136,8 @@ async def playhorizonx_api_task(
                 source="PlayHorizonx定时任务",
                 notify_title=f"PlayHorizonx ({report_label.split()[-1].strip('()')})",
                 data_source=DATA_SOURCE_PLAYHORIZONX,
-                report_type=report["report_type"],
+                report_type=report_type,
+                data_transform=make_playhorizonx_transform(report_type),
                 log_label=report_label,
                 notify_params=notify_params,
             )
