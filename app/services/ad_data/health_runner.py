@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Optional, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -61,34 +61,27 @@ async def _load_product_daily_map(
                 )
             ).all():
                 names[int(i)] = str(n)
+    # 千万行下禁止把日期窗内明细拉回 Python；库内按产品+日聚合
     rows = (
         await db.execute(
             select(
                 AdData.product_id,
                 AdData.date,
-                AdData.request_count,
-                AdData.revenue_after_deduct,
-            ).where(AdData.date >= start, AdData.date <= end)
+                func.count(AdData.id).label("row_count"),
+                func.coalesce(func.sum(AdData.revenue_after_deduct), 0).label("revenue_after"),
+            )
+            .where(AdData.date >= start, AdData.date <= end)
+            .group_by(AdData.product_id, AdData.date)
         )
     ).all()
-    # 聚合成日级：row_count + revenue_after（日环比/缺数用结算收益）
-    from collections import defaultdict
-
-    bucket: dict[tuple[int, date], list] = defaultdict(lambda: [0, 0.0])
-    for pid, d, req, rev in rows:
-        day = _coerce_date(d)
-        key = (int(pid), day)
-        bucket[key][0] += 1
-        bucket[key][1] += float(rev or 0)
-
     flat = [
         {
-            "product_id": pid,
-            "data_date": day,
-            "row_count": cnt,
-            "revenue_after": rev,
+            "product_id": int(pid),
+            "data_date": _coerce_date(d),
+            "row_count": int(row_count or 0),
+            "revenue_after": float(rev or 0),
         }
-        for (pid, day), (cnt, rev) in bucket.items()
+        for pid, d, row_count, rev in rows
     ]
     return names, build_daily_map(flat)
 

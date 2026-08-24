@@ -114,7 +114,7 @@ class AdData(Base):
     """
     __tablename__ = "ad_data"
 
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='广告数据ID')
+    id = Column(Integer, primary_key=True, autoincrement=True, comment='广告数据ID')
     date = Column(Date, nullable=False, comment='数据日期（仅日期）')
 
     # 国家代码（ISO 二字母；无法识别时保留完整原始国名，最长 100 字符）
@@ -157,6 +157,7 @@ class AdData(Base):
         # 日汇总互斥选源子查询：按日期范围 + report_type 取 (product_id, date)
         Index("idx_ad_data_date_report_type", "date", "report_type", "product_id"),
         Index("idx_ad_data_product_date_id", "product_id", "date", "id"),
+        Index("idx_ad_data_date_id", "date", "id"),
         Index("idx_ad_data_date_country", "date", "country_code", "product_id"),
         Index("idx_ad_data_date_ad_unit", "date", "ad_unit", "product_id"),
         Index("idx_ad_data_date_source", "date", "data_source", "report_type", "product_id"),
