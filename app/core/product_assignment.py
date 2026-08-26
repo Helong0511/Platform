@@ -486,6 +486,10 @@ async def sync_product_client_id_with_assignments(
     """
     from app.core.utils import find_or_create_default_client
 
+    # 本仓库 AsyncSession autoflush=False；调用方可能刚改了 end_date 尚未落库。
+    # 若不先 flush，后续 SELECT / create 重叠检查会读到旧区间，归属同步失效或误报重叠。
+    await db.flush()
+
     if not skip_product_lock:
         product = await lock_product_for_assignment(db, product_id)
     else:

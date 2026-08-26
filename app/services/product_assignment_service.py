@@ -369,14 +369,14 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
         # 更新分配记录
         assignment.start_date = new_start_date
         assignment.end_date = new_end_date
-        # 结束最后一条「当前有效」后须同步 products.client_id，否则空窗回退仍漏给原渠道
+        # 会话 autoflush=False：必须先 flush，再同步归属，否则 sync 内 SELECT/重叠检查仍读到旧 end_date
+        await self.db.flush()
         await sync_product_client_id_with_assignments(
             self.db,
             assignment.product_id,
             acting_user_id=current_user.id,
             skip_product_lock=True,
         )
-        await self.db.flush()
         invalidate_assignment_table_cache()
 
         # 验证更新后的分配记录连贯性
@@ -548,16 +548,14 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
             assignment.start_date = new_start_date
             assignment.end_date = new_end_date
 
-        # 结束最后一条「当前有效」后须同步 products.client_id，否则空窗回退仍漏给原渠道
+        # 会话 autoflush=False：必须先 flush，再同步归属，否则 sync 内 SELECT/重叠检查仍读到旧 end_date
+        await self.db.flush()
         await sync_product_client_id_with_assignments(
             self.db,
             product_id,
             acting_user_id=current_user.id,
             skip_product_lock=True,
         )
-
-        # 刷新到数据库（但不提交）
-        await self.db.flush()
         invalidate_assignment_table_cache()
 
         # 验证所有更新后的分配记录连贯性
