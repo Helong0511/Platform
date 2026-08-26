@@ -176,6 +176,9 @@ export const validateAuthData = () => {
 };
 
 // 认证Store
+/** fetchUserInfo 单飞锁（模块级，避免并发 /users/me） */
+let fetchUserInfoInflight = null;
+
 export const useAuthStore = defineStore('auth', {
   state: () => {
     // 验证认证数据完整性
@@ -381,54 +384,64 @@ export const useAuthStore = defineStore('auth', {
         return;
       }
 
-      this.loading = true;
-      try {
-        const userData = await request({
-          url: '/api/v1/users/me',
-          method: 'get'
-        }, { returnDataOnly: true, silent });
-
-        this.userInfo = userData || {};
-        sessionStorage.setItem('userInfo', JSON.stringify(this.userInfo));
-        this.isAuthenticated = true;
-        this.userInfoFetchedAt = Date.now();
-      } catch (err) {
-        const httpStatus = err.response?.status;
-        const businessCode = err.code ?? err.response?.data?.code;
-        const isAuthFailure =
-          httpStatus === 401 ||
-          businessCode === 401 ||
-          businessCode === 2002 ||
-          businessCode === 2003;
-
-        if (isAuthFailure) {
-          clearAuthData();
-          this.userInfo = {};
-          this.isAuthenticated = false;
-          this.userInfoFetchedAt = 0;
-
-          if (!silent && window.location.pathname !== '/login') {
-            ElMessage.error('会话已过期，请重新登录');
-            router.push('/login').catch(() => { });
-          }
-          return;
-        }
-
-        // 权限敏感路由：非 401 也不得继续信任本地篡改的 role
-        if (failClosed) {
-          logger.warn('获取用户信息失败（failClosed）:', err);
-          throw err;
-        }
-
-        // 非认证类错误：保留登录态，仅记录（避免 API 文档等页误触发整站登出）
-        logger.warn('获取用户信息失败（非认证错误）:', err);
-        if (!silent && window.location.pathname !== '/login') {
-          const detail = err.message || '获取用户信息失败';
-          ElMessage.warning(detail);
-        }
-      } finally {
-        this.loading = false;
+      // 单飞：刷新/并发守卫共用同一 /users/me，避免连环失败与重复弹窗
+      if (fetchUserInfoInflight && !force) {
+        return fetchUserInfoInflight;
       }
+
+      this.loading = true;
+      fetchUserInfoInflight = (async () => {
+        try {
+          const userData = await request({
+            url: '/api/v1/users/me',
+            method: 'get'
+          }, { returnDataOnly: true, silent });
+
+          this.userInfo = userData || {};
+          sessionStorage.setItem('userInfo', JSON.stringify(this.userInfo));
+          this.isAuthenticated = true;
+          this.userInfoFetchedAt = Date.now();
+        } catch (err) {
+          const httpStatus = err.response?.status;
+          const businessCode = err.code ?? err.response?.data?.code;
+          const isAuthFailure =
+            httpStatus === 401 ||
+            businessCode === 401 ||
+            businessCode === 2002 ||
+            businessCode === 2003;
+
+          if (isAuthFailure) {
+            clearAuthData();
+            this.userInfo = {};
+            this.isAuthenticated = false;
+            this.userInfoFetchedAt = 0;
+
+            if (!silent && window.location.pathname !== '/login') {
+              ElMessage.error('会话已过期，请重新登录');
+              router.push('/login').catch(() => { });
+            }
+            return;
+          }
+
+          // 权限敏感路由：非 401 也不得继续信任本地篡改的 role
+          if (failClosed) {
+            logger.warn('获取用户信息失败（failClosed）:', err);
+            throw err;
+          }
+
+          // 非认证类错误：保留登录态，仅记录（避免 API 文档等页误触发整站登出）
+          logger.warn('获取用户信息失败（非认证错误）:', err);
+          if (!silent && window.location.pathname !== '/login') {
+            const detail = err.message || '获取用户信息失败';
+            ElMessage.warning(detail);
+          }
+        } finally {
+          this.loading = false;
+          fetchUserInfoInflight = null;
+        }
+      })();
+
+      return fetchUserInfoInflight;
     }
   }
 });

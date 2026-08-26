@@ -457,6 +457,25 @@ function routeNeedsRoleCheck(to) {
   );
 }
 
+/** 刷新后 sessionStorage 中是否具备可用角色缓存（瞬时网络失败时可短暂信任） */
+function hasUsableCachedUserInfo(authStore) {
+  const role = authStore.userInfo?.role;
+  return !!(
+    authStore.isAuthenticated
+    && authStore.userInfo
+    && typeof role === 'string'
+    && role.length > 0
+  );
+}
+
+/** /users/me 瞬时失败（无响应、超时、5xx、429），非鉴权拒绝 */
+function isTransientUserInfoError(err) {
+  if (!err) return true;
+  if (!err.response) return true;
+  const status = err.response.status;
+  return status >= 500 || status === 429;
+}
+
 /**
  * 单次导航内复用 fetchUserInfo 30s 缓存，避免菜单切换重复阻塞 /users/me。
  * @returns {Promise<boolean>} true=已同步或可信任缓存；false=无法验证
@@ -465,7 +484,12 @@ async function ensureUserInfo(authStore, { failClosed = false } = {}) {
   try {
     await authStore.fetchUserInfo({ silent: true, force: false, failClosed });
     return true;
-  } catch {
+  } catch (err) {
+    // 浏览器刷新常见：后端短暂不可达。有本地角色缓存时放行，避免守卫重定向死循环刷屏。
+    if (failClosed && isTransientUserInfoError(err) && hasUsableCachedUserInfo(authStore)) {
+      logger.warn('获取用户信息瞬时失败，暂用本地缓存放行:', err?.message || err);
+      return true;
+    }
     return false;
   }
 }
@@ -476,19 +500,14 @@ function roleGuardFallback(from, authStore) {
   return getDefaultRoute(authStore.userInfo) || '/app/dashboard';
 }
 
+/** 权限同步失败提示：整页生命周期只弹一次，杜绝刷新振荡连环 toast */
+let roleSyncWarnShown = false;
+
 /**
- * 权限同步失败时的安全回退：取消导航或去仅需登录的仪表盘，避免受保护路由间振荡。
+ * 权限同步失败时一律取消导航，禁止 next 到其它受保护页（否则刷新时会无限重入守卫）。
  */
-function roleSyncFailureFallback(from, to) {
-  if (
-    from.path
-    && from.path.startsWith('/app')
-    && from.path !== '/login'
-    && from.path !== to.path
-  ) {
-    return false; // 取消本次跳转，留在当前页
-  }
-  return '/app/dashboard';
+function roleSyncFailureFallback() {
+  return false;
 }
 
 /**
@@ -568,8 +587,17 @@ router.beforeEach(async (to, from, next) => {
       });
       if (!synced) {
         if (routeNeedsRoleCheck(to)) {
-          ElMessage.warning('无法验证访问权限，请稍后重试');
-          return next(roleSyncFailureFallback(from, to));
+          if (!roleSyncWarnShown) {
+            roleSyncWarnShown = true;
+            ElMessage.warning({
+              message: import.meta.env.DEV
+                ? '无法验证访问权限：请确认后端已启动 (8960) 后刷新页面'
+                : '无法验证访问权限，请稍后重试',
+              grouping: true,
+              duration: 4000,
+            });
+          }
+          return next(roleSyncFailureFallback());
         }
         clearAuthData();
         authStore.isAuthenticated = false;
