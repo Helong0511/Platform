@@ -26,6 +26,7 @@ from app.core.product_assignment import (
     lock_product_for_assignment,
     validate_product_assignments,
     cleanup_invalid_assignments,
+    sync_product_client_id_with_assignments,
 )
 from app.core.query_utils import invalidate_assignment_table_cache
 from app.models.models import ProductAssignment, Product, Client, User, UserRole
@@ -368,6 +369,13 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
         # 更新分配记录
         assignment.start_date = new_start_date
         assignment.end_date = new_end_date
+        # 结束最后一条「当前有效」后须同步 products.client_id，否则空窗回退仍漏给原渠道
+        await sync_product_client_id_with_assignments(
+            self.db,
+            assignment.product_id,
+            acting_user_id=current_user.id,
+            skip_product_lock=True,
+        )
         await self.db.flush()
         invalidate_assignment_table_cache()
 
@@ -539,6 +547,14 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
             # 更新分配记录
             assignment.start_date = new_start_date
             assignment.end_date = new_end_date
+
+        # 结束最后一条「当前有效」后须同步 products.client_id，否则空窗回退仍漏给原渠道
+        await sync_product_client_id_with_assignments(
+            self.db,
+            product_id,
+            acting_user_id=current_user.id,
+            skip_product_lock=True,
+        )
 
         # 刷新到数据库（但不提交）
         await self.db.flush()

@@ -436,6 +436,109 @@ async def get_client_id_for_date(
     return None
 
 
+def resolve_product_current_owner(
+    assignments: Sequence[tuple[int, date, date | None]],
+    *,
+    holding_client_id: int,
+) -> tuple[int, date | None]:
+    """
+    根据分配历史推断产品当前归属客户，以及是否需要接续「临时挂靠」区间。
+
+    Args:
+        assignments: (client_id, start_date, end_date) 列表；end_date 为 None 表示当前有效
+        holding_client_id: 「临时挂靠」客户 ID
+
+    Returns:
+        (product_client_id, holding_start_date_or_none)
+        - 有且仅有一条当前有效分配：归属该客户，无需新建挂靠区间
+        - 无当前有效分配：归属临时挂靠；若有已结束记录，holding_start = 最晚 end_date + 1
+    """
+    active = [a for a in assignments if a[2] is None]
+    if len(active) > 1:
+        raise ValueError(
+            f"产品有 {len(active)} 条当前有效分配，无法推断唯一归属客户"
+        )
+    if len(active) == 1:
+        return active[0][0], None
+
+    ended_dates = [a[2] for a in assignments if a[2] is not None]
+    if ended_dates:
+        return holding_client_id, max(ended_dates) + timedelta(days=1)
+    return holding_client_id, date.today()
+
+
+async def sync_product_client_id_with_assignments(
+    db: AsyncSession,
+    product_id: int,
+    *,
+    acting_user_id: int,
+    skip_product_lock: bool = False,
+) -> dict[str, Any]:
+    """
+    将 products.client_id 与分配历史对齐，避免「分配已结束但仍靠空窗回退漏给原渠道」。
+
+    广告数据查询在分配空窗时会 COALESCE 到 Product.client_id；
+    若只改 end_date、不改产品当前归属，原渠道会继续看到结束日之后的数据。
+
+    规则：
+    1. 存在当前有效分配（end_date IS NULL）→ Product.client_id = 该客户
+    2. 否则 → 挂到「临时挂靠」，并补一条从最晚结束日次日开始的当前有效分配
+    """
+    from app.core.utils import find_or_create_default_client
+
+    if not skip_product_lock:
+        product = await lock_product_for_assignment(db, product_id)
+    else:
+        result = await db.execute(select(Product).where(Product.id == product_id))
+        product = result.scalar_one_or_none()
+        if product is None:
+            raise ValueError(f"产品ID {product_id} 不存在")
+
+    asg_result = await db.execute(
+        select(ProductAssignment).where(ProductAssignment.product_id == product_id)
+    )
+    assignments = asg_result.scalars().all()
+    tuples = [(a.client_id, a.start_date, a.end_date) for a in assignments]
+
+    holding = await find_or_create_default_client(db, acting_user_id)
+    target_client_id, holding_start = resolve_product_current_owner(
+        tuples, holding_client_id=holding.id
+    )
+
+    changed_client = product.client_id != target_client_id
+    created_holding = False
+    if changed_client:
+        old_client_id = product.client_id
+        product.client_id = target_client_id
+        logger.info(
+            f"产品 {product_id} 当前归属已同步：client_id {old_client_id} -> {target_client_id}"
+        )
+
+    if holding_start is not None:
+        # 无当前有效分配：补临时挂靠区间，堵住空窗回退到错误渠道
+        await create_product_assignment(
+            db=db,
+            product_id=product_id,
+            client_id=holding.id,
+            start_date=holding_start,
+            end_date=None,
+            skip_product_lock=True,
+        )
+        created_holding = True
+        if product.client_id != holding.id:
+            product.client_id = holding.id
+            changed_client = True
+
+    await db.flush()
+    return {
+        "product_id": product_id,
+        "client_id": product.client_id,
+        "changed_client": changed_client,
+        "created_holding_assignment": created_holding,
+        "holding_start_date": holding_start.isoformat() if holding_start else None,
+    }
+
+
 async def validate_product_assignments(
     db: AsyncSession,
     product_id: int
@@ -577,6 +680,11 @@ async def validate_product_assignments(
         errors.append(
             f"逻辑错误：产品 {product_id} 有 {len(active_assignments)} 个当前有效的分配记录 "
             f"(记录ID: {active_ids})，应该只有一个"
+        )
+    elif len(active_assignments) == 0:
+        warnings.append(
+            f"产品 {product_id} 没有当前有效的分配记录。"
+            f"广告数据空窗会回退到 products.client_id；若未同步归属，原渠道可能仍能看到结束日之后的数据。"
         )
     
     # 检查日期顺序

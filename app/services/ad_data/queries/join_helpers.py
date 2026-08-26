@@ -5,6 +5,8 @@
 - 统一 Product / Client / ProductAssignment / CountryInfo 关联路径
 - 供 list、detail、filter、batch_delete 等 query 模块复用
 - 分配历史模式：按日期最多匹配一条分配（min id），空窗回退 Product.client_id
+- 因此改分配 end_date 后必须同步 products.client_id（见 sync_product_client_id_with_assignments），
+  否则原渠道会在结束日之后仍因空窗回退看到数据
 """
 from typing import Any, Dict, List, Optional
 
@@ -60,7 +62,12 @@ def best_product_assignment_id_subquery(
 
 
 def resolved_client_id_expr():
-    """分配命中用分配客户，空窗回退产品当前归属。"""
+    """
+    分配命中用分配客户，空窗回退产品当前归属。
+
+    注意：若分配已全部结束而 Product.client_id 仍指向原渠道，结束日之后
+    会继续漏给该渠道。写入端须调用 sync_product_client_id_with_assignments。
+    """
     return func.coalesce(ProductAssignment.client_id, Product.client_id)
 
 

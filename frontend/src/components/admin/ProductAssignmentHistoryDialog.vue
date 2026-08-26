@@ -116,7 +116,10 @@
                     :z-index="3002"
                     style="width: 100%"
                   />
-                  <div class="form-tip">留空表示当前有效</div>
+                  <div class="form-tip">
+                    留空表示当前有效。若关闭最后一条当前有效分配且未转给其他渠道，
+                    保存后产品会自动挂到「临时挂靠」，避免结束日之后数据仍对原渠道可见。
+                  </div>
                 </el-form-item>
                 <el-form-item>
                   <el-button type="success" @click="handleTempSave(assignment)">
