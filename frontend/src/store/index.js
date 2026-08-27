@@ -384,64 +384,68 @@ export const useAuthStore = defineStore('auth', {
         return;
       }
 
-      // 单飞：刷新/并发守卫共用同一 /users/me，避免连环失败与重复弹窗
-      if (fetchUserInfoInflight && !force) {
-        return fetchUserInfoInflight;
+      // 单飞只共享原始 /users/me 请求：成功返回 data，失败必须 reject。
+      // failClosed / silent 等策略按「本次调用方」各自处理，避免首个 failClosed=false
+      // 吞错后，后续 failClosed=true 误判为已同步成功。
+      let sharedRequest = fetchUserInfoInflight;
+      if (!sharedRequest || force) {
+        sharedRequest = request({
+          url: '/api/v1/users/me',
+          method: 'get'
+        }, { returnDataOnly: true, silent: true });
+        fetchUserInfoInflight = sharedRequest;
+        // finally 衍生 promise 在 reject 时也要消化，避免 unhandledRejection
+        sharedRequest.finally(() => {
+          if (fetchUserInfoInflight === sharedRequest) {
+            fetchUserInfoInflight = null;
+          }
+        }).catch(() => {});
       }
 
       this.loading = true;
-      fetchUserInfoInflight = (async () => {
-        try {
-          const userData = await request({
-            url: '/api/v1/users/me',
-            method: 'get'
-          }, { returnDataOnly: true, silent });
+      try {
+        const userData = await sharedRequest;
+        this.userInfo = userData || {};
+        sessionStorage.setItem('userInfo', JSON.stringify(this.userInfo));
+        this.isAuthenticated = true;
+        this.userInfoFetchedAt = Date.now();
+      } catch (err) {
+        const httpStatus = err.response?.status;
+        const businessCode = err.code ?? err.response?.data?.code;
+        const isAuthFailure =
+          httpStatus === 401 ||
+          businessCode === 401 ||
+          businessCode === 2002 ||
+          businessCode === 2003;
 
-          this.userInfo = userData || {};
-          sessionStorage.setItem('userInfo', JSON.stringify(this.userInfo));
-          this.isAuthenticated = true;
-          this.userInfoFetchedAt = Date.now();
-        } catch (err) {
-          const httpStatus = err.response?.status;
-          const businessCode = err.code ?? err.response?.data?.code;
-          const isAuthFailure =
-            httpStatus === 401 ||
-            businessCode === 401 ||
-            businessCode === 2002 ||
-            businessCode === 2003;
+        if (isAuthFailure) {
+          clearAuthData();
+          this.userInfo = {};
+          this.isAuthenticated = false;
+          this.userInfoFetchedAt = 0;
 
-          if (isAuthFailure) {
-            clearAuthData();
-            this.userInfo = {};
-            this.isAuthenticated = false;
-            this.userInfoFetchedAt = 0;
-
-            if (!silent && window.location.pathname !== '/login') {
-              ElMessage.error('会话已过期，请重新登录');
-              router.push('/login').catch(() => { });
-            }
-            return;
-          }
-
-          // 权限敏感路由：非 401 也不得继续信任本地篡改的 role
-          if (failClosed) {
-            logger.warn('获取用户信息失败（failClosed）:', err);
-            throw err;
-          }
-
-          // 非认证类错误：保留登录态，仅记录（避免 API 文档等页误触发整站登出）
-          logger.warn('获取用户信息失败（非认证错误）:', err);
           if (!silent && window.location.pathname !== '/login') {
-            const detail = err.message || '获取用户信息失败';
-            ElMessage.warning(detail);
+            ElMessage.error('会话已过期，请重新登录');
+            router.push('/login').catch(() => { });
           }
-        } finally {
-          this.loading = false;
-          fetchUserInfoInflight = null;
+          return;
         }
-      })();
 
-      return fetchUserInfoInflight;
+        // 权限敏感路由：非 401 也不得继续信任本地篡改的 role
+        if (failClosed) {
+          logger.warn('获取用户信息失败（failClosed）:', err);
+          throw err;
+        }
+
+        // 非认证类错误：保留登录态，仅记录（避免 API 文档等页误触发整站登出）
+        logger.warn('获取用户信息失败（非认证错误）:', err);
+        if (!silent && window.location.pathname !== '/login') {
+          const detail = err.message || '获取用户信息失败';
+          ElMessage.warning(detail);
+        }
+      } finally {
+        this.loading = false;
+      }
     }
   }
 });
