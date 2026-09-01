@@ -27,7 +27,10 @@ from app.core.security import is_admin
 from app.models.models import AdData, Client, Product, User
 from app.services.ad_data.queries.dimension_filter import kpi_mutual_source_filter
 from app.services.ad_data.queries.join_helpers import join_product_and_client
-from app.services.ad_data.query_cache import build_ad_data_query_cache_key
+from app.services.ad_data.query_cache import (
+    ad_data_summary_cache_ttl,
+    build_ad_data_query_cache_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +270,7 @@ class AdDataSummaryQuery:
         )
 
         if not skip_cache:
-            await set_cached(cache_key, response_data, ttl=120, key_prefix="ad_data")
+            await set_cached(cache_key, response_data, ttl=ad_data_summary_cache_ttl(), key_prefix="ad_data")
         return response_data
 
     async def fetch_by_product(
@@ -343,12 +346,13 @@ class AdDataSummaryQuery:
         if product_id:
             query = query.where(AdData.product_id == product_id)
 
+        query = apply_date_range_filter(
+            query, AdData.date, start_date, end_date, default_to_current_month=True
+        )
         query = query.where(
             kpi_mutual_source_filter(start_date=start_date, end_date=end_date)
         )
-        return apply_date_range_filter(
-            query, AdData.date, start_date, end_date, default_to_current_month=True
-        )
+        return query
 
     def _build_admin_query(
         self,
@@ -370,12 +374,13 @@ class AdDataSummaryQuery:
         if product_id:
             admin_query = admin_query.where(AdData.product_id == product_id)
 
+        admin_query = apply_date_range_filter(
+            admin_query, AdData.date, start_date, end_date, default_to_current_month=True
+        )
         admin_query = admin_query.where(
             kpi_mutual_source_filter(start_date=start_date, end_date=end_date)
         )
-        return apply_date_range_filter(
-            admin_query, AdData.date, start_date, end_date, default_to_current_month=True
-        )
+        return admin_query
 
     def _aggregate_select_columns(self):
         """公共 SUM 聚合列（含扣前收益，供产品分组复用）。"""
@@ -429,11 +434,10 @@ class AdDataSummaryQuery:
             query = query.where(Client.id == client_id)
 
         query = query.where(Product.is_active == True)
-        query = query.where(
-            kpi_mutual_source_filter(start_date=start_date, end_date=end_date)
-        )
-
         query = apply_date_range_filter(
             query, AdData.date, start_date, end_date, default_to_current_month=True
+        )
+        query = query.where(
+            kpi_mutual_source_filter(start_date=start_date, end_date=end_date)
         )
         return query.group_by(Product.id, Product.name)

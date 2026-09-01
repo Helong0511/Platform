@@ -43,7 +43,10 @@ from app.services.ad_data.queries.join_helpers import (
     join_product_and_client,
     merge_product_options_with_ownership,
 )
-from app.services.ad_data.query_cache import build_ad_data_query_cache_key
+from app.services.ad_data.query_cache import (
+    ad_data_filter_options_cache_ttl,
+    build_ad_data_query_cache_key,
+)
 logger = logging.getLogger(__name__)
 
 
@@ -133,7 +136,7 @@ class FilterOptionsQuery:
         await set_cached(
             cache_key,
             {"data": clients_list, "count": len(clients_list)},
-            ttl=300,
+            ttl=ad_data_filter_options_cache_ttl(),
             key_prefix="ad_data",
         )
         return clients_list
@@ -209,7 +212,7 @@ class FilterOptionsQuery:
         await set_cached(
             cache_key,
             {"data": countries_list, "count": len(countries_list)},
-            ttl=300,
+            ttl=ad_data_filter_options_cache_ttl(),
             key_prefix="ad_data",
         )
         return countries_list
@@ -273,7 +276,7 @@ class FilterOptionsQuery:
         await set_cached(
             cache_key,
             {"data": ad_units_list, "count": len(ad_units_list)},
-            ttl=300,
+            ttl=ad_data_filter_options_cache_ttl(),
             key_prefix="ad_data",
         )
         return ad_units_list
@@ -353,7 +356,7 @@ class FilterOptionsQuery:
         await set_cached(
             cache_key,
             {"data": products_list, "count": len(products_list)},
-            ttl=300,
+            ttl=ad_data_filter_options_cache_ttl(),
             key_prefix="ad_data",
         )
         return products_list
@@ -390,7 +393,7 @@ class FilterOptionsQuery:
                 if row
                 else {"min_date": None, "max_date": None}
             )
-            await set_cached(cache_key, result, ttl=300, key_prefix="ad_data")
+            await set_cached(cache_key, result, ttl=ad_data_filter_options_cache_ttl(), key_prefix="ad_data")
             return result
 
         use_assignment_table = await check_use_assignment_table(self.db)
@@ -422,8 +425,8 @@ class FilterOptionsQuery:
                 if hasattr(row.max_date, "isoformat")
                 else str(row.max_date),
             }
-            await set_cached(cache_key, result, ttl=300, key_prefix="ad_data")
+            await set_cached(cache_key, result, ttl=ad_data_filter_options_cache_ttl(), key_prefix="ad_data")
             return result
         result = {"min_date": None, "max_date": None}
-        await set_cached(cache_key, result, ttl=300, key_prefix="ad_data")
+        await set_cached(cache_key, result, ttl=ad_data_filter_options_cache_ttl(), key_prefix="ad_data")
         return result

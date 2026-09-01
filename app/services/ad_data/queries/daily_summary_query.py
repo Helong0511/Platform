@@ -5,7 +5,7 @@
 - 按统计维度分组聚合：按国家→日期+产品（可选 split_by_country 按国家分行）；
   按广告单元→日期+产品+广告单元；按广告单元+国家→日期+产品+广告单元+国家
 - 支持权限过滤、分页、SQL/内存混合排序
-- Redis 短缓存（300s），与 KPI summary 共用 ad_data 失效前缀
+- Redis 缓存（默认 600s，可 env 配置），与 KPI summary 共用 ad_data 失效前缀
 - 列表查询用 COUNT(*) OVER() 带回分组总数，避免再跑一遍 GROUP BY 计数
 - 全量合计独立缓存，并与列表查询并行执行，降低冷路径墙钟时间
 
@@ -44,7 +44,10 @@ from app.services.ad_data.queries.dimension_filter import (
     normalize_dimension,
 )
 from app.services.ad_data.queries.join_helpers import join_country_info_for_ad_data, join_product_and_client
-from app.services.ad_data.query_cache import build_ad_data_query_cache_key
+from app.services.ad_data.query_cache import (
+    ad_data_daily_summary_cache_ttl,
+    build_ad_data_query_cache_key,
+)
 from app.services.ad_data.queries.summary_query import (
     _empty_aggregate_raw,
     _row_to_aggregate_raw,
@@ -52,10 +55,6 @@ from app.services.ad_data.queries.summary_query import (
 )
 
 logger = logging.getLogger(__name__)
-
-# 与 KPI summary 同量级；入库/改删会整前缀失效
-DAILY_SUMMARY_CACHE_TTL = 300
-
 
 def _effective_summary_date_range(
     start_date: Optional[date],
@@ -217,7 +216,7 @@ class DailySummaryQuery:
                 await set_cached(
                     grand_cache_key,
                     {"grand_total": gt},
-                    ttl=DAILY_SUMMARY_CACHE_TTL,
+                    ttl=ad_data_daily_summary_cache_ttl(),
                     key_prefix="ad_data",
                 )
             return gt
@@ -272,6 +271,13 @@ class DailySummaryQuery:
 
         query = query.where(Product.is_active == True)
         query = query.join(User, Client.user_id == User.id)
+        query = apply_date_range_filter(
+            query,
+            AdData.date,
+            start_date,
+            end_date,
+            default_to_current_month=True,
+        )
         query = query.where(_daily_summary_dimension_filter(dim, dim_start, dim_end))
         query = await apply_ad_data_scope_filters(
             self.db,
@@ -282,14 +288,6 @@ class DailySummaryQuery:
             country_code=country_code,
             ad_unit=ad_unit,
             dimension=dim,
-        )
-
-        query = apply_date_range_filter(
-            query,
-            AdData.date,
-            start_date,
-            end_date,
-            default_to_current_month=True,
         )
 
         query = query.group_by(*group_by_cols)
@@ -503,7 +501,7 @@ class DailySummaryQuery:
                     "total": total,
                     "grand_total": grand_total,
                 },
-                ttl=DAILY_SUMMARY_CACHE_TTL,
+                ttl=ad_data_daily_summary_cache_ttl(),
                 key_prefix="ad_data",
             )
 
@@ -538,6 +536,13 @@ class DailySummaryQuery:
         query = select(*_daily_summary_aggregate_columns())
         query = join_product_and_client(query, use_assignment_table)
         query = query.where(Product.is_active == True)
+        query = apply_date_range_filter(
+            query,
+            AdData.date,
+            start_date,
+            end_date,
+            default_to_current_month=True,
+        )
         query = query.where(_daily_summary_dimension_filter(dim, dim_start, dim_end))
         query = await apply_ad_data_scope_filters(
             self.db,
@@ -548,14 +553,6 @@ class DailySummaryQuery:
             country_code=country_code,
             ad_unit=ad_unit,
             dimension=dim,
-        )
-
-        query = apply_date_range_filter(
-            query,
-            AdData.date,
-            start_date,
-            end_date,
-            default_to_current_month=True,
         )
 
         row = (await self.db.execute(query)).first()
@@ -596,6 +593,13 @@ class DailySummaryQuery:
             subquery = select(*sub_cols)
             subquery = join_product_and_client(subquery, use_assignment_table)
             subquery = subquery.where(Product.is_active == True)
+            subquery = apply_date_range_filter(
+                subquery,
+                AdData.date,
+                start_date,
+                end_date,
+                default_to_current_month=True,
+            )
             subquery = subquery.where(
                 _daily_summary_dimension_filter(dimension, dim_start, dim_end)
             )
@@ -608,14 +612,6 @@ class DailySummaryQuery:
                 country_code=country_code,
                 ad_unit=ad_unit,
                 dimension=dimension,
-            )
-
-            subquery = apply_date_range_filter(
-                subquery,
-                AdData.date,
-                start_date,
-                end_date,
-                default_to_current_month=True,
             )
 
             subquery = subquery.group_by(*group_cols)

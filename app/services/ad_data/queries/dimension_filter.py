@@ -20,7 +20,7 @@ ZZ（全部区域）规则：
 from datetime import date
 from typing import Any, Optional, Set, Tuple
 
-from sqlalchemy import and_, exists, func, or_, select, tuple_
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import aliased
 
 from app.core.ad_data_metadata import (
@@ -513,6 +513,23 @@ def _report_type_product_date_pairs_by_source_subquery(
     return query.distinct().subquery(f"rt_{col_prefix}_pd")
 
 
+def _outer_row_not_in_product_date_subquery(ad_data_model: Any, sq: Any) -> Any:
+    """当前行 (product_id, date) 不在子查询集合中；MySQL 下 NOT EXISTS 通常优于 tuple NOT IN。"""
+    pid_col = list(sq.c)[0]
+    date_col = list(sq.c)[1]
+    return ~exists(
+        select(1)
+        .select_from(sq)
+        .where(
+            and_(
+                pid_col == ad_data_model.product_id,
+                date_col == ad_data_model.date,
+            )
+        )
+        .correlate(ad_data_model)
+    )
+
+
 def _outer_row_not_in_report_type_product_dates(
     ad_data_model: Any,
     report_type: str,
@@ -522,11 +539,7 @@ def _outer_row_not_in_report_type_product_dates(
     sq = _report_type_product_date_pairs_subquery(
         ad_data_model, report_type, start_date, end_date
     )
-    pid_col = list(sq.c)[0]
-    date_col = list(sq.c)[1]
-    return tuple_(ad_data_model.product_id, ad_data_model.date).notin_(
-        select(pid_col, date_col)
-    )
+    return _outer_row_not_in_product_date_subquery(ad_data_model, sq)
 
 
 def _outer_row_not_in_report_type_for_source(
@@ -540,11 +553,7 @@ def _outer_row_not_in_report_type_for_source(
     sq = _report_type_product_date_pairs_by_source_subquery(
         ad_data_model, report_type, data_source, start_date, end_date
     )
-    pid_col = list(sq.c)[0]
-    date_col = list(sq.c)[1]
-    return tuple_(ad_data_model.product_id, ad_data_model.date).notin_(
-        select(pid_col, date_col)
-    )
+    return _outer_row_not_in_product_date_subquery(ad_data_model, sq)
 
 
 def _country_only_product_date_pairs_subquery(
@@ -635,9 +644,7 @@ def _outer_row_not_in_country_only_product_dates(
 ) -> Any:
     """当前行 product+date 不在纯国家集合中（替代逐行 correlated EXISTS）。"""
     sq = _country_only_product_date_pairs_subquery(ad_data_model, start_date, end_date)
-    return tuple_(ad_data_model.product_id, ad_data_model.date).notin_(
-        select(sq.c.co_product_id, sq.c.co_date)
-    )
+    return _outer_row_not_in_product_date_subquery(ad_data_model, sq)
 
 
 def _outer_row_not_in_ad_unit_only_product_dates(
@@ -646,9 +653,7 @@ def _outer_row_not_in_ad_unit_only_product_dates(
     end_date: Optional[date] = None,
 ) -> Any:
     sq = _ad_unit_only_product_date_pairs_subquery(ad_data_model, start_date, end_date)
-    return tuple_(ad_data_model.product_id, ad_data_model.date).notin_(
-        select(sq.c.ao_product_id, sq.c.ao_date)
-    )
+    return _outer_row_not_in_product_date_subquery(ad_data_model, sq)
 
 
 def _outer_row_not_in_plain_summary_product_dates(
@@ -658,9 +663,7 @@ def _outer_row_not_in_plain_summary_product_dates(
 ) -> Any:
     """当前行 product+date 不在日报/plain 集合中。"""
     sq = _plain_summary_product_date_pairs_subquery(ad_data_model, start_date, end_date)
-    return tuple_(ad_data_model.product_id, ad_data_model.date).notin_(
-        select(sq.c.pl_product_id, sq.c.pl_date)
-    )
+    return _outer_row_not_in_product_date_subquery(ad_data_model, sq)
 
 
 def _unit_fallback_for_country_dimension(

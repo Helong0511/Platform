@@ -16,6 +16,27 @@ logger = logging.getLogger(__name__)
 AD_DATA_QUERY_CACHE_NS = "ad_data"
 
 
+def ad_data_daily_summary_cache_ttl() -> int:
+    """每日汇总列表 + 全量合计缓存 TTL（秒）。"""
+    from app.core.config import settings
+
+    return int(getattr(settings, "AD_DATA_DAILY_SUMMARY_CACHE_TTL", 600))
+
+
+def ad_data_filter_options_cache_ttl() -> int:
+    """筛选项（products-with-data 等）缓存 TTL（秒）。"""
+    from app.core.config import settings
+
+    return int(getattr(settings, "AD_DATA_FILTER_OPTIONS_CACHE_TTL", 600))
+
+
+def ad_data_summary_cache_ttl() -> int:
+    """KPI summary / dashboard 汇总缓存 TTL（秒）。"""
+    from app.core.config import settings
+
+    return int(getattr(settings, "AD_DATA_SUMMARY_CACHE_TTL", 300))
+
+
 def build_ad_data_query_cache_key(kind: str, *parts) -> str:
     """生成 ``ad_data:{kind}:{md5}`` 形式的查询缓存键（不含 query_cache: 前缀）。"""
     digest = generate_cache_key(kind, *parts)

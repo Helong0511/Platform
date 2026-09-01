@@ -539,6 +539,16 @@ class Settings(BaseSettings):
     CACHE_DOUBLE_DELETE_DELAY_SECONDS: float = float(
         os.getenv("CACHE_DOUBLE_DELETE_DELAY_SECONDS", "1.0")
     )
+    # 广告数据查询 Redis 缓存 TTL（秒）；入库/改删会整前缀 ad_data: 失效
+    AD_DATA_DAILY_SUMMARY_CACHE_TTL: int = int(
+        os.getenv("AD_DATA_DAILY_SUMMARY_CACHE_TTL", "600")
+    )
+    AD_DATA_FILTER_OPTIONS_CACHE_TTL: int = int(
+        os.getenv("AD_DATA_FILTER_OPTIONS_CACHE_TTL", "600")
+    )
+    AD_DATA_SUMMARY_CACHE_TTL: int = int(
+        os.getenv("AD_DATA_SUMMARY_CACHE_TTL", "300")
+    )
 
     # ====== CSRF配置 ======
     # 是否启用CSRF防护（默认启用；生产环境在 main.py 强制开启）
