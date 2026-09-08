@@ -267,17 +267,23 @@ async def lifespan(app: FastAPI):
     logger.info("应用启动完成")
 
     # 启动通知放到后台，避免 Telegram 不可达时在 yield 前阻塞、延迟 API 监听
-    async def _send_startup_notify_background() -> None:
-        try:
-            sent = await asyncio.to_thread(notify_service_started)
-            if sent:
-                logger.info(f"[Worker PID:{worker_pid}] 已发送服务启动 Telegram 通知")
-            else:
-                logger.debug(f"[Worker PID:{worker_pid}] 未发送服务启动通知（非通知 worker 或已禁用）")
-        except Exception as e:
-            logger.warning(f"发送服务启动通知失败: {e}", exc_info=True)
+    if getattr(settings, "TELEGRAM_ENABLE", True):
 
-    asyncio.create_task(_send_startup_notify_background())
+        async def _send_startup_notify_background() -> None:
+            try:
+                sent = await asyncio.to_thread(notify_service_started)
+                if sent:
+                    logger.info(f"[Worker PID:{worker_pid}] 已发送服务启动 Telegram 通知")
+                else:
+                    logger.debug(
+                        f"[Worker PID:{worker_pid}] 未发送服务启动通知（非通知 worker 或已禁用）"
+                    )
+            except Exception as e:
+                logger.warning(f"发送服务启动通知失败: {e}", exc_info=True)
+
+        asyncio.create_task(_send_startup_notify_background())
+    else:
+        logger.info(f"[Worker PID:{worker_pid}] TELEGRAM_ENABLE=false，跳过服务启动通知")
 
     # ====== 应用运行期间 ======
     yield

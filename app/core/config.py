@@ -1053,6 +1053,14 @@ class Settings(BaseSettings):
         if resolved:
             return resolved
 
+        telegram_on = os.getenv("TELEGRAM_ENABLE", "true").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+        if not telegram_on:
+            return None
+
         if is_prod:
             logger.warning(
                 "生产环境未配置 TELEGRAM_TOKEN_PRODUCTION / TELEGRAM_TOKEN，"

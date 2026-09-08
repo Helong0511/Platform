@@ -25,6 +25,12 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def is_telegram_enabled() -> bool:
+    """全局开关：TELEGRAM_ENABLE=false 时关闭轮询、发送、告警等全部 Telegram 能力。"""
+    return bool(getattr(settings, "TELEGRAM_ENABLE", True))
+
+
 # 消息发送配置
 MAX_RETRIES = 3  # 最大重试次数
 BASE_RETRY_DELAY = 2  # 基础重试延迟（秒）
@@ -99,6 +105,9 @@ async def send_telegram_notify_async(
                 len([c for c in str(chat_id_or_message or "").split(",") if c.strip()]),
             )
         wait_sec = estimate_telegram_send_timeout_seconds(chat_n)
+    if not is_telegram_enabled():
+        logger.debug("TELEGRAM_ENABLE=false，跳过 send_telegram_notify_async")
+        return False
     try:
         return await asyncio.wait_for(
             send_telegram_message_async(
@@ -389,6 +398,9 @@ def _wait_before_send(chat_id: Optional[str] = None) -> None:
 
 def _check_bot_available() -> tuple[bool, str]:
     """检查 Bot 是否可用，并返回详细状态信息"""
+    if not is_telegram_enabled():
+        return False, "Telegram 功能已禁用（TELEGRAM_ENABLE=false）"
+
     # 重新导入模块以获取最新状态
     from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
     from app.core.telegram.bot_state import set_bot_state
@@ -449,6 +461,10 @@ def send_telegram_message(
     Returns:
         bool: 是否发送成功（向所有目标发送成功才返回 True）
     """
+    if not is_telegram_enabled():
+        logger.debug("TELEGRAM_ENABLE=false，跳过 send_telegram_message")
+        return False
+
     bot_available, status_msg = _check_bot_available()
     if not bot_available:
         logger.warning(f"Bot 不可用，无法发送消息: {status_msg}")
@@ -620,6 +636,10 @@ def send_telegram_message_with_buttons(
     Returns:
         tuple[bool, Optional[int]]: (是否发送成功, 消息ID)
     """
+    if not is_telegram_enabled():
+        logger.debug("TELEGRAM_ENABLE=false，跳过 send_telegram_message_with_buttons")
+        return False, None
+
     bot_available, status_msg = _check_bot_available()
     if not bot_available:
         logger.warning(f"Bot 不可用，无法发送消息: {status_msg}")
@@ -742,6 +762,9 @@ async def send_admin_notification(
     Returns:
         bool: 是否发送成功
     """
+    if not is_telegram_enabled():
+        logger.debug("TELEGRAM_ENABLE=false，跳过 send_admin_notification")
+        return False
     if not telegram_chat_id:
         logger.warning("Telegram Chat ID 未设置，无法发送管理员通知")
         return False

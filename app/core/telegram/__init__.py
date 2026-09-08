@@ -12,6 +12,7 @@ Telegram Bot 模块
 from app.core.telegram.bot_initializer import initialize_bot, get_bot, is_bot_available
 from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE, get_bot_status_info
 from app.core.telegram.message_sender import (
+    is_telegram_enabled,
     send_telegram_message,
     send_telegram_message_async,
     send_telegram_notify_async,
@@ -37,6 +38,7 @@ __all__ = [
     'get_bot_status_info',
     
     # 消息发送
+    'is_telegram_enabled',
     'send_telegram_message',
     'send_telegram_message_async',
     'send_telegram_notify_async',

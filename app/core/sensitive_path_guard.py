@@ -216,6 +216,8 @@ async def _send_critical_alert(
     auto_blocked: bool,
 ) -> None:
     """向管理员 Telegram 推送危急等级敏感路径探测预警（受全局开关与防抖约束）。"""
+    if not getattr(settings, "TELEGRAM_ENABLE", True):
+        return
     if not getattr(settings, "SENSITIVE_PATH_ALERT_CRITICAL", True):
         return
     if not await _should_send_telegram_alert(client_ip):

@@ -21,6 +21,7 @@ from app.models.models import (
     PostbackConversion, Client, Product, Publisher, Offer, User, PostbackNotification, Click
 )
 from app.core.telegram import (
+    is_telegram_enabled,
     send_telegram_message_async,
     send_telegram_message_with_buttons,
 )
@@ -64,6 +65,14 @@ class TelegramNotificationService:
     def __init__(self, db: Optional[AsyncSession] = None):
         """可选注入数据库会话，供发送方法记录 PostbackNotification。"""
         self.db = db
+
+    @staticmethod
+    def _ensure_telegram_enabled() -> bool:
+        """TELEGRAM_ENABLE=false 时跳过所有业务侧 Telegram 发送。"""
+        if is_telegram_enabled():
+            return True
+        logger.debug("TELEGRAM_ENABLE=false，跳过 TelegramNotificationService 发送")
+        return False
 
     @staticmethod
     def _resolve_admin_chat_id(telegram_chat_id: Optional[str] = None) -> Optional[str]:
@@ -448,6 +457,8 @@ class TelegramNotificationService:
         Returns:
             是否发送成功
         """
+        if not TelegramNotificationService._ensure_telegram_enabled():
+            return False
         try:
 
             success = await send_telegram_message_async(telegram_chat_id, message)
@@ -517,6 +528,8 @@ class TelegramNotificationService:
         Returns:
             是否发送成功
         """
+        if not TelegramNotificationService._ensure_telegram_enabled():
+            return False
         try:
             chat_id = TelegramNotificationService._resolve_admin_chat_id(telegram_chat_id)
             if not chat_id:
@@ -580,6 +593,8 @@ class TelegramNotificationService:
         Returns:
             是否发送成功
         """
+        if not TelegramNotificationService._ensure_telegram_enabled():
+            return False
         try:
             message = build_alert_message(
                 alert_type=alert_type,
@@ -662,6 +677,8 @@ class TelegramNotificationService:
         Returns:
             bool: 是否发送成功
         """
+        if not TelegramNotificationService._ensure_telegram_enabled():
+            return False
         try:
             message = build_summary_message(
                 summary_data=summary_data,
@@ -726,6 +743,8 @@ class TelegramNotificationService:
         Returns:
             bool: 是否发送成功
         """
+        if not TelegramNotificationService._ensure_telegram_enabled():
+            return False
         if not conversions:
             return True
 
@@ -819,6 +838,8 @@ class TelegramNotificationService:
         Returns:
             tuple[bool, Optional[int]]: (是否发送成功, 消息ID)
         """
+        if not TelegramNotificationService._ensure_telegram_enabled():
+            return False, None
         try:
             chat_id = TelegramNotificationService._resolve_admin_chat_id(telegram_chat_id)
             if not chat_id:
