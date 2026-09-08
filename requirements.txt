@@ -41,8 +41,15 @@ pytz==2024.2
 pydantic-settings==2.7.1
 email-validator==2.2.0
 
-# Telegram Bot
-pyTelegramBotAPI==4.26.0
+# pip install python-telegram-bot --upgrade
+python-telegram-bot==21.5.0
+
+# 推荐使用版本
+python-telegram-bot==22.0.0   # 或当前最新稳定版
+anyio==4.5.0
+
+pyTelegramBotAPI==5.0.0       # 或当前最新稳定版
+requests==2.32.3
 
 # 系统工具
 psutil>=6.1.0
