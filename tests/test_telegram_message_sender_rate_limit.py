@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Telegram message_sender 限流 / 429 共享退避单测。"""
+"""Telegram message_sender 限流 / 429 共享退避 / 互斥锁单测。"""
 from __future__ import annotations
 
 import time
@@ -14,6 +14,12 @@ class _FakeRedis:
     def __init__(self):
         self.store: dict[str, tuple[str, float]] = {}
 
+    def _purge(self):
+        now = time.monotonic()
+        expired = [k for k, (_, exp) in self.store.items() if exp <= now]
+        for k in expired:
+            self.store.pop(k, None)
+
     def ping(self):
         return True
 
@@ -21,10 +27,8 @@ class _FakeRedis:
         self.store[key] = (str(value), time.monotonic() + float(seconds))
 
     def set(self, key, value, nx=False, px=None, ex=None):
+        self._purge()
         now = time.monotonic()
-        expired = [k for k, (_, exp) in self.store.items() if exp <= now]
-        for k in expired:
-            self.store.pop(k, None)
         if nx and key in self.store and self.store[key][1] > now:
             return False
         ttl = 0.0
@@ -35,17 +39,38 @@ class _FakeRedis:
         self.store[key] = (str(value), now + max(ttl, 0.001))
         return True
 
+    def get(self, key):
+        self._purge()
+        item = self.store.get(key)
+        return item[0] if item else None
+
+    def expire(self, key, seconds):
+        self._purge()
+        item = self.store.get(key)
+        if not item:
+            return False
+        self.store[key] = (item[0], time.monotonic() + float(seconds))
+        return True
+
     def pttl(self, key):
-        now = time.monotonic()
+        self._purge()
         item = self.store.get(key)
         if not item:
             return -2
-        _, exp = item
-        remain = exp - now
+        remain = item[1] - time.monotonic()
         if remain <= 0:
             self.store.pop(key, None)
             return -2
         return int(remain * 1000)
+
+    def eval(self, script, numkeys, *keys_and_args):
+        key = keys_and_args[0]
+        token = keys_and_args[1]
+        item = self.store.get(key)
+        if item and item[0] == token:
+            self.store.pop(key, None)
+            return 1
+        return 0
 
 
 @pytest.fixture(autouse=True)
@@ -115,35 +140,17 @@ def test_wait_before_send_cross_process_chat_gate(monkeypatch):
     assert any(s >= 0.05 for s in slept)
 
 
-def test_chat_gate_miss_with_zero_pttl_retries_immediately(monkeypatch):
-    """
-    抢占失败且 PTTL=0（闸门刚过期）时，应立刻重试，而不是 sleep(MIN_SEND_INTERVAL)。
-    """
+def test_chat_gate_miss_with_zero_pttl_spins_briefly(monkeypatch):
+    """抢占失败且 PTTL=0 时短睡再抢，禁止空转，也禁止睡满 MIN_SEND_INTERVAL。"""
     fake = _FakeRedis()
     chat_key = "chat-expire"
     gate_key = ms._REDIS_GATE_CHAT.format(chat_id=chat_key)
     global_key = ms._REDIS_GATE_GLOBAL
     slept = []
-    acquire_calls = {"n": 0}
+    state = {"chat_attempts": 0}
 
     def _sleep(sec):
         slept.append(sec)
-
-    real_acquire = ms._try_acquire_redis_gate
-
-    def _acquire(redis_client, key, interval_seconds):
-        acquire_calls["n"] += 1
-        # 第一次 chat 闸门故意失败，随后 pttl 返回 0；第二次应成功
-        if key == gate_key and acquire_calls["n"] <= 2:
-            # call 1 = global ok path... actually order: global then chat
-            pass
-        if key == gate_key and acquire_calls["n"] == 2:
-            # 第一次尝试 chat：失败
-            return False
-        return real_acquire(redis_client, key, interval_seconds)
-
-    # 更精确：控制前两次 chat 失败一次
-    state = {"chat_attempts": 0}
 
     def _acquire2(redis_client, key, interval_seconds):
         if key == global_key:
@@ -156,8 +163,6 @@ def test_chat_gate_miss_with_zero_pttl_retries_immediately(monkeypatch):
         return True
 
     def _wait_seconds(redis_client, key):
-        if key == gate_key:
-            return 0.0  # 闸门已过期
         return 0.0
 
     monkeypatch.setattr(ms.time, "sleep", _sleep)
@@ -169,8 +174,22 @@ def test_chat_gate_miss_with_zero_pttl_retries_immediately(monkeypatch):
     with patch.object(ms, "_get_sync_redis", return_value=fake):
         ms._wait_before_send(chat_key)
 
-    assert state["chat_attempts"] >= 2, "PTTL=0 时应立刻再抢一次 chat 闸门"
-    assert not any(s >= 1.0 for s in slept), f"不应睡满 MIN_SEND_INTERVAL，实际 slept={slept}"
+    assert state["chat_attempts"] >= 2
+    assert slept, "PTTL=0 时应短睡而非空转"
+    assert all(s < 1.0 for s in slept), f"不应睡满 MIN_SEND_INTERVAL，实际 slept={slept}"
+
+
+def test_send_mutex_serializes_and_releases():
+    fake = _FakeRedis()
+    with patch.object(ms, "_get_sync_redis", return_value=fake):
+        token = ms._acquire_send_mutex(timeout=2.0)
+        assert token
+        assert fake.get(ms._REDIS_SEND_MUTEX) == token
+        # 已被占用时短超时拿不到
+        with patch.object(ms, "_sleep_with_jitter", lambda *a, **k: None):
+            assert ms._acquire_send_mutex(timeout=0.01) is None
+        ms._release_send_mutex(token)
+        assert fake.get(ms._REDIS_SEND_MUTEX) is None
 
 
 def test_estimate_timeout_covers_rate_limit_budget():

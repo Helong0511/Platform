@@ -5,14 +5,16 @@ Telegram 消息发送模块
 
 限流说明：
 - Telegram 对同一 Chat 约 1 条/秒；Bot 全局也有配额。
-- API 多 worker + Scheduler 各自持有进程内间隔时会互相踩踏 → 连环 429。
-- 本模块用 Redis（若可用）做跨进程 per-chat / 全局闸门，并在 429 时写入共享退避，
-  避免多进程同时 ``sleep(retry_after)`` 后再一起打爆。
+- API 多 worker + Scheduler 若各自重试，会在 ``retry_after`` 到期后惊群撞 429，
+  且闸门 PTTL=0 时空转 ``continue`` 会把 CPU 打满。
+- 策略：Redis 跨进程发送互斥锁（持锁期间完成 send+429 退避）、共享退避、
+  醒来抖动；闸门未抢到且 TTL=0 时短睡再试，禁止空转。
 """
 import logging
 import importlib
 import math
 import os
+import random
 import re
 import threading
 import time
@@ -30,13 +32,20 @@ TIMEOUT_SECONDS = 30  # 超时时间（秒），适当增大避免网络波动�
 # 同 Chat 约 1 条/秒；多 Chat 批量发送时也按此间隔错开
 MIN_SEND_INTERVAL = 1.1
 INTER_CHAT_DELAY = 1.1
-# 全局（跨 Chat）最小间隔，防止 Bot 级配额被打满（约 20～25 条/秒上限，留余量）
-MIN_GLOBAL_SEND_INTERVAL = 0.05
+# 全局（跨 Chat）最小间隔（互斥锁内再节流）
+MIN_GLOBAL_SEND_INTERVAL = 0.2
 MAX_RATE_LIMIT_WAIT = 120  # 429 限流时最长等待秒数
+_GATE_SPIN_SECONDS = 0.02  # 闸门刚过期时的短睡，避免空转烧 CPU
 _REDIS_BACKOFF_GLOBAL = "telegram:send:backoff:__global__"
 _REDIS_GATE_GLOBAL = "telegram:send:gate:__global__"
 _REDIS_BACKOFF_CHAT = "telegram:send:backoff:{chat_id}"
 _REDIS_GATE_CHAT = "telegram:send:gate:{chat_id}"
+_REDIS_SEND_MUTEX = "telegram:send:mutex"
+_MUTEX_TTL_SECONDS = MAX_RATE_LIMIT_WAIT + 60
+_RELEASE_MUTEX_LUA = (
+    "if redis.call('get', KEYS[1]) == ARGV[1] then "
+    "return redis.call('del', KEYS[1]) else return 0 end"
+)
 _SYNC_REDIS_FAIL_BACKOFF = 30.0
 
 _sync_redis_client = None
@@ -179,6 +188,12 @@ def _get_sync_redis():
             return None
 
 
+def _mark_sync_redis_failed() -> None:
+    global _sync_redis_client, _sync_redis_failed_until
+    _sync_redis_client = None
+    _sync_redis_failed_until = time.monotonic() + _SYNC_REDIS_FAIL_BACKOFF
+
+
 def _redis_wait_seconds(redis_client, key: str) -> float:
     """读取 key 剩余生存时间（秒，支持 PX 亚秒闸门）。"""
     try:
@@ -186,10 +201,18 @@ def _redis_wait_seconds(redis_client, key: str) -> float:
         if isinstance(pttl, int) and pttl > 0:
             return pttl / 1000.0
     except Exception:
-        global _sync_redis_client, _sync_redis_failed_until
-        _sync_redis_client = None
-        _sync_redis_failed_until = time.monotonic() + _SYNC_REDIS_FAIL_BACKOFF
+        _mark_sync_redis_failed()
     return 0.0
+
+
+def _sleep_with_jitter(base: float, *, max_extra: float = 1.0) -> None:
+    """睡眠 base，并加少量抖动，降低多 worker 同时醒来撞墙的概率。"""
+    base = max(0.0, float(base))
+    if base <= 0 and max_extra <= 0:
+        return
+    span = min(float(max_extra), max(0.05, base * 0.25) if base > 0 else float(max_extra))
+    extra = random.uniform(0.0, max(0.0, span))
+    time.sleep(min(base + extra, float(MAX_RATE_LIMIT_WAIT) + float(max_extra)))
 
 
 def _note_rate_limited(chat_id: str, retry_after: int) -> None:
@@ -206,9 +229,7 @@ def _note_rate_limited(chat_id: str, retry_after: int) -> None:
             "1",
         )
     except Exception:
-        global _sync_redis_client, _sync_redis_failed_until
-        _sync_redis_client = None
-        _sync_redis_failed_until = time.monotonic() + _SYNC_REDIS_FAIL_BACKOFF
+        _mark_sync_redis_failed()
 
 
 def _try_acquire_redis_gate(redis_client, key: str, interval_seconds: float) -> bool:
@@ -217,15 +238,82 @@ def _try_acquire_redis_gate(redis_client, key: str, interval_seconds: float) -> 
     try:
         return bool(redis_client.set(key, str(os.getpid()), nx=True, px=px))
     except Exception:
-        global _sync_redis_client, _sync_redis_failed_until
-        _sync_redis_client = None
-        _sync_redis_failed_until = time.monotonic() + _SYNC_REDIS_FAIL_BACKOFF
+        _mark_sync_redis_failed()
         return True  # Redis 异常时放行，仍靠进程内间隔兜底
+
+
+def _acquire_send_mutex(timeout: Optional[float] = None) -> Optional[str]:
+    """
+    跨进程互斥：同一时刻仅一个 worker 调用 Telegram send API。
+
+    Returns:
+        token 字符串：已持锁；
+        \"\"：无 Redis，降级为仅进程内限流；
+        None：等待超时，应放弃本次发送。
+    """
+    redis_client = _get_sync_redis()
+    if not redis_client:
+        return ""
+    token = f"{os.getpid()}:{threading.get_ident()}:{time.time_ns()}"
+    wait_budget = timeout if timeout is not None else float(MAX_RATE_LIMIT_WAIT * 2)
+    deadline = time.monotonic() + wait_budget
+    while time.monotonic() < deadline:
+        wait = _redis_wait_seconds(redis_client, _REDIS_BACKOFF_GLOBAL)
+        if wait > 0:
+            _sleep_with_jitter(wait, max_extra=1.5)
+            continue
+        try:
+            ok = redis_client.set(
+                _REDIS_SEND_MUTEX,
+                token,
+                nx=True,
+                ex=_MUTEX_TTL_SECONDS,
+            )
+            if ok:
+                return token
+            hold = _redis_wait_seconds(redis_client, _REDIS_SEND_MUTEX)
+            _sleep_with_jitter(hold if hold > 0 else 0.05, max_extra=0.35)
+        except Exception:
+            _mark_sync_redis_failed()
+            return ""
+    logger.warning("Telegram 发送互斥锁等待超时，放弃本次发送")
+    return None
+
+
+def _refresh_send_mutex(token: str, ttl_seconds: int) -> None:
+    """延长互斥锁 TTL（429 长睡前调用，避免持锁过期被其它 worker 抢走）。"""
+    if not token:
+        return
+    redis_client = _get_sync_redis()
+    if not redis_client:
+        return
+    try:
+        if redis_client.get(_REDIS_SEND_MUTEX) == token:
+            redis_client.expire(
+                _REDIS_SEND_MUTEX,
+                max(1, min(int(ttl_seconds), _MUTEX_TTL_SECONDS)),
+            )
+    except Exception:
+        _mark_sync_redis_failed()
+
+
+def _release_send_mutex(token: Optional[str]) -> None:
+    if not token:
+        return
+    redis_client = _get_sync_redis()
+    if not redis_client:
+        return
+    try:
+        redis_client.eval(_RELEASE_MUTEX_LUA, 1, _REDIS_SEND_MUTEX, token)
+    except Exception:
+        _mark_sync_redis_failed()
 
 
 def _wait_before_send(chat_id: Optional[str] = None) -> None:
     """
     发送前限速：进程内串行 +（可选）Redis 跨进程 per-chat/全局闸门与 429 共享退避。
+
+    注意：闸门抢占失败且 PTTL=0 时只短睡再试，禁止空转 ``continue``（会烧满 CPU）。
     """
     global _last_send_monotonic
     chat_key = (str(chat_id).strip() if chat_id else "__default__") or "__default__"
@@ -252,7 +340,7 @@ def _wait_before_send(chat_id: Optional[str] = None) -> None:
                     if wait > 0:
                         sleep_for = wait
                     else:
-                        # 闸门刚过期 / PTTL 竞态为 0：立刻重试抢占，勿强制睡满间隔
+                        _sleep_with_jitter(_GATE_SPIN_SECONDS, max_extra=0.03)
                         continue
                 elif not _try_acquire_redis_gate(
                     redis_client,
@@ -266,11 +354,11 @@ def _wait_before_send(chat_id: Optional[str] = None) -> None:
                     if wait > 0:
                         sleep_for = wait
                     else:
-                        # 闸门刚过期 / PTTL 竞态为 0：立刻重试抢占，勿睡满 MIN_SEND_INTERVAL
+                        _sleep_with_jitter(_GATE_SPIN_SECONDS, max_extra=0.03)
                         continue
 
         if sleep_for > 0:
-            time.sleep(min(sleep_for, float(MAX_RATE_LIMIT_WAIT)))
+            _sleep_with_jitter(min(sleep_for, float(MAX_RATE_LIMIT_WAIT)), max_extra=1.5)
             continue
 
         with _send_lock:
@@ -288,14 +376,12 @@ def _wait_before_send(chat_id: Optional[str] = None) -> None:
 
             _last_send_monotonic = now
             _last_send_by_chat[chat_key] = now
-            # 防止字典无限增长
             if len(_last_send_by_chat) > 256:
                 oldest = sorted(_last_send_by_chat.items(), key=lambda x: x[1])[:64]
                 for k, _ in oldest:
                     _last_send_by_chat.pop(k, None)
         return
 
-    # 超时仍发送：由调用方重试/429 路径兜底
     with _send_lock:
         _last_send_monotonic = time.monotonic()
         _last_send_by_chat[chat_key] = _last_send_monotonic
@@ -405,71 +491,82 @@ def send_telegram_message(
         logger.warning(f"无有效的 Telegram Chat ID，无法发送消息: {actual_chat_id!r}")
         return False
 
+    mutex_token = _acquire_send_mutex()
+    if mutex_token is None:
+        return False
+
     all_success = True
+    try:
+        for index, chat_id in enumerate(chat_ids):
+            if index > 0:
+                time.sleep(INTER_CHAT_DELAY)
 
-    for index, chat_id in enumerate(chat_ids):
-        if index > 0:
-            time.sleep(INTER_CHAT_DELAY)
-
-        # 重试机制
-        success = False
-        for attempt in range(MAX_RETRIES):
-            try:
-                _wait_before_send(chat_id)
-                bot.send_message(
-                    chat_id=chat_id,
-                    text=actual_message,
-                    reply_to_message_id=reply_to_message_id,
-                    timeout=TIMEOUT_SECONDS
-                )
-                logger.info(f"已发送 Telegram 消息到：{chat_id}（尝试 {attempt + 1}/{MAX_RETRIES}）")
-                success = True
-                break
-
-            except Exception as e:
-                error_msg = str(e)
-
-                if _is_rate_limit_error(error_msg):
-                    retry_after = _parse_retry_after(error_msg) or 60
-                    retry_after = min(retry_after, MAX_RATE_LIMIT_WAIT)
-                    # 先写入共享退避，再 sleep，避免其它 worker 继续打
-                    _note_rate_limited(chat_id, retry_after)
-                    if attempt < MAX_RETRIES - 1:
-                        logger.warning(
-                            f"发送 Telegram 消息到 {chat_id} 触发限流，"
-                            f"{retry_after}秒后重试（{attempt + 1}/{MAX_RETRIES}）"
-                        )
-                        time.sleep(retry_after)
-                        continue
-                    # 可预期限流耗尽：不打 Traceback，避免日志风暴与误报严重故障
-                    logger.warning(
-                        f"发送 Telegram 消息到 {chat_id} 限流，已达到最大重试次数，消息丢弃：{e}"
+            success = False
+            for attempt in range(MAX_RETRIES):
+                try:
+                    _wait_before_send(chat_id)
+                    bot.send_message(
+                        chat_id=chat_id,
+                        text=actual_message,
+                        reply_to_message_id=reply_to_message_id,
+                        timeout=TIMEOUT_SECONDS
                     )
-                    all_success = False
+                    logger.info(
+                        f"已发送 Telegram 消息到：{chat_id}（尝试 {attempt + 1}/{MAX_RETRIES}）"
+                    )
+                    success = True
                     break
 
-                if _is_retryable_network_error(error_msg):
-                    if attempt < MAX_RETRIES - 1:
-                        retry_delay = BASE_RETRY_DELAY * (2 ** attempt)
+                except Exception as e:
+                    error_msg = str(e)
+
+                    if _is_rate_limit_error(error_msg):
+                        retry_after = _parse_retry_after(error_msg) or 60
+                        retry_after = min(retry_after, MAX_RATE_LIMIT_WAIT)
+                        _note_rate_limited(chat_id, retry_after)
+                        if attempt < MAX_RETRIES - 1:
+                            logger.warning(
+                                f"发送 Telegram 消息到 {chat_id} 触发限流，"
+                                f"{retry_after}秒后重试（{attempt + 1}/{MAX_RETRIES}）"
+                            )
+                            # 持锁睡眠 + 抖动：其它 worker 排队等互斥锁，避免同时撞 429
+                            _refresh_send_mutex(mutex_token, retry_after + 60)
+                            _sleep_with_jitter(retry_after, max_extra=2.0)
+                            continue
                         logger.warning(
-                            f"发送 Telegram 消息到 {chat_id} 超时/网络错误，"
-                            f"{retry_delay}秒后重试（{attempt + 1}/{MAX_RETRIES}）：{e}"
+                            f"发送 Telegram 消息到 {chat_id} 限流，已达到最大重试次数，消息丢弃：{e}"
                         )
-                        time.sleep(retry_delay)
-                        continue
+                        all_success = False
+                        break
+
+                    if _is_retryable_network_error(error_msg):
+                        if attempt < MAX_RETRIES - 1:
+                            retry_delay = BASE_RETRY_DELAY * (2 ** attempt)
+                            logger.warning(
+                                f"发送 Telegram 消息到 {chat_id} 超时/网络错误，"
+                                f"{retry_delay}秒后重试（{attempt + 1}/{MAX_RETRIES}）：{e}"
+                            )
+                            _refresh_send_mutex(mutex_token, retry_delay + 60)
+                            time.sleep(retry_delay)
+                            continue
+                        logger.error(
+                            f"发送 Telegram 消息到 {chat_id} 失败，已达到最大重试次数：{e}",
+                            exc_info=True
+                        )
+                        all_success = False
+                        break
+
                     logger.error(
-                        f"发送 Telegram 消息到 {chat_id} 失败，已达到最大重试次数：{e}",
+                        f"发送 Telegram 消息到 {chat_id} 失败：{e}",
                         exc_info=True
                     )
                     all_success = False
                     break
 
-                logger.error(f"发送 Telegram 消息到 {chat_id} 失败：{e}", exc_info=True)
+            if not success:
                 all_success = False
-                break
-
-        if not success:
-            all_success = False
+    finally:
+        _release_send_mutex(mutex_token)
 
     return all_success
 
@@ -557,56 +654,70 @@ def send_telegram_message_with_buttons(
         if len(message) > MAX_TELEGRAM_MESSAGE_LENGTH:
             truncated_msg = truncate_message(message, MAX_TELEGRAM_MESSAGE_LENGTH)
             message = truncated_msg
-        
-        # 重试机制
-        for attempt in range(MAX_RETRIES):
-            try:
-                _wait_before_send(chat_id)
-                sent_message = bot.send_message(
-                    chat_id=chat_id,
-                    text=message,
-                    reply_markup=markup,
-                    timeout=TIMEOUT_SECONDS
-                )
-                logger.info(f"已发送带按钮的 Telegram 消息到：{chat_id}（尝试 {attempt + 1}/{MAX_RETRIES}）")
-                return True, sent_message.message_id
 
-            except Exception as e:
-                error_msg = str(e)
+        mutex_token = _acquire_send_mutex()
+        if mutex_token is None:
+            return False, None
 
-                if _is_rate_limit_error(error_msg):
-                    retry_after = _parse_retry_after(error_msg) or 60
-                    retry_after = min(retry_after, MAX_RATE_LIMIT_WAIT)
-                    _note_rate_limited(str(chat_id), retry_after)
-                    if attempt < MAX_RETRIES - 1:
-                        logger.warning(
-                            f"发送带按钮的 Telegram 消息触发限流，"
-                            f"{retry_after}秒后重试（{attempt + 1}/{MAX_RETRIES}）"
-                        )
-                        time.sleep(retry_after)
-                        continue
-                    logger.warning(
-                        f"发送带按钮的 Telegram 消息限流，已达到最大重试次数，消息丢弃：{e}"
+        try:
+            for attempt in range(MAX_RETRIES):
+                try:
+                    _wait_before_send(chat_id)
+                    sent_message = bot.send_message(
+                        chat_id=chat_id,
+                        text=message,
+                        reply_markup=markup,
+                        timeout=TIMEOUT_SECONDS
                     )
-                    return False, None
+                    logger.info(
+                        f"已发送带按钮的 Telegram 消息到：{chat_id}"
+                        f"（尝试 {attempt + 1}/{MAX_RETRIES}）"
+                    )
+                    return True, sent_message.message_id
 
-                if _is_retryable_network_error(error_msg):
-                    if attempt < MAX_RETRIES - 1:
-                        retry_delay = BASE_RETRY_DELAY * (2 ** attempt)
+                except Exception as e:
+                    error_msg = str(e)
+
+                    if _is_rate_limit_error(error_msg):
+                        retry_after = _parse_retry_after(error_msg) or 60
+                        retry_after = min(retry_after, MAX_RATE_LIMIT_WAIT)
+                        _note_rate_limited(str(chat_id), retry_after)
+                        if attempt < MAX_RETRIES - 1:
+                            logger.warning(
+                                f"发送带按钮的 Telegram 消息触发限流，"
+                                f"{retry_after}秒后重试（{attempt + 1}/{MAX_RETRIES}）"
+                            )
+                            _refresh_send_mutex(mutex_token, retry_after + 60)
+                            _sleep_with_jitter(retry_after, max_extra=2.0)
+                            continue
                         logger.warning(
-                            f"发送带按钮的 Telegram 消息超时/网络错误，"
-                            f"{retry_delay}秒后重试（{attempt + 1}/{MAX_RETRIES}）：{e}"
+                            f"发送带按钮的 Telegram 消息限流，已达到最大重试次数，消息丢弃：{e}"
                         )
-                        time.sleep(retry_delay)
-                        continue
+                        return False, None
+
+                    if _is_retryable_network_error(error_msg):
+                        if attempt < MAX_RETRIES - 1:
+                            retry_delay = BASE_RETRY_DELAY * (2 ** attempt)
+                            logger.warning(
+                                f"发送带按钮的 Telegram 消息超时/网络错误，"
+                                f"{retry_delay}秒后重试（{attempt + 1}/{MAX_RETRIES}）：{e}"
+                            )
+                            _refresh_send_mutex(mutex_token, retry_delay + 60)
+                            time.sleep(retry_delay)
+                            continue
+                        logger.error(
+                            f"发送带按钮的 Telegram 消息失败，已达到最大重试次数：{e}",
+                            exc_info=True
+                        )
+                        return False, None
+
                     logger.error(
-                        f"发送带按钮的 Telegram 消息失败，已达到最大重试次数：{e}",
+                        f"发送带按钮的 Telegram 消息失败：{e}",
                         exc_info=True
                     )
                     return False, None
-
-                logger.error(f"发送带按钮的 Telegram 消息失败：{e}", exc_info=True)
-                return False, None
+        finally:
+            _release_send_mutex(mutex_token)
         
     except Exception as e:
         logger.error(f"构建带按钮的 Telegram 消息失败：{e}", exc_info=True)
