@@ -274,10 +274,16 @@ def start_polling():
 
     logger.info("开始 Telegram Bot 长轮询（python-telegram-bot Application）...")
     try:
+        # 轮询跑在 TelegramBot 守护线程，不能注册 POSIX 信号（仅主线程可 add_signal_handler）。
+        # 生产 uvicorn/gunicorn + uvloop 下会直接 ValueError，导致轮询秒退、命令无响应。
+        # 同时为本线程绑定独立事件循环，避免误用主线程 uvloop。
+        thread_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(thread_loop)
         application.run_polling(
             allowed_updates=["message", "callback_query"],
             drop_pending_updates=True,
-            close_loop=False,
+            close_loop=True,
+            stop_signals=None,
         )
     except Exception as e:
         if is_telegram_conflict_error(str(e)):
