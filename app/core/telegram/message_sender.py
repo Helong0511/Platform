@@ -248,23 +248,26 @@ def _wait_before_send(chat_id: Optional[str] = None) -> None:
                 if not _try_acquire_redis_gate(
                     redis_client, _REDIS_GATE_GLOBAL, MIN_GLOBAL_SEND_INTERVAL
                 ):
-                    sleep_for = max(
-                        MIN_GLOBAL_SEND_INTERVAL,
-                        _redis_wait_seconds(redis_client, _REDIS_GATE_GLOBAL),
-                    )
+                    wait = _redis_wait_seconds(redis_client, _REDIS_GATE_GLOBAL)
+                    if wait > 0:
+                        sleep_for = wait
+                    else:
+                        # 闸门刚过期 / PTTL 竞态为 0：立刻重试抢占，勿强制睡满间隔
+                        continue
                 elif not _try_acquire_redis_gate(
                     redis_client,
                     _REDIS_GATE_CHAT.format(chat_id=chat_key),
                     MIN_SEND_INTERVAL,
                 ):
-                    sleep_for = max(
-                        0.05,
-                        _redis_wait_seconds(
-                            redis_client,
-                            _REDIS_GATE_CHAT.format(chat_id=chat_key),
-                        )
-                        or MIN_SEND_INTERVAL,
+                    wait = _redis_wait_seconds(
+                        redis_client,
+                        _REDIS_GATE_CHAT.format(chat_id=chat_key),
                     )
+                    if wait > 0:
+                        sleep_for = wait
+                    else:
+                        # 闸门刚过期 / PTTL 竞态为 0：立刻重试抢占，勿睡满 MIN_SEND_INTERVAL
+                        continue
 
         if sleep_for > 0:
             time.sleep(min(sleep_for, float(MAX_RATE_LIMIT_WAIT)))
