@@ -1,15 +1,22 @@
 """
 Telegram 消息发送模块
 
-提供消息发送功能，包括普通消息、带按钮消息和管理员通知
+提供消息发送功能，包括普通消息、带按钮消息和管理员通知。
+
+限流说明：
+- Telegram 对同一 Chat 约 1 条/秒；Bot 全局也有配额。
+- API 多 worker + Scheduler 各自持有进程内间隔时会互相踩踏 → 连环 429。
+- 本模块用 Redis（若可用）做跨进程 per-chat / 全局闸门，并在 429 时写入共享退避，
+  避免多进程同时 ``sleep(retry_after)`` 后再一起打爆。
 """
 import logging
 import importlib
+import math
+import os
 import re
 import threading
 import time
 from typing import Optional, List, Dict, Any
-from datetime import datetime
 
 from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH, validate_chat_id
 from app.core.config import settings
@@ -20,9 +27,21 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 3  # 最大重试次数
 BASE_RETRY_DELAY = 2  # 基础重试延迟（秒）
 TIMEOUT_SECONDS = 30  # 超时时间（秒），适当增大避免网络波动导致误判
-INTER_CHAT_DELAY = 0.35  # 同一批次向多个 Chat ID 发送时的间隔（秒）
-MIN_SEND_INTERVAL = 0.05  # 全局最小发送间隔（秒）
+# 同 Chat 约 1 条/秒；多 Chat 批量发送时也按此间隔错开
+MIN_SEND_INTERVAL = 1.1
+INTER_CHAT_DELAY = 1.1
+# 全局（跨 Chat）最小间隔，防止 Bot 级配额被打满（约 20～25 条/秒上限，留余量）
+MIN_GLOBAL_SEND_INTERVAL = 0.05
 MAX_RATE_LIMIT_WAIT = 120  # 429 限流时最长等待秒数
+_REDIS_BACKOFF_GLOBAL = "telegram:send:backoff:__global__"
+_REDIS_GATE_GLOBAL = "telegram:send:gate:__global__"
+_REDIS_BACKOFF_CHAT = "telegram:send:backoff:{chat_id}"
+_REDIS_GATE_CHAT = "telegram:send:gate:{chat_id}"
+_SYNC_REDIS_FAIL_BACKOFF = 30.0
+
+_sync_redis_client = None
+_sync_redis_lock = threading.Lock()
+_sync_redis_failed_until = 0.0
 
 
 def estimate_telegram_send_timeout_seconds(chat_count: int = 1) -> float:
@@ -32,8 +51,12 @@ def estimate_telegram_send_timeout_seconds(chat_count: int = 1) -> float:
     避免业务侧 ``wait_for(5)`` 过早取消导致孤儿线程继续重试并打出双 ERROR。
     """
     n = max(1, int(chat_count))
-    # 每 Chat：TIMEOUT * MAX_RETRIES + 退避 2+4；Chat 间间隔；再留缓冲
-    per_chat = TIMEOUT_SECONDS * MAX_RETRIES + BASE_RETRY_DELAY * (2 ** (MAX_RETRIES - 1))
+    # 每 Chat：API 超时重试 + 429 退避上限 + 闸门间隔；Chat 间间隔；再留缓冲
+    per_chat = (
+        TIMEOUT_SECONDS * MAX_RETRIES
+        + MAX_RATE_LIMIT_WAIT * (MAX_RETRIES - 1)
+        + MIN_SEND_INTERVAL * 2
+    )
     return float(per_chat * n + INTER_CHAT_DELAY * n + 30.0)
 
 
@@ -86,6 +109,7 @@ async def send_telegram_notify_async(
 
 _send_lock = threading.Lock()
 _last_send_monotonic = 0.0
+_last_send_by_chat: Dict[str, float] = {}
 
 
 def _parse_retry_after(error_msg: str) -> Optional[int]:
@@ -111,14 +135,167 @@ def _is_retryable_network_error(error_msg: str) -> bool:
     )
 
 
-def _wait_before_send() -> None:
-    """全局串行化发送并保证最小间隔，避免多线程并发触发限流。"""
+def _get_sync_redis():
+    """
+    同步 Redis 客户端（懒加载）。
+
+    ``message_sender`` 在线程池/同步路径调用，不能依赖 asyncio Redis 单例。
+    不可用时返回 None，降级为进程内间隔。
+    """
+    global _sync_redis_client, _sync_redis_failed_until
+    now = time.monotonic()
+    if now < _sync_redis_failed_until:
+        return None
+    if _sync_redis_client is not None:
+        return _sync_redis_client
+
+    with _sync_redis_lock:
+        if _sync_redis_client is not None:
+            return _sync_redis_client
+        if time.monotonic() < _sync_redis_failed_until:
+            return None
+        host = getattr(settings, "REDIS_HOST", None)
+        if not host or not str(host).strip():
+            _sync_redis_failed_until = time.monotonic() + _SYNC_REDIS_FAIL_BACKOFF
+            return None
+        try:
+            import redis as redis_sync
+
+            client = redis_sync.Redis(
+                host=str(host).strip(),
+                port=int(getattr(settings, "REDIS_PORT", 6379) or 6379),
+                db=int(getattr(settings, "REDIS_DB", 0) or 0),
+                password=getattr(settings, "REDIS_PASSWORD", None) or None,
+                socket_connect_timeout=1.0,
+                socket_timeout=1.0,
+                decode_responses=True,
+            )
+            client.ping()
+            _sync_redis_client = client
+            return _sync_redis_client
+        except Exception as exc:
+            _sync_redis_failed_until = time.monotonic() + _SYNC_REDIS_FAIL_BACKOFF
+            logger.debug("Telegram 发送限流：同步 Redis 不可用，降级进程内间隔: %s", exc)
+            return None
+
+
+def _redis_wait_seconds(redis_client, key: str) -> float:
+    """读取 key 剩余生存时间（秒，支持 PX 亚秒闸门）。"""
+    try:
+        pttl = redis_client.pttl(key)
+        if isinstance(pttl, int) and pttl > 0:
+            return pttl / 1000.0
+    except Exception:
+        global _sync_redis_client, _sync_redis_failed_until
+        _sync_redis_client = None
+        _sync_redis_failed_until = time.monotonic() + _SYNC_REDIS_FAIL_BACKOFF
+    return 0.0
+
+
+def _note_rate_limited(chat_id: str, retry_after: int) -> None:
+    """把 429 退避写入 Redis，让其它 worker 一起停发，避免惊群重试。"""
+    wait = max(1, min(int(retry_after), MAX_RATE_LIMIT_WAIT))
+    redis_client = _get_sync_redis()
+    if not redis_client:
+        return
+    try:
+        redis_client.setex(_REDIS_BACKOFF_GLOBAL, wait, "1")
+        redis_client.setex(
+            _REDIS_BACKOFF_CHAT.format(chat_id=chat_id),
+            wait,
+            "1",
+        )
+    except Exception:
+        global _sync_redis_client, _sync_redis_failed_until
+        _sync_redis_client = None
+        _sync_redis_failed_until = time.monotonic() + _SYNC_REDIS_FAIL_BACKOFF
+
+
+def _try_acquire_redis_gate(redis_client, key: str, interval_seconds: float) -> bool:
+    """NX + PX 闸门：占用成功表示当前进程获得发送权。"""
+    px = max(50, int(math.ceil(float(interval_seconds) * 1000)))
+    try:
+        return bool(redis_client.set(key, str(os.getpid()), nx=True, px=px))
+    except Exception:
+        global _sync_redis_client, _sync_redis_failed_until
+        _sync_redis_client = None
+        _sync_redis_failed_until = time.monotonic() + _SYNC_REDIS_FAIL_BACKOFF
+        return True  # Redis 异常时放行，仍靠进程内间隔兜底
+
+
+def _wait_before_send(chat_id: Optional[str] = None) -> None:
+    """
+    发送前限速：进程内串行 +（可选）Redis 跨进程 per-chat/全局闸门与 429 共享退避。
+    """
     global _last_send_monotonic
+    chat_key = (str(chat_id).strip() if chat_id else "__default__") or "__default__"
+    deadline = time.monotonic() + max(MAX_RATE_LIMIT_WAIT * 2, 30.0)
+
+    while time.monotonic() < deadline:
+        sleep_for = 0.0
+        redis_client = _get_sync_redis()
+
+        if redis_client:
+            sleep_for = max(
+                sleep_for,
+                _redis_wait_seconds(redis_client, _REDIS_BACKOFF_GLOBAL),
+                _redis_wait_seconds(
+                    redis_client,
+                    _REDIS_BACKOFF_CHAT.format(chat_id=chat_key),
+                ),
+            )
+            if sleep_for <= 0:
+                if not _try_acquire_redis_gate(
+                    redis_client, _REDIS_GATE_GLOBAL, MIN_GLOBAL_SEND_INTERVAL
+                ):
+                    sleep_for = max(
+                        MIN_GLOBAL_SEND_INTERVAL,
+                        _redis_wait_seconds(redis_client, _REDIS_GATE_GLOBAL),
+                    )
+                elif not _try_acquire_redis_gate(
+                    redis_client,
+                    _REDIS_GATE_CHAT.format(chat_id=chat_key),
+                    MIN_SEND_INTERVAL,
+                ):
+                    sleep_for = max(
+                        0.05,
+                        _redis_wait_seconds(
+                            redis_client,
+                            _REDIS_GATE_CHAT.format(chat_id=chat_key),
+                        )
+                        or MIN_SEND_INTERVAL,
+                    )
+
+        if sleep_for > 0:
+            time.sleep(min(sleep_for, float(MAX_RATE_LIMIT_WAIT)))
+            continue
+
+        with _send_lock:
+            now = time.monotonic()
+            elapsed_global = now - _last_send_monotonic
+            if elapsed_global < MIN_GLOBAL_SEND_INTERVAL:
+                time.sleep(MIN_GLOBAL_SEND_INTERVAL - elapsed_global)
+                now = time.monotonic()
+
+            last_chat = _last_send_by_chat.get(chat_key, 0.0)
+            elapsed_chat = now - last_chat
+            if elapsed_chat < MIN_SEND_INTERVAL:
+                time.sleep(MIN_SEND_INTERVAL - elapsed_chat)
+                now = time.monotonic()
+
+            _last_send_monotonic = now
+            _last_send_by_chat[chat_key] = now
+            # 防止字典无限增长
+            if len(_last_send_by_chat) > 256:
+                oldest = sorted(_last_send_by_chat.items(), key=lambda x: x[1])[:64]
+                for k, _ in oldest:
+                    _last_send_by_chat.pop(k, None)
+        return
+
+    # 超时仍发送：由调用方重试/429 路径兜底
     with _send_lock:
-        elapsed = time.monotonic() - _last_send_monotonic
-        if elapsed < MIN_SEND_INTERVAL:
-            time.sleep(MIN_SEND_INTERVAL - elapsed)
         _last_send_monotonic = time.monotonic()
+        _last_send_by_chat[chat_key] = _last_send_monotonic
 
 
 def _check_bot_available() -> tuple[bool, str]:
@@ -235,7 +412,7 @@ def send_telegram_message(
         success = False
         for attempt in range(MAX_RETRIES):
             try:
-                _wait_before_send()
+                _wait_before_send(chat_id)
                 bot.send_message(
                     chat_id=chat_id,
                     text=actual_message,
@@ -252,6 +429,8 @@ def send_telegram_message(
                 if _is_rate_limit_error(error_msg):
                     retry_after = _parse_retry_after(error_msg) or 60
                     retry_after = min(retry_after, MAX_RATE_LIMIT_WAIT)
+                    # 先写入共享退避，再 sleep，避免其它 worker 继续打
+                    _note_rate_limited(chat_id, retry_after)
                     if attempt < MAX_RETRIES - 1:
                         logger.warning(
                             f"发送 Telegram 消息到 {chat_id} 触发限流，"
@@ -259,9 +438,9 @@ def send_telegram_message(
                         )
                         time.sleep(retry_after)
                         continue
-                    logger.error(
-                        f"发送 Telegram 消息到 {chat_id} 限流，已达到最大重试次数：{e}",
-                        exc_info=True
+                    # 可预期限流耗尽：不打 Traceback，避免日志风暴与误报严重故障
+                    logger.warning(
+                        f"发送 Telegram 消息到 {chat_id} 限流，已达到最大重试次数，消息丢弃：{e}"
                     )
                     all_success = False
                     break
@@ -379,7 +558,7 @@ def send_telegram_message_with_buttons(
         # 重试机制
         for attempt in range(MAX_RETRIES):
             try:
-                _wait_before_send()
+                _wait_before_send(chat_id)
                 sent_message = bot.send_message(
                     chat_id=chat_id,
                     text=message,
@@ -395,6 +574,7 @@ def send_telegram_message_with_buttons(
                 if _is_rate_limit_error(error_msg):
                     retry_after = _parse_retry_after(error_msg) or 60
                     retry_after = min(retry_after, MAX_RATE_LIMIT_WAIT)
+                    _note_rate_limited(str(chat_id), retry_after)
                     if attempt < MAX_RETRIES - 1:
                         logger.warning(
                             f"发送带按钮的 Telegram 消息触发限流，"
@@ -402,9 +582,8 @@ def send_telegram_message_with_buttons(
                         )
                         time.sleep(retry_after)
                         continue
-                    logger.error(
-                        f"发送带按钮的 Telegram 消息限流，已达到最大重试次数：{e}",
-                        exc_info=True
+                    logger.warning(
+                        f"发送带按钮的 Telegram 消息限流，已达到最大重试次数，消息丢弃：{e}"
                     )
                     return False, None
 
