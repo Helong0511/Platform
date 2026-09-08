@@ -58,7 +58,7 @@ def build_service_started_message() -> str:
     """拼装服务启动通知正文（含系统名、环境与监听地址）。"""
     label = get_service_display_name()
     port = get_service_port_hint()
-    env_label = "生产" if settings.is_production else "开发（本机）"
+    env_label = "正式生产环境" if settings.is_production else "开发环境（本机）"
     return (
         f"🚀 【{label}】已启动\n"
         f"系统：{settings.SERVER_NAME}\n"
