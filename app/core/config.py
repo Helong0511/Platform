@@ -1046,13 +1046,11 @@ class Settings(BaseSettings):
     @field_validator("TELEGRAM_TOKEN", mode="before")
     @classmethod
     def validate_telegram_token(cls, v: str | None) -> str | None:
-        """按环境选择 Bot Token，与 TELEGRAM_ADMIN 分流规则一致。"""
-        is_prod = is_production_env_name(detect_production_env())
-        resolved = resolve_telegram_token(v)
+        """按环境选择 Bot Token，与 TELEGRAM_ADMIN 分流规则一致。
 
-        if resolved:
-            return resolved
-
+        TELEGRAM_ENABLE=false 时强制返回 None，避免环境里仍配置了 Token
+        导致 settings.TELEGRAM_TOKEN 非空、诊断/其它逻辑误判「已配置」。
+        """
         telegram_on = os.getenv("TELEGRAM_ENABLE", "true").lower() in (
             "true",
             "1",
@@ -1060,6 +1058,12 @@ class Settings(BaseSettings):
         )
         if not telegram_on:
             return None
+
+        is_prod = is_production_env_name(detect_production_env())
+        resolved = resolve_telegram_token(v)
+
+        if resolved:
+            return resolved
 
         if is_prod:
             logger.warning(
