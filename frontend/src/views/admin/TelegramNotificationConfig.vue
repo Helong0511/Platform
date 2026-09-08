@@ -223,9 +223,11 @@ const saving = ref(false);
 const testingConnection = ref(false);
 const testingMessage = ref(false);
 
+const DEFAULT_ADMIN_TELEGRAM_CHAT_ID = '5312177749';
+
 const formData = reactive({
   telegram_enabled: true,
-  telegram_chat_id: null,
+  telegram_chat_id: DEFAULT_ADMIN_TELEGRAM_CHAT_ID,
   notify_all_conversions: true,
   notify_forward_failure: true,
   notify_forward_success: false,
@@ -265,7 +267,7 @@ const loadConfig = async () => {
     if (config) {
       Object.assign(formData, {
         telegram_enabled: config.telegram_enabled ?? true,
-        telegram_chat_id: config.telegram_chat_id || null,
+        telegram_chat_id: config.telegram_chat_id || DEFAULT_ADMIN_TELEGRAM_CHAT_ID,
         notify_all_conversions: config.notify_all_conversions ?? true,
         notify_forward_failure: config.notify_forward_failure ?? true,
         notify_forward_success: config.notify_forward_success ?? false,
@@ -320,7 +322,7 @@ const handleReset = async () => {
     
     Object.assign(formData, {
       telegram_enabled: true,
-      telegram_chat_id: null,
+      telegram_chat_id: DEFAULT_ADMIN_TELEGRAM_CHAT_ID,
       notify_all_conversions: true,
       notify_forward_failure: true,
       notify_forward_success: false,
@@ -348,11 +350,12 @@ const handleTestConnection = async () => {
     if (result && result.success) {
       ElMessage.success('连接成功，测试消息已发送');
     } else {
-      ElMessage.error('连接失败，请检查 Chat ID 是否正确');
+      ElMessage.error((result && result.message) || '连接失败，请检查 Chat ID 是否正确');
     }
   } catch (error) {
     logger.error('测试 Telegram 连接失败:', error);
-    ElMessage.error('测试连接失败，请检查 Chat ID 是否正确');
+    const detail = error?.response?.data?.detail || error?.message || '请检查 Chat ID 是否正确';
+    ElMessage.error(`测试连接失败：${detail}`);
   } finally {
     testingConnection.value = false;
   }
@@ -371,11 +374,12 @@ const handleTestSend = async () => {
     if (result && result.success) {
       ElMessage.success('测试消息已发送');
     } else {
-      ElMessage.error('发送失败，请检查 Chat ID 是否正确');
+      ElMessage.error((result && result.message) || '发送失败，请检查 Chat ID 是否正确');
     }
   } catch (error) {
     logger.error('发送测试消息失败:', error);
-    ElMessage.error('发送测试消息失败，请重试');
+    const detail = error?.response?.data?.detail || error?.message || '请重试';
+    ElMessage.error(`发送测试消息失败：${detail}`);
   } finally {
     testingMessage.value = false;
   }

@@ -195,6 +195,14 @@ CREATE TABLE IF NOT EXISTS `admin_notification_configs`  (
   CONSTRAINT `check_single_record` CHECK (`id` = 1)
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '管理员通知配置表（单例模式）' ROW_FORMAT = DYNAMIC;
 
+-- 默认种子行（本机测试 Chat ID）
+INSERT INTO `admin_notification_configs`
+(`id`, `telegram_enabled`, `telegram_chat_id`, `notify_all_conversions`, `notify_forward_failure`,
+ `notify_forward_success`, `notify_system_errors`, `notify_statistics`, `statistics_frequency`)
+VALUES
+(1, 1, '5312177749', 1, 1, 0, 1, 0, 'hourly')
+ON DUPLICATE KEY UPDATE `id` = `id`;
+
 -- ----------------------------
 -- Table structure for advertiser_tests
 -- ----------------------------

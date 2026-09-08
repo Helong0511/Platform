@@ -13,8 +13,8 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal, engine, init_db
 from app.core.redis_client import close_redis_client, get_redis_client
 from app.core.telegram.file_lock import is_lock_held as has_bot_lock
-from app.core.telegram.file_lock import release_bot_lock as stop_bot
-from app.core.telegram.polling_manager import start_bot_thread
+from app.core.telegram.file_lock import release_bot_lock
+from app.core.telegram.polling_manager import start_bot_thread, stop_polling_application
 from app.core.telegram.service_notify import (
     notify_service_started,
     notify_service_stopped,
@@ -344,7 +344,11 @@ async def lifespan(app: FastAPI):
                 and has_bot_lock()
             ):
                 try:
-                    stop_bot()
+                    stop_polling_application(timeout=8.0)
+                except Exception as stop_err:
+                    logger.warning(f"停止 Telegram Application 时出错: {stop_err}")
+                try:
+                    release_bot_lock()
                 except Exception as stop_err:
                     logger.warning(f"释放 Telegram Bot 锁时出错: {stop_err}")
             elif should_run_telegram_polling() and _bot_state_mod.bot_initialized:

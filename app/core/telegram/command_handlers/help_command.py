@@ -1,30 +1,19 @@
 """
 /help 命令处理器
 
-显示 Bot 可用命令列表
+显示 Bot 可用命令列表（python-telegram-bot）。
 """
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-def cmd_help(message):
-    """
-    处理 /help 命令：显示帮助信息
-    
-    Args:
-        message: Telegram 消息对象
-    """
-    from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
-    
-    def _check_bot_available() -> bool:
-        """检查 Bot 是否可用"""
-        return bot_initialized and TELEBOT_AVAILABLE and bot is not None
-    
-    if not _check_bot_available():
-        logger.error("[命令处理器] Bot 未初始化，无法处理 /help 命令")
+async def cmd_help(update, context):
+    """处理 /help：显示帮助信息。"""
+    message = update.effective_message
+    if not message:
         return
-    
+
     help_text = (
         "📖 **可用命令：**\n\n"
         "• /start - 启动 Bot\n"
@@ -38,13 +27,13 @@ def cmd_help(message):
         "💡 **提示：**\n"
         "在群组中使用命令时，请 @Bot 名称以确保 Bot 能收到消息。"
     )
-    
+
     try:
-        bot.send_message(
-            chat_id=message.chat.id,
+        await context.bot.send_message(
+            chat_id=message.chat_id,
             text=help_text,
-            parse_mode='Markdown'
+            parse_mode="Markdown",
         )
-        logger.info(f"[命令处理器] 已发送帮助信息到：{message.chat.id}")
+        logger.info(f"[命令处理器] 已发送帮助信息到：{message.chat_id}")
     except Exception as e:
         logger.error(f"[命令处理器] 发送帮助信息失败：{e}")

@@ -342,7 +342,7 @@ async def diagnostic_bot(
         # 2. 检查模块可用性
         # ---------- 条件分支 ----------
         if not TELEBOT_AVAILABLE:
-            recommendations.append("❌ pyTelegramBotAPI 未安装，请运行: pip install pyTelegramBotAPI")
+            recommendations.append("❌ python-telegram-bot 未安装，请运行: pip install 'python-telegram-bot==22.8'")
             return ResponseBaseSchema.success(data=DiagnosticResponse(
                 bot_initialized=False,
                 bot_thread_alive=False,
@@ -351,15 +351,15 @@ async def diagnostic_bot(
                 recommendations=recommendations
             ))
 
-        # 3. 检查 Bot 对象
-        # ---------- 条件分支 ----------
-        if not bot:
-            recommendations.append("❌ Bot 对象不存在")
+        # 3. 检查发送能力（Token / PTB）；轮询 Application 可能尚未挂到 bot_state.bot
+        token = getattr(settings, "TELEGRAM_TOKEN", None)
+        if not token or not str(token).strip():
+            recommendations.append("❌ TELEGRAM_TOKEN 未配置")
             return ResponseBaseSchema.success(data=DiagnosticResponse(
                 bot_initialized=False,
                 bot_thread_alive=False,
                 handlers_count=0,
-                connection_test="Bot 对象不存在",
+                connection_test="无 Token",
                 recommendations=recommendations
             ))
 
@@ -376,11 +376,20 @@ async def diagnostic_bot(
         if not bot_thread_alive:
             recommendations.append("⚠️ 轮询线程未运行，请重启应用或检查日志")
 
+        from app.core.telegram import bot_state as bot_state_mod
+        from app.core.telegram.ptb_runtime import (
+            count_application_handlers,
+            get_send_bot,
+            run_on_send_loop,
+        )
+
+        send_bot = get_send_bot(str(token).strip(), connect_timeout=3.0, read_timeout=10.0)
+
         # 5. 检查 Webhook
         webhook_url = None
         # ---------- 异常处理 ----------
         try:
-            webhook_info = bot.get_webhook_info()
+            webhook_info = run_on_send_loop(send_bot.get_webhook_info(), timeout=15.0)
             webhook_url = webhook_info.url if webhook_info.url else None
             # ---------- 条件分支 ----------
             if webhook_url:
@@ -388,42 +397,20 @@ async def diagnostic_bot(
         except Exception as e:
             logger.warning(f"检查 webhook 时出错: {e}")
 
-        # 6. 检查消息处理器
-        handlers_count = 0
-        # ---------- 异常处理 ----------
-        try:
-            # ---------- 条件分支 ----------
-            if hasattr(bot, 'message_handlers'):
-                handlers_count = len(bot.message_handlers)
-                # ---------- 条件分支 ----------
-                if handlers_count == 0:
-                    recommendations.append("⚠️ 没有注册任何消息处理器！命令无法工作")
-                else:
-                    # 检查命令处理器
-                    command_handlers = []
-                    # ---------- 循环处理 ----------
-                    for handler in bot.message_handlers:
-                        filters = handler.get('filters', {})
-                        commands = filters.get('commands', [])
-                        # ---------- 条件分支 ----------
-                        if commands:
-                            command_handlers.extend(commands)
-
-                    expected_commands = ['id', 'test', 'clock', 'stats']
-                    missing_commands = [cmd for cmd in expected_commands if cmd not in command_handlers]
-                    # ---------- 条件分支 ----------
-                    if missing_commands:
-                        recommendations.append(f"⚠️ 缺少命令处理器: {missing_commands}")
-                    else:
-                        recommendations.append(f"✅ 所有命令处理器已注册: {command_handlers}")
-        except Exception as e:
-            logger.warning(f"检查消息处理器时出错: {e}")
+        # 6. 检查消息处理器（PTB Application.handlers）
+        handlers_count = count_application_handlers(bot_state_mod.application)
+        if bot_state_mod.application is None:
+            recommendations.append("⚠️ Application 未创建（轮询未启动），命令处理器尚未注册")
+        elif handlers_count == 0:
+            recommendations.append("⚠️ 没有注册任何消息处理器！命令无法工作")
+        else:
+            recommendations.append(f"✅ 已注册 {handlers_count} 个 handler（含命令/回调/调试）")
 
         # 7. 测试连接
         connection_test = "未测试"
         # ---------- 异常处理 ----------
         try:
-            bot_info = bot.get_me()
+            bot_info = run_on_send_loop(send_bot.get_me(), timeout=15.0)
             connection_test = f"成功: @{bot_info.username} (ID: {bot_info.id})"
         except Exception as e:
             connection_test = f"失败: {str(e)}"
@@ -481,18 +468,33 @@ async def reset_webhook(
     try:
 
         # ---------- 条件分支 ----------
-        if not bot_initialized or not TELEBOT_AVAILABLE or not bot:
+        if not bot_initialized or not TELEBOT_AVAILABLE:
             raise_api_exception(
                 error_code=ErrorCode.SERVICE_UNAVAILABLE,
                 message="Bot 未初始化",
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE
             )
 
+        token = getattr(settings, "TELEGRAM_TOKEN", None)
+        if not token or not str(token).strip():
+            raise_api_exception(
+                error_code=ErrorCode.SERVICE_UNAVAILABLE,
+                message="TELEGRAM_TOKEN 未配置",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        from app.core.telegram.ptb_runtime import get_send_bot, run_on_send_loop
+
+        send_bot = get_send_bot(str(token).strip(), connect_timeout=3.0, read_timeout=15.0)
+
         # 删除 webhook
-        result = bot.delete_webhook(drop_pending_updates=True)
+        run_on_send_loop(
+            send_bot.delete_webhook(drop_pending_updates=True),
+            timeout=20.0,
+        )
 
         # 检查确认
-        webhook_info = bot.get_webhook_info()
+        webhook_info = run_on_send_loop(send_bot.get_webhook_info(), timeout=15.0)
 
         # ---------- 条件分支 ----------
         if webhook_info.url:

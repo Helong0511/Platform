@@ -10,6 +10,8 @@
 - POST /telegram/restart         仅管理员。
 
 说明：系统运维接口，含定时任务、审计日志、会话、缓存、斗篷与敏感路径探测。"""
+import asyncio
+
 from fastapi import APIRouter, Depends, Request
 
 from app.core.audit_log import log_user_action, commit_audit_log
@@ -18,7 +20,7 @@ from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.security import require_admin
 from app.core.telegram.bot_state import get_bot_status_info
-from app.core.telegram.polling_manager import start_bot_thread
+from app.core.telegram.polling_manager import restart_bot_thread
 from app.core.telegram.shared_state import get_shared_state
 from app.models.models import User
 from app.schemas.base import ResponseBaseSchema
@@ -58,16 +60,12 @@ async def restart_telegram_bot(
     current_user: User = Depends(require_admin),
 ):
     """
-    重启 Telegram Bot 后台轮询线程。
+    真正重启 Telegram Bot 后台轮询：先停 Application，再启新线程。
 
-    权限：仅管理员。
-    流程：调用 start_bot_thread 启动新线程；若已在运行则返回 restarted=False。
-    操作写入审计日志（action_type=TASK_RUN）。
+    权限：仅管理员。操作写入审计日志（action_type=TASK_RUN）。
     """
-    # ---------- 入口：参数与依赖准备 ----------
-    # ---------- 异常处理 ----------
     try:
-        success = start_bot_thread()
+        result = await asyncio.to_thread(restart_bot_thread)
         await log_user_action(
             db=db,
             action_type="TASK_RUN",
@@ -76,18 +74,17 @@ async def restart_telegram_bot(
             resource_id=0,
             resource_name="Telegram Bot重启",
             request=request,
-            details={"restarted": success},
+            details=result,
         )
         await commit_audit_log(db)
-        # ---------- 条件分支 ----------
-        if success:
+        if result.get("restarted"):
             return ResponseBaseSchema.success(
-                data={"restarted": True},
-                message="Telegram Bot 重启命令已发送",
+                data=result,
+                message="Telegram Bot 已重启",
             )
         return ResponseBaseSchema.success(
-            data={"restarted": False},
-            message="Telegram Bot 已经在运行",
+            data=result,
+            message="Telegram Bot 重启未完成（未能启动新轮询线程）",
         )
     except HTTPException:
         raise

@@ -16,14 +16,22 @@ VALID_STATS_PERIODS = frozenset({
 })
 
 
+def _api(chat_id: int, coro):
+    """后台线程内走发送互斥，避免与业务通知撞 429。"""
+    from app.core.telegram.message_sender import call_telegram_api_throttled
+
+    return call_telegram_api_throttled(coro, chat_id=str(chat_id))
+
+
 def _process_stats_request(
     period_key: str,
     chat_id: int,
     message_id: int,
 ):
     """在后台线程中查询统计并更新消息。"""
-    from app.core.telegram.bot_state import bot
+    from app.core.config import settings
     from app.core.telegram.command_handlers.stats_command import send_stats_menu
+    from app.core.telegram.ptb_runtime import build_inline_keyboard, get_send_bot
     from app.core.telegram.stats_period import STATS_PERIOD_LABELS, resolve_stats_date_range
     from app.core.telegram.stats_service import (
         STATS_MENU_CALLBACK,
@@ -32,6 +40,12 @@ def _process_stats_request(
         format_stats_messages,
     )
 
+    token = getattr(settings, "TELEGRAM_TOKEN", None)
+    if not token:
+        logger.error("[统计回调] TELEGRAM_TOKEN 未配置")
+        return
+    bot = get_send_bot(str(token).strip())
+
     try:
         if period_key == STATS_MENU_CALLBACK:
             send_stats_menu(chat_id, message_id=message_id)
@@ -39,38 +53,39 @@ def _process_stats_request(
 
         summary = fetch_stats_sync(period_key)
         if not summary:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text="❌ 统计查询失败，请稍后重试。",
+            _api(
+                chat_id,
+                bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text="❌ 统计查询失败，请稍后重试。",
+                ),
             )
             return
 
         _, _, period_label = resolve_stats_date_range(period_key)
         messages = format_stats_messages(summary, period_label)
         buttons = build_stats_menu_buttons(include_back=True)
+        markup = build_inline_keyboard(buttons)
 
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-        markup = InlineKeyboardMarkup()
-        for row in buttons:
-            markup.row(*[
-                InlineKeyboardButton(text=btn["text"], callback_data=btn["callback_data"])
-                for btn in row
-            ])
-
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
-            text=messages[0],
-            parse_mode="HTML",
-            reply_markup=markup,
+        _api(
+            chat_id,
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=messages[0],
+                parse_mode="HTML",
+                reply_markup=markup,
+            ),
         )
         for extra_text in messages[1:]:
-            bot.send_message(
-                chat_id=chat_id,
-                text=extra_text,
-                parse_mode="HTML",
+            _api(
+                chat_id,
+                bot.send_message(
+                    chat_id=chat_id,
+                    text=extra_text,
+                    parse_mode="HTML",
+                ),
             )
         logger.info(
             f"[统计回调] 已展示 {STATS_PERIOD_LABELS.get(period_key, period_key)} 统计, chat_id={chat_id}"
@@ -78,40 +93,38 @@ def _process_stats_request(
     except Exception as exc:
         logger.error(f"[统计回调] 处理失败: {exc}", exc_info=True)
         try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text="❌ 统计处理出错，请稍后重试。",
+            _api(
+                chat_id,
+                bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text="❌ 统计处理出错，请稍后重试。",
+                ),
             )
         except Exception:
             pass
 
 
-def handle_stats_callbacks(call):
+async def handle_stats_callbacks(update, context):
     """处理 stats_ 前缀的内联按钮回调。"""
-    from app.core.telegram.bot_state import bot_initialized, TELEBOT_AVAILABLE, bot
     from app.core.telegram.stats_service import STATS_MENU_CALLBACK
 
-    if not (bot_initialized and TELEBOT_AVAILABLE and bot):
-        logger.error("[统计回调] Bot 未初始化")
+    query = update.callback_query
+    if not query or not query.message:
         return
 
-    data = call.data or ""
+    data = query.data or ""
     if data != STATS_MENU_CALLBACK and data not in VALID_STATS_PERIODS:
         return
 
     try:
-        bot.answer_callback_query(
-            callback_query_id=call.id,
-            text="正在查询统计...",
-            show_alert=False,
-        )
+        await query.answer(text="正在查询统计...", show_alert=False)
     except Exception as exc:
         logger.warning(f"[统计回调] 即时确认失败: {exc}")
 
     thread = threading.Thread(
         target=_process_stats_request,
-        args=(data, call.message.chat.id, call.message.message_id),
+        args=(data, query.message.chat_id, query.message.message_id),
         daemon=True,
     )
     thread.start()

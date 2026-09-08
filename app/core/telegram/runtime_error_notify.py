@@ -32,6 +32,8 @@ _LOG_HANDLER_EXCLUDED_LOGGER_PREFIXES = (
 _EXCLUDED_LOGGER_PREFIXES = (
     "app.core.telegram",
     "telebot",
+    "telegram",
+    "httpx",
     "urllib3",
     "httpx",
     "httpcore",

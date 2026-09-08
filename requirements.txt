@@ -41,18 +41,9 @@ pytz==2024.2
 pydantic-settings==2.7.1
 email-validator==2.2.0
 
-# Telegram Bot（正式代码用 telebot；勿再混装 python-telegram-bot）
-# pip install python-telegram-bot==22.8 # --upgrade
-# python-telegram-bot==22.8
-# httpx==0.28.1
-# anyio==3.7.1
-# certifi==2023.7.22
-# httpcore==1.0.9
-# idna==3.11
-# h11==0.16.0
-# sniffio==1.3.1
-
-pyTelegramBotAPI==4.36.1
+# Telegram Bot（正式代码：python-telegram-bot；勿再混装 pyTelegramBotAPI）
+# 核心依赖 httpx 已在上方锁定 0.28.1（满足 >=0.27,<0.29）
+python-telegram-bot==22.8
 
 # 系统工具
 psutil>=6.1.0

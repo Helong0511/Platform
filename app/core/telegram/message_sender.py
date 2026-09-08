@@ -131,8 +131,12 @@ _last_send_by_chat: Dict[str, float] = {}
 
 
 def _parse_retry_after(error_msg: str) -> Optional[int]:
-    """从 Telegram 429 错误描述中解析 retry_after 秒数。"""
+    """从 Telegram 429 / Flood control 错误描述中解析退避秒数。"""
     match = re.search(r"retry after (\d+)", error_msg, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    # python-telegram-bot: "Flood control exceeded. Retry in 12 seconds"
+    match = re.search(r"retry in (\d+)\s*seconds?", error_msg, re.IGNORECASE)
     if match:
         return int(match.group(1))
     return None
@@ -140,7 +144,24 @@ def _parse_retry_after(error_msg: str) -> Optional[int]:
 
 def _is_rate_limit_error(error_msg: str) -> bool:
     lowered = error_msg.lower()
-    return "429" in error_msg or "too many requests" in lowered
+    return (
+        "429" in error_msg
+        or "too many requests" in lowered
+        or "flood control" in lowered
+        or "retry after" in lowered
+        or "retry in" in lowered
+    )
+
+
+def _rate_limit_seconds_from_exc(exc: BaseException) -> Optional[int]:
+    """优先读取 PTB RetryAfter.retry_after，否则从文案解析。"""
+    retry_after = getattr(exc, "retry_after", None)
+    if retry_after is not None:
+        try:
+            return int(retry_after)
+        except (TypeError, ValueError):
+            pass
+    return _parse_retry_after(str(exc))
 
 
 def _is_retryable_network_error(error_msg: str) -> bool:
@@ -397,46 +418,58 @@ def _wait_before_send(chat_id: Optional[str] = None) -> None:
 
 
 def _check_bot_available() -> tuple[bool, str]:
-    """检查 Bot 是否可用，并返回详细状态信息"""
+    """检查发送能力是否可用，并返回详细状态信息。"""
     if not is_telegram_enabled():
         return False, "Telegram 功能已禁用（TELEGRAM_ENABLE=false）"
 
-    # 重新导入模块以获取最新状态
     from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
     from app.core.telegram.bot_state import set_bot_state
-    
-    if not TELEBOT_AVAILABLE:
-        # 动态检查模块是否安装
+    from app.core.telegram.ptb_runtime import PTB_AVAILABLE, get_send_bot
+
+    if not TELEBOT_AVAILABLE and not PTB_AVAILABLE:
         try:
-            import telebot
-            # 更新全局状态
+            importlib.import_module("telegram")
             set_bot_state(bot, bot_initialized, True)
         except ImportError:
-            return False, "pyTelegramBotAPI 模块未安装"
-    
-    # 如果 Bot 未初始化但 token 配置了，创建临时 Bot 实例
-    if not bot_initialized or bot is None:
-        token = getattr(settings, 'TELEGRAM_TOKEN', None)
-        if token and isinstance(token, str) and token.strip():
-            try:
-                telebot_module = importlib.import_module("telebot")
-                # 创建临时 Bot 实例
-                temp_bot = telebot_module.TeleBot(token=token)
-                # 更新全局状态
-                set_bot_state(temp_bot, True, True)
-                return True, "Bot 已临时初始化"
-            except Exception as e:
-                return False, f"Bot 初始化失败: {str(e)}"
-        else:
-            return False, "Bot 未初始化（无 token）"
-    
-    return True, "Bot 可用"
+            return False, "python-telegram-bot 模块未安装"
+
+    token = getattr(settings, "TELEGRAM_TOKEN", None)
+    if not token or not isinstance(token, str) or not token.strip():
+        return False, "Bot 未初始化（无 token）"
+
+    try:
+        get_send_bot(
+            token.strip(),
+            connect_timeout=3.0,
+            read_timeout=float(TIMEOUT_SECONDS),
+        )
+        if not bot_initialized:
+            set_bot_state(bot, True, True)
+        return True, "Bot 可用"
+    except Exception as e:
+        return False, f"Bot 初始化失败: {str(e)}"
 
 
-def _get_bot_instance():
-    """获取 Bot 实例（最新状态）。"""
-    from app.core.telegram import bot_state
-    return bot_state.bot
+def _get_send_bot():
+    """获取发送专用 Bot（绑定独立事件循环）。"""
+    from app.core.telegram.ptb_runtime import get_send_bot
+
+    token = getattr(settings, "TELEGRAM_TOKEN", None)
+    if not token or not str(token).strip():
+        raise RuntimeError("TELEGRAM_TOKEN 未配置")
+    return get_send_bot(
+        str(token).strip(),
+        connect_timeout=3.0,
+        read_timeout=float(TIMEOUT_SECONDS),
+    )
+
+
+def _sync_bot_call(coro, *, timeout: Optional[float] = None):
+    """在发送 loop 上同步执行 PTB 协程。"""
+    from app.core.telegram.ptb_runtime import run_on_send_loop
+
+    wait = timeout if timeout is not None else float(TIMEOUT_SECONDS) + 10.0
+    return run_on_send_loop(coro, timeout=wait)
 
 
 def send_telegram_message(
@@ -461,18 +494,41 @@ def send_telegram_message(
     Returns:
         bool: 是否发送成功（向所有目标发送成功才返回 True）
     """
+    ok, _ = send_telegram_message_result(
+        chat_id_or_message,
+        message,
+        parse_mode=parse_mode,
+        reply_to_message_id=reply_to_message_id,
+    )
+    return ok
+
+
+def send_telegram_message_result(
+    chat_id_or_message: str,
+    message: Optional[str] = None,
+    parse_mode: Optional[str] = None,
+    reply_to_message_id: Optional[int] = None,
+) -> tuple[bool, str]:
+    """
+    发送 Telegram 消息，并返回 (成功?, 失败原因)。
+
+    失败原因供管理端测试发送展示；成功时原因为空字符串。
+    """
     if not is_telegram_enabled():
         logger.debug("TELEGRAM_ENABLE=false，跳过 send_telegram_message")
-        return False
+        return False, "TELEGRAM_ENABLE=false，Telegram 已禁用"
 
     bot_available, status_msg = _check_bot_available()
     if not bot_available:
         logger.warning(f"Bot 不可用，无法发送消息: {status_msg}")
-        return False
-    
-    # 重新导入模块以获取最新状态
-    bot = _get_bot_instance()
-    
+        return False, status_msg
+
+    try:
+        bot = _get_send_bot()
+    except Exception as e:
+        logger.warning(f"获取发送 Bot 失败: {e}")
+        return False, f"获取 Bot 失败: {e}"
+
     # 向后兼容：判断是旧方式还是新方式
     if message is None:
         # 旧方式：只有一个参数，即消息内容
@@ -480,7 +536,7 @@ def send_telegram_message(
         actual_chat_id = getattr(settings, 'TELEGRAM_ADMIN', None)
         if not actual_chat_id:
             logger.warning("TELEGRAM_ADMIN 未设置，无法发送消息")
-            return False
+            return False, "TELEGRAM_ADMIN 未设置"
     else:
         # 新方式：两个参数；未传 chat_id 时回退 TELEGRAM_ADMIN
         actual_chat_id = chat_id_or_message
@@ -490,7 +546,7 @@ def send_telegram_message(
 
     if not actual_chat_id or (isinstance(actual_chat_id, str) and not str(actual_chat_id).strip()):
         logger.warning("Telegram Chat ID 未设置，无法发送消息")
-        return False
+        return False, "Telegram Chat ID 未设置"
 
     # 截断过长的消息
     if len(actual_message) > MAX_TELEGRAM_MESSAGE_LENGTH:
@@ -505,13 +561,14 @@ def send_telegram_message(
     ]
     if not chat_ids:
         logger.warning(f"无有效的 Telegram Chat ID，无法发送消息: {actual_chat_id!r}")
-        return False
+        return False, f"无有效的 Telegram Chat ID: {actual_chat_id!r}"
 
     mutex_token = _acquire_send_mutex()
     if mutex_token is None:
-        return False
+        return False, "无法获取发送互斥锁（限流繁忙）"
 
     all_success = True
+    last_error = ""
     try:
         for index, chat_id in enumerate(chat_ids):
             if index > 0:
@@ -521,12 +578,15 @@ def send_telegram_message(
             for attempt in range(MAX_RETRIES):
                 try:
                     _wait_before_send(chat_id)
-                    bot.send_message(
-                        chat_id=chat_id,
-                        text=actual_message,
-                        reply_to_message_id=reply_to_message_id,
-                        timeout=TIMEOUT_SECONDS
-                    )
+                    send_kwargs = {
+                        "chat_id": chat_id,
+                        "text": actual_message,
+                    }
+                    if reply_to_message_id is not None:
+                        send_kwargs["reply_to_message_id"] = reply_to_message_id
+                    if parse_mode:
+                        send_kwargs["parse_mode"] = parse_mode
+                    _sync_bot_call(bot.send_message(**send_kwargs))
                     logger.info(
                         f"已发送 Telegram 消息到：{chat_id}（尝试 {attempt + 1}/{MAX_RETRIES}）"
                     )
@@ -535,9 +595,10 @@ def send_telegram_message(
 
                 except Exception as e:
                     error_msg = str(e)
+                    last_error = f"{chat_id}: {error_msg}"
 
-                    if _is_rate_limit_error(error_msg):
-                        retry_after = _parse_retry_after(error_msg) or 60
+                    if _is_rate_limit_error(error_msg) or getattr(e, "retry_after", None) is not None:
+                        retry_after = _rate_limit_seconds_from_exc(e) or 60
                         retry_after = min(retry_after, MAX_RATE_LIMIT_WAIT)
                         _note_rate_limited(chat_id, retry_after)
                         if attempt < MAX_RETRIES - 1:
@@ -584,7 +645,9 @@ def send_telegram_message(
     finally:
         _release_send_mutex(mutex_token)
 
-    return all_success
+    if all_success:
+        return True, ""
+    return False, last_error or "发送失败"
 
 
 async def send_telegram_message_async(
@@ -611,6 +674,24 @@ async def send_telegram_message_async(
 
     return await asyncio.to_thread(
         send_telegram_message,
+        chat_id_or_message,
+        message,
+        parse_mode,
+        reply_to_message_id,
+    )
+
+
+async def send_telegram_message_result_async(
+    chat_id_or_message: str,
+    message: Optional[str] = None,
+    parse_mode: Optional[str] = None,
+    reply_to_message_id: Optional[int] = None,
+) -> tuple[bool, str]:
+    """异步发送并返回 (成功?, 失败原因)。"""
+    import asyncio
+
+    return await asyncio.to_thread(
+        send_telegram_message_result,
         chat_id_or_message,
         message,
         parse_mode,
@@ -648,28 +729,13 @@ def send_telegram_message_with_buttons(
     if not chat_id or not validate_chat_id(str(chat_id).strip()):
         logger.warning(f"无效的 Telegram Chat ID，无法发送带按钮消息: {chat_id!r}")
         return False, None
-    
-    # 重新导入模块以获取最新状态
-    bot = _get_bot_instance()
-    
+
     try:
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-        
-        # 构建内联键盘
-        keyboard = []
-        for row in buttons:
-            button_row = []
-            for btn in row:
-                button = InlineKeyboardButton(
-                    text=btn.get('text', ''),
-                    callback_data=btn.get('callback_data', '')
-                )
-                button_row.append(button)
-            keyboard.append(button_row)
-        
-        markup = InlineKeyboardMarkup(row_width=2)
-        markup.add(*[btn for row in keyboard for btn in row])
-        
+        bot = _get_send_bot()
+        from app.core.telegram.ptb_runtime import build_inline_keyboard
+
+        markup = build_inline_keyboard(buttons)
+
         # 截断过长的消息
         if len(message) > MAX_TELEGRAM_MESSAGE_LENGTH:
             truncated_msg = truncate_message(message, MAX_TELEGRAM_MESSAGE_LENGTH)
@@ -683,12 +749,14 @@ def send_telegram_message_with_buttons(
             for attempt in range(MAX_RETRIES):
                 try:
                     _wait_before_send(chat_id)
-                    sent_message = bot.send_message(
-                        chat_id=chat_id,
-                        text=message,
-                        reply_markup=markup,
-                        timeout=TIMEOUT_SECONDS
-                    )
+                    send_kwargs = {
+                        "chat_id": chat_id,
+                        "text": message,
+                        "reply_markup": markup,
+                    }
+                    if parse_mode:
+                        send_kwargs["parse_mode"] = parse_mode
+                    sent_message = _sync_bot_call(bot.send_message(**send_kwargs))
                     logger.info(
                         f"已发送带按钮的 Telegram 消息到：{chat_id}"
                         f"（尝试 {attempt + 1}/{MAX_RETRIES}）"
@@ -698,8 +766,8 @@ def send_telegram_message_with_buttons(
                 except Exception as e:
                     error_msg = str(e)
 
-                    if _is_rate_limit_error(error_msg):
-                        retry_after = _parse_retry_after(error_msg) or 60
+                    if _is_rate_limit_error(error_msg) or getattr(e, "retry_after", None) is not None:
+                        retry_after = _rate_limit_seconds_from_exc(e) or 60
                         retry_after = min(retry_after, MAX_RATE_LIMIT_WAIT)
                         _note_rate_limited(str(chat_id), retry_after)
                         if attempt < MAX_RETRIES - 1:
@@ -782,3 +850,47 @@ async def send_admin_notification(
     full_message = f"{prefix}{message}"
     
     return send_telegram_message(telegram_chat_id, full_message)
+
+
+def call_telegram_api_throttled(
+    coro,
+    *,
+    chat_id: Optional[str] = None,
+    timeout: Optional[float] = None,
+):
+    """
+    在发送互斥锁 + 闸门保护下执行任意 PTB 协程（供统计/审批等后台线程使用）。
+
+    Args:
+        coro: 已创建的协程（如 bot.edit_message_text(...)）
+        chat_id: 可选，用于 per-chat 闸门
+        timeout: run_on_send_loop 等待上限
+
+    Returns:
+        协程返回值
+
+    Raises:
+        RuntimeError: Telegram 禁用或抢不到互斥锁
+        Exception: 底层 API 异常（含限流）
+    """
+    if not is_telegram_enabled():
+        raise RuntimeError("TELEGRAM_ENABLE=false")
+
+    mutex_token = _acquire_send_mutex()
+    if mutex_token is None:
+        raise RuntimeError("无法获取 Telegram 发送互斥锁")
+
+    try:
+        if chat_id and validate_chat_id(str(chat_id).strip()):
+            _wait_before_send(str(chat_id).strip())
+        try:
+            return _sync_bot_call(coro, timeout=timeout)
+        except Exception as e:
+            error_msg = str(e)
+            if _is_rate_limit_error(error_msg) or getattr(e, "retry_after", None) is not None:
+                retry_after = _rate_limit_seconds_from_exc(e) or 60
+                retry_after = min(retry_after, MAX_RATE_LIMIT_WAIT)
+                _note_rate_limited(str(chat_id or "__global__"), retry_after)
+            raise
+    finally:
+        _release_send_mutex(mutex_token)

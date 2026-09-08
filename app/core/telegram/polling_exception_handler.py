@@ -1,8 +1,7 @@
 """
 Telegram Bot 轮询异常处理器
 
-在 pyTelegramBotAPI 轮询线程内拦截临时网络错误，避免 ERROR 堆栈刷屏，
-并在 409 冲突时主动停止轮询。
+拦截临时网络错误与 409 冲突，供 Application error handler / 轮询循环使用。
 """
 import logging
 from typing import Callable, Optional
@@ -58,7 +57,7 @@ def is_transient_telegram_network_error(exception: BaseException) -> bool:
 
 
 class TelegramPollingExceptionHandler:
-    """轮询异常处理器，供 TeleBot(exception_handler=...) 使用。"""
+    """轮询异常处理器（兼容保留；PTB 路径主要用 polling_manager._on_error）。"""
 
     def __init__(self, on_conflict: Optional[Callable[[BaseException], None]] = None):
         """

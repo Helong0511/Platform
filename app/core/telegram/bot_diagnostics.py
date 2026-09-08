@@ -77,20 +77,25 @@ class TelegramBotDiagnostics:
     def _check_module() -> Dict[str, Any]:
         """检查模块状态"""
         module_status = {
-            "telebot_available": False,
-            "import_status": "未知"
+            "telebot_available": False,  # 兼容旧字段名：现表示 PTB 可用
+            "ptb_available": False,
+            "import_status": "未知",
         }
-        
+
         try:
-            import telebot
+            import telegram
+
             module_status["import_status"] = "成功"
-            module_status["telebot_version"] = getattr(telebot, "__version__", "未知")
+            module_status["ptb_version"] = getattr(telegram, "__version__", "未知")
+            module_status["telebot_version"] = module_status["ptb_version"]
             module_status["telebot_available"] = True
+            module_status["ptb_available"] = True
+            module_status["library"] = "python-telegram-bot"
         except ImportError as e:
             module_status["import_status"] = f"失败: {str(e)}"
         except Exception as e:
             module_status["import_status"] = f"错误: {str(e)}"
-        
+
         return module_status
     
     @staticmethod
@@ -164,30 +169,33 @@ class TelegramBotDiagnostics:
         """检查网络连接"""
         network_status = {
             "connection_test": "未测试",
-            "api_accessible": False
+            "api_accessible": False,
         }
-        
-        # 动态检查模块可用性
+
         try:
-            importlib.import_module("telebot")
-            telebot_available = True
+            importlib.import_module("telegram")
+            ptb_available = True
         except ImportError:
-            telebot_available = False
-        
-        if bot_initialized and telebot_available and bot:
+            ptb_available = False
+
+        token = getattr(settings, "TELEGRAM_TOKEN", None)
+        if ptb_available and token and str(token).strip():
             try:
-                me = bot.get_me()
+                from app.core.telegram.ptb_runtime import get_send_bot, run_on_send_loop
+
+                send_bot = get_send_bot(str(token).strip(), connect_timeout=3.0, read_timeout=5.0)
+                me = run_on_send_loop(send_bot.get_me(), timeout=8.0)
                 network_status["connection_test"] = "成功"
                 network_status["api_accessible"] = True
                 network_status["bot_info"] = {
                     "id": me.id,
                     "first_name": me.first_name,
-                    "username": me.username
+                    "username": me.username,
                 }
             except Exception as e:
                 network_status["connection_test"] = f"失败: {str(e)}"
                 network_status["api_accessible"] = False
-        
+
         return network_status
     
     @staticmethod
@@ -228,8 +236,10 @@ class TelegramBotDiagnostics:
         recommendations = []
         
         # 模块相关建议
-        if not status["module"]["telebot_available"]:
-            recommendations.append("安装 pyTelegramBotAPI 模块: pip install pyTelegramBotAPI")
+        if not status["module"].get("ptb_available", status["module"].get("telebot_available")):
+            recommendations.append(
+                "安装 python-telegram-bot 模块: pip install 'python-telegram-bot==22.8'"
+            )
         
         # 配置相关建议
         config = status["configuration"]

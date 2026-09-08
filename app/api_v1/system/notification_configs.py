@@ -29,7 +29,7 @@ from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from app.core.dependencies import get_notification_config_service
 from app.core.audit_log import log_create, log_update, log_delete, log_user_action, commit_audit_log
-from app.core.telegram import send_telegram_message_async
+from app.core.telegram.message_sender import send_telegram_message_result_async
 from app.models.models import (
     Client, Product, User, UserRole,
     ClientNotificationConfig, ProductNotificationConfig, AdminNotificationConfig,
@@ -558,11 +558,17 @@ async def get_admin_notification_config(
     config = await notification_service.get_admin_notification_config()
     
     if not config:
-        # 返回默认配置
+        # 返回默认配置（Chat ID 与本机 TELEGRAM_ADMIN / 常用测试 ID 对齐）
+        from app.core.config import settings
+
+        default_chat_id = (
+            getattr(settings, "TELEGRAM_ADMIN", None)
+            or "5312177749"
+        )
         return ResponseBaseSchema.success(data=AdminNotificationConfigResponse(
             id=0,
             telegram_enabled=True,
-            telegram_chat_id=None,
+            telegram_chat_id=str(default_chat_id).strip() or "5312177749",
             notify_all_conversions=True,
             notify_forward_failure=True,
             notify_forward_success=False,
@@ -654,7 +660,7 @@ async def test_telegram_connection(
     
     # ---------- 异常处理 ----------
     try:
-        success = await send_telegram_message_async(telegram_chat_id, test_message)
+        success, err = await send_telegram_message_result_async(telegram_chat_id, test_message)
         # ---------- 条件分支 ----------
         if success:
             await log_user_action(
@@ -674,7 +680,7 @@ async def test_telegram_connection(
         else:
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail="连接失败，请检查 Chat ID 是否正确"
+                detail=f"连接失败：{err or '请检查 Chat ID 是否正确'}"
             )
     except HTTPException:
         raise
@@ -710,7 +716,7 @@ async def send_test_message(
         # 使用 TelegramNotificationService 构建测试消息
         test_message = TelegramNotificationService.build_test_message(message_type)
         
-        success = await send_telegram_message_async(telegram_chat_id, test_message)
+        success, err = await send_telegram_message_result_async(telegram_chat_id, test_message)
         # ---------- 条件分支 ----------
         if success:
             await log_user_action(
@@ -731,7 +737,7 @@ async def send_test_message(
         else:
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail="发送失败，请检查 Chat ID 是否正确"
+                detail=f"发送失败：{err or '请检查 Chat ID 是否正确'}"
             )
     except HTTPException:
         raise
