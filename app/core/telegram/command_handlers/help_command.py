@@ -14,17 +14,18 @@ async def cmd_help(update, context):
     if not message:
         return
 
+    # 使用 HTML：Telegram 旧版 Markdown 不支持双星号加粗，会导致整条发送失败
     help_text = (
-        "📖 **可用命令：**\n\n"
+        "📖 <b>可用命令：</b>\n\n"
         "• /start - 启动 Bot\n"
         "• /help - 显示帮助信息\n"
         "• /stats - 广告数据统计（昨天/本周/上周/本月）\n"
         "• /id - 获取聊天 ID\n\n"
-        "🔔 **通知类型：**\n"
+        "🔔 <b>通知类型：</b>\n"
         "• 转化通知 - 实时接收转化数据\n"
         "• 系统告警 - 转发失败、系统错误等\n"
         "• 定时统计 - 小时/日报表\n\n"
-        "💡 **提示：**\n"
+        "💡 <b>提示：</b>\n"
         "在群组中使用命令时，请 @Bot 名称以确保 Bot 能收到消息。"
     )
 
@@ -32,8 +33,10 @@ async def cmd_help(update, context):
         await context.bot.send_message(
             chat_id=message.chat_id,
             text=help_text,
-            parse_mode="Markdown",
+            parse_mode="HTML",
         )
         logger.info(f"[命令处理器] 已发送帮助信息到：{message.chat_id}")
     except Exception as e:
-        logger.error(f"[命令处理器] 发送帮助信息失败：{e}")
+        from app.core.telegram.command_handlers._reply_errors import log_command_reply_failure
+
+        log_command_reply_failure("help", message.chat_id, e)

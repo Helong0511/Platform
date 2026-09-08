@@ -71,4 +71,6 @@ async def get_chat_id(update, context):
         )
         logger.info(f"[命令处理器] 已发送 Chat ID 到：{chat.id}")
     except Exception as e:
-        logger.error(f"[命令处理器] 发送消息失败：{e}")
+        from app.core.telegram.command_handlers._reply_errors import log_command_reply_failure
+
+        log_command_reply_failure("id", chat.id, e)

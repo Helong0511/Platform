@@ -84,4 +84,12 @@ async def cmd_stats(update, context):
     message = update.effective_message
     if not message:
         return
-    await asyncio.to_thread(send_stats_menu, message.chat_id)
+    ok = await asyncio.to_thread(send_stats_menu, message.chat_id)
+    if not ok:
+        from app.core.telegram.command_handlers._reply_errors import log_command_reply_failure
+
+        log_command_reply_failure(
+            "stats",
+            message.chat_id,
+            RuntimeError("send_stats_menu 返回 False（详见上方展示统计菜单失败日志）"),
+        )

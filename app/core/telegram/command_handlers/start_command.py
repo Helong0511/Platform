@@ -38,4 +38,6 @@ async def cmd_start(update, context):
         await asyncio.to_thread(send_stats_menu, message.chat_id)
         logger.info(f"[命令处理器] 已发送欢迎消息到：{message.chat_id}")
     except Exception as e:
-        logger.error(f"[命令处理器] 发送欢迎消息失败：{e}")
+        from app.core.telegram.command_handlers._reply_errors import log_command_reply_failure
+
+        log_command_reply_failure("start", message.chat_id, e)
