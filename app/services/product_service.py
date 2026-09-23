@@ -7,13 +7,14 @@
 - 删除：有 AdData 则转移至「临时挂靠」，否则物理删除
 
 特殊逻辑：
-- 创建时若同名产品属于临时挂靠，则改绑 client_id 复用历史广告数据
+- 产品名称全局不能重复。创建时若同名产品属于临时挂靠，则改绑 client_id；已属于其他客户则拒绝
 
 在系统中的位置：
 - 被管理端产品 API 调用；继承 ``BaseService[Product]``
 """
 from typing import Optional, List, Dict, Any
 from datetime import date, timedelta
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, and_, or_, text
@@ -25,6 +26,13 @@ from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.utils import get_app_now_naive, find_or_create_default_client
 from app.core.product_assignment import initialize_product_assignment, transfer_product_assignment
+from app.core.product_name import (
+    duplicate_name_detail,
+    fetch_products_by_name,
+    insert_unique_product,
+    is_duplicate_product_name_error,
+    normalize_product_name,
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -209,8 +217,8 @@ class ProductService(BaseService[Product]):
         """
         创建产品（仅管理员）。
 
-        若已存在同名且归属「临时挂靠」的产品，则更新其 client_id
-        与扣减比例（复用历史 AdData），否则新建并 initialize_product_assignment。
+        产品名称全局不能重复。若已存在同名且仅归属「临时挂靠」，则改绑 client_id
+        并复用历史广告数据；名称已被其他客户占用，或已有多条同名时，拒绝新建。
 
         Args:
             product_data: 含 name、client_id、扣减比例、Postback 配置等
@@ -249,96 +257,48 @@ class ProductService(BaseService[Product]):
                 detail=f"减扣比例必须在0-1之间。当前值：ecpm_deduct_ratio={ecpm_ratio}, revenue_deduct_ratio={revenue_ratio}"
             )
 
-        # 检查当前客户是否已存在同名产品
-        existing_product_result = await self.db.execute(
-            select(Product).where(
-                Product.client_id == client_id,
-                Product.name == product_data['name']
+        product_name = normalize_product_name(product_data.get("name"))
+        if not product_name:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail="产品名称不能为空",
             )
-        )
-        existing_product_for_client = existing_product_result.scalar_one_or_none()
-        if existing_product_for_client:
+        product_data["name"] = product_name
+
+        # 产品名称全局唯一。仅当唯一一条同名产品挂在「临时挂靠」上时改绑，其余情况拒绝新建。
+        existing_rows = await fetch_products_by_name(self.db, product_name, lock=True)
+        if len(existing_rows) > 1:
             raise_api_exception(
                 ErrorCode.PRODUCT_ALREADY_EXISTS,
-                detail=f"客户ID {client_id} 已存在同名产品：{product_data['name']}。请使用不同的产品名称或更新现有产品"
+                detail=duplicate_name_detail(product_name, existing_rows),
             )
-
-        # ====== 临时挂靠同名产品改绑逻辑 ======
-        product_with_client_query = select(Product, Client).join(
-            Client, Product.client_id == Client.id
-        ).where(
-            Product.name == product_data['name']
-        )
-        product_with_client_result = await self.db.execute(product_with_client_query)
-        products_with_clients = product_with_client_result.unique().all()
-
-        # 查找属于临时挂靠的产品
-        admin_default_product = None
-        for product_obj, client_obj in products_with_clients:
-            if client_obj.company_name == "临时挂靠":
-                admin_default_product = product_obj
-                break
-
-        # 如果找到属于临时挂靠的产品，更新client_id而不是创建新产品
-        if admin_default_product:
-            old_client_id = admin_default_product.client_id
-            logger.info(
-                f"产品名称 '{product_data['name']}' 属于临时挂靠（产品ID: {admin_default_product.id}，"
-                f"原客户ID: {old_client_id}），将更新为客户ID: {client_id}"
-            )
-
-            # 更新产品的client_id和扣减比例
-            admin_default_product.client_id = client_id
-            admin_default_product.ecpm_deduct_ratio = ecpm_ratio
-            admin_default_product.revenue_deduct_ratio = revenue_ratio
-            admin_default_product.is_active = product_data.get('is_active', True)
-
-            # 更新下游 Postback 配置
-            if 'downstream_postback_url' in product_data:
-                admin_default_product.downstream_postback_url = product_data['downstream_postback_url']
-            if 'downstream_postback_method' in product_data:
-                admin_default_product.downstream_postback_method = product_data['downstream_postback_method']
-            if 'downstream_postback_success_check' in product_data:
-                admin_default_product.downstream_postback_success_check = product_data[
-                    'downstream_postback_success_check'
-                ]
-            if 'notification_address' in product_data:
-                admin_default_product.notification_address = product_data['notification_address']
-
-            # 同步分配历史，避免 products.client_id 与 product_assignments 不一致
-            try:
-                await transfer_product_assignment(
-                    db=self.db,
-                    product_id=admin_default_product.id,
-                    old_client_id=old_client_id,
-                    new_client_id=client_id,
-                    transfer_date=date.today(),
-                )
-            except Exception as e:
-                await self.db.rollback()
-                logger.error(
-                    f"临时挂靠同名产品改绑时更新分配历史失败: product_id={admin_default_product.id}, err={e}",
-                    exc_info=True,
-                )
+        if len(existing_rows) == 1:
+            existing_product = existing_rows[0]
+            if existing_product.client_id == client_id:
                 raise_api_exception(
-                    ErrorCode.OPERATION_FAILED,
-                    detail="产品从临时挂靠改绑时更新分配历史失败，请稍后重试",
+                    ErrorCode.PRODUCT_ALREADY_EXISTS,
+                    detail=duplicate_name_detail(product_name, existing_rows),
                 )
-
-            await self.db.flush()
-            await self.db.refresh(admin_default_product)
-
-            logger.info(
-                f"产品 '{product_data['name']}' 已从临时挂靠转移到客户ID {client_id}，"
-                f"并更新了扣减比例与分配历史"
+            owner_result = await self.db.execute(
+                select(Client).where(Client.id == existing_product.client_id)
+            )
+            owner = owner_result.scalar_one_or_none()
+            if owner is None or owner.company_name != "临时挂靠":
+                raise_api_exception(
+                    ErrorCode.PRODUCT_ALREADY_EXISTS,
+                    detail=duplicate_name_detail(product_name, existing_rows),
+                )
+            return await self._rebind_default_product(
+                existing_product,
+                client_id,
+                ecpm_ratio,
+                revenue_ratio,
+                product_data,
             )
 
-            return admin_default_product
-
-        # 如果没有找到属于临时挂靠的产品，创建新产品
         product = Product(
             client_id=client_id,
-            name=product_data['name'],
+            name=product_name,
             ecpm_deduct_ratio=ecpm_ratio,
             revenue_deduct_ratio=revenue_ratio,
             is_active=product_data.get('is_active', True),
@@ -347,36 +307,98 @@ class ProductService(BaseService[Product]):
             downstream_postback_success_check=product_data.get('downstream_postback_success_check'),
             notification_address=product_data.get('notification_address')
         )
+        saved_product, created = await insert_unique_product(self.db, product)
+        if not created:
+            raise_api_exception(
+                ErrorCode.PRODUCT_ALREADY_EXISTS,
+                detail=duplicate_name_detail(product_name, [saved_product]),
+            )
 
-        self.db.add(product)
-        await self.db.flush()  # 先flush以获取product.id
-
-        # 初始化产品分配记录（失败则整体回滚，避免有产品无分配历史）
         product_start_date = date.today()
         await initialize_product_assignment(
             db=self.db,
-            product_id=product.id,
-            client_id=product.client_id,
+            product_id=saved_product.id,
+            client_id=saved_product.client_id,
             start_date=product_start_date,
         )
         logger.info(
             "产品 %s 的分配记录已初始化：客户 %s，开始日期: %s",
-            product.id,
-            product.client_id,
+            saved_product.id,
+            saved_product.client_id,
             product_start_date,
         )
 
         await self.db.flush()
-        await self.db.refresh(product)
+        await self.db.refresh(saved_product)
 
-        logger.info(f"产品已创建: {product.name} (ID: {product.id})")
+        logger.info(f"产品已创建: {saved_product.name} (ID: {saved_product.id})")
         try:
             from app.services.ad_data.query_cache import invalidate_ad_data_query_caches
 
-            await invalidate_ad_data_query_caches(reason=f"product_create:{product.id}")
+            await invalidate_ad_data_query_caches(reason=f"product_create:{saved_product.id}")
         except Exception as cache_exc:
             logger.warning("创建产品后清理广告数据查询缓存失败: %s", cache_exc)
-        return product
+        return saved_product
+
+    async def _rebind_default_product(
+            self,
+            admin_default_product: Product,
+            client_id: int,
+            ecpm_ratio: float,
+            revenue_ratio: float,
+            product_data: Dict[str, Any],
+    ) -> Product:
+        """把挂在临时挂靠上的同名产品改绑到目标客户，不新建第二条。"""
+        old_client_id = admin_default_product.client_id
+        logger.info(
+            f"产品名称 '{product_data['name']}' 属于临时挂靠（产品ID: {admin_default_product.id}，"
+            f"原客户ID: {old_client_id}），将更新为客户ID: {client_id}"
+        )
+
+        admin_default_product.client_id = client_id
+        admin_default_product.ecpm_deduct_ratio = ecpm_ratio
+        admin_default_product.revenue_deduct_ratio = revenue_ratio
+        admin_default_product.is_active = product_data.get('is_active', True)
+
+        if 'downstream_postback_url' in product_data:
+            admin_default_product.downstream_postback_url = product_data['downstream_postback_url']
+        if 'downstream_postback_method' in product_data:
+            admin_default_product.downstream_postback_method = product_data['downstream_postback_method']
+        if 'downstream_postback_success_check' in product_data:
+            admin_default_product.downstream_postback_success_check = product_data[
+                'downstream_postback_success_check'
+            ]
+        if 'notification_address' in product_data:
+            admin_default_product.notification_address = product_data['notification_address']
+
+        try:
+            await transfer_product_assignment(
+                db=self.db,
+                product_id=admin_default_product.id,
+                old_client_id=old_client_id,
+                new_client_id=client_id,
+                transfer_date=date.today(),
+            )
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(
+                f"临时挂靠同名产品改绑时更新分配历史失败: product_id={admin_default_product.id}, err={e}",
+                exc_info=True,
+            )
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail="产品从临时挂靠改绑时更新分配历史失败，请稍后重试",
+            )
+
+        await self.db.flush()
+        await self.db.refresh(admin_default_product)
+
+        logger.info(
+            f"产品 '{product_data['name']}' 已从临时挂靠转移到客户ID {client_id}，"
+            f"并更新了扣减比例与分配历史"
+        )
+
+        return admin_default_product
 
     async def update_product(
             self,
@@ -405,20 +427,25 @@ class ProductService(BaseService[Product]):
         # 获取产品
         product = await self.get_product_by_id(product_id, current_user, include_client=False)
 
-        # 如果更改产品名称，检查是否已存在
+        # 改名时产品名称全局不能重复
         if 'name' in product_data and product_data['name'] != product.name:
-            existing_product_result = await self.db.execute(
-                select(Product).where(
-                    Product.client_id == product.client_id,
-                    Product.name == product_data['name']
-                )
-            )
-            existing_product = existing_product_result.scalar_one_or_none()
-            if existing_product:
+            new_name = normalize_product_name(product_data['name'])
+            if not new_name:
                 raise_api_exception(
-                    ErrorCode.PRODUCT_ALREADY_EXISTS,
-                    detail=f"客户ID {product.client_id} 已存在同名产品：{product_data['name']}。请使用不同的产品名称"
+                    ErrorCode.INVALID_PARAMETER,
+                    detail="产品名称不能为空",
                 )
+            product_data['name'] = new_name
+            if new_name != product.name:
+                others = [
+                    item for item in await fetch_products_by_name(self.db, new_name, lock=True)
+                    if item.id != product.id
+                ]
+                if others:
+                    raise_api_exception(
+                        ErrorCode.PRODUCT_ALREADY_EXISTS,
+                        detail=duplicate_name_detail(new_name, others),
+                    )
 
         # 验证减扣比例是否在有效范围内
         if 'ecpm_deduct_ratio' in product_data:
@@ -453,18 +480,15 @@ class ProductService(BaseService[Product]):
                     detail=f"客户ID {new_client_id} 不存在"
                 )
 
-            # 检查新客户是否已有同名产品
-            existing_product_result = await self.db.execute(
-                select(Product).where(
-                    Product.client_id == new_client_id,
-                    Product.name == product.name
-                )
-            )
-            existing_product = existing_product_result.scalar_one_or_none()
-            if existing_product:
+            # 目标客户已有另一条同名产品时不能转入（名称全局也不能重复）
+            same_name_on_target = [
+                item for item in await fetch_products_by_name(self.db, product.name, lock=True)
+                if item.id != product.id and item.client_id == new_client_id
+            ]
+            if same_name_on_target:
                 raise_api_exception(
                     ErrorCode.PRODUCT_ALREADY_EXISTS,
-                    detail=f"目标客户ID {new_client_id} 已存在同名产品：{product.name}。无法转移产品"
+                    detail=duplicate_name_detail(product.name, same_name_on_target),
                 )
 
             # 处理产品分配历史转移
@@ -540,7 +564,17 @@ class ProductService(BaseService[Product]):
             if hasattr(product, key):
                 setattr(product, key, value)
 
-        await self.db.flush()
+        attempted_name = product.name
+        try:
+            await self.db.flush()
+        except IntegrityError as exc:
+            await self.db.rollback()
+            if is_duplicate_product_name_error(exc):
+                raise_api_exception(
+                    ErrorCode.PRODUCT_ALREADY_EXISTS,
+                    detail=f"产品名称「{attempted_name}」已存在，不能改成重复名称。",
+                )
+            raise
         await self.db.refresh(product)
 
         try:
@@ -597,14 +631,11 @@ class ProductService(BaseService[Product]):
             old_client_id = product.client_id
 
             # 检查临时挂靠客户是否已有同名产品
-            existing_product_result = await self.db.execute(
-                select(Product).where(
-                    Product.client_id == admin_default_client.id,
-                    Product.name == product.name,
-                    Product.id != product_id
-                )
-            )
-            existing_product = existing_product_result.scalar_one_or_none()
+            existing_rows = [
+                item for item in await fetch_products_by_name(self.db, product.name)
+                if item.id != product_id and item.client_id == admin_default_client.id
+            ]
+            existing_product = existing_rows[0] if existing_rows else None
 
             if existing_product:
                 logger.warning(

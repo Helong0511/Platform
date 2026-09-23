@@ -13,6 +13,7 @@ from app.api_v1.excel.ad_data_import.excel_reader import (
     check_excel_duplicates, process_column_mapping, validate_and_read_excel,
 )
 from app.api_v1.excel.ad_data_import.product_resolver import build_product_maps
+from app.core.product_name import choose_product_match
 from app.api_v1.excel.ad_data_import.row_processor import process_row_data
 from app.api_v1.excel.utils import parse_date_value
 from app.core.exceptions import handle_integrity_error, raise_api_exception
@@ -117,12 +118,9 @@ async def import_ad_data_handler(
                     continue
                 # 查找产品ID
                 matches = product_name_map.get(product_name, [])
-                # ---------- 条件分支 ----------
-                if matches:
-                    product_id = matches[0]["product_id"] if len(matches) == 1 else (
-                        next((m["product_id"] for m in matches if m["client_id"] == client_id), None)
-                        if client_id else matches[0]["product_id"]
-                    )
+                chosen = choose_product_match(matches, client_id)
+                if chosen:
+                    product_id = chosen["product_id"]
                     # ---------- 条件分支 ----------
                     if product_id:
                         date_product_pairs.add((data_date, product_id))

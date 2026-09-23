@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import pandas as pd
 
 from app.core.audit_log import log_update, log_delete, log_user_action
+from app.core.product_name import fetch_products_by_name, insert_unique_product, normalize_product_name
 from app.core.database import get_db
 from app.core.security import get_current_user, is_admin
 from app.core.constants import MAX_PAGE_SIZE
@@ -380,25 +381,16 @@ async def import_tb_search_data(
             # 解析日期：使用统一的日期键规范化函数
             date_val = normalize_date_key(parse_date_value(row["DATE"]))
                 
-            # 解析产品名称（SUBID）
-            product_name = str(row["SUBID"]).strip()
-            # ---------- 条件分支 ----------
+            # 解析产品名称（SUBID）。同名只保留一条，已存在则复用最小 ID。
+            product_name = normalize_product_name(str(row["SUBID"]) if pd.notna(row.get("SUBID")) else "")
             if not product_name:
                 raise ValueError("SUBID(产品名称)不能为空")
-                
-            # 根据名称查找产品
-            # 注意：如果存在同名产品（不同客户），这里可能会有歧义
-            # 这里取第一个匹配的产品
-            product_res = await db.execute(select(Product).where(Product.name == product_name))
-            product = product_res.scalars().first()
-            
-            # ---------- 条件分支 ----------
-            if not product:
-                # 产品不存在，自动创建
-                # 1. 查找或创建临时挂靠客户：使用统一的辅助函数
+
+            existing_products = await fetch_products_by_name(db, product_name)
+            if existing_products:
+                product = existing_products[0]
+            else:
                 client = await find_or_create_default_client(db, current_user.id)
-                
-                # 2. 创建新产品
                 new_product = Product(
                     client_id=client.id,
                     name=product_name,
@@ -406,9 +398,7 @@ async def import_tb_search_data(
                     ecpm_deduct_ratio=0.0,
                     revenue_deduct_ratio=0.0
                 )
-                db.add(new_product)
-                await db.flush() # 获取ID
-                product = new_product
+                product, _created = await insert_unique_product(db, new_product)
             
             subid = product.id
                 

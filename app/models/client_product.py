@@ -102,7 +102,7 @@ class Product(Base):
 
     __table_args__ = (
         Index("idx_product_client", "client_id"),
-        Index("idx_product_name", "name"),  # 优化产品名称查询
+        UniqueConstraint("name", name="uq_products_name"),
     )
 
 class AdData(Base):

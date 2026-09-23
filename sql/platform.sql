@@ -912,7 +912,7 @@ CREATE TABLE IF NOT EXISTS `products`  (
   `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_product_client`(`client_id` ASC) USING BTREE,
-  INDEX `idx_product_name`(`name` ASC) USING BTREE,
+  UNIQUE INDEX `uq_products_name`(`name` ASC) USING BTREE,
   FULLTEXT INDEX `ft_products_name`(`name`) WITH PARSER `ngram`,
   FULLTEXT INDEX `ft_name`(`name`),
   CONSTRAINT `fk_products_client` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT

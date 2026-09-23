@@ -49,7 +49,7 @@
           <div class="form-hint-container">
             <div class="form-hint" v-if="productNames.length > 0">
               <el-icon :size="16"><InfoFilled /></el-icon>
-              <span>已找到 {{ productNames.length }} 个产品（包括关联管理员的客户和其他客户的产品），可选择或手动输入新名称。选择其他客户的产品时，将直接将该产品的客户归属改为当前客户。</span>
+              <span>产品名称不能重复。已找到 {{ productNames.length }} 个产品，选择已有名称会改归属，输入新名称才会新建。</span>
             </div>
             <div class="form-hint" v-else-if="productNamesLoading">
               <el-icon :size="16"><Loading /></el-icon>
@@ -57,7 +57,7 @@
             </div>
             <div class="form-hint" v-else>
               <el-icon :size="16"><InfoFilled /></el-icon>
-              <span>当前客户已有所有产品名称，或数据库中没有产品，请手动输入新名称</span>
+              <span>请输入尚未使用的产品名称。名称不能与已有产品重复。</span>
             </div>
           </div>
         </div>

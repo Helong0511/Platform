@@ -1451,6 +1451,7 @@ async def import_training_data(
         from app.api_v1.excel.import_handler import (
             validate_and_read_excel, process_column_mapping, build_product_maps
         )
+        from app.core.product_name import choose_product_match
 
         # ====== 第一步：检查冲突 ======
         logger.info("开始检查训练数据冲突...")
@@ -1479,11 +1480,9 @@ async def import_training_data(
 
                 # 查找产品ID
                 matches = product_name_map.get(product_name, [])
-                if matches:
-                    product_id = matches[0]["product_id"] if len(matches) == 1 else (
-                        next((m["product_id"] for m in matches if m["client_id"] == client_id), None)
-                        if client_id else matches[0]["product_id"]
-                    )
+                chosen = choose_product_match(matches, client_id)
+                if chosen:
+                    product_id = chosen["product_id"]
                     if product_id:
                         # 确保日期格式一致
                         if isinstance(data_date, datetime):

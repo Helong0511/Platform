@@ -261,7 +261,7 @@ ERROR_SOLUTIONS = {
     ErrorCode.CLIENT_NOT_FOUND: "请确认客户ID是否正确",
     ErrorCode.CLIENT_ALREADY_EXISTS: "该客户已存在",
     ErrorCode.PRODUCT_NOT_FOUND: "请确认产品ID是否正确",
-    ErrorCode.PRODUCT_ALREADY_EXISTS: "该产品已存在",
+    ErrorCode.PRODUCT_ALREADY_EXISTS: "产品名称不能重复，请使用已有产品或更换名称",
     ErrorCode.OPERATION_FAILED: "请检查操作数据并重试",
     ErrorCode.RESOURCE_NOT_FOUND: "请确认资源是否存在",
     ErrorCode.RESOURCE_ALREADY_EXISTS: "请使用其他标识",
