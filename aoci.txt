@@ -1,0 +1,920 @@
+#====Platform 完整索引====
+#Locale: zh-CN
+#===头部索引===
+#【部署】Python 3.10 FastAPI + Vue3 管理端; 本地 Windows(Redis+MySQL8) 开发; 生产 Ubuntu22 systemd 双服务 Platform-backend(Gunicorn :8960) 与 Platform-scheduler(:8961); 依赖 pip install -r requirements.txt; 前端 npm/Vite 构建; SQL 真源 sql/platform.sql
+#【系统】Platform — 广告变现与渠道运营中台 | FastAPI+SQLAlchemy+APScheduler+Vue3 | 上游广告主拉数入库、下游客户结算展示、Postback/追踪/短链/斗篷; 客户界面禁止暴露扣减字样; 未授权禁止操作生产
+#【整体规范】
+#三分法: #开头=说明性内容(规则/字典/分区标题,不被工具提取但须阅读理解) | ===描述/绝对路径/===开启目录段 | 目录段内其余非空行=条目
+#目录示例: ===后端索引E:/Platform/app/=== 即"描述+目录绝对路径+===",单独一行开启一个目录段
+#条目格式: 文件名[标签]: F:功能 | R:关联 | A:接口 | S:信息;单行;四段齐备;无内容用 - 占位
+#F 口径: 写一个简短明确的核心功能锚点,通常控制在10个字以内;语义完整优先,确有需要可以适度超过;禁止翻译文件名、堆砌多个职责或使用批量模板句
+#R 口径: 只列跨文件强依赖(逗号分隔精确路径或模块名);日志/通用工具/框架自带不列;不得机械复制import或依赖清单
+#A 口径: 只列本文件对外提供的API、入口或契约;内部函数不列;无则写 -
+#S 纪律: 只写「文件名+标签+F+R+A推不出,但模型理解系统或修改代码时必须知道」的信息;两问皆是才写;禁演进叙事、禁时间维度(版本/日期/修复痕迹);字数配额见下方S配额行
+#多标签体系: 后端与前端可共用下方字典; 数据库脚本与运维文件用同套 A/B 取值
+#【正确索引示例】
+#main.go[CRT9OT]: F:进程入口 | R:internal/cli/root.go | A:- | S:MCP模式stdout仅允许JSON-RPC协议流,日志必须写stderr
+#atomic.go[FAT9AT]: F:原子写 | R:- | A:AtomicWrite | S:临时文件必须与目标位于同一目录;失败时必须保留原文件
+#说明: 示例来自真实Go项目,只用于说明F/R/A/S的信息分工与颗粒度;实际标签必须依据当前项目字典判断
+#===索引规范===
+#【格式】文件名[标签]: F:功能 | R:关联 | A:接口 | S:信息
+#【标签ABCDE】紧凑形态如 [SC9];合法形态仅紧凑连写与点分两种,逗号分隔标签视为非标
+#A层级: R-路由 S-服务 C-核心 M-模型 H-Schema Q-查询 T-任务 W-中间件 X-脚本 F-前端 U-工具 D-数据/SQL O-运维
+#B模块: A广告数据 P产品/客户 B Postback K追踪 L短链/斗篷 G调度/上游 N通知/Telegram U用户鉴权 Y系统配置 Z测试/脚本
+#C重要度: 9核心 8高频 7业务 5常规 3辅助 1边缘
+#D特征(可选): A异步 J鉴权 T事务 B批量 I导入 E导出 V校验
+#E规模: L大>400 M中200-400 S小100-200 T微<100
+#S配额: C9-8≤600 C7-4≤200 C3-1≤50
+#===索引规范完毕===
+#===头部索引完毕===
+===E:/Platform/===
+.gitignore[OU3M]: F:Git忽略规则 | R:- | A:- | S:强制保留 frontend/package-lock.json与sql/platform.sql;忽略.cursor与xlsx
+sc.bat[OY3T]: F:清理本地缓存目录 | R:- | A:- | S:硬编码扫描 E:\Platform 下 __pycache__ 与 .pytest_cache；文件
+.gitattributes[OU9T]: F:统一文本LF检出 | R:- | A:- | S:* text=auto eol=lf，避免 Windows autocrlf 改写导致 AOCI 基线字节不一致
+.pre-commit-config.yaml[OU5T]: F:提交前质量门禁 | R:- | A:- | S:bandit 扫描 app 目录；eslint 仅作用于 frontend/ 路径
+AGENTS.md[OU9S]: F:Agent强制守则 | R:.cursor/rules/* | A:- | S:汇总 alwaysApply 项目规则与交付自检；未获当次明确同意禁止连接或操作生产
+aoci.txt[CU9T]: F:仓库认知索引头 | R:- | A:- | S:含部署/系统摘要与 F-R-A-S 标签字典；目录段 E:/Platform/ 下尚无业务条目
+gunicorn.conf.py[OZ8M]: F:生产Gunicorn配 | R:NoProxyHeadersUvicornWorker,settings,systemd | A:bind8960/8961,workers,timeout120 | S:GUNICORN_ROLE分pid/日志;preload默认关;post_fork重建日志队列
+pyproject.toml[RZ3T]: F:Pytest入口配置 | R:tests目录 | A:asyncio_mode auto,testpaths,pythonpath | S:仅tool.pytest.ini_options四行
+requirements.txt[OZ7T]: F:Python依赖锁定 | R:FastAPI,Gunicorn,googleads,pytest | A:pip install -r requirements.txt | S:httpx0.28.1锁telegram-bot;bcrypt<4.1;googleads≥47
+update_frontend.sh[OZ5S]: F:生产前端发布 | R:systemctl,npm,Platform双服务 | A:git pull,日志/cache清理,npm ci build | S:停scheduler→backend→mysql;保留有内容error.log
+平台版本迭代报告.md[OZ9L]: F:版本迭代报告 | R:Git全量历史,5.1变更节 | A:能力域/提交活跃度表格 | S:无独立Tag/CHANGELOG;行为修复须追加5.1
+
+===E:/Platform/.github/workflows/===
+ci.yml[OY5T]: F:双端CI流水线 | R:- | A:- | S:未检出 tests/test_*.py 时 pytest 必须失败，禁止无测试绿色通过
+
+===E:/Platform/frontend/===
+index.html[FY5T]: F:Vite应用壳页 | R:frontend/src/main.js | A:- | S:-
+package-lock.json[FU3L]: F:锁定前端依赖树 | R:frontend/package.json | A:- | S:与 .gitignore 策略一致，此锁文件必须入库以保证 CI/部署可重复安装
+package.json[FY8T]: F:前端工程配置 | R:- | A:npm run dev/build/lint/preview | S:本地 dev 固定端口 3310
+.eslintrc.cjs[FY7S]: F:前端ESLint规范 | R:Vue3工程 | A:extends/re/rules | S:生产warn console/debugger
+privacy.html[FP7S]: F:游戏站点隐私政策页 | R:静态托管 | A:独立HTML | S:英文Games Privacy Policy
+vite-plugin-version.js[FZ5T]: F:构建写版本号 | R:vite.config.js,versionCheck | A:versionPlugin,__APP_VERSION__ | S:serve为dev;build写public/version.json并emit资产
+vite.config.js[FZ5S]: F:Vite构建配置 | R:versionPlugin,copyDistStaticPlugin | A:别名@,dev代理/api→8960,manualChunks | S:生产esbuild drop console;sourcemap false;warmup常用视图
+
+===E:/Platform/frontend/src/===
+App.vue[FY5TS]: F:根路由与全局容错 | R:- | A:- | S:capture 阶段拦截并吞掉浏览器扩展引起的 error/unhandledrejection，避免控制台误报
+main.js[FY8T]: F:Vue应用入口 | R:axiosConfig,pinia,router | A:createApp/mount | S:须先initAxios与CSRF;生产启用versionCheck
+style.css[FY5T]: F:主样式入口 | R:variables/common/mobile.css | A:@import聚合 | S:含Element Plus全局覆盖
+
+===E:/Platform/frontend/src/views/===
+Dashboard.vue[FA8L]: F:仪表盘趋势与指标 | R:frontend/src/api/dashboard | A:- | S:period 支持 day/week/month/last_month；ECharts 趋势与统计卡片数据均来自 /dashboard 接口
+Login.vue[FU8L]: F:用户名密码登录 | R:frontend store 认证流 | A:- | S:表单字段 username/password 对接 OAuth2PasswordRequestForm 的 /auth/login
+AdData.vue[FA9L]: F:广告明细维护页 | R:AdDataFilterCard,adDataDimension,useDataPageFilterCascade | A:列表/编辑/导出/批量删 | S:行级维度country与ad_unit互斥;管理员批量删与扣前列
+AlertManagement.vue[FY8L]: F:告警规则与记录 | R:monitoring API | A:getAlertRules/getAlerts/规则CRUD | S:顶部统计为已触发记录数非规则数
+ApiDocumentation.vue[FP8L]: F:客户API文档页 | R:useClientApiDocExamples | A:- | S:登录后注入HMAC签名与ad_data示例;无API凭据时警告
+MonitoringDashboard.vue[FY8L]: F:系统监控仪表盘 | R:monitoring API | A:getMonitoringMetrics/cleanupFileLogsNow | S:QPS/响应/错误率/资源卡片;可触发文件日志清理
+NotFound.vue[FU3T]: F:404兜底页 | R:vue-router | A:- | S:未匹配路由展示;router-link回/dashboard
+PerformanceOptimization.vue[FY8L]: F:性能优化闭环页 | R:optimization API | A:getBottlenecks/getOptimizationPlans/verify | S:瓶颈列表与方案approve/start/complete/reject全流程
+TrendAnalysis.vue[FY8L]: F:趋势分析与预测 | R:monitoring API,trendPrediction | A:getTrendData/getTrendPredict/getTrendSummary | S:Canvas折线图;预测默认60分钟horizon
+
+===E:/Platform/app/api_v1/===
+__init__.py[RY9M]: F:聚合APIv1路由 | R:app/api_v1 各子模块 router | A:api_router,main_router | S:client_api/postback/tracking/bft 无前缀挂载；short-links 与 monitoring 依赖 require_admin
+ad_data.py[RA9L]: F:广告数据CRUD汇总 | R:app/services/ad_data_service | A:GET/PUT/DELETE /ad-data/* | S:列表经 AdDataResponse 校验后仍保留 data_source/report_type 等元字段，防 response_model 裁剪
+dashboard.py[RY7S]: F:仪表盘统计趋势 | R:app/services/dashboard_service | A:GET /dashboard/stats,/trend-data,/recent-ad-data | S:统计缓存约 1 分钟；客户仅看自有数据，管理员看全量
+tb_search_data.py[RY9IL]: F:TB搜索数据管理 | R:app/services/ad_data/queries/join_helpers.py | A:分页列表、Excel 导入、单条/批量删改、筛选下拉 | S:非管理员列表限名下客户；展示经 apply_deduct_ratio
+
+===E:/Platform/app/api_v1/auth/===
+__init__.py[RU9T]: F:合并认证子路由 | R:app/api_v1/auth/auth.py,app/api_v1/auth/refresh.py | A:router | S:当前用户信息走 GET /users/me，本包不提供 /auth/me
+auth.py[RU9M]: F:登录登出签发令牌 | R:app/services/session_service | A:POST /auth/login,POST /auth/logout | S:客户角色校验 IP 白名单且 127.0.0.1 恒允许；登录失败审计不区分用户名或密码错误
+refresh.py[RU8M]: F:刷新访问令牌 | R:app/services/session_service | A:POST /auth/refresh | S:优先 HttpOnly Cookie refresh_token，Body 兼容旧客户端；失败清除 Cookie，TokenReuse 会撤销会话
+
+===E:/Platform/app/api_v1/clients/===
+__init__.py[RP9T]: F:导出客户路由 | R:app/api_v1/clients/clients.py | A:router | S:-
+clients.py[RP8L]: F:客户CRUD与导出 | R:app/services/client_service | A:GET/POST/PUT/PATCH/DELETE /clients/* | S:除创建响应外不返回明文 API 密钥，仅 has_api_key；创建时一次性返回 key
+
+===E:/Platform/app/api_v1/cpl/===
+__init__.py[RG9T]: F:导出CPL路由集 | R:app/api_v1/cpl 各子模块 | A:advertisers_router 等 | S:-
+advertisers.py[RG8S]: F:广告主CRUD | R:app/services/cpl/advertiser_service | A:POST/GET/PUT/DELETE /advertisers/* | S:写操作需管理员；列表按当前用户数据权限过滤
+caps.py[RG8M]: F:Offer转化上限Cap | R:app/services/cpl/cap_service | A:CRUD /caps/*,POST /caps/check-consistency | S:全部端点仅管理员；含 Cap 计数一致性检查与修复
+discounts.py[RG8M]: F:Offer渠道扣量比例 | R:app/services/cpl/discount_service | A:CRUD /discounts/* | S:扣量配置仅管理员可见
+offers.py[RG9L]: F:Offer管理与统计 | R:app/services/cpl/offer_service | A:CRUD /offers/* | S:客户响应剥离上游价、Cap、Tracklink 等；创建/更新可联动生成主短链
+publishers.py[RG8M]: F:渠道CRUD | R:app/services/cpl/publisher_service | A:POST/GET/PUT/DELETE /publishers/* | S:列表与详情响应附带 client_name 便于管理端展示
+
+===E:/Platform/app/api_v1/cpl/affiliate_debug/===
+__init__.py[RG9T]: F:导出联调测试路由 | R:app/api_v1/cpl/affiliate_debug/affiliate_tests.py | A:affiliate_tests_router | S:-
+affiliate_tests.py[RG7M]: F:模拟渠道Postback联调 | R:- | A:POST/GET /affiliate-tests/* | S:出站 Postback URL 须通过 SSRF 校验；记录写入 AffiliateTest 并记审计
+
+===E:/Platform/app/api_v1/cpl/conversions/===
+__init__.py[RG9T]: F:导出转化三路由 | R:clicks.py,deductions.py,summary.py | A:clicks_router,conversion_deductions_router,conversion_summary_router | S:-
+clicks.py[RG8S]: F:短链点击记录查询 | R:app/services/click_service | A:GET/POST /clicks/* | S:全部端点仅管理员
+deductions.py[RG8L]: F:转化扣减规则管理 | R:app/services/cpl/conversion_deduction_service | A:/conversion-deductions/* | S:规则与日志仅管理员；支持批量改状态/删除及 Excel 导出
+summary.py[RG7S]: F:转化汇总统计 | R:app/services/cpl/conversion_service | A:GET /conversion-summary/* | S:使用 get_db_readonly；渠道或管理员按数据权限过滤
+
+===E:/Platform/app/api_v1/excel/===
+__init__.py[RA9T]: F:导出Excel路由 | R:app/api_v1/excel/router.py | A:router | S:-
+export_handler.py[RA8L]: F:广告数据Excel导出 | R:app/services/ad_data/queries/daily_summary_query | A:export_ad_data_handler | S:明细与每日汇总导出各限 50000 行；分组列与 DailySummaryQuery 及 dimension 参数对齐
+import_handler.py[RA3T]: F:导入入口垫片 | R:app/api_v1/excel/ad_data_import | A:import_ad_data_handler(重导出) | S:-
+router.py[RA8S]: F:Excel HTTP路由 | R:import_handler.py,export_handler.py | A:POST /excel/import/ad-data,GET /excel/export/ad-data | S:广告数据导入仅管理员；导出按角色过滤数据范围
+utils.py[RA8M]: F:Excel上传校验解析 | R:- | A:validate_excel_file,parse_date_value,allowed_file | S:仅允许 xlsx/xls 且校验 MIME；受 settings.MAX_UPLOAD_SIZE 限制
+
+===E:/Platform/app/api_v1/excel/ad_data_import/===
+__init__.py[RA9T]: F:重导出导入管线 | R:handler,excel_reader,row_processor 等 | A:import_ad_data_handler 等 | S:统一对外符号供 router 与 import_handler 垫片引用
+excel_reader.py[RA8M]: F:读表与列映射 | R:app/api_v1/ml_model/ml_model.py ColumnMappingService | A:validate_and_read_excel,process_column_mapping | S:mapping_complete 由必需字段映射是否齐全决定能否继续导入
+handler.py[RA8M]: F:广告Excel导入主流程 | R:excel_reader.py,row_processor.py | A:import_ad_data_handler | S:导入完成后可触发待处理数据下降 Telegram 预警
+helpers.py[RA5S]: F:Excel单元格规范化 | R:- | A:normalize_excel_product_name,clean_numeric_value | S:pandas 空值经 str 后的 nan/NaT 占位符不得当作有效产品名
+product_resolver.py[RA7M]: F:导入时产品匹配 | R:app/core/product_name | A:build_product_maps,find_or_create_product | S:可据 Excel 客户列解析并关联 Client，必要时创建产品与分配
+row_processor.py[RA8M]: F:逐行写入AdData | R:app/core/ad_data_processor | A:process_row_data | S:Excel 若填国家或广告单元列会被忽略并提示（当前导入业务按日报维度）
+
+===E:/Platform/app/api_v1/external/===
+__init__.py[RY9T]: F:导出外部API路由 | R:client_api.py,telegram.py | A:client_api_router,telegram_router | S:-
+client_api.py[RP9L]: F:客户签名开放接口 | R:app/core/api_auth,app/services/ad_data/queries/client_api_query | A:POST /client_data,POST /client_products,GET /client/api-key | S:MD5 签名且请求时间差≤10秒；审计与 Telegram 在 BackgroundTasks 异步执行；对外字段不得含扣减字样
+telegram.py[RN8L]: F:Telegram Bot管理 | R:app/core/telegram | A:GET/POST /telegram/status,/send,/diagnostic 等 | S:依赖进程内 Bot 线程与 TELEBOT 可用性；管理端端点需管理员
+
+===E:/Platform/app/api_v1/ml_model/===
+__init__.py[RA9T]: F:导出列映射路由 | R:app/api_v1/ml_model/ml_model.py | A:router | S:-
+ml_model.py[RA9L]: F:Excel列名智能映射 | R:models/column_mapping_rules.json | A:POST /ml-model/parse-excel,/save-mapping,/import 等 | S:REQUIRED_FIELDS 共 11 项决定 mapping_complete；规则 JSON 落盘而非训练.pkl
+
+===E:/Platform/app/api_v1/postback/===
+__init__.py[RB9T]: F:合并Postback子路由 | R:routes.py,bft.py,ip_whitelist.py | A:router,bft_postback | S:须先 include ip_whitelist 再 include 含动态路径的 routes，避免固定端点被覆盖
+bft.py[RB8T]: F:BFT回调兼容入口 | R:app/services/cpl/postback_bft_service.py | A:GET/POST /bft/postback | S:保留历史路径；新对接请走 /postback/bft
+dependencies.py[RB5T]: F:Postback依赖封装 | R:- | A:get_db_dependency,get_admin_dependency | S:封装 get_db/require_admin 供路由 Depends 统一引用
+ip_whitelist.py[RB7BM]: F:Postback IP白名单 | R:app/services/cpl/postback_ip_whitelist_service.py | A:/postback/ip-whitelist CRUD 与 batch | S:-
+postback.py[SB8T]: F:Postback包聚合 | R:app/api_v1/postback/routes | A:导出 router 与各 handler | S:原 /conversion-logs 已废弃，统一用 /postback/conversions
+
+===E:/Platform/app/api_v1/postback/handlers/===
+__init__.py[SB8T]: F:Postback服务单例导出 | R:app/services/cpl/postback_* | A:conversion_handler,receive_handler 等 __all__ | S:-
+
+===E:/Platform/app/api_v1/postback/routes/===
+__init__.py[RB7T]: F:Postback管理路由聚合 | R:conversions,forward_logs,pending,diagnostic,receive | A:router | S:-
+conversions.py[RB8JT]: F:转化查询与统计 | R:app/api_v1/postback/handlers | A:/postback/conversions,/stats,PUT status,/check-duplicates | S:已融合原转化日志查询能力
+diagnostic.py[RB7JT]: F:Postback链路诊断 | R:app/api_v1/postback/handlers | A:GET /postback/diagnose | S:-
+forward_logs.py[RB7JT]: F:下游转发日志 | R:app/api_v1/postback/handlers | A:GET /postback/forward-logs,POST …/resend | S:-
+pending.py[RB7JT]: F:待确认转化审批 | R:app/api_v1/postback/handlers | A:/postback/pending-conversions 查询与 approve/reject | S:-
+receive.py[RB9T]: F:多平台Postback接收 | R:app/core/database.get_postback_db | A:GET/POST /postback/{platform} | S:回调使用 postback 专用会话而非默认业务库
+
+===E:/Platform/app/api_v1/products/===
+__init__.py[RP7T]: F:产品模块路由导出 | R:- | A:router,assignments_router | S:-
+assignments.py[RP7JM]: F:产品分配历史 | R:app/services/product_assignment_service.py | A:产品/客户 assignments、dates 修正、validate、cleanup | S:客户仅可查自身产品分配；日期修正仅管理员
+products.py[RP9EL]: F:产品CRUD | R:app/services/product_service.py,app/core/product_assignment.py | A:/available-names,产品 CRUD | S:有关联 AdData 不可删；换客户须走分配历史
+
+===E:/Platform/app/api_v1/system/===
+__init__.py[RY8T]: F:系统运维路由聚合 | R:- | A:scheduled_tasks_router 等子路由导出 | S:telegram_status 等由 api_v1 其它入口单独挂载
+ad_data_health.py[RA8JM]: F:广告数据健康巡检 | R:app/services/ad_data/baseline_service.py,app/services/ad_data/health_runner.py | A:settings,alerts,baselines,freeze,run,watch-check | S:昨有今无告警在业务时指定小时前不落库不发 Telegram
+audit_logs.py[RY7EM]: F:审计日志查询 | R:app/services/audit_log_service.py | A:GET 列表/stats/clear-all/{id},POST client-error | S:clear-all 为 TRUNCATE 并重置自增
+cache_management.py[RY5S]: F:Redis缓存运维 | R:app/services/cache_management_service.py | A:/cache/entries*,clear-all,clear-pattern,/stats | S:受保护键（如会话）拒绝删除
+cloak_configs.py[RL9JL]: F:斗篷与CAPI配置 | R:app/services/cloak_pixel_mapping.py | A:斗篷 CRUD、桥页上传、test-report | S:磁盘无 {cloak_name}.html 时不可对外启用
+countries.py[RY7BM]: F:国家主数据维护 | R:app/services/country_service.py | A:国家 CRUD、别名、未识别代码列表 | S:-
+notification_configs.py[RN8JL]: F:三级通知策略 | R:app/services/notification_config_service.py | A:client/product/admin 配置 CRUD、测试、通知记录 | S:客户仅能操作自身 client/product 配置
+scheduled_tasks.py[RG9JL]: F:定时任务运维 | R:app/scheduler_module,app/services/gam_scheduled_config_service.py | A:任务列表/编辑/触发/锁释放、GAM 专项端点 | S:响应 enriched 含 supports_manual_date_range 等前端字段
+sensitive_path_probes.py[RY7JL]: F:敏感路径探测治理 | R:app/core/sensitive_path_guard.py | A:探测日志、封禁 IP、统计、cleanup | S:批量封禁单次最多 200 IP、500 条日志关联
+sessions.py[RY8JM]: F:登录会话运维 | R:app/services/session_service.py | A:会话列表/stats、强制下线、revoke-user | S:-
+telegram_status.py[RN5T]: F:Bot运行时运维 | R:app/core/telegram/polling_manager.py | A:GET /runtime-status,POST /restart | S:与 external GET /telegram/status 配置摘要路径并存
+third_party_reports.py[RY7JL]: F:第三方CAPI上报日志 | R:app/core/third_party_report.py | A:列表/详情/stats、PUT 参数、POST 重试 | S:-
+
+===E:/Platform/app/api_v1/tracking/===
+__init__.py[RK7T]: F:追踪模块路由导出 | R:- | A:router,short_links_router | S:-
+short_links.py[RK8AL]: F:短链CRUD与跳转 | R:app/core/short_link_click_counter.py | A:CRUD、generate-code、sync-clicks、公开短码跳转 | S:工具路由须注册在 /{short_code} 动态路由之前
+tracking.py[RK8AM]: F:Offer点击追踪 | R:app/core/tracking/tracklink_generator.py | A:GET /track/click/{offer_id} | S:点击落库走 BackgroundTasks，click_id 冲突自动重生成重试
+
+===E:/Platform/app/api_v1/users/===
+__init__.py[RU7T]: F:用户模块路由导出 | R:- | A:router | S:-
+users.py[RY9JL]: F:用户账户管理 | R:app/services/user_service.py | A:用户 CRUD、/me、改密、export/excel、stats | S:管理 CRUD 需管理员；/me 自助；删用户前查关联 Client
+
+===E:/Platform/app/bootstrap/===
+__init__.py[CY3T]: F:启动辅助包标识 | R:- | A:- | S:实质逻辑在 lifespan、logging_setup、exception_handlers
+exception_handlers.py[CY9TL]: F:全局异常处理 | R:app/core/errors.py | A:register_exception_handlers | S:客户端断连类流异常不记 RUNTIME_ERROR 审计
+lifespan.py[CY8AM]: F:应用生命周期 | R:app/scheduler_module,app/core/telegram | A:lifespan(app) | S:缓存预热仅在单进程或 Gunicorn 首个 API worker
+logging_setup.py[CY8TL]: F:日志体系初始化 | R:- | A:configure_logging,get_logger | S:须在导入其它 app 子模块前调用 configure_logging
+
+===E:/Platform/app/core/===
+ad_data_metadata.py[CA9TL]: F:广告元数据与维度 | R:app/core/country_code.py | A:normalize/infer report_type,refresh_standard_report_types,build_ad_data_metadata_catalog | S:ZZ 非具体国家：有 ad_unit→unit，无 ad_unit→daily
+ad_data_processor.py[CA9AL]: F:API广告入库管道 | R:app/services/ad_data/dual_dimension_check.py | A:process_api_ad_data,build_data_decrease_warning,send_pending_data_decrease_warnings | S:report_type 按行形态推断，非仅入参 report_type
+api_auth.py[CU8JM]: F:客户API签名校验 | R:- | A:verify_signature,verify_client_request | S:MD5 签名受 CLIENT_API_ALLOW_MD5 配置开关；密钥只从库读
+async_orm.py[CU7AT]: F:异步ORM关系安全读 | R:- | A:is_relationship_loaded,get_loaded_relationship,resolve_client_user_full_name | S:未预加载关系禁止读，避免 MissingGreenlet
+audit_log.py[CU8BT]: F:审计日志写入 | R:- | A:log_user_action,log_create/update/delete,commit_audit_log | S:action_type 须在 ALLOWED_ACTION_TYPES 白名单
+auth_response.py[CU9JS]: F:认证Cookie响应 | R:- | A:apply_auth_cookies,build_token_json_response,clear_auth_cookies | S:JSON 不含 token 明文，仅 HttpOnly Cookie 下发
+auth_user_payload.py[CU7JT]: F:登录user载荷 | R:- | A:build_auth_user_payload | S:client.has_api_key 为布尔标志，非密钥明文
+batch_operations.py[CY8BM]: F:AdData批量Upsert | R:- | A:batch_upsert_ad_data,batch_insert_ad_data,batch_update_ad_data | S:-
+bridge_html_sanitize.py[CY7BM]: F:桥页HTML消毒 | R:- | A:sanitize_bridge_html,sanitize_bridge_html_strict | S:剔除 XSS 载体但保留桥页 inline script/style 与 CDN 样式
+cache.py[CU3T]: F:查询缓存兼容层 | R:app/core/infrastructure/cache_compat.py | A:cache_query,get_or_set_cache,invalidate_cache 等 | S:保留 query_cache: 键前缀与原 import 路径
+cache_manager.py[CY7AM]: F:Offer短链缓存编排 | R:app/core/offer_cache.py,app/core/short_link_cache.py | A:CacheManager.warmup_*,invalidate_by_tag | S:tag_keys: 前缀维护标签到 Redis 键映射
+clicks_queue.py[CY8AM]: F:点击Redis削峰队列 | R:app/core/tracking/click_persist.py | A:enqueue_click,reserve_clicks,acknowledge_reserved,requeue_reserved,recover_processing_queue | S:should_persist_clicks_to_db 为 false 时 enqueue 直接成功不落队；recover_processing_queue 仅适合单消费者
+cloak_scripts_paths.py[CL7VM]: F:桥页HTML路径解析 | R:app/core/bridge_html_sanitize.py | A:resolve_bridge_html_read_path,resolve_bridge_html_write_path,read_bridge_html_template_cached,validate_bridge_html_bytes | S:读路径优先 /data/Platform/scripts 再项目 scripts；上传校验与 cloak_configs API 共用 2MB 上限
+config.py[CY9L]: F:全局环境配置 | R:- | A:Settings,settings,detect_production_env,resolve_telegram_token | S:非单测 Windows 固定 development；Linux 生产须显式 PRODUCTION_ENV；CAP/DEDUCTION/CLIENT_API MD5 等 fail-open 未设时 dev 开 prod 关
+constants.py[CY5T]: F:全局魔法常量 | R:- | A:- | S:CLIENT_API 分页/时间戳容差与 Web 后台分页上限分离；SCHEDULED_TASK_RESERVED_NAMES 避免与诊断路由 task_name 冲突
+country_code.py[CY8L]: F:国家码解析筛选 | R:app/models/models.py | A:find_country_code_by_any_format,build_ad_data_country_filter,is_all_regions_country_code | S:ZZ 表全区域、AA/unknown 表未知；无法识别导入可保留原码；英文别名与 DB 多字段按优先级匹配
+csrf.py[CY8JL]: F:CSRF令牌与校验 | R:app/core/redis_client.py | A:CSRFMiddleware,should_skip_csrf_check,issue_csrf_token_for_user,validate_request_origin | S:外部 Postback 回调路径与白名单安全方法可跳过；Origin 仅精确匹配 CORS/Host 禁止父域后缀放行
+csrf_utils.py[CU5T]: F:CSRF安全抛错 | R:- | A:safe_raise_csrf_exception | S:客户端已断开时不抛 HTTPException，改抛 EndOfStream 避免 anyio 二次错误
+database.py[CY9M]: F:异步库会话引擎 | R:app/core/config.py | A:get_db,get_postback_db,get_db_readonly,init_db,AsyncSessionLocal | S:模块加载对 aiomysql.connect 过滤 read_timeout/write_timeout；get_postback_db 不自动 commit；get_db_readonly 成功路径 rollback
+db_errors.py[CY7S]: F:MySQL异常分类 | R:app/core/query_utils.py | A:is_database_unreachable_error,is_table_definition_changed_error,run_with_mysql_schema_retry | S:1412 重试前会 invalidate_assignment_table_cache 并 rollback 会话
+decorators.py[CY7JM]: F:路由权限装饰器 | R:app/core/security.py | A:require_admin,require_roles,check_resource_owner,validate_pagination | S:check_resource_owner 非管理员须匹配资源 user_id 字段，管理员 bypass
+dependencies.py[CY8S]: F:FastAPI依赖聚合 | R:app/services/* | A:get_db_and_admin,*ServiceDep,CurrentUserDep | S:各 get_*_service 每请求新建 Service(db)，非单例
+device_info.py[CK7M]: F:请求设备信息采集 | R:- | A:collect_request_info,parse_user_agent | S:落库 all_headers 时对 Cookie/Authorization/CSRF 等敏感头打 [REDACTED]
+errors.py[CY9L]: F:统一业务错误码 | R:app/core/audit_log.py | A:ErrorCode,create_error_response,record_http_exception_log | S:多数业务错误 HTTP 200 靠 body.code 区分；5xx 会异步写审计并 Telegram 通知
+excel_io.py[CA7ES]: F:Excel读写导出 | R:app/core/excel_security.py | A:build_excel_bytes,read_excel_from_bytes,excel_streaming_response_async | S:读盘前走 zip bomb/行数/defusedxml 限制，阈值来自 settings
+excel_security.py[CA5VS]: F:xlsx上传安全扫描 | R:- | A:validate_xlsx_zip_bomb,enforce_max_rows,ensure_defusedxml | S:进程内只注册一次 defusedxml 补丁 ElementTree
+exceptions.py[CY7S]: F:标准API异常抛出 | R:app/core/errors.py | A:raise_api_exception,handle_integrity_error | S:raise_api_exception 默认把业务错误映射为 HTTP 200（401/403/404/429/500/503 除外）
+fulltext_search.py[CY5S]: F:列表关键词检索 | R:- | A:search_with_fulltext,build_fulltext_query,apply_like_search | S:字段名须字母数字下划线，防 SQL 注入式拼接
+https_middleware.py[WY5JT]: F:生产强制HTTPS | R:app/core/config.py | A:HTTPSRedirectMiddleware | S:CF-Connecting-IP 存在时允许 Flexible SSL 的 HTTP；/bridge/ 路径豁免重定向
+jwt_codec.py[CU8JS]: F:JWT编解码封装 | R:app/core/config.py | A:encode,decode,decode_token_payload,resolve_access_token_from_request | S:替代 python-jose；decode 默认 verify_aud=false；暴露 JWTError 兼容旧命名
+log_file_cleanup.py[CY7L]: F:日志轮转清理归档 | R:app/core/config.py | A:run_file_log_cleanup,classify_log_basename | S:仅扫描 logs 白名单 stem；error 类默认更长保留且优先 gzip 归档
+log_filters.py[OU5S]: F:日志路由与脱敏 | R:- | A:CsrfProbePathFilter,LoggerNamePrefixFilter | S:CsrfProbePathFilter 供 csrf 区分扫描探测与真实 CSRF 失败日志级别
+log_handlers.py[OU5S]: F:多进程安全日志Handler | R:app/core/telegram/runtime_error_notify.py | A:SafeRotatingFileHandler,TelegramRuntimeErrorHandler | S:轮转用 O_EXCL 锁文件跨 worker；handleError 写 __stderr__ 防 LoggingStream 递归
+log_queue.py[OU7S]: F:进程内异步日志队列 | R:app/core/log_handlers.py | A:start_log_queue_listener,make_queue_handler,get_log_queue_stats | S:覆盖 QueueHandler.prepare 保留 exc_info，否则 Telegram 运行时错误通知无栈
+log_utils.py[OU3T]: F:日志PII脱敏 | R:- | A:mask_email,mask_phone,mask_hash_prefix | S:-
+middleware.py[WY9L]: F:安全与访问中间件 | R:app/core/redis_client.py | A:RateLimitMiddleware,SecurityHeadersMiddleware,RequestLoggingMiddleware | S:有效 access_token 用户不限流；/client_data 独立桶；短链路由不限流
+monitoring.py[CY9L]: F:系统监控与告警 | R:app/core/monitoring_redis.py | A:system_monitor,monitoring_router,SystemMonitoringMiddleware | S:monitoring_router 依赖 require_admin；多 worker API 计数靠 Redis 分钟桶汇总
+monitoring_redis.py[CY7AS]: F:跨Worker监控聚合 | R:app/core/redis_client.py | A:record_api_request_async,refresh_api_totals_cache,apply_redis_api_totals | S:仅 status>=500 计 error_count，与进程内监控口径一致
+offer_cache.py[CK7S]: F:Offer热点缓存 | R:app/core/redis_client.py | A:get_offer_advertiser_id,set_offer_cache,invalidate_offer_cache | S:advertiser_id 为空写 __none__ 短 TTL 防穿透；TTL 带随机抖动
+optimization_store.py[OU5S]: F:优化方案Redis存储 | R:app/core/performance_optimization.py | A:load_plans_from_redis,save_plan_to_redis,append_bottleneck_to_redis | S:键 platform:optimization:plans/bottlenecks；Redis 失败回退进程内 dict 不阻断业务
+pagination.py[CY5S]: F:ORM分页查询 | R:app/core/constants.py | A:paginate_query | S:page_size 强制不超过 MAX_PAGE_SIZE
+performance_optimization.py[CY9L]: F:性能优化闭环 | R:app/core/monitoring.py,app/core/optimization_store.py | A:optimization_manager,PerformanceOptimizationManager | S:方案状态 PENDING→VERIFIED；瓶颈与方案多 worker 经 optimization_store 同步
+permission_cache.py[CY8JS]: F:用户权限Redis缓存 | R:app/core/security.py | A:get_user_permissions,invalidate_user_permission_cache | S:客户角色加载 client_id/api_enabled；改用户权限须主动 invalidate
+product_assignment.py[CP9L]: F:产品客户归属区间 | R:app/core/query_utils.py | A:create_product_assignment,get_client_id_for_date,transfer_product_assignment,find_ad_data_assignment_gaps | S:写分配前对产品行 FOR UPDATE；end_date NULL 表当前有效，重叠检测须用 SQL OR 而非 Python 三元
+product_name.py[CP8S]: F:产品名唯一入库 | R:app/models/models.py | A:insert_unique_product,fetch_products_by_name,choose_product_match | S:同名多条复用最小 ID；1062 冲突回读；管理端 create 与入库 insert 策略不同
+query_builder.py[CY8M]: F:链式列表查询 | R:- | A:QueryBuilder,paginated,all | S:filter 仅等值且跳过 None；count 与 list 条件需同步维护
+query_utils.py[CY8M]: F:报表索引友好条件 | R:app/models/models.py | A:date_range_condition,product_assignment_join_condition,check_use_assignment_table | S:禁止对 date 列套 func.date；分配 JOIN 与 AdData.date 直接比较
+redis_client.py[CP9M]: F:异步Redis单例 | R:app/core/config.py | A:get_redis_client,close_redis_client,should_skip_redis_connect | S:不可用返回 None 触发内存降级；非生产 loopback 默认跳过连接除非 REDIS_FORCE；单例绑定创建时事件循环
+security.py[CY9L]: F:JWT与FastAPI鉴权 | R:app/core/errors.py | A:JWTUtils,get_current_user,require_admin,require_client,require_publisher_or_admin | S:RS256/HS256 可配；开发缺 RSA 时可生成临时密钥对；Depends 失败统一 401/403
+sensitive_path_guard.py[CY8M]: F:探测命中处置执行 | R:app/core/sensitive_path_rules.py | A:handle_probe_hit,SensitivePathHitTracker,register_blocked_ip_cache_bust | S:Redis 不可用时内存 LRU 计数；达阈值写 SensitiveBlockedIP 并回调刷新中间件黑名单缓存
+sensitive_path_rules.py[CY8M]: F:敏感路径分级规则 | R:app/core/config.py | A:match_sensitive_path,get_level_policy,SensitivePathLevel | S:等级 1–4 决定日志/404/自动封禁阈值/Telegram；settings 可覆盖 MEDIUM/HIGH/CRITICAL 阈值
+short_link_cache.py[CL8S]: F:短链Redis元数据缓存 | R:app/core/redis_client.py | A:get_short_link_from_cache,set_short_link_to_cache,invalidate_short_link_cache | S:键 short_link:{code} TTL 默认 3600；写缓存可打 offer/channel 标签供 CacheManager 精确失效
+short_link_click_counter.py[CL9L]: F:点击计数异步刷盘 | R:app/core/short_link_cache.py | A:increment_click_count_async,sync_click_counts_to_db,sync_click_counts_to_db_batch | S:Redis 递增+分布式锁；刷盘临时调低 innodb_lock_wait 且须在 finally 还原 SESSION；死锁分批重试
+ssrf_guard.py[CY8S]: F:出站URL SSRF校验 | R:- | A:validate_outbound_url,assert_outbound_url_safe,SSRFForbiddenError | S:仅 http/https；DNS 全部 A/AAAA 解析结果均检禁网段；重定向链须每跳复验
+telegram_utils.py[CU8L]: F:Telegram消息工具 | R:- | A:truncate_message,split_long_message,validate_chat_id,format_telegram_message | S:单条4096字符上限；分片保留行边界
+third_party_report.py[SG8L]: F:第三方广告上报 | R:ThirdPartyReportLog,message_sender | A:create_report_log,report_to_third_party | S:source+adsid唯一；日志掩码邮箱手机
+timezone_utils.py[CY7M]: F:系统时区校验 | R:settings,utils | A:detect_system_timezone,validate_timezone_at_startup,APP_TIMEZONE | S:与settings.TIMEZONE不一致启动告警
+token_blacklist_redis.py[CU7T]: F:JWT Redis黑名单 | R:redis_client | A:add_jti_to_redis_blacklist,is_jti_redis_blacklisted | S:TTL=Token剩余有效期；Redis不可用回退MySQL
+utils.py[CY9L]: F:通用工具集 | R:settings,constants | A:get_app_now_naive,get_client_ip,format_percentage | S:业务日期用naive北京时间；IP仅在可信代理时读转发头
+uvicorn_worker.py[CY5TT]: F:GunicornWorker配置 | R:- | A:NoProxyHeadersUvicornWorker | S:proxy_headers=false由应用层可信代理解析
+validation.py[CY8VL]: F:输入校验清理 | R:settings | A:validate_username,validate_password,sanitize_input,validate_cron_expression | S:SQL/XSS检测仅告警；密码bcrypt最大72字节
+
+===E:/Platform/app/core/cap/===
+__init__.py[CK8BT]: F:Cap模块导出 | R:app/core/cap/cap_manager.py,app/core/cap/consistency_checker.py | A:check_cap,increment_cap_count,reset_daily_caps,check_cap_consistency | S:-
+cap_manager.py[CG9AL]: F:Offer Cap限流 | R:app/core/cap/redis_counter.py | A:check_cap,increment_cap_count,reset_daily_caps,rollback_cap_redis_counts | S:Postback 流水线以 Redis 计数为准做日/总 cap
+cap_sync.py[CG7BM]: F:Cap计数同步DB | R:app/core/cap/redis_counter.py | A:CapSynchronizer.sync_all_active_caps,schedule_cap_sync,get_cap_sync_status | S:Redis 不可用时跳过同步并告警
+consistency_checker.py[CK7S]: F:Cap双写对账 | R:app/models/models.py,app/core/cap/redis_counter.py | A:check_cap_consistency | S:fix_inconsistencies 以 OfferCap 库计数为准写回 Redis；日 Cap 若 cap_start_date 非当日则库侧日计数按 0 比对
+redis_counter.py[CG8AM]: F:Redis原子Cap计数 | R:app/core/config.py | A:RedisCapManager,get_daily_cap_key,get_total_cap_key | S:Redis/Lua 失败与无连接时依 settings.CAP_FAIL_OPEN 放行或拒绝；Lua 先判限再递增，超限返回 -1 不改 key
+
+===E:/Platform/app/core/deduction/===
+__init__.py[CP7T]: F:扣减包导出 | R:app/core/deduction/deduction_manager.py | A:find_deduction_config,apply_deduction,DeductionManager | S:-
+deduction_cache.py[CP7S]: F:扣减配置缓存 | R:app/core/infrastructure/cache_compat.py | A:DeductionConfigCache.get_config | S:缓存存 dict 再重建 ConversionDeductionConfig，避免 ORM 直序列化
+deduction_manager.py[CY9AL]: F:转化扣减决策 | R:app/core/deduction/deduction_cache.py | A:find_deduction_config,apply_deduction,DeductionManager | S:配置优先级 offer>advertiser>publisher；异常时 DEDUCTION_FAIL_OPEN 可返回 None 放行
+
+===E:/Platform/app/core/discount/===
+__init__.py[CP7T]: F:渠道扣价导出 | R:app/core/discount/discount_manager.py | A:calculate_discount,get_discount_info | S:-
+discount_manager.py[CP7S]: F:渠道结算扣价 | R:app/models/models.py | A:calculate_discount,get_discount_info | S:优先级 offer 级 OfferDiscount > channel 级 > Publisher.price_discount 默认比例
+
+===E:/Platform/app/core/infrastructure/===
+CACHE_USAGE.md[CU5M]: F:缓存层使用说明 | R:app/core/infrastructure/cache_compat.py | A:- | S:业务应优先 cache_compat 与 cache_advanced，勿与旧 app.core.cache 混用键前缀
+__init__.py[CU3T]: F:基础设施包说明 | R:- | A:- | S:-
+cache.py[CU8M]: F:缓存后端抽象 | R:app/core/redis_client.py | A:get_cache_backend,CacheBackend,RedisCacheBackend | S:Redis 不可用时后端读写的 get/set 静默降级为 None/false
+cache_advanced.py[CY7AM]: F:缓存穿透击穿防护 | R:app/core/infrastructure/cache.py | A:get_with_none_cache,get_with_lock_protection,distributed_lock | S:NONE_MARKER 单例区分「命中空值」与未命中，须用 is 判断
+cache_compat.py[CU8M]: F:旧版缓存兼容层 | R:app/core/infrastructure/cache.py | A:get_cached,set_cached,invalidate_cache,cache_query | S:legacy 键自动补 query_cache: 前缀；与 metrics 联动统计命中
+cache_metrics.py[OU5S]: F:缓存命中率指标 | R:- | A:get_metrics_collector,CacheMetricsCollector | S:按 key_prefix 分桶累计 hits/misses/errors
+
+===E:/Platform/app/core/postback/===
+__init__.py[CB9T]: F:Postback模块入口 | R:app/core/postback/handlers_registry.py | A:PostbackProcessor,register_handler,get_handler | S:import 时 register_postback_handlers 注册各平台 handler
+bft_handler.py[CB7S]: F:BFT回调解析 | R:app/core/postback/handlers.py | A:BftPostbackHandler.validate,BftPostbackHandler.normalize | S:payout 须数值>0，不能用布尔假值判 0；clk_id 多别名归一为 conversion_id
+errors.py[CB7T]: F:扣量失败业务异常 | R:- | A:DeductionProcessingError | S:扣量计算或日志写入失败且 fail-close 时由流水线向上抛出，区别于普通校验错误
+forwarder.py[CB8L]: F:转化下游HTTP转发 | R:app/core/postback/forwarding/cache_manager.py,app/core/postback/transformers/click_associator.py | A:PostbackForwarder.forward_to_publisher,PostbackForwarder.forward_to_product | S:转发失败写 forward_log 并可入队 PostbackForwardQueue 重试；成功/失败可触发管理员 Telegram
+handlers.py[CB8S]: F:上游Postback处理器契约 | R:app/models/models.py | A:PostbackHandler,register_handler,get_handler,list_platforms | S:normalize 契约字段与通用 DataNormalizer 对齐；validate_product_client 为可选基类能力
+handlers_registry.py[CB8T]: F:挂载上游处理器 | R:app/core/postback/bft_handler.py,app/core/postback/handlers.py | A:register_postback_handlers | S:由 postback 包导入时执行，新增平台须在此注册而非仅实现 Handler
+notifier.py[CB8L]: F:转化通知编排 | R:app/services/telegram_notification_service.py | A:PostbackNotifier.notify_conversion,PostbackNotifier.notify_batch_conversions | S:realtime 用独立 DB 会话 asyncio 任务发 Telegram；非 realtime 可走 Redis 队列（上限 10000）
+pipeline.py[CB8M]: F:Postback可测流水线步 | R:app/core/postback/checks/cap_checker.py,app/core/postback/checks/discount_checker.py | A:PostbackPipelineContext,step_associate_click,step_check_cap,step_apply_discount,step_save_conversion | S:Cap 原子预留在 processor 入库前执行而非本文件 step_check_cap 单独路径；Offer 下线查询失败时放行
+processor.py[CB9L]: F:Postback主处理编排 | R:app/core/postback/pipeline.py,app/core/postback/forwarder.py | A:PostbackProcessor.process | S:DB commit 后才调度渠道/产品转发（独立会话）与第三方像素；校验/重复等多返回 success=True 以免上游重试风暴
+request_parser.py[CB8T]: F:回调原始参数合并 | R:- | A:collect_postback_raw_data | S:POST Body 同名键覆盖 Query；JSON 解析失败静默跳过
+
+===E:/Platform/app/core/postback/checks/===
+__init__.py[CB5T]: F:Postback检查器导出 | R:app/core/postback/checks/cap_checker.py | A:CapChecker,DiscountChecker | S:-
+cap_checker.py[CB8S]: F:Postback侧Cap检查 | R:app/core/cap/__init__.py | A:CapChecker.check,CapChecker.increment | S:increment 仅 flush 由 PostbackProcessor 统一 commit；flush 失败须 rollback_redis 防双 DECR
+discount_checker.py[CB8S]: F:Postback扣价扣量 | R:app/core/discount/discount_manager.py,app/core/deduction/__init__.py | A:DiscountChecker.calculate | S:先 OfferDiscount 再 ConversionDeduction；should_deduct_volume 为真则跳过入库与下游转发
+
+===E:/Platform/app/core/postback/forwarding/===
+__init__.py[CB7T]: F:转发子包导出 | R:- | A:UrlBuilder,PlaceholderResolver,HttpClient,SuccessChecker,CacheManager | S:-
+cache_invalidators.py[CB7S]: F:转发缓存失效与命中统计 | R:- | A:ForwardingCacheInvalidator,invalidate_publisher,invalidate_offer,get_forwarding_metrics | S:失效键为 publisher:{id}/offer:{id} 裸键，与 CacheManager 的 generate_cache_key+legacy 前缀可能不一致，改一侧须核对另一侧
+cache_manager.py[CB7S]: F:转发实体旁路缓存 | R:app/models/models.py | A:CacheManager.get_cached_publisher,get_cached_offer,get_cached_product,invalidate_product,invalidate_publisher | S:Publisher/Product 始终以 DB 行为准再写缓存；Offer 命中缓存时会对 ORM setattr 快照字段，易与 DB 漂移
+http_client.py[CB7S]: F:Postback出站HTTP | R:app/core/ssrf_guard.py | A:HttpClient.send_request | S:follow_redirects 且每次请求经 SSRF 钩子；拦截时返回 success=False 而非抛错
+placeholder_resolver.py[CB7T]: F:转发URL占位符 | R:app/core/url/placeholder.py | A:PlaceholderResolver.resolve,PlaceholderResolver.extract_placeholders | S:语义委托 url.placeholder，本类仅保兼容类名
+success_checker.py[CB7S]: F:转发成功判定 | R:- | A:SuccessChecker.check | S:配置 JSON 支持 status_code/status_range/content/json；非 JSON 响应有多条宽松成功启发式，改判定会影响渠道 postback_success_check 语义
+url_builder.py[CB7S]: F:拼接转发Query | R:app/core/url/url_params_util.py | A:UrlBuilder.build_postback_url | S:click_id 同时写入 click_id 与 clickid；关联 url_params 优先于 association 裸字段
+
+===E:/Platform/app/core/postback/notification/===
+__init__.py[CB7T]: F:Postback通知子包导出 | R:- | A:should_notify,build_notification_message,send_notification_async 等 | S:-
+config_helpers.py[CB7S]: F:通知开关与渠道解析 | R:app/models/models.py | A:should_notify,get_notification_channels,get_client_info,detect_notification_channel | S:客户通知配置优先于产品配置；无配置时 should_notify 默认仍发送
+message_builder.py[CB7S]: F:转化通知文案 | R:- | A:build_notification_message,build_batch_notification_message | S:文案含「结算收益」等字段，面向运营/客户通知非客户 API 口径
+sender.py[CB7M]: F:多渠道通知发送 | R:app/core/telegram/__init__.py | A:send_notification_async,send_to_address,send_webhook_notification,send_to_channel | S:每次发送写 PostbackNotification 历史；email/sms 渠道尚未实现
+
+===E:/Platform/app/core/postback/savers/===
+__init__.py[CB7T]: F:保存器包导出 | R:- | A:ConversionSaver | S:-
+conversion_saver.py[CB7S]: F:转化入库与Click回写 | R:app/models/models.py | A:ConversionSaver.save,ConversionSaver.update_click_conversion | S:归因快照写入 raw_data._attribution JSON 无独立列；original_payout 存标准化 payout、final 存扣量后
+
+===E:/Platform/app/core/postback/transformers/===
+__init__.py[CB7T]: F:转换器包导出 | R:- | A:DataNormalizer,ClickAssociator | S:-
+click_associator.py[CB8M]: F:Click归因关联 | R:app/core/tracking/click_token.py | A:ClickAssociator.associate,ClickAssociator.associate_from_db | S:优先解析追踪令牌再合并 DB 行；DB 查询指数退避最多 5 次应对异步落库延迟
+normalizer.py[CB8T]: F:通用Postback标准化 | R:- | A:DataNormalizer.normalize | S:payout/amount 用 Decimal；click_id 多别名与 conversion_id 互通；raw_data 整包保留
+
+===E:/Platform/app/core/postback/validators/===
+__init__.py[CB7T]: F:验证器包导出 | R:- | A:IpValidator,DataValidator,DuplicateChecker | S:-
+data_validator.py[CB8T]: F:通用字段校验 | R:- | A:DataValidator.validate | S:click_id 与 conversion_id 等价；payout 须>0且禁用 if not payout 判空；长度阈值代码 200 与文案「最大100」不一致
+duplicate_checker.py[CB8T]: F:转化幂等检测 | R:app/models/models.py | A:DuplicateChecker.is_duplicate | S:唯一语义 platform+conversion_id+event_name（空 event 归空串）
+ip_validator.py[CB8S]: F:Postback IP白名单 | R:app/models/models.py | A:IpValidator.validate | S:白名单表为空则全部拒绝；IP 为空/unknown 仍放行
+
+===E:/Platform/app/core/short_link/===
+__init__.py[CL7T]: F:短码算法包导出 | R:app/core/short_link/generator.py | A:encode_base62,generate_short_code,generate_unique_short_code | S:-
+generator.py[CL8S]: F:Base62短码生成 | R:- | A:encode_base62,decode_base62,generate_short_code_from_id,generate_unique_short_code | S:字符集剔除易混淆 0/O/1/l 等；from_id 不足位随机前缀防可预测
+
+===E:/Platform/app/core/telegram/===
+__init__.py[CN7T]: F:Telegram模块门面 | R:app/core/telegram/bot_initializer.py,app/core/telegram/message_sender.py | A:initialize_bot,send_telegram_message_async,ConversionNotificationTemplate | S:TELEBOT_AVAILABLE 历史名现表示 PTB 是否可用
+bot_diagnostics.py[CN7M]: F:Bot状态诊断 | R:app/core/telegram/bot_initializer.py | A:TelegramBotDiagnostics.get_super_detailed_status | S:聚合模块/配置/网络/初始化建议，供管理端或排障一次性拉全量
+bot_initializer.py[CN8S]: F:Bot初始化与多进程锁 | R:app/core/telegram/file_lock.py,app/core/telegram/shared_state.py | A:initialize_bot,get_bot,is_bot_available | S:共享状态检测到其他 PID 存活则跳过初始化；轮询 Application 由 polling_manager 创建非本模块
+bot_state.py[CN8S]: F:Bot全局状态 | R:- | A:set_bot_state,get_bot_status_info,get_bot_state | S:application 与 bot 分离；连接探测带短 TTL 缓存避免管理页阻塞
+file_lock.py[SN8L]: F:Bot跨进程文件锁 | R:polling_manager | A:acquire_bot_lock,release_bot_lock,get_default_lock_path | S:锁文件在logs/telegram_bot.lock过期1h
+message_sender.py[SN9AL]: F:Telegram发送限流 | R:telegram_utils,Redis | A:send_telegram_notify_async,call_telegram_api_throttled,is_telegram_enabled | S:Redis互斥+退避防多worker 429惊群
+notification_templates.py[SN7M]: F:通知消息模板 | R:- | A:ConversionNotificationTemplate.format_conversion,format_pending_approval | S:HTML格式供Bot推送
+polling_exception_handler.py[SN7T]: F:轮询异常分类 | R:polling_manager | A:is_telegram_conflict_error,is_transient_telegram_network_error | S:409冲突不当作可恢复网络错误
+polling_manager.py[SN9L]: F:Bot长轮询生命周期 | R:file_lock,shared_state,ptb_runtime | A:register_handlers,start_bot_polling | S:409时释锁清状态；仅API角色应轮询
+ptb_runtime.py[SN8S]: F:PTB发送运行时 | R:- | A:PTB_AVAILABLE,run_on_send_loop,get_send_bot,build_inline_keyboard | S:独立发送loop线程避免与轮询loop死锁
+runtime_error_notify.py[SN8M]: F:运行错误Telegram告警 | R:message_sender,service_notify | A:notify_runtime_error_from_log,RuntimeErrorLogHandler | S:指纹防抖300s；过滤telegram/上游瞬时故障噪音
+service_notify.py[SN7S]: F:服务启停通知 | R:message_sender | A:notify_service_started,notify_service_stopped,should_run_telegram_polling | S:scheduler不轮询；Gunicorn仅SCHEDULER_WORKER=1发启停
+shared_state.py[SN7S]: F:Bot跨进程状态文件 | R:file_lock | A:get_shared_state,set_shared_state,cleanup_stale_shared_state | S:logs/telegram_bot_state.json；PID不存活则重置
+stats_period.py[SN7T]: F:统计周期日期映射 | R:utils.get_app_now_naive | A:resolve_stats_date_range,STATS_PERIOD_LABELS | S:周一起算本周；未知period_key抛ValueError
+stats_service.py[SN8AM]: F:Bot广告统计查询 | R:AdDataSummaryQuery,stats_period,telegram_utils | A:fetch_stats_sync,format_stats_messages,build_stats_menu_buttons | S:回调线程独立async引擎；口径对齐Web合计
+sync_db.py[SN7T]: F:Bot线程同步Session | R:settings | A:get_sync_session_factory | S:aiomysql DSN转pymysql；lru_cache单例引擎
+
+===E:/Platform/app/core/telegram/callback_handlers/===
+__init__.py[CN7T]: F:回调处理器导出 | R:app/core/telegram/callback_handlers/stats_callbacks.py | A:handle_postback_approval,handle_menu_callbacks,handle_stats_callbacks | S:由 polling_manager 显式注册到 Application
+menu_callbacks.py[CN7T]: F:通用菜单内联回调 | R:- | A:handle_menu_callbacks | S:仅处理 View/clock 演示按钮，非业务 Postback 流程
+postback_approval.py[CB8M]: F:待确认转化TG审批 | R:app/core/telegram/sync_db.py | A:handle_postback_approval,process_pending_conversion | S:批准/拒绝在后台线程跑同步 Session；callback_data 前缀 postback_approve_/postback_reject_
+stats_callbacks.py[SN7AS]: F:统计内联回调 | R:stats_service,message_sender,stats_command | A:handle_stats_callbacks | S:后台线程查库经发送互斥防429
+
+===E:/Platform/app/core/telegram/command_handlers/===
+__init__.py[SN3T]: F:命令处理器导出 | R:polling_manager.register_handlers | A:cmd_start,cmd_help,cmd_stats,get_chat_id | S:-
+_reply_errors.py[SN5T]: F:命令回复失败日志 | R:- | A:log_command_reply_failure | S:识别拉黑/ChatNotFound/HTML实体解析失败
+help_command.py[SN5T]: F:/help帮助 | R:_reply_errors | A:cmd_help | S:用HTML非Markdown避免加粗语法发送失败
+id_command.py[SN5T]: F:/id查ChatID | R:_reply_errors | A:get_chat_id | S:群组未@Bot时警告隐私模式可能无响应
+start_command.py[SN7T]: F:/start欢迎 | R:stats_command.send_stats_menu,_reply_errors | A:cmd_start | S:欢迎后发统计菜单线程send_stats_menu
+stats_command.py[SN7T]: F:/stats统计菜单 | R:stats_service,message_sender,ptb_runtime | A:cmd_stats,send_stats_menu | S:PTB未安装则菜单不可用
+
+===E:/Platform/app/core/tracking/===
+__init__.py[CK7T]: F:追踪模块导出 | R:click_token,ad_tracking_codec,tracklink_generator | A:generate_click_id_unified,AdTrackingCodec,generate_postback_url | S:-
+ad_tracking_codec.py[CK9VL]: F:广告追踪令牌编解码 | R:settings | A:AdTrackingCodec.generate,parse,verify | S:生产须设AD_TRACKING_MASTER_KEY_HEX；仅58进制外层
+click_id_generator.py[CK7S]: F:ClickID生成 | R:- | A:generate_click_id,generate_unique_click_id,generate_click_id_unified | S:字符集排除易混淆0/O/I/l等
+click_persist.py[CK7S]: F:点击是否落库 | R:url_params_util,settings | A:should_persist_clicks_to_db,schedule_click_persist | S:USE_TRACKING_TOKEN=true默认不写clicks；PERSIST_CLICKS_TO_DB可覆盖
+click_token.py[CK9L]: F:业务click_id令牌 | R:AdTrackingCodec,click_id_generator | A:generate_tracking_click_id,resolve_click_from_token | S:USE_TRACKING_TOKEN=false走旧随机ID；解析失败回退clicks表
+tracklink_generator.py[CK7S]: F:Tracklink拼装 | R:- | A:generate_upstream_tracklink,generate_downstream_tracklink,generate_postback_url | S:上游追加our_click_id/our_offer_id等query
+
+===E:/Platform/app/core/url/===
+__init__.py[CK7T]: F:URL占位符导出 | R:placeholder,url_params_util | A:resolve_brace_placeholders,canonicalize_url_params_for_storage | S:-
+placeholder.py[CK8M]: F:花括号占位符解析 | R:url_params_util | A:resolve_brace_placeholders,normalize_placeholder_name,PLACEHOLDER_BRACE_MAP | S:Postback与短链共用；channel_id映射publisher_id
+placeholder_validation.py[CY8VM]: F:短链占位符校验 | R:placeholder | A:validate_tracklink_placeholders,PlaceholderValidationResult | S:支持{name}与{{name}}；非法语法保存前拒绝
+postback_placeholder_validation.py[CB8VS]: F:Postback占位符校验 | R:placeholder,placeholder_validation | A:validate_postback_url_placeholders,canonical_postback_field | S:字段集对齐resolve_brace_placeholders
+url_params_util.py[CK8M]: F:点击query规范化 | R:- | A:canonicalize_url_params_for_storage,parse_stored_url_params,normalize_url_params | S:存库dict[str,list[str]]；cloak_*元字段原样保留
+
+===E:/Platform/app/db/===
+database.py[CY7TT]: F:创建platform库 | R:settings | A:create_database | S:连MySQL无库名执行CREATE DATABASE IF NOT EXISTS
+
+===E:/Platform/app/===
+main.py[CY9S]: F:FastAPI应用组装 | R:lifespan,api_router,bootstrap | A:app | S:生产关OpenAPI；CSRF生产强制开
+
+===E:/Platform/app/models/===
+__init__.py[MY8TT]: F:ORM统一导出 | R:各models子模块 | A:Base,User,PostbackConversion,Offer等 | S:供Alembic发现全部表
+ad_data_health.py[MA8S]: F:广告数据健康ORM | R:base | A:AdDataDayBaseline,AdDataHealthAlert,AdDataHealthSettings | S:基线粒度stat_date+product_id+data_source
+base.py[MY9TT]: F:ORM基类与角色 | R:utils | A:Base,pwd_context,UserRole | S:时间字段默认get_app_now_naive
+client_product.py[MP8M]: F:客户产品广告ORM | R:base | A:Client,Product,AdData,ProductAssignment | S:Client.key为API认证UUID；api_enabled控客户API菜单
+cpl.py[MK8M]: F:CPL核心ORM | R:base | A:Advertiser,Publisher,Offer,Click,OfferCap | S:Publisher含postback_url与price_discount
+deduction.py[MB8S]: F:转化扣减ORM | R:base,cpl | A:ConversionDeductionConfig,ConversionDeductionLog | S:广告主/Offer/渠道三级互斥层级配置
+models.py[MY3TT]: F:ORM兼容重导出 | R:models子模块 | A:与__init__同符号 | S:兼容from app.models.models import
+postback.py[MB9L]: F:Postback短链ORM | R:base,client_product,cpl | A:PostbackConversion,ShortLink,PendingPostbackConversion | S:转化含扣减字段与offer/publisher快照
+security.py[MY7T]: F:安全审计ORM | R:base | A:SensitivePathProbeLog,SensitiveBlockedIP,PostbackIpWhitelist | S:探测日志供Middleware自动封IP
+session.py[MU8T]: F:会话黑名单ORM | R:models.Base | A:UserSession,TokenBlacklist | S:撤销须黑名单+is_active=false双写
+system.py[MY7S]: F:系统任务审计ORM | R:base | A:ScheduledTask,UserAuditLog,CountryInfo | S:ScheduledTask配合scheduler分布式锁与standard_report_type
+third_party.py[MK8T]: F:第三方上报日志ORM | R:app.models.base.Base | A:- | S:source+adsid唯一约束；status含pending/success/failed
+user.py[MU8S]: F:用户与角色ORM | R:app.models.base.UserRole,Client | A:verify_password/set_password | S:bcrypt密码超72字节截断
+
+===E:/Platform/app/repositories/===
+__init__.py[QP3T]: F:仓储层包说明 | R:- | A:- | S:-
+base_repository.py[QP8M]: F:异步仓储CRUD基类 | R:app.core.query_builder | A:get_by_id/paginated/create | S:flush不commit由外层事务控制
+offer_repository.py[QP7T]: F:Offer批量查询仓储 | R:base_repository,OfferPublisherAssignment | A:get_with_assignments | S:joinedload结果须unique()
+
+===E:/Platform/app/routes/===
+__init__.py[RL5T]: F:非API公开路由包 | R:app.main | A:- | S:404/500勿统一JSON包装
+
+===E:/Platform/app/routes/short_link/===
+__init__.py[RL7T]: F:短链子包导出router | R:router.py | A:- | S:高并发入口通常豁免限流
+cloak_bridge.py[RL7S]: F:桥页静态资源路由 | R:errors.raise_short_link_not_found | A:GET /bridge/{filename} | S:文件名白名单防路径穿越
+cloak_bridge_html.py[SL8M]: F:桥页HTML注入渲染 | R:cloak_scripts_paths,CloakConfig | A:build_bridge_html_response | S:HTML no-cache与静态7天缓存区分
+cloak_change.py[RL8M]: F:斗篷change桥页入口 | R:cloak_bridge_html,cloak_show_count | A:GET /change/{short_code} | S:数字dp对齐Offer主键
+cloak_click_persist.py[SL7S]: F:report点击落库 | R:click_persist,utils | A:persist_cloak_report_click | S:PERSIST_CLICKS_TO_DB关则全跳过
+cloak_constants.py[SL7T]: F:load阶段上报脚本 | R:cloak_bridge_html | A:- | S:sessionStorage cloak_load_fb_done去重
+cloak_report.py[RL7S]: F:斗篷report HTTP层 | R:cloak_report_service | A:GET /report | S:postback转化不走本接口
+cloak_report_service.py[SL9L]: F:report业务与CAPI | R:third_party_report,cloak_pixel_mapping | A:record_cloak_click_count | S:Redis去重24h；勿发Purchase
+cloak_show_count.py[SL8M]: F:桥页展示计数 | R:redis_client,ShortLink | A:resolve_cloak_change_original_url | S:show_count TTL 6h与会话Cookie对齐
+errors.py[RL7T]: F:短链404/500映射 | R:app.core.exceptions | A:raise_short_link_not_found | S:保留浏览器可识别HTTP状态
+handlers.py[SL8M]: F:短链302重定向流程 | R:short_link_cache,placeholder | A:handle_cached_redirect | S:缓存缺short_link_id会回查库
+placeholder.py[SL8M]: F:URL占位符替换 | R:app.core.url.placeholder | A:replace_short_link_placeholders | S:空值占位符移除对应查询参数
+router.py[RL9S]: F:短链主路由注册 | R:handlers,cloak_* | A:GET /s/{short_code} | S:查询参数键统一lower传入handler
+short_code_validate.py[RL7T]: F:路径短码校验 | R:errors | A:validate_route_short_code | S:拦截null/undefined/none占位
+url_builder.py[SL7M]: F:最终跳转URL合并 | R:placeholder | A:build_final_url | S:已有别名参数不重复追加标准名
+utils.py[SL8M]: F:Offer渠道归因工具 | R:offer_cache,click_persist | A:create_click_record | S:下线Offer返回None拦截重定向
+
+===E:/Platform/app/scheduler_module/===
+__init__.py[TG7T]: F:调度子系统导出 | R:scheduler,lock,task_registry | A:init/start/shutdown_scheduler | S:新任务须同步task_config与task_names
+gam_api_fetch.py[TG9L]: F:GAM多账号拉报表 | R:googleads,secrets/gam-*.json | A:run_gam_fetch_to_memory | S:收入微单位÷1e6为USD
+gam_credentials_storage.py[TG7S]: F:GAM密钥上传存储 | R:- | A:save_gam_credentials_file | S:文件名gam-{network}.json；GAM_SECRETS_DIR可覆盖
+gam_fetch.py[TG7T]: F:GAM内存拉数门面 | R:gam_api_fetch | A:run_gam_fetch_to_memory | S:异常normalize_gam_api_exception转中文ValueError
+gam_import.py[TA9L]: F:GAM报表入库校验 | R:upstream_import,gam_api_fetch | A:import_gam_account_bundle | S:site报表仅校验不入库
+gam_scheduler_config.py[TY8L]: F:GAM调度JSON配置 | R:gam_api_fetch | A:load/save_gam_scheduler_config | S:账号report_keys与磁盘JSON为真相源
+lock.py[TG8L]: F:任务MySQL+Redis锁 | R:ScheduledTask | A:acquire_task_lock | S:pid勿模块缓存；fork后须运行时取
+playhorizonx_normalize.py[TA7S]: F:PlayHorizonx行规范化 | R:ad_data_metadata | A:normalize_playhorizonx_rows | S:cross须具体国家+非空ad_unit
+process_allocator.py[TG8L]: F:多worker任务分配 | R:task_queue,ScheduledTask | A:should_execute_in_current_process | S:GUNICORN_ROLE=scheduler跳过分配
+scheduler.py[TG9L]: F:APScheduler核心 | R:lock,task_queue,task_registry | A:execute_task_with_lock | S:停服标志拒绝新触发防MySQL已停仍跑
+sweetstaste_normalize.py[TA7M]: F:SweetStaste列映射 | R:watch_products | A:normalize_sweetstaste_rows | S:col_哈希优先display_names；日期斜杠转ISO
+task_config.py[TG9L]: F:定时任务统一配置 | R:tasks/* | A:TASK_CONFIGS | S:增任务仅改此文件即可自动注册
+task_init.py[TG7S]: F:任务同步到DB | R:task_config,ScheduledTask | A:init_scheduled_tasks_in_db | S:每次启动执行；与ENABLE_SCHEDULER无关
+task_names.py[TG7S]: F:任务名常量表 | R:task_config | A:ALL_TASK_NAMES | S:禁止硬编码任务名字符串
+task_queue.py[TG8M]: F:任务并发队列 | R:settings | A:submit_task_to_queue | S:默认单进程同时只跑一任务
+task_registry.py[TG8M]: F:任务函数注册表 | R:task_config | A:get_task_function_by_name_or_path | S:动态import仅允许app.前缀
+task_result_registry.py[TG7S]: F:任务结果getter注册 | R:task_config | A:get_task_result | S:摘要建议<1000字入库last_error
+task_result_store.py[TG3T]: F:进程内结果缓存 | R:- | A:set_task_result/get_task_result | S:多worker不共享；重启丢失
+task_utils.py[TG8M]: F:调度日志与日期工具 | R:settings | A:resolve_upstream_date_range | S:last_error截断1000与lock一致
+upstream_fetch.py[SG9L]: F:各上游fetch_*拉数封装 | R:upstream_http,sweetstaste_normalize | A: fetch_*_rows,UpstreamFetchResult | S:分页上限500页；含登录重试与签名
+upstream_http.py[SG8M]: F:上游HTTP重试客户端 | R:httpx,settings | A: post_json,get_json,UpstreamTransientError | S:5xx/429退避重试；耗尽抛Transient供软跳过
+upstream_import.py[TG9IM]: F:拉数后统一入库收尾 | R:process_api_ad_data,invalidate_ad_data_query_caches | A: import_upstream_ad_data,finalize_upstream_import | S:Telegram失败不回滚；有变更清广告查询缓存
+upstream_task_runner.py[SG8T]: F:上游任务标准执行骨架 | R:upstream_import,upstream_fetch | A: run_upstream_import_task,UpstreamTaskOutcome | S:Transient软跳过不抛；多维度须显式report_type
+
+===E:/Platform/app/scheduler_module/tasks/===
+__init__.py[TG3T]: F:维护类任务导出 | R:cleanup_* | A:- | S:上游拉数通常仅task_config填路径
+ad_data_health_task.py[TA8T]: F:广告健康与基线冻结 | R:health_runner,baseline_service | A:ad_data_health_scan_task | S:00:30冻结昨标准；01:00巡检
+addermobi_task.py[TG8T]: F:Addermobi上游拉数 | R:upstream_task_runner | A:addermobi_api_task | S:early_morning_dual_day日期区间
+archive_old_clicks.py[TK7T]: F:点击表归档任务 | R:clicks_archive_service | A:archive_old_clicks | S:默认90天；PERSIST关可skip
+archive_old_data.py[TA8M]: F:ad_data历史归档 | R:AsyncSessionLocal | A:archive_old_ad_data | S:默认6个月；先插归档表再删主表
+aya_task.py[TG8M]: F:Aya三维度拉数入库 | R:upstream_fetch,upstream_import | A:aya_api_task | S:须显式day/country/unit；cpName写upstream_account
+cleanup_expired_sessions.py[TU7S]: F:过期会话清理 | R:UserSession,TokenBlacklist | A:cleanup_expired_sessions | S:删30天前过期行；7天未活动标非活跃
+cleanup_file_logs.py[TY7T]: F:磁盘日志清理 | R:log_file_cleanup | A:cleanup_file_logs | S:与DB审计cleanup_old_audit_logs独立
+cleanup_old_logs.py[TU7M]: F:审计日志清理 | R:UserAuditLog,audit_log_service | A:cleanup_old_audit_logs | S:默认保留90天；分批DELETE
+cleanup_sensitive_path_probes.py[TG7TT]: F:清理敏感路径探测日志 | R:app.models.models.SensitivePathProbeLog,app.core.config.settings | A: cleanup_sensitive_path_probe_logs | S:保留天数默认SENSITIVE_PATH_PROBE_RETENTION_DAYS；可外部注入db
+clicks_batch_processor.py[TK8BL]: F:点击Redis队列批量入库 | R:app.core.clicks_queue,app.core.tracking.click_persist | A: process_clicks_queue | S:BATCH_SIZE=1000；不落库模式drain丢弃队列
+cpl_tasks.py[TB8T]: F:Cap日清零与Redis同步 | R:app.core.cap.reset_daily_caps,CapSynchronizer | A: reset_daily_caps_task,cap_sync_task | S:日Cap重置建议00:00 UTC与报表时区可能不一致
+flymobi_task.py[TG8M]: F:FlyMobi多维度拉数入库 | R:upstream_fetch.fetch_flymobi_rows,run_upstream_import_task | A: flymobi_api_task | S:country/unit/daily靠env开关；cross需countryCode解析
+forward_tasks.py[TB8T]: F:Postback转发队列消费 | R:PostbackForwarder,PostbackForwardQueue | A: process_forward_queue,trigger_forward_processing | S:最多5次指数退避；每批50条
+gam_task.py[TG9S]: F:GAM多账号拉数入库 | R:gam_fetch,gam_import,gam_scheduler_config | A: google_api_task | S:部分账号失败仍抛错记error_count；site仅校验
+h5deer_task.py[TG7TT]: F:H5Deer拉数入库 | R:fetch_h5deer_rows,run_upstream_import_task | A: h5deer_api_task | S:Authorization为JWT非Bearer；请求dimension拼写ad_nuit
+huguang_task.py[TG7TT]: F:Huguang拉数入库 | R:fetch_huguang_rows,run_upstream_import_task | A: huguang_api_task | S:early_morning_dual_day解析默认日期区间
+idgtn_task.py[TG8M]: F:IDGTN按日cross拉数 | R:fetch_idgtn_rows,import_upstream_ad_data | A: idgtn_api_task | S:可见率上游0-1须×100；按日循环后一次入库
+leiyang_task.py[TG8L]: F:LeiYang多报表拉数 | R:fetch_leiyang_rows,run_upstream_import_task | A: leiyang_api_task | S:atomic默认；响应PascalCase经preprocess归一
+notification_summary_task.py[TN8L]: F:转化通知hourly/daily汇总 | R:TelegramNotificationService,Redis notification_queue | A: process_hourly_notification_task,process_daily_notification_task | S:汇总窗口须对齐客户配置时区
+playhorizonx_task.py[TG7S]: F:PlayHorizonx cross/unit拉数 | R:fetch_playhorizonx_rows,playhorizonx_normalize | A: playhorizonx_api_task | S:Header md5签名；cross/unit靠env开关
+pomiad_task.py[TG7TT]: F:Pomiad拉数入库 | R:fetch_pomiad_rows,run_upstream_import_task | A: pomiad_api_task | S:preprocess补domain、清洗无效country_name
+short_link_tasks.py[TL8S]: F:短链计数同步与队列 | R:sync_click_counts_to_db,process_clicks_queue | A: sync_short_link_clicks_task,open_closed_short_links_task | S:重开短链需Offer活跃且Cap有余量
+skymobi_task.py[TG7TT]: F:Skymobi逐日拉数 | R:fetch_skymobi_rows,run_upstream_import_task | A: skymobi_api_task | S:Transient且已有行则部分入库后停止
+sweetstaste_task.py[TG7TT]: F:SweetStaste单元报表拉数 | R:fetch_sweetstaste_rows,run_upstream_import_task | A: sweetstaste_api_task | S:禁summary_type=date_link；report_type=unit
+tbsj_task.py[TG7S]: F:TBSJ cross拉数 | R:fetch_tbsj_rows,run_upstream_import_task | A: tbsj_api_task | S:过滤无具体国家或无单元；token JSON404改form
+tqt_task.py[TG7TT]: F:TQT签名拉数入库 | R:fetch_tqt_rows,run_upstream_import_task | A: tqt_api_task | S:params.type=country；固定union.e-kivi.com端点
+zhisuo_task.py[TG9L]: F:智索多账号多维度拉数 | R:fetch_zhisuo_*_rows,import_upstream_ad_data | A: zhisuo_api_task | S:单账号失败隔离继续；细粒度无数据可daily兜底
+
+===E:/Platform/app/schemas/===
+__init__.py[HY3T]: F:Schema包说明入口 | R: - | A: - | S:按业务域分子模块供OpenAPI校验
+ad_data.py[HA8S]: F:广告数据与仪表盘Schema | R:app.schemas.base.BaseSchema | A: AdDataResponse,DashboardStatsResponse | S:客户可见字段须无扣减字样
+audit_log.py[HY7S]: F:审计日志Schema | R:PaginatedResponseBaseSchema | A: UserAuditLogResponse,UserAuditLogQuery | S:-
+auth.py[HU8T]: F:登录令牌Schema | R:base,PASSWORD常量 | A: LoginResponse,Token,UserInfoResponse | S:api_enabled语义仅客户角色
+base.py[HY9S]: F:Pydantic基类与统一响应 | R:APP_TIMEZONE | A: BaseSchema,ResponseBaseSchema,PaginatedResponseBaseSchema | S:naive datetime经localize输出ISO8601
+client.py[HP8T]: F:下游客户Schema | R: - | A: ClientCreate,ClientUpdate,ClientResponse | S:allowed_ips空不限；127.0.0.1始终允许
+cloak.py[HL8L]: F:斗篷CAPI配置Schema | R:base | A: CloakConfigCreate,validate_cloak_report_event_name | S:Meta标准事件+自定义名2-64字符
+country.py[HY7S]: F:国家ISO Schema | R:base | A: CountryCreate,CountryResponse | S:alpha2/3/numeric格式校验
+excel.py[HA5T]: F:Excel导入导出响应 | R: - | A: ExcelImportResponse,ExcelExportResponse | S:-
+notification.py[HN8M]: F:客户产品通知配置Schema | R:base | A: ClientNotificationConfigCreate,ProductNotificationConfigCreate | S:notify_channels须JSON数组且渠道白名单
+postback.py[HB7S]: F:Postback通用Schema | R:base | A: PostbackRequest,PostbackResponse | S:Request允许extra平台扩展字段
+postback_ip_whitelist.py[HB7S]: F:Postback IP白名单Schema | R: - | A: PostbackIpWhitelistCreate | S:ipaddress校验IPv4/IPv6
+product.py[HP8S]: F:产品与扣量Schema | R:base | A: ProductCreate,ProductResponse | S:ecpm/revenue/cplpo扣量比例0-1
+product_assignment.py[HP7S]: F:产品归属时间段Schema | R: - | A: ProductAssignmentCreate,ProductAssignmentResponse | S:end_date空表示当前仍归属
+short_link.py[HL8S]: F:短链与像素Schema | R:placeholder_validation | A: ShortLinkCreate,ShortLinkResponse | S:像素空则沿用启用中斗篷配置
+tb_search_data.py[HA7T]: F:淘宝搜索数据Schema | R:base | A: TBSearchDataResponse | S:客户响应revenue_before_deduct保持None
+third_party_report.py[HL7S]: F:第三方CAPI上报日志Schema | R:PaginatedResponseBaseSchema | A: ThirdPartyReportLogResponse | S:-
+user.py[HU8S]: F:用户CRUD Schema | R:PASSWORD常量 | A: UserCreate,UserUpdate,ChangePasswordRequest | S:密码长度受BCRYPT_MAX限制
+
+===E:/Platform/app/schemas/cpl/===
+__init__.py[HB5T]: F:CPL Schema聚合导出 | R:cpl子模块 | A: __all__ | S:-
+advertiser.py[HB7T]: F:广告主CRUD Schema | R: - | A: AdvertiserCreate,AdvertiserResponse | S:-
+cap.py[HB8T]: F:Offer Cap Schema | R: - | A: OfferCapCreate,OfferCapResponse | S:cap_type为advertiser_offer或offer
+click.py[HB7T]: F:点击记录响应Schema | R: - | A: ClickResponse | S:含offer/publisher/advertiser关联名
+deduction.py[HB8M]: F:转化扣减配置Schema | R:base | A: ConversionDeductionConfigCreate | S:level三层；enable_volume_deduction不入主表
+discount.py[HB7T]: F:渠道扣量比例Schema | R:base | A: OfferDiscountCreate,OfferDiscountResponse | S:discount_ratio范围0-100
+offer.py[HB8S]: F:Offer校验Schema | R:placeholder_validation | A: OfferCreate,OfferUpdate | S:Tracklink占位符创建更新时校验
+publisher.py[HB7T]: F:渠道Publisher Schema | R:base | A: PublisherCreate,PublisherResponse | S:postback_success_check为JSON串
+test.py[HB5T]: F:下游联调测试Schema | R:base | A: AffiliateTestCreate,AffiliateTestResponse | S:-
+
+===E:/Platform/app/services/===
+__init__.py[SY5T]: F:服务层总述 | R:BaseService,app.api_v1 | A:- | S:不处理HTTP;业务异常经raise_api_exception上抛
+ad_data_service.py[SA5T]: F:薄兼容导出 | R:ad_data.service | A:AdDataService | S:新功能只改子包
+audit_log_service.py[SY8M]: F:审计日志查询 | R:audit_log,cache_compat | A:AuditLogService | S:统计缓存5分钟;清表须invalidate_audit_log_stats_cache
+base_service.py[SU9M]: F:服务基类 | R:BaseRepository | A:BaseService | S:权限在服务入口;子类勿重复鉴权
+cache_management_service.py[SY8M]: F:Redis键管理 | R:redis_client | A:list/get/delete_cache | S:csrf/session/rate_limit前缀禁删
+click_service.py[SK8L]: F:点击日志服务 | R:cloak_pixel_mapping,third_party_report | A:ClickService | S:列表默认7天;补报前校验转化未重复
+client_service.py[SP8M]: F:客户CRUD | R:BaseService,fulltext_search | A:ClientService | S:写操作仅管理员;删前查产品分配依赖
+cloak_pixel_mapping.py[SL8L]: F:斗篷像素映射 | R:ShortLink,CloakConfig | A:get_cloak_pixel_config | S:短链>启用斗篷;无则不回退全局像素
+country_service.py[SP7M]: F:国家别名维护 | R:country_code,AdData | A:collect_unrecognized_country_codes | S:未识别码聚合ad_data与TBSearch
+dashboard_service.py[SA5L]: F:仪表盘KPI聚合 | R:AdData、kpi_mutual_source_filter | A:stats/trends等 | S:缓存5分钟；客户限分配产品；日汇总country互斥
+gam_scheduled_config_service.py[SG5S]: F:GAM定时配置读写 | R:gam_scheduler.json、scheduler_module | A:get/save_gam_scheduler_config | S:to_thread读写JSON；异常映射API错误码
+notification_config_service.py[SN7M]: F:通知配置编排层 | R:ResendCommand、RecordsQuery | A:客户/产品/管理员配置CRUD | S:薄编排委托commands/queries
+product_assignment_service.py[SP5L]: F:产品分配历史管理 | R:product_assignment核心工具 | A:转移/校验/清理分配 | S:同事务更新历史与生效行
+product_service.py[SP5L]: F:产品CRUD与归属 | R:ProductAssignment、AdData | A:get/create/update/delete | S:同名全局唯一；有AdData删则挂靠
+scheduled_task_service.py[SG5L]: F:定时任务运维 | R:APScheduler、task_queue | A:启用/触发/reload/锁 | S:手动触发skip_process_check；全量reload低峰
+session_service.py[SU5L]: F:会话查询与撤销 | R:TokenBlacklist、JWT jti | A:list/revoke sessions | S:双写黑名单+is_active；时间naive北京
+short_link_service.py[SL5L]: F:短链接CRUD与搜索 | R:short_link_cache、Offer | A:get/create/update/delete | S:两阶段short_code；写后失效Redis
+telegram_notification_service.py[SN5L]: F:Telegram通知构建发送 | R:PostbackNotification | A:各类build_*与send | S:失败返False；超长分片；热路径commit=False
+user_service.py[SU5L]: F:用户CRUD与权限 | R:SessionService、permission_cache | A:get/create/update users | S:禁用同步撤会话；写后失效权限缓存
+
+===E:/Platform/app/services/ad_data/===
+__init__.py[SA8T]: F:子包统一导出 | R:service,queries,calculators | A:AdDataService等 | S:复杂查询勿堆service.py
+baseline_service.py[SA9L]: F:日标冻结倒扣 | R:health_runner,AdDataDayBaseline | A:- | S:每日00:30冻昨天;入库后对比跌≥阈值告警
+dual_dimension_check.py[SA8S]: F:双维收益核对 | R:dimension_filter,Telegram | A:- | S:同日国家/单元扣后不等仅告警不改数
+health_check.py[SA9L]: F:缺数巡检算法 | R:health_runner | A:- | S:口径revenue_after_deduct;昨有今无12点前不告警
+health_runner.py[SA8AM]: F:日巡检执行 | R:health_check,baseline_service,watch_products | A:- | S:库内按产品+日聚合;写AdDataHealthAlert
+query_cache.py[SA7T]: F:查询缓存键 | R:cache_compat,入库命令 | A:invalidate_ad_data_query_caches | S:前缀ad_data:便于定向失效
+service.py[SA9M]: F:广告数据编排 | R:queries,commands,BaseService | A:AdDataService各方法 | S:列表与合计asyncio.gather双会话
+validators.py[SA7VS]: F:更新入参校验 | R:update_command,ad_data_metadata | A:- | S:UPDATE_ALLOWED_FIELDS白名单;ZZ保留全区域
+watch_products.py[SA8L]: F:重点产品盯盘 | R:health_runner,ScheduledTask | A:on_upstream_api_task_finished | S:上游API波次结束Redis协调后发Telegram
+
+===E:/Platform/app/services/ad_data/calculators/===
+__init__.py[SA3T]: F:计算器导出 | R:rate_calculator,revenue_calculator | A:RateCalculator | S:纯计算无IO
+rate_calculator.py[SA7S]: F:漏斗比率计算 | R:AdDataService,导出 | A:- | S:先聚合再算率;分母≤0返0
+revenue_calculator.py[SA8S]: F:收益eCPM计算 | R:app.core.constants | A:- | S:金额用Decimal;ROUND_DOWN两位
+
+===E:/Platform/app/services/ad_data/commands/===
+__init__.py[SA3T]: F:写命令导出 | R:delete_command,update_command | A:- | S:-
+delete_command.py[SA8AS]: F:单批删广告 | R:BatchDeleteQuery,query_cache | A:- | S:删后invalidate_ad_data_query_caches
+update_command.py[SA8AS]: F:管理员更新 | R:AdDataValidator,AdDataUniquenessQuery | A:- | S:改身份维须预检uq_ad_data_identity
+
+===E:/Platform/app/services/ad_data/queries/===
+__init__.py[SA3T]: F:查询模块导出 | R:list_query,detail_query等 | A:- | S:只读不写库
+batch_delete_query.py[SA7T]: F:批删权限解析 | R:join_helpers,delete_command | A:- | S:客户仅删归属Client行
+client_api_query.py[SA9L]: F:客户API查数 | R:dimension_filter,join_helpers | A:/client_data | S:day禁dimension=all;分配空窗回退Product.client_id
+daily_summary_query.py[SA9L]: F:日汇总分页 | R:dimension_filter,query_cache,summary_query | A:- | S:默认当月;列表与合计并行+Redis
+detail_query.py[SA7T]: F:单条详情 | R:join_helpers,AdDataService | A:- | S:非管理员须client.user_id匹配
+dimension_filter.py[SA9L]: F:维度互斥选源 | R:client_api_query,daily_summary_query | A:- | S:日汇总country>cross>unit>daily;Excel与API国家可相加
+filter_conditions.py[SA8M]: F:筛选条件拼装 | R:dimension_filter,list_query | A:- | S:逗号多选;非法整数抛InvalidFilterParameterError
+filter_options_query.py[SA8L]: F:筛选项下拉 | R:dimension_filter,query_cache | A:- | S:下拉用日汇总维度语义非明细互斥
+join_helpers.py[SA8M]: F:JOIN与归属 | R:check_use_assignment_table | A:join_country_info_for_ad_data | S:分配结束须sync_product_client_id防空窗漏数
+list_query.py[SA8M]: F:明细分页列表 | R:filter_conditions,dimension_filter | A:- | S:get_ad_data另开会话并行grand_total
+summary_query.py[SA8L]: F:KPI汇总 | R:kpi_mutual_source_filter,query_cache | A:- | S:衍生指标对齐useAdDataTableFormat合计行
+uniqueness_query.py[SA7T]: F:身份冲突预检 | R:update_command | A:- | S:键含date+product+country+unit+source+report+账号
+
+===E:/Platform/app/services/cpl/===
+__init__.py[SB5T]: F:CPL服务包 | R:advertiser_service,conversion_service | A:- | S:上游=广告主下游=渠道
+advertiser_service.py[SB8M]: F:广告主管理 | R:CacheInvalidator,BaseService | A:AdvertiserService | S:客户可见须expunge后脱敏联系方式
+cap_service.py[SB8M]: F:Cap配置 | R:OfferCap,cpl_tasks | A:CapService | S:日Cap零点reset_daily_caps重置
+conversion_deduction_service.py[SB9L]: F:转化扣减编排 | R:deduction.helpers,queries | A:ConversionDeductionService | S:至少启用量或金额扣减之一
+conversion_service.py[SB9L]: F:转化统计 | R:PostbackConversion,Click | A:ConversionService | S:客户响应剥离po/profit/广告主字段
+discount_service.py[SB8M]: F:折扣配置 | R:OfferDiscount,BaseService | A:DiscountService | S:变更不追溯历史转化
+offer_service.py[SA5L]: F:Offer CRUD与分配 | R:Query子模块、短链sync、CacheInvalidator | A:get/create/update/delete offers | S:写操作仅管理员；删前查Click；延迟import防循环依赖
+offer_stats.py[SU7T]: F:Offer统计区间工具 | R:OfferService、统计API | A:offer_stats_period_start等 | S:day/week/month口径；环比除零规则
+postback_attribution_helper.py[SB5S]: F:转化列表归因ID收集 | R:PostbackConversionService | A:collect_attribution_ids、load_clicks_map | S:快照齐则跳过Click查；失败不阻断列表
+postback_bft_service.py[SB7AM]: F:BFT专用Postback接收 | R:PostbackProcessor、Telegram | A:receive_bft_postback | S:字段别名映射clk_id/event；TG失败仍返ok
+postback_conversion_service.py[SB5L]: F:转化记录查询与管理 | R:attribution_helper、DeductionLog | A:get_postback_conversions、update_status | S:优先快照列筛选；无记录可查扣减日志
+postback_diagnostic_service.py[SB7M]: F:转化缺失诊断 | R:主表/扣减/通知 | A:diagnose_postback_record | S:只读多表排查；提示平台名变更
+postback_duplicate_service.py[SB7M]: F:重复转化检测 | R:Pending/正式转化表 | A:check_duplicate_conversions | S:键platform+conversion_id+event；跨表重复
+postback_forward_log_service.py[SB7M]: F:下游转发日志与补发 | R:PostbackForwarder | A:list_forward_logs、resend | S:补发写新日志；重复补发需谨慎
+postback_ip_whitelist_service.py[SB5BL]: F:Postback IP白名单 | R:postback_pending_service | A:CRUD、batch_create | S:加白触发待确认自动批准；空名单策略看配置
+postback_pending_service.py[SB5L]: F:待确认转化审批 | R:ClickAssociator、白名单 | A:list/approve/reject/auto_approve_by_ip | S:批准前幂等三元组；token优先归因
+postback_receive_service.py[SB7T]: F:通用Postback接收入口 | R:PostbackProcessor | A:receive_postback | S:可恢复失败503；成功固定text ok
+postback_stats_service.py[SB5S]: F:Postback平台统计 | R:PostbackConversion | A:get_postback_stats | S:按platform分组；日期用应用时区边界
+publisher_service.py[SA7VM]: F:渠道CRUD与搜索 | R:Client、Offer分配 | A:get/create/update publishers | S:客户可见脱敏postback；URL占位符校验
+
+===E:/Platform/app/services/cpl/deduction/===
+__init__.py[SB1T]: F:扣减子模块 | R:helpers,mappers,queries | A:- | S:-
+helpers.py[SB8T]: F:扣减配置辅助 | R:ConversionDeductionConfig | A:- | S:同层级目标仅一条激活配置
+mappers.py[SG5ES]: F:扣减响应映射 | R:schemas.cpl.deduction | A:to_config_response等 | S:导出Excel用中文列名
+
+===E:/Platform/app/services/cpl/deduction/queries/===
+__init__.py[SB3T]: F:扣减查询导出 | R:config_list_query等 | A:DeductionConfigListQuery | S:-
+config_list_query.py[SB7T]: F:扣减配置列表 | R:ConversionDeductionService | A:- | S:广告主级可筛其Offer子配置
+logs_query.py[SB7T]: F:扣减日志分页 | R:ConversionDeductionLog | A:- | S:默认关联预加载广告主/Offer/渠道
+stats_query.py[SB7S]: F:扣减统计聚合 | R:ConversionDeductionLog | A:- | S:支持按广告主/Offer/渠道分组
+
+===E:/Platform/app/services/cpl/offer/===
+__init__.py[SB1T]: F:Offer子包占位 | R:- | A:- | S:helpers/queries待扩展
+helpers.py[SA7VM]: F:Offer查询共用辅助 | R:Detail/List/AssignmentsQuery、OfferService | A:客户Offer权限、渠道配置校验、Tracklink生成 | S:parse_publisher_configs非法即INVALID_PARAMETER；客户无权见404
+
+===E:/Platform/app/services/cpl/offer/queries/===
+__init__.py[SG7TT]: F:导出Offer查询类 | R:assignments/detail/list_query | A:OfferAssignmentsQuery等 | S:包入口无业务逻辑
+assignments_query.py[SG7TT]: F:Offer渠道分配查询 | R:helpers、OfferListQuery | A:fetch_for_offer、fetch_batch_for_offers | S:客户仅见本client_id渠道；批量防N+1
+detail_query.py[SG7TT]: F:Offer单条详情查询 | R:assert_client_can_access_offer | A:fetch_by_id | S:客户须激活分配；可选joinedload广告主与分配
+list_query.py[SG5S]: F:Offer分页列表查询 | R:OfferAssignmentsQuery、全文检索 | A:fetch | S:客户JOIN分配distinct；search支持ID/上游ID/MATCH名称
+
+===E:/Platform/app/services/notification/===
+__init__.py[SN7T]: F:通知子模块包标记 | R:commands/queries | A:无 | S:仅占位docstring
+helpers.py[SN5S]: F:通知配置权限与持久化 | R:NotificationConfigService | A:assert_*_access、upsert_config | S:客户经User→Client.id判权
+
+===E:/Platform/app/services/notification/commands/===
+resend_command.py[SB7M]: F:转化通知补发命令 | R:PostbackForwarder、helpers | A:resend_conversion/batch | S:权限assert_conversion_resend_access
+
+===E:/Platform/app/services/notification/queries/===
+__init__.py[SN7T]: F:导出通知查询类 | R:records_query | A:NotificationRecordsQuery | S:包入口
+records_query.py[SN7M]: F:通知记录分页查询 | R:PostbackNotifier | A:fetch | S:客户限client_id；conversion_id空时可补建记录
+
+===E:/Platform/app/services/tracking/===
+__init__.py[SK7T]: F:点击追踪服务子包 | R:clicks_archive_service | A:无 | S:归档须尊重PERSIST_CLICKS开关
+clicks_archive_service.py[SK5S]: F:点击归档至archive表 | R:archive_old_clicks任务 | A:archive_old_clicks | S:默认保留90天；INSERT IGNORE后DELETE
+
+===E:/Platform/config/===
+gam_scheduler.json[TG7TT]: F:GAM多账号拉数配置 | R:gam_scheduled_config_service | A:accounts/report_keys/whitelist | S:管理端改白名单写回此文件
+
+===E:/Platform/deploy/===
+logrotate-platform.conf[OY7TT]: F:gunicorn日志logrotate | R:SafeRotatingFileHandler | A:/data/Platform/logs/gunicorn_*.log | S:勿对应用分类log copytruncate双轨
+
+===E:/Platform/frontend/src/api/===
+ad-data.js[FA5S]: F:广告数据管理API | R:/api/v1/ad-data | A:list/汇总/导入导出 | S:长超时与CSRF mutate
+adDataHealth.js[FA7T]: F:广告数据健康巡检API | R:/ad-data-health | A:settings/alerts/run | S:returnDataOnly
+advertiser.js[FA7T]: F:广告主CRUD封装 | R:createCrudApi | A:/api/v1/advertisers | S:写操作csrfOnMutate
+affiliate-test.js[FZ7T]: F:下游联调测试API | R:/affiliate-tests | A:list/get/create | S:仅含create无update
+app-config.js[FY7T]: F:应用时区配置 | R:ml-model/timezone | A:getTimezone | S:失败默认Asia/Shanghai
+audit-log.js[FA7T]: F:审计日志查询API | R:/audit-logs | A:list/stats/clear-all | S:列表45s超时
+auth.js[FU7T]: F:登录刷新登出API | R:OAuth2、CSRF | A:loginOAuth2/refresh/logout | S:令牌HttpOnly Cookie；登录非标准包装
+cache.js[FY7T]: F:系统缓存管理API | R:/api/v1/cache | A:entries/detail/delete | S:管理端Redis条目运维
+cap.js[FA7T]: F:Cap限额CRUD | R:/api/v1/caps | A:createCrudApi五件套 | S:csrfOnMutate
+clicks.js[FK7T]: F:点击日志API | R:/api/v1/clicks | A:getClicks、FB补发 | S:列表45s超时
+client-api.js[FP7T]: F:客户API密钥查询 | R:/client/api-key | A:getClientApiKey | S:silent可选
+client.js[FP7JS]: F:客户管理API | R:crudApi,exportDownload,csrfMutate | A:getClientList,getClientDetail,updateClientSwitches,exportClients | S:详情本地缓存，写操作后清缓存；管理员可拉 api-key
+cloak-config.js[FL5JT]: F:斗篷配置API | R:crudApi,csrfMutate | A:getCloakConfigs,testCloakReport,uploadCloakBridgeHtml | S:桥页上传 multipart 超时60s；测试 CAPI 超时30s
+conversion-summary.js[FA3T]: F:转化汇总API | R:utils/api request | A:getConversionSummary,getSummaryByOffer | S:统计请求统一30s超时
+country.js[FY5JT]: F:国家主数据API | R:crudApi | A:getCountries,getUnrecognizedCountryCodes,getCountryAliases | S:别名增删走 CSRF；unrecognized 扫业务未登记码
+dashboard.js[FA3T]: F:仪表盘API | R:utils/api | A:getDashboardStats,getTrendData | S:period 默认 week；recent-ads 接口暂未封装
+deduction.js[FB7BT]: F:转化扣减API | R:crudApi,csrfMutate | A:getDeductionConfigs,getDeductionLogs,batchUpdateDeductionConfigStatus | S:日志分页；批量启停与批量删除独立端点
+discount.js[FB1T]: F:CPL扣量CRUD | R:crudApi | A:getDiscounts,createDiscount,updateDiscount,deleteDiscount | S:写操作 csrfOnMutate
+ml-model.js[FA5IT]: F:ML训练数据API | R:requestUploadWithCsrfRetry | A:validateExcelData,saveMapping,importTrainingData | S:Excel 上传60s；re-export getTimezone 自 app-config
+monitoring.js[FY7S]: F:系统监控API | R:csrfMutate | A:getMonitoringMetrics,getAlertRules,cleanupFileLogsNow | S:metrics 30s；日志清理 POST 120s
+notification.js[FN7S]: F:通知中心API | R:helpers/notificationConfig | A:getNotificationRecords,resendConversionNotification,testTelegramConnection | S:客户/产品配置 re-export helper；补发走 CSRF
+offer.js[FA3T]: F:Offer管理API | R:crudApi | A:getOffers,checkOfferShortLink,getOfferStats | S:stats period 默认 week
+optimization.js[FY5TT]: F:性能优化API | R:/api/v1/optimization | A:getBottlenecks,createOptimizationPlan,verifyOptimizationPlan | S:计划 approve/start/complete/reject 全链路
+postback.js[FB5BT]: F:Postback管理API | R:crudApi,csrfMutate | A:getPostbackConversions,getPostbackStats,batchCreateIpWhitelist | S:转化列表 paginated；IP 白名单 batch 创建
+product.js[FP7JT]: F:产品与分配API | R:crudApi,CSRF_REFRESH_PRODUCTS | A:getProductAssignments,batchUpdateAssignmentDates,getAvailableProductNames | S:分配日期批量更新60s；403 走 handleCsrf403IfNeeded
+publisher.js[FP1T]: F:渠道CRUD API | R:crudApi | A:getPublishers,createPublisher,updatePublisher,deletePublisher | S:标准 /api/v1/publishers
+scheduled-task.js[FG7S]: F:定时任务API | R:scheduledTaskPaths,csrfMutate | A:triggerScheduledTask,saveGamSchedulerConfig,refreshGamReportTypes | S:任务名 URL 编码；GAM 刷新类型180s
+sensitive-path-probes.js[FY7BT]: F:敏感路径探测API | R:csrfMutate | A:getSensitivePathProbeLogs,getSensitiveBlockedIps,cleanupSensitivePathProbeLogs | S:列表30s；封禁支持 batch 与 unblock
+session.js[FU5JS]: F:会话管理API | R:CSRF_REFRESH_SESSIONS | A:getMySessions,revokeUserSession,getBlacklist | S:管理员踢人走 CSRF_BLACKLIST 端点
+short-link.js[FL5T]: F:短链接API | R:crudApi | A:getShortLinks,checkShortCode,generateShortCode,getShortLinkStats | S:详情 GET /{id} 与 detail 等价
+tb-search-data.js[FA5IT]: F:TB搜索数据API | R:withDataFilters,adDataRequest | A:getTBSearchDataList,importTBSearchData,batchDeleteTBSearchData | S:列表超时跟广告数据；with-data 筛选项 re-export
+third-party-report.js[FK3T]: F:第三方上报API | R:crudApi | A:getThirdPartyReports,retryThirdPartyReport,getThirdPartyReportStats | S:列表45s超时；无 create/delete
+user.js[FU7JS]: F:用户管理API | R:crudApi,exportDownload | A:getUsers,searchUser,exportUsers,changePassword | S:search 先 ID 再 username；删除前 prepareCsrf
+
+===E:/Platform/frontend/src/api/helpers/===
+adDataSelectOptions.js[FA5T]: F:广告筛选项加载 | R:users,clients 分页API | A:fetchClientsAsUserSelectOptions,fetchProductsAsSelectOptions | S:每页100最多50页；客户 label 拼用户全名
+exportDownload.js[FU3ET]: F:列表导出封装 | R:requestBlobDownload,messages | A:requestListExport | S:识别「无数据/不能导出」关键词并 warning，默认仍 throw
+notificationConfig.js[FN3JT]: F:通知配置工厂 | R:csrfMutate | A:createNotificationConfigApi,getClientNotificationConfig,saveProductNotificationConfig | S:路径模板 notification-configs/{type}s/{id}/config
+scheduledTaskPaths.js[FG3T]: F:定时任务路径 | R:scheduled-task.js | A:scheduledTaskPath,encodeScheduledTaskName | S:任务名 encodeURIComponent；保留段 queue-status 等禁止作 task_name
+withDataFilters.js[FA5T]: F:有数据维度筛选 | R:ad-data,tb-search-data | A:createWithDataFilterApi | S:moduleKey 决定前缀；TB 可 returnRaw 兼容历史响应
+
+===E:/Platform/frontend/src/components/Layout/===
+MainLayout.vue[FU9L]: F:应用主布局 | R:Sidebar,authStore,router | A:- | S:桌面侧栏+移动抽屉；未登录隐藏导航；顶栏退出登录
+Sidebar.vue[FA9L]: F:侧栏菜单 | R:router,prefetch,authStore | A:- | S:按管理员/客户与 hasClientPublisher 显隐；CPL/广告/系统子菜单
+
+===E:/Platform/frontend/src/components/===
+VirtualList.vue[FU7S]: F:虚拟滚动列表 | R:slot 渲染项 | A:items,height,itemHeight,bufferSize | S:spacer 撑高度；仅渲染可见区+缓冲
+VirtualTable.vue[FU7S]: F:虚拟滚动表格 | R:el-table | A:data,height,loading | S:监听容器 scroll 切片 visibleData；透传 $attrs
+
+===E:/Platform/frontend/src/components/ad-data/===
+AdDataDetailTable.vue[FA7M]: F:广告明细表格 | R:columnVisibility,metadataTooltip | A:adDataList,emptyText | S:列显隐与合计行；管理员可见客户与来源
+AdDataEditDialog.vue[FA7M]: F:广告数据编辑 | R:users,products 下拉 | A:visible,editForm,editRules | S:日期只读；换客户联动产品；来源 slug 可选
+AdDataFilterCard.vue[FA8L]: F:广告筛选卡片 | R:ProductFilterSelect | A:searchForm,multiSelect,showDimension | S:详细/日统计共用；维度与国家/ad_unit 互斥逻辑由父页驱动
+ProductFilterSelect.vue[FP5T]: F:产品筛选下拉 | R:productFilterOptions | A:modelValue,options,multiple | S:选项展示当前/历史归属 el-tag
+
+===E:/Platform/frontend/src/components/admin/===
+ClickLogDetailDialog.vue[FK7M]: F:点击详情弹窗 | R:formatDate,clipboard | A:detail,visible | S:展示 UA/设备/短链/Offer 等；Click ID 可复制
+ClickLogFilter.vue[FK7M]: F:点击日志筛选 | R:offerList,publisherList | A:localFilters | S:折叠面板；Enter 触发查询；Offer/渠道下拉
+ClientNotificationConfigDialog.vue[FN3T]: F:客户通知入口 | R:NotificationConfigDialog | A:clientId,clientName | S:entity-type=client 薄包装，saved 事件上抛
+FilterForm.vue[FP7S]: F:客户列表筛选 | R:客户管理页 | A:modelValue | S:v-model 字段 company_name/is_active/dateRange；查询与重置 emit
+GamProductWhitelistEditor.vue[FG7M]: F:GAM产品白名单 | R:products API | A:modelValue | S:留空表示全量；支持平台多选与批量粘贴行
+GamReportTypesEditor.vue[FG7S]: F:GAM报表类型 | R:scheduled-task refresh | A:modelValue,options | S:无 options 提示先刷新；daily 选中额外 hint
+NotificationConfigDialog.vue[FN8M]: F:通知配置弹窗 | R:notification API | A:entityType,entityId | S:客户/产品共用；Telegram 阈值与事件开关表单校验
+NotificationRecordsDialog.vue[FN8M]: F:通知记录弹窗 | R:getNotificationRecords | A:visible,filters | S:按状态/渠道筛选分页；可查看单条详情
+OfferSearchBar.vue[FA7S]: F:Offer筛选栏 | R:advertiserList | A:searchKeyword,filterStatus | S:管理员可筛广告主；Active/激活状态独立下拉
+OfferStatsPanel.vue[FA7S]: F:Offer统计面板 | R:getOfferStats | A:offerId | S:day/week/month 切换；卡片含点击转化 CVR 与趋势百分比
+PostbackFilterCard.vue[FB7S]: F:Postback筛选 | R:Postback 列表页 | A:searchForm | S:平台/转化或点击ID/产品客户ID/日期与状态组合筛选
+ProductActionBar.vue[FP3T]: F:产品操作栏 | R:product-management-dialog.css | A:productCount | S:添加产品按钮与总数 tag
+ProductAssignmentHistoryDialog.vue[FP9L]: F:分配历史弹窗 | R:product-assignments API | A:productId,assignments | S:时间线编辑起止日；pendingChanges 批量保存
+ProductDialogHeader.vue[FP3T]: F:产品弹窗页头 | R:product-management-dialog.css | A:clientName,productCount | S:展示客户名与 el-statistic 产品总数
+ProductFormDialog.vue[FP8M]: F:产品表单弹窗 | R:getAvailableProductNames | A:formData,formRules | S:名称 autocomplete 选已有改归属、新名新建；含 GAM 等扩展字段
+ProductManagementDialog.vue[FP7S]: F:客户维度产品弹窗 | R:useProductForm,ProductTable,ProductFormDialog,ProductTransferDateDialog | A:v-model与add/edit/delete/save/refresh事件 | S:兼容入口，正式页ProductManagement.vue；删除前提示临时挂靠
+ProductNotificationConfigDialog.vue[FN5TT]: F:产品通知配置壳 | R:NotificationConfigDialog.vue | A:entity-type=product的v-model与saved | S:仅委托通用通知弹窗
+ProductTable.vue[FP7S]: F:产品列表表格 | R:product-management-dialog.css | A:history/edit/delete事件；showClient | S:展示eCPM与收益减扣比例；移动端操作圆形按钮
+ProductTransferDateDialog.vue[FP7M]: F:产品转移日期 | R:useProductForm | A:start-date-change/end-date-change/confirm | S:同日更换与次日转移规则；结束日联动禁选
+ShortLinkFormDialog.vue[FL7M]: F:短链表单弹窗 | R:短链API与占位符校验 | A:创建编辑提交 | S:URL须含协议；click_id两种占位写法；编辑不可改short_code
+ShortLinkManagement.vue[FL8M]: F:短链管理页块 | R:ShortLinkFormDialog,列显隐composable | A:CRUD统计搜索分页 | S:内嵌组件可复用非独立路由
+StatsCards.vue[FY5S]: F:客户统计卡片 | R:useClientStats结构 | A:stats prop | S:总数活跃禁用关联产品四卡
+UserColumnSettingDialog.vue[FU5TT]: F:用户列显隐设置 | R:UserTable | A:v-model与columnVisibilityArray、save | S:ID与username列固定显示
+UserDetailDialog.vue[FU7S]: F:用户详情弹窗 | R:getAdminClientApiKey | A:v-model与formatDate | S:客户API密钥按需拉取；关闭重置密钥态
+UserFilterBar.vue[FU5TT]: F:用户筛选栏 | R:user-management.css | A:search与reset事件 | S:用户名角色状态三筛
+UserFormDialog.vue[FU7M]: F:用户表单弹窗 | R:用户与客户校验规则 | A:username-blur、role-change、提交 | S:编辑管理员禁改登录名角色；含客户API开关段
+UserPageHeader.vue[FU5TT]: F:用户页头统计 | R:user-management.css | A:add事件 | S:按角色与启用状态汇总
+UserTable.vue[FU7S]: F:用户列表表格 | R:UserColumnSettingDialog | A:sort-change、status-change、api-switch-change | S:客户行才显示公司与API列
+
+===E:/Platform/frontend/src/composables/===
+useAdDataColumnVisibility.js[FY7AS]: F:广告列显隐 | R:useTableColumnVisibility | A:useAdDataColumnVisibility与默认列工厂 | S:localStorage键迁移label→raw；date与product_name固定
+useAdDataDateRangeBootstrap.js[FY7AS]: F:广告日期初始化 | R:getAdDataDateRange,dateRangeFormat | A:ensureInitialDateRange,handleEmptyWithDateBootstrap | S:默认本月；空结果自动扩至库min-max重查一次
+useAdDataFilterCascade.js[FY5AT]: F:级联重导出 | R:useDataPageFilterCascade | A:export useAdDataFilterCascade | S:兼容旧import路径
+useAdDataMetadataOptions.js[FY8AS]: F:广告元数据下拉 | R:getAdDataMetadataOptions,adDataDimension | A:ensureAdDataMetadataOptions | S:接口失败保留fallback；上游列表以后端metadata为准
+useAdDataProductPanel.js[FP7AT]: F:广告页产品侧栏 | R:getProductById,getProductsWithData | A:useAdDataProductPanel | S:优先单产品查询失败回退列表
+useAdDataTableFormat.js[FY7AS]: F:广告表格格式化 | R:currencyFormat,percentFormat | A:useAdDataTableFormat,getSummaries | S:管理员CPC合计用扣减前收益字段
+useAdvertiserManagementColumnVisibility.js[FG5AT]: F:广告主列显隐 | R:useTableColumnVisibility | A:useAdvertiserManagementColumnVisibility | S:固定id与advertiser_name
+useAffiliateTestColumnVisibility.js[FG5TT]: F:联盟测试列显隐 | R:useTableColumnVisibility | A:useAffiliateTestColumnVisibility | S:固定offer_name与click_id
+useAuditLogColumnVisibility.js[FY5TT]: F:审计日志列显隐 | R:useTableColumnVisibility | A:useAuditLogColumnVisibility | S:固定id与created_at
+useAuditLogs.js[FY7S]: F:审计日志列表 | R:audit-log API | A:useAuditLogs | S:默认本月；支持清空全部与详情弹窗
+useCacheActions.js[FY7S]: F:缓存键操作 | R:cache API,useCacheList | A:viewCache,clearCache,clearAllCache | S:protected键不可删除
+useCacheList.js[FY5TT]: F:缓存键列表 | R:listCacheEntries | A:useCacheList | S:limit300；Redis不可用提示
+useCapColumnVisibility.js[FG5AT]: F:Cap列显隐 | R:useTableColumnVisibility | A:useCapColumnVisibility | S:固定offer_name
+useCapForm.js[FG7AS]: F:Cap表单对话框 | R:cap API,capFormRules | A:useCapForm | S:新建前getCaps拉CSRF；cap_type切换清advertiser
+useCapList.js[FG7AS]: F:Cap列表加载 | R:useCplFilterOptions,cap API | A:useCapList | S:page_size上限100
+useClickLogColumnVisibility.js[FY5TT]: F:点击日志列显隐 | R:useTableColumnVisibility | A:useClickLogColumnVisibility | S:固定click_id与click_time
+useClickLogList.js[FY8M]: F:点击日志列表 | R:clicks API,useCplFilterOptions | A:useClickLogList | S:conversion_id单条自动开详情；可重发FB上报
+useClientApiDocExamples.js[FP8L]: F:客户API示例 | R:clientApiSignature,getClientApiKey | A:useClientApiDocExamples | S:登录后实时签名；含ad_data day/all与dimension示例
+useClientForm.js[FP7S]: F:客户表单状态 | R:getAdminClientApiKey | A:useClientForm | S:编辑时拉取现有API key
+useClientProducts.js[FP8M]: F:客户产品CRUD | R:product API,csrfMutate | A:useClientProducts | S:仅改client_id视为转移；变更走ensureCsrfToken
+useClientStats.js[FP5TT]: F:客户统计聚合 | R:- | A:useClientStats,updateStats | S:products为product_count求和
+useClientUserManagementColumnVisibility.js[FU5TT]: F:客户用户列显隐 | R:useTableColumnVisibility | A:useClientUserManagementColumnVisibility | S:仅id/name/created_at
+useCloakConfigs.js[FL9L]: F:斗篷页全状态 | R:cloak-config API,cloakReportEvents | A:useCloakConfigs | S:启用须桥页HTML存在；CAPI测试分三阶段
+useConversionDeductionColumnVisibility.js[FY5BT]: F:转化扣减列显隐 | R:useTableColumnVisibility | A:useConversionDeductionColumnVisibility | S:固定id与target_name
+useConversionDeductionForm.js[FY7BM]: F:转化扣减表单 | R:deduction与CPL实体API | A:useConversionDeductionForm | S:level变更分页拉全量target
+useConversionDeductionList.js[FY8BM]: F:转化扣减列表 | R:deduction API | A:useConversionDeductionList | S:支持批量启停与批量删除
+useConversionSummary.js[FY8BM]: F:转化总览统计 | R:conversion-summary API,useCplFilterOptions | A:useConversionSummary | S:有日期时筛选项由stats回填；管理员见po/profit
+useConversionSummaryColumnVisibility.js[FY5BT]: F:转化总览列显隐 | R:useTableColumnVisibility | A:useConversionSummaryColumnVisibility | S:默认列随isAdmin隐藏上游列
+useCplFilterOptions.js[FG8AT]: F:CPL筛选项加载 | R:advertiser,publisher,offer API | A:useCplFilterOptions | S:activeOffersOnly控制Offer；Cap扣量点击等共用
+useDataPageFilterCascade.js[FY9AL]: F:数据页筛选级联 | R:ad-data与tb-search-data API | A:useDataPageFilterCascade,formatCountryFilterLabel | S:广告与TB双API；维度国家ad_unit互斥
+useDebouncedPaginatedFetch.js[FY8S]: F:防抖分页拉取 | R:api错误工具 | A:useDebouncedPaginatedFetch | S:同参去重；debounceMs=0仍去重
+useDeductionLogsColumnVisibility.js[FY5BT]: F:扣减日志列显隐 | R:useTableColumnVisibility | A:useDeductionLogsColumnVisibility | S:固定id与click_id
+useDevice.js[FY7S]: F:响应式设备检测 | R:- | A:useDevice,detectIOS,DeviceType | S:1024及以下算平板；首屏width同步防误判
+useDiscountColumnVisibility.js[FG5AT]: F:扣量列显隐 | R:useTableColumnVisibility | A:useDiscountColumnVisibility | S:无pin列配置
+useDiscountForm.js[FG7AS]: F:扣量表单对话框 | R:discount API,discountFormRules | A:useDiscountForm | S:discount_type非offer清offer_id
+useDiscountList.js[FG7AS]: F:扣量列表加载 | R:useCplFilterOptions,discount API | A:useDiscountList | S:与useCapList筛选分页结构对称
+useGamSchedulerConfig.js[FG8L]: F:GAM调度配置 | R:scheduled-task API,gamProductWhitelist | A:useGamSchedulerConfig | S:多账号凭证上传与report_types刷新；白名单文本解析
+useMobileTouch.js[FY5M]: F:移动端手势与视口 | R:mobile.css--vh;MainLayout | A:useMobileTouch/usePullToRefresh/useViewportHeight | S:滑动阈值50px;preventDefault可配置
+useOfferColumnVisibility.js[FK3T]: F:Offer列显隐持久化 | R:useTableColumnVisibility,OfferManagement | A:localStorage offerManagement_columnVisibility | S:管理员默认列更多;id与offer_name不可隐藏
+useOfferDetail.js[FK7S]: F:Offer详情弹窗 | R:offer/cap/discount API,offerTracklink | A:loadRelatedCaps/showOfferDetail | S:Cap与扣量分Tab;渠道短链按角色加载
+useOfferForm.js[FK7M]: F:Offer表单增删改 | R:createOffer/updateOffer,shortLinkFormRules | A:createEmptyOfferForm/handleSave | S:字段对齐后端CreateOffer;tracklink规则校验
+useOfferList.js[FK7S]: F:Offer列表筛选分页 | R:getOffers,useCplFilterOptions | A:loadData/handleSearch | S:loadRequestId丢弃过期响应;page_size上限100
+usePageAuth.js[FU5S]: F:页载前鉴权检查 | R:authStore,router | A:checkAuthBeforeLoad/safeAsync | S:凭HttpOnly Cookie会话;默认超时20s
+usePagination.js[FY3T]: F:通用分页筛选态 | R:各列表页可选复用 | A:getQueryParams/handleSizeChange | S:searchForm含company_name等遗留字段
+usePostbackColumnVisibility.js[FB3T]: F:转化列表列显隐 | R:useTableColumnVisibility,PostbackManagement | A:postbackManagement_columnVisibility | S:管理员可见original_payout;固定id与conversion_id
+usePostbackConversions.js[FB7S]: F:Postback转化查询 | R:postback API,useCplFilterOptions | A:fetchConversions/buildListParams | S:has_notification由notification_count>0推导
+usePostbackIpWhitelistColumnVisibility.js[FB3T]: F:IP白名单列显隐 | R:useTableColumnVisibility | A:postbackIpWhitelist_columnVisibility | S:固定id与ip_address列
+useProductForm.js[FP8L]: F:产品表单与转移 | R:product/client API,ProductManagement | A:表单弹窗/客户转移日期 | S:扣量比例0-1;换客户须重拉产品名
+useProductManagement.js[FP8M]: F:产品管理页逻辑 | R:useProductForm,route.query | A:列表CRUD/applyRouteQuery | S:路由query驱动筛选;表单作用域跟所选客户
+usePublisherColumnVisibility.js[FP3T]: F:渠道表格列显隐 | R:useTableColumnVisibility,PublisherManagement | A:publisherManagement_columnVisibility | S:固定id与publisher_name
+usePublisherList.js[FP5T]: F:渠道列表加载 | R:getPublishers | A:loadData/handleSearch | S:page_size上限100;失败ElMessage提示
+useRouteLoading.js[FY5T]: F:路由切换加载态 | R:router守卫begin/end | A:routeNavigating ref | S:嵌套导航计数;归零才关loading
+useScheduledTaskActions.js[FG7M]: F:任务启停与触发 | R:scheduled-task API,cronValidate | A:handleToggleActive/triggerTask | S:运行中禁切换启用;触发后轮询至结束
+useScheduledTasks.js[FG7M]: F:任务列表自动刷新 | R:scheduler/queue状态API | A:fetchTasks/stats computed | S:有运行中5s刷新否则60s;fetch防抖2s
+useSessionManagementColumnVisibility.js[FU3T]: F:会话列表列显隐 | R:useTableColumnVisibility,SessionManagement | A:sessionManagement_columnVisibility | S:固定id与created_at
+useShortLinkColumnVisibility.js[FL3T]: F:短链列表列显隐 | R:useTableColumnVisibility,ShortLinkManagement | A:shortLinkManagement_columnVisibility | S:固定short_code与short_url
+useShortLinkForm.js[FL7S]: F:短链表单增删改 | R:short-link API,shortLinkFormRules | A:handleSave/generateShortCode | S:空short_code提交时省略;保存后refreshListAndStats
+useShortLinkList.js[FL7M]: F:短链列表与统计 | R:getShortLinks,route.search | A:loadData/loadStats | S:路由search联动;loadRequestId防竞态
+useTableColumnVisibility.js[FY5T]: F:表格列显隐通用 | R:各*ColumnVisibility | A:load/save localStorage | S:pinColumns强制true;解析失败回默认
+useTbSearchColumnVisibility.js[FA3T]: F:TB搜索列显隐 | R:useAdDataColumnVisibility,TBSearchData | A:tbSearchData_columnVisibility | S:管理员可见扣前revenue/rpm
+useTbSearchTableFormat.js[FA3T]: F:TB表合计与格式 | R:formatTbCurrency | A:getSummaries/formatCurrency | S:数值列求和;货币列走TB格式
+useThirdPartyReportColumnVisibility.js[FB3T]: F:第三方上报列显隐 | R:useTableColumnVisibility | A:thirdPartyReportManagement_columnVisibility | S:report_params默认隐藏
+useThirdPartyReports.js[FB7S]: F:第三方上报日志 | R:third-party-report API,authStore | A:fetchLogs/fetchStats | S:默认当月区间;未登录跳/login
+useUserColumnVisibility.js[FU3T]: F:用户表格列显隐 | R:useTableColumnVisibility,UserManagement | A:userManagement_columnVisibility | S:固定id与username
+useUserForm.js[FU7M]: F:用户客户表单 | R:user/client API,VALIDATION | A:createEmptyUserForm/保存 | S:client角色联动公司字段;密钥编辑受控
+useUserList.js[FU7S]: F:用户列表与统计 | R:getUsers/getUserStats | A:fetchUsers/fetchStats | S:client行归一化API开关;请求去重防抖
+useUserManagementInit.js[FU3T]: F:用户页初始化 | R:loadColumnVisibility,fetchUsers | A:onMounted顺序拉取 | S:整页超时20s;统计延迟200ms
+useUserRowActions.js[FU7S]: F:用户行内操作 | R:deleteUser,client switches | A:handleDelete/通知配置弹窗 | S:变更前ensureCsrfToken;可跳产品管理
+
+===E:/Platform/frontend/src/config/===
+constants.js[FY3T]: F:前端全局常量 | R:表单/列表/缓存TTL | A:VALIDATION/PAGINATION/STATUS_MAP | S:API_TIMEOUT分移动与桌面
+
+===E:/Platform/frontend/src/constants/===
+adDataDimension.js[FA8L]: F:广告数据维度配置 | R:DailyReport子页,后端口径 | A:DAILY_REPORT_PAGE_CONFIG/迁移 | S:country与ad_unit互斥;legacy自动迁移
+scheduledTasks.js[FG3T]: F:GAM任务名常量 | R:后端task_names,GamSchedulerConfig | A:isGamSchedulerTask | S:任务名须与后端Google API获取数据一致
+
+===E:/Platform/frontend/src/router/===
+index.js[FY9L]: F:前端路由与守卫 | R:authStore,MainLayout,懒加载页 | A:createWebHistory/meta权限 | S:异步块失败重试一次;多requires*元数据
+
+===E:/Platform/frontend/src/services/===
+telegram_notification_service.js[FN3T]: F:Telegram测试文案 | R:通知配置页 | A:buildTestMessage | S:仅配置页预览;含转化/转发/系统样例
+
+===E:/Platform/frontend/src/store/===
+index.js[FU8L]: F:Pinia认证全局态 | R:auth API,router,axios | A:useAuthStore/login/logout | S:userInfo存sessionStorage;token HttpOnly Cookie
+
+===E:/Platform/frontend/src/styles/===
+common.css[FY3S]: F:公共布局样式 | R:variables.css | A:.page-container/.table-card | S:管理页filter/table/pagination通用
+mobile.css[FY7L]: F:移动端全局样式 | R:MainLayout抽屉,useMobileTouch | A:drawer/表格响应式 | S:--vh;drawer-open-scroll-lock
+product-management-dialog.css[FP5L]: F:产品对话框样式 | R:ProductManagement,useProductForm | A:.product-management-dialog | S:弹窗90vh flex;深度选择器改Element
+user-management.css[FU5L]: F:用户管理页样式 | R:UserManagement | A:.user-management-container | S:统计卡片;移动端表格折叠
+variables.css[FY5S]: F:全局CSS变量 | R:common/style.css | A::root色/间距/字体 | S:设计令牌单一来源
+
+===E:/Platform/frontend/src/utils/===
+adDataRequest.js[FA3T]: F:广告请求超时 | R:AdData/TB列表请求 | A:getAdDataListTimeout | S:移动端默认60s桌面45s
+api.js[FU8L]: F:API响应封装 | R:axios,csrfToken,apiPath | A:request/normalizeResponse | S:分页扁平/嵌套兼容;401清认证
+apiPath.js[FY5VT]: F:API路径校验 | R:utils/api request | A:assertValidRequestUrl/assertValidPathId | S:拦截${}与/undefined/null段
+auditLogFormat.js[FY5S]: F:审计日志格式化 | R:AuditLogManagement | A:getActionTypeTag/getResourceTypeLabel | S:action/resource映射与后端枚举对齐
+authResponse.js[FU3T]: F:认证响应解析 | R:login API,store | A:parseAuthResponseData | S:兼容code包装与历史裸JSON
+axiosConfig.js[FU8L]: F:Axios拦截配置 | R:csrfToken,requestCache,router | A:initAxiosConfig | S:401单飞刷新;GET可缓存;dev探测health
+cacheFormat.js[FY1T]: F:缓存页展示格式化 | R:CacheManagement | A:formatCacheSize,formatCacheExpireTime,getCacheTypeColor,formatCacheContent | S:字节分级;过期相对时间;类型色与JSON美化
+cachedDetailFetch.js[FY3T]: F:详情TTL缓存拉取 | R:各详情页fetch | A:createCachedDetailFetcher | S:Map TTL与并发去重;429/500不缓存错误;LRU删最旧
+canvasDisplay.js[FY3T]: F:Canvas高清适配 | R:Dashboard图表 | A:prepareCanvasForDisplay,lineChartIndexToX | S:DPR对齐缓冲;单点折线居中防除零
+capFormRules.js[FY1VT]: F:Cap表单校验 | R:CapManagement | A:createCapFormRules | S:advertiser_offer类型须选广告主;依赖getFormData读cap_type
+clientApiSignature.js[FP5JM]: F:客户API签名 | R:ClientApiDoc,后端verify | A:buildClientApiSignString,generateClientApiSign,generateClientApiSignMd5 | S:参数字典序拼接;默认HMAC-SHA256;MD5兼容
+clipboard.js[FY1T]: F:剪贴板复制 | R:logger,element-plus | A:copyToClipboard | S:优先clipboard API;失败回退execCommand并提示
+cloakReportEvents.js[FL5JS]: F:斗篷上报事件 | R:cloak.py,jsonFormat | A:validateReportEventName,validateTestReportPhase,CLOAK_REPORT_EVENTS | S:Meta标准/自定义名校验;Purchase金额规则;Token脱敏
+conversionDeductionFormRules.js[FY1VT]: F:转化扣减表单规则 | R:DeductionManagement | A:createConversionDeductionFormRules,emptyConversionDeductionForm | S:启用量/扣金额时比例须>0;默认空表单字段
+conversionDeductionFormat.js[FB1T]: F:转化扣减展示 | R:DeductionManagement | A:getLevelLabel,getStrategyLabel,getLevelTagType | S:层级与策略中文;Element标签色
+conversionSummaryFormat.js[FB3ET]: F:转化总览格式化 | R:dateRangeFormat | A:getDisplayConversion,buildConversionTableSummaries,exportConversionStatsCsv | S:非管理员转化受Cap;汇总行;CSV含BOM
+cronValidate.js[FG3VT]: F:Cron前端校验 | R:ScheduledTaskManagement | A:validateCronExpression,SCHEDULED_TASK_EDIT_RULES,taskSupportsManualDateRange | S:五段式;语义后端复核;手动日期看supports或任务名后缀
+crudApi.js[FA5S]: F:CRUD API工厂 | R:api,csrfMutate | A:createCrudApi,createMultipleCrudApis | S:methodNames须与解构一致;可选csrfOnMutate;listTrailingSlash默认true
+csrfMutate.js[FU3T]: F:写前CSRF刷新 | R:api | A:csrfBeforeMutate,withCsrfMutate,handleCsrf403IfNeeded | S:分模块刷新端点;403含csrf清sessionStorage
+csrfToken.js[FU7M]: F:CSRF令牌管理 | R:axios,logger | A:initCsrfTokenSync,getCsrfToken,fetchCsrfTokenFromEndpoints,clearCsrfToken | S:localStorage跨标签同步;50分钟阈值刷新;探测优先/health
+currencyFormat.js[FY1T]: F:USD金额格式化 | R:广告/统计表格 | A:formatCurrency,formatAdTableCurrency,formatTbCurrency | S:Intl zh-CN USD;表格$两位小数
+dailyReportSubtotals.js[FA5S]: F:日报用户小计 | R:AdDataManagement | A:injectUserDateSubtotals,aggregateAdDataMetrics,excludeUserDateSubtotalRows | S:_isUserDateSubtotal标记;比率按合计重算;管理员CPC口径
+date.js[FY1T]: F:日期兼容导出 | R:dateFormat | A:formatDate | S:忽略第二参数format;转发dateFormat实现
+dateFormat.js[FY3JT]: F:业务时区日期 | R:app-config | A:initTimezone,formatDate,formatDateTime,formatDateOnly | S:登录后init;失败默认Asia/Shanghai;缓存时区
+dateRangeFormat.js[FA3T]: F:日期范围工具 | R:AdData,conversionSummary | A:getMonthDateRange,resolveInitialAdDataDateRange,isSameDateRange | S:月初末YYYY-MM-DD或ISO;广告页默认与数据相交月
+discountFormRules.js[FY1VT]: F:扣量表单校验 | R:DiscountManagement | A:createDiscountFormRules | S:offer类型须选Offer;比例0-100
+domFixes.js[FY5M]: F:DOM兼容修复 | R:router | A:initDomFixes,fixSelectAccessibility | S:Element表单aria/title;MozAppearance与mask;MutationObserver
+errorFilter.js[FY3T]: F:扩展噪声过滤 | R:globalErrorHandler | A:isExtensionError,initConsoleErrorFilter,initEarlyErrorHandler | S:静默浏览器扩展message channel类错误
+gamProductWhitelist.js[FG1JT]: F:GAM白名单解析 | R:gam_api_fetch | A:normalizeGamProductName,parseGamProductNamesFromText,mergeGamProductNames | S:小写去www;多分隔符合并去重
+globalErrorHandler.js[FY5M]: F:全局错误捕获 | R:errorFilter,logger | A:initGlobalErrorHandler,recordFrontendError | S:忽略扩展与ResizeObserver;401不上报;POST client-error
+jsonFormat.js[FY1T]: F:JSON可读格式化 | R:cloakReportEvents等 | A:formatJson | S:字符串或对象缩进2;失败回退原串
+logger.js[FY1T]: F:环境感知日志 | R:全局调试 | A:logger | S:生产禁log/info/debug;error/warn可VITE_ALLOW_ERROR_LOG
+messages.js[FY5M]: F:前后端消息常量 | R:各页面ElMessage | A:getErrorMessage,getSuccessMessage,OperationType | S:优先后端detail;键名与后端对齐
+multiFilterValues.js[FA1T]: F:多选筛选参数 | R:AdData筛选 | A:appendCsvFilter,toCsvFilterValue,pruneMultiSelection | S:逗号分隔传API;兼容历史单选字符串
+navigateProductManagement.js[FP1T]: F:跳转产品管理 | R:ProductManagement路由 | A:navigateToProductManagement | S:非管理员提示;query带client/product/name
+offerTracklink.js[FB5S]: F:Offer下游链接 | R:OfferManagement | A:buildPublisherShortLink,getRowClientPublisherTracklink | S:/s/短链拼offer_id与channel_id;行内PO/Cap读取
+percentFormat.js[FY1T]: F:百分比格式化 | R:广告表格 | A:formatRatioAsPercent,formatPercentNumber,createPercentTableFormatter | S:0-1比率或已为百分数;表格formatter工厂
+postbackFormat.js[FB1T]: F:Postback展示 | R:currencyFormat,jsonFormat | A:formatOs,getOsTagType | S:OS中文与标签色;重导出货币与JSON
+prefetchRoutes.js[FY1T]: F:路由chunk预载 | R:router | A:prefetchRoute,prefetchAllRoutes | S:WeakSet防重复;idleCallback全量预载
+productClientFormat.js[FP3T]: F:产品客户展示 | R:dateFormat | A:formatProductOptionLabel,formatAssignmentDateRange,addDaysToDateString | S:选项拼归属全名;YYYY-MM-DD本地加减天
+productFilterOptions.js[FA3T]: F:产品筛选项文案 | R:AdData产品下拉 | A:mapApiProductToFilterOption,getProductOwnershipTag | S:current/historical/both后缀;PRODUCT_OWNERSHIP_HINT
+requestCache.js[FY9L]: F:GET请求缓存 | R:axiosConfig,logger | A:withCache,createCacheInterceptor,shouldCacheGetRequest | S:内存+localStorage TTL;去重;DEFAULT_GET_CACHE_URL_PATTERNS
+scheduledTaskStatus.js[FG3T]: F:定时任务状态 | R:ScheduledTaskManagement | A:toBoolFlag,isTaskRunning,normalizeScheduledTaskRow,resolveLastResultTagType | S:0/1字符串归一布尔;last_error映射标签色
+shortLinkFormRules.js[FL7S]: F:短链表单校验 | R:shortLinkPlaceholderValidate,useShortLinkForm | A:createShortLinkFormRules/createOfferTracklinkRules | S:校验URL协议域名与占位符;短码3-20且仅字母数字_-;重导出PLACEHOLDER_HINT
+shortLinkPlaceholderValidate.js[FL8S]: F:占位符语法校验 | R:后端validate_track_url_placeholders | A:validateShortLinkPlaceholders | S:单双花括号;别名归一;禁三层括号;缺Offer/渠道时warning
+thirdPartyReportFormat.js[FB3T]: F:第三方上报展示 | R:jsonFormat,dateRangeFormat | A:getSourceTag/getStatusLabel/formatReportJson | S:来源与HTTP状态色映射;re-export getCurrentMonthRange
+trendPrediction.js[FY3T]: F:预测步数索引 | R:TrendAnalysis,getTrendPredict | A:resolvePredictionHorizonIndex/pickPredictionValue | S:每步1分钟;PREDICTION_HORIZON_MINUTES=60;步数不足取min防越界
+userClient.js[FU5T]: F:用户客户ID解析 | R:UserManagement,client API | A:resolveClientIdForUser/ensureUserHasClient | S:仅role=client;缺嵌套时回拉getUserDetail并回写user.client
+uuid.js[FU1T]: F:UUID v4生成 | R:- | A:generateUUID | S:优先crypto.randomUUID;旧环境Math.random模板回退
+versionCheck.js[FY9L]: F:前端版本热更新 | R:main.js,/version.json | A:initVersionCheck/manualCheckUpdate/stopVersionCheck | S:对比__APP_VERSION__与远端;路由守卫与登录轮询;离线跳过;节流5s
+xssFilter.js[FU9L]: F:XSS过滤工具 | R:vSafeHtml,富文本展示 | A:escapeHtml/filterHtml/sanitizeInput/vSafeHtml | S:白名单标签属性;危险协议与on*剥离;script等整棵丢弃
+
+===E:/Platform/frontend/src/views/ad-data/===
+DailyReport.vue[FA8L]: F:广告日汇总页 | R:AdDataFilterCard,getDailySummary | A:导出/列显隐/跳转产品 | S:showDimension=false;共用级联筛选与日期bootstrap
+TBSearchData.vue[FA8L]: F:TB搜索数据页 | R:tb-search-data API,useTbSearchColumnVisibility | A:导入Excel/批量删/导出 | S:管理员可导入xlsx;筛选项级联类似广告页
+
+===E:/Platform/frontend/src/views/admin/===
+AdDataHealth.vue[FA8L]: F:广告健康巡检页 | R:adDataHealth API | A:告警/基线/规则/手动run/freeze | S:昨有今无12点后告警;凌晨巡检跳过today_gap落库
+AdvertiserManagement.vue[FG7L]: F:广告主管理页 | R:advertiser API | A:CRUD/列显隐 | S:上游广告主维护;useAdvertiserManagementColumnVisibility
+AffiliateTest.vue[FK7L]: F:下游联调测试页 | R:affiliate-test API | A:createAffiliateTest/列表筛选 | S:生成测试链接可复制;Offer与渠道下拉
+AuditLogManagement.vue[FY8L]: F:审计日志管理页 | R:useAuditLogs | A:筛选/详情/清空全部 | S:数据逻辑在composable;默认本月范围
+CacheManagement.vue[FY7M]: F:Redis缓存管理页 | R:useCacheList,useCacheActions | A:查看/刷新/单键清除/全清 | S:卡片视图展示键元数据;受保护键不可删
+CapManagement.vue[FG7L]: F:Cap配置管理页 | R:useCapForm,useCapList | A:CRUD/列显隐 | S:Offer/渠道/广告主维度日Cap与总Cap
+ClickLog.vue[FK7M]: F:短链访问记录页 | R:useClickLogList,ClickLogFilter | A:分页列表/详情弹窗/列设置 | S:conversion_id单条命中可自动开详情;可重发FB
+CloakManagement.vue[FL8L]: F:斗篷配置管理页 | R:useCloakConfigs,cloak-config API | A:CRUD/桥页上传/CAPI测试 | S:启用须{名}.html存在;载点转三阶段上报开关
+ConversionDeductionManagement.vue[FY8L]: F:转化扣减配置页 | R:useConversionDeductionList/Form | A:CRUD/批量启停/批量删 | S:level变更分页拉全量target;列显隐固定id
+ConversionSummary.vue[FY8L]: F:转化总览报表页 | R:useConversionSummary | A:多维筛选/汇总表/列显隐 | S:有日期时筛选项由stats回填;管理员见po/profit
+CountryManagement.vue[FY7L]: F:国家主数据维护 | R:country API | A:CRUD/别名/未识别码 | S:对应countries表;二字码表单校验;别名Tab
+DeductionLogs.vue[FB8L]: F:扣减执行日志页 | R:deduction API | A:分页筛选/导出/详情 | S:按转化/点击/Offer/渠道/广告主筛;列显隐
+DeductionStats.vue[FB9L]: F:扣减统计页 | R:getDeductionStats | A:汇总卡片/ECharts/导出 | S:扣量与扣金额趋势及比例分布图
+DiscountManagement.vue[FG7L]: F:CPL扣量配置页 | R:useDiscountList,useDiscountForm | A:CRUD/筛选/列显隐 | S:Offer/渠道/广告主维度扣量比例与生效时间
+GamSchedulerConfig.vue[FG8L]: F:GAM多账号配置页 | R:useGamSchedulerConfig | A:账号凭证/白名单/报表类型保存 | S:写入gam_scheduler.json;供Google API定时拉数
+MLModelManagement.vue[FY9L]: F:ML列映射训练页 | R:ml-model API | A:Excel解析/映射/预览/导入训练 | S:列名映射保存;训练数据导入与模型状态查询
+OfferManagement.vue[FK9L]: F:Offer管理页 | R:useOfferList,useOfferForm | A:CRUD/Tracklink/统计Tab | S:shortLinkFormRules校验;列显隐与批量操作
+PostbackIpWhitelist.vue[FB8L]: F:Postback白名单页 | R:postback API | A:单条/批量添加/CRUD | S:仅白名单IP的postback请求被接收记录
+PostbackManagement.vue[FB9L]: F:Postback转化管理 | R:usePostbackConversions | A:筛选/状态更新/通知补发 | S:融合原转化日志;管理员见original_payout
+ProductManagement.vue[FP8M]: F:产品独立管理页 | R:useProductManagement,ProductTable | A:列表CRUD/路由query筛选 | S:正式菜单页;换客户走转移日期对话框
+PublisherManagement.vue[FZ8L]: F:下游渠道CRUD | R:publisher API,usePublisherList,usePublisherColumnVisibility | A:getPublishers,createPublisher,updatePublisher,deletePublisher | S:表单含Postback URL/方法/成功检查与客户绑定及渠道折扣
+ScheduledTaskManagement.vue[FZ8L]: F:定时任务运维 | R:useScheduledTasks,useScheduledTaskActions,isGamSchedulerTask | A:Cron编辑,手动触发,队列状态 | S:路由离开前确认;统计卡片仅本页;GAM任务有特殊标识
+SensitivePathProbeManagement.vue[FZ8L]: F:敏感路径治理 | R:sensitive-path-probes API,ECharts | A:日志列表,封禁/解封IP,批量封禁,cleanup | S:TOP IP/路径图表;severity说明与自动封禁阈值
+SessionManagement.vue[FZ8L]: F:登录会话管理 | R:session API,authStore,useSessionManagementColumnVisibility | A:getMySessions,revokeAllMySessions,getBlacklist | S:Tab分我的会话与管理员IP黑名单;列显隐localStorage
+ShortLinkManagement.vue[FZ3T]: F:短链管理壳页 | R:components/admin/ShortLinkManagement.vue | A:- | S:路由视图仅包裹子组件;CRUD逻辑在组件内
+TelegramNotificationConfig.vue[FZ8L]: F:管理员TG通知 | R:notification API,TelegramNotificationService | A:get/saveAdminNotificationConfig,testTelegramConnection | S:默认ChatID;转化/转发失败/系统错误/统计频率开关
+ThirdPartyReportManagement.vue[FZ8L]: F:第三方上报日志 | R:third-party-report API,useThirdPartyReports | A:retryThirdPartyReport,updateThirdPartyReport | S:来源short_link/postback;ViewContent/Purchase;列显隐
+UserManagement.vue[FZ5S]: F:用户管理入口 | R:useUserList,useUserForm,useUserRowActions | A:- | S:页头/筛选/表格/表单拆子组件;可开产品管理与通知配置
+
+===E:/Platform/frontend/src/views/admin/ad-data/===
+AdDataList.vue[FZ5S]: F:广告列表示例 | R:getAdDataList,getProductList | A:产品/日期筛选,分页表格 | S:管理端子页;列含扣后ecpm/revenue;非主AdData.vue
+
+===E:/Platform/frontend/src/views/client/===
+ClientUserManagement.vue[FZ7L]: F:客户侧用户页 | R:changePassword,getClientApiKey,getProductList | A:改密,API密钥,产品表 | S:password_change_enabled=false隐藏改密;改密走CSRF
+
+===E:/Platform/models/===
+column_mapping_rules.json[RZ5T]: F:Excel列映射表 | R:ml_model ColumnMappingService | A:mapping,required_fields | S:11项required;映射扣前ecpm/revenue;含中英列名65条
+
+===E:/Platform/nginx/btfrx.online/===
+cloudflare-realip.conf[OZ3T]: F:CF IP弃用占位 | R:cloudflare_real_ip.conf | A:- | S:已清空real_ip指令;仅防旧路径include失败;勿与正式文件双引
+cloudflare_real_ip.conf[OZ5T]: F:CF真实IP段 | R:nginx.conf http include | A:set_real_ip_from,real_ip_header CF-Connecting-IP | S:IPv4/IPv6 CF网段;须随官方IP列表更新
+nginx.conf[OZ9L]: F:生产Nginx主配 | R:cloudflare_real_ip,frontend/dist,8960 | A:client.btfrx.online,/api/,/bridge/ | S:CF真实IP;CSP;proxy_read_timeout120;XFF用remote_addr防伪造
+使用说明.txt[OZ3T]: F:Nginx部署说明 | R:nginx.conf,cloudflare_real_ip.conf | A:cp至/etc/nginx,nginx -t,reload | S:强调CF配置只include一次;reload异常才restart
+改名.bat[OZ3T]: F:证书文件重命名 | R:client.btfrx.online TLS文件 | A:rename key/pem为.up后缀 | S:Windows本地运维辅助;两行走rename
+
+===E:/Platform/scripts/===
+109.html[HZ8M]: F:Macca澳问卷桥 | R:/report像素,cloak桥页 | A:shortCode,fbclid,email,phone | S:McDonald's AU Feedback主题;跳转前异步上报
+111.html[HZ7L]: F:麦当劳转盘桥 | R:master.html,/report | A:Free Spin UI,email phone | S:McDonald's Limited-Time Free Spin标题;后台retry上报
+113.html[HZ7L]: F:DollarTree桥 | R:/report,cloakReportQuerySuffix | A:option问卷字段 | S:750 Dollar Tree Shopping主题
+145.html[HZ7L]: F:UK消费者问卷桥 | R:/report上报 | A:National Consumer Center poll | S:UK Poll落地页模板
+146.html[HZ7L]: F:UK确认入口桥 | R:/report,145同系列 | A:Confirm Your Entry | S:NCC确认页;采集email phone后跳转
+149.html[HZ7L]: F:可乐领取桥页 | R:/report上报 | A:Claim Free Coca-Cola | S:表单+跳转;cloakReportQuerySuffix可选
+150.html[HZ7L]: F:IGA券桥页 | R:/report上报 | A:Win IGA Voucher | S:双底部按钮布局;上报后redirect
+master.html[HZ7L]: F:转盘桥页母版 | R:111等编号html | A:通用spin UI,/report | S:Limited-Time Free Spin;各活动页多从此派生
+
+===E:/Platform/secrets/===
+gam-23347342743.json[TZ7T]: F:GAM服务账号 | R:gam_api_fetch,googleads | A:network 23347342743 | S:Google service_account JSON;secrets勿提交Git;文件名即network code
+gam-23348711678.json[TZ7T]: F:GAM服务账号 | R:gam_api_fetch | A:network 23348711678 | S:多账号并行;结构与23347342743同;生产可API上传覆盖
+
+===E:/Platform/sql/===
+platform.sql[RZ9L]: F:MySQL结构真源 | R:ORM,升迁SQL,Navicat导出 | A:CREATE DATABASE platform,全表DDL | S:utf8mb4_0900;改表须同步本文件并出升迁
+
+===E:/Platform/systemd/===
+Platform-backend.service[OZ5T]: F:API systemd单元 | R:gunicorn.conf.py,GUNICORN_ROLE=api | A:ExecStart gunicorn app.main:app | S:www-data;8960;ENABLE_SCHEDULER=false;TimeoutStopSec45
+Platform-scheduler.service[OZ5T]: F:调度systemd单元 | R:gunicorn.conf,GUNICORN_ROLE=scheduler | A:8961,WORKERS=1 | S:ENABLE_SCHEDULER=true;After backend;独立scheduler日志pid
+
+#代码索引完毕

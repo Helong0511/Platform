@@ -1,0 +1,75 @@
+"""缓存单飞：同 key 并发未命中只执行一次 factory。"""
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+from app.core.infrastructure import cache_compat as cache_compat_mod
+from app.core.infrastructure.cache_compat import get_or_set_single_flight
+
+
+@pytest.mark.asyncio
+async def test_get_or_set_single_flight_coalesces_concurrent_miss(monkeypatch):
+    calls = {"n": 0}
+    store: dict[str, object] = {}
+
+    async def fake_get(key: str, key_prefix: str = "query_cache"):
+        return store.get(key)
+
+    async def fake_set(key: str, value, ttl: int = 300, key_prefix: str = "query_cache"):
+        store[key] = value
+        return True
+
+    monkeypatch.setattr(cache_compat_mod, "legacy_get_cached", fake_get)
+    monkeypatch.setattr(cache_compat_mod, "legacy_set_cached", fake_set)
+    cache_compat_mod._inflight_futures.clear()
+
+    async def factory():
+        calls["n"] += 1
+        await asyncio.sleep(0.05)
+        return {"ok": True, "n": calls["n"]}
+
+    async def _one():
+        return await get_or_set_single_flight(
+            "sf_test_key",
+            factory,
+            ttl=60,
+            key_prefix="ad_data",
+            is_valid=lambda c: isinstance(c, dict) and c.get("ok") is True,
+        )
+
+    results = await asyncio.gather(*[_one() for _ in range(8)])
+    assert calls["n"] == 1
+    assert all(r == results[0] for r in results)
+    assert results[0]["ok"] is True
+    assert store["sf_test_key"]["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_or_set_single_flight_hit_skips_factory(monkeypatch):
+    store = {"sf_hit_key": {"ok": True, "from": "cache"}}
+    calls = {"n": 0}
+
+    async def fake_get(key: str, key_prefix: str = "query_cache"):
+        return store.get(key)
+
+    async def fake_set(key: str, value, ttl: int = 300, key_prefix: str = "query_cache"):
+        store[key] = value
+        return True
+
+    monkeypatch.setattr(cache_compat_mod, "legacy_get_cached", fake_get)
+    monkeypatch.setattr(cache_compat_mod, "legacy_set_cached", fake_set)
+
+    async def factory():
+        calls["n"] += 1
+        return {"ok": True, "from": "factory"}
+
+    out = await get_or_set_single_flight(
+        "sf_hit_key",
+        factory,
+        ttl=60,
+        is_valid=lambda c: isinstance(c, dict) and c.get("ok") is True,
+    )
+    assert out["from"] == "cache"
+    assert calls["n"] == 0

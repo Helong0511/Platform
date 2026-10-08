@@ -8,12 +8,13 @@
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import time
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 from app.core.infrastructure.cache import get_cache_backend
 from app.core.infrastructure.cache_metrics import get_metrics_collector
@@ -22,6 +23,17 @@ logger = logging.getLogger(__name__)
 
 CACHE_PREFIX = "query_cache:"
 DEFAULT_TTL = 300
+
+# 进程内单飞：同 key 并发未命中只跑一次 factory，其余 await 同一 Future
+_inflight_futures: Dict[str, asyncio.Future] = {}
+_inflight_lock: Optional[asyncio.Lock] = None
+
+
+def _get_inflight_lock() -> asyncio.Lock:
+    global _inflight_lock
+    if _inflight_lock is None:
+        _inflight_lock = asyncio.Lock()
+    return _inflight_lock
 
 
 def _legacy_storage_key(key: str) -> str:
@@ -206,3 +218,131 @@ async def get_or_set_cache(
         logger.debug("缓存已设置: %s..., TTL=%ss", cache_key[:20], ttl)
 
     return result
+
+
+async def get_or_set_single_flight(
+    cache_key: str,
+    factory: Callable[[], Awaitable[Any]],
+    *,
+    ttl: int = DEFAULT_TTL,
+    key_prefix: str = "query_cache",
+    is_valid: Optional[Callable[[Any], bool]] = None,
+    wait_timeout: float = 25.0,
+    poll_interval: float = 0.05,
+) -> Any:
+    """
+    读缓存；未命中时进程内单飞计算并写回，避免同 key 并发击穿。
+
+    - 同进程：并发未命中共享一个 Future，只执行一次 factory
+    - 跨 Worker：拿不到进程内 Future 时，用 Redis 锁；等锁方轮询缓存，
+      超时仍未命中则自行计算（降级，保证有结果）
+
+    Args:
+        cache_key: 与 ``legacy_get_cached`` / ``legacy_set_cached`` 相同的业务键
+        factory: 无参异步工厂，返回可缓存的完整载荷
+        is_valid: 可选；判定缓存值是否可用（例如缺字段的旧值视为未命中）
+        wait_timeout: 跟随者等待缓存填好的最长时间（秒）
+    """
+
+    def _ok(value: Any) -> bool:
+        if value is None:
+            return False
+        if is_valid is None:
+            return True
+        try:
+            return bool(is_valid(value))
+        except Exception:
+            return False
+
+    cached = await legacy_get_cached(cache_key, key_prefix=key_prefix)
+    if _ok(cached):
+        return cached
+
+    flight_key = _legacy_storage_key(cache_key)
+    lock = _get_inflight_lock()
+    leader_future: Optional[asyncio.Future] = None
+    is_leader = False
+
+    async with lock:
+        existing = _inflight_futures.get(flight_key)
+        if existing is not None and not existing.done():
+            waiter = existing
+        else:
+            leader_future = asyncio.get_running_loop().create_future()
+            _inflight_futures[flight_key] = leader_future
+            is_leader = True
+            waiter = None
+
+    if not is_leader and waiter is not None:
+        try:
+            return await asyncio.wait_for(asyncio.shield(waiter), timeout=wait_timeout)
+        except Exception:
+            # 领导者失败或超时：再读一次缓存，仍无则自行计算
+            cached = await legacy_get_cached(cache_key, key_prefix=key_prefix)
+            if _ok(cached):
+                return cached
+            logger.warning(
+                "缓存单飞跟随者降级自行计算: key=%s...",
+                cache_key[:48],
+            )
+            result = await factory()
+            if result is not None:
+                await legacy_set_cached(
+                    cache_key, result, ttl=ttl, key_prefix=key_prefix
+                )
+            return result
+
+    # 领导者：优先尝试跨 Worker 锁，减少多进程同时打库
+    acquired_lock = False
+    dist_lock = None
+    try:
+        try:
+            from app.core.infrastructure.cache_advanced import DistributedLock
+
+            dist_lock = DistributedLock(f"sf:{flight_key}", timeout=int(max(5, wait_timeout)))
+            acquired_lock = await dist_lock.acquire()
+        except Exception as e:
+            logger.debug("缓存单飞分布式锁不可用，仅进程内合并: %s", e)
+            acquired_lock = True  # 无 Redis 锁时本进程仍作为计算方
+
+        if not acquired_lock:
+            # 其他 Worker 正在填充：轮询缓存
+            deadline = time.monotonic() + wait_timeout
+            while time.monotonic() < deadline:
+                await asyncio.sleep(poll_interval)
+                cached = await legacy_get_cached(cache_key, key_prefix=key_prefix)
+                if _ok(cached):
+                    if leader_future is not None and not leader_future.done():
+                        leader_future.set_result(cached)
+                    return cached
+            logger.warning(
+                "缓存单飞跨进程等待超时，降级自行计算: key=%s...",
+                cache_key[:48],
+            )
+
+        # 双重检查
+        cached = await legacy_get_cached(cache_key, key_prefix=key_prefix)
+        if _ok(cached):
+            if leader_future is not None and not leader_future.done():
+                leader_future.set_result(cached)
+            return cached
+
+        result = await factory()
+        if result is not None:
+            await legacy_set_cached(cache_key, result, ttl=ttl, key_prefix=key_prefix)
+        if leader_future is not None and not leader_future.done():
+            leader_future.set_result(result)
+        return result
+    except Exception as e:
+        if leader_future is not None and not leader_future.done():
+            leader_future.set_exception(e)
+        raise
+    finally:
+        if dist_lock is not None and acquired_lock:
+            try:
+                await dist_lock.release()
+            except Exception:
+                pass
+        async with lock:
+            if _inflight_futures.get(flight_key) is leader_future:
+                _inflight_futures.pop(flight_key, None)

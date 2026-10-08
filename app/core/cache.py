@@ -11,6 +11,7 @@ from app.core.infrastructure.cache_compat import (
     clear_all_cache,
     generate_cache_key,
     get_or_set_cache,
+    get_or_set_single_flight,
     invalidate_cache,
     legacy_get_cached as get_cached,
     legacy_set_cached as set_cached,
@@ -26,4 +27,5 @@ __all__ = [
     "cache_query",
     "clear_all_cache",
     "get_or_set_cache",
+    "get_or_set_single_flight",
 ]

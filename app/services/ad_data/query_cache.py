@@ -4,12 +4,18 @@
 筛选项（products/clients with-data）、KPI summary、每日汇总 daily-summary
 使用 Redis（query_cache: 命名空间）。
 键格式带可读前缀，便于入库后按前缀批量失效；避免仅 MD5 时无法定向清理。
+冷路径通过 ``ad_data_get_or_set`` 做进程内单飞 + 跨 Worker 锁等待，减轻缓存击穿。
 """
 from __future__ import annotations
 
 import logging
+from typing import Any, Awaitable, Callable, Optional
 
-from app.core.infrastructure.cache_compat import generate_cache_key, invalidate_cache
+from app.core.infrastructure.cache_compat import (
+    generate_cache_key,
+    get_or_set_single_flight,
+    invalidate_cache,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,3 +69,22 @@ async def invalidate_ad_data_query_caches(*, reason: str = "") -> int:
             reason or "-",
         )
     return deleted
+
+
+async def ad_data_get_or_set(
+    cache_key: str,
+    factory: Callable[[], Awaitable[Any]],
+    *,
+    ttl: int,
+    is_valid: Optional[Callable[[Any], bool]] = None,
+    wait_timeout: float = 25.0,
+) -> Any:
+    """广告数据查询缓存：未命中时单飞计算并写回（metric 前缀 ad_data）。"""
+    return await get_or_set_single_flight(
+        cache_key,
+        factory,
+        ttl=ttl,
+        key_prefix="ad_data",
+        is_valid=is_valid,
+        wait_timeout=wait_timeout,
+    )

@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "decisions": [
+    {
+      "path": "frontend/favicon.ico",
+      "decision": "exclude",
+      "role": "前端站点图标二进制资源",
+      "reason": "ICO二进制图标无法形成可读FRAS语义条目,排除出索引生成范围",
+      "confidence": 95,
+      "source_sha256": "d3d061662272821b5d48c5a830a9e085134cc104032e93f905c989011a41fecd",
+      "agent": "cursor",
+      "updated_at": "2026-09-29T07:47:55Z"
+    },
+    {
+      "path": "scripts/bridge/109.png",
+      "decision": "exclude",
+      "role": "桥接页静态PNG图片资源",
+      "reason": "PNG二进制图片不含可索引源码语义,排除出索引生成范围",
+      "confidence": 95,
+      "source_sha256": "3a8000605565cdad6e736c6bea154f6a1a2d72bb272c45a8da8e658bbe01c209",
+      "agent": "cursor",
+      "updated_at": "2026-09-29T07:47:55Z"
+    },
+    {
+      "path": "scripts/favicon.ico",
+      "decision": "exclude",
+      "role": "脚本侧站点图标二进制资源",
+      "reason": "ICO二进制图标无法形成可读FRAS语义条目,排除出索引生成范围",
+      "confidence": 95,
+      "source_sha256": "eb2ff3f9b7237ec02a133d35af5d196fb782432f9fd52f8028d8befa7f169531",
+      "agent": "cursor",
+      "updated_at": "2026-09-29T07:47:55Z"
+    }
+  ]
+}

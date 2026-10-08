@@ -6,6 +6,7 @@
   按广告单元→日期+产品+广告单元；按广告单元+国家→日期+产品+广告单元+国家
 - 支持权限过滤、分页、SQL/内存混合排序
 - Redis 缓存（默认 600s，可 env 配置），与 KPI summary 共用 ad_data 失效前缀
+- 冷路径同 key 单飞（进程内合并 + 跨 Worker 锁等待），减轻缓存击穿
 - 列表查询用 COUNT(*) OVER() 带回分组总数，避免再跑一遍 GROUP BY 计数
 - 全量合计独立缓存，并与列表查询并行执行，降低冷路径墙钟时间
 
@@ -24,10 +25,6 @@ from sqlalchemy.future import select
 
 from app.core.constants import ECPM_MULTIPLIER, PERCENTAGE_MULTIPLIER
 from app.core.database import AsyncSessionLocal
-from app.core.infrastructure.cache_compat import (
-    legacy_get_cached as get_cached,
-    legacy_set_cached as set_cached,
-)
 from app.core.utils import normalize_date_for_ad_data
 from app.core.country_code import resolve_country_name
 from app.core.query_utils import apply_date_range_filter, check_use_assignment_table
@@ -46,6 +43,7 @@ from app.services.ad_data.queries.dimension_filter import (
 from app.services.ad_data.queries.join_helpers import join_country_info_for_ad_data, join_product_and_client
 from app.services.ad_data.query_cache import (
     ad_data_daily_summary_cache_ttl,
+    ad_data_get_or_set,
     build_ad_data_query_cache_key,
 )
 from app.services.ad_data.queries.summary_query import (
@@ -169,16 +167,76 @@ class DailySummaryQuery:
             sort_by,
             sort_order,
         )
-        if not skip_cache:
-            cached = await get_cached(cache_key, key_prefix="ad_data")
-            if (
+
+        async def _produce_payload() -> Dict[str, Any]:
+            items, total, grand_total = await self._fetch_uncached(
+                current_user=current_user,
+                page=page,
+                page_size=page_size,
+                start_date=start_date,
+                end_date=end_date,
+                client_id=client_id,
+                product_id=product_id,
+                country_code=country_code,
+                ad_unit=ad_unit,
+                dim=dim,
+                dim_start=dim_start,
+                dim_end=dim_end,
+                split_by_country=split_by_country,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                skip_cache=skip_cache,
+            )
+            return {
+                "items": items,
+                "total": total,
+                "grand_total": grand_total,
+            }
+
+        def _payload_valid(cached: Any) -> bool:
+            return (
                 isinstance(cached, dict)
                 and "items" in cached
                 and "total" in cached
                 and "grand_total" in cached
-            ):
-                return cached["items"], int(cached["total"] or 0), cached["grand_total"]
+            )
 
+        if skip_cache:
+            payload = await _produce_payload()
+        else:
+            payload = await ad_data_get_or_set(
+                cache_key,
+                _produce_payload,
+                ttl=ad_data_daily_summary_cache_ttl(),
+                is_valid=_payload_valid,
+            )
+        return (
+            payload["items"],
+            int(payload.get("total") or 0),
+            payload["grand_total"],
+        )
+
+    async def _fetch_uncached(
+        self,
+        *,
+        current_user: User,
+        page: int,
+        page_size: int,
+        start_date: Optional[date],
+        end_date: Optional[date],
+        client_id: Optional[str | int],
+        product_id: Optional[str],
+        country_code: Optional[str],
+        ad_unit: Optional[str],
+        dim: str,
+        dim_start: Optional[date],
+        dim_end: Optional[date],
+        split_by_country: bool,
+        sort_by: str,
+        sort_order: str,
+        skip_cache: bool,
+    ) -> Tuple[List[Dict[str, Any]], int, Dict[str, Any]]:
+        """每日汇总冷路径（无外层列表缓存；合计子缓存仍可命中）。"""
         use_assignment_table = await check_use_assignment_table(self.db)
         group_by_ad_unit = dim == "ad_unit" or is_cross_dimension(dim)
         group_by_country = split_by_country or is_cross_dimension(dim)
@@ -196,30 +254,31 @@ class DailySummaryQuery:
         )
 
         async def _load_grand_total() -> Dict[str, Any]:
-            if not skip_cache:
-                cached_grand = await get_cached(grand_cache_key, key_prefix="ad_data")
-                if isinstance(cached_grand, dict) and "grand_total" in cached_grand:
-                    return cached_grand["grand_total"]
-            async with AsyncSessionLocal() as session:
-                gt = await DailySummaryQuery(session).fetch_grand_totals(
-                    current_user=current_user,
-                    start_date=start_date,
-                    end_date=end_date,
-                    client_id=client_id,
-                    product_id=product_id,
-                    country_code=country_code,
-                    ad_unit=ad_unit,
-                    dimension=dim,
-                    use_assignment_table=use_assignment_table,
-                )
-            if not skip_cache:
-                await set_cached(
-                    grand_cache_key,
-                    {"grand_total": gt},
-                    ttl=ad_data_daily_summary_cache_ttl(),
-                    key_prefix="ad_data",
-                )
-            return gt
+            async def _compute_grand() -> Dict[str, Any]:
+                async with AsyncSessionLocal() as session:
+                    gt = await DailySummaryQuery(session).fetch_grand_totals(
+                        current_user=current_user,
+                        start_date=start_date,
+                        end_date=end_date,
+                        client_id=client_id,
+                        product_id=product_id,
+                        country_code=country_code,
+                        ad_unit=ad_unit,
+                        dimension=dim,
+                        use_assignment_table=use_assignment_table,
+                    )
+                return {"grand_total": gt}
+
+            if skip_cache:
+                return (await _compute_grand())["grand_total"]
+
+            wrapped = await ad_data_get_or_set(
+                grand_cache_key,
+                _compute_grand,
+                ttl=ad_data_daily_summary_cache_ttl(),
+                is_valid=lambda c: isinstance(c, dict) and "grand_total" in c,
+            )
+            return wrapped["grand_total"]
 
         # 全量合计走独立会话，与列表/计数并行，缩短冷路径墙钟时间
         grand_task = asyncio.create_task(_load_grand_total())
@@ -491,18 +550,6 @@ class DailySummaryQuery:
             grand_total = build_table_grand_total_payload(
                 raw=_empty_aggregate_raw(),
                 for_admin=is_admin(current_user),
-            )
-
-        if not skip_cache:
-            await set_cached(
-                cache_key,
-                {
-                    "items": ad_data_responses,
-                    "total": total,
-                    "grand_total": grand_total,
-                },
-                ttl=ad_data_daily_summary_cache_ttl(),
-                key_prefix="ad_data",
             )
 
         return ad_data_responses, total, grand_total
