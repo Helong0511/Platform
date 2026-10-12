@@ -32,6 +32,7 @@ DATA_SOURCE_LEIYANG = "leiyang"
 DATA_SOURCE_IDGTN = "idgtn"
 DATA_SOURCE_PLAYHORIZONX = "playhorizonx"
 DATA_SOURCE_SWEETSTASTE = "sweetstaste"
+DATA_SOURCE_ASONE = "asone"
 DATA_SOURCE_EXCEL = "excel"
 DATA_SOURCE_UNKNOWN = "unknown"
 DATA_SOURCE_LEGACY = "legacy"
@@ -53,6 +54,7 @@ UPSTREAM_API_DATA_SOURCES: tuple[str, ...] = (
     DATA_SOURCE_IDGTN,
     DATA_SOURCE_PLAYHORIZONX,
     DATA_SOURCE_SWEETSTASTE,
+    DATA_SOURCE_ASONE,
 )
 
 VALID_DATA_SOURCES = frozenset({
@@ -101,6 +103,7 @@ STANDARD_REPORT_TYPE_BY_SOURCE: dict[str, str] = {
     DATA_SOURCE_AYA: REPORT_TYPE_DAILY,       # Aya：日报为标准
     DATA_SOURCE_FLYMOBI: REPORT_TYPE_CROSS,    # FlyMobi：交叉为标准
     DATA_SOURCE_ZHISUO: REPORT_TYPE_CROSS,     # ZhiSuo：交叉为标准
+    DATA_SOURCE_ASONE: REPORT_TYPE_CROSS,      # Asone：明细(cross)为标准
 }
 
 # 任务名 → 数据源映射（用于从 scheduled_tasks 加载 standard_report_type）
@@ -119,6 +122,7 @@ TASK_NAME_TO_DATA_SOURCE: dict[str, str] = {
     "IDGTN API获取数据": DATA_SOURCE_IDGTN,
     "PlayHorizonx API获取数据": DATA_SOURCE_PLAYHORIZONX,
     "SweetStaste API获取数据": DATA_SOURCE_SWEETSTASTE,
+    "Asone API获取数据": DATA_SOURCE_ASONE,
     "Google API获取数据": DATA_SOURCE_GAM,
 }
 
@@ -319,6 +323,7 @@ DATA_SOURCE_LABELS: dict[str, str] = {
     DATA_SOURCE_IDGTN: "IDGTN",
     DATA_SOURCE_PLAYHORIZONX: "PlayHorizonx",
     DATA_SOURCE_SWEETSTASTE: "SweetStaste",
+    DATA_SOURCE_ASONE: "Asone",
     DATA_SOURCE_EXCEL: "Excel 导入",
     DATA_SOURCE_LEGACY: "历史",
     DATA_SOURCE_UNKNOWN: "未知",
@@ -341,10 +346,10 @@ REPORT_TYPE_DETAIL_OPTIONS: tuple[str, ...] = (
 )
 
 REPORT_TYPE_HINTS: dict[str, str] = {
-    REPORT_TYPE_UNIT: "按广告单元，无具体国家（含 ZZ）；ZhiSuo channelunit、GAM ad_unit、Aya getAdsDataUnit、LeiYang ad-unit（默认关）、SweetStaste /get-ad-data",
-    REPORT_TYPE_COUNTRY: "按具体国家，无广告单元（不含 ZZ）；ZhiSuo channelcountry、TQT、Huguang、Aya、LeiYang country（默认关）",
-    REPORT_TYPE_CROSS: "具体国家+广告单元（不含 ZZ）；ZhiSuo channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、FlyMobi countryList、GAM country、TBSJ(yangyangdeyi)/adunit、LeiYang atomic（推荐）、IDGTN /download/country、PlayHorizonx /reports/index",
-    REPORT_TYPE_DAILY: "日汇总，无具体国家无单元（含 ZZ）；ZhiSuo channeldaily 兜底、GAM daily、Aya getDay、LeiYang all（默认关）",
+    REPORT_TYPE_UNIT: "按广告单元，无具体国家（含 ZZ）；ZhiSuo channelunit、GAM ad_unit、Aya getAdsDataUnit、LeiYang ad-unit（默认关）、SweetStaste /get-ad-data、Asone unit（默认关）",
+    REPORT_TYPE_COUNTRY: "按具体国家，无广告单元（不含 ZZ）；ZhiSuo channelcountry、TQT、Huguang、Aya、LeiYang country（默认关）、Asone country（默认关）",
+    REPORT_TYPE_CROSS: "具体国家+广告单元（不含 ZZ）；ZhiSuo channeldata、Addermobi、Skymobi、Pomiad、H5 Deer、FlyMobi countryList、GAM country、TBSJ(yangyangdeyi)/adunit、LeiYang atomic（推荐）、IDGTN /download/country、PlayHorizonx /reports/index、Asone detail（推荐）",
+    REPORT_TYPE_DAILY: "日汇总，无具体国家无单元（含 ZZ）；ZhiSuo channeldaily 兜底、GAM daily、Aya getDay、LeiYang all（默认关）、Asone daily（默认关）",
     REPORT_TYPE_LEGACY: "历史或未标注；新入库会自动按行形态推断",
 }
 
@@ -365,6 +370,7 @@ UPSTREAM_DEFAULT_REPORT_TYPES: dict[str, str] = {
     DATA_SOURCE_IDGTN: REPORT_TYPE_CROSS,    # /download/country（具体国家+广告单元）
     DATA_SOURCE_PLAYHORIZONX: REPORT_TYPE_CROSS,  # /reports/index（country_code + com_name）
     DATA_SOURCE_SWEETSTASTE: REPORT_TYPE_UNIT,  # /api/v1/get-ad-data 明细（广告单元+日期，无国家）
+    DATA_SOURCE_ASONE: REPORT_TYPE_CROSS,  # /api/channel-data-report 明细（国家+广告位）
     DATA_SOURCE_EXCEL: REPORT_TYPE_DAILY,
 }
 

@@ -875,6 +875,28 @@ class Settings(BaseSettings):
     # 可选按站点过滤；空则拉账号下全部站点
     SWEETSTASTE_API_SITE_NAME: str = os.getenv("SWEETSTASTE_API_SITE_NAME", "")
 
+    # Asone 渠道报表 API（asone.club，Header X-API-Key）
+    # 文档：POST /api/channel-*-report/apiPage；默认明细(cross)，其余维度可开关
+    ASONE_API_BASE_URL: str = os.getenv(
+        "ASONE_API_BASE_URL",
+        "https://asone.club",
+    ).rstrip("/")
+    ASONE_API_KEY: str = os.getenv("ASONE_API_KEY", "")
+    ASONE_API_PAGE_SIZE: int = int(os.getenv("ASONE_API_PAGE_SIZE", "200"))
+    # 默认仅拉明细（国家+广告位交叉）；其余维度默认关闭
+    ASONE_API_FETCH_DETAIL: bool = os.getenv("ASONE_API_FETCH_DETAIL", "true").lower() in [
+        "true", "1", "yes",
+    ]
+    ASONE_API_FETCH_COUNTRY: bool = os.getenv("ASONE_API_FETCH_COUNTRY", "false").lower() in [
+        "true", "1", "yes",
+    ]
+    ASONE_API_FETCH_UNIT: bool = os.getenv("ASONE_API_FETCH_UNIT", "false").lower() in [
+        "true", "1", "yes",
+    ]
+    ASONE_API_FETCH_DAILY: bool = os.getenv("ASONE_API_FETCH_DAILY", "false").lower() in [
+        "true", "1", "yes",
+    ]
+
     @staticmethod
     def _coerce_zhisuo_fetch_bool(value: object, default: bool) -> bool:
         if isinstance(value, bool):
@@ -1190,6 +1212,8 @@ if settings.is_production:
         logger.warning("生产环境未配置 LEIYANG_API_KEY，LeiYang 定时任务将跳过")
     if not settings.SWEETSTASTE_API_KEY.strip():
         logger.warning("生产环境未配置 SWEETSTASTE_API_KEY，SweetStaste 定时任务将跳过")
+    if not settings.ASONE_API_KEY.strip():
+        logger.warning("生产环境未配置 ASONE_API_KEY，Asone 定时任务将跳过")
 else:
     # 开发环境：不显示警告，仅在需要时提示
     # SECRET_KEY 验证已在 validate_secret_key 中处理，这里不需要额外提示

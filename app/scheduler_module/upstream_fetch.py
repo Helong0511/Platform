@@ -1387,3 +1387,86 @@ async def fetch_sweetstaste_rows(
     )
     return UpstreamFetchResult(rows=all_rows, stats=stats)
 
+
+# Asone 渠道报表 API（asone.club，X-API-Key）
+# 文档：https://s.apifox.cn/57980c06-f0c6-4e22-b6c1-1524be28b003
+# POST JSON：current/size/reportDateStart/reportDateEnd；成功 code=200；行在 data.records
+ASONE_PATH_DETAIL = "/api/channel-data-report/apiPage"  # 明细=交叉（国家+广告位）
+ASONE_PATH_UNIT = "/api/channel-unit-report/apiPage"
+ASONE_PATH_COUNTRY = "/api/channel-country-report/apiPage"
+ASONE_PATH_DAILY = "/api/channel-daily-report/apiPage"
+
+
+async def fetch_asone_rows(
+    *,
+    base_url: str,
+    api_key: str,
+    start: str,
+    end: str,
+    path: str,
+    label: str = "Asone API",
+    page_size: int = 200,
+) -> UpstreamFetchResult:
+    """
+    Asone 拉数：POST JSON + Header X-API-Key，按 data.pages / data.total 全量分页。
+
+    响应：code==200 成功；data.records 为行；分页字段 current/size/pages/total。
+    """
+    url = f"{base_url.rstrip('/')}{path}"
+    headers = {
+        "X-API-Key": api_key,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    all_rows: List[Any] = []
+    limit = max(1, min(int(page_size or 200), 500))
+    current = 1
+    last_total = 0
+    last_pages = 0
+
+    while True:
+        json_data = await post_json(
+            url,
+            json_body={
+                "current": current,
+                "size": limit,
+                "reportDateStart": start,
+                "reportDateEnd": end,
+                "orders": [{"column": "reportDate", "asc": False}],
+            },
+            headers=headers,
+            label=f"{label} (page={current})",
+        )
+        raise_unless_api_success(json_data, {200}, label=label, code_key="code")
+
+        payload = json_data.get("data") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        rows = payload.get("records") or []
+        if not isinstance(rows, list):
+            rows = []
+        all_rows.extend(rows)
+
+        last_total = int(payload.get("total") or last_total or 0)
+        last_pages = int(payload.get("pages") or last_pages or 0)
+
+        if _should_break_upstream_pagination(
+            rows,
+            total=last_total,
+            collected=len(all_rows),
+            page=current,
+            total_pages=last_pages,
+            limit=limit,
+        ):
+            break
+        current += 1
+
+    stats = _build_fetch_stats(
+        pages_fetched=current,
+        total_pages=last_pages,
+        rows_fetched=len(all_rows),
+        total_rows=last_total,
+        limit=limit,
+    )
+    return UpstreamFetchResult(rows=all_rows, stats=stats)
+
