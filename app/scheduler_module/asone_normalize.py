@@ -1,19 +1,20 @@
 """
 Asone 渠道报表行规范化。
 
-实测字段（camelCase）：
+实测字段（camelCase，2026-10-17 起明细/广告位开放 API 已含 unitName）：
 - reportDate (YYYY-MM-DD 字符串)
 - domainName (域名，作产品名)
-- country (英文全称，如 UNITED STATES；unit/daily 接口常无此字段)
-- unitId (字符串广告位 ID；country/daily 接口常无)
+- country (ISO 二位码如 AR/US，或偶发英文全称；country/daily 接口常无)
+- unitId (上游内部广告位 ID，如 auto-2-… / ca-pub-…)
+- unitName (与后台一致的单元名称，如 domain_INTERSTITIAL；明细/广告位优先用此入库)
 - requests / matchedRequests / impressions / clicks (整数或可转整数)
 - estimatedEarnings (浮点收益 USD)
-- ecpm (文档有；实测可能缺，入库时可按收益/展示回算)
+- ecpm (可选；缺省时入库可按收益/展示回算)
 
 维度形态：
-- cross（明细 channel-data-report）：保留具体国家 + unitId
+- cross（明细 channel-data-report）：具体国家 + unitName(优先)/unitId
 - country：保留国家，清空广告单元
-- unit：保留 unitId，清空国家
+- unit：保留 unitName(优先)/unitId，清空国家
 - daily：清空国家与广告单元
 """
 from __future__ import annotations
@@ -144,7 +145,11 @@ def normalize_asone_rows(
             continue
 
         country = _normalize_country(_pick(raw, "country", "countryCode", "country_code"), stats=stats)
-        ad_unit = _normalize_ad_unit(_pick(raw, "unitId", "unit_id", "adUnit", "ad_unit"))
+        # 与上游后台一致：优先单元名称 unitName，其次才用内部 unitId
+        ad_unit = _normalize_ad_unit(
+            _pick(raw, "unitName", "unit_name", "adUnitName", "ad_unit_name")
+            or _pick(raw, "unitId", "unit_id", "adUnit", "ad_unit")
+        )
 
         item: dict[str, Any] = {
             "date": date_str,

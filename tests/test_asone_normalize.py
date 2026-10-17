@@ -7,7 +7,8 @@ from app.core.ad_data_metadata import (
 )
 from app.scheduler_module.asone_normalize import normalize_asone_rows
 
-SAMPLE = {
+# 兼容：仅有 unitId / 英文国名
+SAMPLE_LEGACY = {
     "id": 22703095,
     "reportDate": "2026-10-12",
     "domainName": "zxcv.poki.love",
@@ -20,22 +21,59 @@ SAMPLE = {
     "estimatedEarnings": 0.0,
 }
 
+# 2026-10-17 起明细开放 API 实测形态
+SAMPLE = {
+    "id": 25160612,
+    "reportDate": "2026-10-17",
+    "domainName": "arctic.saacgames.com",
+    "country": "BD",
+    "unitId": "auto-3-arctic.saacgames.com",
+    "unitName": "arctic.saacgames.com_INTERSTITIAL",
+    "requests": 30,
+    "matchedRequests": 22,
+    "impressions": 11,
+    "clicks": 0,
+    "estimatedEarnings": 0.0,
+    "ecpm": 0.0,
+}
+
 
 def test_cross_maps_fields_and_country_alias():
-    rows, stats = normalize_asone_rows([SAMPLE], report_type=REPORT_TYPE_CROSS)
+    rows, stats = normalize_asone_rows([SAMPLE_LEGACY], report_type=REPORT_TYPE_CROSS)
     assert stats.kept_rows == 1
     row = rows[0]
     assert row["date"] == "2026-10-12"
     assert row["product_name"] == "zxcv.poki.love"
     assert row["country_code"] == "US"
+    # 无 unitName 时回退 unitId
     assert row["ad_unit"] == "23378317340"
-    assert row["request_count"] == 1
-    assert row["match_count"] == 1
-    assert row["display_count"] == 0
-    assert row["click_count"] == 0
-    assert row["revenue_before_deduct"] == 0.0
-    assert isinstance(row["request_count"], int)
-    assert isinstance(row["revenue_before_deduct"], float)
+
+
+def test_cross_uses_unit_name_and_iso_country():
+    rows, stats = normalize_asone_rows([SAMPLE], report_type=REPORT_TYPE_CROSS)
+    assert stats.kept_rows == 1
+    row = rows[0]
+    assert row["date"] == "2026-10-17"
+    assert row["product_name"] == "arctic.saacgames.com"
+    assert row["country_code"] == "BD"
+    assert row["ad_unit"] == "arctic.saacgames.com_INTERSTITIAL"
+    assert row["request_count"] == 30
+
+
+def test_prefers_unit_name_over_unit_id():
+    raw = {
+        **SAMPLE_LEGACY,
+        "unitId": "auto-2-favor.saacgames.com",
+        "unitName": "favor.saacgames.com_ANCHOR",
+    }
+    rows, _ = normalize_asone_rows([raw], report_type=REPORT_TYPE_CROSS)
+    assert rows[0]["ad_unit"] == "favor.saacgames.com_ANCHOR"
+
+
+def test_unit_dimension_prefers_unit_name():
+    rows, _ = normalize_asone_rows([SAMPLE], report_type=REPORT_TYPE_UNIT)
+    assert rows[0]["ad_unit"] == "arctic.saacgames.com_INTERSTITIAL"
+    assert rows[0]["country_code"] == ""
 
 
 def test_cross_coerces_string_metrics():
@@ -59,7 +97,7 @@ def test_cross_coerces_string_metrics():
 
 def test_cross_drops_missing_country_or_unit():
     bad_country = {**SAMPLE, "country": ""}
-    bad_unit = {**SAMPLE, "unitId": ""}
+    bad_unit = {**SAMPLE, "unitId": "", "unitName": ""}
     rows1, s1 = normalize_asone_rows([bad_country], report_type=REPORT_TYPE_CROSS)
     rows2, s2 = normalize_asone_rows([bad_unit], report_type=REPORT_TYPE_CROSS)
     assert rows1 == [] and s1.dropped_invalid_shape == 1
@@ -68,12 +106,12 @@ def test_cross_drops_missing_country_or_unit():
 
 def test_country_strips_ad_unit():
     rows, _ = normalize_asone_rows([SAMPLE], report_type=REPORT_TYPE_COUNTRY)
-    assert rows[0]["country_code"] == "US"
+    assert rows[0]["country_code"] == "BD"
     assert rows[0]["ad_unit"] == ""
 
 
 def test_unit_strips_country():
-    rows, _ = normalize_asone_rows([SAMPLE], report_type=REPORT_TYPE_UNIT)
+    rows, _ = normalize_asone_rows([SAMPLE_LEGACY], report_type=REPORT_TYPE_UNIT)
     assert rows[0]["ad_unit"] == "23378317340"
     assert rows[0]["country_code"] == ""
 
