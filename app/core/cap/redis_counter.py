@@ -98,13 +98,19 @@ class RedisCapManager:
 
     # 仅当本次 token 仍存在时撤销一次；重复调用不会误减其他请求的计数。
     _ROLLBACK_RESERVATION_LUA = """
-    if redis.call('DEL', KEYS[2]) == 0 then
+    if redis.call('EXISTS', KEYS[2]) == 0 then
         return 0
     end
+    -- 计数器缺失可能是独立淘汰/重启；保留 token 作为恢复证据，
+    -- 不能先删 token 再返回，否则永久丢失本次预留的撤销依据。
     if redis.call('EXISTS', KEYS[1]) == 0 then
-        return 0
+        return -2
     end
     local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+    if not current then
+        return -2
+    end
+    redis.call('DEL', KEYS[2])
     if current > 0 then
         return redis.call('DECR', KEYS[1])
     end
