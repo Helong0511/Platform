@@ -490,3 +490,13 @@ async def test_click_batch_ack_failure_replays_without_double_increment():
     assert second_inserted is False
     assert db.click_updates == 1
     assert redis.deleted == [pending_key]
+
+
+
+@pytest.mark.asyncio
+async def test_legacy_raw_snapshot_batch_writer_fails_closed():
+    with pytest.raises(RuntimeError, match="幂等恢复能力"):
+        await counter.sync_click_counts_to_db_batch(
+            db=None,
+            updates=[("unsafe-legacy-code", 3)],
+        )
