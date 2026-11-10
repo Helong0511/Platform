@@ -73,6 +73,9 @@ async def process_clicks_queue_task():
         elif result.get('processed', 0):
             logger.info("点击队列处理完成: %s", summary)
         set_task_result(TASK_PROCESS_QUEUE, f"执行完成: {summary}")
+        if result.get("failed", 0):
+            # 已回队等待下一轮重试，但本轮不是完全成功；让调度器记录失败状态。
+            raise RuntimeError(f"点击队列本轮有 {result['failed']} 条处理失败，已回队/等待恢复: {summary}")
     except Exception as e:
         logger.error("点击队列批量处理任务执行失败: %s", e, exc_info=True)
         raise
