@@ -188,3 +188,54 @@ async def test_cleanup_does_not_assign_short_ttl_to_total_cap_keys(monkeypatch):
 
     assert cleaned == 0
     assert redis.expire_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("daily_missing", "total_missing", "expected_issue"),
+    [
+        (True, False, "每日 Redis 计数 key 缺失"),
+        (False, True, "总计 Redis 计数 key 缺失"),
+        (True, True, "真实计数未知"),
+    ],
+)
+async def test_missing_redis_cap_keys_are_unknown_not_zero_and_never_repaired(
+    monkeypatch, daily_missing, total_missing, expected_issue
+):
+    now = datetime(2026, 11, 10, 12, 0, 0)
+    cap = SimpleNamespace(
+        id=4,
+        offer_id=80,
+        publisher_id=14,
+        daily_cap=50,
+        total_cap=500,
+        cap_start_date=now,
+        current_daily_count=0,
+        current_total_count=0,
+        is_active=True,
+    )
+    values = {}
+    if not daily_missing:
+        values[consistency_checker.get_daily_cap_key(80, now, 14)] = "0"
+    if not total_missing:
+        values[consistency_checker.get_total_cap_key(80, 14)] = "0"
+    redis = _FakeRedis(values)
+    db = _FakeDB([cap])
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(consistency_checker, "get_redis_client", fake_redis)
+    monkeypatch.setattr(consistency_checker, "get_app_now_naive", lambda: now)
+
+    issues = await consistency_checker.check_cap_consistency(
+        db=db, offer_id=80, fix_inconsistencies=True
+    )
+
+    assert len(issues) == 1
+    issue = issues[0]
+    assert expected_issue in " ".join(issue["inconsistencies"])
+    assert issue["redis_daily_count"] is (None if daily_missing else 0)
+    assert issue["redis_total_count"] is (None if total_missing else 0)
+    assert redis.writes == []
+    assert any("未执行自动覆盖修复" in item for item in issue["inconsistencies"])
