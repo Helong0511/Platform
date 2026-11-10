@@ -469,7 +469,7 @@ class PostbackProcessor:
                     db.add(
                         PostbackForwardQueue(
                             conversion_id=conversion.id,
-                            product_id=conversion.product_id,
+                            product_id=None,
                             publisher_id=publisher_id,
                             downstream_url=publisher.postback_url,
                             request_method=publisher.postback_method or "GET",
