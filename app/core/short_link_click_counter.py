@@ -338,7 +338,13 @@ async def increment_click_count_async(
     if not marker_set then
         return tonumber(redis.call('GET', KEYS[1]) or '0')
     end
-    return redis.call('INCR', KEYS[1])
+    local ok, incremented = pcall(redis.call, 'INCR', KEYS[1])
+    if not ok then
+        -- INCR 失败时清除刚创建的 marker，确保相同 event_id 可安全重试。
+        redis.call('DEL', KEYS[2])
+        return redis.error_reply(incremented)
+    end
+    return incremented
     """
 
     last_error = None
