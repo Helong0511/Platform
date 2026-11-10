@@ -318,6 +318,56 @@ async def _scan_click_counter_keys(redis, max_keys: int = MAX_KEYS_PER_SYNC) -> 
     return keys
 
 
+async def _sync_in_memory_counters_to_db(db: AsyncSession, short_codes: list[str] = None) -> int:
+    """Redis 恢复后补写故障期间积累的进程内点击计数。"""
+    async with _counter_lock:
+        snapshot = {
+            code: count for code, count in _click_counters.items()
+            if count > 0 and (not short_codes or code in short_codes)
+        }
+    if not snapshot:
+        return 0
+
+    try:
+        result = await db.execute(
+            select(ShortLink.short_code, ShortLink.is_active).where(
+                ShortLink.short_code.in_(list(snapshot))
+            )
+        )
+        rows = result.fetchall()
+    except Exception as exc:
+        logger.warning("Redis 恢复后预验证进程内点击计数失败，保留计数等待重试: %s", exc)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return 0
+
+    active_codes = {row[0] for row in rows if row[1]}
+    async with _counter_lock:
+        for code in snapshot:
+            if code not in active_codes:
+                _click_counters.pop(code, None)
+
+    synced = 0
+    for code, snapshot_count in sorted(snapshot.items()):
+        if code not in active_codes:
+            continue
+        if await _update_click_count_with_retry(db, code, snapshot_count):
+            synced += 1
+            # 仅扣除已入账快照；同步期间新增的点击必须保留。
+            async with _counter_lock:
+                remaining = _click_counters.get(code, 0) - snapshot_count
+                if remaining > 0:
+                    _click_counters[code] = remaining
+                else:
+                    _click_counters.pop(code, None)
+
+    if synced:
+        logger.info("Redis 恢复后补写进程内点击计数完成: %s 个短链接", synced)
+    return synced
+
+
 async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = None) -> int:
     """
     将Redis中的点击次数同步到数据库
@@ -495,6 +545,9 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
             
             return synced
         
+        # Redis 恢复后先补写故障期间积累的本地计数，避免只扫描 Redis 而遗漏降级数据。
+        await _sync_in_memory_counters_to_db(db, short_codes)
+
         # Redis 可用时只用 SCAN；失败时保留 Redis 数据并等待下轮重试，
         # 绝不降级到 KEYS，避免大 keyspace 下阻塞 Redis 主线程。
         keys = await _scan_click_counter_keys(redis, MAX_KEYS_PER_SYNC)
