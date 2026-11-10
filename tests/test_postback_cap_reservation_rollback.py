@@ -101,8 +101,8 @@ async def test_cap_checker_rolls_back_only_the_recorded_reservations(monkeypatch
     async def dec_total(offer_id, publisher_id=None):
         calls.append(("total", offer_id, publisher_id))
 
-    monkeypatch.setattr(cap_checker.RedisCapManager, "decrement_daily", dec_daily)
-    monkeypatch.setattr(cap_checker.RedisCapManager, "decrement_total", dec_total)
+    monkeypatch.setattr(cap_checker.RedisCapManager, "decrement_daily", staticmethod(dec_daily))
+    monkeypatch.setattr(cap_checker.RedisCapManager, "decrement_total", staticmethod(dec_total))
 
     await CapChecker.rollback_reservations([("total", 77, 12)])
 
