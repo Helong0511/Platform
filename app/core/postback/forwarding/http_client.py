@@ -3,13 +3,57 @@ HTTP 客户端
 
 发送 Postback HTTP 请求。发请求前与重定向链上均做 SSRF 校验，避免打到内网/元数据地址。
 """
+import asyncio
 import logging
 from typing import Dict, Any, Optional, Tuple
 import httpx
 
-from app.core.ssrf_guard import SSRFForbiddenError, assert_outbound_url_safe, validate_outbound_url
+from app.core.ssrf_guard import (
+    SSRFForbiddenError,
+    assert_outbound_url_safe,
+    resolve_public_ip,
+)
 
 logger = logging.getLogger(__name__)
+
+
+class _PinnedDNSAsyncHTTPTransport(httpx.AsyncBaseTransport):
+    """
+    DNS 固定传输层：连接前再次解析并校验，然后把 TCP 目标固定为该 IP。
+
+    HTTP Host 与 TLS SNI 仍使用原始域名；禁用 keep-alive，避免不同域名解析到同一 IP
+    时错误复用 TLS 连接。每次重定向都会经过该传输层重新解析和校验。
+    """
+
+    def __init__(self, delegate: Optional[httpx.AsyncBaseTransport] = None):
+        self._delegate = delegate or httpx.AsyncHTTPTransport(
+            trust_env=False,
+            limits=httpx.Limits(max_keepalive_connections=0),
+        )
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        original_url = request.url
+        original_sni = request.extensions.get("sni_hostname")
+        original_host = original_url.host
+
+        # 连接前最后一刻解析并固定 IP，关闭「校验 DNS 与 TCP 连接再次解析」的竞态窗口。
+        pinned_ip = await asyncio.to_thread(resolve_public_ip, original_host)
+        if original_url.scheme == "https":
+            request.extensions["sni_hostname"] = original_host
+        request.url = original_url.copy_with(host=pinned_ip)
+
+        try:
+            return await self._delegate.handle_async_request(request)
+        finally:
+            # 让 HTTPX 的响应/重定向仍以原始 URL 为基准，而不是 IP URL。
+            request.url = original_url
+            if original_sni is None:
+                request.extensions.pop("sni_hostname", None)
+            else:
+                request.extensions["sni_hostname"] = original_sni
+
+    async def aclose(self) -> None:
+        await self._delegate.aclose()
 
 
 class HttpClient:
@@ -22,7 +66,7 @@ class HttpClient:
     async def _ssrf_request_hook(request: httpx.Request) -> None:
         """httpx 请求钩子：含跟随重定向后的每一次请求都会触发。"""
         try:
-            assert_outbound_url_safe(str(request.url))
+            await asyncio.to_thread(assert_outbound_url_safe, str(request.url))
         except SSRFForbiddenError as exc:
             raise httpx.RequestError(
                 f"SSRF blocked: {exc.reason}",
@@ -44,7 +88,7 @@ class HttpClient:
             tuple: (是否成功，状态码，响应内容)
         """
         try:
-            assert_outbound_url_safe(url)
+            await asyncio.to_thread(assert_outbound_url_safe, url)
         except SSRFForbiddenError as exc:
             logger.warning(
                 "Postback 出站被 SSRF 防护拦截：url=%s reason=%s",
@@ -55,11 +99,13 @@ class HttpClient:
 
         try:
             async with httpx.AsyncClient(
+                transport=_PinnedDNSAsyncHTTPTransport(),
                 timeout=httpx.Timeout(
                     HttpClient.DEFAULT_TIMEOUT,
                     connect=HttpClient.CONNECT_TIMEOUT,
                 ),
                 follow_redirects=True,
+                trust_env=False,
                 event_hooks={"request": [HttpClient._ssrf_request_hook]},
             ) as client:
 
