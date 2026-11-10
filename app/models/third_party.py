@@ -33,8 +33,6 @@ class ThirdPartyReportLog(Base):
     event_key = Column(
         String(64),
         nullable=False,
-        unique=True,
-        index=True,
         comment='事件幂等键：source、adsid、event、conversion_id 的 SHA-256',
     )
     conversion_id = Column(String(255), nullable=True, index=True, comment='转化ID')
