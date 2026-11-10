@@ -126,6 +126,25 @@ else
 end
 """
 
+# Lua：数据库成功入账后，只扣减本轮已读取的增量。
+# DECRBY 保留 key 的原 TTL，避免并发点击残留值因 SET 而丢失过期时间。
+_DECREMENT_COUNTER_LUA = """
+local current = redis.call('GET', KEYS[1])
+if not current then
+    return 0
+end
+local decrement = tonumber(ARGV[1])
+local current_number = tonumber(current)
+if not decrement or decrement <= 0 or not current_number or current_number < decrement then
+    return 0
+end
+local remaining = redis.call('DECRBY', KEYS[1], decrement)
+if remaining <= 0 then
+    redis.call('DEL', KEYS[1])
+end
+return 1
+"""
+
 # Lua脚本：原子获取并删除计数器值（已废弃，保留用于兼容）
 # 注意：此脚本会导致数据丢失风险，已改用_GET_COUNTER_LUA
 _GET_AND_DELETE_COUNTER_LUA = """
@@ -249,6 +268,54 @@ async def increment_click_count_async(short_code: str) -> None:
             f"短链接点击计数（降级到进程内）: short_code={short_code}, "
             f"旧值={old_count}, 新值={new_count}"
         )
+
+
+async def _scan_click_counter_keys(redis, max_keys: int = MAX_KEYS_PER_SYNC) -> list:
+    """有界扫描点击计数器；去重 SCAN 可能重复返回的键，失败时不调用阻塞式 KEYS。"""
+    pattern = f"{CLICK_COUNTER_PREFIX}*"
+    keys = []
+    seen = set()
+    cursor = 0
+    max_iterations = 100000
+    iteration = 0
+    limit = max(1, int(max_keys))
+
+    try:
+        while True:
+            cursor, batch_keys = await redis.scan(cursor, match=pattern, count=100)
+            for key in batch_keys:
+                if key in seen:
+                    continue
+                seen.add(key)
+                keys.append(key)
+                if len(keys) >= limit:
+                    logger.info(
+                        "本轮同步已达上限 %s 个计数器，剩余键将在下轮继续处理",
+                        limit,
+                    )
+                    return keys
+
+            iteration += 1
+            if iteration >= max_iterations:
+                logger.warning(
+                    "Redis SCAN 达到最大迭代次数 %s，停止扫描；已收集 %s 个键，游标=%s",
+                    max_iterations,
+                    len(keys),
+                    cursor,
+                )
+                break
+            if cursor == 0:
+                break
+    except Exception as exc:
+        # SCAN 失败时不能用 KEYS 扫描整个 keyspace；已收集的键仍可安全处理，
+        # 未扫描到的键留在 Redis 中，等待下一轮任务重试。
+        logger.warning(
+            "Redis SCAN 失败，保留未扫描计数器供下轮重试；已收集 %s 个键：%s",
+            len(keys),
+            exc,
+        )
+
+    return keys
 
 
 async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = None) -> int:
@@ -428,45 +495,9 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
             
             return synced
         
-        # Redis可用时，从Redis同步
-        # 使用SCAN而不是KEYS，避免在生产环境阻塞
-        pattern = f"{CLICK_COUNTER_PREFIX}*"
-        keys = []
-        cursor = 0
-        max_iterations = 100000  # 最大迭代次数，防止无限循环（100000 * 100 = 1000万条键）
-        iteration = 0
-        try:
-            while True:
-                cursor, batch_keys = await redis.scan(cursor, match=pattern, count=100)
-                keys.extend(batch_keys)
-                iteration += 1
-
-                if len(keys) >= MAX_KEYS_PER_SYNC:
-                    keys = keys[:MAX_KEYS_PER_SYNC]
-                    logger.info(
-                        f"本轮同步已达上限 {MAX_KEYS_PER_SYNC} 个计数器，"
-                        f"剩余键将在下轮继续处理"
-                    )
-                    break
-                
-                # 安全检查：防止无限循环
-                if iteration >= max_iterations:
-                    logger.warning(
-                        f"Redis SCAN达到最大迭代次数 {max_iterations}，停止扫描。"
-                        f"已收集 {len(keys)} 个键，当前游标: {cursor}"
-                    )
-                    break
-                
-                if cursor == 0:
-                    break
-        except Exception as e:
-            # 如果SCAN失败，降级使用KEYS（不推荐，但作为后备方案）
-            logger.warning(f"Redis SCAN失败，降级使用KEYS: {e}")
-            try:
-                keys = await redis.keys(pattern)
-            except Exception as keys_error:
-                logger.error(f"Redis KEYS也失败: {keys_error}")
-                keys = []
+        # Redis 可用时只用 SCAN；失败时保留 Redis 数据并等待下轮重试，
+        # 绝不降级到 KEYS，避免大 keyspace 下阻塞 Redis 主线程。
+        keys = await _scan_click_counter_keys(redis, MAX_KEYS_PER_SYNC)
         
         if not keys:
             logger.debug("没有需要同步的短链接点击计数器")
@@ -1055,21 +1086,9 @@ async def _batch_update_click_counts_with_retry(
                     if redis_key:
                         # 使用Lua脚本原子地减少计数器值，如果减到0或以下则删除
                         # 这样可以避免删除其他进程在同步期间新增加的计数
-                        delete_lua = """
-                        local val = redis.call('GET', KEYS[1])
-                        if val and tonumber(val) >= tonumber(ARGV[1]) then
-                            local new_val = tonumber(val) - tonumber(ARGV[1])
-                            if new_val <= 0 then
-                                redis.call('DEL', KEYS[1])
-                                return 1
-                            else
-                                redis.call('SET', KEYS[1], new_val)
-                                return 1
-                            end
-                        else
-                            return 0
-                        end
-                        """
+                        # DECRBY 会保留 Redis key 原有 TTL；不能用 SET 覆盖剩余计数，
+                        # 否则并发新点击留下的计数会变成永久 key。
+                        delete_lua = _DECREMENT_COUNTER_LUA
                         delete_tasks.append(
                             redis.eval(delete_lua, 1, redis_key, count_value)
                         )
