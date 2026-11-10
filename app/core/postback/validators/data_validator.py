@@ -5,7 +5,7 @@
 """
 import logging
 from decimal import Decimal, InvalidOperation
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 
 from app.core.postback.transformers.normalizer import DataNormalizer
 
