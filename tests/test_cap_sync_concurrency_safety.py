@@ -1,0 +1,158 @@
+"""回归测试：Cap 同步和一致性检查不得覆盖并发预留或降低已确认计数。"""
+from datetime import datetime, timedelta
+from types import SimpleNamespace
+
+import pytest
+
+from app.core.cap import cap_sync, consistency_checker
+
+
+class _ScalarResult:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self.rows
+
+    def first(self):
+        return self.rows[0] if self.rows else None
+
+
+class _FakeDB:
+    def __init__(self, rows):
+        self.rows = rows
+        self.query = None
+        self.committed = False
+        self.rolled_back = False
+
+    async def execute(self, query):
+        self.query = query
+        return _ScalarResult(self.rows)
+
+    async def commit(self):
+        self.committed = True
+
+    async def rollback(self):
+        self.rolled_back = True
+
+
+class _FakeRedis:
+    def __init__(self, values):
+        self.values = values
+        self.writes = []
+
+    async def get(self, key):
+        return self.values.get(key)
+
+    async def setex(self, *args):
+        self.writes.append(("setex", args))
+
+    async def set(self, *args, **kwargs):
+        self.writes.append(("set", args, kwargs))
+
+
+@pytest.mark.asyncio
+async def test_sync_all_caps_locks_rows_and_never_resets_existing_today_redis_key(monkeypatch):
+    now = datetime(2026, 11, 10, 12, 0, 0)
+    cap = SimpleNamespace(
+        id=1,
+        offer_id=77,
+        publisher_id=12,
+        daily_cap=100,
+        total_cap=1000,
+        cap_start_date=now - timedelta(days=1),
+        current_daily_count=88,
+        current_total_count=9,
+        is_active=True,
+    )
+    daily_key = cap_sync.get_daily_cap_key(77, now, 12)
+    total_key = cap_sync.get_total_cap_key(77, 12)
+    redis = _FakeRedis({daily_key: "4", total_key: "5"})
+    db = _FakeDB([cap])
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(cap_sync, "get_redis_client", fake_redis)
+    monkeypatch.setattr(cap_sync, "get_app_now_naive", lambda: now)
+
+    stats = await cap_sync.CapSynchronizer(db).sync_all_active_caps()
+
+    assert db.query._for_update_arg is not None
+    assert stats == {"success": 1, "failed": 0}
+    # 新业务日的 Redis key 已经包含真实预留，不能因为 DB 日期旧而被清零。
+    assert cap.current_daily_count == 4
+    assert cap.cap_start_date == now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Redis 回退时不能降低 DB 已确认的总计数。
+    assert cap.current_total_count == 9
+    assert redis.writes == []
+    assert db.committed is True
+
+
+@pytest.mark.asyncio
+async def test_sync_single_cap_locks_row_and_keeps_maximum_count(monkeypatch):
+    now = datetime(2026, 11, 10, 12, 0, 0)
+    cap = SimpleNamespace(
+        id=2,
+        offer_id=78,
+        publisher_id=None,
+        daily_cap=20,
+        total_cap=200,
+        cap_start_date=now,
+        current_daily_count=8,
+        current_total_count=30,
+    )
+    redis = _FakeRedis({
+        cap_sync.get_daily_cap_key(78, now, None): "6",
+        cap_sync.get_total_cap_key(78, None): "25",
+    })
+    db = _FakeDB([cap])
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(cap_sync, "get_redis_client", fake_redis)
+    monkeypatch.setattr(cap_sync, "get_app_now_naive", lambda: now)
+
+    assert await cap_sync.CapSynchronizer(db).sync_single_cap(2) is True
+    assert db.query._for_update_arg is not None
+    assert cap.current_daily_count == 8
+    assert cap.current_total_count == 30
+    assert db.committed is True
+
+
+@pytest.mark.asyncio
+async def test_consistency_fix_never_overwrites_redis_counters(monkeypatch):
+    now = datetime(2026, 11, 10, 12, 0, 0)
+    cap = SimpleNamespace(
+        id=3,
+        offer_id=79,
+        publisher_id=13,
+        daily_cap=50,
+        total_cap=500,
+        cap_start_date=now,
+        current_daily_count=2,
+        current_total_count=4,
+        is_active=True,
+    )
+    daily_key = consistency_checker.get_daily_cap_key(79, now, 13)
+    total_key = consistency_checker.get_total_cap_key(79, 13)
+    redis = _FakeRedis({daily_key: "3", total_key: "5"})
+    db = _FakeDB([cap])
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(consistency_checker, "get_redis_client", fake_redis)
+    monkeypatch.setattr(consistency_checker, "get_app_now_naive", lambda: now)
+
+    issues = await consistency_checker.check_cap_consistency(
+        db=db, offer_id=79, fix_inconsistencies=True
+    )
+
+    assert len(issues) == 1
+    assert redis.writes == []
+    assert any("未执行自动覆盖修复" in item for item in issues[0]["inconsistencies"])
