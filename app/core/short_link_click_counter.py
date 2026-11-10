@@ -645,7 +645,7 @@ async def _sync_redis_click_counter_batches(
 ) -> int:
     """通过 Redis pending batch + DB 唯一账本完成可恢复的短链接点击刷盘。"""
     processed = 0
-    inserted_count = 0
+    inserted_codes: set[str] = set()
     pending_pattern = f"{CLICK_COUNTER_PREFIX}pending:*"
     pending_keys = await _scan_click_counter_keys(redis, max_keys, pattern=pending_pattern)
     pending_seen = set(pending_keys)
@@ -671,7 +671,8 @@ async def _sync_redis_click_counter_batches(
         )
         if ok:
             processed += 1
-            inserted_count += int(inserted)
+            if inserted:
+                inserted_codes.add(short_code)
 
     # 再把 active counter 原子切换成 pending；切换后并发新点击写入新的 active key。
     active_keys = await _scan_click_counter_keys(redis, max_keys, pattern=f"{CLICK_COUNTER_PREFIX}*")
@@ -703,14 +704,15 @@ async def _sync_redis_click_counter_batches(
         )
         if ok:
             processed += 1
-            inserted_count += int(inserted)
+            if inserted:
+                inserted_codes.add(short_code)
 
     await _cleanup_click_sync_batch_ledger(db, redis)
     logger.info(
-        "短链接点击幂等刷盘完成: processed_batches=%s newly_committed_batches=%s",
-        processed, inserted_count,
+        "短链接点击幂等刷盘完成: processed_batches=%s newly_updated_links=%s",
+        processed, len(inserted_codes),
     )
-    return inserted_count
+    return len(inserted_codes)
 
 
 
