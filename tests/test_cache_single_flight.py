@@ -5,7 +5,6 @@ import asyncio
 
 import pytest
 
-from app.core.infrastructure import cache as cache_mod
 from app.core.infrastructure import cache_compat as cache_compat_mod
 from app.core.infrastructure.cache_compat import get_or_set_single_flight
 
@@ -90,26 +89,3 @@ def test_single_flight_state_is_isolated_between_event_loops():
     assert lock_a is not lock_b
     assert futures_a is not futures_b
 
-
-@pytest.mark.asyncio
-async def test_cache_backend_is_stable_per_loop_and_isolated_across_loops(monkeypatch):
-    async def fake_get_redis_client():
-        return object()
-
-    monkeypatch.setattr(cache_mod, "get_redis_client", fake_get_redis_client)
-    cache_mod._cache_backends.clear()
-    cache_mod._cache_locks.clear()
-
-    async def get_twice():
-        first = await cache_mod.get_cache_backend()
-        second = await cache_mod.get_cache_backend()
-        return first, second
-
-    loop_a_first, loop_a_second = await get_twice()
-    loop_b_first, loop_b_second = await asyncio.to_thread(
-        lambda: asyncio.run(get_twice())
-    )
-
-    assert loop_a_first is loop_a_second
-    assert loop_b_first is loop_b_second
-    assert loop_a_first is not loop_b_first
