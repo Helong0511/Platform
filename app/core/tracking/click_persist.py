@@ -100,6 +100,10 @@ async def persist_click_record(
     from app.core.utils import get_app_now_naive
 
     enqueued = await enqueue_click(click_data)
-    if not enqueued and background_tasks is not None:
+    if not enqueued:
         click_data["click_time"] = get_app_now_naive()
-        background_tasks.add_task(create_click_background, click_data)
+        if background_tasks is not None:
+            background_tasks.add_task(create_click_background, click_data)
+        else:
+            # 没有 BackgroundTasks 时不能静默丢弃点击，直接执行幂等 DB 备用写入。
+            await create_click_background(click_data)
