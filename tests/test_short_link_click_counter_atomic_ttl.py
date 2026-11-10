@@ -9,11 +9,30 @@ import pytest
 from app.core import short_link_click_counter as counter
 
 
+class _EmptyLedgerResult:
+    def first(self):
+        return None
+
+
+class _EmptyLedgerSession:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def execute(self, statement):
+        return _EmptyLedgerResult()
+
+
 @pytest.mark.asyncio
 async def test_increment_uses_single_atomic_redis_script(monkeypatch):
     calls = []
 
     class FakeRedis:
+        async def exists(self, key):
+            return 0
+
         async def eval(self, script, number_of_keys, counter_key, event_key, ttl):
             calls.append((script, number_of_keys, counter_key, event_key, ttl))
             return 7
@@ -660,6 +679,9 @@ def test_legacy_counter_snapshot_loader_rejects_invalid_entries(tmp_path, monkey
 @pytest.mark.asyncio
 async def test_redis_increment_retry_uses_same_click_event_marker(monkeypatch):
     class AmbiguousRedis:
+        async def exists(self, key):
+            return 0
+
         def __init__(self):
             self.counter = {}
             self.markers = set()
@@ -680,6 +702,7 @@ async def test_redis_increment_retry_uses_same_click_event_marker(monkeypatch):
         return redis
 
     monkeypatch.setattr(counter, "get_redis_client", fake_redis)
+    monkeypatch.setattr(counter, "AsyncSessionLocal", _EmptyLedgerSession)
     await counter.increment_click_count_async("event-safe-code", click_id="stable-click-event")
 
     assert len(redis.calls) == 2
@@ -697,6 +720,9 @@ async def test_redis_increment_retry_uses_same_click_event_marker(monkeypatch):
 @pytest.mark.asyncio
 async def test_redis_increment_retries_when_first_command_did_not_execute(monkeypatch):
     class RedisFailsBeforeExecute:
+        async def exists(self, key):
+            return 0
+
         def __init__(self):
             self.counter = {}
             self.markers = set()
@@ -717,6 +743,7 @@ async def test_redis_increment_retries_when_first_command_did_not_execute(monkey
         return redis
 
     monkeypatch.setattr(counter, "get_redis_client", fake_redis)
+    monkeypatch.setattr(counter, "AsyncSessionLocal", _EmptyLedgerSession)
     await counter.increment_click_count_async("event-safe-code", click_id="event-before-exec")
 
     assert redis.calls == 2
@@ -738,6 +765,7 @@ async def test_ambiguous_redis_increment_does_not_blindly_fallback_to_db(monkeyp
         db_fallback_calls.append(short_code)
 
     monkeypatch.setattr(counter, "get_redis_client", fake_redis)
+    monkeypatch.setattr(counter, "AsyncSessionLocal", _EmptyLedgerSession)
     monkeypatch.setattr(counter, "_increment_click_count_in_db", fake_db_fallback)
     await counter.increment_click_count_async("event-safe-code", click_id="event-uncertain")
 
