@@ -1,6 +1,9 @@
 """短链接点击计数 Redis 原子性回归测试。"""
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 import pytest
 
 from app.core import short_link_click_counter as counter
@@ -589,3 +592,22 @@ async def test_ambiguous_redis_increment_does_not_blindly_fallback_to_db(monkeyp
     await counter.increment_click_count_async("event-safe-code", click_id="event-uncertain")
 
     assert db_fallback_calls == []
+
+
+
+def test_all_redirect_paths_pass_stable_click_id_to_counter():
+    source = Path("app/routes/short_link/handlers.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "increment_click_count_async"
+    ]
+
+    assert len(calls) == 2
+    assert all(
+        any(keyword.arg == "click_id" for keyword in call.keywords)
+        for call in calls
+    )
