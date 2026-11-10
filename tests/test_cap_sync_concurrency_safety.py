@@ -156,3 +156,35 @@ async def test_consistency_fix_never_overwrites_redis_counters(monkeypatch):
     assert len(issues) == 1
     assert redis.writes == []
     assert any("未执行自动覆盖修复" in item for item in issues[0]["inconsistencies"])
+
+
+@pytest.mark.asyncio
+async def test_cleanup_does_not_assign_short_ttl_to_total_cap_keys(monkeypatch):
+    class CleanupRedis:
+        def __init__(self):
+            self.expire_calls = []
+
+        async def scan(self, cursor, match, count):
+            if cursor == 0:
+                return 0, [
+                    "cpl:cap:total:77",
+                    "cpl:cap:daily:77:2026-11-10",
+                ]
+            raise AssertionError("unexpected scan cursor")
+
+        async def ttl(self, key):
+            return -1
+
+        async def expire(self, key, seconds):
+            self.expire_calls.append((key, seconds))
+
+    redis = CleanupRedis()
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(cap_sync, "get_redis_client", fake_redis)
+    cleaned = await cap_sync.CapSynchronizer(_FakeDB([])).cleanup_expired_caps()
+
+    assert cleaned == 0
+    assert redis.expire_calls == []
