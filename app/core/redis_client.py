@@ -77,12 +77,13 @@ def _mark_redis_connect_failed() -> None:
 
 def _reset_redis_singleton(*, reset_connect_lock: bool = False) -> None:
     """丢弃当前单例引用（不在异构事件循环上 close，避免二次破坏）。"""
-    global _redis_client, _redis_loop, _redis_connect_lock, _redis_last_ping_at
+    global _redis_client, _redis_loop, _redis_connect_lock, _redis_connect_lock_loop, _redis_last_ping_at
     _redis_client = None
     _redis_loop = None
     _redis_last_ping_at = 0.0
     if reset_connect_lock:
         _redis_connect_lock = None
+        _redis_connect_lock_loop = None
 
 
 async def get_redis_client() -> Optional[aioredis.Redis]:
@@ -111,13 +112,18 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
     ):
         return _redis_client
 
-    # 事件循环切换时先丢弃旧 Lock（asyncio.Lock 绑定创建时的事件循环）
+    # 无论客户端是否已成功创建，都按事件循环隔离连接锁；
+    # 首次连接失败时 _redis_loop 仍为 None，不能只依赖 _redis_loop 判断锁是否跨 loop。
     if _redis_loop is not None and (_redis_loop is not current_loop or _redis_loop.is_closed()):
         _reset_redis_singleton(reset_connect_lock=True)
 
-    # Lock 仅保护连接创建和低频健康检查，不阻塞正常请求的客户端获取。
-    if _redis_connect_lock is None:
+    if (
+        _redis_connect_lock is None
+        or _redis_connect_lock_loop is not current_loop
+        or (_redis_connect_lock_loop is not None and _redis_connect_lock_loop.is_closed())
+    ):
         _redis_connect_lock = asyncio.Lock()
+        _redis_connect_lock_loop = current_loop
 
     async with _redis_connect_lock:
         now = time.monotonic()
