@@ -30,6 +30,13 @@ class ThirdPartyReportLog(Base):
     # 上报参数
     adsid = Column(String(500), nullable=False, index=True, comment='广告事件ID')
     event = Column(String(50), nullable=False, index=True, comment='事件类型：ViewContent, Purchase')
+    event_key = Column(
+        String(64),
+        nullable=False,
+        unique=True,
+        index=True,
+        comment='事件幂等键：source、adsid、event、conversion_id 的 SHA-256',
+    )
     conversion_id = Column(String(255), nullable=True, index=True, comment='转化ID')
     use_hash = Column(Boolean, default=True, nullable=False, comment='是否对email、ip、phone进行哈希处理：True=哈希，False=不哈希')
     email = Column(String(255), nullable=True, comment='邮箱（原始值）')
@@ -65,6 +72,6 @@ class ThirdPartyReportLog(Base):
         Index("idx_third_party_status", "status"),
         Index("idx_third_party_created_at", "created_at"),
         Index("idx_third_party_status_created", "status", "created_at"),
-        UniqueConstraint('source', 'adsid', name='unique_source_adsid'),
+        UniqueConstraint('event_key', name='unique_event_key'),
     )
 
