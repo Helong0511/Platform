@@ -65,11 +65,16 @@ class RedisCapManager:
     # ARGV[3]: limit
     _RESERVE_LUA = """
     local limit = tonumber(ARGV[3])
-    local current = redis.call('GET', KEYS[1])
+    local db_count = tonumber(ARGV[2]) or 0
+    local redis_value = redis.call('GET', KEYS[1])
+    local current = tonumber(redis_value)
+    -- DB 计数是故障降级期间的权威累计值。Redis key 即使仍存在，也必须
+    -- 与 DB 基线取较大值，避免 Redis 故障恢复后继续沿用过期的旧计数。
+    -- 非数字/损坏的 Redis 值按 DB 基线修复，避免 Lua 比较时报错并长期卡死。
     if not current then
-        current = tonumber(ARGV[2]) or 0
+        current = db_count
     else
-        current = tonumber(current)
+        current = math.max(current, db_count)
     end
     if current >= limit then
         return -1
