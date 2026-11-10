@@ -11,6 +11,7 @@ Postback 统一处理器模块（重构版）
 import asyncio
 import logging
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from decimal import Decimal
 from typing import Dict, Any, Optional
 
@@ -537,16 +538,18 @@ class PostbackProcessor:
         email = scalar_query_value(url_params.get("email"))
         phone = scalar_query_value(url_params.get("phone"))
 
-        amount_raw = raw_data.get("payout")
-        if amount_raw is None:
+        # 使用标准化后的 Decimal 金额，兼容 BFT 的 PayOut/pay_out 等别名。
+        # 仅在调用外部像素 API 时转换为 float，内部结算金额始终保留 Decimal。
+        amount_raw = normalized_data.get("payout")
+        try:
+            amount_decimal = Decimal(str(amount_raw))
+            amount = (
+                float(amount_decimal)
+                if amount_decimal.is_finite() and amount_decimal >= 0
+                else 0.0
+            )
+        except (InvalidOperation, ValueError, TypeError):
             amount = 0.0
-        else:
-            try:
-                amount = float(str(amount_raw).strip())
-                if amount < 0:
-                    amount = 0.0
-            except (ValueError, TypeError, AttributeError):
-                amount = 0.0
 
         if not fbclid and not dp:
             logger.debug("未检测到 fbclid/dp，跳过第三方上报")
