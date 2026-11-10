@@ -88,7 +88,9 @@ async def test_fail_open_only_returns_reservations_that_really_incremented(monke
 
     assert ok is True
     assert status == "cap_ok"
-    assert reservations == [("total", 77, 12, None)]
+    assert len(reservations) == 1
+    assert reservations[0][:4] == ("total", 77, 12, None)
+    assert len(reservations[0][4]) == 32
     assert db.flushed is True
 
 
@@ -112,8 +114,8 @@ async def test_cap_checker_rolls_back_only_the_recorded_reservations(monkeypatch
     ])
 
     assert calls == [
-        ("daily", 77, 12, reservation_date),
-        ("total", 77, 12, None),
+        ("daily", 77, 12, reservation_date, None),
+        ("total", 77, 12, None, None),
     ]
 
 
