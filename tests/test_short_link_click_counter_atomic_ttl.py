@@ -355,3 +355,97 @@ async def test_ambiguous_redis_increment_error_does_not_double_write_database(mo
 
     # 短链接跳转不应因计数设施的结果不确定而失败；但不能盲目双写。
     await counter.increment_click_count_async("ambiguous-redis-result")
+
+
+
+def test_claim_batch_lua_atomically_moves_active_counter_without_ttl():
+    script = counter._CLAIM_COUNTER_BATCH_LUA
+    assert "redis.call('GET', KEYS[1])" in script
+    assert "redis.call('SET', KEYS[2], count)" in script
+    assert "redis.call('DEL', KEYS[1])" in script
+    assert script.index("redis.call('SET', KEYS[2], count)") < script.index("redis.call('DEL', KEYS[1])")
+    assert "'EX'" not in script
+    assert "'PX'" not in script
+
+
+class _LedgerResult:
+    def __init__(self, value=None, rowcount=1):
+        self.value = value
+        self.rowcount = rowcount
+
+    def scalar_one_or_none(self):
+        return self.value
+
+
+class _ClickBatchLedgerDB:
+    """模拟账本唯一键与 DB COMMIT 响应丢失；仅用于隔离单元测试。"""
+    def __init__(self, *, ambiguous_first_commit=False):
+        self.ledger = set()
+        self.added = None
+        self.click_updates = 0
+        self.commits = 0
+        self.ambiguous_first_commit = ambiguous_first_commit
+
+    async def execute(self, statement):
+        sql = str(statement)
+        if "FROM short_links" in sql and sql.lstrip().upper().startswith("SELECT"):
+            return _LedgerResult(17)
+        if "FROM short_link_click_sync_batches" in sql and sql.lstrip().upper().startswith("SELECT"):
+            # batch_id 参数由 SQLAlchemy 绑定；本测试只处理同一个 batch。
+            return _LedgerResult(next(iter(self.ledger), None))
+        if sql.lstrip().upper().startswith("UPDATE SHORT_LINKS"):
+            self.click_updates += 1
+            return _LedgerResult(rowcount=1)
+        if sql.lstrip().upper().startswith("UPDATE SHORT_LINK_CLICK_SYNC_BATCHES"):
+            return _LedgerResult(rowcount=1)
+        raise AssertionError(f"unexpected SQL in fake DB: {sql}")
+
+    def add(self, record):
+        self.added = record
+
+    async def flush(self):
+        if self.added is not None:
+            self.ledger.add(self.added.batch_id)
+
+    async def commit(self):
+        self.commits += 1
+        if self.ambiguous_first_commit and self.commits == 1:
+            # 模拟服务端已提交，但 COMMIT 响应丢失。
+            raise OSError("ambiguous commit response")
+        return None
+
+    async def rollback(self):
+        self.added = None
+
+
+class _PendingRedis:
+    def __init__(self):
+        self.deleted = []
+
+    async def delete(self, key):
+        self.deleted.append(key)
+        return 1
+
+
+@pytest.mark.asyncio
+async def test_click_batch_replay_does_not_double_increment_after_ambiguous_commit():
+    db = _ClickBatchLedgerDB(ambiguous_first_commit=True)
+    redis = _PendingRedis()
+    args = dict(
+        short_code="idempotent-code",
+        batch_id="a" * 32,
+        pending_key=f"{counter.CLICK_COUNTER_PREFIX}pending:idempotent-code:{'a' * 32}",
+        click_count=9,
+    )
+
+    first_ok, first_inserted = await counter._process_pending_click_batch(db, redis, **args)
+    assert first_ok is False
+    assert first_inserted is False
+    assert db.click_updates == 1
+    assert args["pending_key"] not in redis.deleted
+
+    second_ok, second_inserted = await counter._process_pending_click_batch(db, redis, **args)
+    assert second_ok is True
+    assert second_inserted is False
+    assert db.click_updates == 1
+    assert redis.deleted == [args["pending_key"]]
