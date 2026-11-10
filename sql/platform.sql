@@ -1844,4 +1844,19 @@ INSERT INTO `country_aliases` VALUES
 (51, 'Republic of Kosovo', 'republic of kosovo', 'XK', '科索沃'),
 (52, 'Falkland Islands (Islas Malvinas)', 'falkland islands islas malvinas', 'GB', '福克兰群岛 属于 英国');
 
+
+-- 短链接点击刷盘幂等账本：解决 DB COMMIT 与 Redis ACK 之间的崩溃/响应丢失窗口。
+CREATE TABLE IF NOT EXISTS short_link_click_sync_batches (
+    batch_id VARCHAR(64) NOT NULL COMMENT 'Redis pending batch UUID',
+    short_code VARCHAR(20) NOT NULL COMMENT '短链接代码',
+    click_count INT NOT NULL COMMENT '本批次待入账点击数',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    acknowledged_at DATETIME NULL COMMENT 'Redis pending key 确认删除时间',
+    PRIMARY KEY (batch_id),
+    KEY idx_short_link_click_sync_code (short_code),
+    KEY idx_short_click_batch_code_created (short_code, created_at),
+    KEY idx_short_click_batch_ack_created (acknowledged_at, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='短链接点击刷盘幂等账本';
+
 SET FOREIGN_KEY_CHECKS = 1;
