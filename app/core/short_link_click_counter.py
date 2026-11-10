@@ -708,6 +708,24 @@ async def _process_pending_click_batch(
         )
         return False, False
 
+    # click_count 被短链缓存包含；必须先成功失效缓存，再 ACK pending。
+    try:
+        cache_invalidated = await invalidate_short_link_cache(short_code)
+    except Exception as cache_exc:
+        cache_invalidated = False
+        logger.warning(
+            "短链接点击已入账，但缓存失效异常；保留 pending 等待重试: "
+            "short_code=%s batch_id=%s error=%s",
+            short_code, batch_id, cache_exc, exc_info=True,
+        )
+    if not cache_invalidated:
+        logger.warning(
+            "短链接点击已入账，但缓存未确认失效；保留 pending 供下轮重试: "
+            "short_code=%s batch_id=%s",
+            short_code, batch_id,
+        )
+        return False, inserted
+
     acknowledged = await _acknowledge_click_batch(db, redis, batch_id, pending_key)
     return acknowledged, inserted
 
@@ -745,6 +763,13 @@ async def _cleanup_click_sync_batch_ledger(
                 # Redis 状态未知时不猜测 ACK 状态。
                 continue
             if not pending_exists:
+                # DB 账本证明点击数已入账；pending 已消失后补做缓存失效，再标记 ACK。
+                try:
+                    cache_invalidated = await invalidate_short_link_cache(short_code)
+                except Exception:
+                    cache_invalidated = False
+                if not cache_invalidated:
+                    continue
                 await db.execute(
                     update(ShortLinkClickSyncBatch)
                     .where(ShortLinkClickSyncBatch.batch_id == batch_id)
