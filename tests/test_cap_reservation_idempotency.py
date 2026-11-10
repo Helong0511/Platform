@@ -32,10 +32,14 @@ class _AmbiguousRedis:
             key, token_key = args
             if token_key not in self.tokens:
                 return 0
+            # 与 Lua 保持一致：计数 key 丢失时保留 token，避免丢失恢复证据。
+            if key not in self.values:
+                return -2
+            if self.values[key] <= 0:
+                return -2
             self.tokens.remove(token_key)
-            if key in self.values and self.values[key] > 0:
-                self.values[key] -= 1
-            return self.values.get(key, 0)
+            self.values[key] -= 1
+            return self.values[key]
 
         raise AssertionError("unexpected Redis Lua script")
 
@@ -216,3 +220,27 @@ def test_rollback_lua_preserves_token_when_counter_is_missing():
     token_delete = script.index("redis.call('DEL', KEYS[2])")
     assert counter_check < token_delete
     assert "return -2" in script
+
+
+
+@pytest.mark.asyncio
+async def test_rollback_keeps_reservation_token_when_counter_key_is_missing(monkeypatch):
+    redis = _AmbiguousRedis()
+    now = datetime(2026, 11, 10, 12, 0, 0)
+    key = redis_counter.get_daily_cap_key(77, now, 12)
+    token_key = f"{key}:reservation:orphaned-counter"
+    redis.tokens.add(token_key)
+
+    async def fake_get_redis_client():
+        return redis
+
+    monkeypatch.setattr(redis_counter, "get_redis_client", fake_get_redis_client)
+    monkeypatch.setattr(redis_counter, "get_app_now_naive", lambda: now)
+
+    result = await redis_counter.RedisCapManager.decrement_daily(
+        77, 12, reservation_date=now, reservation_id="orphaned-counter"
+    )
+
+    assert result == -2
+    assert token_key in redis.tokens
+    assert key not in redis.values
