@@ -42,19 +42,19 @@ class RedisCapManager:
     """Redis Cap 管理器"""
 
     @staticmethod
-    def _redis_unavailable_result() -> bool:
-        """Redis 不可用时按 CAP_FAIL_OPEN 决定放行或拒绝。"""
+    def _redis_unavailable_result() -> Optional[bool]:
+        """Redis 不可用时返回三态结果；fail-open 放行但不伪造 reservation。"""
         if settings.CAP_FAIL_OPEN:
-            logger.warning("Redis不可用，Cap fail-open 放行")
-            return True
+            logger.warning("Redis不可用，Cap fail-open 放行（未创建 Redis reservation）")
+            return None
         logger.error("Redis不可用，Cap fail-close 拒绝")
         return False
 
     @staticmethod
-    def _lua_failure_result() -> bool:
+    def _lua_failure_result() -> Optional[bool]:
         if settings.CAP_FAIL_OPEN:
-            logger.warning("Redis Cap Lua 失败，fail-open 放行")
-            return True
+            logger.warning("Redis Cap Lua 失败，fail-open 放行（未创建 Redis reservation）")
+            return None
         logger.error("Redis Cap Lua 失败，fail-close 拒绝")
         return False
     
@@ -104,7 +104,7 @@ class RedisCapManager:
         limit: int, 
         publisher_id: Optional[int] = None,
         initial_value: Optional[int] = None
-    ) -> bool:
+    ) -> Optional[bool]:
         """
         检查并增加每日计数 (原子操作)
         
@@ -147,7 +147,7 @@ class RedisCapManager:
         limit: int, 
         publisher_id: Optional[int] = None,
         initial_value: Optional[int] = None
-    ) -> bool:
+    ) -> Optional[bool]:
         """
         检查并增加总计数
         """
