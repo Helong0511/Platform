@@ -74,9 +74,13 @@ async def enqueue_click(click_data: Dict[str, Any]) -> bool:
     if not should_persist_clicks_to_db():
         return True
 
-    redis = await get_redis_client()
+    try:
+        redis = await get_redis_client()
+    except Exception as e:
+        logger.error("获取 Redis 客户端失败，点击队列入队不可用: %s", e, exc_info=True)
+        return False
     if not redis:
-        logger.warning("Redis不可用，无法使用队列缓冲，点击记录可能丢失")
+        logger.warning("Redis不可用，无法使用队列缓冲，点击记录将走 DB 备用写入")
         return False
 
     try:
