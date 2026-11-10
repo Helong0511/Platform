@@ -60,6 +60,7 @@ async def process_clicks_queue() -> Dict[str, int]:
         'processed': 0,
         'inserted': 0,
         'failed': 0,
+        'deduplicated': 0,
         'queue_remaining': 0,
         'skipped': False,
         'drained': 0,
@@ -130,7 +131,6 @@ async def process_clicks_queue() -> Dict[str, int]:
                     # 记录被过滤的记录数
                     filtered_count = len(clicks) - len(valid_clicks)
                     if filtered_count > 0:
-                        result['failed'] += filtered_count
                         logger.warning(
                             f"第 {batch_count} 批：过滤了 {filtered_count} 条无效记录，"
                             f"剩余 {len(valid_clicks)} 条有效记录"
@@ -146,7 +146,7 @@ async def process_clicks_queue() -> Dict[str, int]:
                     inserted_count, duplicate_count = await _batch_insert_clicks(db, valid_clicks)
                     result['inserted'] += inserted_count
                     result['deduplicated'] = result.get('deduplicated', 0) + duplicate_count
-                    result['failed'] += len(valid_clicks) - inserted_count - duplicate_count
+                    result['failed'] += filtered_count + len(valid_clicks) - inserted_count - duplicate_count
 
                     await db.commit()
                     await acknowledge_reserved(raw_items)
@@ -164,7 +164,8 @@ async def process_clicks_queue() -> Dict[str, int]:
                         f"批量插入点击记录失败（第 {batch_count} 批）: error={e}",
                         exc_info=True
                     )
-                    result['failed'] += len(valid_clicks) if 'valid_clicks' in locals() else len(clicks)
+                    # 整批回队，按本次失败批次统计；不要沿用上批 valid_clicks 的局部状态。
+                    result['failed'] += len(clicks)
                     await requeue_reserved(raw_items)
 
             if batch_failed:
@@ -178,6 +179,7 @@ async def process_clicks_queue() -> Dict[str, int]:
 
     except Exception as e:
         logger.error(f"处理点击队列异常: error={e}", exc_info=True)
+        raise
 
     return result
 
@@ -512,7 +514,4 @@ async def _batch_insert_clicks(
 
     except Exception as e:
         logger.error("批量插入点击记录失败: error=%s", e, exc_info=True)
-        raise
-
-        logger.error(f"批量插入点击记录失败: error={e}", exc_info=True)
         raise
