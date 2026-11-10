@@ -193,7 +193,10 @@ def load_persisted_counters():
                 data = json.load(f)
                 if isinstance(data, dict):
                     _click_counters.update(data)
-                    logger.info(f"✅ 加载持久化的计数器数据: {len(data)} 个计数器")
+                    logger.warning(
+                        "检测到旧版点击计数快照: %s 个计数器；因缺少批次幂等键，仅保留供人工核对，不自动重放",
+                        len(data),
+                    )
     except Exception as e:
         logger.warning(f"⚠️ 加载持久化计数器数据失败: {e}")
 
