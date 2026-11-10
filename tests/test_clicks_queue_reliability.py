@@ -222,3 +222,43 @@ async def test_requeue_moves_exhausted_message_to_dead_letter_atomically(monkeyp
     assert target == clicks_queue.CLICKS_DLQ_KEY
     assert '"reason": "max_retries:0"' in payload
     assert "LREM" in script and "RPUSH" in script
+
+
+
+@pytest.mark.asyncio
+async def test_reserve_dead_letters_missing_click_id(monkeypatch):
+    import json
+
+    class FakeRedis:
+        def __init__(self):
+            self.payload = json.dumps({"offer_id": 9})
+            self.eval_calls = []
+
+        async def llen(self, key):
+            return 1
+
+        async def rpoplpush(self, source, destination):
+            if self.payload is None:
+                return None
+            value, self.payload = self.payload, None
+            return value
+
+        async def eval(self, script, numkeys, source, target, raw, envelope):
+            self.eval_calls.append((script, source, target, raw, envelope))
+            return 1
+
+    redis = FakeRedis()
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(clicks_queue, "get_redis_client", fake_redis)
+    reserved = await clicks_queue.reserve_clicks(10)
+
+    assert reserved == []
+    assert len(redis.eval_calls) == 1
+    script, source, target, raw, envelope = redis.eval_calls[0]
+    assert source == clicks_queue.CLICKS_PROCESSING_KEY
+    assert target == clicks_queue.CLICKS_DLQ_KEY
+    assert "invalid_or_oversized_click_id" in envelope
+    assert "LREM" in script and "RPUSH" in script
