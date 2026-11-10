@@ -198,17 +198,31 @@ def load_persisted_counters():
 
 # 持久化计数器数据
 async def persist_counters():
-    """持久化计数器数据"""
-    global _click_counters
+    """原子持久化计数器；即使计数器为空也必须覆盖旧文件，防止重启后重复入账。"""
     try:
         async with _counter_lock:
             data = _click_counters.copy()
-        if data:
-            with open(COUNTER_PERSIST_FILE, 'w', encoding='utf-8') as f:
+
+        # 先写同目录临时文件，再原子替换，避免进程中断留下半截 JSON。
+        temp_path = COUNTER_PERSIST_FILE.with_name(
+            f"{COUNTER_PERSIST_FILE.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        )
+        try:
+            with open(temp_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            logger.info(f"✅ 持久化计数器数据: {len(data)} 个计数器")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, COUNTER_PERSIST_FILE)
+        finally:
+            try:
+                if temp_path.exists():
+                    temp_path.unlink()
+            except OSError:
+                logger.warning("清理点击计数临时持久化文件失败: %s", temp_path)
+
+        logger.info("持久化进程内点击计数完成: %s 个计数器", len(data))
     except Exception as e:
-        logger.warning(f"⚠️ 持久化计数器数据失败: {e}")
+        logger.warning("持久化计数器数据失败: %s", e)
 
 # 初始化时加载持久化数据
 load_persisted_counters()
