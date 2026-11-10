@@ -161,3 +161,64 @@ async def test_processing_recovery_uses_atomic_rpoplpush(monkeypatch):
         (clicks_queue.CLICKS_PROCESSING_KEY, clicks_queue.CLICKS_QUEUE_KEY),
         (clicks_queue.CLICKS_PROCESSING_KEY, clicks_queue.CLICKS_QUEUE_KEY),
     ]
+
+
+
+@pytest.mark.asyncio
+async def test_requeue_uses_atomic_lrem_and_lpush_script(monkeypatch):
+    class FakeRedis:
+        def __init__(self):
+            self.calls = []
+
+        async def eval(self, script, numkeys, source, target, raw, payload):
+            self.calls.append((script, numkeys, source, target, raw, payload))
+            return 1
+
+    redis = FakeRedis()
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(clicks_queue, "get_redis_client", fake_redis)
+    monkeypatch.setattr(clicks_queue, "_max_retries", lambda: 5)
+
+    raw = '{"click_id":"retry-1","_queue_retry":0}'
+    requeued = await clicks_queue.requeue_reserved([raw])
+
+    assert requeued == 1
+    assert len(redis.calls) == 1
+    script, numkeys, source, target, source_raw, payload = redis.calls[0]
+    assert numkeys == 2
+    assert source == clicks_queue.CLICKS_PROCESSING_KEY
+    assert target == clicks_queue.CLICKS_QUEUE_KEY
+    assert source_raw == raw
+    assert '"_queue_retry": 1' in payload
+    assert "LREM" in script and "LPUSH" in script
+
+
+@pytest.mark.asyncio
+async def test_requeue_moves_exhausted_message_to_dead_letter_atomically(monkeypatch):
+    class FakeRedis:
+        def __init__(self):
+            self.calls = []
+
+        async def eval(self, script, numkeys, source, target, raw, payload):
+            self.calls.append((script, numkeys, source, target, raw, payload))
+            return 1
+
+    redis = FakeRedis()
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(clicks_queue, "get_redis_client", fake_redis)
+    monkeypatch.setattr(clicks_queue, "_max_retries", lambda: 0)
+
+    raw = '{"click_id":"retry-dead","_queue_retry":0}'
+    requeued = await clicks_queue.requeue_reserved([raw])
+
+    assert requeued == 0
+    script, numkeys, source, target, source_raw, payload = redis.calls[0]
+    assert target == clicks_queue.CLICKS_DLQ_KEY
+    assert '"reason": "max_retries:0"' in payload
+    assert "LREM" in script and "RPUSH" in script
