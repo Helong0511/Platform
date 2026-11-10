@@ -149,7 +149,7 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
 
         # 检查Redis库是否可用
         if not REDIS_AVAILABLE:
-            logger.warning("Redis库未安装，将使用内存存储。安装命令: pip install redis>=5.0.0")
+            logger.warning("Redis库未安装，将使用内存存储。安装命令: pip install redis>=6.0.0")
             return None
 
         # 如果未配置Redis，返回None（使用内存存储）
@@ -195,7 +195,6 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
                 decode_responses=True,
                 socket_connect_timeout=connect_timeout,
                 socket_timeout=connect_timeout,
-                retry_on_timeout=True,
                 health_check_interval=30,
                 max_connections=max_connections,
                 socket_keepalive=True,
