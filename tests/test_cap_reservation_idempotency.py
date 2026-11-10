@@ -177,3 +177,33 @@ async def test_legacy_rollback_uses_only_explicit_reservation_tokens(monkeypatch
     )
 
     assert calls == [reservations]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method_name",
+    ["check_and_increment_daily", "check_and_increment_total"],
+)
+async def test_existing_token_with_evicted_counter_fails_closed(monkeypatch, method_name):
+    class TokenSurvivedCounterEviction:
+        async def eval(self, script, numkeys, *args):
+            if script == redis_counter.RedisCapManager._RESERVE_LUA:
+                # 模拟 token key 未被淘汰，但计数 key 已被 Redis 独立淘汰。
+                return -2
+            raise AssertionError("不应尝试无依据的计数回退")
+
+    async def fake_get_redis_client():
+        return TokenSurvivedCounterEviction()
+
+    monkeypatch.setattr(redis_counter, "get_redis_client", fake_get_redis_client)
+    monkeypatch.setattr(redis_counter.settings, "CAP_FAIL_OPEN", True)
+
+    method = getattr(redis_counter.RedisCapManager, method_name)
+    with pytest.raises(RuntimeError, match="计数 key 丢失"):
+        await method(
+            offer_id=77,
+            limit=10,
+            publisher_id=12,
+            initial_value=9,
+            reservation_id="already-reserved-token",
+        )
