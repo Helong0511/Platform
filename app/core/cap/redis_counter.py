@@ -84,9 +84,15 @@ class RedisCapManager:
     # KEYS[1]: cap_key
     # 返回: 回滚后的最终值
     _DECREMENT_LUA = """
+    -- 不对不存在的 key 执行 DECR，避免创建没有 TTL 的负数 key。
+    local current = redis.call('GET', KEYS[1])
+    if not current then
+        return 0
+    end
     local val = redis.call('DECR', KEYS[1])
     if val < 0 then
-        redis.call('SET', KEYS[1], 0)
+        -- INCR 恢复到 0，保留原 TTL；SET 会清除 TTL。
+        redis.call('INCR', KEYS[1])
         return 0
     end
     return val
