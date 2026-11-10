@@ -99,7 +99,16 @@ async def persist_click_record(
     from app.api_v1.tracking.tracking import create_click_background
     from app.core.utils import get_app_now_naive
 
-    enqueued = await enqueue_click(click_data)
+    try:
+        enqueued = await enqueue_click(click_data)
+    except Exception as exc:
+        logger.error(
+            "点击队列入队异常，转入幂等 DB 备用写入: click_id=%s error=%s",
+            click_data.get("click_id"),
+            exc,
+            exc_info=True,
+        )
+        enqueued = False
     if not enqueued:
         click_data["click_time"] = get_app_now_naive()
         if background_tasks is not None:
