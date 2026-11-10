@@ -8,6 +8,8 @@ import time
 import re
 import hashlib
 import logging
+import threading
+import weakref
 from abc import ABC, abstractmethod
 from datetime import date, datetime
 from decimal import Decimal
@@ -227,40 +229,49 @@ class MemoryCacheBackend(CacheBackend):
         return True
 
 
-# 全局缓存后端实例（绑定创建时的事件循环）
-_cache_backend: Optional[CacheBackend] = None
-_cache_loop: Optional[asyncio.AbstractEventLoop] = None
+# 缓存后端按事件循环隔离。应用中存在 Web / Scheduler / asyncio.run 辅助线程，
+# 不能让一个 loop 的 Redis 客户端或 MemoryCacheBackend 被另一个 loop 重置/复用。
+_cache_backends: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_cache_locks: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_cache_state_guard = threading.Lock()
+
+
+def _get_cache_lock(loop: asyncio.AbstractEventLoop) -> asyncio.Lock:
+    """获取当前事件循环专属的初始化锁。"""
+    with _cache_state_guard:
+        lock = _cache_locks.get(loop)
+        if lock is None:
+            lock = asyncio.Lock()
+            _cache_locks[loop] = lock
+        return lock
 
 
 async def get_cache_backend() -> CacheBackend:
-    """获取缓存后端实例（单例模式）"""
-    global _cache_backend, _cache_loop
+    """获取当前事件循环专属的缓存后端实例。"""
+    current_loop = asyncio.get_running_loop()
+    with _cache_state_guard:
+        backend = _cache_backends.get(current_loop)
+    if backend is not None:
+        return backend
 
-    try:
-        current_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        current_loop = None
+    async with _get_cache_lock(current_loop):
+        with _cache_state_guard:
+            backend = _cache_backends.get(current_loop)
+        if backend is not None:
+            return backend
 
-    if _cache_backend is not None and current_loop is not None:
-        if _cache_loop is not current_loop or _cache_loop.is_closed():
-            _cache_backend = None
-            _cache_loop = None
-    
-    if _cache_backend is None:
-        # 尝试使用Redis
+        # 尝试使用 Redis；不可用时仅在当前 loop 内降级到内存缓存。
         redis_client = await get_redis_client()
         if redis_client:
-            _cache_backend = RedisCacheBackend(redis_client)
-            logger.info("使用Redis作为缓存后端")
+            backend = RedisCacheBackend(redis_client)
+            logger.info("当前事件循环使用 Redis 作为缓存后端")
         else:
-            # 降级到内存缓存
-            _cache_backend = MemoryCacheBackend()
-            logger.info("使用内存缓存作为缓存后端（Redis不可用）")
+            backend = MemoryCacheBackend()
+            logger.info("当前事件循环使用内存缓存后端（Redis 不可用）")
 
-        if current_loop is not None:
-            _cache_loop = current_loop
-    
-    return _cache_backend
+        with _cache_state_guard:
+            _cache_backends[current_loop] = backend
+        return backend
 
 
 def cached(key_pattern: str, ttl: int = 300):
