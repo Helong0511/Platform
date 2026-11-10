@@ -443,7 +443,9 @@ async def increment_click_count_async(
     except Exception:
         # EXISTS 失败不能证明事件不存在；继续查询 DB 账本，Lua 仍负责 Redis 原子去重。
         marker_exists = False
-    if not marker_exists:
+    if click_id is not None and not marker_exists:
+        # 只有调用方提供稳定 click_id 时，才需要跨存储查询 DB 账本；
+        # 自动生成 UUID 的单次调用没有跨请求重试标识，避免每次普通点击额外查询数据库。
         try:
             async with AsyncSessionLocal() as event_db:
                 event_result = await event_db.execute(
