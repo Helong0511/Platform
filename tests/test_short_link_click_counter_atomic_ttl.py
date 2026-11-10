@@ -480,3 +480,18 @@ async def test_legacy_raw_snapshot_batch_writer_fails_closed():
             db=None,
             updates=[("unsafe-legacy-code", 3)],
         )
+
+
+
+def test_legacy_counter_snapshot_loader_rejects_invalid_entries(tmp_path, monkeypatch):
+    snapshot = tmp_path / "click_counters.json"
+    snapshot.write_text(
+        '{"valid-code": 7, "negative": -1, "string-count": "4", "bool-count": true, "": 2}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(counter, "COUNTER_PERSIST_FILE", snapshot)
+    counter._click_counters.clear()
+
+    counter.load_persisted_counters()
+
+    assert counter._click_counters == {"valid-code": 7}
