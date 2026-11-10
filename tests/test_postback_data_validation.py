@@ -63,3 +63,17 @@ def test_normalizer_preserves_explicit_zero_payout_instead_of_falling_back_to_am
 @pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity"])
 def test_normalizer_rejects_non_finite_decimal_values(value):
     assert DataNormalizer._parse_decimal(value) is None
+
+
+
+def test_validator_checks_conversion_id_even_when_click_id_is_short():
+    valid, errors = DataValidator.validate(
+        {
+            "click_id": "short-click",
+            "conversion_id": "x" * 201,
+            "payout": "1.0000",
+        },
+        "test-platform",
+    )
+    assert valid is False
+    assert any("过长" in error for error in errors)
