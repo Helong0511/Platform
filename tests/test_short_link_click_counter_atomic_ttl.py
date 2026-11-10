@@ -452,3 +452,41 @@ async def test_click_batch_replay_does_not_double_increment_after_ambiguous_comm
     assert second_inserted is False
     assert db.click_updates == 1
     assert redis.deleted == [args["pending_key"]]
+
+
+
+@pytest.mark.asyncio
+async def test_click_batch_ack_failure_replays_without_double_increment():
+    db = _ClickBatchLedgerDB()
+    pending_key = f"{counter.CLICK_COUNTER_PREFIX}pending:ack-retry-code:{'b' * 32}"
+
+    class FailFirstDeleteRedis(_PendingRedis):
+        def __init__(self):
+            super().__init__()
+            self.attempts = 0
+
+        async def delete(self, key):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise OSError("simulated lost Redis ACK")
+            return await super().delete(key)
+
+    redis = FailFirstDeleteRedis()
+    args = dict(
+        short_code="ack-retry-code",
+        batch_id="b" * 32,
+        pending_key=pending_key,
+        click_count=4,
+    )
+
+    first_ok, first_inserted = await counter._process_pending_click_batch(db, redis, **args)
+    assert first_ok is False
+    assert first_inserted is True
+    assert db.click_updates == 1
+    assert args["batch_id"] in db.ledger
+
+    second_ok, second_inserted = await counter._process_pending_click_batch(db, redis, **args)
+    assert second_ok is True
+    assert second_inserted is False
+    assert db.click_updates == 1
+    assert redis.deleted == [pending_key]
