@@ -566,7 +566,7 @@ class PostbackForwarder:
 
             task = PostbackForwardQueue(
                 conversion_id=conversion.id,
-                product_id=conversion.product_id,
+                product_id=None,
                 publisher_id=publisher_id,
                 downstream_url=downstream_url,
                 request_method=method,
