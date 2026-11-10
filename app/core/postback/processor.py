@@ -88,7 +88,7 @@ class PostbackProcessor:
         # Redis Cap reservation 不参与数据库事务；任何未提交阶段的异常都必须精确回退。
         # 一旦进入 COMMIT reconciliation，则由该函数根据数据库实际提交结果负责处理，
         # 外层异常处理不得再次 DECR，避免重复回退造成 Cap 计数虚低。
-        cap_reservations: list[tuple[str, int, Optional[int], Optional[datetime]]] = []
+        cap_reservations: list[tuple] = []
         cap_rollback_attempted = False
         cap_commit_reconciliation_started = False
 
@@ -412,7 +412,7 @@ class PostbackProcessor:
         *,
         db: AsyncSession,
         conversion_id: int,
-        cap_reservations: list[tuple[str, int, Optional[int], Optional[datetime]]],
+        cap_reservations: list[tuple],
     ) -> None:
         """
         提交转化与队列事务；遇到提交异常时先查询提交结果，再决定是否回退 Redis。
