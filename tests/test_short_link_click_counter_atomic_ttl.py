@@ -11,8 +11,8 @@ async def test_increment_uses_single_atomic_redis_script(monkeypatch):
     calls = []
 
     class FakeRedis:
-        async def eval(self, script, number_of_keys, key):
-            calls.append((script, number_of_keys, key))
+        async def eval(self, script, number_of_keys, counter_key, event_key, ttl):
+            calls.append((script, number_of_keys, counter_key, event_key, ttl))
             return 7
 
     async def fake_get_redis_client():
@@ -22,9 +22,11 @@ async def test_increment_uses_single_atomic_redis_script(monkeypatch):
     await counter.increment_click_count_async("regression-code")
 
     assert len(calls) == 1
-    script, number_of_keys, key = calls[0]
-    assert number_of_keys == 1
+    script, number_of_keys, key, event_key, ttl = calls[0]
+    assert number_of_keys == 2
     assert key == f"{counter.CLICK_COUNTER_PREFIX}regression-code"
+    assert event_key.startswith("short_link:click_event:")
+    assert ttl == 120
     assert "EXPIRE" not in script
     assert "redis.call('INCR', KEYS[1])" in script
     assert "return redis.call('INCR', KEYS[1])" in script
