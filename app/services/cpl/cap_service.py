@@ -23,7 +23,7 @@ from sqlalchemy.orm import joinedload
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.utils import get_app_now_naive
-from app.models.models import OfferCap, Offer, Advertiser, Publisher, User
+from app.models.models import OfferCap, Offer, Publisher, User
 from app.schemas.cpl.cap import OfferCapResponse
 from app.services.base_service import BaseService
 
