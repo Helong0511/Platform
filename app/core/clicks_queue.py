@@ -31,7 +31,7 @@ local current = redis.call('LLEN', KEYS[1]) + redis.call('LLEN', KEYS[2])
 if current >= tonumber(ARGV[2]) then
     return -1
 end
-redis.call('RPUSH', KEYS[1], ARGV[1])
+redis.call('LPUSH', KEYS[1], ARGV[1])
 return current + 1
 """
 
