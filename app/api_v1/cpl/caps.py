@@ -222,7 +222,7 @@ async def check_cap_consistency_api(
     """
     检查 Cap 内存计数与数据库转化数是否一致。
 
-    fix=true 时自动修复偏差并记录审计日志。
+    fix=true 仅保留兼容参数；为避免覆盖并发预留，不执行自动覆盖修复。
     """
     # ---------- 入口：参数与依赖准备 ----------
     cap_service: CapService = await get_cap_service(db)
@@ -236,15 +236,17 @@ async def check_cap_consistency_api(
         if fix and inconsistencies:
             await log_user_action(
                 db=db,
-                action_type="UPDATE",
+                action_type="API_ACCESS",
                 user=current_user,
                 resource_type="OFFER_CAP",
                 resource_id=offer_id or 0,
-                resource_name="Cap计数一致性修复",
+                resource_name="Cap计数一致性检查（自动覆盖修复已禁用）",
                 request=request,
                 details={
                     "inconsistency_count": len(inconsistencies),
                     "offer_id": offer_id,
+                    "repair_performed": False,
+                    "reason": "防止 DB -> Redis 覆盖并发预留",
                 },
             )
             await commit_audit_log(db)
