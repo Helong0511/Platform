@@ -11,6 +11,28 @@ from app.core.postback.transformers.normalizer import DataNormalizer
 
 logger = logging.getLogger(__name__)
 
+MAX_PAYOUT_VALUE = Decimal("99999999.9999")
+PAYOUT_QUANTUM = Decimal("0.0001")
+
+
+def validate_payout_value(value: Any) -> Optional[str]:
+    """校验 Numeric(12, 4) 金额字段，拒绝 NaN/Infinity、非正数及超精度值。"""
+    if value is None or str(value).strip() == "":
+        return "缺少必填字段：payout"
+    try:
+        payout = Decimal(str(value).strip())
+        if not payout.is_finite():
+            return f"payout 必须为有限数字：当前值={value}"
+        if payout <= 0:
+            return f"payout 必须大于 0：当前值={value}"
+        if payout > MAX_PAYOUT_VALUE:
+            return "payout 超出数据库 Numeric(12, 4) 可存储范围"
+        if payout != payout.quantize(PAYOUT_QUANTUM):
+            return "payout 最多允许 4 位小数"
+    except (InvalidOperation, ValueError, TypeError):
+        return f"payout 格式错误：{value}（应为有限数字）"
+    return None
+
 
 class DataValidator:
     """数据验证器"""
@@ -62,22 +84,9 @@ class DataValidator:
         payout = raw_data.get('payout')
         if payout is None or str(payout).strip() == '':
             payout = raw_data.get('amount')
-
-        if payout is None or str(payout).strip() == '':
-            errors.append("缺少必填字段：payout")
-        else:
-            try:
-                payout_val = Decimal(str(payout).strip())
-                if not payout_val.is_finite():
-                    errors.append(f"payout 必须为有限数字：当前值={payout}")
-                elif payout_val <= 0:
-                    errors.append(f"payout 必须大于 0：当前值={payout}")
-                elif payout_val > Decimal("99999999.9999"):
-                    errors.append("payout 超出数据库 Numeric(12, 4) 可存储范围")
-                elif payout_val != payout_val.quantize(Decimal("0.0001")):
-                    errors.append("payout 最多允许 4 位小数")
-            except (InvalidOperation, ValueError, TypeError):
-                errors.append(f"payout 格式错误：{payout}（应为有限数字）")
+        payout_error = validate_payout_value(payout)
+        if payout_error:
+            errors.append(payout_error)
 
         # 记录验证结果
         if errors:
