@@ -1853,7 +1853,6 @@ CREATE TABLE IF NOT EXISTS short_link_click_sync_batches (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     acknowledged_at DATETIME NULL COMMENT 'Redis pending key 确认删除时间',
     PRIMARY KEY (batch_id),
-    KEY idx_short_link_click_sync_code (short_code),
     KEY idx_short_click_batch_code_created (short_code, created_at),
     KEY idx_short_click_batch_ack_created (acknowledged_at, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
