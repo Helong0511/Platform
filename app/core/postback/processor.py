@@ -214,13 +214,16 @@ class PostbackProcessor:
             # Cap 原子预留（替代原先 check + increment 分离）
             cap_ok = True
             cap_status = "cap_ok"
+            cap_reservations: list[tuple[str, int, Optional[int]]] = []
             logger.info("=== Cap 原子预留 ===")
             try:
-                cap_incremented, cap_status = await CapChecker.increment(
-                    offer_id=offer_id,
-                    publisher_id=publisher_id,
-                    advertiser_id=advertiser_id,
-                    db=db,
+                cap_incremented, cap_status, cap_reservations = (
+                    await CapChecker.increment_with_reservations(
+                        offer_id=offer_id,
+                        publisher_id=publisher_id,
+                        advertiser_id=advertiser_id,
+                        db=db,
+                    )
                 )
             except Exception:
                 # CapChecker/increment_cap_count 已按实际预留回退 Redis，此处勿再全量 DECR
@@ -273,28 +276,19 @@ class PostbackProcessor:
             try:
                 conversion = await step_save_conversion(pipe_ctx)
             except IntegrityError:
-                if cap_ok:
-                    await CapChecker.rollback_redis(
-                        offer_id=offer_id,
-                        publisher_id=publisher_id,
-                        advertiser_id=advertiser_id,
-                        db=db,
-                    )
+                # 先回滚 DB 事务，再精确回退本次真正预留的 Redis key。
                 await db.rollback()
+                if cap_reservations:
+                    await CapChecker.rollback_reservations(cap_reservations)
                 logger.info("并发重复转化，已跳过：platform=%s", platform)
                 return {
                     "success": True,
                     "message": "重复转化，已跳过",
                 }
             except Exception as save_err:
-                if cap_ok:
-                    await CapChecker.rollback_redis(
-                        offer_id=offer_id,
-                        publisher_id=publisher_id,
-                        advertiser_id=advertiser_id,
-                        db=db,
-                    )
                 await db.rollback()
+                if cap_reservations:
+                    await CapChecker.rollback_reservations(cap_reservations)
                 logger.error("保存转化记录失败，已回滚：%s", save_err, exc_info=True)
                 raise
             logger.info(
@@ -324,7 +318,11 @@ class PostbackProcessor:
 
             # ========== 第 11 步：提交事务（Cap / 短链 / 转化 / 转发队列原子提交） ==========
             logger.info("=== 第 11 步：提交事务 ====")
-            await db.commit()
+            await PostbackProcessor._commit_conversion_with_cap_reconciliation(
+                db=db,
+                conversion_id=conversion.id,
+                cap_reservations=cap_reservations,
+            )
             logger.info("事务提交成功")
 
             # 立即触发仅作为低延迟优化；真正的恢复依赖数据库队列和每分钟定时任务。
@@ -383,6 +381,68 @@ class PostbackProcessor:
             logger.error(f"Postback 处理失败，已回滚事务：platform={platform}, error={str(e)}", exc_info=True)
             raise
     
+    @staticmethod
+    async def _commit_conversion_with_cap_reconciliation(
+        *,
+        db: AsyncSession,
+        conversion_id: int,
+        cap_reservations: list[tuple[str, int, Optional[int]]],
+    ) -> None:
+        """
+        提交转化与队列事务；遇到提交异常时先查询提交结果，再决定是否回退 Redis。
+
+        数据库连接在 COMMIT 响应期间断开时，提交结果可能未知。只有确认转化不存在才回退
+        本次 Redis reservation，避免「DB 已提交但 Redis 被回退」导致 Cap 超卖。
+        """
+        try:
+            await db.commit()
+            return
+        except Exception as commit_error:
+            try:
+                await db.rollback()
+            except Exception:
+                logger.critical(
+                    "Postback COMMIT 异常后 DB rollback 也失败；保留 Redis Cap reservation，"
+                    "需人工/巡检核对 conversion_id=%s",
+                    conversion_id,
+                    exc_info=True,
+                )
+                raise commit_error
+
+            try:
+                result = await db.execute(
+                    select(PostbackConversion.id)
+                    .where(PostbackConversion.id == conversion_id)
+                    .limit(1)
+                )
+                committed = result.scalar_one_or_none() is not None
+            except Exception:
+                logger.critical(
+                    "Postback COMMIT 结果无法确认；为避免 Cap 超卖，保留 Redis reservation，"
+                    "conversion_id=%s",
+                    conversion_id,
+                    exc_info=True,
+                )
+                raise commit_error
+
+            if not committed and cap_reservations:
+                try:
+                    await CapChecker.rollback_reservations(cap_reservations)
+                except Exception:
+                    logger.critical(
+                        "Postback COMMIT 确认未提交，但 Redis Cap reservation 回退失败；"
+                        "conversion_id=%s",
+                        conversion_id,
+                        exc_info=True,
+                    )
+            elif committed:
+                logger.critical(
+                    "Postback COMMIT 返回异常但 DB 已确认转化存在；保留 Redis Cap reservation，"
+                    "conversion_id=%s",
+                    conversion_id,
+                )
+            raise commit_error
+
     @staticmethod
     async def _enqueue_downstream_forward_tasks(
         *,
