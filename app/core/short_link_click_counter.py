@@ -248,11 +248,15 @@ async def _increment_click_count_in_db(short_code: str) -> bool:
             )
             await db.commit()
             updated = bool(getattr(result, "rowcount", 0))
-        if updated:
-            await invalidate_short_link_cache(short_code)
-        else:
+        if not updated:
             logger.warning("短链接点击计数降级写库未更新记录（短链不存在或已停用）: %s", short_code)
-        return updated
+            return False
+        try:
+            await invalidate_short_link_cache(short_code)
+        except Exception as cache_exc:
+            # 数据库已经提交；缓存失效失败不能把已入账结果误报成写库失败。
+            logger.warning("短链接点击计数已写库，但缓存失效失败: short_code=%s, error=%s", short_code, cache_exc)
+        return True
     except Exception as exc:
         logger.error(
             "Redis 不可用且数据库降级自增失败，当前点击无法持久化: short_code=%s, error=%s",
@@ -270,7 +274,12 @@ async def increment_click_count_async(short_code: str) -> None:
     不再把 API Worker 的点击写入各自进程内内存；多 Worker 的本地计数无法由单一
     scheduler 进程可靠汇总，且 Worker 重启会造成未刷盘计数丢失。
     """
-    redis = await get_redis_client()
+    try:
+        redis = await get_redis_client()
+    except Exception as exc:
+        logger.warning("获取 Redis 客户端失败，改用数据库原子自增: short_code=%s, error=%s", short_code, exc)
+        await _increment_click_count_in_db(short_code)
+        return
     if not redis:
         await _increment_click_count_in_db(short_code)
         return
