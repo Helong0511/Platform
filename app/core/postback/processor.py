@@ -214,7 +214,7 @@ class PostbackProcessor:
             # Cap 原子预留（替代原先 check + increment 分离）
             cap_ok = True
             cap_status = "cap_ok"
-            cap_reservations: list[tuple[str, int, Optional[int]]] = []
+            cap_reservations: list[tuple[str, int, Optional[int], Optional[datetime]]] = []
             logger.info("=== Cap 原子预留 ===")
             try:
                 cap_incremented, cap_status, cap_reservations = (
@@ -386,7 +386,7 @@ class PostbackProcessor:
         *,
         db: AsyncSession,
         conversion_id: int,
-        cap_reservations: list[tuple[str, int, Optional[int]]],
+        cap_reservations: list[tuple[str, int, Optional[int], Optional[datetime]]],
     ) -> None:
         """
         提交转化与队列事务；遇到提交异常时先查询提交结果，再决定是否回退 Redis。
