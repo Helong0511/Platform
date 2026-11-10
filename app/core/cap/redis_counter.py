@@ -121,8 +121,9 @@ class RedisCapManager:
         if not redis:
             return RedisCapManager._redis_unavailable_result()
             
-        now = get_app_now_naive()
-        key = get_daily_cap_key(offer_id, now, publisher_id)
+        # 必须回退预留时所属的业务日期；跨午夜回滚不能误减新一天的计数。
+        key_date = reservation_date or get_app_now_naive()
+        key = get_daily_cap_key(offer_id, key_date, publisher_id)
         
         try:
             init_val = str(initial_value) if initial_value is not None else "0"
@@ -177,7 +178,8 @@ class RedisCapManager:
     @staticmethod
     async def decrement_daily(
         offer_id: int,
-        publisher_id: Optional[int] = None
+        publisher_id: Optional[int] = None,
+        reservation_date: Optional[datetime] = None,
     ) -> int:
         """
         减少每日计数 (用于回滚，原子操作)
