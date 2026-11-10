@@ -10,7 +10,6 @@ import httpx
 
 from app.core.ssrf_guard import (
     SSRFForbiddenError,
-    assert_outbound_url_safe,
     resolve_public_ip,
 )
 
@@ -36,7 +35,10 @@ class _PinnedDNSAsyncHTTPTransport(httpx.AsyncBaseTransport):
         original_sni = request.extensions.get("sni_hostname")
         original_host = original_url.host
 
-        # 连接前最后一刻解析并固定 IP，关闭「校验 DNS 与 TCP 连接再次解析」的竞态窗口。
+        if original_url.scheme not in ("http", "https") or not original_host:
+            raise SSRFForbiddenError("仅允许带主机名的 HTTP/HTTPS 出站 URL")
+
+        # 连接前最后一刻只解析一次并固定 IP，避免重复 DNS 查询及校验/连接竞态。
         pinned_ip = await asyncio.to_thread(resolve_public_ip, original_host)
         if original_url.scheme == "https":
             request.extensions["sni_hostname"] = original_host
@@ -63,17 +65,6 @@ class HttpClient:
     CONNECT_TIMEOUT = 5
 
     @staticmethod
-    async def _ssrf_request_hook(request: httpx.Request) -> None:
-        """httpx 请求钩子：含跟随重定向后的每一次请求都会触发。"""
-        try:
-            await asyncio.to_thread(assert_outbound_url_safe, str(request.url))
-        except SSRFForbiddenError as exc:
-            raise httpx.RequestError(
-                f"SSRF blocked: {exc.reason}",
-                request=request,
-            ) from exc
-
-    @staticmethod
     async def send_request(
         url: str,
         method: str = "GET",
@@ -88,16 +79,6 @@ class HttpClient:
             tuple: (是否成功，状态码，响应内容)
         """
         try:
-            await asyncio.to_thread(assert_outbound_url_safe, url)
-        except SSRFForbiddenError as exc:
-            logger.warning(
-                "Postback 出站被 SSRF 防护拦截：url=%s reason=%s",
-                url[:100],
-                exc.reason,
-            )
-            return False, 0, f"SSRF blocked: {exc.reason}"
-
-        try:
             async with httpx.AsyncClient(
                 transport=_PinnedDNSAsyncHTTPTransport(),
                 timeout=httpx.Timeout(
@@ -106,7 +87,6 @@ class HttpClient:
                 ),
                 follow_redirects=True,
                 trust_env=False,
-                event_hooks={"request": [HttpClient._ssrf_request_hook]},
             ) as client:
 
                 if method.upper() == "GET":
