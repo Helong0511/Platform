@@ -77,12 +77,11 @@ async def check_cap_consistency(
                     cap_issues.append(f"每日计数不一致: DB={db_daily_count}, Redis={redis_daily_count}")
                     
                     if fix_inconsistencies:
-                        # 修复：以DB为准，更新Redis
-                        try:
-                            await redis.setex(redis_key, 48 * 3600, db_daily_count)
-                            logger.info(f"已修复每日计数不一致: cap_id={cap.id}, 设置为{db_daily_count}")
-                        except Exception as e:
-                            logger.error(f"修复每日计数失败: cap_id={cap.id}, error={e}")
+                        # 禁止 DB -> Redis 覆盖：可能抹掉 Redis 中尚未提交到 DB 的并发预留。
+                        logger.warning(
+                            "Cap 自动修复已禁用（每日计数）；需通过持行锁的安全同步流程处理：cap_id=%s",
+                            cap.id,
+                        )
             
             # 检查总Cap
             if cap.total_cap:
@@ -95,14 +94,17 @@ async def check_cap_consistency(
                     cap_issues.append(f"总计数不一致: DB={db_total_count}, Redis={redis_total_count}")
                     
                     if fix_inconsistencies:
-                        # 修复：以DB为准，更新Redis
-                        try:
-                            await redis.setex(redis_key, 30 * 24 * 3600, db_total_count)
-                            logger.info(f"已修复总计数不一致: cap_id={cap.id}, 设置为{db_total_count}")
-                        except Exception as e:
-                            logger.error(f"修复总计数失败: cap_id={cap.id}, error={e}")
+                        # 禁止 DB -> Redis 覆盖：可能抹掉 Redis 中尚未提交到 DB 的并发预留。
+                        logger.warning(
+                            "Cap 自动修复已禁用（总计数）；需通过持行锁的安全同步流程处理：cap_id=%s",
+                            cap.id,
+                        )
             
             if cap_issues:
+                if fix_inconsistencies:
+                    cap_issues.append(
+                        "未执行自动覆盖修复：为保护并发预留，需使用安全同步/人工核验流程"
+                    )
                 inconsistencies.append({
                     "cap_id": cap.id,
                     "offer_id": cap.offer_id,
