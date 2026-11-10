@@ -301,12 +301,16 @@ async def increment_click_count_async(short_code: str) -> None:
             new_count,
         )
     except Exception as exc:
-        logger.warning(
-            "Redis 点击计数递增失败，改用数据库原子自增: short_code=%s, error=%s",
+        # Redis eval 超时/连接中断时，服务端可能已经执行 INCR，只是响应未到达。
+        # 此时直接写 DB 会与 Redis 中可能存在的增量重复入账；没有事件级幂等流水前，
+        # 必须将结果标记为不确定并交由后续对账，而不是盲目双写。
+        logger.error(
+            "Redis 点击计数执行结果不确定，跳过数据库回退以避免重复计数: "
+            "short_code=%s, error=%s",
             short_code,
             exc,
+            exc_info=True,
         )
-        await _increment_click_count_in_db(short_code)
 
 
 async def _scan_click_counter_keys(redis, max_keys: int = MAX_KEYS_PER_SYNC) -> list:
