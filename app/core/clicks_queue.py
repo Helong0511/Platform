@@ -171,6 +171,10 @@ async def reserve_clicks(count: int = BATCH_SIZE) -> list[tuple[str, Dict[str, A
             if click_data is None:
                 await move_to_dead_letter(click_json, reason="invalid_json")
                 continue
+            click_id = click_data.get("click_id")
+            if not click_id or len(str(click_id)) > 255:
+                await move_to_dead_letter(click_json, reason="invalid_or_oversized_click_id")
+                continue
             reserved.append((click_json, click_data))
 
         if reserved:
