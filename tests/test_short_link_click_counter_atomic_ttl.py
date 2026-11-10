@@ -533,6 +533,8 @@ async def test_redis_increment_retry_uses_same_click_event_marker(monkeypatch):
     assert redis.counter[redis.calls[0][2]] == 1
     assert "SET" in redis.calls[0][0] and "'NX'" in redis.calls[0][0]
     assert "INCR" in redis.calls[0][0]
+    assert "pcall(redis.call, 'INCR'" in redis.calls[0][0]
+    assert "redis.call('DEL', KEYS[2])" in redis.calls[0][0]
 
 
 @pytest.mark.asyncio
