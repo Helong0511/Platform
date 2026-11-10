@@ -333,8 +333,9 @@ async def test_db_prevalidation_failure_preserves_redis_click_counter(monkeypatc
     synced = await counter.sync_click_counts_to_db(db)
 
     assert synced == 0
-    assert db.execute_calls == 1
-    assert db.rollback_calls == 1
+    # 一次预验证失败；后续账本清理也因 DB 故障安全跳过。
+    assert db.execute_calls == 2
+    assert db.rollback_calls == 2
     assert redis.deleted == []
 
 
