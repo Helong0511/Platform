@@ -121,9 +121,8 @@ class RedisCapManager:
         if not redis:
             return RedisCapManager._redis_unavailable_result()
             
-        # 必须回退预留时所属的业务日期；跨午夜回滚不能误减新一天的计数。
-        key_date = reservation_date or get_app_now_naive()
-        key = get_daily_cap_key(offer_id, key_date, publisher_id)
+        now = get_app_now_naive()
+        key = get_daily_cap_key(offer_id, now, publisher_id)
         
         try:
             init_val = str(initial_value) if initial_value is not None else "0"
@@ -191,8 +190,9 @@ class RedisCapManager:
         if not redis:
             return -1
 
-        now = get_app_now_naive()
-        key = get_daily_cap_key(offer_id, now, publisher_id)
+        # 必须回退预留时所属的业务日期；跨午夜回滚不能误减新一天的计数。
+        key_date = reservation_date or get_app_now_naive()
+        key = get_daily_cap_key(offer_id, key_date, publisher_id)
         try:
             # 使用 Lua 脚本原子化 decr + 负数归零，避免 TOCTOU 竞态
             # （decr 后到 set(0) 之间若有 incr 会丢失计数或导致配额虚增）
