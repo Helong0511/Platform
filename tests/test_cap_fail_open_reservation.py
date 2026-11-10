@@ -84,7 +84,9 @@ async def test_fail_open_daily_failure_is_not_added_to_reservations(monkeypatch)
 
     assert ok is True
     assert status == "cap_ok"
-    assert reservations == [("total", 77, 12, None)]
+    assert len(reservations) == 1
+    assert reservations[0][:4] == ("total", 77, 12, None)
+    assert len(reservations[0][4]) == 32
     assert cap.current_daily_count == 1
     assert cap.cap_start_date == datetime(2026, 11, 10, 0, 0, 0)
     assert cap.current_total_count == 6
