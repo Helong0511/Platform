@@ -27,7 +27,7 @@ _RETRY_FIELD = "_queue_retry"
 
 # 队列长度检查与入队必须在同一 Lua 原子操作中完成，避免并发生产者突破上限。
 _ENQUEUE_CLICK_LUA = """
-local current = redis.call('LLEN', KEYS[1])
+local current = redis.call('LLEN', KEYS[1]) + redis.call('LLEN', KEYS[2])
 if current >= tonumber(ARGV[2]) then
     return -1
 end
@@ -71,8 +71,9 @@ async def enqueue_click(click_data: Dict[str, Any]) -> bool:
         click_json = json.dumps(click_data, default=str)
         queue_length = int(await redis.eval(
             _ENQUEUE_CLICK_LUA,
-            1,
+            2,
             CLICKS_QUEUE_KEY,
+            CLICKS_PROCESSING_KEY,
             click_json,
             MAX_QUEUE_SIZE,
         ))
