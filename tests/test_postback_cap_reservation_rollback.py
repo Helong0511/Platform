@@ -62,7 +62,8 @@ async def test_fail_open_only_returns_reservations_that_really_incremented(monke
     db = _FakeCapDB([cap])
 
     async def daily_fails(*args, **kwargs):
-        raise OSError("isolated Redis daily counter failure")
+        # 底层已对不确定的 Redis Lua 执行令牌补偿，安全 fail-open 返回 None。
+        return None
 
     async def total_succeeds(*args, **kwargs):
         return True
@@ -100,9 +101,11 @@ async def test_cap_checker_rolls_back_only_the_recorded_reservations(monkeypatch
 
     async def dec_daily(offer_id, publisher_id=None, reservation_date=None, reservation_id=None):
         calls.append(("daily", offer_id, publisher_id, reservation_date, reservation_id))
+        return 0
 
     async def dec_total(offer_id, publisher_id=None, reservation_id=None):
         calls.append(("total", offer_id, publisher_id, None, reservation_id))
+        return 0
 
     monkeypatch.setattr(cap_checker.RedisCapManager, "decrement_daily", staticmethod(dec_daily))
     monkeypatch.setattr(cap_checker.RedisCapManager, "decrement_total", staticmethod(dec_total))
