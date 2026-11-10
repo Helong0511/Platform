@@ -205,3 +205,57 @@ async def test_sync_fails_closed_when_global_lock_acquisition_errors(monkeypatch
 
     assert synced == 0
     assert db.executed is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("redis_mode", ["unavailable", "increment_error"])
+async def test_click_increment_uses_atomic_db_fallback_across_workers(monkeypatch, redis_mode):
+    class FakeResult:
+        rowcount = 1
+
+    class FakeDb:
+        def __init__(self):
+            self.statement = None
+            self.committed = False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, statement):
+            self.statement = statement
+            return FakeResult()
+
+        async def commit(self):
+            self.committed = True
+
+    fake_db = FakeDb()
+
+    def fake_session_local():
+        return fake_db
+
+    async def fake_invalidate(short_code):
+        assert short_code == "worker-fallback-code"
+
+    async def fake_get_redis_client():
+        if redis_mode == "unavailable":
+            return None
+
+        class BrokenRedis:
+            async def eval(self, *args):
+                raise OSError("simulated Redis increment failure")
+
+        return BrokenRedis()
+
+    monkeypatch.setattr(counter, "AsyncSessionLocal", fake_session_local)
+    monkeypatch.setattr(counter, "get_redis_client", fake_get_redis_client)
+    monkeypatch.setattr(counter, "invalidate_short_link_cache", fake_invalidate)
+
+    await counter.increment_click_count_async("worker-fallback-code")
+
+    assert fake_db.statement is not None
+    assert fake_db.committed is True
+    compiled = str(fake_db.statement)
+    assert "click_count" in compiled
