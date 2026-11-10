@@ -78,6 +78,11 @@ class HttpClient:
         Returns:
             tuple: (是否成功，状态码，响应内容)
         """
+        normalized_method = (method or "").upper()
+        if normalized_method not in {"GET", "POST"}:
+            logger.warning("拒绝不支持的 Postback HTTP 方法：%s", method)
+            return False, 0, f"Unsupported HTTP method: {method}"
+
         try:
             async with httpx.AsyncClient(
                 transport=_PinnedDNSAsyncHTTPTransport(),
@@ -89,18 +94,17 @@ class HttpClient:
                 trust_env=False,
             ) as client:
 
-                if method.upper() == "GET":
+                if normalized_method == "GET":
                     response = await client.get(url, params=params, headers=headers)
-                elif method.upper() == "POST":
+                elif normalized_method == "POST":
                     response = await client.post(
                         url,
                         params=params,
                         json=json_data,
                         headers=headers,
                     )
-                else:
-                    logger.warning(f"不支持的 HTTP 方法：{method}，使用 GET")
-                    response = await client.get(url, params=params, headers=headers)
+                else:  # 前置白名单校验保证不可达
+                    raise AssertionError("未处理的 Postback HTTP 方法")
 
                 success = 200 <= response.status_code < 400
                 content = response.text
