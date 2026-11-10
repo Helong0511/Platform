@@ -17,7 +17,6 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import AsyncSessionLocal
 from app.core.postback.errors import DeductionProcessingError
 from app.core.postback.pipeline import attribution_ids_from_association
 from app.core.postback.validators.ip_validator import IpValidator
@@ -39,10 +38,14 @@ from app.models.models import (
     AdminNotificationConfig,
     CloakConfig,
     PostbackConversion,
+    PostbackForwardQueue,
+    Publisher,
+    Product,
     ShortLink,
 )
 from app.services.telegram_notification_service import TelegramNotificationService
 from app.core.third_party_report import send_third_party_report
+from app.core.utils import get_app_now_naive
 from app.core.url.url_params_util import (
     parse_stored_url_params,
     resolve_dp_from_url_params,
@@ -299,10 +302,41 @@ class PostbackProcessor:
                 f"conversion_id={conversion.conversion_id}"
             )
 
-            # ========== 第 11 步：提交事务（Cap / 短链 / 转化原子提交） ==========
+            # 转发任务与转化记录在同一事务入队，避免提交后进程崩溃造成首次转发丢失。
+            should_forward_pub = bool(
+                cap_ok
+                and not pipe_ctx.skip_save_and_forward
+                and click_association
+                and click_association.get("publisher_id")
+            )
+            should_forward_prod = bool(
+                cap_ok
+                and not pipe_ctx.skip_save_and_forward
+                and conversion.product_id
+            )
+            queued_forwards = await PostbackProcessor._enqueue_downstream_forward_tasks(
+                db=db,
+                conversion=conversion,
+                click_association=click_association,
+                forward_publisher=should_forward_pub,
+                forward_product=should_forward_prod,
+            )
+
+            # ========== 第 11 步：提交事务（Cap / 短链 / 转化 / 转发队列原子提交） ==========
             logger.info("=== 第 11 步：提交事务 ====")
             await db.commit()
             logger.info("事务提交成功")
+
+            # 立即触发仅作为低延迟优化；真正的恢复依赖数据库队列和每分钟定时任务。
+            if queued_forwards:
+                try:
+                    from app.scheduler_module.tasks.forward_tasks import trigger_forward_processing
+
+                    asyncio.create_task(trigger_forward_processing())
+                except RuntimeError:
+                    logger.warning(
+                        "当前无可用事件循环，首次转发由持久化队列定时任务接管"
+                    )
 
             # 入库成功后再做第三方像素上报，避免 DB 回滚后产生幽灵 CAPI 事件
             try:
@@ -315,28 +349,11 @@ class PostbackProcessor:
             except Exception as pixel_err:
                 logger.error("第三方像素上报失败（转化已入库）: %s", pixel_err, exc_info=True)
             
-            # ========== 第 9/9b 步：渠道 + 产品转发（后台，不阻塞上游回调） ==========
-            logger.info("=== 第 9/9b 步：调度下游转发（后台） ====")
-            should_forward_pub = bool(
-                cap_ok
-                and not pipe_ctx.skip_save_and_forward
-                and click_association
-                and click_association.get("publisher_id")
+            logger.info(
+                "持久化下游转发任务已入队：conversion_id=%s queued=%s",
+                conversion.id,
+                queued_forwards,
             )
-            should_forward_prod = bool(
-                cap_ok
-                and not pipe_ctx.skip_save_and_forward
-                and conversion.product_id
-            )
-            if should_forward_pub or should_forward_prod:
-                PostbackProcessor._schedule_downstream_forwards(
-                    conversion_id=conversion.id,
-                    click_association=click_association,
-                    forward_publisher=should_forward_pub,
-                    forward_product=should_forward_prod,
-                )
-            else:
-                logger.info("跳过下游转发（Cap 超限、扣量或无目标）")
 
             # ========== 第 10 步：通知发送 ==========
             logger.info("=== 第 10 步：通知发送 ====")
@@ -367,108 +384,70 @@ class PostbackProcessor:
             raise
     
     @staticmethod
-    def _snapshot_click_association(
-        click_association: Optional[Dict[str, Any]],
-    ) -> Optional[Dict[str, Any]]:
-        """拷贝 Click 关联中的可序列化字段，供后台转发使用。"""
-        if not click_association:
-            return None
-        keys = (
-            "publisher_id",
-            "offer_id",
-            "click_id",
-            "product_id",
-            "client_id",
-            "ip",
-            "user_agent",
-            "url_params",
-            "short_link_id",
-        )
-        snap: Dict[str, Any] = {}
-        for key in keys:
-            if key in click_association:
-                snap[key] = click_association[key]
-        return snap
-
-    @staticmethod
-    def _schedule_downstream_forwards(
+    async def _enqueue_downstream_forward_tasks(
         *,
-        conversion_id: int,
+        db: AsyncSession,
+        conversion: PostbackConversion,
         click_association: Optional[Dict[str, Any]],
         forward_publisher: bool,
         forward_product: bool,
-    ) -> None:
-        """
-        入库成功后后台转发。
+    ) -> int:
+        """在转化事务中写入首次下游转发任务，保证提交后可由 Scheduler 恢复。"""
+        queued = 0
+        now = get_app_now_naive()
 
-        使用独立 DB 会话并显式 commit，避免：
-        1) 下游超时拖垮上游回调；
-        2) get_postback_db 不自动 commit 导致转发日志丢失。
-        """
-        assoc_snap = PostbackProcessor._snapshot_click_association(click_association)
-
-        async def _run() -> None:
-            async with AsyncSessionLocal() as fwd_db:
-                try:
-                    result = await fwd_db.execute(
-                        select(PostbackConversion).where(
-                            PostbackConversion.id == conversion_id
+        if forward_publisher:
+            publisher_id = (click_association or {}).get("publisher_id")
+            if publisher_id:
+                result = await db.execute(
+                    select(Publisher).where(Publisher.id == publisher_id).limit(1)
+                )
+                publisher = result.scalars().first()
+                if publisher and publisher.is_active and publisher.postback_url:
+                    db.add(
+                        PostbackForwardQueue(
+                            conversion_id=conversion.id,
+                            product_id=conversion.product_id,
+                            publisher_id=publisher_id,
+                            downstream_url=publisher.postback_url,
+                            request_method=publisher.postback_method or "GET",
+                            request_params=None,
+                            request_data=None,
+                            retry_count=0,
+                            next_retry_time=now,
                         )
                     )
-                    conv = result.scalars().first()
-                    if not conv:
-                        logger.warning(
-                            "后台转发跳过：转化不存在 conversion_id=%s",
-                            conversion_id,
-                        )
-                        return
-                    if forward_publisher:
-                        logger.info(
-                            "后台渠道转发开始：conversion_id=%s publisher_id=%s",
-                            conversion_id,
-                            (assoc_snap or {}).get("publisher_id"),
-                        )
-                        await PostbackForwarder.forward_to_publisher(
-                            conv, fwd_db, assoc_snap
-                        )
-                    if forward_product:
-                        logger.info(
-                            "后台产品转发开始：conversion_id=%s product_id=%s",
-                            conversion_id,
-                            conv.product_id,
-                        )
-                        await PostbackForwarder.forward_to_product(
-                            conv, fwd_db, assoc_snap
-                        )
-                    await fwd_db.commit()
-                    logger.info(
-                        "后台下游转发完成并已提交：conversion_id=%s",
-                        conversion_id,
-                    )
-                except Exception as exc:
-                    await fwd_db.rollback()
-                    logger.warning(
-                        "后台下游转发失败：conversion_id=%s err=%s",
-                        conversion_id,
-                        exc,
-                        exc_info=True,
-                    )
+                    queued += 1
 
-        try:
-            asyncio.create_task(_run())
+        if forward_product and conversion.product_id:
+            result = await db.execute(
+                select(Product).where(Product.id == conversion.product_id).limit(1)
+            )
+            product = result.scalars().first()
+            if product and product.is_active and product.downstream_postback_url:
+                db.add(
+                    PostbackForwardQueue(
+                        conversion_id=conversion.id,
+                        product_id=conversion.product_id,
+                        publisher_id=None,
+                        downstream_url=product.downstream_postback_url,
+                        request_method=product.downstream_postback_method or "GET",
+                        request_params=None,
+                        request_data=None,
+                        retry_count=0,
+                        next_retry_time=now,
+                    )
+                )
+                queued += 1
+
+        if queued:
+            await db.flush()
             logger.info(
-                "已调度后台转发：conversion_id=%s pub=%s prod=%s",
-                conversion_id,
-                forward_publisher,
-                forward_product,
+                "已在转化事务中写入下游转发队列：conversion_id=%s count=%s",
+                conversion.id,
+                queued,
             )
-        except Exception as exc:
-            logger.warning(
-                "调度后台转发失败：conversion_id=%s err=%s",
-                conversion_id,
-                exc,
-                exc_info=True,
-            )
+        return queued
 
     @staticmethod
     async def _send_third_party_report_if_needed(
