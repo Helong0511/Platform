@@ -156,7 +156,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "result_getter_function": "get_task_result",
         # 数据库配置
         "cron_expression": "* * * * *",  # 每分钟执行一次（高并发优化，实际处理时会循环处理直到队列为空）
-        "description": "从Redis队列批量取出点击记录并插入到数据库，每分钟执行一次，每次处理最多1000条（高并发优化）",
+        "description": "每分钟批量消费 Redis 点击队列；单次最多处理 10 批（10000 条）或运行 30 秒，支持崩溃恢复、幂等去重和死信监控",
     },
 
     "点击记录归档": {
