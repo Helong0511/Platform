@@ -296,7 +296,7 @@ async def test_postback_precommit_queue_failure_rolls_back_cap_reservation_once(
         return True, "cap_ok", reservations
 
     async def save_conversion(ctx):
-        return SimpleNamespace(id=101, product_id=None)
+        return SimpleNamespace(id=101, product_id=None, conversion_id='conversion-101')
 
     async def fail_enqueue(**kwargs):
         raise OSError("simulated isolated queue insert failure")
