@@ -143,3 +143,40 @@ async def test_persist_empty_snapshot_clears_stale_file_atomically(tmp_path, mon
     assert persist_file.exists()
     assert persist_file.read_text(encoding="utf-8") == "{}"
     assert list(tmp_path.glob("*.tmp")) == []
+
+@pytest.mark.asyncio
+async def test_redis_outage_sync_preserves_clicks_arriving_during_db_write(monkeypatch, tmp_path):
+    async with counter._counter_lock:
+        counter._click_counters.clear()
+        counter._click_counters["outage-code"] = 4
+    monkeypatch.setattr(counter, "COUNTER_PERSIST_FILE", tmp_path / "click_counters.json")
+
+    class Result:
+        def fetchall(self):
+            return [("outage-code", True)]
+
+    class FakeDb:
+        async def execute(self, statement):
+            return Result()
+
+        async def rollback(self):
+            return None
+
+    async def no_redis():
+        return None
+
+    async def update_snapshot(db, short_code, count):
+        assert (short_code, count) == ("outage-code", 4)
+        async with counter._counter_lock:
+            counter._click_counters[short_code] += 3
+        return True
+
+    monkeypatch.setattr(counter, "get_redis_client", no_redis)
+    monkeypatch.setattr(counter, "_update_click_count_with_retry", update_snapshot)
+
+    synced = await counter.sync_click_counts_to_db(FakeDb())
+
+    assert synced == 1
+    async with counter._counter_lock:
+        assert counter._click_counters == {"outage-code": 3}
+    assert '"outage-code": 3' in (tmp_path / "click_counters.json").read_text(encoding="utf-8")
