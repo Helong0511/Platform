@@ -218,17 +218,19 @@ async def increment_click_count_async(short_code: str) -> None:
         return
     
     try:
-        # 使用Redis原子递增
+        # 使用 Lua 将 INCR 与 EXPIRE 合并为一个原子操作。
+        # 避免进程在两条命令之间退出/断连，导致计数器永久没有 TTL。
         counter_key = f"{CLICK_COUNTER_PREFIX}{short_code}"
-        new_count = await redis.incr(counter_key)
-        # 设置过期时间（48小时）- 如果失败不影响计数，但记录警告
-        try:
-            await redis.expire(counter_key, 48 * 3600)
-        except Exception as expire_error:
-            logger.warning(
-                f"设置Redis计数器过期时间失败（不影响计数）: "
-                f"short_code={short_code}, key={counter_key}, error={expire_error}"
-            )
+        new_count = await redis.eval(
+            """
+            local count = redis.call('INCR', KEYS[1])
+            redis.call('EXPIRE', KEYS[1], ARGV[1])
+            return count
+            """,
+            1,
+            counter_key,
+            48 * 3600,
+        )
         # 使用debug级别，避免高频点击时产生大量日志
         logger.debug(
             f"短链接点击计数（Redis）: short_code={short_code}, "
