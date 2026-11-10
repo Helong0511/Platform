@@ -235,7 +235,9 @@ async def test_missing_redis_cap_keys_are_unknown_not_zero_and_never_repaired(
     assert len(issues) == 1
     issue = issues[0]
     assert expected_issue in " ".join(issue["inconsistencies"])
-    assert issue["redis_daily_count"] is (None if daily_missing else 0)
-    assert issue["redis_total_count"] is (None if total_missing else 0)
+    assert issue["redis_daily_count"] == (None if daily_missing else 0)
+    assert issue["redis_total_count"] == (None if total_missing else 0)
+    assert issue["db_daily_count"] == 0
+    assert issue["db_total_count"] == 0
     assert redis.writes == []
     assert any("未执行自动覆盖修复" in item for item in issue["inconsistencies"])
