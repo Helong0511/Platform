@@ -12,11 +12,13 @@ class _AmbiguousRedis:
         self.tokens = set()
         self.reserve_calls = 0
         self.rollback_calls = 0
+        self.reserve_args = []
 
     async def eval(self, script, numkeys, *args):
         if script == redis_counter.RedisCapManager._RESERVE_LUA:
             self.reserve_calls += 1
-            key, token_key, ttl, initial, limit = args
+            key, token_key, counter_ttl, initial, limit, token_ttl = args
+            self.reserve_args.append((counter_ttl, token_ttl))
             if token_key in self.tokens:
                 return int(self.values.get(key, 0))
             current = max(int(self.values.get(key, initial)), int(initial))
@@ -42,6 +44,81 @@ class _AmbiguousRedis:
             return self.values[key]
 
         raise AssertionError("unexpected Redis Lua script")
+
+
+@pytest.mark.asyncio
+async def test_total_cap_counter_has_no_ttl_but_reservation_token_expires(monkeypatch):
+    calls = []
+
+    class CaptureRedis:
+        async def eval(self, script, numkeys, *args):
+            assert script == redis_counter.RedisCapManager._RESERVE_LUA
+            calls.append(args)
+            return 1
+
+    async def fake_get_redis_client():
+        return CaptureRedis()
+
+    monkeypatch.setattr(redis_counter, "get_redis_client", fake_get_redis_client)
+    monkeypatch.setattr(redis_counter.settings, "CAP_FAIL_OPEN", False)
+
+    result = await redis_counter.RedisCapManager.check_and_increment_total(
+        offer_id=88,
+        limit=500,
+        publisher_id=9,
+        initial_value=0,
+        reservation_id="persistent-total-token",
+    )
+
+    assert result is True
+    assert calls == [
+        (
+            redis_counter.get_total_cap_key(88, 9),
+            f"{redis_counter.get_total_cap_key(88, 9)}:reservation:persistent-total-token",
+            0,
+            "0",
+            "500",
+            30 * 24 * 3600,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_daily_cap_counter_and_reservation_keep_daily_ttl(monkeypatch):
+    calls = []
+    now = datetime(2026, 11, 10, 12, 0, 0)
+
+    class CaptureRedis:
+        async def eval(self, script, numkeys, *args):
+            assert script == redis_counter.RedisCapManager._RESERVE_LUA
+            calls.append(args)
+            return 1
+
+    async def fake_get_redis_client():
+        return CaptureRedis()
+
+    monkeypatch.setattr(redis_counter, "get_redis_client", fake_get_redis_client)
+    monkeypatch.setattr(redis_counter, "get_app_now_naive", lambda: now)
+    monkeypatch.setattr(redis_counter.settings, "CAP_FAIL_OPEN", False)
+
+    result = await redis_counter.RedisCapManager.check_and_increment_daily(
+        offer_id=88,
+        limit=50,
+        publisher_id=9,
+        initial_value=0,
+        reservation_id="daily-token",
+    )
+
+    assert result is True
+    assert calls[0][2] == redis_counter.DEFAULT_EXPIRE_SECONDS
+    assert calls[0][5] == redis_counter.DEFAULT_EXPIRE_SECONDS
+
+
+def test_total_cap_reservation_script_persists_counter_without_expiry():
+    script = redis_counter.RedisCapManager._RESERVE_LUA
+    assert "local counter_ttl = tonumber(ARGV[1]) or 0" in script
+    assert "redis.call('PERSIST', KEYS[1])" in script
+    assert "redis.call('EXPIRE', KEYS[2], token_ttl)" in script
 
 
 @pytest.mark.asyncio
