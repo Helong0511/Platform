@@ -39,7 +39,7 @@ class _FakeDB:
 
 
 @pytest.mark.asyncio
-async def test_initial_publisher_queue_does_not_store_product_target(monkeypatch):
+async def test_initial_publisher_queue_does_not_store_product_target():
     publisher = SimpleNamespace(
         id=44,
         is_active=True,
