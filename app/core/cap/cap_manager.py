@@ -97,25 +97,19 @@ async def check_cap(
                     redis_key = get_daily_cap_key(cap.offer_id, now, cap.publisher_id)
                     redis_val = await redis.get(redis_key)
                     
+                    db_daily_count = (
+                        int(cap.current_daily_count or 0)
+                        if cap.cap_start_date
+                        and cap.cap_start_date.date() == today_start.date()
+                        else 0
+                    )
                     if redis_val is not None:
-                        actual_count = int(redis_val)
+                        # 与原子预留路径一致，不能让 Redis 回退低于 DB 已确认计数。
+                        actual_count = max(int(redis_val), db_daily_count)
                     else:
-                        # Redis 未命中（冷启动），从 DB 初始化
-                        if cap.cap_start_date and cap.cap_start_date.date() == today_start.date():
-                             actual_count = cap.current_daily_count
-                        else:
-                             actual_count = 0
-                        
-                        # SET NX：禁止覆盖并发路径已写入的计数
-                        try:
-                            await redis.set(
-                                redis_key,
-                                actual_count,
-                                ex=48 * 3600,
-                                nx=True,
-                            )
-                        except Exception as e:
-                            logger.warning(f"Redis回写失败: {e}")
+                        # 缺失 key 可能是 Redis 重启/淘汰或在途 reservation；
+                        # 这里只做只读预检查，不得 SET/SETNX 重建，最终由 Lua 原子预留初始化。
+                        actual_count = db_daily_count
                 else:
                     # Redis 不可用，降级到 DB 缓存字段 (不再执行实时 COUNT)
                     if cap.cap_start_date and cap.cap_start_date.date() == today_start.date():
@@ -135,14 +129,12 @@ async def check_cap(
                         total_key = get_total_cap_key(cap.offer_id, cap.publisher_id)
                         redis_val = await redis.get(total_key)
                         if redis_val is not None:
-                            actual_total_count = int(redis_val)
-                        else:
-                            await redis.set(
-                                total_key,
-                                actual_total_count,
-                                ex=30 * 24 * 3600,
-                                nx=True,
+                            # Redis 计数不得低于 DB 已确认值；实际预留仍由 Lua 原子判定。
+                            actual_total_count = max(
+                                int(redis_val),
+                                int(cap.current_total_count or 0),
                             )
+                        # key 缺失时只读使用 DB 值，不在预检查阶段重建 Redis key。
                     except Exception as e:
                         logger.warning(f"读取 Redis 总Cap失败，回退 DB 字段: {e}")
                 if actual_total_count >= cap.total_cap:
