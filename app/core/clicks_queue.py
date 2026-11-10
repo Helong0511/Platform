@@ -311,16 +311,14 @@ async def recover_processing_queue() -> int:
 
 async def dequeue_clicks(count: int = BATCH_SIZE) -> list[Dict[str, Any]]:
     """
-    从 Redis 队列批量取出点击记录（兼容旧调用方）。
+    已弃用并 fail-closed。
 
-    新代码请使用 reserve_clicks / acknowledge_reserved / requeue_reserved。
+    旧 API 在返回数据前就从 processing 确认删除，调用方若尚未持久化即崩溃会丢数据。
+    新调用方必须使用 reserve_clicks()，并在 DB COMMIT 成功后调用 acknowledge_reserved()。
     """
-    reserved = await reserve_clicks(count)
-    if not reserved:
-        return []
-    raw_items = [raw for raw, _ in reserved]
-    await acknowledge_reserved(raw_items)
-    return [data for _, data in reserved]
+    raise RuntimeError(
+        "dequeue_clicks 已停用：必须使用 reserve_clicks/acknowledge_reserved 保证先持久化再 ACK"
+    )
 
 
 async def get_queue_length() -> int:
