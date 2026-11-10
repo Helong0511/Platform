@@ -218,6 +218,7 @@ async def test_click_increment_uses_idempotent_db_fallback_across_workers(monkey
             self.committed = False
             self.added = None
             self.ledger = set()
+            self.ack_update = False
 
         async def __aenter__(self):
             return self
@@ -234,6 +235,9 @@ async def test_click_increment_uses_idempotent_db_fallback_across_workers(monkey
                 return FakeResult(scalar=77)
             if sql.lstrip().startswith("UPDATE SHORT_LINKS"):
                 return FakeResult()
+            if sql.lstrip().startswith("UPDATE SHORT_LINK_CLICK_SYNC_BATCHES"):
+                self.ack_update = True
+                return FakeResult()
             raise AssertionError(f"unexpected DB statement: {sql}")
 
         def add(self, record):
@@ -244,6 +248,8 @@ async def test_click_increment_uses_idempotent_db_fallback_across_workers(monkey
 
         async def commit(self):
             self.committed = True
+            if self.ack_update and self.added is not None:
+                self.added.acknowledged_at = True
 
     fake_db = FakeDb()
 
@@ -252,6 +258,7 @@ async def test_click_increment_uses_idempotent_db_fallback_across_workers(monkey
 
     async def fake_invalidate(short_code):
         assert short_code == "worker-fallback-code"
+        return True
 
     async def fake_get_redis_client():
         if redis_mode == "unavailable":
@@ -435,6 +442,10 @@ class _ClickBatchLedgerDB:
         self.added = None
 
 
+async def _true_async():
+    return True
+
+
 class _PendingRedis:
     def __init__(self):
         self.deleted = []
@@ -445,7 +456,8 @@ class _PendingRedis:
 
 
 @pytest.mark.asyncio
-async def test_click_batch_replay_does_not_double_increment_after_ambiguous_commit():
+async def test_click_batch_replay_does_not_double_increment_after_ambiguous_commit(monkeypatch):
+    monkeypatch.setattr(counter, "invalidate_short_link_cache", lambda _code: _true_async())
     db = _ClickBatchLedgerDB(ambiguous_first_commit=True)
     redis = _PendingRedis()
     args = dict(
@@ -470,7 +482,8 @@ async def test_click_batch_replay_does_not_double_increment_after_ambiguous_comm
 
 
 @pytest.mark.asyncio
-async def test_click_batch_ack_failure_replays_without_double_increment():
+async def test_click_batch_ack_failure_replays_without_double_increment(monkeypatch):
+    monkeypatch.setattr(counter, "invalidate_short_link_cache", lambda _code: _true_async())
     db = _ClickBatchLedgerDB()
     pending_key = f"{counter.CLICK_COUNTER_PREFIX}pending:ack-retry-code:{'b' * 32}"
 
