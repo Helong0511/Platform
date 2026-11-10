@@ -263,3 +263,10 @@ async def test_reserve_dead_letters_missing_click_id(monkeypatch):
     assert target == clicks_queue.CLICKS_DLQ_KEY
     assert "invalid_or_oversized_click_id" in envelope
     assert "LREM" in script and "RPUSH" in script
+
+
+
+@pytest.mark.asyncio
+async def test_legacy_dequeue_api_fails_closed():
+    with pytest.raises(RuntimeError, match="先持久化再 ACK"):
+        await clicks_queue.dequeue_clicks(10)
