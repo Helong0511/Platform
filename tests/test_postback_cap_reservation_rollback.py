@@ -107,7 +107,10 @@ async def test_cap_checker_rolls_back_only_the_recorded_reservations(monkeypatch
 
     await CapChecker.rollback_reservations([("total", 77, 12)])
 
-    assert calls == [("total", 77, 12)]
+    assert calls == [
+        ("daily", 77, 12, reservation_date),
+        ("total", 77, 12, None),
+    ]
 
 
 @pytest.mark.asyncio
