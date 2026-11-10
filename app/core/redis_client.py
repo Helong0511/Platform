@@ -92,7 +92,7 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
     如果Redis未配置或连接失败，返回None（使用内存存储）
     """
     global _redis_client, _redis_loop, _redis_dev_no_host_logged, _redis_dev_loopback_skip_logged
-    global _redis_connect_backoff_until, _redis_connect_lock, _redis_last_ping_at
+    global _redis_connect_backoff_until, _redis_connect_lock, _redis_connect_lock_loop, _redis_last_ping_at
 
     try:
         current_loop = asyncio.get_running_loop()
