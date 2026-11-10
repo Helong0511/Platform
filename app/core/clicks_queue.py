@@ -50,7 +50,7 @@ end
 return removed
 """
 
-# processing 恢复必须用 RPOPLPUSH 原子迁移，不能先 RPOP 再 LPUSH。
+# 失败回队时，LREM 与 LPUSH 必须在同一 Lua 中完成。
 _MOVE_TO_QUEUE_LUA = """
 local source_type = redis.call('TYPE', KEYS[1]).ok
 local target_type = redis.call('TYPE', KEYS[2]).ok
