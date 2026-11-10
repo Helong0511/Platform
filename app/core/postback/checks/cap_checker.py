@@ -139,8 +139,6 @@ class CapChecker:
                 raise RuntimeError(
                     f"Cap reservation rollback failed: kind={kind}, offer_id={offer_id}, token={reservation_id}"
                 )
-            else:
-                logger.error("未知 Cap reservation 类型，跳过回滚：%s", kind)
 
     @staticmethod
     async def increment(
