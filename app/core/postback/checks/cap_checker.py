@@ -113,21 +113,32 @@ class CapChecker:
 
     @staticmethod
     async def rollback_reservations(
-        reservations: list[tuple[str, int, Optional[int], Optional[datetime]]],
+        reservations: list[tuple],
     ) -> None:
         """仅回滚当前请求确实预留成功的 Redis Cap key，不再重新查询 DB。"""
         for reservation in reservations:
             # 兼容历史三元组；新预留记录带业务日期，确保跨日回滚精确。
             kind, offer_id, publisher_id = reservation[:3]
             reservation_date = reservation[3] if len(reservation) > 3 else None
+            reservation_id = reservation[4] if len(reservation) > 4 else None
             if kind == "daily":
-                await RedisCapManager.decrement_daily(
+                result = await RedisCapManager.decrement_daily(
                     offer_id,
                     publisher_id,
                     reservation_date=reservation_date,
+                    reservation_id=reservation_id,
                 )
             elif kind == "total":
-                await RedisCapManager.decrement_total(offer_id, publisher_id)
+                result = await RedisCapManager.decrement_total(
+                    offer_id, publisher_id, reservation_id=reservation_id
+                )
+            else:
+                logger.error("未知 Cap reservation 类型，跳过回滚：%s", kind)
+                continue
+            if result < 0:
+                raise RuntimeError(
+                    f"Cap reservation rollback failed: kind={kind}, offer_id={offer_id}, token={reservation_id}"
+                )
             else:
                 logger.error("未知 Cap reservation 类型，跳过回滚：%s", kind)
 
