@@ -9,8 +9,8 @@ class _StatefulRedis:
         self.value = initial_value
         self.calls = []
 
-    async def eval(self, script, numkeys, key, expire_seconds, db_count, limit):
-        self.calls.append((script, numkeys, key, expire_seconds, db_count, limit))
+    async def eval(self, script, numkeys, key, token_key, expire_seconds, db_count, limit):
+        self.calls.append((script, numkeys, key, token_key, expire_seconds, db_count, limit))
         # Model the Lua reconciliation rule against an already-existing Redis key.
         current = max(self.value, int(db_count))
         if current >= int(limit):
@@ -48,8 +48,9 @@ async def test_existing_redis_key_is_reconciled_to_db_fallback_count(
     assert allowed is True
     assert redis.value == 8
     assert len(redis.calls) == 1
-    script, numkeys, key, _ttl, db_count, limit = redis.calls[0]
-    assert numkeys == 1
+    script, numkeys, key, token_key, _ttl, db_count, limit = redis.calls[0]
+    assert numkeys == 2
+    assert ":reservation:" in token_key
     assert key.startswith(f"cpl:cap:{key_kind}:901:")
     assert db_count == "7"
     assert limit == "20"
