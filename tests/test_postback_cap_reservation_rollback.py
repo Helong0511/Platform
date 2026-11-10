@@ -336,3 +336,31 @@ async def test_postback_precommit_queue_failure_rolls_back_cap_reservation_once(
 
     assert rollback_calls == [reservations]
     assert db.rollback_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_cap_checker_attempts_all_rollbacks_after_one_token_fails(monkeypatch):
+    calls = []
+
+    async def dec_daily(offer_id, publisher_id=None, reservation_date=None, reservation_id=None):
+        calls.append(("daily", reservation_id))
+        if reservation_id == "bad-token":
+            return -1
+        return 0
+
+    async def dec_total(offer_id, publisher_id=None, reservation_id=None):
+        calls.append(("total", reservation_id))
+        return 0
+
+    monkeypatch.setattr(cap_checker.RedisCapManager, "decrement_daily", staticmethod(dec_daily))
+    monkeypatch.setattr(cap_checker.RedisCapManager, "decrement_total", staticmethod(dec_total))
+
+    reservations = [
+        ("daily", 77, 12, datetime(2026, 11, 10), "bad-token"),
+        ("total", 77, 12, None, "good-token"),
+    ]
+
+    with pytest.raises(RuntimeError, match="rollback incomplete"):
+        await CapChecker.rollback_reservations(reservations)
+
+    assert calls == [("daily", "bad-token"), ("total", "good-token")]
