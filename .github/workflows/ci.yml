@@ -26,6 +26,18 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-password
+          MYSQL_DATABASE: platform_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -p$MYSQL_ROOT_PASSWORD"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,6 +57,11 @@ jobs:
           REDIS_PORT: "6379"
           REDIS_DB: "15"
           REDIS_INTEGRATION_URL: "redis://127.0.0.1:6379/14"
+          MYSQL_INTEGRATION_HOST: "127.0.0.1"
+          MYSQL_INTEGRATION_PORT: "3306"
+          MYSQL_INTEGRATION_USER: "root"
+          MYSQL_INTEGRATION_PASSWORD: "ci-root-password"
+          MYSQL_INTEGRATION_DATABASE: "platform_ci"
           ASONE_API_BASE_URL: "http://127.0.0.1:9"
           ASONE_API_KEY: ""
           TEST_API_BASE: "http://127.0.0.1:9"
