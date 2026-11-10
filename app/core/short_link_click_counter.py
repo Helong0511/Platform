@@ -562,6 +562,8 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
         
         # Redis 恢复后先补写故障期间积累的本地计数，避免只扫描 Redis 而遗漏降级数据。
         await _sync_in_memory_counters_to_db(db, short_codes)
+        # 即使后续 SCAN 没有 Redis key，也必须刷新本地快照，避免重启重放已入账数据。
+        await persist_counters()
 
         # Redis 可用时只用 SCAN；失败时保留 Redis 数据并等待下轮重试，
         # 绝不降级到 KEYS，避免大 keyspace 下阻塞 Redis 主线程。
