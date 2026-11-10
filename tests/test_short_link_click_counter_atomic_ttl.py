@@ -495,3 +495,89 @@ def test_legacy_counter_snapshot_loader_rejects_invalid_entries(tmp_path, monkey
     counter.load_persisted_counters()
 
     assert counter._click_counters == {"valid-code": 7}
+
+
+
+@pytest.mark.asyncio
+async def test_redis_increment_retry_uses_same_click_event_marker(monkeypatch):
+    class AmbiguousRedis:
+        def __init__(self):
+            self.counter = {}
+            self.markers = set()
+            self.calls = []
+
+        async def eval(self, script, numkeys, counter_key, event_key, ttl):
+            self.calls.append((script, numkeys, counter_key, event_key, ttl))
+            if event_key not in self.markers:
+                self.markers.add(event_key)
+                self.counter[counter_key] = self.counter.get(counter_key, 0) + 1
+                if len(self.calls) == 1:
+                    raise OSError("response lost after Redis executed Lua")
+            return self.counter.get(counter_key, 0)
+
+    redis = AmbiguousRedis()
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(counter, "get_redis_client", fake_redis)
+    await counter.increment_click_count_async("event-safe-code", click_id="stable-click-event")
+
+    assert len(redis.calls) == 2
+    assert redis.calls[0][1] == 2
+    assert redis.calls[0][2] == redis.calls[1][2]
+    assert redis.calls[0][3] == redis.calls[1][3]
+    assert redis.calls[0][4] == 120
+    assert redis.counter[redis.calls[0][2]] == 1
+    assert "SET" in redis.calls[0][0] and "'NX'" in redis.calls[0][0]
+    assert "INCR" in redis.calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_redis_increment_retries_when_first_command_did_not_execute(monkeypatch):
+    class RedisFailsBeforeExecute:
+        def __init__(self):
+            self.counter = {}
+            self.markers = set()
+            self.calls = 0
+
+        async def eval(self, script, numkeys, counter_key, event_key, ttl):
+            self.calls += 1
+            if self.calls == 1:
+                raise OSError("connection failed before command execution")
+            if event_key not in self.markers:
+                self.markers.add(event_key)
+                self.counter[counter_key] = self.counter.get(counter_key, 0) + 1
+            return self.counter[counter_key]
+
+    redis = RedisFailsBeforeExecute()
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(counter, "get_redis_client", fake_redis)
+    await counter.increment_click_count_async("event-safe-code", click_id="event-before-exec")
+
+    assert redis.calls == 2
+    assert sum(redis.counter.values()) == 1
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_redis_increment_does_not_blindly_fallback_to_db(monkeypatch):
+    class RedisAlwaysFails:
+        async def eval(self, *args):
+            raise OSError("ambiguous Redis response")
+
+    async def fake_redis():
+        return RedisAlwaysFails()
+
+    db_fallback_calls = []
+
+    async def fake_db_fallback(short_code):
+        db_fallback_calls.append(short_code)
+
+    monkeypatch.setattr(counter, "get_redis_client", fake_redis)
+    monkeypatch.setattr(counter, "_increment_click_count_in_db", fake_db_fallback)
+    await counter.increment_click_count_async("event-safe-code", click_id="event-uncertain")
+
+    assert db_fallback_calls == []
