@@ -157,11 +157,15 @@ async def check_cap(
 
 
 async def _rollback_reserved_redis(
-    reserved: list[tuple[str, int, Optional[int]]],
+    reserved: list[tuple[str, int, Optional[int], Optional[datetime]]],
 ) -> None:
-    for kind, oid, pid in reserved:
+    for kind, oid, pid, reservation_date in reserved:
         if kind == "daily":
-            await RedisCapManager.decrement_daily(oid, pid)
+            await RedisCapManager.decrement_daily(
+                oid,
+                pid,
+                reservation_date=reservation_date,
+            )
         else:
             await RedisCapManager.decrement_total(oid, pid)
 
@@ -183,7 +187,7 @@ async def increment_cap_count(
     *,
     session_flush: bool = True,
     include_reservations: bool = False,
-) -> Tuple[bool, str] | Tuple[bool, str, list[tuple[str, int, Optional[int]]]]:
+) -> Tuple[bool, str] | Tuple[bool, str, list[tuple[str, int, Optional[int], Optional[datetime]]]]:
     """
     增加 Cap 计数 (线程/进程安全版本)
     
@@ -200,7 +204,7 @@ async def increment_cap_count(
         - (False, "cap_check_error") 基础设施失败（调用方应拒绝入库并允许重试）
     """
     caps = []
-    reserved: list[tuple[str, int, Optional[int]]] = []
+    reserved: list[tuple[str, int, Optional[int], Optional[datetime]]] = []
 
     def _result(ok: bool, status: str):
         if include_reservations:
@@ -285,7 +289,7 @@ async def increment_cap_count(
                     return _result(False, "cap_exceeded")
 
                 if passed is True:
-                    reserved.append(("daily", cap.offer_id, cap.publisher_id))
+                    reserved.append(("daily", cap.offer_id, cap.publisher_id, today_start))
                     if is_new_day:
                         cap.cap_start_date = today_start
                     cap.current_daily_count = redis_init_val + 1
@@ -323,7 +327,7 @@ async def increment_cap_count(
                     return _result(False, "cap_exceeded")
 
                 if passed is True:
-                    reserved.append(("total", cap.offer_id, cap.publisher_id))
+                    reserved.append(("total", cap.offer_id, cap.publisher_id, None))
                     if not cap.cap_start_date:
                         cap.cap_start_date = now
                     cap.current_total_count = redis_init_val + 1
