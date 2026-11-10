@@ -327,7 +327,58 @@ async def increment_click_count_async(
     end
 
     local current = redis.call('GET', KEYS[1])
-    if current and not string.match(current, '^%-?%d+
+    if current and not string.match(current, '^%-?%d+$') then
+        return redis.error_reply('short link click counter is not an integer')
+    end
+    if not current then
+        redis.call('SET', KEYS[1], '0', 'NX')
+    end
+
+    local marker_set = redis.call('SET', KEYS[2], '1', 'NX', 'EX', ARGV[1])
+    if not marker_set then
+        return tonumber(redis.call('GET', KEYS[1]) or '0')
+    end
+    return redis.call('INCR', KEYS[1])
+    """
+
+    last_error = None
+    for attempt in range(3):
+        try:
+            new_count = await redis.eval(
+                increment_script,
+                2,
+                counter_key,
+                event_key,
+                dedupe_ttl,
+            )
+            logger.debug(
+                "短链接点击计数（Redis 幂等）: short_code=%s count=%s attempt=%s",
+                short_code, new_count, attempt + 1,
+            )
+            return
+        except Exception as exc:
+            last_error = exc
+            if attempt < 2:
+                logger.warning(
+                    "Redis 点击计数响应异常，使用同一 click_id 安全重试: "
+                    "short_code=%s attempt=%s error=%s",
+                    short_code, attempt + 1, exc,
+                )
+                await asyncio.sleep(0.05 * (attempt + 1))
+
+    logger.error(
+        "Redis 点击计数结果仍不确定，已用相同 click_id 重试 3 次；为避免双写不回退 DB: "
+        "short_code=%s click_id_hash=%s error=%s",
+        short_code,
+        event_digest[:12],
+        last_error,
+        exc_info=(
+            type(last_error),
+            last_error,
+            last_error.__traceback__,
+        ) if last_error else None,
+    )
+
 
 async def _scan_click_counter_keys(
     redis, max_keys: int = MAX_KEYS_PER_SYNC, pattern: str | None = None
