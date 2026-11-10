@@ -28,7 +28,6 @@ DEFAULT_TTL = 300
 
 # 单飞状态按事件循环隔离，防止不同线程/asyncio.run 共用另一个 loop 的 Future。
 _inflight_futures: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
-_inflight_locks: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 _inflight_state_guard = threading.Lock()
 
 
@@ -36,10 +35,11 @@ def _get_inflight_state() -> tuple[asyncio.Lock, Dict[str, asyncio.Future]]:
     """获取当前事件循环专属的单飞锁与 Future 表。"""
     loop = asyncio.get_running_loop()
     with _inflight_state_guard:
-        lock = _inflight_locks.get(loop)
+        # 锁直接挂在 loop 上，避免 WeakKeyDictionary 的 value 反向强引用 key。
+        lock = getattr(loop, "_platform_cache_compat_inflight_lock", None)
         if lock is None:
             lock = asyncio.Lock()
-            _inflight_locks[loop] = lock
+            setattr(loop, "_platform_cache_compat_inflight_lock", lock)
 
         futures = _inflight_futures.get(loop)
         if futures is None:
