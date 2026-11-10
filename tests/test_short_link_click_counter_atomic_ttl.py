@@ -281,7 +281,83 @@ async def test_click_increment_uses_idempotent_db_fallback_across_workers(monkey
     assert fake_db.added.short_code == "worker-fallback-code"
     assert fake_db.added.click_count == 1
     assert fake_db.added.acknowledged_at is not None
-    assert len(fake_db.added.batch_id) == 64
+    assert fake_db.added.batch_id == counter.hashlib.sha256(
+        b"stable-db-fallback-event"
+    ).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_redis_recovery_checks_durable_db_fallback_event_before_increment(monkeypatch):
+    event_digest = counter.hashlib.sha256(b"recovered-db-event").hexdigest()
+    db_lookups = []
+    reconciled = []
+
+    class FakeResult:
+        def first(self):
+            return ("recovered-code", 1)
+
+    class FakeDb:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, statement):
+            db_lookups.append(str(statement))
+            return FakeResult()
+
+    class FakeRedis:
+        async def exists(self, key):
+            assert key == f"short_link:click_event:{event_digest}"
+            return 0
+
+        async def eval(self, *args):
+            raise AssertionError("DB fallback duplicate must not execute Redis INCR")
+
+    async def fake_reconcile(short_code, event_id_digest=None):
+        reconciled.append((short_code, event_id_digest))
+        return True
+
+    monkeypatch.setattr(counter, "get_redis_client", lambda: _redis_async(FakeRedis()))
+    monkeypatch.setattr(counter, "AsyncSessionLocal", FakeDb)
+    monkeypatch.setattr(counter, "_increment_click_count_in_db", fake_reconcile)
+
+    await counter.increment_click_count_async(
+        "recovered-code",
+        click_id="recovered-db-event",
+    )
+
+    assert db_lookups
+    assert reconciled == [("recovered-code", event_digest)]
+
+
+@pytest.mark.asyncio
+async def test_redis_recovery_fails_closed_when_db_ledger_cannot_be_checked(monkeypatch):
+    class FakeDb:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, statement):
+            raise OSError("isolated DB ledger lookup failure")
+
+    class FakeRedis:
+        async def exists(self, key):
+            return 0
+
+        async def eval(self, *args):
+            raise AssertionError("must not increment without durable dedupe check")
+
+    monkeypatch.setattr(counter, "get_redis_client", lambda: _redis_async(FakeRedis()))
+    monkeypatch.setattr(counter, "AsyncSessionLocal", FakeDb)
+
+    await counter.increment_click_count_async(
+        "recovery-fail-closed",
+        click_id="recovery-db-error",
+    )
 
 
 @pytest.mark.asyncio
@@ -440,6 +516,10 @@ class _ClickBatchLedgerDB:
 
     async def rollback(self):
         self.added = None
+
+
+async def _redis_async(value):
+    return value
 
 
 async def _true_async():
