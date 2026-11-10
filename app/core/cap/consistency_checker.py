@@ -47,6 +47,11 @@ async def check_cap_consistency(
             db_total_count = None
 
             if cap.daily_cap:
+                if cap.cap_start_date and cap.cap_start_date.date() == today_start.date():
+                    db_daily_count = cap.current_daily_count
+                else:
+                    db_daily_count = 0
+
                 redis_key = get_daily_cap_key(cap.offer_id, now, cap.publisher_id)
                 redis_val = await redis.get(redis_key)
                 if redis_val is None:
@@ -55,11 +60,6 @@ async def check_cap_consistency(
                     )
                 else:
                     redis_daily_count = int(redis_val)
-                    if cap.cap_start_date and cap.cap_start_date.date() == today_start.date():
-                        db_daily_count = cap.current_daily_count
-                    else:
-                        db_daily_count = 0
-
                     if redis_daily_count != db_daily_count:
                         cap_issues.append(
                             f"每日计数不一致: DB={db_daily_count}, Redis={redis_daily_count}"
@@ -71,6 +71,7 @@ async def check_cap_consistency(
                             )
 
             if cap.total_cap:
+                db_total_count = cap.current_total_count
                 redis_key = get_total_cap_key(cap.offer_id, cap.publisher_id)
                 redis_val = await redis.get(redis_key)
                 if redis_val is None:
@@ -79,7 +80,6 @@ async def check_cap_consistency(
                     )
                 else:
                     redis_total_count = int(redis_val)
-                    db_total_count = cap.current_total_count
                     if redis_total_count != db_total_count:
                         cap_issues.append(
                             f"总计数不一致: DB={db_total_count}, Redis={redis_total_count}"
