@@ -207,3 +207,16 @@ async def test_existing_token_with_evicted_counter_fails_closed(monkeypatch, met
             initial_value=9,
             reservation_id="already-reserved-token",
         )
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    ["decrement_daily", "decrement_total"],
+)
+def test_rollback_lua_preserves_token_when_counter_is_missing(method_name):
+    # 脚本必须先确认计数 key 存在，再删除 reservation token。
+    script = redis_counter.RedisCapManager._ROLLBACK_RESERVATION_LUA
+    counter_check = script.index("if redis.call('EXISTS', KEYS[1]) == 0 then")
+    token_delete = script.index("redis.call('DEL', KEYS[2])")
+    assert counter_check < token_delete
+    assert "return -2" in script
