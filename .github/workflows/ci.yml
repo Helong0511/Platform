@@ -21,7 +21,16 @@ jobs:
       - name: Run unit tests
         env:
           UNIT_TEST: "1"
+          PYTHON_DOTENV_DISABLED: "1"
           DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+          REDIS_URL: "redis://127.0.0.1:6379/15"
+          REDIS_HOST: "127.0.0.1"
+          REDIS_PORT: "6379"
+          REDIS_DB: "15"
+          ASONE_API_BASE_URL: "http://127.0.0.1:9"
+          ASONE_API_KEY: ""
+          TEST_API_BASE: "http://127.0.0.1:9"
+          TELEGRAM_ENABLE: "false"
           SECRET_KEY: "ci-test-secret-key-must-be-at-least-32-chars-long"
           PRODUCTION_ENV: "development"
         # 收集仓库中所有测试文件；没有测试时必须失败，禁止“无测试绿色通过”。
