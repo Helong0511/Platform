@@ -280,16 +280,12 @@ async def increment_cap_count(
                         reservation_id=reservation_id,
                     )
                 except Exception as e:
-                    logger.warning(f"Redis计数递增同步失败: {e}")
-                    if settings.CAP_FAIL_OPEN:
-                        # fail-open：不改 Redis/ORM 日计数，继续处理 total
-                        logger.warning("Cap 日计数 Redis 失败，fail-open 跳过日计数")
-                        passed = None
-                    else:
-                        await _rollback_reserved_redis(reserved)
-                        reserved.clear()
-                        await _refresh_offer_caps(db, caps)
-                        return _result(False, "cap_check_error")
+                    # 无法确认预留结果或补偿失败时必须 fail-closed，不能把不确定名额当作放行。
+                    logger.error("Cap 日计数预留/补偿状态不确定，拒绝本次转化：%s", e, exc_info=True)
+                    await _rollback_reserved_redis(reserved)
+                    reserved.clear()
+                    await _refresh_offer_caps(db, caps)
+                    return _result(False, "cap_check_error")
 
                 if passed is False:
                     logger.warning(
@@ -324,15 +320,12 @@ async def increment_cap_count(
                         reservation_id=reservation_id,
                     )
                 except Exception as e:
-                    logger.warning(f"Redis总计数递增同步失败: {e}")
-                    if settings.CAP_FAIL_OPEN:
-                        logger.warning("Cap 总计数 Redis 失败，fail-open 跳过总计数")
-                        passed = None
-                    else:
-                        await _rollback_reserved_redis(reserved)
-                        reserved.clear()
-                        await _refresh_offer_caps(db, caps)
-                        return _result(False, "cap_check_error")
+                    # Redis 预留结果不确定时 fail-closed，避免超发名额。
+                    logger.error("Cap 总计数预留/补偿状态不确定，拒绝本次转化：%s", e, exc_info=True)
+                    await _rollback_reserved_redis(reserved)
+                    reserved.clear()
+                    await _refresh_offer_caps(db, caps)
+                    return _result(False, "cap_check_error")
 
                 if passed is False:
                     logger.warning(
