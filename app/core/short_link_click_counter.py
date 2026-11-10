@@ -248,42 +248,136 @@ async def persist_counters():
 load_persisted_counters()
 
 
-async def _increment_click_count_in_db(short_code: str) -> bool:
+async def _increment_click_count_in_db(
+    short_code: str,
+    event_id_digest: str | None = None,
+) -> bool:
     """
-    Redis 不可用时使用数据库原子自增，避免多 API Worker 的进程内计数无法汇总。
+    Redis 在执行任何计数命令前不可用时，使用 DB 唯一事件账本原子自增。
 
-    这是降级路径，正常流量仍由 Redis 聚合；数据库不可用时不阻断短链跳转，
-    但必须明确记录计数未能持久化，不能伪称已成功入账。
+    batch_id 使用同一请求的 click_id SHA-256，DB COMMIT 响应丢失后可查询账本确认结果；
+    与 Redis pending batch 共用账本表，但事件记录直接标记 acknowledged_at。
     """
-    try:
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(
-                update(ShortLink)
-                .where(
-                    ShortLink.short_code == short_code,
-                    ShortLink.is_active.is_(True),
-                )
-                .values(click_count=ShortLink.click_count + 1)
-            )
-            await db.commit()
-            updated = bool(getattr(result, "rowcount", 0))
-        if not updated:
-            logger.warning("短链接点击计数降级写库未更新记录（短链不存在或已停用）: %s", short_code)
-            return False
+    batch_id = event_id_digest or hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest()
+    if len(batch_id) > 64:
+        batch_id = hashlib.sha256(batch_id.encode("utf-8")).hexdigest()
+
+    async def invalidate_cache_after_commit() -> None:
         try:
             await invalidate_short_link_cache(short_code)
         except Exception as cache_exc:
-            # 数据库已经提交；缓存失效失败不能把已入账结果误报成写库失败。
-            logger.warning("短链接点击计数已写库，但缓存失效失败: short_code=%s, error=%s", short_code, cache_exc)
-        return True
-    except Exception as exc:
-        logger.error(
-            "Redis 不可用且数据库降级自增失败，当前点击无法持久化: short_code=%s, error=%s",
-            short_code,
-            exc,
-            exc_info=True,
-        )
-        return False
+            logger.warning(
+                "短链接点击计数已写库，但缓存失效失败: short_code=%s error=%s",
+                short_code, cache_exc,
+            )
+
+    for attempt in range(3):
+        try:
+            async with AsyncSessionLocal() as db:
+                existing_result = await db.execute(
+                    select(
+                        ShortLinkClickSyncBatch.short_code,
+                        ShortLinkClickSyncBatch.click_count,
+                    )
+                    .where(ShortLinkClickSyncBatch.batch_id == batch_id)
+                    .limit(1)
+                )
+                existing = existing_result.first()
+                if existing is not None:
+                    if existing[0] != short_code or int(existing[1]) != 1:
+                        logger.critical(
+                            "短链接 DB 降级事件账本 ID 冲突，拒绝误判为幂等成功: batch_id=%s short_code=%s",
+                            batch_id, short_code,
+                        )
+                        return False
+                    persisted = True
+                else:
+                    link_result = await db.execute(
+                        select(ShortLink.id)
+                        .where(
+                            ShortLink.short_code == short_code,
+                            ShortLink.is_active.is_(True),
+                        )
+                        .limit(1)
+                    )
+                    short_link_id = link_result.scalar_one_or_none()
+                    if short_link_id is None:
+                        logger.warning(
+                            "短链接点击计数降级写库未更新记录（短链不存在或已停用）: %s",
+                            short_code,
+                        )
+                        return False
+
+                    db.add(ShortLinkClickSyncBatch(
+                        batch_id=batch_id,
+                        short_code=short_code,
+                        click_count=1,
+                        acknowledged_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    ))
+                    await db.flush()
+                    result = await db.execute(
+                        update(ShortLink)
+                        .where(ShortLink.id == short_link_id)
+                        .values(click_count=ShortLink.click_count + 1)
+                    )
+                    if getattr(result, "rowcount", 0) != 1:
+                        raise RuntimeError(
+                            f"短链接 DB 降级自增更新行数异常: short_code={short_code}, "
+                            f"rowcount={getattr(result, 'rowcount', None)}"
+                        )
+                    await db.commit()
+                    persisted = True
+
+            if persisted:
+                await invalidate_cache_after_commit()
+                return True
+
+        except Exception as exc:
+            # 包括 COMMIT 响应丢失：先查唯一账本，确认已提交则不重放自增。
+            try:
+                async with AsyncSessionLocal() as verify_db:
+                    verify_result = await verify_db.execute(
+                        select(
+                            ShortLinkClickSyncBatch.short_code,
+                            ShortLinkClickSyncBatch.click_count,
+                        )
+                        .where(ShortLinkClickSyncBatch.batch_id == batch_id)
+                        .limit(1)
+                    )
+                    existing = verify_result.first()
+                if existing is not None:
+                    if existing[0] == short_code and int(existing[1]) == 1:
+                        await invalidate_cache_after_commit()
+                        return True
+                    logger.critical(
+                        "短链接 DB 降级事件账本核验发现 ID 冲突: batch_id=%s",
+                        batch_id,
+                    )
+                    return False
+            except Exception as verify_exc:
+                logger.error(
+                    "短链接 DB 降级自增失败且无法核验 COMMIT 结果: "
+                    "short_code=%s batch_id=%s write_error=%s verify_error=%s",
+                    short_code, batch_id, exc, verify_exc, exc_info=True,
+                )
+                return False
+
+            if attempt < 2:
+                logger.warning(
+                    "短链接 DB 降级自增未提交，使用同一 event_id 重试: "
+                    "short_code=%s attempt=%s error=%s",
+                    short_code, attempt + 1, exc,
+                )
+                await asyncio.sleep(0.05 * (attempt + 1))
+                continue
+
+            logger.error(
+                "Redis 不可用且数据库幂等降级自增失败: short_code=%s batch_id=%s error=%s",
+                short_code, batch_id, exc, exc_info=True,
+            )
+            return False
+
+    return False
 
 
 async def increment_click_count_async(
@@ -311,7 +405,7 @@ async def increment_click_count_async(
             "获取 Redis 客户端失败，改用数据库原子自增: short_code=%s error=%s",
             short_code, exc,
         )
-        await _increment_click_count_in_db(short_code)
+        await _increment_click_count_in_db(short_code, event_id_digest=event_digest)
         return
     if not redis:
         await _increment_click_count_in_db(short_code)
