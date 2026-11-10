@@ -225,29 +225,14 @@ class RedisCapManager:
         reservation_date: Optional[datetime] = None,
         reservation_id: Optional[str] = None,
     ) -> int:
-        """
-        减少每日计数 (用于回滚，原子操作)
-
-        Returns:
-            int: 回滚后的最终计数值；Redis 不可用或异常返回 -1
-        """
+        """按原业务日期回退日 Cap；带 token 时保证同一预留最多回退一次。"""
         redis = await get_redis_client()
         if not redis:
             return -1
-
-        # 必须回退预留时所属的业务日期；跨午夜回滚不能误减新一天的计数。
         key_date = reservation_date or get_app_now_naive()
         key = get_daily_cap_key(offer_id, key_date, publisher_id)
         try:
-            # 使用 Lua 脚本原子化 decr + 负数归零，避免 TOCTOU 竞态
-            # （decr 后到 set(0) 之间若有 incr 会丢失计数或导致配额虚增）
             if reservation_id:
-                token_key = f"{key}:reservation:{reservation_id}"
-                val = await redis.eval(
-                    RedisCapManager._ROLLBACK_RESERVATION_LUA, 2, key, token_key
-                )
-            else:
-                if reservation_id:
                 token_key = f"{key}:reservation:{reservation_id}"
                 val = await redis.eval(
                     RedisCapManager._ROLLBACK_RESERVATION_LUA, 2, key, token_key
@@ -256,7 +241,7 @@ class RedisCapManager:
                 val = await redis.eval(RedisCapManager._DECREMENT_LUA, 1, key)
             return int(val)
         except Exception as e:
-            logger.error(f"Redis回滚失败: {e}", exc_info=True)
+            logger.error("Redis 日 Cap 回滚失败：%s", e, exc_info=True)
             return -1
 
     @staticmethod
@@ -265,21 +250,20 @@ class RedisCapManager:
         publisher_id: Optional[int] = None,
         reservation_id: Optional[str] = None,
     ) -> int:
-        """
-        减少总计数 (用于回滚，原子操作)
-
-        Returns:
-            int: 回滚后的最终计数值；Redis 不可用或异常返回 -1
-        """
+        """回退总 Cap；带 token 时保证同一预留最多回退一次。"""
         redis = await get_redis_client()
         if not redis:
             return -1
-
         key = get_total_cap_key(offer_id, publisher_id)
         try:
-            # 使用 Lua 脚本原子化 decr + 负数归零，避免并发 set 覆盖丢失计数
-            val = await redis.eval(RedisCapManager._DECREMENT_LUA, 1, key)
+            if reservation_id:
+                token_key = f"{key}:reservation:{reservation_id}"
+                val = await redis.eval(
+                    RedisCapManager._ROLLBACK_RESERVATION_LUA, 2, key, token_key
+                )
+            else:
+                val = await redis.eval(RedisCapManager._DECREMENT_LUA, 1, key)
             return int(val)
         except Exception as e:
-            logger.error(f"Redis回滚失败: {e}", exc_info=True)
+            logger.error("Redis 总 Cap 回滚失败：%s", e, exc_info=True)
             return -1
