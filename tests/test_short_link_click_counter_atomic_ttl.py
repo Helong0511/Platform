@@ -180,3 +180,28 @@ async def test_redis_outage_sync_preserves_clicks_arriving_during_db_write(monke
     async with counter._counter_lock:
         assert counter._click_counters == {"outage-code": 3}
     assert '"outage-code": 3' in (tmp_path / "click_counters.json").read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_sync_fails_closed_when_global_lock_acquisition_errors(monkeypatch):
+    class BrokenRedis:
+        async def set(self, *args, **kwargs):
+            raise OSError("simulated isolated Redis lock failure")
+
+    async def fake_get_redis_client():
+        return BrokenRedis()
+
+    class FakeDb:
+        executed = False
+
+        async def execute(self, statement):
+            self.executed = True
+            raise AssertionError("database sync must not run without the global lock")
+
+    db = FakeDb()
+    monkeypatch.setattr(counter, "get_redis_client", fake_get_redis_client)
+
+    synced = await counter.sync_click_counts_to_db(db)
+
+    assert synced == 0
+    assert db.executed is False
