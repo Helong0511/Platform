@@ -182,7 +182,8 @@ async def increment_cap_count(
     advertiser_id: Optional[int] = None,
     *,
     session_flush: bool = True,
-) -> Tuple[bool, str]:
+    include_reservations: bool = False,
+) -> Tuple[bool, str] | Tuple[bool, str, list[tuple[str, int, Optional[int]]]]:
     """
     增加 Cap 计数 (线程/进程安全版本)
     
@@ -200,6 +201,12 @@ async def increment_cap_count(
     """
     caps = []
     reserved: list[tuple[str, int, Optional[int]]] = []
+
+    def _result(ok: bool, status: str):
+        if include_reservations:
+            return ok, status, list(reserved)
+        return ok, status
+
     try:
         # 1. 查询所有相关的 Cap 配置，使用 with_for_update() 进行行级锁定
         query = select(OfferCap).where(
@@ -263,8 +270,9 @@ async def increment_cap_count(
                         passed = None
                     else:
                         await _rollback_reserved_redis(reserved)
+                        reserved.clear()
                         await _refresh_offer_caps(db, caps)
-                        return False, "cap_check_error"
+                        return _result(False, "cap_check_error")
 
                 if passed is False:
                     logger.warning(
@@ -272,8 +280,9 @@ async def increment_cap_count(
                         f"current={redis_init_val}"
                     )
                     await _rollback_reserved_redis(reserved)
+                    reserved.clear()
                     await _refresh_offer_caps(db, caps)
-                    return False, "cap_exceeded"
+                    return _result(False, "cap_exceeded")
 
                 if passed is True:
                     reserved.append(("daily", cap.offer_id, cap.publisher_id))
@@ -320,12 +329,13 @@ async def increment_cap_count(
         # 由调用方控制外层事务时可选跳过 flush，与转化入库同一 commit
         if session_flush:
             await db.flush()
-        return True, "cap_ok"
+        return _result(True, "cap_ok")
         
     except Exception as e:
         logger.error(f"增加Cap计数失败: {str(e)}", exc_info=True)
         try:
             await _rollback_reserved_redis(reserved)
+            reserved.clear()
         except Exception:
             pass
         if caps:
