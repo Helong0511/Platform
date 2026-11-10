@@ -160,25 +160,42 @@ async def check_cap(
 async def _rollback_reserved_redis(
     reserved: list[tuple],
 ) -> None:
+    failures = []
     for reservation in reserved:
         kind, oid, pid = reservation[:3]
         reservation_date = reservation[3] if len(reservation) > 3 else None
         reservation_id = reservation[4] if len(reservation) > 4 else None
-        if kind == "daily":
-            result = await RedisCapManager.decrement_daily(
-                oid,
-                pid,
-                reservation_date=reservation_date,
-                reservation_id=reservation_id,
+        try:
+            if kind == "daily":
+                result = await RedisCapManager.decrement_daily(
+                    oid,
+                    pid,
+                    reservation_date=reservation_date,
+                    reservation_id=reservation_id,
+                )
+            elif kind == "total":
+                result = await RedisCapManager.decrement_total(
+                    oid, pid, reservation_id=reservation_id
+                )
+            else:
+                failures.append(f"unknown kind={kind}, offer_id={oid}")
+                continue
+            if result < 0:
+                failures.append(
+                    f"kind={kind}, offer_id={oid}, token={reservation_id}"
+                )
+        except Exception as exc:
+            failures.append(
+                f"kind={kind}, offer_id={oid}, token={reservation_id}, error={exc}"
             )
-        else:
-            result = await RedisCapManager.decrement_total(
-                oid, pid, reservation_id=reservation_id
+            logger.error(
+                "Cap reservation rollback failed; continue with remaining tokens",
+                exc_info=True,
             )
-        if result < 0:
-            raise RuntimeError(
-                f"Cap reservation rollback failed: kind={kind}, offer_id={oid}, token={reservation_id}"
-            )
+    if failures:
+        raise RuntimeError(
+            "Cap reservation rollback incomplete: " + "; ".join(failures)
+        )
 
 
 async def _refresh_offer_caps(db: AsyncSession, caps: list) -> None:
