@@ -37,6 +37,12 @@ return current + 1
 
 # LREM 与转入 DLQ 必须原子完成，避免进程在两条命令之间崩溃丢失消息。
 _MOVE_TO_DLQ_LUA = """
+local source_type = redis.call('TYPE', KEYS[1]).ok
+local target_type = redis.call('TYPE', KEYS[2]).ok
+if (source_type ~= 'none' and source_type ~= 'list') or
+   (target_type ~= 'none' and target_type ~= 'list') then
+    return redis.error_reply('click queue key has unexpected Redis type')
+end
 local removed = redis.call('LREM', KEYS[1], 1, ARGV[1])
 if removed > 0 then
     redis.call('RPUSH', KEYS[2], ARGV[2])
@@ -46,6 +52,12 @@ return removed
 
 # processing 恢复必须用 RPOPLPUSH 原子迁移，不能先 RPOP 再 LPUSH。
 _MOVE_TO_QUEUE_LUA = """
+local source_type = redis.call('TYPE', KEYS[1]).ok
+local target_type = redis.call('TYPE', KEYS[2]).ok
+if (source_type ~= 'none' and source_type ~= 'list') or
+   (target_type ~= 'none' and target_type ~= 'list') then
+    return redis.error_reply('click queue key has unexpected Redis type')
+end
 local removed = redis.call('LREM', KEYS[1], 1, ARGV[1])
 if removed > 0 then
     redis.call('LPUSH', KEYS[2], ARGV[2])
