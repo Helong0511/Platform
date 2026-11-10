@@ -206,7 +206,11 @@ async def acknowledge_reserved(raw_items: list[str]) -> bool:
     """DB COMMIT 后从 processing 删除；返回 ACK 是否完成，失败时由恢复流程重放并去重。"""
     if not raw_items:
         return True
-    redis = await get_redis_client()
+    try:
+        redis = await get_redis_client()
+    except Exception as e:
+        logger.error("获取 Redis 客户端失败，无法 ACK 已入库点击记录: %s", e, exc_info=True)
+        return False
     if not redis:
         logger.error("Redis 不可用，无法 ACK %s 条已入库点击记录；等待恢复后幂等重放", len(raw_items))
         return False
