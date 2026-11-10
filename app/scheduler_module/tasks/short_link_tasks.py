@@ -54,28 +54,27 @@ async def sync_short_link_clicks_task():
 
 async def process_clicks_queue_task():
     """
-    批量处理点击记录队列（高并发优化）
-    每10秒执行一次，从Redis队列批量取出点击记录并插入到数据库
+    批量处理点击记录队列（高并发优化）。
+    通过调度器分布式锁保证单消费者；任务内部最多运行 30 秒。
     """
-    result = {"processed": 0, "inserted": 0}
     try:
         result = await process_clicks_queue()
-
-        if result['processed'] > 0:
-            # 处理结果输出到 scheduler.log（INFO 级别）
-            logger.info(
-                f"✅ 点击记录队列处理: "
-                f"处理={result['processed']}, "
-                f"插入={result['inserted']}, "
-                f"失败={result['failed']}, "
-                f"队列剩余={result['queue_remaining']}"
-            )
-        set_task_result(
-            TASK_PROCESS_QUEUE,
-            f"执行成功: 处理={result.get('processed', 0)}, 插入={result.get('inserted', 0)}",
+        summary = (
+            f"处理={result.get('processed', 0)}, "
+            f"插入={result.get('inserted', 0)}, "
+            f"重复跳过={result.get('deduplicated', 0)}, "
+            f"失败={result.get('failed', 0)}, "
+            f"主队列={result.get('queue_remaining', 0)}, "
+            f"处理中={result.get('processing_remaining', 0)}, "
+            f"死信={result.get('dead_letter', 0)}"
         )
+        if result.get('failed', 0) or result.get('dead_letter', 0):
+            logger.warning("点击队列处理存在失败/死信: %s", summary)
+        elif result.get('processed', 0):
+            logger.info("点击队列处理完成: %s", summary)
+        set_task_result(TASK_PROCESS_QUEUE, f"执行完成: {summary}")
     except Exception as e:
-        logger.error(f"❌ 点击记录队列批量处理任务执行失败: {e}", exc_info=True)
+        logger.error("点击队列批量处理任务执行失败: %s", e, exc_info=True)
         raise
 
 
