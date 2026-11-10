@@ -368,57 +368,27 @@ async def rollback_cap_redis_counts(
     offer_id: int,
     publisher_id: Optional[int] = None,
     advertiser_id: Optional[int] = None,
+    *,
+    reservations: Optional[list[tuple]] = None,
 ) -> None:
     """
-    DB 事务回滚后同步回退 Redis Cap 计数。
+    仅按当前请求的 reservation token 回退 Redis Cap。
 
-    increment_cap_count 会先写 Redis 再改 DB；外层 rollback 不会撤销 Redis，
-    须在转化入库失败或 Cap 递增判定失败时显式调用本函数。
+    旧版无 token 的全量 DECR 会误减并发请求的计数，故不再执行。
+    未提供 reservation 时保留计数并记录告警，交由对账任务处理。
     """
     if not offer_id:
         return
-    try:
-        query = select(OfferCap).where(
-            and_(
-                OfferCap.offer_id == offer_id,
-                OfferCap.is_active == True,  # noqa: E712
-            )
-        )
-        if publisher_id:
-            query = query.where(
-                or_(
-                    OfferCap.publisher_id == publisher_id,
-                    OfferCap.publisher_id.is_(None),
-                )
-            )
-        if advertiser_id:
-            query = query.where(
-                or_(
-                    OfferCap.cap_type == "offer",
-                    and_(
-                        OfferCap.cap_type == "advertiser_offer",
-                        OfferCap.advertiser_id == advertiser_id,
-                    ),
-                )
-            )
-        else:
-            query = query.where(OfferCap.cap_type == "offer")
-
-        result = await db.execute(query)
-        caps = result.scalars().all()
-        for cap in caps:
-            if cap.daily_cap:
-                await RedisCapManager.decrement_daily(cap.offer_id, cap.publisher_id)
-            if cap.total_cap:
-                await RedisCapManager.decrement_total(cap.offer_id, cap.publisher_id)
-    except Exception as e:
-        logger.error(
-            "回退 Redis Cap 计数失败: offer_id=%s publisher_id=%s err=%s",
+    if not reservations:
+        logger.critical(
+            "拒绝执行无 token 的 Cap Redis 回滚，避免误减并发请求名额："
+            "offer_id=%s publisher_id=%s advertiser_id=%s",
             offer_id,
             publisher_id,
-            e,
-            exc_info=True,
+            advertiser_id,
         )
+        return
+    await _rollback_reserved_redis(reservations)
 
 
 async def reset_daily_caps(db: AsyncSession) -> None:
