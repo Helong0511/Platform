@@ -64,11 +64,12 @@ async def process_clicks_queue_task():
             f"插入={result.get('inserted', 0)}, "
             f"重复跳过={result.get('deduplicated', 0)}, "
             f"失败={result.get('failed', 0)}, "
+            f"ACK失败={result.get('ack_failed', 0)}, "
             f"主队列={result.get('queue_remaining', 0)}, "
             f"处理中={result.get('processing_remaining', 0)}, "
             f"死信={result.get('dead_letter', 0)}"
         )
-        if result.get('failed', 0) or result.get('dead_letter', 0):
+        if result.get('failed', 0) or result.get('ack_failed', 0) or result.get('dead_letter', 0):
             logger.warning("点击队列处理存在失败/死信: %s", summary)
         elif result.get('processed', 0):
             logger.info("点击队列处理完成: %s", summary)
