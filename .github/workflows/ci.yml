@@ -6,8 +6,14 @@ on:
   pull_request:
     branches: [main, master]
 
+# 同一 PR/分支只保留最新 CI，避免连续提交造成旧测试争抢 Runner 资源。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +50,7 @@ jobs:
           pytest "${TEST_FILES[@]}" -q --tb=short
 
   frontend:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     defaults:
       run:
