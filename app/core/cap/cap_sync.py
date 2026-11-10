@@ -48,7 +48,7 @@ class CapSynchronizer:
         
         # 查询所有活跃的 Cap 配置
         result = await self.db.execute(
-            select(OfferCap).where(OfferCap.is_active == True)
+            select(OfferCap).where(OfferCap.is_active == True).with_for_update()
         )
         caps = result.scalars().all()
         
@@ -64,14 +64,16 @@ class CapSynchronizer:
                     redis_count = await redis.get(redis_key)
                     
                     if redis_count is not None:
-                        # Redis 有数据，同步到 DB
-                        cap.current_daily_count = int(redis_count)
-                        
-                        # 检查是否需要重置（新的一天）
-                        if cap.cap_start_date and cap.cap_start_date.date() != today_start.date():
-                            # 新的一天，重置计数
-                            cap.current_daily_count = 0
-                            await redis.setex(redis_key, 48*3600, 0)
+                        # 当前业务日取 DB/Redis 较大值，防止 Redis 数据回退降低已确认计数。
+                        db_daily_count = (
+                            cap.current_daily_count or 0
+                            if cap.cap_start_date
+                            and cap.cap_start_date.date() == today_start.date()
+                            else 0
+                        )
+                        cap.current_daily_count = max(int(redis_count), db_daily_count)
+                        cap.cap_start_date = today_start
+                    # key 缺失时不创建或清零，避免掩盖仍在途的 reservation token。
                 
                 # 同步总 Cap
                 if cap.total_cap:
@@ -79,7 +81,7 @@ class CapSynchronizer:
                     redis_count = await redis.get(redis_key)
                     
                     if redis_count is not None:
-                        cap.current_total_count = int(redis_count)
+                        cap.current_total_count = max(int(redis_count), cap.current_total_count or 0)
                 
                 stats['success'] += 1
                 
@@ -114,7 +116,7 @@ class CapSynchronizer:
         try:
             # 查询 Cap 配置
             result = await self.db.execute(
-                select(OfferCap).where(OfferCap.id == cap_id)
+                select(OfferCap).where(OfferCap.id == cap_id).with_for_update()
             )
             cap = result.scalars().first()
             
@@ -130,7 +132,15 @@ class CapSynchronizer:
                 redis_count = await redis.get(redis_key)
                 
                 if redis_count is not None:
-                    cap.current_daily_count = int(redis_count)
+                    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                    db_daily_count = (
+                        cap.current_daily_count or 0
+                        if cap.cap_start_date
+                        and cap.cap_start_date.date() == today_start.date()
+                        else 0
+                    )
+                    cap.current_daily_count = max(int(redis_count), db_daily_count)
+                    cap.cap_start_date = today_start
             
             # 同步总 Cap
             if cap.total_cap:
@@ -138,7 +148,7 @@ class CapSynchronizer:
                 redis_count = await redis.get(redis_key)
                 
                 if redis_count is not None:
-                    cap.current_total_count = int(redis_count)
+                    cap.current_total_count = max(int(redis_count), cap.current_total_count or 0)
             
             await self.db.commit()
             logger.info(f"单个 Cap 同步成功：cap_id={cap_id}")
