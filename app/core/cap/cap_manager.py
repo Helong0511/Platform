@@ -308,8 +308,9 @@ async def increment_cap_count(
                         passed = None
                     else:
                         await _rollback_reserved_redis(reserved)
+                        reserved.clear()
                         await _refresh_offer_caps(db, caps)
-                        return False, "cap_check_error"
+                        return _result(False, "cap_check_error")
 
                 if passed is False:
                     logger.warning(
@@ -317,8 +318,9 @@ async def increment_cap_count(
                         f"current={redis_init_val}"
                     )
                     await _rollback_reserved_redis(reserved)
+                    reserved.clear()
                     await _refresh_offer_caps(db, caps)
-                    return False, "cap_exceeded"
+                    return _result(False, "cap_exceeded")
 
                 if passed is True:
                     reserved.append(("total", cap.offer_id, cap.publisher_id))
