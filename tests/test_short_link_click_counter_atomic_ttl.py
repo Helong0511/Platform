@@ -79,3 +79,52 @@ async def test_scan_failure_does_not_fall_back_to_blocking_keys():
     keys = await counter._scan_click_counter_keys(redis, max_keys=10)
     assert keys == []
     assert redis.keys_called is False
+
+@pytest.mark.asyncio
+async def test_redis_recovery_flushes_local_snapshot_and_preserves_new_clicks(monkeypatch):
+    async with counter._counter_lock:
+        counter._click_counters.clear()
+        counter._click_counters["recovery-code"] = 5
+
+    class Result:
+        def fetchall(self):
+            return [("recovery-code", True)]
+
+    class FakeDb:
+        async def execute(self, statement):
+            return Result()
+
+    async def update_snapshot(db, short_code, count):
+        assert short_code == "recovery-code"
+        assert count == 5
+        # 模拟数据库写入期间 Redis 仍不可用，新点击继续进入进程内计数器。
+        async with counter._counter_lock:
+            counter._click_counters[short_code] += 2
+        return True
+
+    monkeypatch.setattr(counter, "_update_click_count_with_retry", update_snapshot)
+    synced = await counter._sync_in_memory_counters_to_db(FakeDb())
+
+    assert synced == 1
+    async with counter._counter_lock:
+        assert counter._click_counters == {"recovery-code": 2}
+
+
+@pytest.mark.asyncio
+async def test_redis_recovery_keeps_local_counters_when_db_prevalidation_fails():
+    async with counter._counter_lock:
+        counter._click_counters.clear()
+        counter._click_counters["recovery-db-error"] = 3
+
+    class FakeDb:
+        async def execute(self, statement):
+            raise OSError("isolated database unavailable")
+
+        async def rollback(self):
+            return None
+
+    synced = await counter._sync_in_memory_counters_to_db(FakeDb())
+
+    assert synced == 0
+    async with counter._counter_lock:
+        assert counter._click_counters == {"recovery-db-error": 3}
