@@ -502,19 +502,18 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
             if synced > 0:
                 logger.info(f"成功同步 {synced} 个短链接的点击次数到数据库（进程内）")
             
-            # 只清空成功同步的计数器（使用异步锁保护并发访问）
+            # 仅扣减本轮成功入账的快照增量，保留同步期间并发产生的新点击。
             if synced > 0:
+                failed_code_set = set(failed_codes)
                 async with _counter_lock:
-                    if short_codes:
-                        # 只清空指定列表中成功同步的
-                        for code in short_codes:
-                            if code not in failed_codes:
-                                _click_counters.pop(code, None)
-                    else:
-                        # 清空所有成功同步的，但保留失败的
-                        for code in list(_click_counters.keys()):
-                            if code not in failed_codes:
-                                _click_counters.pop(code, None)
+                    for code, snapshot_count in valid_updates:
+                        if code in failed_code_set:
+                            continue
+                        remaining = _click_counters.get(code, 0) - snapshot_count
+                        if remaining > 0:
+                            _click_counters[code] = remaining
+                        else:
+                            _click_counters.pop(code, None)
             
             if failed_codes:
                 # 对失败的更新进行二次验证，不存在的立即清理
@@ -557,6 +556,8 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                         f"失败的计数详情: {failed_counts}"
                     )
             
+            # Redis 不可用时也要持久化同步后的剩余计数（包括空快照），避免重启重放旧数据。
+            await persist_counters()
             return synced
         
         # Redis 恢复后先补写故障期间积累的本地计数，避免只扫描 Redis 而遗漏降级数据。
