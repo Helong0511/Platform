@@ -11,6 +11,7 @@ import random
 from typing import Dict, List, Tuple
 from datetime import datetime, timezone
 from app.core.redis_client import get_redis_client
+from app.core.database import AsyncSessionLocal
 from app.core.short_link_cache import invalidate_short_link_cache
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -228,31 +229,54 @@ async def persist_counters():
 load_persisted_counters()
 
 
+async def _increment_click_count_in_db(short_code: str) -> bool:
+    """
+    Redis 不可用时使用数据库原子自增，避免多 API Worker 的进程内计数无法汇总。
+
+    这是降级路径，正常流量仍由 Redis 聚合；数据库不可用时不阻断短链跳转，
+    但必须明确记录计数未能持久化，不能伪称已成功入账。
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                update(ShortLink)
+                .where(
+                    ShortLink.short_code == short_code,
+                    ShortLink.is_active.is_(True),
+                )
+                .values(click_count=ShortLink.click_count + 1)
+            )
+            await db.commit()
+            updated = bool(getattr(result, "rowcount", 0))
+        if updated:
+            await invalidate_short_link_cache(short_code)
+        else:
+            logger.warning("短链接点击计数降级写库未更新记录（短链不存在或已停用）: %s", short_code)
+        return updated
+    except Exception as exc:
+        logger.error(
+            "Redis 不可用且数据库降级自增失败，当前点击无法持久化: short_code=%s, error=%s",
+            short_code,
+            exc,
+            exc_info=True,
+        )
+        return False
+
+
 async def increment_click_count_async(short_code: str) -> None:
     """
-    异步增加点击次数（使用Redis计数器）
-    
-    Args:
-        short_code: 短链接代码
+    增加短链接点击次数：优先 Redis 原子计数，Redis 故障时直接原子写数据库。
+
+    不再把 API Worker 的点击写入各自进程内内存；多 Worker 的本地计数无法由单一
+    scheduler 进程可靠汇总，且 Worker 重启会造成未刷盘计数丢失。
     """
     redis = await get_redis_client()
     if not redis:
-        # Redis不可用时，使用进程内计数器
-        # 使用异步锁保护并发访问，确保计数准确性
-        async with _counter_lock:
-            old_count = _click_counters.get(short_code, 0)
-            _click_counters[short_code] = old_count + 1
-            new_count = _click_counters[short_code]
-        # 使用debug级别，避免高频点击时产生大量日志
-        logger.debug(
-            f"短链接点击计数（进程内）: short_code={short_code}, "
-            f"旧值={old_count}, 新值={new_count}"
-        )
+        await _increment_click_count_in_db(short_code)
         return
-    
+
     try:
         # 使用 Lua 将 INCR 与 EXPIRE 合并为一个原子操作。
-        # 避免进程在两条命令之间退出/断连，导致计数器永久没有 TTL。
         counter_key = f"{CLICK_COUNTER_PREFIX}{short_code}"
         new_count = await redis.eval(
             """
@@ -264,24 +288,19 @@ async def increment_click_count_async(short_code: str) -> None:
             counter_key,
             48 * 3600,
         )
-        # 使用debug级别，避免高频点击时产生大量日志
         logger.debug(
-            f"短链接点击计数（Redis）: short_code={short_code}, "
-            f"计数器键={counter_key}, 当前值={new_count}"
+            "短链接点击计数（Redis）: short_code=%s, 计数器键=%s, 当前值=%s",
+            short_code,
+            counter_key,
+            new_count,
         )
-    except Exception as e:
-        logger.warning(f"Redis点击计数递增失败: short_code={short_code}, error={e}")
-        # 降级到进程内计数器
-        # 使用异步锁保护并发访问，确保计数准确性
-        async with _counter_lock:
-            old_count = _click_counters.get(short_code, 0)
-            _click_counters[short_code] = old_count + 1
-            new_count = _click_counters[short_code]
-        # 使用debug级别，避免高频点击时产生大量日志
-        logger.debug(
-            f"短链接点击计数（降级到进程内）: short_code={short_code}, "
-            f"旧值={old_count}, 新值={new_count}"
+    except Exception as exc:
+        logger.warning(
+            "Redis 点击计数递增失败，改用数据库原子自增: short_code=%s, error=%s",
+            short_code,
+            exc,
         )
+        await _increment_click_count_in_db(short_code)
 
 
 async def _scan_click_counter_keys(redis, max_keys: int = MAX_KEYS_PER_SYNC) -> list:
