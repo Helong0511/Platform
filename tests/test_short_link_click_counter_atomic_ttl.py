@@ -128,3 +128,18 @@ async def test_redis_recovery_keeps_local_counters_when_db_prevalidation_fails()
     assert synced == 0
     async with counter._counter_lock:
         assert counter._click_counters == {"recovery-db-error": 3}
+
+@pytest.mark.asyncio
+async def test_persist_empty_snapshot_clears_stale_file_atomically(tmp_path, monkeypatch):
+    persist_file = tmp_path / "click_counters.json"
+    persist_file.write_text('{"stale-code": 9}', encoding="utf-8")
+    monkeypatch.setattr(counter, "COUNTER_PERSIST_FILE", persist_file)
+
+    async with counter._counter_lock:
+        counter._click_counters.clear()
+
+    await counter.persist_counters()
+
+    assert persist_file.exists()
+    assert persist_file.read_text(encoding="utf-8") == "{}"
+    assert list(tmp_path.glob("*.tmp")) == []
