@@ -96,3 +96,42 @@ async def test_repeated_token_rollback_never_decrements_another_request(monkeypa
     assert second == 0  # token 已在第一次调用中删除，重复回滚不再扣减
     assert redis.values[key] == 1
     assert other_token in redis.tokens
+
+
+@pytest.mark.asyncio
+async def test_uncertain_reservation_with_failed_compensation_never_fail_opens(monkeypatch):
+    class UnavailableForCompensation:
+        async def eval(self, script, numkeys, *args):
+            raise OSError("simulated Redis connection loss")
+
+    async def fake_get_redis_client():
+        return UnavailableForCompensation()
+
+    monkeypatch.setattr(redis_counter, "get_redis_client", fake_get_redis_client)
+    monkeypatch.setattr(redis_counter.settings, "CAP_FAIL_OPEN", True)
+
+    with pytest.raises(RuntimeError, match="令牌补偿失败"):
+        await redis_counter.RedisCapManager.check_and_increment_total(
+            offer_id=77,
+            limit=100,
+            publisher_id=12,
+            initial_value=5,
+            reservation_id="request-token-uncertain",
+        )
+
+
+@pytest.mark.asyncio
+async def test_redis_unavailable_fail_closed_is_not_reported_as_cap_exhausted(monkeypatch):
+    async def no_redis():
+        return None
+
+    monkeypatch.setattr(redis_counter, "get_redis_client", no_redis)
+    monkeypatch.setattr(redis_counter.settings, "CAP_FAIL_OPEN", False)
+
+    with pytest.raises(RuntimeError, match="Redis unavailable"):
+        await redis_counter.RedisCapManager.check_and_increment_daily(
+            offer_id=77,
+            limit=100,
+            publisher_id=12,
+            initial_value=5,
+        )
