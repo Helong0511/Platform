@@ -117,9 +117,13 @@ async def enqueue_click(click_data: Dict[str, Any]) -> bool:
 def _decode_click_payload(click_json: str) -> Optional[Dict[str, Any]]:
     """解析队列中的 JSON 载荷；失败返回 None。"""
     try:
-        return json.loads(click_json)
-    except json.JSONDecodeError as e:
-        logger.warning("反序列化点击记录失败: %s, error=%s", click_json[:100], e)
+        payload = json.loads(click_json)
+        if not isinstance(payload, dict):
+            logger.warning("点击队列载荷不是 JSON object，移入死信: %s", click_json[:100])
+            return None
+        return payload
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning("反序列化点击记录失败: %s, error=%s", str(click_json)[:100], e)
         return None
 
 
