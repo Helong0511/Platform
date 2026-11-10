@@ -13,6 +13,7 @@ from typing import Optional
 from datetime import datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.telegram.message_sender import send_telegram_message_async as send_telegram_message
@@ -36,6 +37,19 @@ def sha256_hash(value: Optional[str]) -> str:
     return hashlib.sha256(normalized_value.encode('utf-8')).hexdigest()
 
 
+def build_event_idempotency_key(
+    source: str,
+    adsid: str,
+    event: str,
+    conversion_id: Optional[str] = None,
+) -> str:
+    """构建稳定的事件身份键；同一事件的重试保持不变，不同事件互不覆盖。"""
+    parts = (source or "", adsid or "", event or "", conversion_id or "")
+    # 长度前缀避免字段中出现分隔符时产生身份碰撞。
+    identity = "".join(f"{len(part)}:{part}" for part in parts)
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
 async def create_report_log(
         source: str,
         adsid: str,
@@ -52,31 +66,25 @@ async def create_report_log(
         amount: Optional[float] = None
 ) -> int:
     """
-    创建第三方上报日志记录
-    如果遇到唯一约束冲突，返回已存在记录的ID
+    按事件身份创建上报日志；相同事件重试复用同一日志，不同事件独立留痕。
     """
+    event_key = build_event_idempotency_key(source, adsid, event, conversion_id)
     try:
         async with AsyncSessionLocal() as db:
-            # 先检查是否已存在记录（只考虑 source 和 adsid，与数据库唯一约束保持一致）
             result = await db.execute(
-                select(ThirdPartyReportLog)
-                .where(ThirdPartyReportLog.source == source)
-                .where(ThirdPartyReportLog.adsid == adsid)
+                select(ThirdPartyReportLog.id)
+                .where(ThirdPartyReportLog.event_key == event_key)
+                .limit(1)
             )
-            existing_log = result.scalars().first()
-            
-            if existing_log:
-                logger.info(
-                    "[第三方上报] 已存在记录: source=%s, adsid=%s, id=%s",
-                    source, adsid, existing_log.id,
-                )
-                return existing_log.id
-            
-            # 创建新记录
+            existing_id = result.scalar_one_or_none()
+            if existing_id:
+                return int(existing_id)
+
             log_entry = ThirdPartyReportLog(
                 source=source,
                 adsid=adsid,
                 event=event,
+                event_key=event_key,
                 conversion_id=conversion_id,
                 email=email,
                 ip=ip,
@@ -89,16 +97,29 @@ async def create_report_log(
                 status="pending",
                 attempt_count=0,
                 max_attempts=max_attempts,
-                created_at=get_app_now_naive()
+                created_at=get_app_now_naive(),
             )
             db.add(log_entry)
             await db.commit()
             await db.refresh(log_entry)
             return log_entry.id
+    except IntegrityError:
+        # 并发请求可能同时查询到不存在；唯一键负责仲裁，冲突方读取已创建记录。
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(ThirdPartyReportLog.id)
+                    .where(ThirdPartyReportLog.event_key == event_key)
+                    .limit(1)
+                )
+                existing_id = result.scalar_one_or_none()
+                if existing_id:
+                    return int(existing_id)
+        except Exception as lookup_exc:
+            logger.warning("[第三方上报] 并发创建冲突后读取事件日志失败: %s", lookup_exc)
     except Exception as e:
-        logger.warning(f"[第三方上报] 创建日志记录失败: {e}")
-        return 0
-
+        logger.warning("[第三方上报] 创建日志记录失败: %s", e)
+    return 0
 
 async def update_report_log(
         log_id: int,
