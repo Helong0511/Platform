@@ -5,6 +5,7 @@ Cap 限制检查器
 """
 import logging
 from typing import Optional, Tuple
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cap import check_cap, increment_cap_count, rollback_cap_redis_counts
@@ -90,7 +91,7 @@ class CapChecker:
         publisher_id: Optional[int],
         advertiser_id: Optional[int],
         db: AsyncSession,
-    ) -> Tuple[bool, str, list[tuple[str, int, Optional[int]]]]:
+    ) -> Tuple[bool, str, list[tuple[str, int, Optional[int], Optional[datetime]]]]:
         """
         增加 Cap 并返回本次真正预留的 Redis 计数器列表。
 
@@ -112,12 +113,19 @@ class CapChecker:
 
     @staticmethod
     async def rollback_reservations(
-        reservations: list[tuple[str, int, Optional[int]]],
+        reservations: list[tuple[str, int, Optional[int], Optional[datetime]]],
     ) -> None:
         """仅回滚当前请求确实预留成功的 Redis Cap key，不再重新查询 DB。"""
-        for kind, offer_id, publisher_id in reservations:
+        for reservation in reservations:
+            # 兼容历史三元组；新预留记录带业务日期，确保跨日回滚精确。
+            kind, offer_id, publisher_id = reservation[:3]
+            reservation_date = reservation[3] if len(reservation) > 3 else None
             if kind == "daily":
-                await RedisCapManager.decrement_daily(offer_id, publisher_id)
+                await RedisCapManager.decrement_daily(
+                    offer_id,
+                    publisher_id,
+                    reservation_date=reservation_date,
+                )
             elif kind == "total":
                 await RedisCapManager.decrement_total(offer_id, publisher_id)
             else:
