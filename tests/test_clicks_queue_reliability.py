@@ -127,8 +127,8 @@ async def test_enqueue_uses_single_atomic_capacity_and_rpush_script(monkeypatch)
     assert key == clicks_queue.CLICKS_QUEUE_KEY
     assert processing_key == clicks_queue.CLICKS_PROCESSING_KEY
     assert limit == clicks_queue.MAX_QUEUE_SIZE
-    assert "LLEN" in script and "RPUSH" in script
-    assert script.index("LLEN") < script.index("RPUSH")
+    assert "LLEN" in script and "LPUSH" in script
+    assert script.index("LLEN") < script.index("LPUSH")
 
 
 @pytest.mark.asyncio
