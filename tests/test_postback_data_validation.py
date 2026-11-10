@@ -5,6 +5,7 @@ import pytest
 
 from app.core.postback.transformers.normalizer import DataNormalizer
 from app.core.postback.validators.data_validator import DataValidator
+from app.core.postback.bft_handler import BftPostbackHandler
 
 
 @pytest.mark.parametrize(
@@ -77,3 +78,69 @@ def test_validator_checks_conversion_id_even_when_click_id_is_short():
     )
     assert valid is False
     assert any("过长" in error for error in errors)
+
+
+
+@pytest.mark.asyncio
+async def test_bft_handler_uses_decimal_for_payout_and_event_value():
+    handler = BftPostbackHandler()
+    payload = {
+        "clk_id": "bft-click-1",
+        "payout": "1.2345",
+        "event_value": "2.3456",
+    }
+
+    valid, error = await handler.validate(payload)
+    normalized = await handler.normalize(payload)
+
+    assert valid is True
+    assert error is None
+    assert normalized["payout"] == Decimal("1.2345")
+    assert normalized["event_value"] == Decimal("2.3456")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payout", ["NaN", "Infinity", "0", "1.12345", "100000000"])
+async def test_bft_handler_rejects_invalid_financial_payouts(payout):
+    handler = BftPostbackHandler()
+    valid, error = await handler.validate({"clk_id": "bft-click-1", "payout": payout})
+
+    assert valid is False
+    assert error is not None
+
+
+@pytest.mark.asyncio
+async def test_bft_handler_does_not_fall_back_when_primary_payout_is_zero():
+    handler = BftPostbackHandler()
+    payload = {
+        "clk_id": "bft-click-1",
+        "payout": 0,
+        "PayOut": "5.0000",
+    }
+
+    valid, error = await handler.validate(payload)
+    normalized = await handler.normalize(payload)
+
+    assert valid is False
+    assert "大于 0" in error
+    assert normalized["payout"] == Decimal("0")
+
+
+@pytest.mark.asyncio
+async def test_bft_handler_rejects_overlong_conversion_and_event_ids():
+    handler = BftPostbackHandler()
+
+    valid_id, error_id = await handler.validate({
+        "clk_id": "x" * 201,
+        "payout": "1.0000",
+    })
+    valid_event, error_event = await handler.validate({
+        "clk_id": "bft-click-1",
+        "payout": "1.0000",
+        "event_name": "x" * 101,
+    })
+
+    assert valid_id is False
+    assert "过长" in error_id
+    assert valid_event is False
+    assert "event_name" in error_event
