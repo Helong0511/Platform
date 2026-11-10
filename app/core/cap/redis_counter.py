@@ -39,6 +39,10 @@ def get_total_cap_key(offer_id: int, publisher_id: Optional[int] = None) -> str:
     return key
 
 
+class _CapReservationStateLost(RuntimeError):
+    """幂等令牌存在但计数状态丢失；必须 fail-closed，不能误判为成功或超限。"""
+
+
 class RedisCapManager:
     """Redis Cap 管理器"""
 
@@ -64,7 +68,15 @@ class RedisCapManager:
     # ARGV[1]: expire_seconds；ARGV[2]: DB 初始值；ARGV[3]: limit
     _RESERVE_LUA = """
     if redis.call('EXISTS', KEYS[2]) == 1 then
-        return tonumber(redis.call('GET', KEYS[1]) or '0')
+        -- token 仍在但 counter 已被独立淘汰/删除时，绝不能把缺失计数当作 0 放行。
+        if redis.call('EXISTS', KEYS[1]) == 0 then
+            return -2
+        end
+        local existing = tonumber(redis.call('GET', KEYS[1]))
+        if not existing then
+            return -2
+        end
+        return existing
     end
     local limit = tonumber(ARGV[3])
     local db_count = tonumber(ARGV[2]) or 0
@@ -157,9 +169,14 @@ class RedisCapManager:
                 init_val,
                 str(limit),
             )
-            if int(current) < 0:
+            current = int(current)
+            if current == -2:
+                raise _CapReservationStateLost("Redis 日 Cap token 存在但计数 key 丢失，拒绝重试放行")
+            if current < 0:
                 return False
             return True
+        except _CapReservationStateLost:
+            raise
         except Exception as e:
             logger.error("Redis 日 Cap 预留结果不确定，使用唯一令牌执行幂等补偿：%s", e, exc_info=True)
             try:
@@ -203,9 +220,14 @@ class RedisCapManager:
                 init_val,
                 str(limit),
             )
-            if int(current) < 0:
+            current = int(current)
+            if current == -2:
+                raise _CapReservationStateLost("Redis 总 Cap token 存在但计数 key 丢失，拒绝重试放行")
+            if current < 0:
                 return False
             return True
+        except _CapReservationStateLost:
+            raise
         except Exception as e:
             logger.error("Redis 总 Cap 预留结果不确定，使用唯一令牌执行幂等补偿：%s", e, exc_info=True)
             try:
