@@ -42,9 +42,9 @@ SELECT
 FROM offer_caps AS c
 GROUP BY
     c.cap_type,
-    COALESCE(c.advertiser_id, 0),
+    c.advertiser_id,
     c.offer_id,
-    COALESCE(c.publisher_id, 0)
+    c.publisher_id
 HAVING COUNT(*) > 1
 ORDER BY c.offer_id, c.publisher_id, c.cap_type;
 
@@ -62,7 +62,7 @@ SELECT
     GROUP_CONCAT(c.id ORDER BY c.id) AS cap_ids
 FROM offer_caps AS c
 WHERE c.is_active = 1
-GROUP BY c.offer_id, COALESCE(c.publisher_id, 0)
+GROUP BY c.offer_id, c.publisher_id
 HAVING
     MIN(COALESCE(c.current_daily_count, 0)) <> MAX(COALESCE(c.current_daily_count, 0))
     OR MIN(COALESCE(c.current_total_count, 0)) <> MAX(COALESCE(c.current_total_count, 0))
