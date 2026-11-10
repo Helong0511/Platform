@@ -36,12 +36,17 @@ class DataNormalizer:
             or click_id_raw
         )
 
+        payout_raw = raw_data.get('payout')
+        if payout_raw is None or str(payout_raw).strip() == '':
+            payout_raw = raw_data.get('amount')
+
+        event_name = str(raw_data.get('event_name') or 'default').strip() or 'default'
         normalized = {
             'platform': platform,
-            'conversion_id': str(conversion_id or ''),
-            'event_name': str(raw_data.get('event_name') or 'default'),
+            'conversion_id': str(conversion_id or '').strip(),
+            'event_name': event_name,
             'event_value': DataNormalizer._parse_decimal(raw_data.get('event_value')),
-            'payout': DataNormalizer._parse_decimal(raw_data.get('payout') or raw_data.get('amount')),
+            'payout': DataNormalizer._parse_decimal(payout_raw),
             'devad_id': raw_data.get('devad_id'),
             'os': raw_data.get('os'),
             'carrier': raw_data.get('carrier'),
@@ -84,7 +89,8 @@ class DataNormalizer:
         if value is None:
             return None
         try:
-            return Decimal(str(value))
+            parsed = Decimal(str(value).strip())
+            return parsed if parsed.is_finite() else None
         except (InvalidOperation, ValueError, TypeError):
             return None
 
