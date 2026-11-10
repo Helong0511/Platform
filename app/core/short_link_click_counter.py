@@ -423,8 +423,14 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
     Returns:
         同步的记录数
     """
-    redis = await get_redis_client()
-    
+    try:
+        redis = await get_redis_client()
+    except Exception as exc:
+        # 无法确认 Redis 状态时也无法确认全局锁是否可用。
+        # 旧的进程内计数仅是兼容恢复路径，不能在多 Worker 下无锁同步。
+        logger.error("获取 Redis 客户端失败，跳过短链接计数同步以避免无锁并发入账: %s", exc)
+        return 0
+
     # 使用分布式锁，确保同一时间只有一个进程在执行同步
     lock_key = f"{SYNC_LOCK_PREFIX}global"
     lock_value = str(uuid.uuid4())
