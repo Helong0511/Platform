@@ -636,3 +636,81 @@ def test_all_redirect_paths_pass_stable_click_id_to_counter():
         any(keyword.arg == "click_id" for keyword in call.keywords)
         for call in calls
     )
+
+
+
+@pytest.mark.asyncio
+async def test_db_fallback_commit_response_loss_is_verified_by_event_ledger(monkeypatch):
+    state = {"ledger": {}, "updates": 0, "commits": 0}
+    invalidated = []
+
+    class FakeResult:
+        rowcount = 1
+
+        def __init__(self, scalar=None, row=None):
+            self.scalar = scalar
+            self.row = row
+
+        def scalar_one_or_none(self):
+            return self.scalar
+
+        def first(self):
+            return self.row
+
+    class FakeDb:
+        def __init__(self):
+            self.added = None
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, statement):
+            sql = str(statement).upper()
+            if "FROM SHORT_LINK_CLICK_SYNC_BATCHES" in sql and sql.lstrip().startswith("SELECT"):
+                record = next(iter(state["ledger"].values()), None)
+                return FakeResult(row=record)
+            if "FROM SHORT_LINKS" in sql and sql.lstrip().startswith("SELECT"):
+                return FakeResult(scalar=88)
+            if sql.lstrip().startswith("UPDATE SHORT_LINKS"):
+                state["updates"] += 1
+                return FakeResult()
+            raise AssertionError(f"unexpected DB statement: {sql}")
+
+        def add(self, record):
+            self.added = record
+
+        async def flush(self):
+            return None
+
+        async def commit(self):
+            state["commits"] += 1
+            state["ledger"][self.added.batch_id] = (
+                self.added.short_code,
+                self.added.click_count,
+            )
+            if state["commits"] == 1:
+                # DB 已提交，僅 COMMIT 回應遺失。
+                raise OSError("ambiguous DB commit response")
+
+    async def fake_redis():
+        return None
+
+    async def fake_invalidate(short_code):
+        invalidated.append(short_code)
+
+    monkeypatch.setattr(counter, "AsyncSessionLocal", FakeDb)
+    monkeypatch.setattr(counter, "get_redis_client", fake_redis)
+    monkeypatch.setattr(counter, "invalidate_short_link_cache", fake_invalidate)
+
+    await counter.increment_click_count_async(
+        "db-ambiguous-code",
+        click_id="db-ambiguous-event",
+    )
+
+    assert state["updates"] == 1
+    assert state["commits"] == 1
+    assert len(state["ledger"]) == 1
+    assert invalidated == ["db-ambiguous-code"]
