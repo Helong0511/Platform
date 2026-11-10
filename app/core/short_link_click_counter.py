@@ -1,7 +1,7 @@
 """
 短链接点击计数异步刷盘模块。
 
-职责：Redis 原子递增 + 定时/阈值触发批量写回 ``short_links.click_count``，并失效短链缓存。
+职责：Redis 原子递增 + pending batch + DB 唯一账本，安全刷盘到 ``short_links.click_count``，并失效短链缓存。
 
 在系统中的位置：``app.core.short_link_click_counter``，由短链跳转路由与定时任务调用。
 """
@@ -1642,70 +1642,22 @@ async def _commit_with_retry(db: AsyncSession, synced_count: int, max_retries: i
 
 
 async def sync_click_counts_to_db_batch(
-    db: AsyncSession, 
+    db: AsyncSession,
     updates: List[Tuple[str, int]],
-    batch_size: int = 5
+    batch_size: int = 5,
 ) -> int:
     """
-    批量同步点击次数到数据库（使用原子批量更新，减少死锁风险）
-    
-    注意：此函数已重构为使用原子批量更新，避免 ORM 方式导致的死锁
-    
-    Args:
-        db: 数据库会话
-        updates: (short_code, count) 元组列表
-        batch_size: 每批处理的记录数（默认5，与主函数保持一致）
-        
-    Returns:
-        成功同步的记录数
+    已弃用：调用方传入的裸计数快照没有稳定 batch_id，无法安全处理 COMMIT 响应丢失。
+
+    禁止继续走旧的“DB 自增后 Redis 无幂等 ACK”路径。调用方应改用
+    sync_click_counts_to_db()，由该函数通过 Redis pending batch 生成稳定幂等键。
     """
-    if not updates:
-        return 0
-    
-    # 按 short_code 排序，确保所有进程以相同顺序锁定记录（关键：避免死锁）
-    updates = sorted(updates, key=lambda x: x[0])
-    
-    synced = 0
-    total_batches = (len(updates) + batch_size - 1) // batch_size
-    
-    redis = await get_redis_client()
-    
-    for batch_idx in range(total_batches):
-        batch = updates[batch_idx * batch_size:(batch_idx + 1) * batch_size]
-        
-        # 转换为 (short_code, count, redis_key) 格式，redis_key 设为空字符串（不使用Redis）
-        batch_with_keys = [(code, count, "") for code, count in batch]
-        
-        try:
-            # 使用与主函数相同的批量更新方法（原子更新，带重试机制）
-            batch_synced, _, batch_failed = await _batch_update_click_counts_with_retry(
-                db, batch_with_keys, redis
-            )
-            
-            if batch_synced > 0:
-                synced += batch_synced
-                logger.debug(
-                    f"批量同步点击次数成功（批次 {batch_idx + 1}/{total_batches}）: "
-                    f"成功 {batch_synced} 条"
-                )
-            
-            if batch_failed:
-                logger.warning(
-                    f"批量同步点击次数部分失败（批次 {batch_idx + 1}/{total_batches}）: "
-                    f"失败 {len(batch_failed)} 条"
-                )
-                
-        except Exception as e:
-            logger.error(
-                f"批量同步点击次数失败（批次 {batch_idx + 1}/{total_batches}）: {e}",
-                exc_info=True
-            )
-            try:
-                await db.rollback()
-            except Exception:
-                pass
-    
-    return synced
+    if updates:
+        raise RuntimeError(
+            "sync_click_counts_to_db_batch 已停用：裸计数快照不具备幂等恢复能力；"
+            "请改用 sync_click_counts_to_db()"
+        )
+    return 0
 
 
 async def get_deadlock_stats() -> dict:
