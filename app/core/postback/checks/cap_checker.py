@@ -118,30 +118,44 @@ class CapChecker:
     async def rollback_reservations(
         reservations: list[tuple],
     ) -> None:
-        """仅回滚当前请求确实预留成功的 Redis Cap key，不再重新查询 DB。"""
+        """尝试回退全部本次预留；收集失败后统一报告，避免首个故障阻断后续回滚。"""
+        failures = []
         for reservation in reservations:
-            # 兼容历史三元组；新预留记录带业务日期，确保跨日回滚精确。
             kind, offer_id, publisher_id = reservation[:3]
             reservation_date = reservation[3] if len(reservation) > 3 else None
             reservation_id = reservation[4] if len(reservation) > 4 else None
-            if kind == "daily":
-                result = await RedisCapManager.decrement_daily(
-                    offer_id,
-                    publisher_id,
-                    reservation_date=reservation_date,
-                    reservation_id=reservation_id,
+            try:
+                if kind == "daily":
+                    result = await RedisCapManager.decrement_daily(
+                        offer_id,
+                        publisher_id,
+                        reservation_date=reservation_date,
+                        reservation_id=reservation_id,
+                    )
+                elif kind == "total":
+                    result = await RedisCapManager.decrement_total(
+                        offer_id, publisher_id, reservation_id=reservation_id
+                    )
+                else:
+                    failures.append(f"unknown kind={kind}, offer_id={offer_id}")
+                    continue
+                if result < 0:
+                    failures.append(
+                        f"kind={kind}, offer_id={offer_id}, token={reservation_id}"
+                    )
+            except Exception as exc:
+                failures.append(
+                    f"kind={kind}, offer_id={offer_id}, token={reservation_id}, error={exc}"
                 )
-            elif kind == "total":
-                result = await RedisCapManager.decrement_total(
-                    offer_id, publisher_id, reservation_id=reservation_id
+                logger.error(
+                    "Cap reservation rollback failed; continue with remaining tokens",
+                    exc_info=True,
                 )
-            else:
-                logger.error("未知 Cap reservation 类型，跳过回滚：%s", kind)
-                continue
-            if result < 0:
-                raise RuntimeError(
-                    f"Cap reservation rollback failed: kind={kind}, offer_id={offer_id}, token={reservation_id}"
-                )
+        if failures:
+            raise RuntimeError(
+                "Cap reservation rollback incomplete: " + "; ".join(failures)
+            )
+
 
     @staticmethod
     async def increment(
