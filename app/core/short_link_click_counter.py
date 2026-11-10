@@ -16,8 +16,8 @@ from app.core.short_link_cache import invalidate_short_link_cache
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import update, text
-from sqlalchemy.exc import OperationalError
-from app.models.models import ShortLink
+from sqlalchemy.exc import OperationalError, IntegrityError
+from app.models.models import ShortLink, ShortLinkClickSyncBatch
 import uuid
 import json
 import os
@@ -313,9 +313,11 @@ async def increment_click_count_async(short_code: str) -> None:
         )
 
 
-async def _scan_click_counter_keys(redis, max_keys: int = MAX_KEYS_PER_SYNC) -> list:
-    """有界扫描点击计数器；去重 SCAN 可能重复返回的键，失败时不调用阻塞式 KEYS。"""
-    pattern = f"{CLICK_COUNTER_PREFIX}*"
+async def _scan_click_counter_keys(
+    redis, max_keys: int = MAX_KEYS_PER_SYNC, pattern: str | None = None
+) -> list:
+    """有界扫描 Redis key；去重 SCAN 可能重复返回的键，失败时不调用阻塞式 KEYS。"""
+    pattern = pattern or f"{CLICK_COUNTER_PREFIX}*"
     keys = []
     seen = set()
     cursor = 0
@@ -409,6 +411,241 @@ async def _sync_in_memory_counters_to_db(db: AsyncSession, short_codes: list[str
     if synced:
         logger.info("Redis 恢复后补写进程内点击计数完成: %s 个短链接", synced)
     return synced
+
+
+# 原子地把活跃计数切换为不可变 pending batch。
+# 新点击继续写入 active key；pending key 在数据库确认入账且 ACK 前绝不设置 TTL。
+_CLAIM_COUNTER_BATCH_LUA = """
+local value = redis.call('GET', KEYS[1])
+if not value then
+    return 0
+end
+local count = tonumber(value)
+if not count or count <= 0 then
+    return 0
+end
+if redis.call('EXISTS', KEYS[2]) == 1 then
+    return -1
+end
+redis.call('SET', KEYS[2], count)
+redis.call('DEL', KEYS[1])
+return count
+"""
+
+
+async def _acknowledge_click_batch(db: AsyncSession, redis, batch_id: str, pending_key: str) -> bool:
+    """删除 pending key 得到确认后再标记账本 ACK；失败时保留账本供恢复。"""
+    try:
+        await redis.delete(pending_key)
+    except Exception as exc:
+        logger.error(
+            "短链接点击批次 Redis ACK 失败，保留幂等账本等待重试: batch_id=%s error=%s",
+            batch_id, exc, exc_info=True,
+        )
+        return False
+
+    try:
+        await db.execute(
+            update(ShortLinkClickSyncBatch)
+            .where(ShortLinkClickSyncBatch.batch_id == batch_id)
+            .values(acknowledged_at=datetime.now(timezone.utc).replace(tzinfo=None))
+        )
+        await db.commit()
+    except Exception as exc:
+        # Redis pending 已删除，DB ACK 标记失败不会造成重复入账；账本暂时保留。
+        logger.warning(
+            "短链接点击批次已从 Redis 删除，但 ACK 状态写库失败: batch_id=%s error=%s",
+            batch_id, exc, exc_info=True,
+        )
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+    return True
+
+
+async def _process_pending_click_batch(
+    db: AsyncSession,
+    redis,
+    *,
+    short_code: str,
+    batch_id: str,
+    pending_key: str,
+    click_count: int,
+) -> tuple[bool, bool]:
+    """
+    将一个不可变 pending batch 幂等入账。
+
+    返回 (已安全处理, 本次是否新入账)。DB COMMIT 结果不确定时不 ACK，
+    下轮通过唯一 batch_id 判断是否已提交，避免重复累加。
+    """
+    if click_count <= 0:
+        logger.error("拒绝处理非正数短链接点击批次: batch_id=%s count=%s", batch_id, click_count)
+        return False, False
+
+    inserted = False
+    try:
+        link_result = await db.execute(
+            select(ShortLink.id)
+            .where(
+                ShortLink.short_code == short_code,
+                ShortLink.is_active.is_(True),
+            )
+            .limit(1)
+        )
+        short_link_id = link_result.scalar_one_or_none()
+        if short_link_id is None:
+            # 短链已删除或停用，与旧逻辑一致：不再为无效短链累计点击。
+            await db.commit()
+            await redis.delete(pending_key)
+            return True, False
+
+        existing_result = await db.execute(
+            select(ShortLinkClickSyncBatch.batch_id)
+            .where(ShortLinkClickSyncBatch.batch_id == batch_id)
+            .limit(1)
+        )
+        already_committed = existing_result.scalar_one_or_none() is not None
+
+        if not already_committed:
+            db.add(ShortLinkClickSyncBatch(
+                batch_id=batch_id,
+                short_code=short_code,
+                click_count=click_count,
+            ))
+            # 唯一 batch_id 必须先落入当前事务，再更新点击总数。
+            await db.flush()
+            update_result = await db.execute(
+                update(ShortLink)
+                .where(ShortLink.id == short_link_id)
+                .values(click_count=ShortLink.click_count + click_count)
+            )
+            if getattr(update_result, "rowcount", 0) != 1:
+                raise RuntimeError(
+                    f"短链接点击批次更新行数异常: short_code={short_code}, "
+                    f"batch_id={batch_id}, rowcount={getattr(update_result, 'rowcount', None)}"
+                )
+            await db.commit()
+            inserted = True
+        else:
+            # 上次 DB COMMIT 成功但 Redis ACK 未完成；不重复更新 click_count。
+            await db.commit()
+
+    except IntegrityError:
+        # 可能是全局同步锁租约过期导致两个 worker 同时处理同一 pending batch。
+        # 唯一键冲突后回滚，再读取账本；存在即证明另一个 worker 已完成入账。
+        try:
+            await db.rollback()
+            existing_result = await db.execute(
+                select(ShortLinkClickSyncBatch.batch_id)
+                .where(ShortLinkClickSyncBatch.batch_id == batch_id)
+                .limit(1)
+            )
+            already_committed = existing_result.scalar_one_or_none() is not None
+            await db.commit()
+            if not already_committed:
+                return False, False
+        except Exception:
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            logger.error(
+                "短链接点击批次唯一键冲突后无法确认入账状态，保留 pending: batch_id=%s",
+                batch_id, exc_info=True,
+            )
+            return False, False
+    except Exception as exc:
+        # 包括 COMMIT 响应丢失：不 ACK pending；重试时由 batch_id 账本去重。
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        logger.error(
+            "短链接点击批次入账失败或结果不确定，保留 pending 等待幂等恢复: "
+            "short_code=%s batch_id=%s error=%s",
+            short_code, batch_id, exc, exc_info=True,
+        )
+        return False, False
+
+    acknowledged = await _acknowledge_click_batch(db, redis, batch_id, pending_key)
+    return acknowledged, inserted
+
+
+async def _sync_redis_click_counter_batches(
+    db: AsyncSession,
+    redis,
+    short_codes: list[str] | None = None,
+    max_keys: int = MAX_KEYS_PER_SYNC,
+) -> int:
+    """通过 Redis pending batch + DB 唯一账本完成可恢复的短链接点击刷盘。"""
+    processed = 0
+    inserted_count = 0
+    pending_pattern = f"{CLICK_COUNTER_PREFIX}pending:*"
+    pending_keys = await _scan_click_counter_keys(redis, max_keys, pattern=pending_pattern)
+    pending_seen = set(pending_keys)
+
+    # 优先处理上轮遗留 pending；这些 key 可能已在 DB 入账，只差 ACK。
+    for pending_key in pending_keys:
+        suffix = pending_key[len(pending_pattern.split("*", 1)[0]):]
+        try:
+            short_code, batch_id = suffix.rsplit(":", 1)
+            if short_codes and short_code not in short_codes:
+                continue
+            raw_count = await redis.get(pending_key)
+            click_count = int(raw_count) if raw_count is not None else 0
+        except Exception as exc:
+            logger.error("读取 pending 点击批次失败，保留待下轮处理: key=%s error=%s", pending_key, exc)
+            continue
+        if click_count <= 0:
+            logger.error("pending 点击批次数值无效，保留人工核验: key=%s value=%s", pending_key, raw_count)
+            continue
+        ok, inserted = await _process_pending_click_batch(
+            db, redis, short_code=short_code, batch_id=batch_id,
+            pending_key=pending_key, click_count=click_count,
+        )
+        if ok:
+            processed += 1
+            inserted_count += int(inserted)
+
+    # 再把 active counter 原子切换成 pending；切换后并发新点击写入新的 active key。
+    active_keys = await _scan_click_counter_keys(redis, max_keys, pattern=f"{CLICK_COUNTER_PREFIX}*")
+    for active_key in active_keys:
+        if ":pending:" in active_key or active_key in pending_seen:
+            continue
+        short_code = active_key[len(CLICK_COUNTER_PREFIX):]
+        if not short_code or short_codes and short_code not in short_codes:
+            continue
+        batch_id = uuid.uuid4().hex
+        pending_key = f"{CLICK_COUNTER_PREFIX}pending:{short_code}:{batch_id}"
+        try:
+            claimed = int(await redis.eval(
+                _CLAIM_COUNTER_BATCH_LUA, 2, active_key, pending_key
+            ))
+        except Exception as exc:
+            # Redis 执行结果不确定时，pending 可能已创建；下轮扫描 pending 自动恢复。
+            logger.error(
+                "切换短链接点击计数为 pending 结果不确定: short_code=%s batch_id=%s error=%s",
+                short_code, batch_id, exc, exc_info=True,
+            )
+            continue
+        if claimed <= 0:
+            continue
+
+        ok, inserted = await _process_pending_click_batch(
+            db, redis, short_code=short_code, batch_id=batch_id,
+            pending_key=pending_key, click_count=claimed,
+        )
+        if ok:
+            processed += 1
+            inserted_count += int(inserted)
+
+    logger.info(
+        "短链接点击幂等刷盘完成: processed_batches=%s newly_committed_batches=%s",
+        processed, inserted_count,
+    )
+    return inserted_count
+
 
 
 async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = None) -> int:
@@ -597,238 +834,11 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
             await persist_counters()
             return synced
         
-        # Redis 恢复后先补写故障期间积累的本地计数，避免只扫描 Redis 而遗漏降级数据。
+        # Redis 恢复后先补写历史进程内快照；随后使用 pending batch + DB 唯一账本刷盘。
         await _sync_in_memory_counters_to_db(db, short_codes)
-        # 即使后续 SCAN 没有 Redis key，也必须刷新本地快照，避免重启重放已入账数据。
         await persist_counters()
+        return await _sync_redis_click_counter_batches(db, redis, short_codes)
 
-        # Redis 可用时只用 SCAN；失败时保留 Redis 数据并等待下轮重试，
-        # 绝不降级到 KEYS，避免大 keyspace 下阻塞 Redis 主线程。
-        keys = await _scan_click_counter_keys(redis, MAX_KEYS_PER_SYNC)
-        
-        if not keys:
-            logger.debug("没有需要同步的短链接点击计数器")
-            return 0
-        
-        logger.info(f"找到 {len(keys)} 个短链接点击计数器需要同步")
-        
-        # 收集所有需要更新的数据
-        updates: List[Tuple[str, int, str]] = []  # (short_code, count, redis_key)
-        
-        for key in keys:
-            # 安全地提取 short_code：使用 startswith 检查并移除前缀
-            # 这样可以避免 key 中多次出现前缀时提取错误的问题
-            if not key.startswith(CLICK_COUNTER_PREFIX):
-                logger.warning(f"Redis键格式不符合预期，跳过: key={key}")
-                continue
-            
-            short_code = key[len(CLICK_COUNTER_PREFIX):]
-            
-            # 验证 short_code 不为空且格式正确
-            if not short_code or len(short_code) == 0:
-                logger.warning(f"从Redis键提取的short_code为空，跳过: key={key}")
-                continue
-            
-            if short_codes and short_code not in short_codes:
-                continue
-            
-            try:
-                # 使用Lua脚本原子获取计数器值（不删除，避免数据丢失）
-                # 只有在数据库更新成功后才删除计数器，确保数据不丢失
-                count_value = await redis.eval(_GET_COUNTER_LUA, 1, key)
-                
-                # Lua脚本返回的是数字类型，需要转换为int
-                if isinstance(count_value, (int, float)):
-                    count_value = int(count_value)
-                else:
-                    # 如果返回的不是数字，可能是错误，记录并跳过
-                    logger.warning(
-                        f"Lua脚本返回非数字值: short_code={short_code}, key={key}, "
-                        f"value={count_value}, type={type(count_value)}"
-                    )
-                    continue
-                
-                if count_value <= 0:
-                    # 计数器为0或不存在，跳过（不删除，因为可能正在被其他进程使用）
-                    continue
-                
-                updates.append((short_code, count_value, key))
-                
-            except Exception as e:
-                # 获取计数器值失败，保留以便下次重试
-                # 注意：如果Lua脚本执行失败，计数器可能没有被删除，会在下次同步时重试
-                logger.error(
-                    f"获取计数器值失败: short_code={short_code}, key={key}, error={e}",
-                    exc_info=True
-                )
-        
-        if not updates:
-            logger.debug("没有需要同步的计数器")
-            return 0
-        
-        logger.info(f"准备批量同步 {len(updates)} 个短链接的点击次数")
-        
-        # 第一步：预先验证短链接是否存在，不存在的直接清理（避免无效重试）
-        short_codes_to_check = [code for code, _, _ in updates]
-        existing_codes = set()
-        try:
-            result = await db.execute(
-                select(ShortLink.short_code, ShortLink.is_active).where(
-                    ShortLink.short_code.in_(short_codes_to_check)
-                )
-            )
-            existing_links = result.fetchall()
-            existing_codes = {row[0] for row in existing_links if row[1]}  # 只包含激活的短链接
-        except Exception as e:
-            # 预验证失败代表数据库状态未知，绝不能把“未知”当成“不存在”。
-            # 否则后续 invalid_updates 分支会删除 Redis 中尚未入账的计数。
-            logger.error(
-                "预验证短链接存在性失败，本轮保留全部 Redis 计数并跳过同步: %s",
-                e,
-                exc_info=True,
-            )
-            try:
-                await db.rollback()
-            except Exception as rollback_exc:
-                logger.warning("预验证失败后的数据库回滚失败: %s", rollback_exc)
-            return 0
-        
-        # 分离存在的和不存在的短链接
-        valid_updates = []
-        invalid_updates = []
-        for update_item in updates:
-            short_code = update_item[0]
-            if short_code in existing_codes:
-                valid_updates.append(update_item)
-            else:
-                invalid_updates.append(update_item)
-                # 立即清理不存在的短链接的Redis计数器（如果Lua脚本还没删除）
-                if redis:
-                    try:
-                        redis_key = update_item[2] if len(update_item) > 2 else f"{CLICK_COUNTER_PREFIX}{short_code}"
-                        await redis.delete(redis_key)
-                        logger.info(f"清理不存在的短链接Redis计数器: short_code={short_code}")
-                    except Exception as e:
-                        logger.warning(f"清理不存在的短链接Redis计数器失败: short_code={short_code}, error={e}")
-        
-        if invalid_updates:
-            logger.info(f"发现 {len(invalid_updates)} 个不存在的短链接，已清理其Redis计数器")
-        
-        if not valid_updates:
-            logger.debug("所有短链接都不存在或已禁用，无需同步")
-            return 0
-        
-        logger.info(f"实际需要同步 {len(valid_updates)} 个有效短链接的点击次数")
-        
-        # 使用批量更新（分批处理，减少死锁风险）
-        # 减小批量大小，进一步降低死锁风险
-        BATCH_SIZE = 5  # 每批处理5条记录（进一步减小批量大小，减少锁竞争）
-        synced = 0
-        failed_updates = []  # 记录失败的更新
-        
-        for batch_idx in range(0, len(valid_updates), BATCH_SIZE):
-            batch = valid_updates[batch_idx:batch_idx + BATCH_SIZE]
-            
-            try:
-                # 按 short_code 排序，确保更新顺序一致，减少死锁
-                batch = sorted(batch, key=lambda x: x[0])
-                
-                # 尝试使用批量更新（一次性更新多条记录，减少锁持有时间）
-                batch_synced, batch_keys_to_delete, batch_failed = await _batch_update_click_counts_with_retry(
-                    db, batch, redis
-                )
-                
-                if batch_synced > 0:
-                    synced += batch_synced
-                    # 注意：Redis计数器已经在获取时通过Lua脚本原子删除了
-                    # 这里只需要处理删除失败的情况（如果Lua脚本执行失败）
-                    # 但实际上Lua脚本已经处理了删除，所以这里主要是日志记录
-                    if batch_keys_to_delete:
-                        logger.debug(
-                            f"批次 {batch_idx // BATCH_SIZE + 1} 成功同步，"
-                            f"Redis计数器已通过Lua脚本原子删除: {len(batch_keys_to_delete)} 个"
-                        )
-                
-                # 记录失败的更新
-                if batch_failed:
-                    failed_updates.extend(batch_failed)
-                    
-            except Exception as e:
-                # 批次处理失败，保留计数器以便下次重试
-                logger.error(
-                    f"批量同步点击次数失败（批次 {batch_idx // BATCH_SIZE + 1}）: {e}",
-                    exc_info=True
-                )
-                failed_updates.extend(batch)
-                try:
-                    await db.rollback()
-                except Exception:
-                    pass
-        
-        if synced > 0:
-            logger.info(f"成功同步 {synced} 个短链接的点击次数到数据库")
-        
-        if failed_updates:
-            # 对失败的更新进行二次验证，不存在的立即清理
-            failed_codes = [code for code, _, _ in failed_updates]
-            retry_updates = []
-            cleaned_updates = []
-            
-            try:
-                # 验证失败的短链接是否存在
-                result = await db.execute(
-                    select(ShortLink.short_code, ShortLink.is_active).where(
-                        ShortLink.short_code.in_(failed_codes)
-                    )
-                )
-                existing_failed = {row[0] for row in result.fetchall() if row[1]}  # 只包含激活的
-                
-                for update_item in failed_updates:
-                    short_code = update_item[0]
-                    if short_code in existing_failed:
-                        # 短链接存在且激活，加入重试列表
-                        retry_updates.append(update_item)
-                    else:
-                        # 短链接不存在或已禁用，清理Redis计数器
-                        # 注意：由于短链接不存在，不会有新的点击，可以直接删除
-                        cleaned_updates.append(update_item)
-                        if redis:
-                            try:
-                                redis_key = update_item[2] if len(update_item) > 2 else f"{CLICK_COUNTER_PREFIX}{short_code}"
-                                # 直接删除计数器（短链接不存在，不会有新点击）
-                                deleted = await redis.delete(redis_key)
-                                if deleted:
-                                    logger.info(f"清理失败且不存在的短链接Redis计数器: short_code={short_code}")
-                            except Exception as e:
-                                logger.warning(f"清理失败短链接Redis计数器失败: short_code={short_code}, error={e}")
-            except Exception as e:
-                logger.warning(f"验证失败短链接存在性失败，所有失败项将重试: {e}")
-                retry_updates = failed_updates
-            
-            # 记录日志
-            if cleaned_updates:
-                cleaned_codes = [code for code, _, _ in cleaned_updates]
-                cleaned_counts = {code: count for code, count, _ in cleaned_updates}
-                logger.info(
-                    f"清理了 {len(cleaned_updates)} 个不存在或已禁用的短链接计数器: "
-                    f"codes={cleaned_codes}, counts={cleaned_counts}"
-                )
-            
-            if retry_updates:
-                retry_codes = [code for code, _, _ in retry_updates]
-                retry_counts = {code: count for code, count, _ in retry_updates}
-                logger.warning(
-                    f"有 {len(retry_updates)} 个计数器同步失败，将在下次同步时重试。"
-                    f"失败的短链接代码: {retry_codes}，"
-                    f"失败的计数详情: {retry_counts}"
-                )
-            else:
-                logger.info("所有失败的计数器都已清理，无需重试")
-        
-        # 同步完成后持久化进程内计数器
-        await persist_counters()
-        
-        return synced
     except Exception as e:
         logger.error(f"同步点击次数到数据库失败: {e}", exc_info=True)
         return 0
