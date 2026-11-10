@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.cap import cap_manager
+from app.core.postback.checks import cap_checker
 from app.core.postback.checks.cap_checker import CapChecker
 from app.core.postback.processor import PostbackProcessor
 
@@ -100,14 +101,8 @@ async def test_cap_checker_rolls_back_only_the_recorded_reservations(monkeypatch
     async def dec_total(offer_id, publisher_id=None):
         calls.append(("total", offer_id, publisher_id))
 
-    monkeypatch.setattr(CapChecker.__module__ and __import__(
-        "app.core.postback.checks.cap_checker", fromlist=["RedisCapManager"]
-    ).RedisCapManager, "decrement_daily", dec_daily)
-    monkeypatch.setattr(
-        __import__("app.core.postback.checks.cap_checker", fromlist=["RedisCapManager"]).RedisCapManager,
-        "decrement_total",
-        dec_total,
-    )
+    monkeypatch.setattr(cap_checker.RedisCapManager, "decrement_daily", dec_daily)
+    monkeypatch.setattr(cap_checker.RedisCapManager, "decrement_total", dec_total)
 
     await CapChecker.rollback_reservations([("total", 77, 12)])
 
