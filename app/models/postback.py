@@ -432,7 +432,7 @@ class ShortLinkClickSyncBatch(Base):
     batch_id = Column(String(64), primary_key=True, comment="Redis pending batch UUID")
     short_code = Column(String(20), nullable=False, comment="短链接代码")
     click_count = Column(Integer, nullable=False, comment="本批次待入账点击数")
-    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment="创建时间")
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment="创建时间")
     acknowledged_at = Column(DateTime, nullable=True, comment="Redis pending key 确认删除时间")
 
     __table_args__ = (
