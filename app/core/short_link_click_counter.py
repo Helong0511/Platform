@@ -192,10 +192,25 @@ def load_persisted_counters():
             with open(COUNTER_PERSIST_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 if isinstance(data, dict):
-                    _click_counters.update(data)
+                    valid_data = {}
+                    invalid_entries = 0
+                    for code, count in data.items():
+                        if (
+                            not isinstance(code, str)
+                            or not code
+                            or not isinstance(count, int)
+                            or isinstance(count, bool)
+                            or count <= 0
+                        ):
+                            invalid_entries += 1
+                            continue
+                        valid_data[code] = count
+                    _click_counters.update(valid_data)
                     logger.warning(
-                        "检测到旧版点击计数快照: %s 个计数器；因缺少批次幂等键，仅保留供人工核对，不自动重放",
-                        len(data),
+                        "检测到旧版点击计数快照: %s 个有效计数器、%s 个无效条目；"
+                        "因缺少批次幂等键，仅保留供人工核对，不自动重放",
+                        len(valid_data),
+                        invalid_entries,
                     )
     except Exception as e:
         logger.warning(f"⚠️ 加载持久化计数器数据失败: {e}")
