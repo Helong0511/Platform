@@ -194,7 +194,8 @@ async def test_requeue_uses_atomic_lrem_and_lpush_script(monkeypatch):
     assert target == clicks_queue.CLICKS_QUEUE_KEY
     assert source_raw == raw
     assert '"_queue_retry": 1' in payload
-    assert "LREM" in script and "LPUSH" in script
+    assert "TYPE" in script and "LREM" in script and "LPUSH" in script
+    assert script.index("TYPE") < script.index("LREM")
 
 
 @pytest.mark.asyncio
@@ -222,7 +223,8 @@ async def test_requeue_moves_exhausted_message_to_dead_letter_atomically(monkeyp
     script, numkeys, source, target, source_raw, payload = redis.calls[0]
     assert target == clicks_queue.CLICKS_DLQ_KEY
     assert '"reason": "max_retries:0"' in payload
-    assert "LREM" in script and "RPUSH" in script
+    assert "TYPE" in script and "LREM" in script and "RPUSH" in script
+    assert script.index("TYPE") < script.index("LREM")
 
 
 
