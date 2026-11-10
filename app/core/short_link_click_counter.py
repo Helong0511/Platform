@@ -679,8 +679,18 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
             existing_links = result.fetchall()
             existing_codes = {row[0] for row in existing_links if row[1]}  # 只包含激活的短链接
         except Exception as e:
-            logger.warning(f"预验证短链接存在性失败，继续同步: {e}")
-            # 如果验证失败，继续同步流程，让后续逻辑处理
+            # 预验证失败代表数据库状态未知，绝不能把“未知”当成“不存在”。
+            # 否则后续 invalid_updates 分支会删除 Redis 中尚未入账的计数。
+            logger.error(
+                "预验证短链接存在性失败，本轮保留全部 Redis 计数并跳过同步: %s",
+                e,
+                exc_info=True,
+            )
+            try:
+                await db.rollback()
+            except Exception as rollback_exc:
+                logger.warning("预验证失败后的数据库回滚失败: %s", rollback_exc)
+            return 0
         
         # 分离存在的和不存在的短链接
         valid_updates = []
