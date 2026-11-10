@@ -74,8 +74,10 @@ class CapChecker:
         publisher_id: Optional[int],
         advertiser_id: Optional[int],
         db: AsyncSession,
+        *,
+        reservations: Optional[list[tuple]] = None,
     ) -> None:
-        """DB 回滚后同步回退 Redis Cap 计数。"""
+        """仅按当前请求的 reservation token 回退 Redis；旧式无 token 调用安全拒绝。"""
         if not offer_id:
             return
         await rollback_cap_redis_counts(
@@ -83,6 +85,7 @@ class CapChecker:
             offer_id=offer_id,
             publisher_id=publisher_id,
             advertiser_id=advertiser_id,
+            reservations=reservations,
         )
     
     @staticmethod
