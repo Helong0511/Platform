@@ -105,6 +105,8 @@ class ClickAssociator:
                     select(Publisher).where(Publisher.id == publisher_id).limit(1)
                 )
                 association["publisher"] = r.scalars().first()
+                if association["publisher"] is not None:
+                    association["client_id"] = association["publisher"].client_id
             if offer_id and association.get("offer") is None:
                 r = await db.execute(
                     select(Offer).where(Offer.id == offer_id).limit(1)
@@ -198,6 +200,8 @@ class ClickAssociator:
             'os': click.os,
             'offer': click.offer,
             'publisher': click.publisher,
+            # 客户归属以点击时的渠道配置为准，不能信任回调请求体中的 client_id。
+            'client_id': click.publisher.client_id if click.publisher else None,
             'advertiser': click.advertiser,
             'url_params': url_params,
         }
