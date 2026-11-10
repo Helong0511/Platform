@@ -148,11 +148,12 @@ async def process_clicks_queue() -> Dict[str, int]:
 
                     # 4. 批量插入 Click 记录
                     inserted_count, duplicate_count = await _batch_insert_clicks(db, valid_clicks)
-                    result['inserted'] += inserted_count
-                    result['deduplicated'] = result.get('deduplicated', 0) + duplicate_count
-                    result['failed'] += filtered_count + len(valid_clicks) - inserted_count - duplicate_count
 
+                    # 只有 DB COMMIT 确认成功后才计入成功统计；COMMIT 结果不确定时整批回队。
                     await db.commit()
+                    result['inserted'] += inserted_count
+                    result['deduplicated'] += duplicate_count
+                    result['failed'] += filtered_count + len(valid_clicks) - inserted_count - duplicate_count
                     await acknowledge_reserved(raw_items)
                     logger.debug(
                         f"批量插入点击记录成功（第 {batch_count} 批）: "
