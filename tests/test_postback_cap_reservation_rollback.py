@@ -96,19 +96,19 @@ async def test_fail_open_only_returns_reservations_that_really_incremented(monke
 async def test_cap_checker_rolls_back_only_the_recorded_reservations(monkeypatch):
     calls = []
 
-    async def dec_daily(offer_id, publisher_id=None, reservation_date=None):
-        calls.append(("daily", offer_id, publisher_id, reservation_date))
+    async def dec_daily(offer_id, publisher_id=None, reservation_date=None, reservation_id=None):
+        calls.append(("daily", offer_id, publisher_id, reservation_date, reservation_id))
 
-    async def dec_total(offer_id, publisher_id=None):
-        calls.append(("total", offer_id, publisher_id, None))
+    async def dec_total(offer_id, publisher_id=None, reservation_id=None):
+        calls.append(("total", offer_id, publisher_id, None, reservation_id))
 
     monkeypatch.setattr(cap_checker.RedisCapManager, "decrement_daily", staticmethod(dec_daily))
     monkeypatch.setattr(cap_checker.RedisCapManager, "decrement_total", staticmethod(dec_total))
 
     reservation_date = datetime(2026, 11, 9, 0, 0, 0)
     await CapChecker.rollback_reservations([
-        ("daily", 77, 12, reservation_date),
-        ("total", 77, 12, None),
+        ("daily", 77, 12, reservation_date, None),
+        ("total", 77, 12, None, None),
     ])
 
     assert calls == [
@@ -237,10 +237,11 @@ async def test_successful_daily_reservation_records_business_date(monkeypatch):
 
     assert ok is True
     assert status == "cap_ok"
-    assert reservations == [
+    assert [item[:4] for item in reservations] == [
         ("daily", 77, 12, datetime(2026, 11, 10, 0, 0, 0)),
         ("total", 77, 12, None),
     ]
+    assert all(len(item[4]) == 32 for item in reservations)
 
 
 @pytest.mark.asyncio
