@@ -1,7 +1,7 @@
 -- 短链接点击刷盘幂等账本迁移（MySQL 8.0）
 --
--- 目的：通过 Redis pending batch + DB 唯一 batch_id，保证 DB COMMIT 响应丢失、
--- 进程在提交后崩溃、Redis ACK 失败时，重试不会重复增加 short_links.click_count。
+-- 目的：通过 Redis pending batch / DB fallback event + 唯一 batch_id，保证 DB COMMIT
+-- 响应丢失、进程在提交后崩溃、Redis ACK 失败时，重试不会重复增加 short_links.click_count。
 --
 -- 发布顺序：
 -- 1. 先在隔离数据库演练；本审计和 CI 禁止连接/执行生产数据库。
