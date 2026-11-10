@@ -8,7 +8,6 @@ import asyncio
 import httpx
 import hashlib
 import json
-import uuid
 from typing import Optional
 from datetime import datetime
 
