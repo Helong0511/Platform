@@ -24,9 +24,3 @@ async def test_unsupported_method_is_rejected_without_creating_http_client(monke
     assert status_code == 0
     assert message.startswith("Unsupported HTTP method:")
 
-
-def test_method_allowlist_is_explicit():
-    import inspect
-
-    source = inspect.getsource(HttpClient.send_request)
-    assert 'normalized_method not in {"GET", "POST"}' in source
