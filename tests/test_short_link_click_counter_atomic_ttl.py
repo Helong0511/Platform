@@ -521,6 +521,38 @@ async def test_click_batch_ack_failure_replays_without_double_increment(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_click_batch_keeps_pending_until_cache_invalidation_succeeds(monkeypatch):
+    state = {"invalidations": 0}
+
+    async def invalidate(_short_code):
+        state["invalidations"] += 1
+        return state["invalidations"] > 1
+
+    monkeypatch.setattr(counter, "invalidate_short_link_cache", invalidate)
+    db = _ClickBatchLedgerDB()
+    redis = _PendingRedis()
+    args = dict(
+        short_code="cache-recovery-code",
+        batch_id="c" * 32,
+        pending_key=f"{counter.CLICK_COUNTER_PREFIX}pending:cache-recovery-code:{'c' * 32}",
+        click_count=3,
+    )
+
+    first_ok, first_inserted = await counter._process_pending_click_batch(db, redis, **args)
+    assert first_ok is False
+    assert first_inserted is True
+    assert db.click_updates == 1
+    assert args["batch_id"] in db.ledger
+    assert args["pending_key"] not in redis.deleted
+
+    second_ok, second_inserted = await counter._process_pending_click_batch(db, redis, **args)
+    assert second_ok is True
+    assert second_inserted is False
+    assert db.click_updates == 1
+    assert redis.deleted == [args["pending_key"]]
+
+
+@pytest.mark.asyncio
 async def test_legacy_raw_snapshot_batch_writer_fails_closed():
     with pytest.raises(RuntimeError, match="幂等恢复能力"):
         await counter.sync_click_counts_to_db_batch(
