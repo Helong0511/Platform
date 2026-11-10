@@ -7,6 +7,7 @@ cpl:cap:daily:{offer_id}:{date_str} -> int
 cpl:cap:total:{offer_id} -> int
 """
 import logging
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -58,19 +59,17 @@ class RedisCapManager:
         logger.error("Redis Cap Lua 失败，fail-close 拒绝")
         return False
     
-    # Lua：先判限再递增，超限返回 -1（不修改 key）
-    # KEYS[1]: cap_key
-    # ARGV[1]: expire_seconds
-    # ARGV[2]: initial_value（冷启动，key 不存在时使用）
-    # ARGV[3]: limit
+    # Lua：以唯一 reservation token 保证预留幂等；同一请求重试不会重复 INCR。
+    # KEYS[1]: cap_key；KEYS[2]: reservation token key
+    # ARGV[1]: expire_seconds；ARGV[2]: DB 初始值；ARGV[3]: limit
     _RESERVE_LUA = """
+    if redis.call('EXISTS', KEYS[2]) == 1 then
+        return tonumber(redis.call('GET', KEYS[1]) or '0')
+    end
     local limit = tonumber(ARGV[3])
     local db_count = tonumber(ARGV[2]) or 0
     local redis_value = redis.call('GET', KEYS[1])
     local current = tonumber(redis_value)
-    -- DB 计数是故障降级期间的权威累计值。Redis key 即使仍存在，也必须
-    -- 与 DB 基线取较大值，避免 Redis 故障恢复后继续沿用过期的旧计数。
-    -- 非数字/损坏的 Redis 值按 DB 基线修复，避免 Lua 比较时报错并长期卡死。
     if not current then
         current = db_count
     else
@@ -80,9 +79,24 @@ class RedisCapManager:
         return -1
     end
     local new_val = current + 1
-    redis.call('SET', KEYS[1], new_val)
-    redis.call('EXPIRE', KEYS[1], ARGV[1])
+    redis.call('SET', KEYS[1], new_val, 'EX', ARGV[1])
+    redis.call('SET', KEYS[2], '1', 'EX', ARGV[1])
     return new_val
+    """
+
+    # 仅当本次 token 仍存在时撤销一次；重复调用不会误减其他请求的计数。
+    _ROLLBACK_RESERVATION_LUA = """
+    if redis.call('DEL', KEYS[2]) == 0 then
+        return 0
+    end
+    if redis.call('EXISTS', KEYS[1]) == 0 then
+        return 0
+    end
+    local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+    if current > 0 then
+        return redis.call('DECR', KEYS[1])
+    end
+    return 0
     """
 
     # Lua：原子回滚（decr 后若 <0 则归零，避免并发 set 覆盖丢失计数）
@@ -108,7 +122,8 @@ class RedisCapManager:
         offer_id: int, 
         limit: int, 
         publisher_id: Optional[int] = None,
-        initial_value: Optional[int] = None
+        initial_value: Optional[int] = None,
+        reservation_id: Optional[str] = None,
     ) -> Optional[bool]:
         """
         检查并增加每日计数 (原子操作)
@@ -131,10 +146,13 @@ class RedisCapManager:
         
         try:
             init_val = str(initial_value) if initial_value is not None else "0"
+            token = reservation_id or uuid.uuid4().hex
+            token_key = f"{key}:reservation:{token}"
             current = await redis.eval(
                 RedisCapManager._RESERVE_LUA,
-                1,
+                2,
                 key,
+                token_key,
                 DEFAULT_EXPIRE_SECONDS,
                 init_val,
                 str(limit),
@@ -143,7 +161,16 @@ class RedisCapManager:
                 return False
             return True
         except Exception as e:
-            logger.error(f"Redis Lua操作失败: {e}", exc_info=True)
+            logger.error("Redis 日 Cap 预留结果不确定，使用唯一令牌执行幂等补偿：%s", e, exc_info=True)
+            try:
+                rolled_back = await RedisCapManager.decrement_daily(
+                    offer_id, publisher_id, reservation_date=now,
+                    reservation_id=token,
+                )
+            except Exception:
+                rolled_back = -1
+            if rolled_back < 0:
+                raise RuntimeError("Redis 日 Cap 预留结果不确定且令牌补偿失败") from e
             return RedisCapManager._lua_failure_result()
 
     @staticmethod
@@ -151,7 +178,8 @@ class RedisCapManager:
         offer_id: int, 
         limit: int, 
         publisher_id: Optional[int] = None,
-        initial_value: Optional[int] = None
+        initial_value: Optional[int] = None,
+        reservation_id: Optional[str] = None,
     ) -> Optional[bool]:
         """
         检查并增加总计数
@@ -164,10 +192,13 @@ class RedisCapManager:
         
         try:
             init_val = str(initial_value) if initial_value is not None else "0"
+            token = reservation_id or uuid.uuid4().hex
+            token_key = f"{key}:reservation:{token}"
             current = await redis.eval(
                 RedisCapManager._RESERVE_LUA,
-                1,
+                2,
                 key,
+                token_key,
                 30 * 24 * 3600,
                 init_val,
                 str(limit),
@@ -176,7 +207,15 @@ class RedisCapManager:
                 return False
             return True
         except Exception as e:
-            logger.error(f"Redis Lua操作失败: {e}", exc_info=True)
+            logger.error("Redis 总 Cap 预留结果不确定，使用唯一令牌执行幂等补偿：%s", e, exc_info=True)
+            try:
+                rolled_back = await RedisCapManager.decrement_total(
+                    offer_id, publisher_id, reservation_id=token,
+                )
+            except Exception:
+                rolled_back = -1
+            if rolled_back < 0:
+                raise RuntimeError("Redis 总 Cap 预留结果不确定且令牌补偿失败") from e
             return RedisCapManager._lua_failure_result()
             
     @staticmethod
@@ -184,6 +223,7 @@ class RedisCapManager:
         offer_id: int,
         publisher_id: Optional[int] = None,
         reservation_date: Optional[datetime] = None,
+        reservation_id: Optional[str] = None,
     ) -> int:
         """
         减少每日计数 (用于回滚，原子操作)
@@ -201,7 +241,19 @@ class RedisCapManager:
         try:
             # 使用 Lua 脚本原子化 decr + 负数归零，避免 TOCTOU 竞态
             # （decr 后到 set(0) 之间若有 incr 会丢失计数或导致配额虚增）
-            val = await redis.eval(RedisCapManager._DECREMENT_LUA, 1, key)
+            if reservation_id:
+                token_key = f"{key}:reservation:{reservation_id}"
+                val = await redis.eval(
+                    RedisCapManager._ROLLBACK_RESERVATION_LUA, 2, key, token_key
+                )
+            else:
+                if reservation_id:
+                token_key = f"{key}:reservation:{reservation_id}"
+                val = await redis.eval(
+                    RedisCapManager._ROLLBACK_RESERVATION_LUA, 2, key, token_key
+                )
+            else:
+                val = await redis.eval(RedisCapManager._DECREMENT_LUA, 1, key)
             return int(val)
         except Exception as e:
             logger.error(f"Redis回滚失败: {e}", exc_info=True)
@@ -210,7 +262,8 @@ class RedisCapManager:
     @staticmethod
     async def decrement_total(
         offer_id: int,
-        publisher_id: Optional[int] = None
+        publisher_id: Optional[int] = None,
+        reservation_id: Optional[str] = None,
     ) -> int:
         """
         减少总计数 (用于回滚，原子操作)
