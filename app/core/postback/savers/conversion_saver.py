@@ -11,7 +11,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.models.models import PostbackConversion, Click
+from app.models.models import PostbackConversion, Click, Product
 from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
@@ -71,6 +71,48 @@ class ConversionSaver:
         snap_pub = click_association.get('publisher_id') if click_association else None
         snap_adv = click_association.get('advertiser_id') if click_association else None
 
+        # 租户归属必须来自服务器侧 Click -> Publisher 关联，不能接受回调请求体覆盖。
+        trusted_client_id = (
+            click_association.get('client_id') if click_association else None
+        )
+        if trusted_client_id is None and click_association:
+            trusted_publisher = click_association.get('publisher')
+            trusted_client_id = getattr(trusted_publisher, 'client_id', None)
+
+        supplied_client_id = normalized_data.get('client_id')
+        if (
+            supplied_client_id is not None
+            and trusted_client_id is not None
+            and int(supplied_client_id) != int(trusted_client_id)
+        ):
+            logger.warning(
+                "忽略回调中与点击归属不一致的 client_id：supplied=%s trusted=%s",
+                supplied_client_id,
+                trusted_client_id,
+            )
+
+        # 产品必须属于点击归属的客户；没有可信客户上下文时不采信回调中的 product_id。
+        product_id_candidate = (
+            click_association.get('product_id') if click_association else None
+        ) or normalized_data.get('product_id')
+        trusted_product_id = None
+        if trusted_client_id is not None and product_id_candidate is not None:
+            product_result = await db.execute(
+                select(Product.id)
+                .where(
+                    Product.id == product_id_candidate,
+                    Product.client_id == trusted_client_id,
+                )
+                .limit(1)
+            )
+            trusted_product_id = product_result.scalar_one_or_none()
+            if trusted_product_id is None:
+                logger.warning(
+                    "忽略不属于当前点击客户的 product_id：product_id=%s client_id=%s",
+                    product_id_candidate,
+                    trusted_client_id,
+                )
+
         conversion = PostbackConversion(
             platform=normalized_data['platform'],
             conversion_id=normalized_data['conversion_id'],
@@ -88,8 +130,8 @@ class ConversionSaver:
             carrier=normalized_data['carrier'],
             ip=normalized_data['ip'] or (click_association.get('ip') if click_association else None),
             gid=normalized_data['gid'],
-            product_id=normalized_data['product_id'] or (click_association.get('product_id') if click_association else None),
-            client_id=normalized_data['client_id'] or (click_association.get('client_id') if click_association else None),
+            product_id=trusted_product_id,
+            client_id=trusted_client_id,
             conversion_status=conversion_status,
             raw_data=raw_data_json,
             created_at=get_app_now_naive()
