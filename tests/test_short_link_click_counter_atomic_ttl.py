@@ -28,8 +28,12 @@ async def test_increment_uses_single_atomic_redis_script(monkeypatch):
     assert event_key.startswith("short_link:click_event:")
     assert ttl == 120
     assert "EXPIRE" not in script
-    assert "redis.call('INCR', KEYS[1])" in script
-    assert "return redis.call('INCR', KEYS[1])" in script
+    # INCR 由 pcall 包装：只有 Redis 明确执行失败时才清除本次 marker，
+    # 避免脚本异常或响应丢失造成相同 click_id 重试时重复计数。
+    assert "pcall(redis.call, 'INCR', KEYS[1])" in script
+    assert "if not ok then" in script
+    assert "redis.call('DEL', KEYS[2])" in script
+    assert "return incremented" in script
 
 
 def test_decrement_script_only_removes_counter_after_acknowledged_snapshot():
