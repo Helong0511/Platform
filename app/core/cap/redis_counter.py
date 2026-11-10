@@ -79,6 +79,8 @@ class RedisCapManager:
         return existing
     end
     local limit = tonumber(ARGV[3])
+    local counter_ttl = tonumber(ARGV[1]) or 0
+    local token_ttl = tonumber(ARGV[4]) or counter_ttl
     local db_count = tonumber(ARGV[2]) or 0
     local redis_value = redis.call('GET', KEYS[1])
     local current = tonumber(redis_value)
@@ -91,8 +93,21 @@ class RedisCapManager:
         return -1
     end
     local new_val = current + 1
-    redis.call('SET', KEYS[1], new_val, 'EX', ARGV[1])
-    redis.call('SET', KEYS[2], '1', 'EX', ARGV[1])
+    -- Daily key 设置滚动 TTL；Total key 使用 counter_ttl=0，必须永久保留。
+    redis.call('SET', KEYS[1], new_val)
+    if counter_ttl > 0 then
+        redis.call('EXPIRE', KEYS[1], counter_ttl)
+    else
+        -- 兼容旧版本遗留的 30 天 TTL，首次新代码预留时主动清除。
+        redis.call('PERSIST', KEYS[1])
+    end
+    -- reservation token 独立过期，避免成功提交的请求留下永久 token。
+    redis.call('SET', KEYS[2], '1')
+    if token_ttl > 0 then
+        redis.call('EXPIRE', KEYS[2], token_ttl)
+    else
+        redis.call('PERSIST', KEYS[2])
+    end
     return new_val
     """
 
@@ -174,6 +189,7 @@ class RedisCapManager:
                 DEFAULT_EXPIRE_SECONDS,
                 init_val,
                 str(limit),
+                DEFAULT_EXPIRE_SECONDS,
             )
             current = int(current)
             if current == -2:
@@ -222,9 +238,10 @@ class RedisCapManager:
                 2,
                 key,
                 token_key,
-                30 * 24 * 3600,
+                0,  # Total Cap 计数器不能自动过期。
                 init_val,
                 str(limit),
+                30 * 24 * 3600,  # reservation token 独立保留 30 天。
             )
             current = int(current)
             if current == -2:
