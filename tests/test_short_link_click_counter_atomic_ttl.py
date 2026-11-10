@@ -261,3 +261,24 @@ async def test_click_increment_uses_atomic_db_fallback_across_workers(monkeypatc
     assert fake_db.committed is True
     compiled = str(fake_db.statement)
     assert "click_count" in compiled
+
+
+@pytest.mark.asyncio
+async def test_sync_fails_closed_when_redis_client_lookup_raises(monkeypatch):
+    async def broken_redis_client():
+        raise OSError("simulated isolated Redis connection setup failure")
+
+    class FakeDb:
+        executed = False
+
+        async def execute(self, statement):
+            self.executed = True
+            raise AssertionError("sync must not run without a verifiable distributed lock")
+
+    db = FakeDb()
+    monkeypatch.setattr(counter, "get_redis_client", broken_redis_client)
+
+    synced = await counter.sync_click_counts_to_db(db)
+
+    assert synced == 0
+    assert db.executed is False
