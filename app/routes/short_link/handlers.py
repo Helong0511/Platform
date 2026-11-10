@@ -223,7 +223,7 @@ async def handle_cached_redirect(
         )
 
     # 更新点击次数
-    await increment_click_count_async(short_code)
+    await increment_click_count_async(short_code, click_id=click_id)
 
     # 打印最终跳转链接详细信息
     log_redirect_details(
