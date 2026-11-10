@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.postback.savers.conversion_saver import ConversionSaver
+from app.core.postback import pipeline as postback_pipeline
 
 
 class FakeResult:
@@ -123,3 +124,53 @@ async def test_product_from_another_client_is_not_attached_to_conversion():
 
     assert conversion.client_id == 12
     assert conversion.product_id is None
+
+
+
+@pytest.mark.asyncio
+async def test_discount_step_uses_trusted_tenant_attribution_not_callback_fields(monkeypatch):
+    captured = {}
+
+    async def resolve_trusted_attribution(**kwargs):
+        return 12, 100
+
+    async def fake_calculate(**kwargs):
+        captured.update(kwargs)
+        return Decimal("1.0000"), {"deducted": False}, False
+
+    monkeypatch.setattr(
+        ConversionSaver,
+        "resolve_trusted_attribution",
+        staticmethod(resolve_trusted_attribution),
+    )
+    monkeypatch.setattr(
+        postback_pipeline.DiscountChecker,
+        "calculate",
+        staticmethod(fake_calculate),
+    )
+
+    context = postback_pipeline.PostbackPipelineContext(
+        platform="bft",
+        raw_data={},
+        db=object(),
+        normalized_data={
+            "payout": Decimal("1.0000"),
+            "client_id": 99,
+            "product_id": 999,
+            "click_id": "click-1",
+        },
+        click_association={
+            "offer_id": 2,
+            "publisher_id": 3,
+            "advertiser_id": 4,
+            "client_id": 12,
+        },
+    )
+
+    await postback_pipeline.step_apply_discount(context)
+
+    assert captured["client_id"] == 12
+    assert captured["product_id"] == 100
+    assert context.trusted_attribution_resolved is True
+    assert context.trusted_client_id == 12
+    assert context.trusted_product_id == 100
