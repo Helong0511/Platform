@@ -420,6 +420,27 @@ class ShortLink(Base):
     )
 
 
+class ShortLinkClickSyncBatch(Base):
+    """
+    短链接点击刷盘幂等账本。
+
+    每个 Redis pending batch 在 DB 中最多入账一次；只有 Redis pending key
+    确认删除后才标记 acknowledged，便于在 COMMIT/Redis 响应不确定时安全重试。
+    """
+    __tablename__ = "short_link_click_sync_batches"
+
+    batch_id = Column(String(64), primary_key=True, comment="Redis pending batch UUID")
+    short_code = Column(String(20), nullable=False, index=True, comment="短链接代码")
+    click_count = Column(Integer, nullable=False, comment="本批次待入账点击数")
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment="创建时间")
+    acknowledged_at = Column(DateTime, nullable=True, index=True, comment="Redis pending key 确认删除时间")
+
+    __table_args__ = (
+        Index("idx_short_click_batch_code_created", "short_code", "created_at"),
+        Index("idx_short_click_batch_ack_created", "acknowledged_at", "created_at"),
+    )
+
+
 # ==================== CPL 系统数据模型 ====================
 
 class PendingPostbackConversion(Base):
