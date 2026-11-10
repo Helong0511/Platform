@@ -452,4 +452,15 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
     },
     #     "description": "任务描述",
     # },
+    # ========== Postback 下游转发与失败重试 ==========
+    "Postback转发队列处理": {
+        "task_name": "Postback转发队列处理",
+        "task_module": "app.scheduler_module.tasks.forward_tasks",
+        "task_function": "process_forward_queue",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "*/1 * * * *",
+        "description": "每分钟处理到期的渠道/产品 Postback 转发任务与失败重试，确保进程重启后可恢复",
+    },
+
 }
