@@ -10,6 +10,7 @@ from app.core.cap import cap_manager
 from app.core.postback.checks import cap_checker
 from app.core.postback.checks.cap_checker import CapChecker
 from app.core.postback.processor import PostbackProcessor
+from app.core.postback.pipeline import conversion_status_for_cap
 
 
 class _Scalars:
@@ -364,3 +365,10 @@ async def test_cap_checker_attempts_all_rollbacks_after_one_token_fails(monkeypa
         await CapChecker.rollback_reservations(reservations)
 
     assert calls == [("daily", "bad-token"), ("total", "good-token")]
+
+
+@pytest.mark.parametrize(("cap_ok", "expected"), [(True, "Pending"), (False, "CapReached")])
+def test_cap_conversion_status_fits_database_column(cap_ok, expected):
+    status = conversion_status_for_cap(cap_ok)
+    assert status == expected
+    assert len(status) <= 20
