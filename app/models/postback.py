@@ -424,8 +424,9 @@ class ShortLinkClickSyncBatch(Base):
     """
     短链接点击刷盘幂等账本。
 
-    每个 Redis pending batch 在 DB 中最多入账一次；只有 Redis pending key
-    确认删除后才标记 acknowledged，便于在 COMMIT/Redis 响应不确定时安全重试。
+    Redis pending batch 与 Redis 不可用时的单次点击事件共用唯一账本。
+    pending batch 只有在 Redis pending key 确认删除后才标记 acknowledged；
+    DB fallback event 在同一事务提交时直接标记 acknowledged。
     """
     __tablename__ = "short_link_click_sync_batches"
 
