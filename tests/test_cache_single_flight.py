@@ -81,7 +81,6 @@ def test_single_flight_state_is_isolated_between_event_loops():
         return cache_compat_mod._get_inflight_state()
 
     cache_compat_mod._inflight_futures.clear()
-    cache_compat_mod._inflight_locks.clear()
 
     lock_a, futures_a = asyncio.run(get_state())
     lock_b, futures_b = asyncio.run(get_state())
