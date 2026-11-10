@@ -9,13 +9,13 @@ import logging
 import asyncio
 import random
 from typing import Dict, List, Tuple
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from app.core.redis_client import get_redis_client
 from app.core.database import AsyncSessionLocal
 from app.core.short_link_cache import invalidate_short_link_cache
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import update, text
+from sqlalchemy import delete, update, text
 from sqlalchemy.exc import OperationalError, IntegrityError
 from app.models.models import ShortLink, ShortLinkClickSyncBatch
 import uuid
@@ -572,6 +572,71 @@ async def _process_pending_click_batch(
     return acknowledged, inserted
 
 
+async def _cleanup_click_sync_batch_ledger(
+    db: AsyncSession,
+    redis,
+    *,
+    max_unacked: int = 100,
+    max_delete: int = 500,
+    retention_days: int = 30,
+) -> None:
+    """
+    有界清理已确认 ACK 的账本记录。
+
+    对 DB 已提交但 Redis DEL 响应丢失的记录，账本行本身证明 DB 已入账；
+    若 pending key 已不存在，可安全补记 ACK。未确认 ACK 的行绝不按时间直接删除。
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    try:
+        unacked_result = await db.execute(
+            select(
+                ShortLinkClickSyncBatch.batch_id,
+                ShortLinkClickSyncBatch.short_code,
+            )
+            .where(ShortLinkClickSyncBatch.acknowledged_at.is_(None))
+            .order_by(ShortLinkClickSyncBatch.created_at)
+            .limit(max_unacked)
+        )
+        for batch_id, short_code in unacked_result.fetchall():
+            pending_key = f"{CLICK_COUNTER_PREFIX}pending:{short_code}:{batch_id}"
+            try:
+                pending_exists = await redis.exists(pending_key)
+            except Exception:
+                # Redis 状态未知时不猜测 ACK 状态。
+                continue
+            if not pending_exists:
+                await db.execute(
+                    update(ShortLinkClickSyncBatch)
+                    .where(ShortLinkClickSyncBatch.batch_id == batch_id)
+                    .values(acknowledged_at=now)
+                )
+
+        cutoff = now - timedelta(days=max(1, retention_days))
+        old_ack_result = await db.execute(
+            select(ShortLinkClickSyncBatch.batch_id)
+            .where(
+                ShortLinkClickSyncBatch.acknowledged_at.is_not(None),
+                ShortLinkClickSyncBatch.acknowledged_at < cutoff,
+            )
+            .order_by(ShortLinkClickSyncBatch.acknowledged_at)
+            .limit(max_delete)
+        )
+        old_ids = old_ack_result.scalars().all()
+        if old_ids:
+            await db.execute(
+                delete(ShortLinkClickSyncBatch)
+                .where(ShortLinkClickSyncBatch.batch_id.in_(old_ids))
+            )
+        await db.commit()
+    except Exception as exc:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        logger.warning("短链接点击刷盘幂等账本清理失败（不影响 pending 重试）: %s", exc, exc_info=True)
+
+
+
 async def _sync_redis_click_counter_batches(
     db: AsyncSession,
     redis,
@@ -640,6 +705,7 @@ async def _sync_redis_click_counter_batches(
             processed += 1
             inserted_count += int(inserted)
 
+    await _cleanup_click_sync_batch_ledger(db, redis)
     logger.info(
         "短链接点击幂等刷盘完成: processed_batches=%s newly_committed_batches=%s",
         processed, inserted_count,
