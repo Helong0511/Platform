@@ -33,6 +33,7 @@ from app.core.postback.pipeline import (
     step_save_conversion,
     step_validate_offer_status,
     deactivate_short_links_on_cap_exceeded,
+    conversion_status_for_cap,
 )
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
@@ -265,7 +266,7 @@ class PostbackProcessor:
                 # 真超限：ORM 已 refresh，按 CapExceeded 入库（0 金额 + 关短链）
                 cap_ok = False
                 pipe_ctx.cap_ok = False
-                pipe_ctx.conversion_status = f"CapExceeded({cap_status or 'cap_exceeded'})"
+                pipe_ctx.conversion_status = conversion_status_for_cap(False)
                 pipe_ctx.final_payout = Decimal("0")
                 final_payout = Decimal("0")
                 logger.warning(
