@@ -198,14 +198,26 @@ async def test_sync_fails_closed_when_global_lock_acquisition_errors(monkeypatch
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("redis_mode", ["unavailable", "client_error"])
-async def test_click_increment_uses_atomic_db_fallback_across_workers(monkeypatch, redis_mode):
+async def test_click_increment_uses_idempotent_db_fallback_across_workers(monkeypatch, redis_mode):
     class FakeResult:
         rowcount = 1
+
+        def __init__(self, scalar=None, row=None):
+            self.scalar = scalar
+            self.row = row
+
+        def scalar_one_or_none(self):
+            return self.scalar
+
+        def first(self):
+            return self.row
 
     class FakeDb:
         def __init__(self):
             self.statement = None
             self.committed = False
+            self.added = None
+            self.ledger = set()
 
         async def __aenter__(self):
             return self
@@ -215,7 +227,20 @@ async def test_click_increment_uses_atomic_db_fallback_across_workers(monkeypatc
 
         async def execute(self, statement):
             self.statement = statement
-            return FakeResult()
+            sql = str(statement).upper()
+            if "FROM SHORT_LINK_CLICK_SYNC_BATCHES" in sql and sql.lstrip().startswith("SELECT"):
+                return FakeResult(row=None)
+            if "FROM SHORT_LINKS" in sql and sql.lstrip().startswith("SELECT"):
+                return FakeResult(scalar=77)
+            if sql.lstrip().startswith("UPDATE SHORT_LINKS"):
+                return FakeResult()
+            raise AssertionError(f"unexpected DB statement: {sql}")
+
+        def add(self, record):
+            self.added = record
+
+        async def flush(self):
+            self.ledger.add(self.added.batch_id)
 
         async def commit(self):
             self.committed = True
@@ -234,22 +259,22 @@ async def test_click_increment_uses_atomic_db_fallback_across_workers(monkeypatc
         if redis_mode == "client_error":
             raise OSError("simulated Redis client initialization failure")
 
-        class BrokenRedis:
-            async def eval(self, *args):
-                raise OSError("simulated Redis increment failure")
-
-        return BrokenRedis()
-
     monkeypatch.setattr(counter, "AsyncSessionLocal", fake_session_local)
     monkeypatch.setattr(counter, "get_redis_client", fake_get_redis_client)
     monkeypatch.setattr(counter, "invalidate_short_link_cache", fake_invalidate)
 
-    await counter.increment_click_count_async("worker-fallback-code")
+    await counter.increment_click_count_async(
+        "worker-fallback-code",
+        click_id="stable-db-fallback-event",
+    )
 
     assert fake_db.statement is not None
     assert fake_db.committed is True
-    compiled = str(fake_db.statement)
-    assert "click_count" in compiled
+    assert fake_db.added is not None
+    assert fake_db.added.short_code == "worker-fallback-code"
+    assert fake_db.added.click_count == 1
+    assert fake_db.added.acknowledged_at is not None
+    assert len(fake_db.added.batch_id) == 64
 
 
 @pytest.mark.asyncio
