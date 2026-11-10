@@ -48,7 +48,7 @@ MAX_BATCH_TIME = 30
 
 async def process_clicks_queue() -> Dict[str, int]:
     """
-    批量处理点击记录队列（循环处理直到队列为空或达到最大批次数）
+    批量处理点击记录队列（队列为空、达到最大批次数或运行 30 秒即停止）
     
     Returns:
         处理结果统计：{
