@@ -256,20 +256,44 @@ async def _increment_click_count_in_db(
     Redis 在执行任何计数命令前不可用时，使用 DB 唯一事件账本原子自增。
 
     batch_id 使用同一请求的 click_id SHA-256，DB COMMIT 响应丢失后可查询账本确认结果；
-    与 Redis pending batch 共用账本表，但事件记录直接标记 acknowledged_at。
+    与 Redis pending batch 共用账本表；只有短链缓存成功失效后才标记 acknowledged_at。
     """
     batch_id = event_id_digest or hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest()
     if len(batch_id) > 64:
         batch_id = hashlib.sha256(batch_id.encode("utf-8")).hexdigest()
 
-    async def invalidate_cache_after_commit() -> None:
+    async def invalidate_cache_after_commit() -> bool:
         try:
-            await invalidate_short_link_cache(short_code)
+            cache_invalidated = await invalidate_short_link_cache(short_code)
         except Exception as cache_exc:
+            cache_invalidated = False
             logger.warning(
-                "短链接点击计数已写库，但缓存失效失败: short_code=%s error=%s",
-                short_code, cache_exc,
+                "短链接点击计数已写库，但缓存失效异常: short_code=%s error=%s",
+                short_code, cache_exc, exc_info=True,
             )
+        if not cache_invalidated:
+            logger.warning(
+                "短链接点击计数已写库，但缓存尚未确认失效；保留未 ACK 账本等待恢复: "
+                "short_code=%s batch_id=%s",
+                short_code, batch_id,
+            )
+            return False
+        try:
+            async with AsyncSessionLocal() as ack_db:
+                await ack_db.execute(
+                    update(ShortLinkClickSyncBatch)
+                    .where(ShortLinkClickSyncBatch.batch_id == batch_id)
+                    .values(acknowledged_at=datetime.now(timezone.utc).replace(tzinfo=None))
+                )
+                await ack_db.commit()
+        except Exception as ack_exc:
+            # 缓存已失效但 ACK 标记写库失败；账本保留，cleanup 会再次核验并标记。
+            logger.warning(
+                "短链接缓存已失效，但事件账本 ACK 标记失败: batch_id=%s error=%s",
+                batch_id, ack_exc, exc_info=True,
+            )
+            return False
+        return True
 
     for attempt in range(3):
         try:
@@ -312,7 +336,7 @@ async def _increment_click_count_in_db(
                         batch_id=batch_id,
                         short_code=short_code,
                         click_count=1,
-                        acknowledged_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                        acknowledged_at=None,
                     ))
                     await db.flush()
                     result = await db.execute(
