@@ -33,6 +33,8 @@ _redis_last_ping_at: float = 0.0
 _redis_dev_no_host_logged = False
 _redis_dev_loopback_skip_logged = False
 _redis_connect_lock: Optional[asyncio.Lock] = None
+# 连接锁所属事件循环；首次连接前也必须显式初始化，避免读取未定义全局变量。
+_redis_connect_lock_loop: Optional[asyncio.AbstractEventLoop] = None
 
 _LOOPBACK_REDIS_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
