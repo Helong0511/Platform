@@ -304,3 +304,13 @@ async def test_reserve_dead_letters_json_array_payload(monkeypatch):
     assert await clicks_queue.reserve_clicks(1) == []
     assert redis.eval_calls[0][1] == clicks_queue.CLICKS_DLQ_KEY
     assert "invalid_json" in redis.eval_calls[0][2]
+
+
+
+@pytest.mark.asyncio
+async def test_acknowledge_reserved_reports_redis_failure(monkeypatch):
+    async def no_redis():
+        return None
+
+    monkeypatch.setattr(clicks_queue, "get_redis_client", no_redis)
+    assert await clicks_queue.acknowledge_reserved(["raw-a"]) is False
