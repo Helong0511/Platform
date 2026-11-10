@@ -255,6 +255,35 @@ async def send_third_party_report(
         logger.error(f"[第三方上报] {error_msg}")
         raise ValueError(error_msg)
 
+    event_key = build_event_idempotency_key(source, adsid, event, conversion_id)
+    try:
+        async with AsyncSessionLocal() as db:
+            status_result = await db.execute(
+                select(ThirdPartyReportLog.status)
+                .where(ThirdPartyReportLog.id == report_log_id)
+                .limit(1)
+            )
+            existing_status = status_result.scalar_one_or_none()
+    except Exception as status_exc:
+        # 无法确认该事件是否已成功上报时，不盲目重发；稳定 event_id 供后续安全重试。
+        logger.error(
+            "[第三方上报] 无法读取事件日志状态，跳过本次发送以避免重复事件: id=%s error=%s",
+            report_log_id,
+            status_exc,
+            exc_info=True,
+        )
+        return {"success": False, "retryable": True, "reason": "report_status_unavailable"}
+
+    if existing_status == "success":
+        logger.info(
+            "[第三方上报] 相同事件已成功上报，跳过重复发送: source=%s adsid=%s event=%s conversion_id=%s",
+            source,
+            adsid,
+            event,
+            conversion_id,
+        )
+        return {"success": True, "deduplicated": True, "report_log_id": report_log_id}
+
     async def _mark_failed_and_raise(error_msg: str):
         """将上报日志标为 failed 后抛出 ValueError，供上层中断流程。"""
         logger.error(f"[第三方上报] {error_msg}")
@@ -366,7 +395,7 @@ async def send_third_party_report(
                 "event_name": fb_event_name,
                 "event_time": event_time,
                 "action_source": "website",
-                "event_id": str(uuid.uuid4()),  # 生成唯一事件ID 原始值 adsid
+                "event_id": event_key,  # 同一业务事件的重试必须复用稳定 event_id
                 "user_data": user_data
             }
 
@@ -533,7 +562,7 @@ async def send_third_party_report(
                 "event_name": fb_event_name,
                 "event_time": event_time,
                 "action_source": "website",
-                "event_id": str(uuid.uuid4()),
+                "event_id": event_key,
                 "user_data": user_data
             }
 
