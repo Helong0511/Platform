@@ -42,6 +42,78 @@ class CapService(BaseService[OfferCap]):
         """注入异步数据库会话。"""
         super().__init__(db, OfferCap)
 
+    async def _validate_cap_scope(
+        self,
+        scope: Dict[str, Any],
+        *,
+        exclude_cap_id: Optional[int] = None,
+    ) -> Offer:
+        """校验 Cap 归属与唯一业务范围，并锁定 Offer 串行化同一 Offer 的配置写入。
+
+        Offer 行锁让通过本服务创建/更新同一 Offer 的并发请求串行执行；
+        不能用可空列的普通复合唯一索引替代，因为 MySQL UNIQUE 允许多个 NULL。
+        """
+        cap_type = scope.get("cap_type")
+        if cap_type not in {"offer", "advertiser_offer"}:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail="Cap 类型只能是 offer 或 advertiser_offer",
+            )
+
+        offer_id = scope.get("offer_id")
+        offer_result = await self.db.execute(
+            select(Offer).where(Offer.id == offer_id).with_for_update()
+        )
+        offer = offer_result.scalars().first()
+        if not offer:
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail=f"Offer ID {offer_id} 不存在",
+            )
+
+        advertiser_id = scope.get("advertiser_id")
+        if cap_type == "advertiser_offer":
+            if advertiser_id is None or advertiser_id != offer.advertiser_id:
+                raise_api_exception(
+                    ErrorCode.INVALID_PARAMETER,
+                    detail="广告主专属 Cap 的 advertiser_id 必须与 Offer 所属广告主一致",
+                )
+        elif advertiser_id is not None:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail="Offer 全局 Cap 不允许设置 advertiser_id",
+            )
+
+        publisher_id = scope.get("publisher_id")
+        if publisher_id is not None:
+            publisher_result = await self.db.execute(
+                select(Publisher.id).where(Publisher.id == publisher_id).limit(1)
+            )
+            if publisher_result.scalar_one_or_none() is None:
+                raise_api_exception(
+                    ErrorCode.RESOURCE_NOT_FOUND,
+                    detail=f"渠道ID {publisher_id} 不存在",
+                )
+
+        duplicate_filters = [
+            OfferCap.cap_type == cap_type,
+            OfferCap.advertiser_id == advertiser_id,
+            OfferCap.offer_id == offer_id,
+            OfferCap.publisher_id == publisher_id,
+        ]
+        if exclude_cap_id is not None:
+            duplicate_filters.append(OfferCap.id != exclude_cap_id)
+        duplicate_result = await self.db.execute(
+            select(OfferCap.id).where(*duplicate_filters).limit(1)
+        )
+        if duplicate_result.scalar_one_or_none() is not None:
+            raise_api_exception(
+                ErrorCode.RESOURCE_ALREADY_EXISTS,
+                detail="相同 Offer、广告主、渠道和 Cap 类型的配置已存在",
+            )
+
+        return offer
+
     @staticmethod
     def to_cap_response(cap: OfferCap) -> OfferCapResponse:
         """
@@ -126,40 +198,8 @@ class CapService(BaseService[OfferCap]):
         Raises:
             APIException: 关联实体不存在或数据库写入失败
         """
-        # --- 关联实体校验 ---
-        offer_result = await self.db.execute(
-            select(Offer).where(Offer.id == cap_data['offer_id'])
-        )
-        offer = offer_result.scalars().first()
-        if not offer:
-            raise_api_exception(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                detail=f"Offer ID {cap_data['offer_id']} 不存在"
-            )
-
-        # 如果是advertiser_offer类型，验证广告主
-        if cap_data.get('cap_type') == 'advertiser_offer' and cap_data.get('advertiser_id'):
-            adv_result = await self.db.execute(
-                select(Advertiser).where(Advertiser.id == cap_data['advertiser_id'])
-            )
-            advertiser = adv_result.scalars().first()
-            if not advertiser:
-                raise_api_exception(
-                    ErrorCode.RESOURCE_NOT_FOUND,
-                    detail=f"广告主ID {cap_data['advertiser_id']} 不存在"
-                )
-
-        # 如果指定了渠道，验证渠道
-        if cap_data.get('publisher_id'):
-            pub_result = await self.db.execute(
-                select(Publisher).where(Publisher.id == cap_data['publisher_id'])
-            )
-            publisher = pub_result.scalars().first()
-            if not publisher:
-                raise_api_exception(
-                    ErrorCode.RESOURCE_NOT_FOUND,
-                    detail=f"渠道ID {cap_data['publisher_id']} 不存在"
-                )
+        # 锁定 Offer 并校验广告主归属、渠道及重复配置。
+        await self._validate_cap_scope(cap_data)
 
         # 设置Cap开始日期（用于Total Cap）
         cap_start_date = None
@@ -311,7 +351,7 @@ class CapService(BaseService[OfferCap]):
             APIException: 记录不存在或提交失败
         """
         result = await self.db.execute(
-            select(OfferCap).where(OfferCap.id == cap_id)
+            select(OfferCap).where(OfferCap.id == cap_id).with_for_update()
         )
         cap = result.scalars().first()
 
@@ -321,7 +361,24 @@ class CapService(BaseService[OfferCap]):
                 detail=f"Cap配置ID {cap_id} 不存在"
             )
 
-        # 如果更新了total_cap且之前没有cap_start_date，设置开始日期
+        # 先合并现有范围与更新字段，再执行与创建相同的完整校验。
+        effective_scope = {
+            "cap_type": cap.cap_type,
+            "advertiser_id": cap.advertiser_id,
+            "offer_id": cap.offer_id,
+            "publisher_id": cap.publisher_id,
+        }
+        effective_scope.update({
+            key: update_data[key]
+            for key in ("cap_type", "advertiser_id", "offer_id", "publisher_id")
+            if key in update_data
+        })
+        await self._validate_cap_scope(
+            effective_scope,
+            exclude_cap_id=cap_id,
+        )
+
+        # 如果首次设置 total_cap 且尚无 cap_start_date，设置开始日期。
         if 'total_cap' in update_data and update_data['total_cap'] and not cap.cap_start_date:
             update_data['cap_start_date'] = get_app_now_naive()  # 使用北京时间
 
