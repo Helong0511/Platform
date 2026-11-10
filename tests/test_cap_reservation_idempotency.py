@@ -135,3 +135,45 @@ async def test_redis_unavailable_fail_closed_is_not_reported_as_cap_exhausted(mo
             publisher_id=12,
             initial_value=5,
         )
+
+
+@pytest.mark.asyncio
+async def test_legacy_rollback_without_reservation_token_never_decrements(monkeypatch):
+    from app.core.cap import cap_manager
+
+    calls = []
+
+    async def capture(reservations):
+        calls.append(reservations)
+
+    monkeypatch.setattr(cap_manager, "_rollback_reserved_redis", capture)
+
+    await cap_manager.rollback_cap_redis_counts(
+        db=None,
+        offer_id=77,
+        publisher_id=12,
+    )
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_rollback_uses_only_explicit_reservation_tokens(monkeypatch):
+    from app.core.cap import cap_manager
+
+    reservations = [("daily", 77, 12, datetime(2026, 11, 10), "token-123")]
+    calls = []
+
+    async def capture(received):
+        calls.append(received)
+
+    monkeypatch.setattr(cap_manager, "_rollback_reserved_redis", capture)
+
+    await cap_manager.rollback_cap_redis_counts(
+        db=None,
+        offer_id=77,
+        publisher_id=12,
+        reservations=reservations,
+    )
+
+    assert calls == [reservations]
