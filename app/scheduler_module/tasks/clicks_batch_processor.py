@@ -26,6 +26,8 @@ from app.core.clicks_queue import (
     acknowledge_reserved,
     drain_clicks_queue,
     get_queue_length,
+    get_processing_queue_length,
+    get_dead_letter_length,
     recover_processing_queue,
     requeue_reserved,
     reserve_clicks,
@@ -62,6 +64,8 @@ async def process_clicks_queue() -> Dict[str, int]:
         'failed': 0,
         'deduplicated': 0,
         'queue_remaining': 0,
+        'processing_remaining': 0,
+        'dead_letter': 0,
         'skipped': False,
         'drained': 0,
     }
@@ -174,6 +178,8 @@ async def process_clicks_queue() -> Dict[str, int]:
 
         # 获取剩余队列长度
         result['queue_remaining'] = await get_queue_length()
+        result['processing_remaining'] = await get_processing_queue_length()
+        result['dead_letter'] = await get_dead_letter_length()
 
         # 注意：处理结果日志由调用方（short_link_tasks.py）统一输出，避免重复
 
