@@ -241,3 +241,92 @@ async def test_successful_daily_reservation_records_business_date(monkeypatch):
         ("daily", 77, 12, datetime(2026, 11, 10, 0, 0, 0)),
         ("total", 77, 12, None),
     ]
+
+
+@pytest.mark.asyncio
+async def test_postback_precommit_queue_failure_rolls_back_cap_reservation_once(monkeypatch):
+    from decimal import Decimal
+    from app.core.postback import processor as processor_module
+    from app.core.postback import handlers as handlers_module
+
+    reservations = [("daily", 77, 12, datetime(2026, 11, 10))]
+    rollback_calls = []
+
+    class FakeDB:
+        def __init__(self):
+            self.rollback_calls = 0
+
+        async def rollback(self):
+            self.rollback_calls += 1
+
+    class FakeHandler:
+        async def validate(self, raw_data):
+            return True, None
+
+        async def normalize(self, raw_data):
+            return {
+                "platform": "isolated-test",
+                "conversion_id": "conversion-101",
+                "event_name": "purchase",
+                "click_id": "click-101",
+            }
+
+    async def valid_ip(*args, **kwargs):
+        return True, "203.0.113.10"
+
+    async def associate(ctx):
+        ctx.click_association = {
+            "offer_id": 77,
+            "publisher_id": 12,
+            "advertiser_id": None,
+            "click_id": "click-101",
+        }
+        return ctx.click_association
+
+    async def valid_offer(ctx):
+        return True
+
+    async def not_duplicate(ctx):
+        return False
+
+    async def apply_discount(ctx):
+        return Decimal("1.00"), {}, False
+
+    async def reserve(**kwargs):
+        return True, "cap_ok", reservations
+
+    async def save_conversion(ctx):
+        return SimpleNamespace(id=101, product_id=None)
+
+    async def fail_enqueue(**kwargs):
+        raise OSError("simulated isolated queue insert failure")
+
+    async def rollback_reservations(items):
+        rollback_calls.append(list(items))
+
+    monkeypatch.setattr(processor_module.IpValidator, "validate", staticmethod(valid_ip))
+    monkeypatch.setattr(handlers_module, "get_handler", lambda platform: FakeHandler())
+    monkeypatch.setattr(processor_module, "step_associate_click", associate)
+    monkeypatch.setattr(processor_module, "step_validate_offer_status", valid_offer)
+    monkeypatch.setattr(processor_module, "step_check_duplicate", not_duplicate)
+    monkeypatch.setattr(processor_module, "step_apply_discount", apply_discount)
+    monkeypatch.setattr(processor_module.CapChecker, "increment_with_reservations", reserve)
+    monkeypatch.setattr(processor_module, "step_save_conversion", save_conversion)
+    monkeypatch.setattr(
+        processor_module.PostbackProcessor,
+        "_enqueue_downstream_forward_tasks",
+        fail_enqueue,
+    )
+    monkeypatch.setattr(processor_module.CapChecker, "rollback_reservations", rollback_reservations)
+
+    db = FakeDB()
+    with pytest.raises(OSError, match="queue insert failure"):
+        await PostbackProcessor.process(
+            platform="isolated-test",
+            raw_data={"conversion_id": "conversion-101"},
+            db=db,
+            request_ip="203.0.113.10",
+        )
+
+    assert rollback_calls == [reservations]
+    assert db.rollback_calls == 1
