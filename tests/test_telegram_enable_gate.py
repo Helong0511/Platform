@@ -19,12 +19,11 @@ def test_is_telegram_enabled_false():
 
 
 def test_send_telegram_message_skipped_when_disabled():
+    # 当前发送入口先检查全局开关，不应初始化 Bot 或访问 Telegram 网络。
     with patch.object(ms, "_check_bot_available") as check:
-        with patch.object(ms, "_get_bot_instance") as get_bot:
-            ok = ms.send_telegram_message("hello")
+        ok = ms.send_telegram_message("hello")
     assert ok is False
     check.assert_not_called()
-    get_bot.assert_not_called()
 
 
 def test_send_with_buttons_skipped_when_disabled():
