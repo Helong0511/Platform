@@ -415,90 +415,45 @@ async def rollback_cap_redis_counts(
 
 async def reset_daily_caps(db: AsyncSession) -> None:
     """
-    重置每日 Cap 计数（定时任务调用）
-    使用批量更新以提高性能和原子性
-    同时清除Redis中的每日Cap计数
-    
-    Args:
-        db: 数据库会话
+    重置已跨日的每日 Cap DB 计数。
+
+    使用行锁与 Postback 的 Cap 预留串行化，避免午夜并发请求被重置覆盖。
+    不删除 Redis 今日 key：定时任务可能在当天已有流量后才运行，删除今日 key
+    会丢失已经发生的 reservation。历史日期 key 由 TTL 自然回收。
     """
     try:
         now = get_app_now_naive()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        
-        # 1. 查询所有需要重置的 Cap 配置（用于清除Redis）
-        query = select(OfferCap).where(
-            and_(
-                OfferCap.is_active == True,
-                OfferCap.daily_cap > 0,
-                or_(
-                    OfferCap.cap_start_date.is_(None),
-                    OfferCap.cap_start_date < today_start
-                )
-            )
-        )
-        result = await db.execute(query)
-        caps_to_reset = result.scalars().all()
-        
-        # 2. 清除Redis中的每日Cap计数
-        redis = await get_redis_client()
-        if redis:
-            try:
-                # 清除今天和昨天的key（防止时区问题）
-                for date_offset in [0, -1]:
-                    reset_date = today_start + timedelta(days=date_offset)
-                    for cap in caps_to_reset:
-                        # 清除所有渠道的每日Cap key
-                        # 包括特定渠道和全局渠道的key
-                        keys_to_delete = []
-                        
-                        # 全局渠道key
-                        global_key = get_daily_cap_key(cap.offer_id, reset_date, None)
-                        keys_to_delete.append(global_key)
-                        
-                        # 如果有特定渠道，也需要清除（虽然可能不存在，但为了安全）
-                        if cap.publisher_id:
-                            pub_key = get_daily_cap_key(cap.offer_id, reset_date, cap.publisher_id)
-                            keys_to_delete.append(pub_key)
-                        
-                        # 批量删除
-                        for key in keys_to_delete:
-                            try:
-                                await redis.delete(key)
-                            except Exception as e:
-                                logger.warning(f"清除Redis key失败: {key}, error: {e}")
-                
-                logger.info(f"成功清除Redis中的每日Cap计数，涉及 {len(caps_to_reset)} 个Cap配置")
-            except Exception as e:
-                logger.warning(f"清除Redis每日Cap计数时出错: {e}，继续执行DB重置")
-        else:
-            logger.warning("Redis不可用，跳过清除Redis计数")
-        
-        # 3. 批量更新数据库
-        stmt = (
-            update(OfferCap)
+
+        query = (
+            select(OfferCap)
             .where(
                 and_(
                     OfferCap.is_active == True,
                     OfferCap.daily_cap > 0,
                     or_(
                         OfferCap.cap_start_date.is_(None),
-                        OfferCap.cap_start_date < today_start
-                    )
+                        OfferCap.cap_start_date < today_start,
+                    ),
                 )
             )
-            .values(
-                current_daily_count=0,
-                cap_start_date=today_start
-            )
+            .with_for_update()
         )
-        
-        result = await db.execute(stmt)
+        result = await db.execute(query)
+        caps_to_reset = result.scalars().all()
+
+        # 行锁保证与 increment_cap_count 的 SELECT ... FOR UPDATE 串行执行。
+        # 不通过 bulk UPDATE 绕开 ORM 行锁状态，也不清理今天可能已经创建的 Redis key。
+        for cap in caps_to_reset:
+            cap.current_daily_count = 0
+            cap.cap_start_date = today_start
+
         await db.commit()
-        
-        logger.info(f"成功执行批量每日Cap重置，更新了 {result.rowcount} 条记录")
-        
+        logger.info(
+            "每日 Cap 跨日重置完成：更新 %s 条记录；保留 Redis 今日计数 key",
+            len(caps_to_reset),
+        )
     except Exception as e:
-        logger.error(f"批量重置每日Cap失败: {str(e)}", exc_info=True)
+        logger.error("每日 Cap 跨日重置失败: %s", e, exc_info=True)
         await db.rollback()
         raise
