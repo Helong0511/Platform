@@ -432,8 +432,50 @@ async def increment_click_count_async(
         await _increment_click_count_in_db(short_code, event_id_digest=event_digest)
         return
     if not redis:
-        await _increment_click_count_in_db(short_code)
+        # Redis 不可用时也必须沿用同一个 click_id，确保 Redis 恢复后的重试可查到 DB 账本。
+        await _increment_click_count_in_db(short_code, event_id_digest=event_digest)
         return
+
+    # DB 降级事件可能在 Redis 恢复后重试。若 Redis marker 不存在，先查持久化账本，
+    # 防止同一个 click_id 从 DB 路径切换到 Redis 路径后被再次计数。
+    try:
+        marker_exists = bool(await redis.exists(event_key))
+    except Exception:
+        # EXISTS 失败不能证明事件不存在；继续查询 DB 账本，Lua 仍负责 Redis 原子去重。
+        marker_exists = False
+    if not marker_exists:
+        try:
+            async with AsyncSessionLocal() as event_db:
+                event_result = await event_db.execute(
+                    select(
+                        ShortLinkClickSyncBatch.short_code,
+                        ShortLinkClickSyncBatch.click_count,
+                    )
+                    .where(ShortLinkClickSyncBatch.batch_id == event_digest)
+                    .limit(1)
+                )
+                persisted_event = event_result.first()
+        except Exception as ledger_exc:
+            # 无法核验跨存储幂等状态时 fail-closed，不能冒险再次 INCR。
+            logger.error(
+                "短链接 Redis 恢复后无法核验 DB 降级事件账本，拒绝重复计数: "
+                "short_code=%s click_id_hash=%s error=%s",
+                short_code, event_digest[:12], ledger_exc, exc_info=True,
+            )
+            return
+        if persisted_event is not None:
+            if persisted_event[0] != short_code or int(persisted_event[1]) != 1:
+                logger.critical(
+                    "短链接跨存储幂等账本 ID 冲突，拒绝重复计数: "
+                    "short_code=%s click_id_hash=%s",
+                    short_code, event_digest[:12],
+                )
+                return
+            await _increment_click_count_in_db(
+                short_code,
+                event_id_digest=event_digest,
+            )
+            return
 
     # 预验证 key 类型和值，再写 marker；网络响应丢失后用同一 event_id 重试不会重复 INCR。
     increment_script = """
