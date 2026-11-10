@@ -11,8 +11,8 @@ async def test_increment_uses_single_atomic_redis_script(monkeypatch):
     calls = []
 
     class FakeRedis:
-        async def eval(self, script, number_of_keys, key, ttl):
-            calls.append((script, number_of_keys, key, ttl))
+        async def eval(self, script, number_of_keys, key):
+            calls.append((script, number_of_keys, key))
             return 7
 
     async def fake_get_redis_client():
@@ -22,16 +22,16 @@ async def test_increment_uses_single_atomic_redis_script(monkeypatch):
     await counter.increment_click_count_async("regression-code")
 
     assert len(calls) == 1
-    script, number_of_keys, key, ttl = calls[0]
+    script, number_of_keys, key = calls[0]
     assert number_of_keys == 1
     assert key == f"{counter.CLICK_COUNTER_PREFIX}regression-code"
-    assert ttl == 48 * 3600
+    assert "EXPIRE" not in script
     assert "redis.call('INCR', KEYS[1])" in script
-    assert "redis.call('EXPIRE', KEYS[1], ARGV[1])" in script
+    assert "return redis.call('INCR', KEYS[1])" in script
 
 
-def test_decrement_script_preserves_ttl_without_replacing_key():
-    # Redis DECRBY 不会清除现有 TTL；SET 默认会清除 TTL。
+def test_decrement_script_only_removes_counter_after_acknowledged_snapshot():
+    # 待入账计数器不设置 TTL；确认入账后只扣减快照并在归零时删除。
     script = counter._DECREMENT_COUNTER_LUA
     assert "redis.call('DECRBY', KEYS[1], decrement)" in script
     assert "redis.call('SET'" not in script
