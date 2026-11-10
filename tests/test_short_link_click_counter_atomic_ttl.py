@@ -317,6 +317,9 @@ async def test_db_prevalidation_failure_preserves_redis_click_counter(monkeypatc
 
     redis = FakeRedis()
     db = BrokenDb()
+    # 避免旧版故障恢复快照先触发一次独立的内存计数预验证。
+    async with counter._counter_lock:
+        counter._click_counters.clear()
 
     async def fake_get_redis_client():
         return redis
