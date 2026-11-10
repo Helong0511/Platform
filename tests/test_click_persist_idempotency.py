@@ -84,3 +84,33 @@ async def test_concurrent_duplicate_insert_is_idempotent_success(monkeypatch):
     assert len(session.added) == 1
     assert session.commit_calls == 1
     assert session.rollback_calls == 1
+
+
+
+@pytest.mark.asyncio
+async def test_queue_failure_without_background_tasks_falls_back_to_db(monkeypatch):
+    from app.core.tracking import click_persist
+    from app.core import clicks_queue
+    from app.core import utils
+
+    called = []
+
+    monkeypatch.setattr(click_persist, "should_persist_clicks_to_db", lambda: True)
+    monkeypatch.setattr(clicks_queue, "enqueue_click", _async_false)
+    monkeypatch.setattr(tracking, "create_click_background", _capture_click(called))
+    monkeypatch.setattr(utils, "get_app_now_naive", lambda: __import__("datetime").datetime(2026, 11, 10, 12, 0))
+
+    await click_persist.persist_click_record({"click_id": "fallback-event"})
+
+    assert len(called) == 1
+    assert called[0]["click_id"] == "fallback-event"
+
+
+async def _async_false(*args, **kwargs):
+    return False
+
+
+def _capture_click(called):
+    async def capture(click_data):
+        called.append(dict(click_data))
+    return capture
