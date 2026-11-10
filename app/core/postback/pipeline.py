@@ -112,6 +112,11 @@ async def step_check_duplicate(ctx: PostbackPipelineContext) -> bool:
     )
 
 
+def conversion_status_for_cap(cap_ok: bool) -> str:
+    """返回数据库可存储且稳定的转化状态；详细超限原因单独用于日志/响应。"""
+    return "Pending" if cap_ok else "CapReached"
+
+
 def attribution_ids_from_association(
     association: Optional[Dict[str, Any]],
 ) -> Tuple[Optional[int], Optional[int], Optional[int]]:
@@ -153,7 +158,7 @@ async def step_check_cap(ctx: PostbackPipelineContext) -> Tuple[bool, str]:
         db=ctx.db,
     )
     ctx.cap_ok = cap_ok
-    ctx.conversion_status = "Pending" if cap_ok else f"CapExceeded({cap_status})"
+    ctx.conversion_status = conversion_status_for_cap(cap_ok)
     return cap_ok, cap_status
 
 
