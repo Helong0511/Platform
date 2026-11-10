@@ -282,3 +282,54 @@ async def test_sync_fails_closed_when_redis_client_lookup_raises(monkeypatch):
 
     assert synced == 0
     assert db.executed is False
+
+
+@pytest.mark.asyncio
+async def test_db_prevalidation_failure_preserves_redis_click_counter(monkeypatch):
+    class FakeRedis:
+        def __init__(self):
+            self.deleted = []
+            self.eval_calls = 0
+
+        async def set(self, *args, **kwargs):
+            return True
+
+        async def eval(self, script, number_of_keys, *args):
+            self.eval_calls += 1
+            # 第一处 eval 读取计数；finally 中的 eval 释放全局锁。
+            return 5 if self.eval_calls == 1 else 1
+
+        async def delete(self, key):
+            self.deleted.append(key)
+            return 1
+
+    class BrokenDb:
+        def __init__(self):
+            self.execute_calls = 0
+            self.rollback_calls = 0
+
+        async def execute(self, statement, *args, **kwargs):
+            self.execute_calls += 1
+            raise OSError("simulated isolated database prevalidation failure")
+
+        async def rollback(self):
+            self.rollback_calls += 1
+
+    redis = FakeRedis()
+    db = BrokenDb()
+
+    async def fake_get_redis_client():
+        return redis
+
+    async def fake_scan(redis_client, max_keys):
+        return [f"{counter.CLICK_COUNTER_PREFIX}preserve-on-db-error"]
+
+    monkeypatch.setattr(counter, "get_redis_client", fake_get_redis_client)
+    monkeypatch.setattr(counter, "_scan_click_counter_keys", fake_scan)
+
+    synced = await counter.sync_click_counts_to_db(db)
+
+    assert synced == 0
+    assert db.execute_calls == 1
+    assert db.rollback_calls == 1
+    assert redis.deleted == []
