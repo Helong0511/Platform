@@ -85,7 +85,7 @@ class CapService(BaseService[OfferCap]):
 
         Args:
             offer_id: 限定单个 Offer，None 表示全量扫描
-            fix: True 时由 consistency_checker 自动修复不一致项
+            fix: 兼容旧 API 参数；为保护并发预留，不再执行 DB -> Redis 自动覆盖
 
         Returns:
             tuple[list, str]: (不一致记录列表, 人类可读摘要信息)
@@ -100,7 +100,7 @@ class CapService(BaseService[OfferCap]):
         if inconsistencies:
             message = f"发现 {len(inconsistencies)} 个不一致的记录"
             if fix:
-                message += "，已自动修复"
+                message += "；自动覆盖修复已禁用，需通过安全同步流程处理"
         else:
             message = "所有Cap计数一致"
         return inconsistencies, message
