@@ -202,18 +202,26 @@ async def reserve_clicks(count: int = BATCH_SIZE) -> list[tuple[str, Dict[str, A
         return []
 
 
-async def acknowledge_reserved(raw_items: list[str]) -> None:
-    """落库成功后从 processing 队列确认删除。"""
+async def acknowledge_reserved(raw_items: list[str]) -> bool:
+    """DB COMMIT 后从 processing 删除；返回 ACK 是否完成，失败时由恢复流程重放并去重。"""
     if not raw_items:
-        return
+        return True
     redis = await get_redis_client()
     if not redis:
-        return
+        logger.error("Redis 不可用，无法 ACK %s 条已入库点击记录；等待恢复后幂等重放", len(raw_items))
+        return False
     try:
         for raw in raw_items:
+            # LREM 返回 0 表示该条可能已被另一个 worker ACK；不影响幂等安全。
             await redis.lrem(CLICKS_PROCESSING_KEY, 1, raw)
+        return True
     except Exception as e:
-        logger.error("确认点击队列条目失败: error=%s", e, exc_info=True)
+        logger.error(
+            "确认点击队列条目失败；DB 已提交，未 ACK 消息将由恢复任务重放并按 click_id 去重: %s",
+            e,
+            exc_info=True,
+        )
+        return False
 
 
 async def requeue_reserved(raw_items: list[str]) -> int:
