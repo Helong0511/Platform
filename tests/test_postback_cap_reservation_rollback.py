@@ -186,3 +186,51 @@ async def test_daily_cap_rollback_uses_original_reservation_date(monkeypatch):
 
     assert len(calls) == 1
     assert ":daily:77:2026-11-09:pub:12" in calls[0]
+
+
+
+@pytest.mark.asyncio
+async def test_successful_daily_reservation_records_business_date(monkeypatch):
+    cap = SimpleNamespace(
+        offer_id=77,
+        publisher_id=12,
+        daily_cap=100,
+        total_cap=1000,
+        cap_start_date=None,
+        current_daily_count=0,
+        current_total_count=5,
+    )
+    db = _FakeCapDB([cap])
+
+    async def daily_succeeds(*args, **kwargs):
+        return True
+
+    async def total_succeeds(*args, **kwargs):
+        return True
+
+    business_now = datetime(2026, 11, 10, 12, 30, 0)
+    monkeypatch.setattr(cap_manager, "get_app_now_naive", lambda: business_now)
+    monkeypatch.setattr(
+        cap_manager.RedisCapManager,
+        "check_and_increment_daily",
+        daily_succeeds,
+    )
+    monkeypatch.setattr(
+        cap_manager.RedisCapManager,
+        "check_and_increment_total",
+        total_succeeds,
+    )
+
+    ok, status, reservations = await cap_manager.increment_cap_count(
+        db=db,
+        offer_id=77,
+        publisher_id=12,
+        include_reservations=True,
+    )
+
+    assert ok is True
+    assert status == "cap_ok"
+    assert reservations == [
+        ("daily", 77, 12, datetime(2026, 11, 10, 0, 0, 0)),
+        ("total", 77, 12, None),
+    ]
