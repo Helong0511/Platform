@@ -107,8 +107,8 @@ async def test_enqueue_uses_single_atomic_capacity_and_rpush_script(monkeypatch)
             self.result = result
             self.calls = []
 
-        async def eval(self, script, numkeys, key, payload, limit):
-            self.calls.append((script, numkeys, key, payload, limit))
+        async def eval(self, script, numkeys, key, processing_key, payload, limit):
+            self.calls.append((script, numkeys, key, processing_key, payload, limit))
             return self.result
 
     monkeypatch.setattr(click_persist, "should_persist_clicks_to_db", lambda: True)
@@ -122,9 +122,10 @@ async def test_enqueue_uses_single_atomic_capacity_and_rpush_script(monkeypatch)
 
     assert accepted is False
     assert len(redis.calls) == 1
-    script, numkeys, key, _payload, limit = redis.calls[0]
-    assert numkeys == 1
+    script, numkeys, key, processing_key, _payload, limit = redis.calls[0]
+    assert numkeys == 2
     assert key == clicks_queue.CLICKS_QUEUE_KEY
+    assert processing_key == clicks_queue.CLICKS_PROCESSING_KEY
     assert limit == clicks_queue.MAX_QUEUE_SIZE
     assert "LLEN" in script and "RPUSH" in script
     assert script.index("LLEN") < script.index("RPUSH")
