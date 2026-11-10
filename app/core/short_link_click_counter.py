@@ -128,7 +128,7 @@ end
 """
 
 # Lua：数据库成功入账后，只扣减本轮已读取的增量。
-# DECRBY 保留 key 的原 TTL，避免并发点击残留值因 SET 而丢失过期时间。
+# 点击计数器在数据库确认入账前不设置 TTL，避免同步故障超过固定 TTL 后丢失待入账数据。
 _DECREMENT_COUNTER_LUA = """
 local current = redis.call('GET', KEYS[1])
 if not current then
@@ -285,17 +285,14 @@ async def increment_click_count_async(short_code: str) -> None:
         return
 
     try:
-        # 使用 Lua 将 INCR 与 EXPIRE 合并为一个原子操作。
+        # 仅执行原子 INCR，不设置固定 TTL。
+        # 计数器只有在数据库确认入账后才由同步流程扣减/删除；
+        # 固定 TTL 会在同步任务长期故障时悄悄丢弃尚未入账的点击。
         counter_key = f"{CLICK_COUNTER_PREFIX}{short_code}"
         new_count = await redis.eval(
-            """
-            local count = redis.call('INCR', KEYS[1])
-            redis.call('EXPIRE', KEYS[1], ARGV[1])
-            return count
-            """,
+            "return redis.call('INCR', KEYS[1])",
             1,
             counter_key,
-            48 * 3600,
         )
         logger.debug(
             "短链接点击计数（Redis）: short_code=%s, 计数器键=%s, 当前值=%s",
