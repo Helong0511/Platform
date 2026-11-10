@@ -67,6 +67,8 @@ class RedisCapManager:
     # KEYS[1]: cap_key；KEYS[2]: reservation token key
     # ARGV[1]: expire_seconds；ARGV[2]: DB 初始值；ARGV[3]: limit
     _RESERVE_LUA = """
+    local counter_ttl = tonumber(ARGV[1]) or 0
+    local token_ttl = tonumber(ARGV[4]) or counter_ttl
     if redis.call('EXISTS', KEYS[2]) == 1 then
         -- token 仍在但 counter 已被独立淘汰/删除时，绝不能把缺失计数当作 0 放行。
         if redis.call('EXISTS', KEYS[1]) == 0 then
@@ -76,13 +78,21 @@ class RedisCapManager:
         if not existing then
             return -2
         end
+        -- 即使本次只是幂等重试，也必须清除历史 Total key 的旧 TTL。
+        if counter_ttl > 0 then
+            redis.call('EXPIRE', KEYS[1], counter_ttl)
+        else
+            redis.call('PERSIST', KEYS[1])
+        end
         return existing
     end
     local limit = tonumber(ARGV[3])
-    local counter_ttl = tonumber(ARGV[1]) or 0
-    local token_ttl = tonumber(ARGV[4]) or counter_ttl
     local db_count = tonumber(ARGV[2]) or 0
     local redis_value = redis.call('GET', KEYS[1])
+    -- 达到上限时也必须清除旧 Total key 的 TTL，不能让满额计数器自动消失。
+    if redis_value and counter_ttl == 0 then
+        redis.call('PERSIST', KEYS[1])
+    end
     local current = tonumber(redis_value)
     if not current then
         current = db_count
