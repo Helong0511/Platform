@@ -63,6 +63,7 @@ async def process_clicks_queue() -> Dict[str, int]:
         'inserted': 0,
         'failed': 0,
         'deduplicated': 0,
+        'ack_failed': 0,
         'queue_remaining': 0,
         'processing_remaining': 0,
         'dead_letter': 0,
@@ -154,7 +155,9 @@ async def process_clicks_queue() -> Dict[str, int]:
                     result['inserted'] += inserted_count
                     result['deduplicated'] += duplicate_count
                     result['failed'] += filtered_count + len(valid_clicks) - inserted_count - duplicate_count
-                    await acknowledge_reserved(raw_items)
+                    acknowledged = await acknowledge_reserved(raw_items)
+                    if not acknowledged:
+                        result['ack_failed'] += len(raw_items)
                     logger.debug(
                         f"批量插入点击记录成功（第 {batch_count} 批）: "
                         f"处理={len(clicks)}, "
