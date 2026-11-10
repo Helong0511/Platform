@@ -198,7 +198,7 @@ async def increment_cap_count(
     *,
     session_flush: bool = True,
     include_reservations: bool = False,
-) -> Tuple[bool, str] | Tuple[bool, str, list[tuple[str, int, Optional[int], Optional[datetime]]]]:
+) -> Tuple[bool, str] | Tuple[bool, str, list[tuple]]:
     """
     增加 Cap 计数 (线程/进程安全版本)
     
