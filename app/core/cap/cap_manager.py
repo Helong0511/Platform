@@ -3,6 +3,7 @@ Cap 管理逻辑
 用于检查 Cap 限制和自动下线
 """
 import logging
+import uuid
 from typing import Optional, Tuple
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -157,17 +158,27 @@ async def check_cap(
 
 
 async def _rollback_reserved_redis(
-    reserved: list[tuple[str, int, Optional[int], Optional[datetime]]],
+    reserved: list[tuple],
 ) -> None:
-    for kind, oid, pid, reservation_date in reserved:
+    for reservation in reserved:
+        kind, oid, pid = reservation[:3]
+        reservation_date = reservation[3] if len(reservation) > 3 else None
+        reservation_id = reservation[4] if len(reservation) > 4 else None
         if kind == "daily":
-            await RedisCapManager.decrement_daily(
+            result = await RedisCapManager.decrement_daily(
                 oid,
                 pid,
                 reservation_date=reservation_date,
+                reservation_id=reservation_id,
             )
         else:
-            await RedisCapManager.decrement_total(oid, pid)
+            result = await RedisCapManager.decrement_total(
+                oid, pid, reservation_id=reservation_id
+            )
+        if result < 0:
+            raise RuntimeError(
+                f"Cap reservation rollback failed: kind={kind}, offer_id={oid}, token={reservation_id}"
+            )
 
 
 async def _refresh_offer_caps(db: AsyncSession, caps: list) -> None:
@@ -204,7 +215,7 @@ async def increment_cap_count(
         - (False, "cap_check_error") 基础设施失败（调用方应拒绝入库并允许重试）
     """
     caps = []
-    reserved: list[tuple[str, int, Optional[int], Optional[datetime]]] = []
+    reserved: list[tuple] = []
 
     def _result(ok: bool, status: str):
         if include_reservations:
@@ -259,12 +270,14 @@ async def increment_cap_count(
                 # 先算 init，预留成功后再写 ORM，避免失败路径脏写
                 redis_init_val = 0 if is_new_day else (cap.current_daily_count or 0)
 
+                reservation_id = uuid.uuid4().hex
                 try:
                     passed = await RedisCapManager.check_and_increment_daily(
                         cap.offer_id,
                         cap.daily_cap,
                         cap.publisher_id,
                         initial_value=redis_init_val,
+                        reservation_id=reservation_id,
                     )
                 except Exception as e:
                     logger.warning(f"Redis计数递增同步失败: {e}")
@@ -292,7 +305,7 @@ async def increment_cap_count(
                     # Redis fail-open 时仍更新 DB 计数作为降级权威值，但不能把未确认写入的
                     # Redis 操作登记为 reservation，避免事务回滚时误减其它请求的计数。
                     if passed is True:
-                        reserved.append(("daily", cap.offer_id, cap.publisher_id, today_start))
+                        reserved.append(("daily", cap.offer_id, cap.publisher_id, today_start, reservation_id))
                     if is_new_day:
                         cap.cap_start_date = today_start
                     cap.current_daily_count = redis_init_val + 1
@@ -301,12 +314,14 @@ async def increment_cap_count(
             if cap.total_cap:
                 redis_init_val = cap.current_total_count or 0
 
+                reservation_id = uuid.uuid4().hex
                 try:
                     passed = await RedisCapManager.check_and_increment_total(
                         cap.offer_id,
                         cap.total_cap,
                         cap.publisher_id,
                         initial_value=redis_init_val,
+                        reservation_id=reservation_id,
                     )
                 except Exception as e:
                     logger.warning(f"Redis总计数递增同步失败: {e}")
@@ -333,7 +348,7 @@ async def increment_cap_count(
                     # 与 daily 一致：fail-open 更新 DB 计数，但只对已确认的 Redis
                     # reservation 执行回滚，防止把其它并发请求的计数减掉。
                     if passed is True:
-                        reserved.append(("total", cap.offer_id, cap.publisher_id, None))
+                        reserved.append(("total", cap.offer_id, cap.publisher_id, None, reservation_id))
                     if not cap.cap_start_date:
                         cap.cap_start_date = now
                     cap.current_total_count = redis_init_val + 1
