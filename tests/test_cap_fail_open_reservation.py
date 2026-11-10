@@ -7,7 +7,10 @@ from app.core.cap import cap_manager, redis_counter
 
 
 class _BrokenRedis:
-    async def eval(self, *args, **kwargs):
+    async def eval(self, script, *args, **kwargs):
+        if script == redis_counter.RedisCapManager._ROLLBACK_RESERVATION_LUA:
+            # 模拟预留 Lua 未执行：令牌不存在，幂等补偿安全地返回未回退。
+            return 0
         raise OSError("simulated Redis Lua failure")
 
 
