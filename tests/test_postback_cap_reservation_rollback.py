@@ -1,6 +1,7 @@
 """Cap reservation 精确回滚与 COMMIT 不确定结果回归测试。"""
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -87,7 +88,7 @@ async def test_fail_open_only_returns_reservations_that_really_incremented(monke
 
     assert ok is True
     assert status == "cap_ok"
-    assert reservations == [("total", 77, 12)]
+    assert reservations == [("total", 77, 12, None)]
     assert db.flushed is True
 
 
@@ -135,7 +136,7 @@ async def test_commit_failure_rolls_back_reservation_only_when_conversion_absent
         "rollback_reservations",
         rollback_reservations,
     )
-    reservations = [("daily", 77, 12)]
+    reservations = [("daily", 77, 12, datetime(2026, 11, 9))]
 
     with pytest.raises(OSError):
         await PostbackProcessor._commit_conversion_with_cap_reconciliation(
@@ -153,3 +154,35 @@ async def test_commit_failure_rolls_back_reservation_only_when_conversion_absent
             cap_reservations=reservations,
         )
     assert calls == []
+
+
+
+@pytest.mark.asyncio
+async def test_daily_cap_rollback_uses_original_reservation_date(monkeypatch):
+    from app.core.cap import redis_counter
+
+    calls = []
+
+    class FakeRedis:
+        async def eval(self, script, number_of_keys, key):
+            calls.append(key)
+            return 0
+
+    async def fake_get_redis_client():
+        return FakeRedis()
+
+    monkeypatch.setattr(redis_counter, "get_redis_client", fake_get_redis_client)
+    monkeypatch.setattr(
+        redis_counter,
+        "get_app_now_naive",
+        lambda: datetime(2026, 11, 10, 0, 1, 0),
+    )
+
+    await redis_counter.RedisCapManager.decrement_daily(
+        offer_id=77,
+        publisher_id=12,
+        reservation_date=datetime(2026, 11, 9, 0, 0, 0),
+    )
+
+    assert len(calls) == 1
+    assert ":daily:77:2026-11-09:pub:12" in calls[0]
