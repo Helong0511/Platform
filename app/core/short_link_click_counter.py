@@ -364,53 +364,26 @@ async def _scan_click_counter_keys(
 
 
 async def _sync_in_memory_counters_to_db(db: AsyncSession, short_codes: list[str] = None) -> int:
-    """Redis 恢复后补写故障期间积累的进程内点击计数。"""
-    async with _counter_lock:
-        snapshot = {
-            code: count for code, count in _click_counters.items()
-            if count > 0 and (not short_codes or code in short_codes)
-        }
-    if not snapshot:
-        return 0
+    """
+    兼容读取旧版进程内计数快照，但禁止自动刷入 DB。
 
-    try:
-        result = await db.execute(
-            select(ShortLink.short_code, ShortLink.is_active).where(
-                ShortLink.short_code.in_(list(snapshot))
-            )
+    旧版快照没有稳定 batch_id；历史 DB COMMIT 响应不确定时，无法判断计数是否
+    已经入账。自动重放可能重复累计，因此保留快照并要求部署前人工核对。
+    当前点击写入路径已在 Redis 不可用时直接执行 DB 原子自增，不再写入此内存表。
+    """
+    async with _counter_lock:
+        legacy_count = sum(
+            max(0, int(value))
+            for code, value in _click_counters.items()
+            if not short_codes or code in short_codes
         )
-        rows = result.fetchall()
-    except Exception as exc:
-        logger.warning("Redis 恢复后预验证进程内点击计数失败，保留计数等待重试: %s", exc)
-        try:
-            await db.rollback()
-        except Exception:
-            pass
-        return 0
-
-    active_codes = {row[0] for row in rows if row[1]}
-    async with _counter_lock:
-        for code in snapshot:
-            if code not in active_codes:
-                _click_counters.pop(code, None)
-
-    synced = 0
-    for code, snapshot_count in sorted(snapshot.items()):
-        if code not in active_codes:
-            continue
-        if await _update_click_count_with_retry(db, code, snapshot_count):
-            synced += 1
-            # 仅扣除已入账快照；同步期间新增的点击必须保留。
-            async with _counter_lock:
-                remaining = _click_counters.get(code, 0) - snapshot_count
-                if remaining > 0:
-                    _click_counters[code] = remaining
-                else:
-                    _click_counters.pop(code, None)
-
-    if synced:
-        logger.info("Redis 恢复后补写进程内点击计数完成: %s 个短链接", synced)
-    return synced
+    if legacy_count:
+        logger.critical(
+            "检测到旧版进程内点击计数快照共 %s 次；因缺少批次幂等键，已禁止自动重放。"
+            "请在部署前人工核对并归档 click_counters.json",
+            legacy_count,
+        )
+    return 0
 
 
 # 原子地把活跃计数切换为不可变 pending batch。
@@ -766,142 +739,14 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
     
     try:
         if not redis:
-            # Redis不可用时，同步进程内计数器
-            # 使用异步锁保护并发访问
+            # 新版点击写入在 Redis 不可用时直接走 DB 原子自增。
+            # 旧版本地快照缺少稳定幂等键，禁止自动刷盘，避免 COMMIT 结果不确定时重复累计。
             async with _counter_lock:
-                if not _click_counters:
-                    logger.debug("进程内计数器为空，无需同步")
-                    return 0
-                
-                # 收集需要更新的数据，按 short_code 排序（统一锁顺序，避免死锁）
-                updates: List[Tuple[str, int]] = []
-                for short_code, count in _click_counters.items():
-                    if short_codes and short_code not in short_codes:
-                        continue
-                    if count > 0:
-                        updates.append((short_code, count))
-            
-            if not updates:
-                logger.debug("没有需要同步的进程内计数器")
-                return 0
-            
-            logger.info(f"Redis不可用，同步进程内计数器: {len(updates)} 个短链接")
-            
-            # 按 short_code 排序，确保所有进程以相同顺序锁定记录
-            updates = sorted(updates, key=lambda x: x[0])
-            
-            # 使用批量更新，减少死锁风险
-            synced = 0
-            failed_codes = []  # 记录同步失败的短链接代码
-            
-            # 第一步：预先验证短链接是否存在，不存在的直接清理（避免无效重试）
-            short_codes_to_check = [code for code, _ in updates]
-            existing_codes = set()
-            try:
-                result = await db.execute(
-                    select(ShortLink.short_code, ShortLink.is_active).where(
-                        ShortLink.short_code.in_(short_codes_to_check)
-                    )
-                )
-                existing_links = result.fetchall()
-                existing_codes = {row[0] for row in existing_links if row[1]}  # 只包含激活的短链接
-            except Exception as e:
-                logger.warning(f"预验证短链接存在性失败（进程内），继续同步: {e}")
-                existing_codes = set(short_codes_to_check)  # 如果验证失败，假设都存在
-            
-            # 分离存在的和不存在的短链接
-            valid_updates = [(code, count) for code, count in updates if code in existing_codes]
-            invalid_codes = [code for code, _ in updates if code not in existing_codes]
-            
-            if invalid_codes:
-                logger.info(f"发现 {len(invalid_codes)} 个不存在或已禁用的短链接（进程内），已清理其计数器")
-                # 清理不存在的短链接的进程内计数器
-                async with _counter_lock:
-                    for code in invalid_codes:
-                        _click_counters.pop(code, None)
-            
-            if not valid_updates:
-                logger.debug("所有短链接都不存在或已禁用（进程内），无需同步")
-                return 0
-            
-            # 批量处理，每批5条（与主函数保持一致）
-            BATCH_SIZE = 5
-            for batch_idx in range(0, len(valid_updates), BATCH_SIZE):
-                batch = valid_updates[batch_idx:batch_idx + BATCH_SIZE]
-                
-                # 使用原子更新，避免 ORM 方式导致的死锁
-                for short_code, count in batch:
-                    success = await _update_click_count_with_retry(db, short_code, count)
-                    if success:
-                        synced += 1
-                        logger.debug(
-                            f"更新短链接点击次数（进程内）: short_code={short_code}, 增量={count}"
-                        )
-                    else:
-                        failed_codes.append(short_code)
-                        logger.warning(f"更新短链接点击次数失败（进程内）: short_code={short_code}")
-            
-            if synced > 0:
-                logger.info(f"成功同步 {synced} 个短链接的点击次数到数据库（进程内）")
-            
-            # 仅扣减本轮成功入账的快照增量，保留同步期间并发产生的新点击。
-            if synced > 0:
-                failed_code_set = set(failed_codes)
-                async with _counter_lock:
-                    for code, snapshot_count in valid_updates:
-                        if code in failed_code_set:
-                            continue
-                        remaining = _click_counters.get(code, 0) - snapshot_count
-                        if remaining > 0:
-                            _click_counters[code] = remaining
-                        else:
-                            _click_counters.pop(code, None)
-            
-            if failed_codes:
-                # 对失败的更新进行二次验证，不存在的立即清理
-                try:
-                    result = await db.execute(
-                        select(ShortLink.short_code, ShortLink.is_active).where(
-                            ShortLink.short_code.in_(failed_codes)
-                        )
-                    )
-                    existing_failed = {row[0] for row in result.fetchall() if row[1]}  # 只包含激活的
-                    
-                    retry_codes = [code for code in failed_codes if code in existing_failed]
-                    cleaned_codes = [code for code in failed_codes if code not in existing_failed]
-                    
-                    if cleaned_codes:
-                        # 清理不存在的短链接的进程内计数器
-                        async with _counter_lock:
-                            for code in cleaned_codes:
-                                _click_counters.pop(code, None)
-                        logger.info(
-                            f"清理了 {len(cleaned_codes)} 个不存在或已禁用的短链接计数器（进程内）: "
-                            f"codes={cleaned_codes}"
-                        )
-                    
-                    if retry_codes:
-                        failed_counts = {code: _click_counters.get(code, 0) for code in retry_codes}
-                        logger.warning(
-                            f"有 {len(retry_codes)} 个短链接同步失败（进程内计数器），将在下次同步时重试。"
-                            f"失败的短链接代码: {retry_codes}，"
-                            f"失败的计数详情: {failed_counts}"
-                        )
-                    else:
-                        logger.info("所有失败的计数器都已清理（进程内），无需重试")
-                except Exception as e:
-                    # 如果验证失败，记录所有失败项
-                    failed_counts = {code: _click_counters.get(code, 0) for code in failed_codes}
-                    logger.warning(
-                        f"验证失败短链接存在性失败（进程内），所有失败项将重试: {e}。"
-                        f"失败的短链接代码: {failed_codes}，"
-                        f"失败的计数详情: {failed_counts}"
-                    )
-            
-            # Redis 不可用时也要持久化同步后的剩余计数（包括空快照），避免重启重放旧数据。
-            await persist_counters()
-            return synced
-        
+                has_legacy_snapshot = bool(_click_counters)
+            if has_legacy_snapshot:
+                await _sync_in_memory_counters_to_db(db, short_codes)
+            return 0
+
         # Redis 恢复后先补写历史进程内快照；随后使用 pending batch + DB 唯一账本刷盘。
         await _sync_in_memory_counters_to_db(db, short_codes)
         await persist_counters()
