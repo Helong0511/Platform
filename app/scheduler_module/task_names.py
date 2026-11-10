@@ -18,6 +18,9 @@
 2. 常量值长度受 scheduled_tasks.name 字段限制
 """
 
+# Postback 下游转发队列处理
+POSTBACK_FORWARD_QUEUE_TASK_NAME = "Postback转发队列处理"
+
 # ==================== 任务名称常量定义 ====================
 # 数据归档任务
 ARCHIVE_DATA_TASK_NAME = "数据归档任务"
@@ -93,6 +96,7 @@ AD_DATA_HEALTH_SCAN_TASK_NAME = "广告数据健康巡检"
 # 用于快速查找任务名称，格式：{任务模块名: 任务名称常量}
 
 TASK_NAME_MAP = {
+    "forward_tasks": POSTBACK_FORWARD_QUEUE_TASK_NAME,
     "archive_old_data": ARCHIVE_DATA_TASK_NAME,
     "cleanup_old_logs": CLEANUP_LOGS_TASK_NAME,
     "cleanup_file_logs": CLEANUP_FILE_LOGS_TASK_NAME,
@@ -122,6 +126,7 @@ TASK_NAME_MAP = {
 # 用于批量操作和验证
 
 ALL_TASK_NAMES = [
+    POSTBACK_FORWARD_QUEUE_TASK_NAME,
     ARCHIVE_DATA_TASK_NAME,
     CLEANUP_SESSIONS_TASK_NAME,
     CLEANUP_SENSITIVE_PROBES_TASK_NAME,
