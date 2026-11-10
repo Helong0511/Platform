@@ -49,7 +49,7 @@ class RedisCapManager:
             logger.warning("Redis不可用，Cap fail-open 放行（未创建 Redis reservation）")
             return None
         logger.error("Redis不可用，Cap fail-close 拒绝")
-        return False
+        raise RuntimeError("Redis unavailable during Cap reservation")
 
     @staticmethod
     def _lua_failure_result() -> Optional[bool]:
@@ -57,7 +57,7 @@ class RedisCapManager:
             logger.warning("Redis Cap Lua 失败，fail-open 放行（未创建 Redis reservation）")
             return None
         logger.error("Redis Cap Lua 失败，fail-close 拒绝")
-        return False
+        raise RuntimeError("Redis Cap reservation Lua failed")
     
     # Lua：以唯一 reservation token 保证预留幂等；同一请求重试不会重复 INCR。
     # KEYS[1]: cap_key；KEYS[2]: reservation token key
