@@ -419,8 +419,10 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
             else:
                 logger.debug("成功获取同步锁，开始执行同步")
     except Exception as e:
-        logger.warning(f"获取分布式锁失败，继续执行同步（可能发生并发）: {e}")
-        # 如果获取锁失败，仍然继续执行（降级处理）
+        # Redis 已连接但分布式锁操作失败时，无法证明当前进程拥有同步权。
+        # 必须 fail-closed；继续执行会让多个 Worker 同时读取同一批计数并重复入账。
+        logger.error("获取短链接点击同步分布式锁失败，本轮安全跳过并等待下次重试: %s", e)
+        return 0
     
     try:
         if not redis:
