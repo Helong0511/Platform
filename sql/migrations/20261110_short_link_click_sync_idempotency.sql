@@ -7,7 +7,7 @@
 -- 1. 先在隔离数据库演练；本审计和 CI 禁止连接/执行生产数据库。
 -- 2. 生产发布前备份并审批，先执行本迁移，再部署依赖该表的新应用代码。
 -- 3. 未执行迁移前禁止部署新应用版本。
--- 4. acknowledged_at 仅在 Redis pending key 删除得到确认后写入；未确认账本记录不可清理。
+-- 4. Redis pending batch 仅在 pending key 删除得到确认后写入 acknowledged_at；DB fallback event 在点击计数与账本同一事务提交时标记 acknowledged。未确认的 pending batch 不可按时间清理。
 -- 5. MySQL DDL 隐式提交，回滚需按独立方案处理。
 -- 6. 部署前检查每个旧应用节点的 tempfile.gettempdir()/click_counters.json。
 --    旧快照没有稳定 batch_id，且可能包含 DB COMMIT 响应不确定的记录；
