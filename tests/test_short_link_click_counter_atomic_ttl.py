@@ -208,7 +208,7 @@ async def test_sync_fails_closed_when_global_lock_acquisition_errors(monkeypatch
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("redis_mode", ["unavailable", "increment_error", "client_error"])
+@pytest.mark.parametrize("redis_mode", ["unavailable", "client_error"])
 async def test_click_increment_uses_atomic_db_fallback_across_workers(monkeypatch, redis_mode):
     class FakeResult:
         rowcount = 1
@@ -336,3 +336,22 @@ async def test_db_prevalidation_failure_preserves_redis_click_counter(monkeypatc
     assert db.execute_calls == 1
     assert db.rollback_calls == 1
     assert redis.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_redis_increment_error_does_not_double_write_database(monkeypatch):
+    class BrokenRedis:
+        async def eval(self, *args):
+            raise OSError("simulated lost response after possible Redis execution")
+
+    async def fake_get_redis_client():
+        return BrokenRedis()
+
+    def unexpected_session():
+        raise AssertionError("ambiguous Redis outcome must not trigger a second DB increment")
+
+    monkeypatch.setattr(counter, "get_redis_client", fake_get_redis_client)
+    monkeypatch.setattr(counter, "AsyncSessionLocal", unexpected_session)
+
+    # 短链接跳转不应因计数设施的结果不确定而失败；但不能盲目双写。
+    await counter.increment_click_count_async("ambiguous-redis-result")
