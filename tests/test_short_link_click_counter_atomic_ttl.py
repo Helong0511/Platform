@@ -208,7 +208,7 @@ async def test_sync_fails_closed_when_global_lock_acquisition_errors(monkeypatch
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("redis_mode", ["unavailable", "increment_error"])
+@pytest.mark.parametrize("redis_mode", ["unavailable", "increment_error", "client_error"])
 async def test_click_increment_uses_atomic_db_fallback_across_workers(monkeypatch, redis_mode):
     class FakeResult:
         rowcount = 1
@@ -242,6 +242,8 @@ async def test_click_increment_uses_atomic_db_fallback_across_workers(monkeypatc
     async def fake_get_redis_client():
         if redis_mode == "unavailable":
             return None
+        if redis_mode == "client_error":
+            raise OSError("simulated Redis client initialization failure")
 
         class BrokenRedis:
             async def eval(self, *args):
