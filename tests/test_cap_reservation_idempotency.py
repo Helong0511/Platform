@@ -119,6 +119,9 @@ def test_total_cap_reservation_script_persists_counter_without_expiry():
     assert "local counter_ttl = tonumber(ARGV[1]) or 0" in script
     assert "redis.call('PERSIST', KEYS[1])" in script
     assert "redis.call('EXPIRE', KEYS[2], token_ttl)" in script
+    # 历史 Total key 即使已满额或通过旧 token 重试，也必须先清除遗留 TTL。
+    assert script.index("redis.call('PERSIST', KEYS[1])") < script.index("if current >= limit then")
+    assert "if counter_ttl == 0 then\n            redis.call('PERSIST', KEYS[1])" in script
 
 
 @pytest.mark.asyncio
