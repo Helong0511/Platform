@@ -269,92 +269,123 @@ async def increment_cap_count(
         now = get_app_now_naive()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
+        # 同一 Redis key 可能对应 Offer 全局 Cap 与广告主-Offer Cap。
+        # 它们约束的是同一 Offer/渠道转化集合，必须共享一个计数；逐条预留会把单次转化重复计数。
+        daily_groups: dict[tuple[int, Optional[int]], list] = {}
+        total_groups: dict[tuple[int, Optional[int]], list] = {}
         for cap in caps:
-            # 2. 处理每日计数（Redis 先预留名额，成功后再更新 DB）
+            group_key = (cap.offer_id, cap.publisher_id)
             if cap.daily_cap:
-                is_new_day = (
-                    not cap.cap_start_date
-                    or cap.cap_start_date.date() < today_start.date()
-                )
-                # 先算 init，预留成功后再写 ORM，避免失败路径脏写
-                redis_init_val = 0 if is_new_day else (cap.current_daily_count or 0)
-
-                reservation_id = uuid.uuid4().hex
-                try:
-                    passed = await RedisCapManager.check_and_increment_daily(
-                        cap.offer_id,
-                        cap.daily_cap,
-                        cap.publisher_id,
-                        initial_value=redis_init_val,
-                        reservation_id=reservation_id,
-                    )
-                except Exception as e:
-                    # 无法确认预留结果或补偿失败时必须 fail-closed，不能把不确定名额当作放行。
-                    logger.error("Cap 日计数预留/补偿状态不确定，拒绝本次转化：%s", e, exc_info=True)
-                    await _rollback_reserved_redis(reserved)
-                    reserved.clear()
-                    await _refresh_offer_caps(db, caps)
-                    return _result(False, "cap_check_error")
-
-                if passed is False:
-                    logger.warning(
-                        f"每日Cap超限: offer={cap.offer_id}, limit={cap.daily_cap}, "
-                        f"current={redis_init_val}"
-                    )
-                    await _rollback_reserved_redis(reserved)
-                    reserved.clear()
-                    await _refresh_offer_caps(db, caps)
-                    return _result(False, "cap_exceeded")
-
-                if passed is True or passed is None:
-                    # Redis fail-open 时仍更新 DB 计数作为降级权威值，但不能把未确认写入的
-                    # Redis 操作登记为 reservation，避免事务回滚时误减其它请求的计数。
-                    if passed is True:
-                        reserved.append(("daily", cap.offer_id, cap.publisher_id, today_start, reservation_id))
-                    if is_new_day:
-                        cap.cap_start_date = today_start
-                    cap.current_daily_count = redis_init_val + 1
-            
-            # 3. 处理总计数（Redis 先预留，成功后再更新 DB）
+                daily_groups.setdefault(group_key, []).append(cap)
             if cap.total_cap:
-                redis_init_val = cap.current_total_count or 0
+                total_groups.setdefault(group_key, []).append(cap)
 
-                reservation_id = uuid.uuid4().hex
-                try:
-                    passed = await RedisCapManager.check_and_increment_total(
-                        cap.offer_id,
-                        cap.total_cap,
-                        cap.publisher_id,
-                        initial_value=redis_init_val,
-                        reservation_id=reservation_id,
-                    )
-                except Exception as e:
-                    # Redis 预留结果不确定时 fail-closed，避免超发名额。
-                    logger.error("Cap 总计数预留/补偿状态不确定，拒绝本次转化：%s", e, exc_info=True)
-                    await _rollback_reserved_redis(reserved)
-                    reserved.clear()
-                    await _refresh_offer_caps(db, caps)
-                    return _result(False, "cap_check_error")
+        # 2. 每个 Daily Redis key 只原子预留一次；多个约束取最严格上限。
+        for (group_offer_id, group_publisher_id), group_caps in daily_groups.items():
+            db_daily_counts = [
+                int(cap.current_daily_count or 0)
+                if cap.cap_start_date
+                and cap.cap_start_date.date() == today_start.date()
+                else 0
+                for cap in group_caps
+            ]
+            redis_init_val = max(db_daily_counts, default=0)
+            effective_limit = min(int(cap.daily_cap) for cap in group_caps)
+            reservation_id = uuid.uuid4().hex
+            try:
+                passed = await RedisCapManager.check_and_increment_daily(
+                    group_offer_id,
+                    effective_limit,
+                    group_publisher_id,
+                    initial_value=redis_init_val,
+                    reservation_id=reservation_id,
+                )
+            except Exception as e:
+                logger.error("Cap 日计数预留/补偿状态不确定，拒绝本次转化：%s", e, exc_info=True)
+                await _rollback_reserved_redis(reserved)
+                reserved.clear()
+                await _refresh_offer_caps(db, caps)
+                return _result(False, "cap_check_error")
 
-                if passed is False:
-                    logger.warning(
-                        f"总Cap超限: offer={cap.offer_id}, limit={cap.total_cap}, "
-                        f"current={redis_init_val}"
-                    )
-                    await _rollback_reserved_redis(reserved)
-                    reserved.clear()
-                    await _refresh_offer_caps(db, caps)
-                    return _result(False, "cap_exceeded")
+            if passed is False:
+                logger.warning(
+                    "每日Cap超限: offer=%s publisher=%s limit=%s current=%s cap_ids=%s",
+                    group_offer_id,
+                    group_publisher_id,
+                    effective_limit,
+                    redis_init_val,
+                    [cap.id for cap in group_caps],
+                )
+                await _rollback_reserved_redis(reserved)
+                reserved.clear()
+                await _refresh_offer_caps(db, caps)
+                return _result(False, "cap_exceeded")
 
-                if passed is True or passed is None:
-                    # 与 daily 一致：fail-open 更新 DB 计数，但只对已确认的 Redis
-                    # reservation 执行回滚，防止把其它并发请求的计数减掉。
-                    if passed is True:
-                        reserved.append(("total", cap.offer_id, cap.publisher_id, None, reservation_id))
-                    if not cap.cap_start_date:
-                        cap.cap_start_date = now
-                    cap.current_total_count = redis_init_val + 1
-        
+            if passed is True:
+                reserved.append((
+                    "daily",
+                    group_offer_id,
+                    group_publisher_id,
+                    today_start,
+                    reservation_id,
+                ))
+
+            # 多个配置共享同一实际计数，保持 DB 快照一致；fail-open 时也只增加一次。
+            for cap in group_caps:
+                cap.cap_start_date = today_start
+                cap.current_daily_count = redis_init_val + 1
+
+        # 3. 每个 Total Redis key 只原子预留一次；多个约束取最严格上限。
+        for (group_offer_id, group_publisher_id), group_caps in total_groups.items():
+            redis_init_val = max(
+                (int(cap.current_total_count or 0) for cap in group_caps),
+                default=0,
+            )
+            effective_limit = min(int(cap.total_cap) for cap in group_caps)
+            reservation_id = uuid.uuid4().hex
+            try:
+                passed = await RedisCapManager.check_and_increment_total(
+                    group_offer_id,
+                    effective_limit,
+                    group_publisher_id,
+                    initial_value=redis_init_val,
+                    reservation_id=reservation_id,
+                )
+            except Exception as e:
+                logger.error("Cap 总计数预留/补偿状态不确定，拒绝本次转化：%s", e, exc_info=True)
+                await _rollback_reserved_redis(reserved)
+                reserved.clear()
+                await _refresh_offer_caps(db, caps)
+                return _result(False, "cap_check_error")
+
+            if passed is False:
+                logger.warning(
+                    "总Cap超限: offer=%s publisher=%s limit=%s current=%s cap_ids=%s",
+                    group_offer_id,
+                    group_publisher_id,
+                    effective_limit,
+                    redis_init_val,
+                    [cap.id for cap in group_caps],
+                )
+                await _rollback_reserved_redis(reserved)
+                reserved.clear()
+                await _refresh_offer_caps(db, caps)
+                return _result(False, "cap_exceeded")
+
+            if passed is True:
+                reserved.append((
+                    "total",
+                    group_offer_id,
+                    group_publisher_id,
+                    None,
+                    reservation_id,
+                ))
+
+            for cap in group_caps:
+                if not cap.cap_start_date:
+                    cap.cap_start_date = now
+                cap.current_total_count = redis_init_val + 1
+
         # 由调用方控制外层事务时可选跳过 flush，与转化入库同一 commit
         if session_flush:
             await db.flush()
