@@ -324,7 +324,9 @@ async def test_db_prevalidation_failure_preserves_redis_click_counter(monkeypatc
     async def fake_get_redis_client():
         return redis
 
-    async def fake_scan(redis_client, max_keys):
+    async def fake_scan(redis_client, max_keys, pattern=None):
+        if pattern and ":pending:" in pattern:
+            return []
         return [f"{counter.CLICK_COUNTER_PREFIX}preserve-on-db-error"]
 
     monkeypatch.setattr(counter, "get_redis_client", fake_get_redis_client)
