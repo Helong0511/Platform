@@ -288,8 +288,11 @@ async def increment_cap_count(
                     await _refresh_offer_caps(db, caps)
                     return _result(False, "cap_exceeded")
 
-                if passed is True:
-                    reserved.append(("daily", cap.offer_id, cap.publisher_id, today_start))
+                if passed is True or passed is None:
+                    # Redis fail-open 时仍更新 DB 计数作为降级权威值，但不能把未确认写入的
+                    # Redis 操作登记为 reservation，避免事务回滚时误减其它请求的计数。
+                    if passed is True:
+                        reserved.append(("daily", cap.offer_id, cap.publisher_id, today_start))
                     if is_new_day:
                         cap.cap_start_date = today_start
                     cap.current_daily_count = redis_init_val + 1
@@ -326,8 +329,11 @@ async def increment_cap_count(
                     await _refresh_offer_caps(db, caps)
                     return _result(False, "cap_exceeded")
 
-                if passed is True:
-                    reserved.append(("total", cap.offer_id, cap.publisher_id, None))
+                if passed is True or passed is None:
+                    # 与 daily 一致：fail-open 更新 DB 计数，但只对已确认的 Redis
+                    # reservation 执行回滚，防止把其它并发请求的计数减掉。
+                    if passed is True:
+                        reserved.append(("total", cap.offer_id, cap.publisher_id, None))
                     if not cap.cap_start_date:
                         cap.cap_start_date = now
                     cap.current_total_count = redis_init_val + 1
