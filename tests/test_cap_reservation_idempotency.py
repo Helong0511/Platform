@@ -93,6 +93,6 @@ async def test_repeated_token_rollback_never_decrements_another_request(monkeypa
     )
 
     assert first == 1
-    assert second == 1
+    assert second == 0  # token 已在第一次调用中删除，重复回滚不再扣减
     assert redis.values[key] == 1
     assert other_token in redis.tokens
