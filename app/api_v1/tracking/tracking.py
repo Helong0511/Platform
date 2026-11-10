@@ -74,7 +74,7 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
                     exc.orig if getattr(exc, "orig", None) else exc
                 ).lower()
                 duplicate_click_id = (
-                    "duplicate entry" in error_msg
+                    ("duplicate entry" in error_msg and "click_id" in error_msg)
                     or (
                         "unique constraint" in error_msg
                         and "click_id" in error_msg
