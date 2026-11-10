@@ -81,33 +81,25 @@ async def test_scan_failure_does_not_fall_back_to_blocking_keys():
     assert redis.keys_called is False
 
 @pytest.mark.asyncio
-async def test_redis_recovery_flushes_local_snapshot_and_preserves_new_clicks(monkeypatch):
+async def test_legacy_memory_snapshot_is_not_auto_replayed_without_batch_id():
     async with counter._counter_lock:
         counter._click_counters.clear()
-        counter._click_counters["recovery-code"] = 5
-
-    class Result:
-        def fetchall(self):
-            return [("recovery-code", True)]
+        counter._click_counters["legacy-recovery-code"] = 5
 
     class FakeDb:
+        executed = False
+
         async def execute(self, statement):
-            return Result()
+            self.executed = True
+            raise AssertionError("legacy snapshot must not be replayed automatically")
 
-    async def update_snapshot(db, short_code, count):
-        assert short_code == "recovery-code"
-        assert count == 5
-        # 模拟数据库写入期间 Redis 仍不可用，新点击继续进入进程内计数器。
-        async with counter._counter_lock:
-            counter._click_counters[short_code] += 2
-        return True
+    db = FakeDb()
+    synced = await counter._sync_in_memory_counters_to_db(db)
 
-    monkeypatch.setattr(counter, "_update_click_count_with_retry", update_snapshot)
-    synced = await counter._sync_in_memory_counters_to_db(FakeDb())
-
-    assert synced == 1
+    assert synced == 0
+    assert db.executed is False
     async with counter._counter_lock:
-        assert counter._click_counters == {"recovery-code": 2}
+        assert counter._click_counters == {"legacy-recovery-code": 5}
 
 
 @pytest.mark.asyncio
@@ -145,41 +137,29 @@ async def test_persist_empty_snapshot_clears_stale_file_atomically(tmp_path, mon
     assert list(tmp_path.glob("*.tmp")) == []
 
 @pytest.mark.asyncio
-async def test_redis_outage_sync_preserves_clicks_arriving_during_db_write(monkeypatch, tmp_path):
+async def test_redis_outage_does_not_replay_legacy_non_idempotent_snapshot(monkeypatch):
     async with counter._counter_lock:
         counter._click_counters.clear()
-        counter._click_counters["outage-code"] = 4
-    monkeypatch.setattr(counter, "COUNTER_PERSIST_FILE", tmp_path / "click_counters.json")
-
-    class Result:
-        def fetchall(self):
-            return [("outage-code", True)]
+        counter._click_counters["legacy-outage-code"] = 4
 
     class FakeDb:
-        async def execute(self, statement):
-            return Result()
+        executed = False
 
-        async def rollback(self):
-            return None
+        async def execute(self, statement):
+            self.executed = True
+            raise AssertionError("legacy local snapshot must not be flushed")
 
     async def no_redis():
         return None
 
-    async def update_snapshot(db, short_code, count):
-        assert (short_code, count) == ("outage-code", 4)
-        async with counter._counter_lock:
-            counter._click_counters[short_code] += 3
-        return True
-
     monkeypatch.setattr(counter, "get_redis_client", no_redis)
-    monkeypatch.setattr(counter, "_update_click_count_with_retry", update_snapshot)
+    db = FakeDb()
+    synced = await counter.sync_click_counts_to_db(db)
 
-    synced = await counter.sync_click_counts_to_db(FakeDb())
-
-    assert synced == 1
+    assert synced == 0
+    assert db.executed is False
     async with counter._counter_lock:
-        assert counter._click_counters == {"outage-code": 3}
-    assert '"outage-code": 3' in (tmp_path / "click_counters.json").read_text(encoding="utf-8")
+        assert counter._click_counters == {"legacy-outage-code": 4}
 
 
 @pytest.mark.asyncio
