@@ -185,9 +185,11 @@ class CapSynchronizer:
                         ttl = await redis.ttl(key)
                         if ttl == -2:  # Key 不存在
                             continue
-                        if ttl < 0:  # 没有过期时间，设置一个
-                            await redis.expire(key, 7*24*3600)  # 7 天
-                            cleaned_count += 1
+                        # 不为未知类型的 Cap key 设置 TTL。尤其 total key 必须跨越
+                        # 任意 7/30 天窗口持续有效；统一设置 TTL 会使累计限额失效。
+                        # 已无 TTL 的 key 保持原状，需由明确的业务生命周期清理。
+                        if ttl < 0:
+                            logger.debug("保留无 TTL 的 Cap key：%s", key)
                 
                 if cursor == 0:
                     break
