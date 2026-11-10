@@ -38,11 +38,20 @@ class DataValidator:
         if not click_id or not str(click_id).strip():
             errors.append("缺少必填字段：click_id 或 conversion_id")
 
-        # Click / Conversion ID 最大长度与接口字段约束保持一致。
-        if click_id and len(str(click_id).strip()) > 200:
-            errors.append(
-                f"click_id/conversion_id 过长：{len(str(click_id).strip())} 字符（最大 200）"
-            )
+        # 同时检查 conversion_id 与 click_id，避免其中一个较短掩盖另一个超长字段。
+        id_candidates = [
+            raw_data.get('conversion_id'),
+            raw_data.get('conversionId'),
+            DataNormalizer._extract_click_id(raw_data),
+        ]
+        for id_value in id_candidates:
+            if id_value is not None and str(id_value).strip():
+                id_length = len(str(id_value).strip())
+                if id_length > 200:
+                    errors.append(
+                        f"click_id/conversion_id 过长：{id_length} 字符（最大 200）"
+                    )
+                    break
 
         # 事件名入库字段为 VARCHAR(100)，提前拒绝超长数据，避免数据库截断/异常。
         event_name = raw_data.get('event_name')
