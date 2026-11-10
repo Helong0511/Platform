@@ -272,3 +272,35 @@ async def test_reserve_dead_letters_missing_click_id(monkeypatch):
 async def test_legacy_dequeue_api_fails_closed():
     with pytest.raises(RuntimeError, match="先持久化再 ACK"):
         await clicks_queue.dequeue_clicks(10)
+
+
+
+@pytest.mark.asyncio
+async def test_reserve_dead_letters_json_array_payload(monkeypatch):
+    import json
+
+    class FakeRedis:
+        def __init__(self):
+            self.payload = json.dumps(["not", "an", "object"])
+            self.eval_calls = []
+
+        async def llen(self, key):
+            return 1
+
+        async def rpoplpush(self, source, destination):
+            value, self.payload = self.payload, None
+            return value
+
+        async def eval(self, script, numkeys, source, target, raw, envelope):
+            self.eval_calls.append((source, target, envelope))
+            return 1
+
+    redis = FakeRedis()
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(clicks_queue, "get_redis_client", fake_redis)
+    assert await clicks_queue.reserve_clicks(1) == []
+    assert redis.eval_calls[0][1] == clicks_queue.CLICKS_DLQ_KEY
+    assert "invalid_json" in redis.eval_calls[0][2]
