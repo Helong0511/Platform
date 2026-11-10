@@ -41,28 +41,11 @@ class ConversionSaver:
         Returns:
             PostbackConversion: 保存的转化记录
         """
-        # 归因快照写入 raw_data._attribution（无 DB 列迁移时的轻量方案）
+        # 归因快照在可信租户/产品归属核验后生成，避免把请求体字段当成可信归属。
         raw_in = normalized_data.get('raw_data')
+        raw_payload = dict(raw_in) if isinstance(raw_in, dict) else None
         snapshot = None
-        if click_association:
-            snapshot = {
-                k: click_association[k]
-                for k in ('offer_id', 'publisher_id', 'advertiser_id', 'click_id')
-                if click_association.get(k) is not None
-            } or None
 
-        if isinstance(raw_in, dict):
-            raw_payload = dict(raw_in)
-            if snapshot:
-                raw_payload['_attribution'] = snapshot
-            raw_data_json = json.dumps(raw_payload)
-        elif raw_in is not None:
-            raw_data_json = json.dumps(raw_in)
-        elif snapshot:
-            raw_data_json = json.dumps({'_attribution': snapshot})
-        else:
-            raw_data_json = None
-        
         click_time = None
         if click_association:
             click_time = click_association.get('click_time')
@@ -80,16 +63,20 @@ class ConversionSaver:
             trusted_client_id = getattr(trusted_publisher, 'client_id', None)
 
         supplied_client_id = normalized_data.get('client_id')
-        if (
-            supplied_client_id is not None
-            and trusted_client_id is not None
-            and int(supplied_client_id) != int(trusted_client_id)
-        ):
-            logger.warning(
-                "忽略回调中与点击归属不一致的 client_id：supplied=%s trusted=%s",
-                supplied_client_id,
-                trusted_client_id,
-            )
+        if supplied_client_id is not None:
+            try:
+                client_id_mismatch = (
+                    trusted_client_id is None
+                    or int(supplied_client_id) != int(trusted_client_id)
+                )
+            except (TypeError, ValueError):
+                client_id_mismatch = True
+            if client_id_mismatch:
+                logger.warning(
+                    "忽略回调中不可信或与点击归属不一致的 client_id：supplied=%s trusted=%s",
+                    supplied_client_id,
+                    trusted_client_id,
+                )
 
         # 产品必须属于点击归属的客户；没有可信客户上下文时不采信回调中的 product_id。
         product_id_candidate = (
@@ -112,6 +99,29 @@ class ConversionSaver:
                     product_id_candidate,
                     trusted_client_id,
                 )
+
+        if click_association:
+            snapshot = {
+                key: click_association[key]
+                for key in ('offer_id', 'publisher_id', 'advertiser_id', 'click_id')
+                if click_association.get(key) is not None
+            }
+            if trusted_client_id is not None:
+                snapshot['client_id'] = trusted_client_id
+            if trusted_product_id is not None:
+                snapshot['product_id'] = trusted_product_id
+            snapshot = snapshot or None
+
+        if raw_payload is not None:
+            if snapshot:
+                raw_payload['_attribution'] = snapshot
+            raw_data_json = json.dumps(raw_payload)
+        elif raw_in is not None:
+            raw_data_json = json.dumps(raw_in)
+        elif snapshot:
+            raw_data_json = json.dumps({'_attribution': snapshot})
+        else:
+            raw_data_json = None
 
         conversion = PostbackConversion(
             platform=normalized_data['platform'],
