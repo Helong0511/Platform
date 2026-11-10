@@ -91,7 +91,7 @@ class CapChecker:
         publisher_id: Optional[int],
         advertiser_id: Optional[int],
         db: AsyncSession,
-    ) -> Tuple[bool, str, list[tuple[str, int, Optional[int], Optional[datetime]]]]:
+    ) -> Tuple[bool, str, list[tuple]]:
         """
         增加 Cap 并返回本次真正预留的 Redis 计数器列表。
 
