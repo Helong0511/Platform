@@ -9,6 +9,9 @@
 -- 3. 未执行迁移前禁止部署新应用版本。
 -- 4. acknowledged_at 仅在 Redis pending key 删除得到确认后写入；未确认账本记录不可清理。
 -- 5. MySQL DDL 隐式提交，回滚需按独立方案处理。
+-- 6. 部署前检查每个旧应用节点的 tempfile.gettempdir()/click_counters.json。
+--    旧快照没有稳定 batch_id，且可能包含 DB COMMIT 响应不确定的记录；
+--    新代码会保留并告警，不会自动重放。必须人工核对后归档，禁止直接累加入库。
 CREATE TABLE IF NOT EXISTS short_link_click_sync_batches (
     batch_id VARCHAR(64) NOT NULL COMMENT 'Redis pending batch UUID',
     short_code VARCHAR(20) NOT NULL COMMENT '短链接代码',
