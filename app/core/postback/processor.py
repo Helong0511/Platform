@@ -84,7 +84,14 @@ class PostbackProcessor:
         logger.info(f"平台: {platform}")
         logger.info(f"请求 IP: {request_ip}")
         logger.debug(f"原始数据键: {list(raw_data.keys()) if isinstance(raw_data, dict) else type(raw_data)}")
-        
+
+        # Redis Cap reservation 不参与数据库事务；任何未提交阶段的异常都必须精确回退。
+        # 一旦进入 COMMIT reconciliation，则由该函数根据数据库实际提交结果负责处理，
+        # 外层异常处理不得再次 DECR，避免重复回退造成 Cap 计数虚低。
+        cap_reservations: list[tuple[str, int, Optional[int], Optional[datetime]]] = []
+        cap_rollback_attempted = False
+        cap_commit_reconciliation_started = False
+
         try:
             # ========== 第 1 步：IP 验证 ==========
             logger.info("=== 第 1 步：IP 验证 ===")
@@ -216,7 +223,6 @@ class PostbackProcessor:
             # Cap 原子预留（替代原先 check + increment 分离）
             cap_ok = True
             cap_status = "cap_ok"
-            cap_reservations: list[tuple[str, int, Optional[int], Optional[datetime]]] = []
             logger.info("=== Cap 原子预留 ===")
             try:
                 cap_incremented, cap_status, cap_reservations = (
@@ -281,6 +287,7 @@ class PostbackProcessor:
                 # 先回滚 DB 事务，再精确回退本次真正预留的 Redis key。
                 await db.rollback()
                 if cap_reservations:
+                    cap_rollback_attempted = True
                     await CapChecker.rollback_reservations(cap_reservations)
                 logger.info("并发重复转化，已跳过：platform=%s", platform)
                 return {
@@ -290,6 +297,7 @@ class PostbackProcessor:
             except Exception as save_err:
                 await db.rollback()
                 if cap_reservations:
+                    cap_rollback_attempted = True
                     await CapChecker.rollback_reservations(cap_reservations)
                 logger.error("保存转化记录失败，已回滚：%s", save_err, exc_info=True)
                 raise
@@ -320,6 +328,7 @@ class PostbackProcessor:
 
             # ========== 第 11 步：提交事务（Cap / 短链 / 转化 / 转发队列原子提交） ==========
             logger.info("=== 第 11 步：提交事务 ====")
+            cap_commit_reconciliation_started = True
             await PostbackProcessor._commit_conversion_with_cap_reconciliation(
                 db=db,
                 conversion_id=conversion.id,
@@ -378,8 +387,23 @@ class PostbackProcessor:
                 "payout": final_payout
             }
         except Exception as e:
-            # 发生异常时回滚事务
-            await db.rollback()
+            # COMMIT 前若异常发生在转化保存/队列入队等步骤，回退本次已成功预留的 Redis Cap。
+            # COMMIT reconciliation 已启动时由其自行判断数据库提交结果，禁止外层重复 DECR。
+            if cap_reservations and not cap_rollback_attempted and not cap_commit_reconciliation_started:
+                cap_rollback_attempted = True
+                try:
+                    await CapChecker.rollback_reservations(cap_reservations)
+                except Exception:
+                    logger.critical(
+                        "Postback 在 COMMIT 前异常，Cap reservation 回退失败，需对账：reservations=%s",
+                        cap_reservations,
+                        exc_info=True,
+                    )
+            # 发生异常时回滚数据库事务
+            try:
+                await db.rollback()
+            except Exception:
+                logger.error("Postback 异常后的数据库回滚失败", exc_info=True)
             logger.error(f"Postback 处理失败，已回滚事务：platform={platform}, error={str(e)}", exc_info=True)
             raise
     
