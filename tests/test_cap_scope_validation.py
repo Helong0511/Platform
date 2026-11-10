@@ -37,11 +37,11 @@ class _ScopeDB:
     async def execute(self, statement):
         self.statements.append(str(statement).lower())
         sql = self.statements[-1]
-        if " from offers" in sql:
+        if "from offers" in sql:
             return _Result(rows=[SimpleNamespace(id=10, advertiser_id=self.offer_advertiser_id)])
-        if " from publishers" in sql:
+        if "from publishers" in sql:
             return _Result(scalar=3 if self.publisher_exists else None)
-        if " from offer_caps" in sql:
+        if "from offer_caps" in sql:
             return _Result(scalar=self.duplicate_id)
         raise AssertionError(f"unexpected SQL: {sql}")
 
@@ -61,9 +61,9 @@ async def test_advertiser_offer_cap_requires_matching_offer_owner():
         "offer_id": 10,
         "publisher_id": 3,
     })
-    assert any(" from offers" in sql and "for update" in sql for sql in db.statements)
-    assert any(" from publishers" in sql for sql in db.statements)
-    assert any(" from offer_caps" in sql for sql in db.statements)
+    assert any("from offers" in sql and "for update" in sql for sql in db.statements)
+    assert any("from publishers" in sql for sql in db.statements)
+    assert any("from offer_caps" in sql for sql in db.statements)
 
 
 @pytest.mark.asyncio
