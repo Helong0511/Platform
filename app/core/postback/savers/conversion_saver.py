@@ -19,14 +19,75 @@ logger = logging.getLogger(__name__)
 
 class ConversionSaver:
     """转化记录保存器"""
-    
+
+    @staticmethod
+    async def resolve_trusted_attribution(
+        normalized_data: Dict[str, Any],
+        click_association: Optional[Dict[str, Any]],
+        db: AsyncSession,
+    ) -> tuple[Optional[int], Optional[int]]:
+        """仅从服务器侧点击/渠道关系确定客户，并验证产品属于该客户。"""
+        trusted_client_id = (
+            click_association.get('client_id') if click_association else None
+        )
+        if trusted_client_id is None and click_association:
+            trusted_publisher = click_association.get('publisher')
+            trusted_client_id = getattr(trusted_publisher, 'client_id', None)
+
+        supplied_client_id = normalized_data.get('client_id')
+        if supplied_client_id is not None:
+            try:
+                client_id_mismatch = (
+                    trusted_client_id is None
+                    or int(supplied_client_id) != int(trusted_client_id)
+                )
+            except (TypeError, ValueError):
+                client_id_mismatch = True
+            if client_id_mismatch:
+                logger.warning(
+                    "忽略回调中不可信或与点击归属不一致的 client_id：supplied=%s trusted=%s",
+                    supplied_client_id,
+                    trusted_client_id,
+                )
+
+        product_id_candidate = (
+            click_association.get('product_id') if click_association else None
+        ) or normalized_data.get('product_id')
+        trusted_product_id = None
+        if trusted_client_id is not None and product_id_candidate is not None:
+            product_result = await db.execute(
+                select(Product.id)
+                .where(
+                    Product.id == product_id_candidate,
+                    Product.client_id == trusted_client_id,
+                )
+                .limit(1)
+            )
+            trusted_product_id = product_result.scalar_one_or_none()
+            if trusted_product_id is None:
+                logger.warning(
+                    "忽略不属于当前点击客户的 product_id：product_id=%s client_id=%s",
+                    product_id_candidate,
+                    trusted_client_id,
+                )
+        elif product_id_candidate is not None:
+            logger.warning(
+                "缺少可信点击客户归属，忽略回调中的 product_id：product_id=%s",
+                product_id_candidate,
+            )
+
+        return trusted_client_id, trusted_product_id
+
     @staticmethod
     async def save(
         normalized_data: Dict[str, Any],
         click_association: Optional[Dict[str, Any]],
         final_payout: Decimal | float | int | str,
         conversion_status: str,
-        db: AsyncSession
+        db: AsyncSession,
+        trusted_client_id: Optional[int] = None,
+        trusted_product_id: Optional[int] = None,
+        trusted_attribution_resolved: bool = False,
     ) -> PostbackConversion:
         """
         保存转化记录
@@ -54,51 +115,14 @@ class ConversionSaver:
         snap_pub = click_association.get('publisher_id') if click_association else None
         snap_adv = click_association.get('advertiser_id') if click_association else None
 
-        # 租户归属必须来自服务器侧 Click -> Publisher 关联，不能接受回调请求体覆盖。
-        trusted_client_id = (
-            click_association.get('client_id') if click_association else None
-        )
-        if trusted_client_id is None and click_association:
-            trusted_publisher = click_association.get('publisher')
-            trusted_client_id = getattr(trusted_publisher, 'client_id', None)
-
-        supplied_client_id = normalized_data.get('client_id')
-        if supplied_client_id is not None:
-            try:
-                client_id_mismatch = (
-                    trusted_client_id is None
-                    or int(supplied_client_id) != int(trusted_client_id)
+        if not trusted_attribution_resolved:
+            trusted_client_id, trusted_product_id = (
+                await ConversionSaver.resolve_trusted_attribution(
+                    normalized_data=normalized_data,
+                    click_association=click_association,
+                    db=db,
                 )
-            except (TypeError, ValueError):
-                client_id_mismatch = True
-            if client_id_mismatch:
-                logger.warning(
-                    "忽略回调中不可信或与点击归属不一致的 client_id：supplied=%s trusted=%s",
-                    supplied_client_id,
-                    trusted_client_id,
-                )
-
-        # 产品必须属于点击归属的客户；没有可信客户上下文时不采信回调中的 product_id。
-        product_id_candidate = (
-            click_association.get('product_id') if click_association else None
-        ) or normalized_data.get('product_id')
-        trusted_product_id = None
-        if trusted_client_id is not None and product_id_candidate is not None:
-            product_result = await db.execute(
-                select(Product.id)
-                .where(
-                    Product.id == product_id_candidate,
-                    Product.client_id == trusted_client_id,
-                )
-                .limit(1)
             )
-            trusted_product_id = product_result.scalar_one_or_none()
-            if trusted_product_id is None:
-                logger.warning(
-                    "忽略不属于当前点击客户的 product_id：product_id=%s client_id=%s",
-                    product_id_candidate,
-                    trusted_client_id,
-                )
 
         if click_association:
             snapshot = {
