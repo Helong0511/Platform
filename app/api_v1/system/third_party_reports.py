@@ -312,7 +312,7 @@ async def get_third_party_reports(
         raise
 
     except Exception as e:
-        logger.error(f"获取第三方上报日志列表失败: {e}", exc_info=True)
+        logger.error("获取第三方上报日志列表失败：%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"获取日志列表失败：{str(e)}"
@@ -406,7 +406,7 @@ async def get_third_party_report_stats(
         raise
 
     except Exception as e:
-        logger.error(f"获取第三方上报统计信息失败: {e}", exc_info=True)
+        logger.error("获取第三方上报统计信息失败：%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"获取统计信息失败：{str(e)}"
@@ -459,7 +459,7 @@ async def get_third_party_report(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取第三方上报日志详情失败: {e}", exc_info=True)
+        logger.error("获取第三方上报日志详情失败：%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"获取日志详情失败：{str(e)}"
@@ -529,7 +529,7 @@ async def update_third_party_report(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"更新第三方上报日志参数失败: {e}", exc_info=True)
+        logger.error("更新第三方上报日志参数失败：%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"更新日志参数失败：{str(e)}"
@@ -585,7 +585,7 @@ async def retry_third_party_report(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"重新上报第三方上报日志失败: {e}", exc_info=True)
+        logger.error("重新上报第三方上报日志失败：%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"重新上报失败：{str(e)}"
