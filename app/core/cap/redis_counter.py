@@ -169,6 +169,7 @@ class RedisCapManager:
         publisher_id: Optional[int] = None,
         initial_value: Optional[int] = None,
         reservation_id: Optional[str] = None,
+        reservation_date: Optional[datetime] = None,
     ) -> Optional[bool]:
         """
         检查并增加每日计数 (原子操作)
@@ -186,7 +187,9 @@ class RedisCapManager:
         if not redis:
             return RedisCapManager._redis_unavailable_result()
             
-        now = get_app_now_naive()
+        # 调用方若已在同一业务事务中确定日期，必须沿用该日期；
+        # 防止等待 Redis/跨午夜时重新取时，导致预留与 DB 快照、回滚 key 不一致。
+        now = reservation_date or get_app_now_naive()
         key = get_daily_cap_key(offer_id, now, publisher_id)
         
         try:
