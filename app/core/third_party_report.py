@@ -851,6 +851,7 @@ async def retry_report_log(log_id: int):
                     ThirdPartyReportLog.id == log_id,
                     ThirdPartyReportLog.outbox_enqueued.is_(True),
                     ThirdPartyReportLog.status == "failed",
+                    ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                     or_(
                         ThirdPartyReportLog.short_link_id.is_not(None),
                         (
@@ -914,6 +915,9 @@ async def update_report_log_params(
             
             if not log_entry:
                 logger.warning(f"[第三方上报] 日志记录不存在: id={log_id}")
+                return False
+            if log_entry.pii_scrubbed_at is not None:
+                logger.warning("[第三方上报] 已按保留策略清理个人信息的日志不可重新写入载荷: id=%s", log_id)
                 return False
             
             # 事件身份必须与 event_key 保持一致。
