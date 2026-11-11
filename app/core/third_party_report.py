@@ -212,6 +212,25 @@ async def _get_report_attempt_state(report_log_id: int) -> tuple[int, int]:
         return max(0, int(row[0] or 0)), max(1, int(row[1] or 1))
 
 
+def _calculate_report_attempt_budget(
+    base_attempt_count: int,
+    max_attempts_total: int,
+    *,
+    use_hash: bool,
+    max_retries: int,
+) -> tuple[int, bool]:
+    """计算本轮哈希请求数与非哈希兜底，严格不超过累计尝试预算。"""
+    remaining = max(0, int(max_attempts_total) - max(0, int(base_attempt_count)))
+    if remaining == 0:
+        return 0, False
+    hash_attempts = min(
+        max(0, int(max_retries)),
+        max(0, remaining - (1 if use_hash else 0)),
+    )
+    fallback_allowed = bool(use_hash and remaining > hash_attempts)
+    return hash_attempts, fallback_allowed
+
+
 async def _claim_report_log(report_log_id: int, lease_seconds: int = REPORT_LOG_LEASE_SECONDS) -> bool:
     """原子认领一条待上报事件，避免并发请求同时发送同一事件。
 
@@ -394,12 +413,12 @@ async def send_third_party_report(
 
     # 每次 Worker 执行的总请求数（哈希请求 + 可选非哈希兜底）不得超过
     # 数据库中剩余的累计预算，防止接近上限时仍固定发送 4 次而超额。
-    remaining_attempts = max_attempts_total - base_attempt_count
-    hash_attempts = min(
-        max_retries,
-        max(0, remaining_attempts - (1 if use_hash else 0)),
+    hash_attempts, fallback_allowed = _calculate_report_attempt_budget(
+        base_attempt_count,
+        max_attempts_total,
+        use_hash=use_hash,
+        max_retries=max_retries,
     )
-    fallback_allowed = bool(use_hash and remaining_attempts > hash_attempts)
 
     async def _mark_failed_and_raise(error_msg: str):
         """将上报日志标为 failed 后抛出 ValueError，供上层中断流程。"""
@@ -752,9 +771,9 @@ async def send_third_party_report(
                             return
                         else:
                             error_msg = "第三方未确认接收事件"
-                            failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
+                            failure_reasons.append(f"尝试 {hash_attempts + 1} (不使用哈希): {error_msg}")
                             logger.warning(
-                                f"[第三方上报] ✗ 失败 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希): {error_msg}")
+                                f"[第三方上报] ✗ 失败 (尝试 {hash_attempts + 1}/{hash_attempts + 1} - 不使用哈希): {error_msg}")
                             await update_report_log(
                                 report_log_id,
                                 response_status=response.status_code,
@@ -762,9 +781,9 @@ async def send_third_party_report(
                             )
                     except Exception:
                         error_msg = "第三方响应 JSON 解析失败"
-                        failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
+                        failure_reasons.append(f"尝试 {hash_attempts + 1} (不使用哈希): {error_msg}")
                         logger.warning(
-                            f"[第三方上报] ✗ 失败 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希): {error_msg}")
+                            f"[第三方上报] ✗ 失败 (尝试 {hash_attempts + 1}/{hash_attempts + 1} - 不使用哈希): {error_msg}")
                         await update_report_log(
                             report_log_id,
                             response_status=response.status_code,
@@ -772,9 +791,9 @@ async def send_third_party_report(
                         )
                 else:
                     error_msg = f"第三方返回 HTTP {response.status_code}"
-                    failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
+                    failure_reasons.append(f"尝试 {hash_attempts + 1} (不使用哈希): {error_msg}")
                     logger.warning(
-                        f"[第三方上报] ✗ 失败 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希): {error_msg}")
+                        f"[第三方上报] ✗ 失败 (尝试 {hash_attempts + 1}/{hash_attempts + 1} - 不使用哈希): {error_msg}")
                     await update_report_log(
                         report_log_id,
                         response_status=response.status_code,
@@ -783,15 +802,15 @@ async def send_third_party_report(
 
         except httpx.TimeoutException:
             error_msg = "请求超时"
-            failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
-            logger.warning(f"[第三方上报] ✗ 超时 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希)")
+            failure_reasons.append(f"尝试 {hash_attempts + 1} (不使用哈希): {error_msg}")
+            logger.warning(f"[第三方上报] ✗ 超时 (尝试 {hash_attempts + 1}/{hash_attempts + 1} - 不使用哈希)")
         except httpx.ConnectError:
             error_msg = "连接失败"
-            failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
-            logger.warning(f"[第三方上报] ✗ 连接失败 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希)")
+            failure_reasons.append(f"尝试 {hash_attempts + 1} (不使用哈希): {error_msg}")
+            logger.warning(f"[第三方上报] ✗ 连接失败 (尝试 {hash_attempts + 1}/{hash_attempts + 1} - 不使用哈希)")
         except Exception as e:
             error_msg = f"请求异常（{type(e).__name__}）"
-            failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
+            failure_reasons.append(f"尝试 {hash_attempts + 1} (不使用哈希): {error_msg}")
             logger.warning("[第三方上报] 请求异常（不使用哈希）：%s", type(e).__name__)
 
     # 更新失败原因字符串
