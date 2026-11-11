@@ -12,6 +12,7 @@ import pytest
 from redis.asyncio import Redis
 
 from app.core import short_link_click_counter as counter
+from app.core.cap.redis_counter import RedisCapManager
 from app.core.infrastructure.cache_advanced import DistributedLock
 
 
@@ -113,4 +114,45 @@ async def test_real_redis_distributed_lock_release_is_atomic_and_owner_scoped():
         assert await redis.get(key) is None
     finally:
         await redis.delete(key)
+        await redis.aclose()
+
+
+
+@pytest.mark.asyncio
+async def test_real_redis_cap_rollback_preserves_token_when_counter_is_zero():
+    """异常归零的计数器不得让回滚脚本静默删除 reservation 证据。"""
+    redis = Redis.from_url(REDIS_URL, decode_responses=True)
+    suffix = uuid.uuid4().hex
+    counter_key = f"ci:cap:counter:{suffix}"
+    token_key = f"ci:cap:reservation:{suffix}"
+
+    try:
+        assert await redis.ping() is True
+        await redis.set(counter_key, 0)
+        await redis.set(token_key, "1")
+
+        result = await redis.eval(
+            RedisCapManager._ROLLBACK_RESERVATION_LUA,
+            2,
+            counter_key,
+            token_key,
+        )
+
+        assert result == -2
+        assert await redis.get(counter_key) == "0"
+        assert await redis.get(token_key) == "1"
+
+        # 正常正数计数器仍然只扣减一次，并在同一 Lua 中删除 token。
+        await redis.set(counter_key, 2)
+        normal_result = await redis.eval(
+            RedisCapManager._ROLLBACK_RESERVATION_LUA,
+            2,
+            counter_key,
+            token_key,
+        )
+        assert normal_result == 1
+        assert await redis.get(counter_key) == "1"
+        assert await redis.get(token_key) is None
+    finally:
+        await redis.delete(counter_key, token_key)
         await redis.aclose()
