@@ -93,7 +93,10 @@ async def check_cap(
                 
                 if redis:
                     # 尝试从 Redis 读取
+                    # 读取 Redis key 前刷新业务时间，并同步刷新日期边界；
+                    # 避免首次取时与实际 key 日期跨午夜后，拿昨日 DB 计数阻止今日请求。
                     now = get_app_now_naive()
+                    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
                     redis_key = get_daily_cap_key(cap.offer_id, now, cap.publisher_id)
                     redis_val = await redis.get(redis_key)
                     
