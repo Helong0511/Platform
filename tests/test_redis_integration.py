@@ -12,6 +12,7 @@ import pytest
 from redis.asyncio import Redis
 
 from app.core import short_link_click_counter as counter
+from app.core.infrastructure.cache_advanced import DistributedLock
 
 
 REDIS_URL = os.getenv("REDIS_INTEGRATION_URL")
@@ -77,4 +78,39 @@ async def test_real_redis_claim_pending_batch_and_decrement_acknowledged_counter
         assert await redis.get(counter_key) is None
     finally:
         await redis.delete(active_key, pending_key, counter_key)
+        await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_real_redis_distributed_lock_release_is_atomic_and_owner_scoped():
+    """旧锁释放不能删除同 key 上由新请求持有的锁。"""
+    redis = Redis.from_url(REDIS_URL, decode_responses=True)
+    key = f"ci:cache:lock:{uuid.uuid4().hex}"
+    old_owner = "old-owner-token"
+    new_owner = "new-owner-token"
+
+    try:
+        assert await redis.set(key, old_owner, nx=True, ex=30) is True
+        # 模拟旧锁过期后另一个请求重新获取同一 key。
+        await redis.set(key, new_owner, ex=30)
+
+        old_release = await redis.eval(
+            DistributedLock._RELEASE_LUA,
+            1,
+            key,
+            old_owner,
+        )
+        assert old_release == 0
+        assert await redis.get(key) == new_owner
+
+        new_release = await redis.eval(
+            DistributedLock._RELEASE_LUA,
+            1,
+            key,
+            new_owner,
+        )
+        assert new_release == 1
+        assert await redis.get(key) is None
+    finally:
+        await redis.delete(key)
         await redis.aclose()
