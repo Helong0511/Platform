@@ -841,6 +841,7 @@ async def retry_report_log(log_id: int):
                     report_start_time=stale_lease_time,
                     report_success_time=None,
                     completed_at=None,
+                    next_retry_time=now,
                 )
             )
             await db.commit()
@@ -859,48 +860,27 @@ async def retry_report_log(log_id: int):
                 logger.warning("[第三方上报] 重试状态已更新但日志读取失败: id=%s", log_id)
                 return False
 
-            # 后台任务仅负责发起发送；最终仍由 send_third_party_report 的
-            # _claim_report_log 原子 UPDATE 获取发送租约。
-            async def background_send():
-                """后台重试：从日志条目解析金额/币种后再次调用第三方上报 API。"""
-                currency = log_entry.currency or "USD"
-                amount = log_entry.amount if log_entry.amount is not None else 0.0
-
-                if log_entry.report_params and (
-                    not log_entry.currency or log_entry.amount is None
-                ):
-                    try:
-                        report_params = json.loads(log_entry.report_params)
-                        if "payData" in report_params:
-                            currency = report_params["payData"].get("currency", currency)
-                            amount = report_params["payData"].get("amount", amount)
-                        elif "data" in report_params and report_params["data"]:
-                            event_data = report_params["data"][0]
-                            custom_data = event_data.get("custom_data", {})
-                            currency = custom_data.get("currency", currency)
-                            amount = custom_data.get("value", amount)
-                    except (KeyError, TypeError, AttributeError, ValueError):
-                        logger.warning(
-                            "[第三方上报] 重试日志参数解析失败，使用已保存的金额/币种: id=%s",
-                            log_id,
-                        )
-
-                await send_third_party_report(
-                    adsid=log_entry.adsid,
-                    event=log_entry.event,
-                    email=log_entry.email,
-                    ip=log_entry.ip,
-                    phone=log_entry.phone,
-                    ua=log_entry.ua,
-                    source=log_entry.source,
-                    use_hash=log_entry.use_hash,
-                    conversion_id=log_entry.conversion_id,
-                    currency=currency,
-                    amount=amount,
+            if not log_entry.outbox_enqueued:
+                # 旧日志没有配置引用，不能从日志中安全恢复 access token；拒绝创建一个必然失败的后台任务。
+                await update_report_log(
+                    log_id,
+                    status="failed",
+                    error_message="该历史日志没有可恢复的像素配置引用，无法自动重试；请由新 Outbox 事件承接",
+                    report_start_time=stale_lease_time,
+                    completed_at=now,
+                    clear_next_retry_time=True,
                 )
+                logger.warning("[第三方上报] 拒绝重试缺少配置引用的历史日志: id=%s", log_id)
+                return False
+
+            # Outbox 重试由同一 worker 重新解析当前短链接/斗篷配置，不从日志或请求参数恢复凭据。
+            async def background_send():
+                from app.services.third_party_report_outbox import process_postback_report_outbox_item
+
+                await process_postback_report_outbox_item(log_id)
 
             asyncio.create_task(background_send())
-            logger.info("[第三方上报] 已原子触发重新上报: id=%s", log_id)
+            logger.info("[第三方上报] 已原子触发 Outbox 重新投递: id=%s", log_id)
             return True
 
     except Exception as e:
