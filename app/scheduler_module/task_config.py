@@ -191,6 +191,16 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "description": "每5分钟将 Redis Cap 计数同步到数据库",
     },
 
+    "Cap Reservation 崩溃恢复": {
+        "task_name": "Cap Reservation 崩溃恢复",
+        "task_module": "app.scheduler_module.tasks.cap_reservation_recovery",
+        "task_function": "cap_reservation_recovery_task",
+        "result_getter_module": "app.scheduler_module.tasks.cap_reservation_recovery",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "* * * * *",
+        "description": "每分钟恢复已过期租约的 Cap Reservation；仅对 Redis token 明确存在的孤儿预留执行幂等回滚，未知状态转人工对账",
+    },
+
     # ========== TQT API获取数据任务 ==========
     "TQT API获取数据": {
         "task_name": "TQT API获取数据",
