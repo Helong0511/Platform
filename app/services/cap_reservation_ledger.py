@@ -12,7 +12,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.core.database import AsyncSessionLocal
@@ -269,6 +269,36 @@ class CapReservationLedger:
                 raise RuntimeError(
                     f"Cap Reservation lease 续租失败，拒绝提交业务事务：{reservation_key}"
                 )
+
+    @staticmethod
+    async def renew_recovery_lease(
+        reservation_key: str,
+        lease_owner: str,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    ) -> bool:
+        """恢复 Worker 开始处理单条记录前续租；仅当前 owner 可延长租约。"""
+        if lease_seconds < 30 or lease_seconds > 3600:
+            raise ValueError("Reservation recovery lease_seconds 必须在 30 到 3600 秒之间")
+        now = get_app_now_naive()
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                update(CapReservation)
+                .where(
+                    CapReservation.reservation_key == reservation_key,
+                    CapReservation.lease_owner == lease_owner,
+                    CapReservation.state.in_(ACTIVE_STATES + ("COMMITTED",)),
+                    or_(
+                        CapReservation.state != "COMMITTED",
+                        CapReservation.redis_token_cleaned.is_(False),
+                    ),
+                )
+                .values(
+                    lease_expires_at=now + timedelta(seconds=lease_seconds),
+                    updated_at=now,
+                )
+            )
+            await session.commit()
+            return (result.rowcount or 0) == 1
 
     @staticmethod
     async def finalize(
