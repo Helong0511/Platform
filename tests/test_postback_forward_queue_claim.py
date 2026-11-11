@@ -351,3 +351,48 @@ def test_forward_log_request_summary_never_persists_parameter_values():
         assert sensitive_value not in summary
     assert _safe_forward_log_request_summary(None) is None
     assert _safe_forward_log_request_summary({}) is None
+
+
+def test_forward_log_api_response_redacts_historical_personal_data():
+    from types import SimpleNamespace
+
+    from app.services.cpl.postback_forward_log_service import (
+        _safe_forward_log_response,
+    )
+
+    log = SimpleNamespace(
+        id=1,
+        conversion_id=2,
+        product_id=None,
+        publisher_id=3,
+        downstream_url=(
+            "https://downstream.invalid/cb?email=alice%40example.invalid"
+            "&click_id=private-click-id"
+        ),
+        request_method="GET",
+        request_data='{"email":"alice@example.invalid"}',
+        request_params='{"ip":"203.0.113.8","click_id":"private-click-id"}',
+        response_status=200,
+        response_body='{"echo":"alice@example.invalid"}',
+        success=False,
+        error_message="downstream echoed alice@example.invalid",
+        retry_count=1,
+        created_at=datetime(2026, 11, 1, 12, 0, 0),
+        completed_at=datetime(2026, 11, 1, 12, 0, 1),
+        pii_scrubbed_at=None,
+    )
+
+    response = _safe_forward_log_response(log)
+    serialized = response.model_dump_json()
+
+    assert response.downstream_url == "https://downstream.invalid"
+    assert response.request_data == "历史请求载荷已脱敏"
+    assert response.request_params == "历史请求参数已脱敏"
+    assert response.response_body is None
+    assert response.error_message == "下游响应未满足成功检查规则"
+    for sensitive_value in (
+        "alice@example.invalid",
+        "203.0.113.8",
+        "private-click-id",
+    ):
+        assert sensitive_value not in serialized
