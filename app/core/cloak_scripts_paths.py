@@ -60,7 +60,11 @@ def resolve_bridge_html_read_path(bridge_page_name: str) -> Optional[str]:
     if not isinstance(bridge_page_name, str) or not bridge_page_name.endswith(".html"):
         raise ValueError("桥页文件名无效")
     cloak_name = bridge_page_name[:-5]
-    if bridge_html_filename(cloak_name) != bridge_page_name:
+    try:
+        expected_filename = bridge_html_filename(cloak_name)
+    except ValueError as exc:
+        raise ValueError("桥页文件名无效") from exc
+    if expected_filename != bridge_page_name:
         raise ValueError("桥页文件名无效")
     for base in iter_bridge_search_bases():
         path = os.path.join(base, bridge_page_name)
