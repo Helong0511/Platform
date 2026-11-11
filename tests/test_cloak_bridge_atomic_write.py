@@ -65,3 +65,30 @@ def test_template_cache_detects_atomic_replace_even_with_same_mtime(tmp_path):
         "<html>new replacement template</html>"
     )
     cloak_scripts_paths.invalidate_bridge_template_cache()
+
+
+def test_read_only_existing_bridge_is_not_deleted_before_atomic_replace(tmp_path, monkeypatch):
+    target = tmp_path / "master.html"
+    original = "<html>still serving old valid page</html>"
+    target.write_text(original, encoding="utf-8")
+    monkeypatch.setattr(
+        cloak_scripts_paths,
+        "iter_bridge_search_bases",
+        lambda: (str(tmp_path), str(tmp_path / "local")),
+    )
+
+    real_access = os.access
+
+    def controlled_access(path, mode):
+        if os.path.abspath(path) == os.path.abspath(target):
+            return False
+        if os.path.abspath(path) == os.path.abspath(tmp_path):
+            return True
+        return real_access(path, mode)
+
+    monkeypatch.setattr(cloak_scripts_paths.os, "access", controlled_access)
+
+    resolved = cloak_scripts_paths.resolve_bridge_html_write_path("master")
+
+    assert resolved == str(target)
+    assert target.read_text(encoding="utf-8") == original
