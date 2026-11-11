@@ -34,7 +34,7 @@ class IpValidator:
         # 无法确认来源 IP 时必须 fail-closed；代理/CDN 场景应通过可信代理配置解析真实 IP，
         # 不能因 request.client 缺失或头部异常而绕过 Postback IP 白名单。
         if not request_ip or not request_ip.strip() or request_ip.strip().lower() == "unknown":
-            logger.warning("Postback 请求 IP 为空或无法获取，拒绝处理：request_ip=%r", request_ip)
+            logger.warning("Postback 请求 IP 为空或无法获取，拒绝处理")
             return False, None
         
         # 清理 IP 地址
@@ -44,7 +44,7 @@ class IpValidator:
         is_whitelisted = await IpValidator._check_whitelist(cleaned_ip, db)
         
         if not is_whitelisted:
-            logger.warning(f"IP 地址不在白名单中：{cleaned_ip}")
+            logger.warning("IP 地址不在白名单中，拒绝处理")
             return False, cleaned_ip
         
         return True, cleaned_ip
