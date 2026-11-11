@@ -121,7 +121,7 @@ def _initialize_isolated_schema(database: str) -> None:
         connection.close()
 
 
-async def _run_recovery_scenario(monkeypatch, *, conversion_committed: bool):
+async def _run_recovery_scenario(monkeypatch, *, conversion_committed: bool, workers: int = 1):
     database = _create_isolated_mysql_database()
     engine = None
     redis = Redis.from_url(REDIS_URL, decode_responses=True)
@@ -205,7 +205,13 @@ async def _run_recovery_scenario(monkeypatch, *, conversion_committed: bool):
             )
             await session.commit()
 
-        stats = await recovery_module.recover_cap_reservations(batch_size=10)
+        if workers == 1:
+            stats = await recovery_module.recover_cap_reservations(batch_size=10)
+        else:
+            stats = await asyncio.gather(*(
+                recovery_module.recover_cap_reservations(batch_size=10)
+                for _ in range(workers)
+            ))
 
         async with session_factory() as session:
             recovered = await session.scalar(
@@ -318,3 +324,20 @@ async def test_mysql_concurrent_claim_allows_only_one_owner_for_same_reservation
         if engine is not None:
             await engine.dispose()
         _drop_isolated_mysql_database(database)
+
+
+
+@pytest.mark.asyncio
+async def test_mysql_recovery_workers_cannot_double_rollback_same_reservation(monkeypatch):
+    result = await _run_recovery_scenario(
+        monkeypatch,
+        conversion_committed=False,
+        workers=2,
+    )
+
+    stats = result["stats"]
+    assert sum(item["claimed"] for item in stats) == 1
+    assert sum(item["rolled_back"] for item in stats) == 1
+    assert result["state"] == "ROLLED_BACK"
+    assert result["counter_value"] == "0"
+    assert result["token_value"] is None
