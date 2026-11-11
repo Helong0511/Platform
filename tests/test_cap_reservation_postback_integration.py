@@ -192,7 +192,6 @@ async def test_fail_open_rollback_finalizes_ledger_without_redis_decrement(monke
     async def finalize(*args, **kwargs):
         finalized.append((args, kwargs))
 
-    monkeypatch.setattr(CapChecker, "rollback_reservations", CapChecker.rollback_reservations)
     from app.core.postback.checks import cap_checker
     monkeypatch.setattr(cap_checker.RedisCapManager, "decrement_daily", decrement)
     monkeypatch.setattr(cap_checker.CapReservationLedger, "finalize", finalize)
@@ -234,3 +233,80 @@ async def test_postback_commit_finalizes_ledger_after_database_commit(monkeypatc
         ("e" * 64, "COMMITTED"),
         {"lease_owner": "owner"},
     )
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("token_value", "counter_value", "expected"),
+    [
+        (b"1", b"7", "PRESENT"),
+        (None, b"7", "ABSENT"),
+        (b"1", None, "UNKNOWN"),
+        (b"1", b"not-a-number", "UNKNOWN"),
+    ],
+)
+async def test_redis_reservation_token_state_is_three_valued(
+    monkeypatch, token_value, counter_value, expected
+):
+    from app.core.cap import redis_counter
+
+    class FakeRedis:
+        async def mget(self, *keys):
+            assert keys == ("counter:key:reservation:token", "counter:key")
+            return [token_value, counter_value]
+
+    async def get_redis():
+        return FakeRedis()
+
+    monkeypatch.setattr(redis_counter, "get_redis_client", get_redis)
+
+    state = await redis_counter.RedisCapManager.get_reservation_token_state(
+        "counter:key", "counter:key:reservation:token"
+    )
+
+    assert state == expected
+
+
+@pytest.mark.asyncio
+async def test_redis_reservation_token_state_is_unknown_when_redis_unavailable(monkeypatch):
+    from app.core.cap import redis_counter
+
+    async def get_redis():
+        return None
+
+    monkeypatch.setattr(redis_counter, "get_redis_client", get_redis)
+
+    state = await redis_counter.RedisCapManager.get_reservation_token_state(
+        "counter:key", "counter:key:reservation:token"
+    )
+
+    assert state == "UNKNOWN"
+
+
+@pytest.mark.asyncio
+async def test_recovery_rollback_uses_exact_persisted_redis_keys(monkeypatch):
+    from app.core.cap import redis_counter
+
+    calls = []
+
+    class FakeRedis:
+        async def eval(self, script, numkeys, *keys):
+            calls.append((script, numkeys, keys))
+            return 4
+
+    async def get_redis():
+        return FakeRedis()
+
+    monkeypatch.setattr(redis_counter, "get_redis_client", get_redis)
+
+    result = await redis_counter.RedisCapManager.rollback_reservation_keys(
+        "persisted:counter:key", "persisted:token:key"
+    )
+
+    assert result == 4
+    assert calls == [(
+        redis_counter.RedisCapManager._ROLLBACK_RESERVATION_LUA,
+        2,
+        ("persisted:counter:key", "persisted:token:key"),
+    )]
