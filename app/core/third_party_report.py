@@ -43,9 +43,12 @@ def build_event_idempotency_key(
     adsid: str,
     event: str,
     conversion_id: Optional[str] = None,
+    platform: Optional[str] = None,
 ) -> str:
     """构建稳定的事件身份键；同一事件的重试保持不变，不同事件互不覆盖。"""
     parts = (source or "", adsid or "", event or "", conversion_id or "")
+    if platform:
+        parts = (*parts, platform.strip())
     # 长度前缀避免字段中出现分隔符时产生身份碰撞。
     identity = "".join(f"{len(part)}:{part}" for part in parts)
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
@@ -69,7 +72,7 @@ async def create_report_log(
     """
     按事件身份创建上报日志；相同事件重试复用同一日志，不同事件独立留痕。
     """
-    event_key = build_event_idempotency_key(source, adsid, event, conversion_id)
+    event_key = event_key or build_event_idempotency_key(source, adsid, event, conversion_id)
     try:
         async with AsyncSessionLocal() as db:
             result = await db.execute(
@@ -99,6 +102,7 @@ async def create_report_log(
                 attempt_count=0,
                 max_attempts=max_attempts,
                 created_at=get_app_now_naive(),
+                next_retry_time=get_app_now_naive(),
             )
             db.add(log_entry)
             await db.commit()
@@ -133,7 +137,9 @@ async def update_report_log(
         report_start_time: Optional[datetime] = None,
         report_success_time: Optional[datetime] = None,
         completed_at: Optional[datetime] = None,
-        report_params: Optional[str] = None
+        report_params: Optional[str] = None,
+        next_retry_time: Optional[datetime] = None,
+        clear_next_retry_time: bool = False,
 ):
     """
     更新第三方上报日志记录
@@ -165,6 +171,10 @@ async def update_report_log(
                     log_entry.completed_at = completed_at
                 if report_params is not None:
                     log_entry.report_params = report_params
+                if next_retry_time is not None:
+                    log_entry.next_retry_time = next_retry_time
+                if clear_next_retry_time:
+                    log_entry.next_retry_time = None
                 await db.commit()
     except Exception as e:
         logger.warning(f"[第三方上报] 更新日志记录失败: {e}")
@@ -199,6 +209,10 @@ async def _claim_report_log(report_log_id: int, lease_seconds: int = REPORT_LOG_
                     ThirdPartyReportLog.report_start_time.is_(None),
                     ThirdPartyReportLog.report_start_time < stale_before,
                 ),
+                or_(
+                    ThirdPartyReportLog.next_retry_time.is_(None),
+                    ThirdPartyReportLog.next_retry_time <= now,
+                ),
             )
             .values(report_start_time=now)
         )
@@ -221,7 +235,9 @@ async def send_third_party_report(
         currency: Optional[str] = None,
         amount: Optional[float] = None,
         click_time: Optional[datetime] = None,
-        facebook_api_version: Optional[str] = "v23.0"  # 可选参数，默认与全局 FACEBOOK_API_VERSION 对齐
+        facebook_api_version: Optional[str] = "v23.0",  # 可选参数，默认与全局 FACEBOOK_API_VERSION 对齐
+        report_log_id: Optional[int] = None,
+        event_key: Optional[str] = None,
 ):
     """
     后台任务：发送第三方广告上报
@@ -261,18 +277,30 @@ async def send_third_party_report(
     api_version = (facebook_api_version or settings.FACEBOOK_API_VERSION or "v23.0").strip()
     if not pixel_id or not access_token:
         logger.warning(
-            "[第三方上报] 缺少像素凭证，跳过 Facebook CAPI：event=%s pixel_id=%s",
+            "[第三方上报] 缺少像素凭证，暂缓 Facebook CAPI：event=%s pixel_id=%s",
             event,
             "empty" if not pixel_id else pixel_id[:10],
         )
+        if report_log_id:
+            now = get_app_now_naive()
+            await update_report_log(
+                report_log_id,
+                status="failed",
+                error_message="像素凭证暂不可用，Outbox 将自动重试",
+                report_start_time=now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
+                completed_at=now,
+                next_retry_time=now + timedelta(minutes=5),
+            )
+            return {"success": False, "retryable": True, "reason": "missing_facebook_credentials"}
         return {
             "success": False,
             "skipped": True,
             "reason": "missing_facebook_credentials",
         }
 
-    # 创建上报日志记录，传递conversion_id
-    report_log_id = await create_report_log(
+    # 直接发送路径创建日志；事务性 Outbox 路径复用转化事务中已提交的日志行。
+    if not report_log_id:
+        report_log_id = await create_report_log(
         source=source,
         adsid=adsid,
         event=event,
@@ -285,7 +313,7 @@ async def send_third_party_report(
         conversion_id=conversion_id,
         currency=currency,
         amount=amount
-    )
+        )
 
     if not report_log_id:
         error_msg = "创建上报日志记录失败"
