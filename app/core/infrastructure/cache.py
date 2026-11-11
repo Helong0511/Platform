@@ -194,18 +194,19 @@ class MemoryCacheBackend(CacheBackend):
         self._cache[key] = (value, expire_time)
         self._cache.move_to_end(key)
 
-        # 先清除已过期的最旧条目，避免在缓存写入高峰期保留过期对象。
-        now = self._time()
-        expired_keys = [
-            cache_key
-            for cache_key, (_, expires_at) in self._cache.items()
-            if expires_at is not None and now >= expires_at
-        ]
-        for cache_key in expired_keys:
-            self._cache.pop(cache_key, None)
+        if len(self._cache) > self._max_entries:
+            # 仅在容量将超限时清理过期项，避免每次写入都扫描整个缓存。
+            now = self._time()
+            expired_keys = [
+                cache_key
+                for cache_key, (_, expires_at) in self._cache.items()
+                if expires_at is not None and now >= expires_at
+            ]
+            for cache_key in expired_keys:
+                self._cache.pop(cache_key, None)
 
-        while len(self._cache) > self._max_entries:
-            self._cache.popitem(last=False)
+            while len(self._cache) > self._max_entries:
+                self._cache.popitem(last=False)
         return True
     
     async def delete(self, key: str) -> bool:
