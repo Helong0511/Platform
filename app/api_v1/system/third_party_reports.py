@@ -11,6 +11,8 @@
 
 说明：系统运维接口，含定时任务、审计日志、会话、缓存、斗篷与敏感路径探测。"""
 from datetime import datetime
+import json
+import re
 from decimal import Decimal
 from time import perf_counter
 from typing import Optional
@@ -42,6 +44,63 @@ from app.core.third_party_report import retry_report_log, update_report_log_para
 router = APIRouter()
 # 获取日志记录器
 logger = logging.getLogger(__name__)
+
+
+def _mask_report_pii(value: Optional[str], field: str) -> Optional[str]:
+    """管理端日志仅展示脱敏个人信息，避免调试接口成为原始 PII 导出通道。"""
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return raw
+    normalized = field.lower()
+    if normalized == "email":
+        if "@" not in raw:
+            return "***"
+        local, domain = raw.rsplit("@", 1)
+        return f"{local[:1]}***@{domain}"
+    if normalized == "phone":
+        digits = re.sub(r"\\D", "", raw)
+        if len(digits) < 7:
+            return "***"
+        return f"{digits[:3]}****{digits[-4:]}"
+    if normalized == "ip":
+        if ":" in raw:
+            return raw.split(":")[0] + ":****"
+        parts = raw.split(".")
+        return ".".join(parts[:2] + ["*", "*"]) if len(parts) == 4 else "***"
+    if normalized in {"ua", "user_agent"}:
+        return "[已隐藏]"
+    return raw
+
+
+def _sanitize_report_params(raw: Optional[str]) -> Optional[str]:
+    """递归脱敏 JSON 中的邮箱、手机号、IP 和 UA；非法 JSON 不向接口透出原文。"""
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return "[参数内容不可解析，已隐藏]"
+
+    sensitive_keys = {"email", "phone", "ip", "ua", "user_agent"}
+
+    def sanitize(value):
+        if isinstance(value, dict):
+            cleaned = {}
+            for key, item in value.items():
+                key_name = str(key).lower()
+                cleaned[key] = (
+                    _mask_report_pii(item, key_name)
+                    if key_name in sensitive_keys and item is not None
+                    else sanitize(item)
+                )
+            return cleaned
+        if isinstance(value, list):
+            return [sanitize(item) for item in value]
+        return value
+
+    return json.dumps(sanitize(payload), ensure_ascii=False, separators=(",", ":"))
 
 
 class UpdateReportLogParams(BaseModel):
@@ -151,9 +210,10 @@ async def get_third_party_reports(
         for log in logs:
             item = ThirdPartyReportLogListResponse.model_validate(log).model_dump()
             # ---------- 条件分支 ----------
-            if log.report_params:
-                preview = log.report_params[:120]
-                item["report_params_preview"] = f"{preview}..." if len(log.report_params) > 120 else preview
+            safe_params = _sanitize_report_params(log.report_params)
+            if safe_params:
+                preview = safe_params[:120]
+                item["report_params_preview"] = f"{preview}..." if len(safe_params) > 120 else preview
             else:
                 item["report_params_preview"] = None
             log_responses.append(item)
@@ -314,9 +374,15 @@ async def get_third_party_report(
                 detail="日志记录不存在"
             )
 
+        # 详情接口只返回脱敏字段；原始 PII 不通过管理端日志 API 暴露。
+        safe_data = ThirdPartyReportLogResponse.model_validate(log).model_dump()
+        for field in ("email", "phone", "ip", "ua"):
+            safe_data[field] = _mask_report_pii(safe_data.get(field), field)
+        safe_data["report_params"] = _sanitize_report_params(safe_data.get("report_params"))
+
         return ResponseBaseSchema.success(
-            data=ThirdPartyReportLogResponse.model_validate(log),
-            message="获取日志详情成功"
+            data=safe_data,
+            message="获取日志详情成功（个人信息已脱敏）"
         )
 
     except HTTPException:
