@@ -386,3 +386,89 @@ async def test_outbox_scan_is_bounded_and_filters_due_unexpired_attempts(monkeyp
     assert "third_party_report_logs.attempt_count < third_party_report_logs.max_attempts" in captured["sql"]
     assert "third_party_report_logs.report_start_time is null" in captured["sql"]
     assert "limit %s" in captured["sql"]
+
+async def test_remote_acceptance_with_lost_local_ack_retries_same_event_id(monkeypatch):
+    """模拟远端已接收、但本地 success ACK 未落库；恢复后必须复用稳定 event_id。"""
+    row = type(
+        "ReportRow",
+        (),
+        {
+            "id": 119,
+            "outbox_enqueued": True,
+            "status": "pending",
+            "next_retry_time": datetime(2026, 11, 11, 11, 59, 0),
+            "adsid": "fbclid-ack-lost",
+            "event": "Purchase",
+            "conversion_id": "conversion-ack-lost",
+            "email": "",
+            "ip": "",
+            "phone": "",
+            "ua": "",
+            "source": "postback",
+            "use_hash": True,
+            "currency": "USD",
+            "amount": 19.0,
+            "click_time": None,
+            "event_key": "stable-event-id-ack-lost",
+            "short_link_id": 19,
+            "cloak_name": None,
+            "short_code": None,
+        },
+    )()
+
+    class FakeDB:
+        async def scalar(self, statement):
+            return row
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    remote_accepted = set()
+    attempts = []
+    status_reads = 0
+
+    async def resolve(**kwargs):
+        return "pixel-ci", "token-ci", "v23.0"
+
+    async def send(**kwargs):
+        # 代表 HTTP 200/events_received；第一次模拟本地 ACK COMMIT 丢失，
+        # 发送函数无法确认本地状态，第二次由相同 event_id 幂等去重。
+        event_id = kwargs["event_key"]
+        attempts.append(event_id)
+        remote_accepted.add(event_id)
+        return None
+
+    async def report_status(report_log_id):
+        nonlocal status_reads
+        assert report_log_id == 119
+        status_reads += 1
+        return "pending" if status_reads == 1 else "success"
+
+    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(
+        outbox,
+        "get_app_now_naive",
+        lambda: datetime(2026, 11, 11, 12, 0, 0),
+    )
+    monkeypatch.setattr(outbox, "_resolve_pixel_credentials", resolve)
+    monkeypatch.setattr(outbox, "send_third_party_report", send)
+    monkeypatch.setattr(
+        "app.core.third_party_report._get_report_status", report_status
+    )
+
+    first = await outbox.process_postback_report_outbox_item(119)
+    second = await outbox.process_postback_report_outbox_item(119)
+
+    assert first == {
+        "success": False,
+        "retryable": True,
+        "reason": "report_status_not_confirmed",
+        "report_log_id": 119,
+    }
+    assert second["success"] is True
+    assert attempts == ["stable-event-id-ack-lost", "stable-event-id-ack-lost"]
+    assert remote_accepted == {"stable-event-id-ack-lost"}
