@@ -764,3 +764,50 @@ def test_report_attempt_budget_never_exceeds_cumulative_limit():
     assert _calculate_report_attempt_budget(
         10, 12, use_hash=False, max_retries=3
     ) == (2, False)
+
+
+@pytest.mark.asyncio
+async def test_failed_attempt_persistence_prevents_external_request(monkeypatch):
+    """累计尝试次数无法持久化时，必须 fail-closed，不得调用第三方。"""
+    async def existing_log(**kwargs):
+        return 910
+
+    async def claimed(report_log_id):
+        return True
+
+    async def attempt_state(report_log_id):
+        return 0, 4
+
+    async def failed_persist(report_log_id, **kwargs):
+        return False
+
+    class UnexpectedHTTPClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("attempt_count 未持久化时不得调用第三方 API")
+
+    monkeypatch.setattr(third_party_report, "create_report_log", existing_log)
+    monkeypatch.setattr(third_party_report, "_claim_report_log", claimed)
+    monkeypatch.setattr(third_party_report, "_get_report_attempt_state", attempt_state)
+    monkeypatch.setattr(third_party_report, "update_report_log", failed_persist)
+    monkeypatch.setattr(third_party_report.httpx, "AsyncClient", UnexpectedHTTPClient)
+
+    result = await third_party_report.send_third_party_report(
+        adsid="synthetic-click-id",
+        event="Purchase",
+        email="buyer@example.invalid",
+        ip="203.0.113.19",
+        phone="",
+        ua="synthetic-agent",
+        facebook_pixel_id="isolated-pixel",
+        facebook_access_token="isolated-token",
+        source="postback",
+        conversion_id="synthetic-conversion",
+        currency="USD",
+        amount=19.0,
+        report_log_id=910,
+        event_key="stable-attempt-persist-test",
+    )
+
+    assert result["success"] is False
+    assert result["retryable"] is True
+    assert result["reason"] == "attempt_state_persist_failed"
