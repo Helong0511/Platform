@@ -65,10 +65,10 @@ def _schedule_admin_notification(
         try:
             error = completed.exception()
         except Exception as exc:
-            logger.warning("读取 Postback 通知后台任务结果失败: %s", exc)
+            logger.warning("读取 Postback 通知后台任务结果失败：%s", type(exc).__name__)
             return
         if error:
-            logger.warning("Postback 管理员通知后台任务异常: %s", error, exc_info=error)
+            logger.warning("Postback 管理员通知后台任务异常：%s", type(error).__name__)
 
     task.add_done_callback(_on_done)
 
@@ -647,10 +647,9 @@ class PostbackForwarder:
             asyncio.create_task(trigger_forward_processing())
         except Exception as exc:
             logger.error(
-                "入队转发重试失败: conversion_id=%s err=%s",
+                "入队转发重试失败：conversion_record_id=%s error_type=%s",
                 conversion.id,
-                exc,
-                exc_info=True,
+                type(exc).__name__,
             )
 
     @staticmethod
@@ -713,10 +712,9 @@ class PostbackForwarder:
             asyncio.create_task(trigger_forward_processing())
         except Exception as exc:
             logger.error(
-                "入队产品级转发重试失败: conversion_id=%s err=%s",
+                "入队产品级转发重试失败：conversion_record_id=%s error_type=%s",
                 conversion.id,
-                exc,
-                exc_info=True,
+                type(exc).__name__,
             )
 
 
