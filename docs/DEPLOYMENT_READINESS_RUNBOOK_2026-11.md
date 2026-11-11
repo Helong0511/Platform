@@ -94,3 +94,47 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - 不得将当前依赖审计描述为“零漏洞”。
 - 该风险必须作为独立的凭据安全事项留档并由发布负责人单独接受/安排修复。
 - 本轮其余非凭据安全问题仍按本手册继续验收。
+
+## 9. 第三方上报事件幂等键与事务性 Outbox 发布/回滚
+
+> 本节是发布评审清单，不代表已执行生产迁移。当前审计只允许隔离 CI 数据库和合成数据。
+
+### 9.1 发布前检查
+
+- [ ] 确认目标 MySQL 为 InnoDB，版本满足项目实际使用的 MySQL 8.0 功能要求；先在与目标版本一致的隔离实例完整演练。
+- [ ] 对 `third_party_report_logs` 完成可恢复备份，并验证恢复到隔离实例成功；记录行数、主键范围、索引定义及备份校验值。
+- [ ] 暂停第三方上报旧 worker 和会修改 `third_party_report_logs` 身份字段的管理操作；排空正在执行的上报请求。
+- [ ] 运行事件幂等键预检查：确认 `source/adsid/event/conversion_id` 的历史数据可按应用的长度前缀算法生成键；检查重复键、空键和字段截断风险。
+- [ ] 若重复键查询返回任何行，必须逐条核对业务事件并形成经批准的去重/合并方案；禁止直接删除历史记录或跳过唯一索引创建。
+- [ ] 确认当前应用版本和目标版本的写入字段兼容，且管理端不会改写已进入 Outbox 的事件身份字段。
+
+### 9.2 强制迁移顺序
+
+1. 完成数据库备份、恢复验证、维护窗口审批及上报流量排空。
+2. 执行 `sql/migrations/20261110_third_party_report_event_idempotency.sql`。
+3. 检查 `missing_event_keys=0`，重复键查询无结果；确认 `unique_event_key` 已创建，且旧的 `unique_source_adsid` 已按迁移预期替换。
+4. 执行 `sql/migrations/20261111_third_party_report_outbox.sql`。
+5. 核验 Outbox 五个字段和 `idx_third_party_outbox_due`，与 ORM `ThirdPartyReportLog` 定义一致。
+6. 发布同一 SHA 的兼容应用代码；先保持 Outbox worker 禁用，执行隔离/受控验证后再按发布审批启用 worker。
+7. 确认新旧 API/worker 不混跑；观察 pending、failed、重试耗尽和租约恢复指标后再恢复正常流量。
+
+`sql/platform.sql` 是完整建库基线，已经包含 `event_key`、Outbox 字段及相关索引；它不是在线增量迁移脚本。已有数据库必须按上面的两个增量迁移顺序执行，禁止对现有生产库直接运行会 DROP/重建表的完整基线脚本。
+
+### 9.3 回滚原则与兼容边界
+
+- MySQL DDL 可能隐式提交；两份迁移不能按一个事务整体回滚。**默认回滚只回应用代码，不删除新增列、索引或历史事件记录。**
+- Outbox migration 新增列/索引可以保留；回退应用前必须停止新 Outbox worker，并确认已入队事件的处置方案（由兼容 worker 继续处理，或暂停并保留待恢复队列），不得静默丢弃。
+- event-id migration 将 `event_key` 改为 NOT NULL 并替换旧唯一索引。旧版应用若不写 `event_key`，不能直接回滚到该旧二进制版本；必须使用仍能生成/写入 `event_key` 的兼容回滚版本。若不存在兼容版本，回滚被阻断，需先制定并在隔离库演练 schema 与数据回退方案。
+- 不得自动 DROP `event_key`、Outbox 字段或索引；不得未经审批恢复旧 `unique_source_adsid`，因为新数据可能已允许同一 source/adsid 下存在不同 event。
+- 任何 schema 回退都必须先停止写入、备份当前库、在隔离副本验证数据映射和索引重建，并由数据库负责人审批；本手册不提供可直接用于生产的 DROP/DELETE 回滚 SQL。
+
+### 9.4 当前验收缺口
+
+- [ ] 两份迁移按真实顺序在隔离 MySQL 上完成从旧 schema/代表性历史数据到新 schema 的升级演练。
+- [ ] 覆盖重复 event_key、历史 NULL conversion_id、超长字段、唯一键冲突和中途失败后的恢复/重跑行为。
+- [ ] 演练代码回滚兼容性，证明旧版本不会因 NOT NULL `event_key` 写入失败；否则必须提供兼容回滚构建。
+- [ ] 演练 worker 停止、pending Outbox 保留、恢复后继续发送及稳定 event_id 不变。
+- [ ] 保存迁移前后 schema diff、行数对账、测试日志和审批记录。
+
+在以上项目完成前，第三方 Outbox 迁移/回滚仍是合并及发布阻断项。
+
