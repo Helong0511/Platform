@@ -45,7 +45,10 @@ def build_event_idempotency_key(
     platform: Optional[str] = None,
 ) -> str:
     """构建稳定的事件身份键；同一事件的重试保持不变，不同事件互不覆盖。"""
-    parts = (source or "", adsid or "", event or "", conversion_id or "")
+    # ViewContent 是点击/浏览事件；Purchase 到来后补写 conversion_id 只是关联元数据，
+    # 不得改变已创建 ViewContent 的幂等身份。Purchase 等转化事件仍使用 conversion_id。
+    identity_conversion_id = "" if event == "ViewContent" else (conversion_id or "")
+    parts = (source or "", adsid or "", event or "", identity_conversion_id)
     if platform:
         parts = (*parts, platform.strip())
     # 长度前缀避免字段中出现分隔符时产生身份碰撞。
