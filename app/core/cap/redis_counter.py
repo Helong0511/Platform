@@ -94,6 +94,10 @@ class RedisCapManager:
         redis.call('PERSIST', KEYS[1])
     end
     local current = tonumber(redis_value)
+    -- 已存在但不是非负整数的计数值属于数据损坏，不能回退到 DB 初值覆盖。
+    if redis_value and (not current or current < 0 or current ~= math.floor(current)) then
+        return -2
+    end
     if not current then
         current = db_count
     else
@@ -111,7 +115,7 @@ class RedisCapManager:
         -- 兼容旧版本遗留的 30 天 TTL，首次新代码预留时主动清除。
         redis.call('PERSIST', KEYS[1])
     end
-    -- reservation token 独立过期，避免成功提交的请求留下永久 token。
+    -- reservation token 保留到账本终态；终态清理任务负责删除，不能使用固定 TTL。
     redis.call('SET', KEYS[2], '1')
     if token_ttl > 0 then
         redis.call('EXPIRE', KEYS[2], token_ttl)
