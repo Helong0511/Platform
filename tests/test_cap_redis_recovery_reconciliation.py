@@ -60,7 +60,7 @@ async def test_existing_redis_key_is_reconciled_to_db_fallback_count(
         redis_counter.DEFAULT_EXPIRE_SECONDS if key_kind == "daily" else 0
     )
     assert token_ttl == (
-        redis_counter.DEFAULT_EXPIRE_SECONDS if key_kind == "daily" else 30 * 24 * 3600
+        0  # 两种待处理 token 均由账本终态控制
     )
     assert "math.max(current, db_count)" in script
     assert "if not current then" in script
