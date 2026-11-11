@@ -167,11 +167,14 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             .where(
                 ThirdPartyReportLog.id == report_log_id,
                 ThirdPartyReportLog.outbox_enqueued.is_(True),
+                ThirdPartyReportLog.pii_scrubbed_at.is_(None),
             )
             .limit(1)
         )
         if row is None:
             return {"success": False, "reason": "outbox_not_found"}
+        if row.pii_scrubbed_at is not None:
+            return {"success": False, "retryable": False, "reason": "pii_payload_scrubbed"}
         if row.status == "success":
             return {"success": True, "deduplicated": True}
         if row.next_retry_time is None or row.next_retry_time > now:
@@ -273,6 +276,7 @@ async def process_postback_report_outbox(
     stale_before = now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS)
     conditions = [
         ThirdPartyReportLog.outbox_enqueued.is_(True),
+        ThirdPartyReportLog.pii_scrubbed_at.is_(None),
         ThirdPartyReportLog.status.in_(("pending", "failed")),
         ThirdPartyReportLog.next_retry_time.is_not(None),
         ThirdPartyReportLog.next_retry_time <= now,
