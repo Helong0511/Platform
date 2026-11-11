@@ -108,26 +108,32 @@ async def test_pii_retention_scheduler_failure_does_not_persist_exception_text(
 
 
 @pytest.mark.asyncio
-async def test_pii_retention_scheduler_runs_both_log_retention_paths(monkeypatch):
+async def test_pii_retention_scheduler_runs_one_bounded_combined_sweep(monkeypatch):
     from app.scheduler_module.tasks import third_party_report_tasks as tasks
     from app.services import third_party_report_pii_retention as retention
 
     calls = []
 
     async def scrub_reports(**kwargs):
-        calls.append(("reports", kwargs["batch_size"]))
-        return {"enabled": True, "selected": 2, "scrubbed": 2, "retention_days": 90}
+        calls.append(("combined", kwargs["batch_size"]))
+        return {
+            "enabled": True,
+            "selected": 5,
+            "scrubbed": 5,
+            "third_party_report_logs_scrubbed": 2,
+            "postback_forward_logs_scrubbed": 3,
+            "retention_days": 90,
+        }
 
-    async def scrub_forward_logs(**kwargs):
-        calls.append(("forward_logs", kwargs["batch_size"]))
-        return {"enabled": True, "selected": 3, "scrubbed": 3, "retention_days": 90}
+    async def unexpected_second_sweep(**kwargs):
+        raise AssertionError("综合清理已覆盖下游转发日志，不应重复执行第二次扫描")
 
     monkeypatch.setattr(retention, "scrub_expired_third_party_report_pii", scrub_reports)
-    monkeypatch.setattr(retention, "scrub_expired_postback_forward_log_pii", scrub_forward_logs)
+    monkeypatch.setattr(retention, "scrub_expired_postback_forward_log_pii", unexpected_second_sweep)
     monkeypatch.setattr(tasks, "set_task_result", lambda *args: None)
 
     result = await tasks.scrub_third_party_report_pii_task()
 
-    assert calls == [("reports", 200), ("forward_logs", 200)]
-    assert result["scrubbed"] == 2
-    assert result["postback_forward_logs"]["scrubbed"] == 3
+    assert calls == [("combined", 200)]
+    assert result["scrubbed"] == 5
+    assert result["postback_forward_logs_scrubbed"] == 3
