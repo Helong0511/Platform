@@ -483,7 +483,7 @@ async def test_admin_cannot_change_outbox_event_identity(monkeypatch):
     assert log_entry.conversion_id == "conversion-original"
     assert log_entry.event_key == "platform-scoped-event-key"
 
-async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(monkeypatch):
+async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(monkeypatch, caplog):
     """实际执行发送函数：远端接收后本地成功状态提交失败，重试仍使用相同 event_id。"""
     state = {"status": "pending", "http_event_ids": [], "ack_attempts": 0, "claim": 0}
 
@@ -541,7 +541,7 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
         "adsid": "fbclid-ack-loss",
         "event": "Purchase",
         "email": None,
-        "ip": None,
+        "ip": "198.51.100.77",
         "phone": None,
         "ua": None,
         "facebook_pixel_id": "isolated-pixel",
@@ -565,3 +565,5 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
         "stable-event-id-ack-loss",
         "stable-event-id-ack-loss",
     ]
+    # 原始客户端 IP 不得进入应用日志（TEST-NET 合成地址）。
+    assert "198.51.100.77" not in caplog.text
