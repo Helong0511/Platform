@@ -51,6 +51,6 @@ async def collect_postback_raw_data(request: Request) -> Dict[str, Any]:
             except Exception:
                 pass
     except Exception as e:
-        logger.warning("读取 POST Body 数据时发生错误: %s", e)
+        logger.warning("读取 POST Body 数据时发生错误：%s", type(e).__name__)
 
     return raw_data
