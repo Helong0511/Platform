@@ -238,7 +238,9 @@ NEEDS_RECONCILIATION
 
 ### 第 13 节编写时仍未完成的事项（历史状态，已由第 14 节后续实现覆盖）
 
-以下 1–6 项是第 13 节编写时的历史状态；第 14 节记录了后续代码接入和恢复 Worker 实现，不得将这些旧描述当作当前代码状态。\n\n1. `CapReservationLedger.prepare()` 尚未接入 `increment_cap_count()`；当时 Redis reservation 仍由 cap_manager 生成随机 UUID。
+以下 1–6 项是第 13 节编写时的历史状态；第 14 节记录了后续代码接入和恢复 Worker 实现，不得将这些旧描述当作当前代码状态。
+
+1. `CapReservationLedger.prepare()` 尚未接入 `increment_cap_count()`；当时 Redis reservation 仍由 cap_manager 生成随机 UUID。
 2. `mark_reserved/finalize` 尚未接入 Postback 预留、DB commit、rollback 与 commit reconciliation 生命周期。
 3. Redis token 三态核验尚未实现；Redis UNKNOWN、counter key missing、token ABSENT 尚无统一恢复语义。
 4. 恢复 Worker、数据库 lease 抢占、条件状态更新、任务配置与积压监控尚未实现。
