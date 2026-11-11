@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 import tempfile
 from collections import OrderedDict
@@ -41,13 +42,23 @@ def iter_bridge_search_bases() -> tuple[str, str]:
     return SCRIPTS_DIR_SERVER, _project_scripts_dir()
 
 
+_SAFE_CLOAK_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
+
+
 def bridge_html_filename(cloak_name: str) -> str:
-    """斗篷名对应的桥页文件名，如 master -> master.html。"""
+    """斗篷名对应的桥页文件名；在文件系统边界再次校验，不能只信任 API Schema。"""
+    if not isinstance(cloak_name, str) or not _SAFE_CLOAK_NAME_RE.fullmatch(cloak_name):
+        raise ValueError("斗篷名称无效：仅支持 1～100 位字母、数字、下划线和中划线")
     return f"{cloak_name}.html"
 
 
 def resolve_bridge_html_read_path(bridge_page_name: str) -> Optional[str]:
-    """返回首个存在的桥页文件绝对路径（与 /change 读取顺序一致：服务器目录优先）。"""
+    """返回首个存在的桥页文件绝对路径；仅接受安全的单层 .html 文件名。"""
+    if not isinstance(bridge_page_name, str) or not bridge_page_name.endswith(".html"):
+        raise ValueError("桥页文件名无效")
+    cloak_name = bridge_page_name[:-5]
+    if bridge_html_filename(cloak_name) != bridge_page_name:
+        raise ValueError("桥页文件名无效")
     for base in iter_bridge_search_bases():
         path = os.path.join(base, bridge_page_name)
         if os.path.isfile(path):
@@ -56,8 +67,12 @@ def resolve_bridge_html_read_path(bridge_page_name: str) -> Optional[str]:
 
 
 def bridge_html_exists(cloak_name: str) -> bool:
-    """任一候选路径存在同名文件即视为已部署桥页。"""
-    return resolve_bridge_html_read_path(bridge_html_filename(cloak_name)) is not None
+    """任一候选路径存在同名文件即视为已部署桥页；历史脏数据按不可用处理。"""
+    try:
+        filename = bridge_html_filename(cloak_name)
+    except ValueError:
+        return False
+    return resolve_bridge_html_read_path(filename) is not None
 
 
 def atomic_write_bridge_html(target_path: str, content: str) -> None:
