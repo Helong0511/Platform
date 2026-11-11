@@ -125,18 +125,18 @@ class CloakPixelMappingService:
             logger.error(f"[斗篷像素映射] dp 参数格式无效：{dp}")
             return None
         
-        # 检查缓存（使用 dp 作为缓存键）
+        # 多 Worker 环境下，进程内缓存无法接收其它 Worker 的失效通知。
+        # 在共享缓存版本机制完成前，数据库是配置变更的唯一权威来源；
+        # 即使调用方显式传入 use_cache=True，也不读取或写入本地凭证缓存。
+        # 这会增加一次数据库查询，但避免配置轮换/停用/删除后其它 Worker
+        # 在 TTL 内继续使用旧 Pixel ID 或 Token。
         cache_key = f"{short_code}:{dp}"
         if use_cache:
-            cached_config = self._get_from_cache(cache_key)
-            if cached_config:
-                cached_expiry = cached_config.get("expires_at")
-                if cached_expiry is not None and cached_expiry <= get_app_now_naive():
-                    # 过期时间可自然到达，不一定伴随 DB 更新；缓存命中时也必须校验。
-                    self.invalidate_cache(cache_key)
-                else:
-                    logger.info(f"[斗篷像素映射] 缓存命中：dp={dp}, short_code={short_code}")
-                    return cached_config
+            logger.debug(
+                "[斗篷像素映射] 已绕过进程内凭证缓存，使用数据库权威配置：dp=%s, short_code=%s",
+                dp,
+                short_code,
+            )
         
         try:
             # 从数据库查询短链接信息
@@ -174,10 +174,6 @@ class CloakPixelMappingService:
             # 验证配置有效性
             if not self._validate_pixel_config(pixel_config, dp):
                 return None
-
-            # 更新缓存
-            if use_cache:
-                self._update_cache(cache_key, pixel_config)
 
             pixel_id = pixel_config.get("facebook_pixel_id") or ""
             logger.info(
