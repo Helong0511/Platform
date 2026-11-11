@@ -332,3 +332,69 @@ async def test_manual_retry_does_not_schedule_when_another_request_won(monkeypat
 
     assert await third_party_report.retry_report_log(41) is False
     assert scheduled == []
+
+
+
+async def test_telegram_failure_does_not_retry_successful_purchase_report(monkeypatch):
+    """Meta 已确认接收 Purchase 后，通知故障不得触发重复上报或降级状态。"""
+    state = {"http_calls": 0, "statuses": []}
+
+    class Response:
+        status_code = 200
+        text = '{"events_received":1,"fbtrace_id":"trace-123"}'
+
+        @staticmethod
+        def json():
+            return {"events_received": 1, "fbtrace_id": "trace-123"}
+
+    class FakeHTTPClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            state["http_calls"] += 1
+            return Response()
+
+    async def existing_log(**kwargs):
+        return 41
+
+    async def claimed(report_log_id):
+        return True
+
+    async def capture_update(report_log_id, **kwargs):
+        if "status" in kwargs:
+            state["statuses"].append(kwargs["status"])
+
+    async def failed_notification(*args, **kwargs):
+        raise RuntimeError("simulated Telegram outage")
+
+    monkeypatch.setattr(third_party_report, "create_report_log", existing_log)
+    monkeypatch.setattr(third_party_report, "_claim_report_log", claimed)
+    monkeypatch.setattr(third_party_report, "update_report_log", capture_update)
+    monkeypatch.setattr(third_party_report.httpx, "AsyncClient", FakeHTTPClient)
+    monkeypatch.setattr(third_party_report, "send_telegram_message", failed_notification)
+    monkeypatch.setattr(third_party_report.settings, "TELEGRAM_ADMIN", "isolated-admin")
+
+    await third_party_report.send_third_party_report(
+        adsid="ads-123",
+        event="Purchase",
+        email="buyer@example.invalid",
+        ip="203.0.113.10",
+        phone="",
+        ua="test-agent",
+        facebook_pixel_id="isolated-pixel",
+        facebook_access_token="isolated-token",
+        source="postback",
+        conversion_id="conversion-456",
+        currency="USD",
+        amount=12.5,
+    )
+
+    assert state["http_calls"] == 1
+    assert state["statuses"] == ["success"]
