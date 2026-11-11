@@ -163,6 +163,16 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
                 ),
             )
 
+            # 模拟迁移在首个 ADD COLUMN 成功后中断：字段已存在但尚未回填。
+            cursor.execute(
+                "ALTER TABLE third_party_report_logs "
+                "ADD COLUMN event_key VARCHAR(64) NULL COMMENT 'CI interrupted migration' AFTER event"
+            )
+            _run_sql_file(
+                cursor,
+                "sql/migrations/20261110_third_party_report_event_idempotency.sql",
+            )
+            # 完整重复执行必须保持安全且不改写已回填的事件身份。
             _run_sql_file(
                 cursor,
                 "sql/migrations/20261110_third_party_report_event_idempotency.sql",
@@ -201,7 +211,16 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
             assert "unique_event_key" in index_names
             assert "unique_source_adsid" not in index_names
 
-            # Outbox 扩展必须兼容历史日志，并保存非敏感配置引用而非 access token。
+            # 模拟 Outbox 迁移在第一个字段已添加后中断；续跑应补齐其它字段和索引。
+            cursor.execute(
+                "ALTER TABLE third_party_report_logs "
+                "ADD COLUMN outbox_enqueued TINYINT(1) NOT NULL DEFAULT 0"
+            )
+            _run_sql_file(
+                cursor,
+                "sql/migrations/20261111_third_party_report_outbox.sql",
+            )
+            # 重复执行不应因重复字段/索引而失败。
             _run_sql_file(
                 cursor,
                 "sql/migrations/20261111_third_party_report_outbox.sql",
@@ -250,6 +269,16 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
                     '{"echo":"alice@example.invalid"}',
                 ),
             )
+            # 模拟 PII 迁移在第一张表的清理标记列创建后中断。
+            cursor.execute(
+                "ALTER TABLE third_party_report_logs "
+                "ADD COLUMN pii_scrubbed_at DATETIME NULL"
+            )
+            _run_sql_file(
+                cursor,
+                "sql/migrations/20261112_third_party_report_pii_retention.sql",
+            )
+            # 包括两个表的字段/索引在内，整份脚本可安全重跑。
             _run_sql_file(
                 cursor,
                 "sql/migrations/20261112_third_party_report_pii_retention.sql",
