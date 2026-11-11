@@ -9,7 +9,7 @@ import logging
 from datetime import timedelta
 from typing import Optional
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 
 from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive
@@ -278,8 +278,22 @@ async def process_postback_report_outbox(
             .limit(batch_size)
         )
         report_ids = [int(value) for value in result.scalars().all()]
+        # 达到自动重试上限的失败事件不会再进入 due scan，必须单独暴露积压数量。
+        exhausted_count = await db.scalar(
+            select(func.count(ThirdPartyReportLog.id)).where(
+                ThirdPartyReportLog.outbox_enqueued.is_(True),
+                ThirdPartyReportLog.status == "failed",
+                ThirdPartyReportLog.attempt_count >= ThirdPartyReportLog.max_attempts,
+            )
+        )
 
-    stats = {"selected": len(report_ids), "success": 0, "retryable": 0, "failed": 0}
+    stats = {
+        "selected": len(report_ids),
+        "success": 0,
+        "retryable": 0,
+        "failed": 0,
+        "exhausted": int(exhausted_count or 0),
+    }
     for report_id in report_ids:
         try:
             result = await process_postback_report_outbox_item(report_id)
