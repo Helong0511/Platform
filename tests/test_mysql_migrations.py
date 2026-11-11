@@ -126,6 +126,43 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
                 historical,
             )
 
+            # 构造历史下游转发日志，验证 PII 迁移同时覆盖该表且不改写历史内容。
+            cursor.execute("DROP TABLE IF EXISTS postback_forward_logs")
+            cursor.execute(
+                """
+                CREATE TABLE postback_forward_logs (
+                    id INT NOT NULL AUTO_INCREMENT,
+                    conversion_id INT NOT NULL,
+                    product_id INT NULL,
+                    publisher_id INT NULL,
+                    downstream_url VARCHAR(500) NOT NULL,
+                    request_method VARCHAR(10) NOT NULL,
+                    request_data TEXT NULL,
+                    request_params TEXT NULL,
+                    response_status INT NULL,
+                    response_body TEXT NULL,
+                    success BOOLEAN NOT NULL DEFAULT 0,
+                    error_message TEXT NULL,
+                    retry_count INT NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    completed_at DATETIME NULL,
+                    PRIMARY KEY (id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                  COLLATE=utf8mb4_0900_ai_ci
+                """
+            )
+            cursor.execute(
+                "INSERT INTO postback_forward_logs "
+                "(conversion_id, downstream_url, request_method, request_params, "
+                "response_body, created_at, completed_at) "
+                "VALUES (1, %s, 'GET', %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                (
+                    "https://downstream.invalid/cb?email=alice%40example.invalid",
+                    '{"email":"alice@example.invalid","ip":"203.0.113.8"}',
+                    '{"echo":"alice@example.invalid"}',
+                ),
+            )
+
             _run_sql_file(
                 cursor,
                 "sql/migrations/20261110_third_party_report_event_idempotency.sql",
@@ -281,6 +318,20 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
             pii_index_names = {row[2] for row in cursor.fetchall()}
             assert "idx_third_party_pii_retention" in pii_index_names
 
+            cursor.execute(
+                "SELECT downstream_url, request_params, response_body, pii_scrubbed_at "
+                "FROM postback_forward_logs WHERE id = 1"
+            )
+            forward_row = cursor.fetchone()
+            assert forward_row == (
+                "https://downstream.invalid/cb?email=alice%40example.invalid",
+                '{"email":"alice@example.invalid","ip":"203.0.113.8"}',
+                '{"echo":"alice@example.invalid"}',
+                None,
+            )
+            cursor.execute("SHOW INDEX FROM postback_forward_logs")
+            forward_index_names = {row[2] for row in cursor.fetchall()}
+            assert "idx_forward_log_pii_retention" in forward_index_names
 
             for column in (
                 "pii_scrubbed_at",
