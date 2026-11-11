@@ -79,6 +79,12 @@ async def scrub_expired_third_party_report_pii(
         rows = list(result.scalars().all())
         for row in rows:
             # 保留 event_key/source/event/status/金额和时间，防止幂等去重及审计断链。
+            row.adsid = ""
+            row.conversion_id = None
+            row.short_link_id = None
+            row.cloak_name = None
+            row.short_code = None
+            row.click_time = None
             row.email = None
             row.ip = None
             row.phone = None
