@@ -231,6 +231,7 @@ async def test_report_claim_query_limits_failed_retries_to_expired_leases(monkey
     sql = captured["sql"]
     assert "status in" in sql
     assert "third_party_report_logs.pii_scrubbed_at is null" in sql
+    assert "third_party_report_logs.attempt_count < third_party_report_logs.max_attempts" in sql
     assert "report_start_time is null" in sql
     assert "report_start_time <" in sql
 
@@ -733,3 +734,33 @@ async def test_report_claim_exception_does_not_leak_exception_text(monkeypatch, 
     assert "buyer@example.invalid" not in caplog.text
     assert "203.0.113.10" not in caplog.text
     assert "secret-payload" not in caplog.text
+
+
+
+def test_report_attempt_budget_never_exceeds_cumulative_limit():
+    from app.core.third_party_report import _calculate_report_attempt_budget
+
+    # 新事件保留原有 3 次哈希请求 + 1 次非哈希兜底语义。
+    assert _calculate_report_attempt_budget(
+        0, 4, use_hash=True, max_retries=3
+    ) == (3, True)
+
+    # 剩余预算为 2 时，只允许 1 次哈希 + 1 次兜底。
+    assert _calculate_report_attempt_budget(
+        10, 12, use_hash=True, max_retries=3
+    ) == (1, True)
+
+    # 最后 1 次预算只允许非哈希兜底，不能额外发送哈希请求。
+    assert _calculate_report_attempt_budget(
+        11, 12, use_hash=True, max_retries=3
+    ) == (0, True)
+
+    # 预算耗尽后不再发起任何请求。
+    assert _calculate_report_attempt_budget(
+        12, 12, use_hash=True, max_retries=3
+    ) == (0, False)
+
+    # 不使用哈希时，剩余预算全部用于本轮请求。
+    assert _calculate_report_attempt_budget(
+        10, 12, use_hash=False, max_retries=3
+    ) == (2, False)
