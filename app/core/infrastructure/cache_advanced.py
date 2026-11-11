@@ -6,6 +6,7 @@
 在系统中的位置：热点配置/字典类数据可选用本模块的 ``cache_with_protection`` 等 API。
 """
 import random
+import secrets
 import asyncio
 import logging
 from typing import Optional, Any, Callable, TypeVar
@@ -149,6 +150,14 @@ class DistributedLock:
     用于防止缓存击穿（热点 Key 过期时大量并发请求）
     """
     
+    # 比较并删除必须在 Redis 内原子完成，避免 GET 与 DELETE 之间锁过期后误删新持有者的锁。
+    _RELEASE_LUA = """
+    if redis.call('GET', KEYS[1]) == ARGV[1] then
+        return redis.call('DEL', KEYS[1])
+    end
+    return 0
+    """
+
     def __init__(self, key: str, timeout: int = 10):
         """
         Args:
@@ -157,7 +166,7 @@ class DistributedLock:
         """
         self.key = f"lock:{key}"
         self.timeout = timeout
-        self.lock_value = f"locked:{random.randint(100000, 999999)}"
+        self.lock_value = secrets.token_urlsafe(32)
     
     async def acquire(self) -> bool:
         """
@@ -204,15 +213,18 @@ class DistributedLock:
         
         if hasattr(cache, 'redis') and cache.redis:
             try:
-                # 检查锁是否属于当前实例（防止误删其他进程的锁）
-                current_value = await cache.redis.get(self.key)
-                if current_value == self.lock_value:
-                    await cache.redis.delete(self.key)
+                # Lua 将 owner 校验与删除合并为单条原子操作，避免锁过期/重获期间误删新锁。
+                released = await cache.redis.eval(
+                    self._RELEASE_LUA,
+                    1,
+                    self.key,
+                    self.lock_value,
+                )
+                if int(released or 0) == 1:
                     logger.debug(f"释放分布式锁成功：{self.key}")
                     return True
-                else:
-                    logger.debug(f"锁不属于当前实例，跳过释放：{self.key}")
-                    return False
+                logger.debug(f"锁已过期或不属于当前实例，跳过释放：{self.key}")
+                return False
             except Exception as e:
                 logger.error(f"释放分布式锁失败：{e}", exc_info=True)
                 return False
