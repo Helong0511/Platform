@@ -238,7 +238,7 @@ async def increment_cap_count(
                 OfferCap.offer_id == offer_id,
                 OfferCap.is_active == True
             )
-        ).with_for_update()
+        ).order_by(OfferCap.id.asc()).with_for_update()
         
         if publisher_id:
             query = query.where(
@@ -455,6 +455,7 @@ async def reset_daily_caps(db: AsyncSession) -> None:
                     ),
                 )
             )
+            .order_by(OfferCap.id.asc())
             .with_for_update()
         )
         result = await db.execute(query)
