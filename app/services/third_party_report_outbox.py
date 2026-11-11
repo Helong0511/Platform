@@ -25,6 +25,10 @@ from app.models.models import ShortLink, ThirdPartyReportLog
 logger = logging.getLogger(__name__)
 
 
+class OutboxConfigReferenceDeleted(Exception):
+    """Outbox 引用的短链接已物理删除，事件无法再解析原配置。"""
+
+
 async def enqueue_postback_report(
     db,
     *,
@@ -136,7 +140,19 @@ async def _resolve_pixel_credentials(
             short_link = await db.scalar(
                 select(ShortLink).where(ShortLink.id == short_link_id).limit(1)
             )
-            if short_link and short_link.facebook_pixel_id and short_link.facebook_access_token:
+            if short_link is None:
+                # 物理删除的短链无法靠原 ID 恢复；不能无限每 5 分钟重试。
+                raise OutboxConfigReferenceDeleted()
+            if (
+                not short_link.is_active
+                or (
+                    short_link.expires_at is not None
+                    and short_link.expires_at <= get_app_now_naive()
+                )
+            ):
+                # 停用/过期可能被管理员恢复，因此不发送，但由 worker 延迟重试。
+                return None, None, None
+            if short_link.facebook_pixel_id and short_link.facebook_access_token:
                 pixel_id = short_link.facebook_pixel_id
                 access_token = short_link.facebook_access_token
                 api_version = short_link.facebook_api_version
@@ -206,6 +222,24 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             cloak_name=payload["cloak_name"],
             short_code=payload["short_code"],
         )
+    except OutboxConfigReferenceDeleted:
+        claimed = await _claim_report_log(report_log_id)
+        if not claimed:
+            return {"success": False, "retryable": True, "reason": "report_in_progress"}
+        now = get_app_now_naive()
+        await update_report_log(
+            report_log_id,
+            status="failed",
+            error_message="短链接已删除，无法解析像素配置",
+            report_start_time=now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
+            completed_at=now,
+            clear_next_retry_time=True,
+        )
+        return {
+            "success": False,
+            "retryable": False,
+            "reason": "short_link_deleted",
+        }
     except Exception as exc:
         # 异常原文可能包含第三方响应或个人信息，只记录异常类型与内部记录 ID。
         logger.warning(
