@@ -192,6 +192,20 @@ async def _get_report_status(report_log_id: int) -> Optional[str]:
         return result.scalar_one_or_none()
 
 
+async def _get_report_attempt_state(report_log_id: int) -> tuple[int, int]:
+    """读取累计尝试次数与总上限，供 Outbox 跨 worker 计算重试预算。"""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(ThirdPartyReportLog.attempt_count, ThirdPartyReportLog.max_attempts)
+            .where(ThirdPartyReportLog.id == report_log_id)
+            .limit(1)
+        )
+        row = result.one_or_none()
+        if row is None:
+            raise RuntimeError(f"第三方上报日志不存在：{report_log_id}")
+        return max(0, int(row[0] or 0)), max(1, int(row[1] or 1))
+
+
 async def _claim_report_log(report_log_id: int, lease_seconds: int = REPORT_LOG_LEASE_SECONDS) -> bool:
     """原子认领一条待上报事件，避免并发请求同时发送同一事件。
 
@@ -353,6 +367,10 @@ async def send_third_party_report(
 
 
 
+    base_attempt_count, max_attempts_total = await _get_report_attempt_state(report_log_id)
+    if base_attempt_count >= max_attempts_total:
+        return {"success": False, "retryable": False, "reason": "max_attempts_exhausted"}
+
     async def _mark_failed_and_raise(error_msg: str):
         """将上报日志标为 failed 后抛出 ValueError，供上层中断流程。"""
         logger.error(f"[第三方上报] {error_msg}")
@@ -362,7 +380,8 @@ async def send_third_party_report(
             error_message=error_msg,
             # 将租约标记为已释放，允许失败事件立即被后续重试认领。
             report_start_time=get_app_now_naive() - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
-            completed_at=get_app_now_naive()
+            completed_at=get_app_now_naive(),
+            clear_next_retry_time=True,
         )
         raise ValueError(error_msg)
 
@@ -481,7 +500,11 @@ async def send_third_party_report(
 
             # 存储完整上报参数
             report_params_json = json.dumps(send_data, ensure_ascii=False)
-            await update_report_log(report_log_id, report_params=report_params_json, attempt_count=attempt + 1)
+            await update_report_log(
+                report_log_id,
+                report_params=report_params_json,
+                attempt_count=base_attempt_count + attempt + 1,
+            )
 
             logger.info(
                 "[第三方上报] 开始发送 (尝试 %s/%s): adsid=%s, ip=%s, use_hash=%s, email=%s, phone=%s",
@@ -521,7 +544,8 @@ async def send_third_party_report(
                                 response_body=response.text[:2000],
                                 log_id_from_response=log_id,
                                 report_success_time=report_success_time,
-                                completed_at=report_success_time
+                                completed_at=report_success_time,
+                                clear_next_retry_time=True,
                             )
                             
                             # 当Purchase事件上报成功时，发送Telegram通知
@@ -661,7 +685,11 @@ async def send_third_party_report(
 
             # 存储完整上报参数
             report_params_json = json.dumps(send_data, ensure_ascii=False)
-            await update_report_log(report_log_id, report_params=report_params_json, attempt_count=max_retries + 1)
+            await update_report_log(
+                report_log_id,
+                report_params=report_params_json,
+                attempt_count=base_attempt_count + max_retries + 1,
+            )
 
             logger.info(
                 "[第三方上报] 开始发送 (尝试 %s/%s - 不使用哈希): adsid=%s, ip=%s, email=%s, phone=%s",
@@ -695,7 +723,8 @@ async def send_third_party_report(
                                 response_body=response.text[:2000],
                                 log_id_from_response=log_id,
                                 report_success_time=report_success_time,
-                                completed_at=report_success_time
+                                completed_at=report_success_time,
+                                clear_next_retry_time=True,
                             )
                             return
                         else:
@@ -746,14 +775,21 @@ async def send_third_party_report(
     failure_reasons_str = "\n" + "\n".join(failure_reasons) if failure_reasons else "\n无详细信息"
     logger.error(f"[第三方上报] ❌ 全部 {len(failure_reasons)} 次尝试失败: adsid={adsid}, 失败原因:{failure_reasons_str}")
 
-    # 更新日志记录为失败状态
+    # 失败后释放发送租约；按累计尝试次数安排退避，达到预算后转为人工重试。
+    final_attempt_count = base_attempt_count + (max_retries + 1 if use_hash else max_retries)
+    retry_at = None
+    if final_attempt_count < max_attempts_total:
+        retry_delay_minutes = min(5 * (2 ** (base_attempt_count // 4)), 60)
+        retry_at = get_app_now_naive() + timedelta(minutes=retry_delay_minutes)
     await update_report_log(
         report_log_id,
         status="failed",
+        attempt_count=final_attempt_count,
         error_message=failure_reasons_str.strip(),
-        # 失败后释放发送租约；下一次重试仍需通过数据库原子认领。
         report_start_time=get_app_now_naive() - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
-        completed_at=get_app_now_naive()
+        completed_at=get_app_now_naive(),
+        next_retry_time=retry_at,
+        clear_next_retry_time=retry_at is None,
     )
 
     # 发送告警
