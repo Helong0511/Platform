@@ -82,6 +82,7 @@ async def test_sync_all_caps_locks_rows_and_never_resets_existing_today_redis_ke
     stats = await cap_sync.CapSynchronizer(db).sync_all_active_caps()
 
     assert db.query._for_update_arg is not None
+    assert str(db.query._order_by_clauses[0]) == "offer_caps.id ASC"
     assert stats == {"success": 1, "failed": 0}
     # 新业务日的 Redis key 已经包含真实预留，不能因为 DB 日期旧而被清零。
     assert cap.current_daily_count == 4
@@ -119,6 +120,7 @@ async def test_sync_single_cap_locks_row_and_keeps_maximum_count(monkeypatch):
 
     assert await cap_sync.CapSynchronizer(db).sync_single_cap(2) is True
     assert db.query._for_update_arg is not None
+    assert str(db.query._order_by_clauses[0]) == "offer_caps.id ASC"
     assert cap.current_daily_count == 8
     assert cap.current_total_count == 30
     assert db.committed is True
