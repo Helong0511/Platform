@@ -324,6 +324,8 @@ async def send_to_channel(
         return False
     except Exception as e:
         logger.warning(
-            "发送通知失败：channel=%s error_type=%s"
+            "发送通知失败：channel=%s error_type=%s",
+            channel,
+            type(e).__name__,
         )
         return False
