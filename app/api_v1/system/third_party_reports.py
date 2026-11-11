@@ -79,6 +79,22 @@ def _mask_report_pii(value: Optional[str], field: str) -> Optional[str]:
     return raw
 
 
+def _can_requeue_report(log, now: Optional[datetime] = None) -> bool:
+    """与 retry_report_log 使用同一配置引用及租约条件，避免前端误显示不可执行操作。"""
+    if not getattr(log, "outbox_enqueued", False) or getattr(log, "status", None) != "failed":
+        return False
+    has_config_reference = bool(
+        getattr(log, "short_link_id", None)
+        or (getattr(log, "cloak_name", None) and getattr(log, "short_code", None))
+    )
+    if not has_config_reference:
+        return False
+    now = now or get_app_now_naive()
+    stale_lease_time = now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1)
+    report_start_time = getattr(log, "report_start_time", None)
+    return report_start_time is None or report_start_time < stale_lease_time
+
+
 def _safe_report_error_message(value: Optional[str]) -> Optional[str]:
     """只向管理端返回归类后的失败原因，避免第三方响应/异常原文携带 PII。"""
     if not value:
@@ -247,20 +263,7 @@ async def get_third_party_reports(
             item["outbox_error_category"] = (
                 _safe_report_error_message(log.error_message) if log.outbox_enqueued else None
             )
-            retry_lease_expired = (
-                log.report_start_time is None
-                or log.report_start_time < get_app_now_naive()
-                - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1)
-            )
-            has_config_reference = bool(
-                log.short_link_id or (log.cloak_name and log.short_code)
-            )
-            item["can_requeue"] = bool(
-                log.outbox_enqueued
-                and log.status == "failed"
-                and has_config_reference
-                and retry_lease_expired
-            )
+            item["can_requeue"] = _can_requeue_report(log)
             log_responses.append(item)
         serialize_elapsed_ms = int((perf_counter() - serialize_started_at) * 1000)
         total_elapsed_ms = int((perf_counter() - started_at) * 1000)
