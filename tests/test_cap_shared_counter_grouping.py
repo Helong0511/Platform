@@ -27,8 +27,10 @@ class _DB:
     def __init__(self, caps):
         self.caps = caps
         self.flushed = False
+        self.query = None
 
     async def execute(self, statement):
+        self.query = statement
         return _Result(self.caps)
 
     async def flush(self):
@@ -88,3 +90,4 @@ async def test_overlapping_offer_and_advertiser_caps_reserve_shared_key_once(mon
     assert all(cap.current_total_count == 11 for cap in caps)
     assert all(cap.cap_start_date == datetime(2026, 11, 10, 0, 0, 0) for cap in caps)
     assert db.flushed is True
+    assert str(db.query._order_by_clauses[0]) == "offer_caps.id ASC"
