@@ -120,6 +120,7 @@ TASK_NAME_MAP = {
     "asone_task": ASONE_API_TASK_NAME,
     "gam_task": GAM_API_TASK_NAME,
     "cpl_tasks": RESET_DAILY_CAPS_TASK_NAME,
+    "cap_reservation_recovery": CAP_RESERVATION_RECOVERY_TASK_NAME,
     "ad_data_health_task": AD_DATA_HEALTH_SCAN_TASK_NAME,
 }
 
