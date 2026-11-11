@@ -23,11 +23,15 @@ Official references:
 
 ## Verification status
 
-The lockfile is being regenerated in an isolated CI workspace. The workflow commits the generated lockfile only after backend tests, frontend lint/build, and Playwright E2E all pass. A subsequent CI run must use the committed lockfile directly with `npm ci`; only that run establishes the migration as verified.
+CI #634 successfully ran ESLint 10 flat-config lint, frontend build, Playwright browser E2E, and backend tests (230 passed, 1 skipped). The lockfile was generated from a clean dependency graph and committed only after both backend and frontend jobs succeeded.
+
+A follow-up CI run must execute `npm ci` directly against the committed lockfile, without the temporary regeneration step. That run is the final reproducibility check.
 
 No production server, database, Redis, cache, queue, or live third-party endpoint is used.
 
 
 ## Peer dependency resolution
 
-The first lockfile-only update correctly stopped with `ERESOLVE`: the previous lock graph still contained `eslint-plugin-vue@9.28.0` and its old Vue parser peer while the manifest now requests plugin v10. The workflow does not use `--force` or `--legacy-peer-deps`. It now resolves a fresh lockfile from the declared manifest in the isolated CI workspace, then runs `npm ci`, lint, build and browser E2E before the lockfile can be committed.
+The first lockfile-only update correctly stopped with `ERESOLVE`: the previous lock graph still contained `eslint-plugin-vue@9.28.0` and its old Vue parser peer while the manifest now requests plugin v10. The workflow does not use `--force` or `--legacy-peer-deps`. The temporary CI workflow now removes the stale lockfile and resolves a fresh graph from the manifest.
+
+ESLint 10.14.0 initially brought `minimatch@10.2.6`, which is affected by GHSA-g3hv-75wg-m249. ESLint upstream merged #21492 to require minimatch 11.0.1 or later. This project pins `minimatch@11.0.5` via a root override; the installed ESLint and `@eslint/config-array` paths use only the constructor and `match()` API retained in v11. The full lint, build, and browser E2E suite passed with that override.
