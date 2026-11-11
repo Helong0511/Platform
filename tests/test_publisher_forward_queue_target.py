@@ -24,11 +24,14 @@ class _Result:
 
 
 class _FakeDB:
-    def __init__(self, publisher=None):
+    def __init__(self, publisher=None, execute_results=None):
         self.publisher = publisher
+        self.execute_results = list(execute_results or [])
         self.added = []
 
     async def execute(self, statement):
+        if self.execute_results:
+            return _Result(self.execute_results.pop(0))
         return _Result(self.publisher)
 
     def add(self, value):
@@ -66,7 +69,9 @@ async def test_initial_publisher_queue_does_not_store_product_target():
 
 @pytest.mark.asyncio
 async def test_publisher_retry_queue_does_not_store_product_target():
-    db = _FakeDB()
+    # 第一次查询模拟 SELECT ... FOR UPDATE 命中转化主记录；
+    # 第二次去重查询模拟队列中尚无该渠道任务。
+    db = _FakeDB(execute_results=[100, None])
     conversion = SimpleNamespace(id=100, product_id=88)
 
     await PostbackForwarder._enqueue_publisher_forward_retry(
