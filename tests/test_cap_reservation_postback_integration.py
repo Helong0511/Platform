@@ -340,5 +340,5 @@ async def test_missing_redis_token_does_not_finalize_active_ledger_as_rolled_bac
         ])
 
     assert marked and marked[0][0] == "ledger-key"
-    assert "-3" in marked[0][1] or "unknown" in marked[0][1].lower()
+    assert "rollback unresolved" in marked[0][1].lower()
     assert finalized == []
