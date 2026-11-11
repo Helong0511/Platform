@@ -40,6 +40,7 @@ from app.schemas.third_party_report import (
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.core.third_party_report import (
     REPORT_LOG_LEASE_SECONDS,
+    is_outbox_payload_editable,
     retry_report_log,
     update_report_log_params,
 )
@@ -264,6 +265,7 @@ async def get_third_party_reports(
                 _safe_report_error_message(log.error_message) if log.outbox_enqueued else None
             )
             item["can_requeue"] = _can_requeue_report(log)
+            item["outbox_payload_editable"] = is_outbox_payload_editable(log)
             log_responses.append(item)
         serialize_elapsed_ms = int((perf_counter() - serialize_started_at) * 1000)
         total_elapsed_ms = int((perf_counter() - started_at) * 1000)
