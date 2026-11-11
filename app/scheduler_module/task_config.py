@@ -209,7 +209,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
     THIRD_PARTY_REPORT_OUTBOX_TASK_NAME: {
         "task_name": THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
         "task_module": "app.scheduler_module.tasks.third_party_report_tasks",
-        "task_function": "third_party_report_outbox_task",
+        "task_function": "process_third_party_report_outbox_task",
         "result_getter_module": "app.scheduler_module.task_result_store",
         "result_getter_function": "get_task_result",
         "cron_expression": "* * * * *",
