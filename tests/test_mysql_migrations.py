@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 import pymysql
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 
 HOST = os.getenv("MYSQL_INTEGRATION_HOST")
@@ -198,6 +200,60 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
                 "idx_third_party_outbox_due",
             ):
                 assert column in baseline_schema
+
+            # 使用两个独立 MySQL 连接真实竞争同一 Outbox 行的租约。
+            # 这验证 InnoDB 条件 UPDATE 的实际仲裁，而不是仅模拟 rowcount。
+            cursor.execute(
+                "INSERT INTO third_party_report_logs "
+                "(source, adsid, event, event_key, conversion_id, amount, status, "
+                "outbox_enqueued, next_retry_time, report_start_time) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, 1, CURRENT_TIMESTAMP, NULL)",
+                (
+                    "postback", "ci-outbox-claim", "Purchase",
+                    hashlib.sha256(b"ci-outbox-claim").hexdigest(),
+                    "ci-outbox-conversion", "1.00", "pending",
+                ),
+            )
+            cursor.execute(
+                "SELECT id FROM third_party_report_logs WHERE adsid = %s",
+                ("ci-outbox-claim",),
+            )
+            claim_row_id = cursor.fetchone()[0]
+
+            barrier = threading.Barrier(2)
+
+            def _claim_from_independent_connection():
+                claim_connection = _connect()
+                claim_connection.autocommit(False)
+                try:
+                    barrier.wait(timeout=5)
+                    with claim_connection.cursor() as claim_cursor:
+                        claim_cursor.execute(
+                            "UPDATE third_party_report_logs "
+                            "SET report_start_time = CURRENT_TIMESTAMP "
+                            "WHERE id = %s AND outbox_enqueued = 1 "
+                            "AND status IN ('pending', 'failed') "
+                            "AND (report_start_time IS NULL OR "
+                            "report_start_time < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 300 SECOND)) "
+                            "AND (next_retry_time IS NULL OR next_retry_time <= CURRENT_TIMESTAMP)",
+                            (claim_row_id,),
+                        )
+                        affected = claim_cursor.rowcount
+                    claim_connection.commit()
+                    return affected
+                finally:
+                    claim_connection.close()
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                claim_results = list(
+                    executor.map(
+                        lambda _: _claim_from_independent_connection(),
+                        range(2),
+                    )
+                )
+            assert sorted(claim_results) == [0, 1], (
+                "同一 Outbox 行只能由一个独立 MySQL worker 取得发送租约"
+            )
     finally:
         connection.close()
 
