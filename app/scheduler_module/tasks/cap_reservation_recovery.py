@@ -3,7 +3,8 @@ import logging
 from datetime import datetime, timezone
 
 from app.scheduler_module.task_names import CAP_RESERVATION_RECOVERY_TASK_NAME
-from app.scheduler_module.task_result_store import set_task_result
+# 该 getter 由 task_config.result_getter_module 动态按模块属性加载，需显式导出。
+from app.scheduler_module.task_result_store import get_task_result, set_task_result
 from app.services.cap_reservation_recovery import (
     get_cap_reservation_recovery_status,
     recover_cap_reservations,
