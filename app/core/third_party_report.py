@@ -363,10 +363,9 @@ async def send_third_party_report(
     except Exception as claim_exc:
         # 无法确认是否成功认领时禁止发送，避免并发重复上报。
         logger.error(
-            "[第三方上报] 事件认领失败，跳过发送: id=%s error=%s",
+            "[第三方上报] 事件认领失败，跳过发送：id=%s error_type=%s",
             report_log_id,
-            claim_exc,
-            exc_info=True,
+            type(claim_exc).__name__,
         )
         return {"success": False, "retryable": True, "reason": "report_claim_unavailable"}
 
