@@ -506,7 +506,19 @@ async def send_third_party_report(
                                 
                                 # 发送Telegram通知
                                 if settings.TELEGRAM_ADMIN:
-                                    await send_telegram_message(settings.TELEGRAM_ADMIN, notification_message)
+                                    # 通知失败不能反向改变已经成功的第三方上报结果，
+                                    # 更不能因此重新发送同一笔 Purchase 事件。
+                                    try:
+                                        await send_telegram_message(
+                                            settings.TELEGRAM_ADMIN,
+                                            notification_message,
+                                        )
+                                    except Exception as notify_err:
+                                        logger.warning(
+                                            "[第三方上报] Purchase 已成功，但 Telegram 通知失败: %s",
+                                            notify_err,
+                                            exc_info=True,
+                                        )
                                 else:
                                     logger.warning("TELEGRAM_ADMIN 未配置，无法发送 Purchase 事件通知")
                             
