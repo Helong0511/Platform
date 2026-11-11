@@ -151,7 +151,11 @@ async def update_report_log(
         return
     try:
         async with AsyncSessionLocal() as db:
-            result = await db.execute(select(ThirdPartyReportLog).where(ThirdPartyReportLog.id == log_id))
+            result = await db.execute(
+                select(ThirdPartyReportLog)
+                .where(ThirdPartyReportLog.id == log_id)
+                .with_for_update()
+            )
             log_entry = result.scalars().first()
             if log_entry:
                 if status is not None:
@@ -815,6 +819,20 @@ async def send_third_party_report(
         logger.warning(f"[第三方上报] 发送告警失败: {notify_err}")
 
 
+def is_outbox_payload_editable(report_log, now: Optional[datetime] = None) -> bool:
+    """只有尚未尝试发送、失败且租约已释放的 Outbox 才允许修正发送载荷。"""
+    if not getattr(report_log, "outbox_enqueued", False):
+        return False
+    if getattr(report_log, "status", None) != "failed":
+        return False
+    if int(getattr(report_log, "attempt_count", 0) or 0) > 0:
+        return False
+    now = now or get_app_now_naive()
+    stale_lease_time = now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1)
+    report_start_time = getattr(report_log, "report_start_time", None)
+    return report_start_time is None or report_start_time < stale_lease_time
+
+
 async def retry_report_log(log_id: int):
     """
     将失败的持久化 Outbox 事件重新排队。
@@ -910,6 +928,22 @@ async def update_report_log_params(
                 logger.warning(
                     "[第三方上报] 拒绝修改 Outbox 事件身份字段: id=%s",
                     log_id,
+                )
+                return False
+
+            payload_updates_requested = any(value is not None for value in (
+                email, ip, phone, ua, currency, amount, report_params, use_hash
+            ))
+            if (
+                log_entry.outbox_enqueued
+                and payload_updates_requested
+                and not is_outbox_payload_editable(log_entry)
+            ):
+                logger.warning(
+                    "[第三方上报] 已开始发送或已完成的 Outbox 载荷不可修改: id=%s attempts=%s status=%s",
+                    log_id,
+                    log_entry.attempt_count,
+                    log_entry.status,
                 )
                 return False
 
