@@ -59,7 +59,7 @@ const mockApi = async (page) => {
       return;
     }
 
-    const normalizedPath = pathname.replace(/\\/+$/, '');
+    const normalizedPath = pathname.replace(/\/+$/, '');
     if (normalizedPath === '/api/v1/third-party-reports' && request.method() === 'GET') {
       await route.fulfill({
         status: 200,
