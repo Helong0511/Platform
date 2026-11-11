@@ -279,6 +279,21 @@ class RedisCapManager:
             return RedisCapManager._lua_failure_result()
             
     @staticmethod
+    async def delete_reservation_token(token_key: str) -> bool:
+        """终态账本确认后删除幂等 token，不修改已提交的 Cap counter。"""
+        if not token_key:
+            return False
+        redis = await get_redis_client()
+        if not redis:
+            raise RuntimeError("Redis unavailable while cleaning committed Cap reservation token")
+        try:
+            await redis.delete(token_key)
+            return True
+        except Exception as exc:
+            logger.error("清理已终结 Cap reservation token 失败：%s", token_key, exc_info=True)
+            raise RuntimeError("Cap reservation token cleanup failed") from exc
+
+    @staticmethod
     async def decrement_daily(
         offer_id: int,
         publisher_id: Optional[int] = None,
