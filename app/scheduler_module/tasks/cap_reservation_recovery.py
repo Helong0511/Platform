@@ -4,7 +4,10 @@ from datetime import datetime, timezone
 
 from app.scheduler_module.task_names import CAP_RESERVATION_RECOVERY_TASK_NAME
 from app.scheduler_module.task_result_store import get_task_result, set_task_result
-from app.services.cap_reservation_recovery import recover_cap_reservations
+from app.services.cap_reservation_recovery import (
+    get_cap_reservation_recovery_status,
+    recover_cap_reservations,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +17,7 @@ async def cap_reservation_recovery_task():
     started = datetime.now(timezone.utc)
     try:
         stats = await recover_cap_reservations()
+        backlog = await get_cap_reservation_recovery_status()
         duration = (datetime.now(timezone.utc) - started).total_seconds()
         message = (
             f"执行完成：claimed={stats['claimed']} committed={stats['committed']} "
@@ -21,10 +25,22 @@ async def cap_reservation_recovery_task():
             f"needs_reconciliation={stats['needs_reconciliation']} "
             f"tokens_cleaned={stats['tokens_cleaned']} "
             f"cleanup_pending={stats['cleanup_pending']} "
+            f"backlog_prepared={backlog['pending_prepared']} "
+            f"backlog_reserved={backlog['pending_reserved']} "
+            f"backlog_needs_reconciliation={backlog['needs_reconciliation']} "
+            f"backlog_token_cleanup={backlog['committed_token_cleanup_pending']} "
+            f"oldest_pending_seconds={backlog['oldest_pending_seconds']} "
             f"failed={stats['failed']} duration={duration:.2f}s"
         )
         set_task_result(CAP_RESERVATION_RECOVERY_TASK_NAME, message)
-        if stats["needs_reconciliation"] or stats["cleanup_pending"] or stats["failed"]:
+        if (
+            stats["needs_reconciliation"]
+            or stats["cleanup_pending"]
+            or stats["failed"]
+            or backlog["needs_reconciliation"]
+            or backlog["committed_token_cleanup_pending"]
+            or backlog["oldest_pending_seconds"] > 600
+        ):
             logger.warning("Cap Reservation 恢复任务存在待对账项：%s", message)
         else:
             logger.info(message)
