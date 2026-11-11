@@ -1,3 +1,4 @@
+import pytest
 """第三方广告事件日志幂等与跨事件隔离测试。"""
 from __future__ import annotations
 
