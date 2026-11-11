@@ -114,3 +114,36 @@ def test_bridge_html_read_path_rejects_non_local_filename(unsafe_filename):
 
 def test_bridge_html_exists_treats_legacy_unsafe_name_as_unavailable():
     assert cloak_scripts_paths.bridge_html_exists("../outside") is False
+
+
+def test_bridge_html_read_path_does_not_follow_symlink(tmp_path, monkeypatch):
+    outside = tmp_path / "outside.html"
+    outside.write_text("<html>outside secret</html>", encoding="utf-8")
+    bridge_dir = tmp_path / "scripts"
+    bridge_dir.mkdir()
+    (bridge_dir / "master.html").symlink_to(outside)
+    monkeypatch.setattr(
+        cloak_scripts_paths,
+        "iter_bridge_search_bases",
+        lambda: (str(bridge_dir), str(tmp_path / "local")),
+    )
+
+    assert cloak_scripts_paths.resolve_bridge_html_read_path("master.html") is None
+    assert cloak_scripts_paths.bridge_html_exists("master") is False
+
+
+def test_bridge_html_write_path_rejects_symlink_target(tmp_path, monkeypatch):
+    outside = tmp_path / "outside.html"
+    outside.write_text("<html>outside content must remain</html>", encoding="utf-8")
+    bridge_dir = tmp_path / "scripts"
+    bridge_dir.mkdir()
+    (bridge_dir / "master.html").symlink_to(outside)
+    monkeypatch.setattr(
+        cloak_scripts_paths,
+        "iter_bridge_search_bases",
+        lambda: (str(bridge_dir), str(tmp_path / "local")),
+    )
+
+    with pytest.raises(ValueError, match="拒绝符号链接或特殊文件"):
+        cloak_scripts_paths.resolve_bridge_html_write_path("master")
+    assert outside.read_text(encoding="utf-8") == "<html>outside content must remain</html>"
