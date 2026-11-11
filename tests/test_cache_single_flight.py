@@ -172,3 +172,31 @@ async def test_memory_cache_fallback_uses_process_local_lock(monkeypatch):
     assert await first.release() is True
     assert await second.acquire() is True
     assert await second.release() is True
+
+
+@pytest.mark.asyncio
+async def test_distributed_lock_uses_local_mutex_when_redis_command_fails(monkeypatch):
+    """Redis 客户端仍存在但服务端不可用时，锁应安全降级为进程内互斥。"""
+    from app.core.infrastructure import cache_advanced as cache_advanced_mod
+
+    class BrokenRedis:
+        async def set(self, *args, **kwargs):
+            raise ConnectionError("isolated test Redis unavailable")
+
+    class FakeCache:
+        redis = BrokenRedis()
+
+    monkeypatch.setattr(
+        cache_advanced_mod,
+        "get_cache_backend",
+        lambda: _async_value(FakeCache()),
+    )
+
+    first = cache_advanced_mod.DistributedLock("redis-outage-fallback", timeout=10)
+    second = cache_advanced_mod.DistributedLock("redis-outage-fallback", timeout=10)
+
+    assert await first.acquire() is True
+    assert await second.acquire() is False
+    assert await first.release() is True
+    assert await second.acquire() is True
+    assert await second.release() is True
