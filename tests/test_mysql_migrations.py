@@ -37,7 +37,7 @@ def _connect():
 
 def _run_sql_file(cursor, relative_path: str) -> None:
     sql = Path(relative_path).read_text(encoding="utf-8")
-    # 当前两份迁移不包含存储过程；移除整行 SQL 注释后按语句执行，
+    # 当前迁移不包含存储过程；移除整行 SQL 注释后按语句执行，
     # 并对 SELECT 验证语句读取结果，确保连接可继续执行后续语句。
     statements = [
         statement.strip()
@@ -144,5 +144,68 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
             index_names = {row[2] for row in cursor.fetchall()}
             assert "unique_event_key" in index_names
             assert "unique_source_adsid" not in index_names
+    finally:
+        connection.close()
+
+
+
+def test_cap_reservation_migration_is_idempotent_and_matches_mysql_schema():
+    """在 CI 专用 MySQL 8.0 实际执行账本迁移，核对字段、索引和 utf8mb4。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+            migration = "sql/migrations/20261111_cap_reservation_ledger.sql"
+            _run_sql_file(cursor, migration)
+            # CREATE TABLE IF NOT EXISTS 必须允许重复部署，不得破坏既有账本数据。
+            cursor.execute(
+                "INSERT INTO cap_reservations "
+                "(reservation_key, platform, conversion_id, event_name, offer_id, "
+                "cap_kind, redis_counter_key, redis_token_key, state) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    "a" * 64, "ci", "conversion-1", "purchase", 77,
+                    "daily", "counter:key", "counter:key:reservation:" + "a" * 64,
+                    "PREPARED",
+                ),
+            )
+            _run_sql_file(cursor, migration)
+
+            cursor.execute(
+                "SELECT reservation_key, state, redis_reserved, redis_token_cleaned "
+                "FROM cap_reservations WHERE reservation_key = %s",
+                ("a" * 64,),
+            )
+            assert cursor.fetchone() == ("a" * 64, "PREPARED", 0, 0)
+
+            cursor.execute("SHOW CREATE TABLE cap_reservations")
+            create_sql = cursor.fetchone()[1]
+            assert "DEFAULT CHARSET=utf8mb4" in create_sql
+            assert "COLLATE=utf8mb4_unicode_ci" in create_sql
+            assert "redis_reserved" in create_sql
+            assert "redis_token_cleaned" in create_sql
+
+            cursor.execute("SHOW INDEX FROM cap_reservations")
+            index_names = {row[2] for row in cursor.fetchall()}
+            assert {
+                "uq_cap_reservation_key",
+                "idx_cap_reservation_state_updated",
+                "idx_cap_reservation_lease",
+                "idx_cap_reservation_event",
+                "idx_cap_reservation_scope",
+            }.issubset(index_names)
+
+            cursor.execute(
+                "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE "
+                "FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'"
+            )
+            columns = {row[0]: (row[1].lower(), row[2]) for row in cursor.fetchall()}
+            assert columns["id"] == ("int", "NO")
+            assert columns["reservation_key"] == ("varchar(64)", "NO")
+            assert columns["publisher_id"][1] == "YES"
+            assert columns["business_date"][1] == "YES"
+            assert columns["redis_reserved"] == ("tinyint(1)", "NO")
+            assert columns["redis_token_cleaned"] == ("tinyint(1)", "NO")
     finally:
         connection.close()
