@@ -210,7 +210,7 @@ class CapReservationLedger:
                 update(CapReservation)
                 .where(
                     CapReservation.reservation_key == reservation_key,
-                    CapReservation.state == "PREPARED",
+                    CapReservation.state.in_(("PREPARED", "RESERVED")),
                     CapReservation.lease_owner == lease_owner,
                 )
                 .values(
@@ -241,7 +241,7 @@ class CapReservationLedger:
         *,
         lease_owner: Optional[str] = None,
     ) -> None:
-        """提交账本终态；COMMITTED 后清理 token，但绝不修改已提交计数器。"""
+        """提交账本终态；COMMITTED 前先删除 token，失败则保留活动状态供恢复重试。"""
         if state not in FINAL_STATES:
             raise ValueError(f"非法 Cap Reservation 终态：{state}")
         now = get_app_now_naive()
@@ -251,15 +251,21 @@ class CapReservationLedger:
         ]
         if lease_owner:
             conditions.append(CapReservation.lease_owner == lease_owner)
-        token_key_to_cleanup = None
+
         async with AsyncSessionLocal() as session:
             row = await session.scalar(
                 select(CapReservation)
                 .where(CapReservation.reservation_key == reservation_key)
                 .with_for_update()
             )
-            if row and state == "COMMITTED" and row.redis_reserved:
-                token_key_to_cleanup = row.redis_token_key
+            if row is None:
+                raise RuntimeError(f"Cap Reservation 不存在：{reservation_key}")
+
+            # 先删除 token 再提交 COMMITTED。若 Redis 不可用，账本仍保持活动状态，
+            # 恢复任务可在确认正式转化存在后重试；若 DB 更新失败，重复 DEL 是幂等的。
+            if state == "COMMITTED" and row.redis_reserved:
+                await RedisCapManager.delete_reservation_token(row.redis_token_key)
+
             result = await session.execute(
                 update(CapReservation)
                 .where(*conditions)
@@ -284,16 +290,6 @@ class CapReservationLedger:
                     raise RuntimeError(
                         f"Cap Reservation 终态更新失败：expected={state}, actual={current}"
                     )
-        # DB 已确认 COMMITTED 后才删除 token。若 Redis 清理失败，账本终态仍可用于后续清理任务。
-        if token_key_to_cleanup:
-            try:
-                await RedisCapManager.delete_reservation_token(token_key_to_cleanup)
-            except Exception:
-                logger.critical(
-                    "Cap Reservation 已提交但 Redis token 清理失败，需后台清理：%s",
-                    token_key_to_cleanup,
-                    exc_info=True,
-                )
 
     @staticmethod
     async def mark_needs_reconciliation(
