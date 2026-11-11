@@ -441,12 +441,13 @@ CapReservation ORM、migration 和 `sql/platform.sql` 统一增加 CHECK 约束�
 
 ### 最新 CI 证据
 
-- 最新已完成 CI：Run #855，commit `41992463ec60ec2c703a0ba01114e36c63bcf3c4`，结论 `success`。
-- Backend：依赖安装、Python compile、unit tests 全部成功。
+- 最新已完成 CI：Run #860，commit `ccab5706fb6937b7d749674a814fb36ad397b721`，结论 `success`。
+- Backend：依赖安装、Python compile、unit tests 全部成功，**310 passed、1 skipped、1 warning**。唯一 skipped 是仓库既有本地核对脚本未检出提示；不是 MySQL migration 测试跳过。
 - Frontend：`npm ci`、lint、build 全部成功。
 - Playwright：隔离前端服务 + Mock API 浏览器 E2E 全部成功。
+- CI Backend 明确注入 `MYSQL_INTEGRATION_HOST=127.0.0.1` 和 CI 专用数据库 `platform_ci`；MySQL migration 集成测试已运行。新增两个独立 MySQL 连接竞争同一 Outbox 行的租约测试随该测试执行并通过。
 - CI 使用隔离 MySQL/Redis 容器和 mock API；没有连接生产服务器、生产数据库、生产缓存、生产队列或真实 Meta 接口。
-- Run #855 只证明该提交在现有自动化覆盖范围内通过，不代表真实第三方网络、生产数据或发布迁移已验收。
+- Run #860 只证明该提交在现有自动化覆盖范围内通过，不代表真实第三方网络、生产数据或发布迁移已验收。
 
 ### 本轮二次代码审查核实
 
@@ -464,4 +465,4 @@ CapReservation ORM、migration 和 `sql/platform.sql` 统一增加 CHECK 约束�
 4. 需要在隔离 MySQL 上实际执行第三方 Outbox 两个 migration，核对已有表兼容、索引、唯一键、字符集、字段默认值及独立回滚方案。CI 的单元测试不能替代 DDL 发布演练。
 5. 必须检查 report_params 的持久化内容与保留周期；哈希发送失败后的非哈希 fallback 会改变上报参数敏感度，需确认业务授权、访问权限、日志展示和清理策略。此项不是凭据专项，不得因凭据安全排除而跳过。
 
-**结论：Run #855 全绿；Outbox 核心代码已接入，但上述真实 MySQL 并发、崩溃故障注入、管理端状态可见性和 migration 演练仍未验收。PR 继续保持 Draft，禁止合并 main。**
+**结论：Run #860 全绿；真实 MySQL 双连接租约竞争已通过。Outbox 核心代码已接入，但远端成功/本地 ACK 崩溃注入、管理端状态可见性和完整 migration 发布/回滚演练仍未验收。PR 继续保持 Draft，禁止合并 main。**
