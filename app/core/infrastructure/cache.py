@@ -4,6 +4,7 @@
 """
 import asyncio
 import json
+import fnmatch
 import time
 import re
 import hashlib
@@ -219,14 +220,14 @@ class MemoryCacheBackend(CacheBackend):
     async def delete_pattern(self, pattern: str) -> int:
         """按模式删除内存缓存（简单实现）"""
         try:
-            # 将glob模式转换为正则表达式
-            regex = pattern.replace('*', '.*').replace('?', '.')
-            pattern_re = re.compile(f'^{regex}$')
-            
-            deleted_keys = [key for key in self._cache.keys() if pattern_re.match(key)]
+            # 使用标准 glob 匹配，避免将缓存键中的点号/方括号误解释为正则表达式。
+            deleted_keys = [
+                key for key in self._cache
+                if fnmatch.fnmatchcase(key, pattern)
+            ]
             for key in deleted_keys:
-                del self._cache[key]
-            
+                self._cache.pop(key, None)
+
             return len(deleted_keys)
         except Exception as e:
             logger.warning(f"内存缓存按模式删除失败: pattern={pattern}, error={e}")
