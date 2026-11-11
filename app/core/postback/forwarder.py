@@ -111,9 +111,9 @@ class PostbackForwarder:
         
         # 详细日志：开始转发流程
         logger.info(f"=== PostBack 转发流程开始 ===")
-        logger.info(f"转化 ID: {conversion.conversion_id}")
+        logger.info("转化记录已加载：record_id=%s", conversion.id)
         logger.info(f"平台: {conversion.platform}")
-        logger.info(f"接收到的 click_id: {conversion.click_id}")
+        logger.info("Click ID 是否存在：present=%s", bool(conversion.click_id))
         logger.info(f"接收到的 payout: {conversion.payout}")
         
         # ========== 第 1 步：获取渠道信息 ==========
@@ -127,18 +127,18 @@ class PostbackForwarder:
             
             # 详细日志：Click 关联信息
             logger.info(f"=== Click 关联信息 ===")
-            logger.info(f"click_id: {click_association_data.get('click_id')}")
+            logger.info("click_id 是否存在：present=%s", bool(click_association_data.get("click_id")))
             logger.info(f"advertiser_id: {click_association_data.get('advertiser_id')}")
             logger.info(f"offer_id: {click_association_data.get('offer_id')}")
             logger.info(f"publisher_id: {click_association_data.get('publisher_id')}")
             logger.info(f"short_link_id: {click_association_data.get('short_link_id')}")
-            logger.info(f"url_params: {click_association_data.get('url_params')}")
+            logger.info("url_params 字段数：%s", len(click_association_data.get("url_params") or {}))
         else:
             # 如果没有提供 click_association，尝试从 conversion 中获取
             if conversion.click_id:
                 from app.core.postback.transformers.click_associator import ClickAssociator
                 # 通过 ClickAssociator 关联点击信息
-                logger.warning(f"尝试通过 click_id 关联信息: {conversion.click_id}")
+                logger.warning("尝试通过 Click ID 关联转化：present=%s", bool(conversion.click_id))
                 click_association = await ClickAssociator.associate(
                     conversion.click_id,
                     db
@@ -151,12 +151,12 @@ class PostbackForwarder:
                     
                     # 详细日志：Click 关联信息
                     logger.info(f"=== Click 关联信息 ===")
-                    logger.info(f"click_id: {click_association_data.get('click_id')}")
+                    logger.info("click_id 是否存在：present=%s", bool(click_association_data.get("click_id")))
                     logger.info(f"advertiser_id: {click_association_data.get('advertiser_id')}")
                     logger.info(f"offer_id: {click_association_data.get('offer_id')}")
                     logger.info(f"publisher_id: {click_association_data.get('publisher_id')}")
                     logger.info(f"short_link_id: {click_association_data.get('short_link_id')}")
-                    logger.info(f"url_params: {click_association_data.get('url_params')}")
+                    logger.info("url_params 字段数：%s", len(click_association_data.get("url_params") or {}))
         
         # 如果没有找到 publisher_id，跳过转发
         if not publisher_id:
@@ -180,7 +180,7 @@ class PostbackForwarder:
         # 详细日志：渠道信息
         logger.info(f"=== 渠道信息 ===")
         logger.info(f"渠道名称: {publisher.publisher_name}")
-        logger.info(f"postback_url: {publisher.postback_url}")
+        logger.info("已加载渠道 Postback URL 配置")
         logger.info(f"postback_method: {publisher.postback_method or 'GET'}")
         logger.info(f"postback_success_check: {publisher.postback_success_check}")
         
@@ -196,7 +196,7 @@ class PostbackForwarder:
         
         # 详细日志：转化数据
         logger.info(f"=== 转化数据 ===")
-        logger.info(f"conversion_id: {conversion_data.get('conversion_id')}")
+        logger.info("转化数据字段数：%s", len(conversion_data))
         logger.info(f"payout: {conversion_data.get('payout')}")
         logger.info(f"event_name: {conversion_data.get('event_name')}")
         
@@ -205,13 +205,13 @@ class PostbackForwarder:
         
         # 详细日志：URL 构建过程
         logger.info(f"=== URL 构建过程 ===")
-        logger.info(f"原始 postback_url: {base_url}")
+        logger.info("开始解析渠道 Postback URL 配置")
         
         # 合并数据用于占位符替换
         url_data = {**conversion_data, **click_association_data}
         # 解析 URL 中的占位符
         resolved_url = PlaceholderResolver.resolve(base_url, url_data)
-        logger.info(f"解析占位符后 URL: {resolved_url}")
+        logger.info("Postback URL 占位符解析完成")
         
         # 构建最终的 postback URL，添加必要的参数
         final_url, params = UrlBuilder.build_postback_url(
@@ -219,8 +219,8 @@ class PostbackForwarder:
             conversion_data,
             click_association_data
         )
-        logger.info(f"最终 URL: {final_url}")
-        logger.info(f"构建的参数: {params}")
+        logger.info("Postback 目标 URL 构建完成")
+        logger.info("Postback 请求参数字段数：%s", len(params or {}))
         
         # ========== 第 4 步：发送 HTTP 请求 ==========
         # 获取渠道配置的请求方法，默认为 GET
@@ -261,15 +261,15 @@ class PostbackForwarder:
             if oid is not None:
                 json_data['offer_id'] = str(oid)
             
-            logger.info(f"POST JSON 数据: {json_data}")
+            logger.info("POST JSON 字段数：%s", len(json_data or {}))
         else:
             # 对于 GET 请求，参数已经在 URL 中
             request_params = params
-            logger.info(f"GET 请求参数: {request_params}")
+            logger.info("GET 参数字段数：%s", len(request_params or {}))
         
         # 详细日志：发送请求
         logger.info(f"=== 发送 HTTP 请求 ===")
-        logger.info(f"发送请求到: {final_url}")
+        logger.info("开始向配置的下游主机发送请求")
         
         # 发送 HTTP 请求
         success, status_code, response_content = await HttpClient.send_request(
@@ -283,7 +283,7 @@ class PostbackForwarder:
         logger.info(f"=== 请求结果 ===")
         logger.info(f"请求成功: {success}")
         logger.info(f"状态码: {status_code}")
-        logger.info(f"响应内容: {response_content[:500] if response_content else '无'}")
+        logger.info("下游响应已接收：body_length=%s", len(response_content or ""))
         
         # ========== 第 5 步：检查转发结果 ==========
         # 获取渠道配置的成功检查规则
@@ -385,12 +385,12 @@ class PostbackForwarder:
                     "❌ Postback 转发失败",
                     "",
                     f"平台：{conversion.platform}",
-                    f"转化 ID: {conversion.conversion_id}",
+                    f"转化记录 ID: {conversion.id}",
                     f"渠道：{publisher.publisher_name}",
                     f"状态码：{status_code}",
-                    f"检查结果：{check_message}",
+                    "检查结果：转发失败，请在受控系统查看脱敏详情",
                     "",
-                    f"响应：{response_content[:200] if response_content else '无'}"
+                    "响应正文：已省略（可能包含个人信息）"
                 ]
                 
                 # 通知异步旁路发送，不能让 Telegram 限流/网络重试延长队列租约。
@@ -402,7 +402,7 @@ class PostbackForwarder:
                 
         except Exception as e:
             # 记录发送通知失败的错误
-            logger.warning(f"发送转发失败通知失败：{e}")
+            logger.warning("发送转发失败通知失败：%s", type(e).__name__)
     
     @staticmethod
     async def _send_success_notification(
@@ -432,11 +432,11 @@ class PostbackForwarder:
                     "✅ Postback 转发成功",
                     "",
                     f"平台：{conversion.platform}",
-                    f"转化 ID: {conversion.conversion_id}",
+                    f"转化记录 ID: {conversion.id}",
                     f"渠道：{publisher.publisher_name}",
                     f"状态码：{status_code}",
                     "",
-                    f"响应：{response_content[:200] if response_content else '无'}"
+                    "响应正文：已省略（可能包含个人信息）"
                 ]
                 
                 # 通知异步旁路发送，不能让 Telegram 限流/网络重试延长队列租约。
@@ -448,7 +448,7 @@ class PostbackForwarder:
                 
         except Exception as e:
             # 记录发送通知失败的错误
-            logger.warning(f"发送转发成功通知失败：{e}")
+            logger.warning("发送转发成功通知失败：%s", type(e).__name__)
 
     @staticmethod
     async def forward_to_product(
