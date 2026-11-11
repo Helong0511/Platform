@@ -208,11 +208,11 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             short_code=payload["short_code"],
         )
     except Exception as exc:
+        # 异常原文可能包含第三方响应或个人信息，只记录异常类型与内部记录 ID。
         logger.warning(
-            "Outbox 凭据解析暂时失败，保留待重试：report_log_id=%s error=%s",
+            "Outbox 凭据解析暂时失败，保留待重试：report_log_id=%s error_type=%s",
             report_log_id,
-            exc,
-            exc_info=True,
+            type(exc).__name__,
         )
         pixel_id = access_token = api_version = None
 
@@ -322,7 +322,12 @@ async def process_postback_report_outbox(
                 stats["retryable"] += 1
             else:
                 stats["failed"] += 1
-        except Exception:
+        except Exception as exc:
             stats["failed"] += 1
-            logger.error("处理 Postback Report Outbox 失败：id=%s error_type=%s", report_id, type(exc).__name__)
+            # 不记录异常原文，避免第三方响应或个人信息进入任务日志。
+            logger.error(
+                "处理 Postback Report Outbox 失败：id=%s error_type=%s",
+                report_id,
+                type(exc).__name__,
+            )
     return stats
