@@ -697,7 +697,7 @@ async def test_mysql_tcp_proxy_drops_real_commit_ack_and_preserves_cap_reservati
                         payload = packet[4:]
                         upstream_writer.write(packet)
                         # 只识别 COM_QUERY 的完整 COMMIT 语句，避免匹配 SQL 参数文本。
-                        if payload[:1] == b"\\x03" and payload[1:].strip().upper() == b"COMMIT":
+                        if payload[:1] == b"\\x03" and payload[1:].lstrip().upper().startswith(b"COMMIT"):
                             commit_seen.set()
                         await upstream_writer.drain()
                         del buffer[:packet_length]
