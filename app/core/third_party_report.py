@@ -184,7 +184,7 @@ async def update_report_log(
                     log_entry.next_retry_time = None
                 await db.commit()
     except Exception as e:
-        logger.warning(f"[第三方上报] 更新日志记录失败: {e}")
+        logger.warning("[第三方上报] 更新日志记录失败：%s", type(e).__name__)
 
 
 async def _get_report_status(report_log_id: int) -> Optional[str]:
@@ -441,7 +441,7 @@ async def send_third_party_report(
                 else:
                     logger.info("[第三方上报] 未找到可关联的 ViewContent 事件：report_log_id=%s", report_log_id)
         except Exception as e:
-            logger.warning(f"[第三方上报] 更新 ViewContent 事件的 conversion_id 失败: {e}")
+            logger.warning("[第三方上报] 关联 ViewContent 事件失败：%s", type(e).__name__)
 
     logger.info("[第三方上报] 使用像素配置 - Pixel ID: %s, API 版本：%s", pixel_id, api_version)
     
@@ -574,9 +574,8 @@ async def send_third_party_report(
                                         )
                                     except Exception as notify_err:
                                         logger.warning(
-                                            "[第三方上报] Purchase 已成功，但 Telegram 通知失败: %s",
-                                            notify_err,
-                                            exc_info=True,
+                                            "[第三方上报] Purchase 已成功，但 Telegram 通知失败：%s",
+                                            type(notify_err).__name__,
                                         )
                                 else:
                                     logger.warning("TELEGRAM_ADMIN 未配置，无法发送 Purchase 事件通知")
@@ -592,7 +591,7 @@ async def send_third_party_report(
                                 response_status=response.status_code,
                                 response_body=None
                             )
-                    except Exception as parse_err:
+                    except Exception:
                         error_msg = "第三方响应 JSON 解析失败"
                         failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
                         logger.warning(
@@ -740,7 +739,7 @@ async def send_third_party_report(
                                 response_status=response.status_code,
                                 response_body=None
                             )
-                    except Exception as parse_err:
+                    except Exception:
                         error_msg = "第三方响应 JSON 解析失败"
                         failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
                         logger.warning(
