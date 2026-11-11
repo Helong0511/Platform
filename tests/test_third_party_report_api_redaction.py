@@ -6,6 +6,7 @@ from app.api_v1.system.third_party_reports import (
     _sanitize_report_params,
     _safe_report_error_message,
     _can_requeue_report,
+    _is_outbox_processing,
 )
 
 
@@ -75,6 +76,7 @@ def test_third_party_report_response_schemas_expose_outbox_state():
     assert "can_requeue" in ThirdPartyReportLogListResponse.model_fields
     assert "report_params_preview" in ThirdPartyReportLogListResponse.model_fields
     assert "outbox_payload_editable" in ThirdPartyReportLogListResponse.model_fields
+    assert "outbox_processing" in ThirdPartyReportLogListResponse.model_fields
     assert "error_message" in ThirdPartyReportLogResponse.model_fields
     assert "response_body" not in ThirdPartyReportLogResponse.model_fields
 
@@ -132,3 +134,28 @@ def test_manual_requeue_eligibility_matches_backend_guards():
         }),
         now,
     ) is True
+
+
+
+def test_outbox_processing_state_uses_the_backend_lease_duration():
+    from datetime import datetime, timedelta
+    from types import SimpleNamespace
+    from app.core.third_party_report import REPORT_LOG_LEASE_SECONDS
+
+    now = datetime(2026, 11, 11, 12, 0, 0)
+    base = {
+        "outbox_enqueued": True,
+        "status": "failed",
+        "report_start_time": now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS - 1),
+    }
+    assert _is_outbox_processing(SimpleNamespace(**base), now) is True
+    assert _is_outbox_processing(
+        SimpleNamespace(**{
+            **base,
+            "report_start_time": now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
+        }),
+        now,
+    ) is False
+    assert _is_outbox_processing(
+        SimpleNamespace(**{**base, "outbox_enqueued": False}), now
+    ) is False
