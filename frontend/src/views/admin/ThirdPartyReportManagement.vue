@@ -218,7 +218,7 @@
             <el-button type="warning" link size="small" @click="handleEdit(scope.row)">
               编辑
             </el-button>
-            <el-button v-if="scope.row.outbox_enqueued && scope.row.status === 'failed'"
+            <el-button v-if="scope.row.can_requeue"
               type="danger" link size="small" @click="handleRetry(scope.row)">
               重新排队
             </el-button>
