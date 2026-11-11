@@ -124,10 +124,10 @@ class PostbackForwardLogService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"查询 PostBack 转发日志失败: {e}", exc_info=True)
+            logger.error("查询 PostBack 转发日志失败：%s", type(e).__name__)
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"查询失败：{str(e)}",
+                detail="查询失败，请查看受控服务端日志",
             )
 
     async def resend_forward(
@@ -160,6 +160,11 @@ class PostbackForwardLogService:
                 raise_api_exception(
                     ErrorCode.RESOURCE_NOT_FOUND,
                     detail=f"转发日志 ID {forward_log_id} 不存在",
+                )
+            if forward_log.pii_scrubbed_at is not None:
+                raise_api_exception(
+                    ErrorCode.CONFLICT,
+                    detail="该转发日志已按保留策略清除载荷，不允许补发",
                 )
 
             conv_result = await db.execute(
