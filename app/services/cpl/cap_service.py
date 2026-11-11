@@ -15,7 +15,7 @@ Cap（转化上限）服务层。
 import logging
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import func, delete
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
@@ -444,8 +444,9 @@ class CapService(BaseService[OfferCap]):
         Raises:
             APIException: 记录不存在或删除失败
         """
+        # 与转化预留、同步器使用相同的 OfferCap 行锁协议，避免删除和计数更新交错。
         result = await self.db.execute(
-            select(OfferCap).where(OfferCap.id == cap_id)
+            select(OfferCap).where(OfferCap.id == cap_id).with_for_update()
         )
         cap = result.scalars().first()
 
@@ -456,7 +457,8 @@ class CapService(BaseService[OfferCap]):
             )
 
         try:
-            await self.db.execute(delete(OfferCap).where(OfferCap.id == cap_id))
+            # 删除已锁定的 ORM 实体，避免绕过当前事务内的行锁对象。
+            await self.db.delete(cap)
             await self.db.flush()
 
             logger.info(f"Cap配置删除成功: cap_id={cap_id}")
