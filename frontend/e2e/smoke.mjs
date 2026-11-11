@@ -231,7 +231,9 @@ try {
     assert.equal(await reportRows.nth(1).getByRole('button', { name: '重新排队' }).count(), 0);
 
     await reportRows.nth(1).getByRole('button', { name: '详情' }).click();
-    await page.getByText('像素配置缺失或不可用；检查配置后可重新排队', { exact: false }).waitFor({ timeout: 5000 });
+    await page.getByRole('dialog', { name: '上报日志详情' })
+      .getByText('像素配置缺失或不可用；检查配置后可重新排队', { exact: false })
+      .waitFor({ timeout: 5000 });
     assert.equal(await page.getByText('203.0.113.77', { exact: false }).count(), 0);
     await page.locator('.report-detail-dialog .el-dialog__headerbtn').click();
 
