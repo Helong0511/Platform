@@ -358,3 +358,25 @@ Run #783 / SHA `042026e6c654753ec91b2ec72748c85d94b11f61`：Backend、Frontend�
 - state 只能为状态机定义的五种状态。
 
 MySQL 目标版本为 8.0.16+（CHECK 约束实际执行版本）。隔离 CI 的 migration 集成测试负责校验建表和实际 ORM 写入；正式数据库仍未连接、迁移仍未执行。
+## 17. Token 缺失回滚歧义与数据库级约束补充（2026-11-11）
+
+### Token ABSENT 不等于回滚成功
+
+复核 Redis 回滚 Lua 时发现旧返回值 `0` 同时表达“token 已不存在”和“重复回滚未扣减”。调用方将 `0` 视为成功，可能在 token 被独立淘汰、但 counter 仍存在时，把活动账本错误终结为 ROLLED_BACK。
+
+修复后约定：
+
+- `_ROLLBACK_RESERVATION_LUA` 在 token 不存在时返回 `-3`，不执行 DECR，也不删除或改写任何其它 token。
+- 调用方将 `-3` 视为状态不确定，活动账本转入 NEEDS_RECONCILIATION；不得把它当作成功。
+- 已完成的第一次回滚仍只扣减一次；后续重复调用会得到 `-3`，并要求调用方结合持久化账本状态判断，避免把“token 消失”错误解释成“回滚已确认”。
+- 新增单测、Postback 回滚状态测试和隔离 Redis 集成测试覆盖该行为。
+
+### 数据库层不变量
+
+CapReservation ORM、migration 和 `sql/platform.sql` 统一增加 CHECK 约束，数据库直接拒绝非法 Reservation key 长度、非正 Offer/Publisher ID、负 attempts、错误的 Daily/Total 日期组合及未知状态。
+
+这些 CHECK 约束必须由 MySQL 实际强制执行，因此部署最低版本明确为 MySQL 8.0.16+。CI migration 测试需查询 `information_schema.TABLE_CONSTRAINTS` 并尝试插入非法 Daily 日期组合，确认约束不是仅存在于 ORM metadata 中。
+
+### 验收边界
+
+以上修改已提交修复分支；必须以包含这些变更的最新 SHA 重新运行 Backend、MySQL 8.0 隔离迁移、Redis DB14 集成、Frontend lint/build 和 Playwright Mock API E2E。历史 Run #783 不能代替新提交验收。
