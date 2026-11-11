@@ -204,7 +204,7 @@ class RedisCapManager:
                 DEFAULT_EXPIRE_SECONDS,
                 init_val,
                 str(limit),
-                DEFAULT_EXPIRE_SECONDS,
+                0,  # token 生命周期由持久化账本终态控制，不使用固定 TTL。
             )
             current = int(current)
             if current == -2:
@@ -256,7 +256,7 @@ class RedisCapManager:
                 0,  # Total Cap 计数器不能自动过期。
                 init_val,
                 str(limit),
-                30 * 24 * 3600,  # reservation token 独立保留 30 天。
+                0,  # Total token 在账本终态前永久保留，防止恢复窗口过期。
             )
             current = int(current)
             if current == -2:
