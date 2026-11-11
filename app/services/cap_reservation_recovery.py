@@ -131,6 +131,25 @@ async def recover_cap_reservations(
                 row.redis_counter_key, row.redis_token_key
             )
             if token_state == "PRESENT":
+                daily_scope_expired = (
+                    row.cap_kind == "daily"
+                    and row.business_date is not None
+                    and (get_app_now_naive().date() - row.business_date).days >= 2
+                )
+                if daily_scope_expired:
+                    counter_exists = await RedisCapManager.counter_key_exists(
+                        row.redis_counter_key
+                    )
+                    if counter_exists is False:
+                        # Daily counter 已按 48h TTL 自然过期；token 本身无 TTL，
+                        # 因此必须显式清理孤儿 token，不能尝试对不存在的 counter 执行 DECR。
+                        await RedisCapManager.delete_reservation_token(row.redis_token_key)
+                        await CapReservationLedger.finalize(
+                            row.reservation_key, "ROLLED_BACK", lease_owner=owner
+                        )
+                        stats["rolled_back"] += 1
+                        continue
+
                 rollback_result = await RedisCapManager.rollback_reservation_keys(
                     row.redis_counter_key, row.redis_token_key
                 )
