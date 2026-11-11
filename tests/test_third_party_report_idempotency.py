@@ -306,9 +306,9 @@ async def test_manual_retry_returns_false_when_another_request_won(monkeypatch):
     assert await third_party_report.retry_report_log(41) is False
 
 
-async def test_telegram_failure_does_not_retry_successful_purchase_report(monkeypatch):
-    """Meta 已确认接收 Purchase 后，通知故障不得触发重复上报或降级状态。"""
-    state = {"http_calls": 0, "statuses": []}
+async def test_telegram_failure_does_not_retry_successful_purchase_report(monkeypatch, caplog):
+    """Meta 已确认接收 Purchase 后，通知故障不得重发，日志也不得泄露原始 PII。"""
+    state = {"http_calls": 0, "statuses": [], "response_bodies": []}
 
     class Response:
         status_code = 200
@@ -341,6 +341,8 @@ async def test_telegram_failure_does_not_retry_successful_purchase_report(monkey
     async def capture_update(report_log_id, **kwargs):
         if "status" in kwargs:
             state["statuses"].append(kwargs["status"])
+        if "response_body" in kwargs:
+            state["response_bodies"].append(kwargs["response_body"])
 
     async def failed_notification(*args, **kwargs):
         raise RuntimeError("simulated Telegram outage")
@@ -369,6 +371,15 @@ async def test_telegram_failure_does_not_retry_successful_purchase_report(monkey
 
     assert state["http_calls"] == 1
     assert state["statuses"] == ["success"]
+    assert state["response_bodies"] == [None]
+    for sensitive_value in (
+        "buyer@example.invalid",
+        "203.0.113.10",
+        "ads-123",
+        "conversion-456",
+        "test-agent",
+    ):
+        assert sensitive_value not in caplog.text
 
 
 
