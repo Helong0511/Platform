@@ -23,10 +23,9 @@ def test_forward_task_lease_is_longer_than_http_connect_timeout():
     # HTTP connect timeout 当前为 5 秒；租约须明显长于单次正常转发时间。
     from app.core.postback.forwarding.http_client import HttpClient
 
-    # 需覆盖完整 HTTP 响应超时预算（最多 10 次重定向）并留出 DB/调度余量。
-    request_budget = HttpClient.DEFAULT_TIMEOUT * (HttpClient.MAX_REDIRECTS + 1)
-    assert FORWARD_TASK_LEASE_SECONDS >= request_budget + 60
+    # 整个下游 HTTP 请求有硬 deadline；租约额外预留 60 秒用于 DB/调度收尾。
     assert HttpClient.MAX_REDIRECTS == 10
+    assert FORWARD_TASK_LEASE_SECONDS >= HttpClient.TOTAL_REQUEST_TIMEOUT_SECONDS + 60
 
 
 
@@ -146,3 +145,40 @@ async def test_admin_telegram_notification_does_not_hold_forward_queue_worker(mo
     release.set()
     await asyncio.wait_for(asyncio.gather(*pending), timeout=1)
     assert not forwarder._notification_tasks
+
+
+
+async def test_postback_http_total_deadline_bounds_slow_streaming_response(monkeypatch):
+    """HTTPX 单次 read timeout 不能限制慢速分块响应，必须执行总 deadline。"""
+    import asyncio
+
+    import httpx
+
+    from app.core.postback.forwarding.http_client import HttpClient
+
+    captured = {}
+
+    class HangingClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, *args, **kwargs):
+            await asyncio.Event().wait()
+
+    def build_client(**kwargs):
+        captured.update(kwargs)
+        return HangingClient()
+
+    monkeypatch.setattr(httpx, "AsyncClient", build_client)
+    monkeypatch.setattr(HttpClient, "TOTAL_REQUEST_TIMEOUT_SECONDS", 0.01)
+
+    result = await HttpClient.send_request(
+        url="https://downstream.example.invalid/postback",
+        method="GET",
+    )
+
+    assert result == (False, 0, "Timeout: Total request deadline exceeded")
+    assert captured["max_redirects"] == HttpClient.MAX_REDIRECTS
