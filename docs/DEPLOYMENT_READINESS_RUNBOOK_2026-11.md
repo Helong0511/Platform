@@ -395,3 +395,30 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - 账号禁用和登录限制不再依赖 5 分钟权限缓存的失效及时性。
 - 权限缓存模块仍可供其它明确允许短暂陈旧的只读展示/优化场景使用；不得用于绕过实时账号状态和资源归属校验。
 - 其余 RBAC 路由覆盖、数据租户隔离、迁移/备份恢复和 PII 治理仍需继续审计。PR 保持 Draft，不合并、不部署。
+
+
+## 22. Postback 错误响应与数据库异常日志 PII 脱敏（2026-11-11，Run #1122 / #1124）
+
+### 发现的问题
+
+- 公开 `/postback/{platform}` 回调入口在可恢复失败时，旧逻辑会把处理结果中的 `message` 原样返回给上游；若错误消息包含 SQL/下游响应内容，可能泄露内部细节或 PII。
+- Postback 接收服务异常日志原先使用 `str(exc)` 和 `exc_info=True`；异常消息可能包含邮箱、IP、click_id、SQL 参数等原始内容。
+- `get_postback_db`、通用 `get_db`、`get_db_readonly` 在数据库异常时也记录原始异常文本和 traceback；SQLAlchemy 异常字符串可能包含绑定参数。
+
+### 修复
+
+- Postback 可恢复错误统一返回固定的 `503` + 通用重试提示；不再把内部 `result.message` 暴露给上游。
+- Postback 接收服务只记录异常类型，不记录原始异常文本或 traceback。
+- 三类数据库会话依赖的异常日志只记录异常类型，不输出 SQL 参数或原始错误消息。
+- 新增回归测试：公开 Postback 异常响应不包含内部错误消息；接收服务日志不包含 email/click_id/IP；三类数据库依赖均不把异常中的 PII 写入日志。
+
+### CI 证据
+
+- Run #1122（SHA `0ff14efa69e4f4560b077bb88fe9906776a339ce`）：Backend **408 passed、1 skipped、1 warning**；Frontend Lint/Build/Playwright 全部通过。
+- Run #1124（SHA `46c988f689a9e1389f62a1f27558a98eab4d3c73`）：Backend **411 passed、1 skipped、1 warning**；Frontend Lint、Build、Playwright Mock API E2E 全部通过。Run #1124：[查看 CI](https://github.com/Helong0511/Platform/actions/runs/43006102884)。
+
+### 未解决的数据生命周期问题
+
+- 本修复只减少日志和上游响应的 PII 暴露，不代表持久化 PII 已全部治理。
+- `postback_conversions`、未完成 `postback_forward_queue`、`postback_notifications.notification_message`、备份副本及第三方接收方数据仍需要经批准的用途、保留期限、访问权限和删除流程。
+- PII 清理配置默认关闭；未经业务/合规负责人批准，不得擅自设置保留天数或删除仍需重试的队列载荷。
