@@ -229,52 +229,24 @@ async def test_report_claim_query_limits_failed_retries_to_expired_leases(monkey
 
 
 
-async def test_manual_retry_claim_is_conditional_on_failed_status(monkeypatch):
-    """手动重试只能把 failed 原子转换为 pending，不能清空活动发送者的租约。"""
+async def test_manual_retry_enqueues_only_persisted_outbox_rows(monkeypatch):
+    """人工重试只做持久化入队，不在请求进程创建非持久化发送任务。"""
     from datetime import datetime
     from sqlalchemy.dialects import mysql
 
     captured = {}
-    log_entry = type(
-        "Log",
-        (),
-        {
-            "currency": "USD",
-            "amount": 12.5,
-            "report_params": None,
-            "adsid": "ads-123",
-            "event": "Purchase",
-            "email": "",
-            "ip": "",
-            "phone": "",
-            "ua": "",
-            "source": "postback",
-            "use_hash": True,
-            "conversion_id": "conversion-456",
-        },
-    )()
 
     class Result:
-        def __init__(self, rowcount=None, value=None):
-            self.rowcount = rowcount
-            self.value = value
-
-        def scalars(self):
-            return self
-
-        def first(self):
-            return self.value
+        rowcount = 1
 
     class FakeDB:
         async def execute(self, statement):
-            if statement.__class__.__name__ == "Update":
-                compiled = statement.compile(dialect=mysql.dialect())
-                captured["sql"] = str(compiled).lower()
-                captured["params"] = {
-                    key: str(value).lower() for key, value in compiled.params.items()
-                }
-                return Result(rowcount=1)
-            return Result(value=log_entry)
+            compiled = statement.compile(dialect=mysql.dialect())
+            captured["sql"] = str(compiled).lower()
+            captured["params"] = {
+                key: str(value).lower() for key, value in compiled.params.items()
+            }
+            return Result()
 
         async def commit(self):
             captured["committed"] = True
@@ -286,30 +258,25 @@ async def test_manual_retry_claim_is_conditional_on_failed_status(monkeypatch):
         async def __aexit__(self, *args):
             return False
 
-    scheduled = []
-    def capture_task(coro):
-        scheduled.append(True)
-        coro.close()
-
     monkeypatch.setattr(
         third_party_report, "AsyncSessionLocal", lambda: SessionContext()
     )
     monkeypatch.setattr(
         third_party_report, "get_app_now_naive", lambda: datetime(2026, 11, 11, 12, 0, 0)
     )
-    monkeypatch.setattr(third_party_report.asyncio, "create_task", capture_task)
 
     assert await third_party_report.retry_report_log(41) is True
     assert captured["committed"] is True
     assert "third_party_report_logs.status = %s" in captured["sql"]
+    assert "third_party_report_logs.outbox_enqueued = true" in captured["sql"]
     assert "failed" in captured["params"].values()
+    assert "next_retry_time" in captured["sql"]
     assert "report_start_time is null" in captured["sql"]
     assert "report_start_time <" in captured["sql"]
-    assert scheduled == [True]
 
 
-async def test_manual_retry_does_not_schedule_when_another_request_won(monkeypatch):
-    """并发管理员重试的失败方不得再创建后台发送任务。"""
+async def test_manual_retry_returns_false_when_another_request_won(monkeypatch):
+    """并发管理员重试的失败方不得重复入队。"""
     class Result:
         rowcount = 0
 
@@ -327,17 +294,11 @@ async def test_manual_retry_does_not_schedule_when_another_request_won(monkeypat
         async def __aexit__(self, *args):
             return False
 
-    scheduled = []
     monkeypatch.setattr(
         third_party_report, "AsyncSessionLocal", lambda: SessionContext()
     )
-    monkeypatch.setattr(
-        third_party_report.asyncio, "create_task", lambda coro: scheduled.append(coro)
-    )
 
     assert await third_party_report.retry_report_log(41) is False
-    assert scheduled == []
-
 
 
 async def test_telegram_failure_does_not_retry_successful_purchase_report(monkeypatch):
