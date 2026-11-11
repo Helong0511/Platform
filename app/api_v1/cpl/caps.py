@@ -160,7 +160,17 @@ async def update_cap(
     cap_service: CapService = await get_cap_service(db)
     update_data = cap_in.model_dump(exclude_unset=True)
     cap = await cap_service.update_cap(cap_id, update_data, current_user)
-    if update_data:
+    audit_before = getattr(cap, "_audit_before", {})
+    audit_after = {
+        key: getattr(cap, key)
+        for key in audit_before
+        if hasattr(cap, key)
+    }
+    changed_fields = [
+        key for key, old_value in audit_before.items()
+        if key in audit_after and old_value != audit_after[key]
+    ]
+    if changed_fields:
         await log_update(
             db=db,
             user=current_user,
@@ -168,7 +178,11 @@ async def update_cap(
             resource_id=cap_id,
             resource_name=f"Cap-{cap_id}",
             request=request,
-            details={"updated_fields": list(update_data.keys())},
+            details={
+                "updated_fields": changed_fields,
+                "before": {key: audit_before[key] for key in changed_fields},
+                "after": {key: audit_after[key] for key in changed_fields},
+            },
         )
         await commit_audit_log(db)
     return ResponseBaseSchema.success(data=cap_service.to_cap_response(cap))
