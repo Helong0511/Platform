@@ -73,6 +73,7 @@ class ThirdPartyReportLog(Base):
     report_start_time = Column(DateTime, nullable=True, comment='上报开始时间')
     report_success_time = Column(DateTime, nullable=True, comment='上报成功时间')
     completed_at = Column(DateTime, nullable=True, comment='完成时间')
+    pii_scrubbed_at = Column(DateTime, nullable=True, comment='PII 按保留策略清理时间；保留事件幂等键')
     
     __table_args__ = (
         Index("idx_third_party_source", "source"),
@@ -80,6 +81,7 @@ class ThirdPartyReportLog(Base):
         Index("idx_third_party_event", "event"),
         Index("idx_third_party_status", "status"),
         Index("idx_third_party_created_at", "created_at"),
+        Index("idx_third_party_pii_retention", "pii_scrubbed_at", "created_at", "id"),
         Index("idx_third_party_status_created", "status", "created_at"),
         UniqueConstraint('event_key', name='unique_event_key'),
         Index(
