@@ -141,7 +141,7 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - Run #923 曾因新增测试的调用记录断言错误而失败（324 passed、1 failed）；已修正测试断言，Run #924 全绿。随后 Run #925 增加真实 MySQL COMMIT 响应丢失测试并全绿。
 - 仍未完成：完整旧 schema 到新 schema 的真实升级/中断重跑/兼容回滚演练；Outbox 配置生命周期与发送租约压力测试；PII 数据保留、删除、访问审计政策核定；全项目业务模块最终回归。
 - PII 生命周期修复：新增第三方上报与下游转发日志的 `pii_scrubbed_at` 标记、扫描索引、分批清除服务和每日调度任务；仅清理终态历史载荷，保留 `event_key`/最小审计骨架；待重试 Outbox 不会被清理。默认 `THIRD_PARTY_REPORT_PII_RETENTION_DAYS=0`（关闭），须经业务/合规负责人确定期限后显式设置；未设置前不得声称已自动执行个人信息到期清理。
-- 最新代码头为 `5891ae5c6a24`；Run #1006 Backend / Frontend 全绿（346 passed? 需以完整 CI 汇总为准），PR #1 继续保持 Draft；CI 通过不代表迁移已获生产审批，也不构成部署许可。
+- Run #1006 对应代码头 `5891ae5c6a24`：Backend 347 passed、1 skipped，Frontend build 与 Mock API Browser E2E 全部通过。PR #1 继续保持 Draft；CI 通过不代表迁移已获生产审批，也不构成部署许可。
 
 ## 9.5 第三方上报 PII 保留与清理策略
 
