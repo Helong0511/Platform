@@ -230,3 +230,57 @@ def test_third_party_report_outbox_scheduler_is_registered():
         f"{config['result_getter_module']}.{config['result_getter_function']}"
     )
     assert callable(getter)
+
+
+async def test_outbox_scan_is_bounded_and_filters_due_unexpired_attempts(monkeypatch):
+    from sqlalchemy.dialects import mysql
+
+    captured = {}
+
+    class ScalarResult:
+        def all(self):
+            return [101, 102]
+
+    class Result:
+        def scalars(self):
+            return ScalarResult()
+
+    class FakeDB:
+        async def execute(self, statement):
+            compiled = statement.compile(dialect=mysql.dialect())
+            captured["sql"] = str(compiled).lower()
+            captured["params"] = {
+                key: str(value).lower() for key, value in compiled.params.items()
+            }
+            return Result()
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    processed = []
+
+    async def process_item(report_id):
+        processed.append(report_id)
+        return {"success": True}
+
+    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(
+        outbox,
+        "get_app_now_naive",
+        lambda: datetime(2026, 11, 11, 12, 0, 0),
+    )
+    monkeypatch.setattr(outbox, "process_postback_report_outbox_item", process_item)
+
+    stats = await outbox.process_postback_report_outbox(batch_size=2)
+
+    assert processed == [101, 102]
+    assert stats == {"selected": 2, "success": 2, "retryable": 0, "failed": 0}
+    assert "third_party_report_logs.outbox_enqueued is true" in captured["sql"]
+    assert "third_party_report_logs.next_retry_time <= %s" in captured["sql"]
+    assert "third_party_report_logs.attempt_count < third_party_report_logs.max_attempts" in captured["sql"]
+    assert "third_party_report_logs.report_start_time is null" in captured["sql"]
+    assert "limit %s" in captured["sql"]
