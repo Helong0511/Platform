@@ -362,6 +362,101 @@ async def test_mysql_commit_response_lost_after_commit_preserves_cap_reservation
 
 
 @pytest.mark.asyncio
+async def test_mysql_redis_recovery_retries_needs_reconciliation_after_backoff(monkeypatch):
+    """NEEDS_RECONCILIATION 到期后，真实 MySQL + Redis 恢复应安全撤销孤儿预留。"""
+    database = _create_isolated_mysql_database()
+    engine = None
+    redis = Redis.from_url(REDIS_URL, decode_responses=True)
+    redis_keys = []
+    try:
+        _initialize_isolated_schema(database)
+        password = quote_plus(os.getenv("MYSQL_INTEGRATION_PASSWORD", ""))
+        user = quote_plus(os.getenv("MYSQL_INTEGRATION_USER", "root"))
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:"
+            f"{int(os.getenv('MYSQL_INTEGRATION_PORT', '3306'))}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(ledger_module, "AsyncSessionLocal", session_factory)
+        monkeypatch.setattr(recovery_module, "AsyncSessionLocal", session_factory)
+
+        async def isolated_redis_client():
+            return redis
+
+        from app.core.cap import redis_counter
+        monkeypatch.setattr(redis_counter, "get_redis_client", isolated_redis_client)
+        assert await redis.ping() is True
+
+        offer_id = int(uuid.uuid4().int % 900_000_000) + 100_000_000
+        publisher_id = int(uuid.uuid4().int % 900_000_000) + 100_000_000
+        business_date = get_app_now_naive().date()
+        row, claimed, owner = await CapReservationLedger.prepare_and_claim(
+            platform="ci",
+            conversion_id=f"needs-reconciliation-{uuid.uuid4().hex}",
+            event_name="purchase",
+            offer_id=offer_id,
+            publisher_id=publisher_id,
+            cap_kind="daily",
+            business_date=business_date,
+        )
+        assert claimed is True
+        assert owner
+        redis_keys.extend([row.redis_counter_key, row.redis_token_key])
+
+        reserved = await RedisCapManager.check_and_increment_daily(
+            offer_id,
+            limit=10,
+            publisher_id=publisher_id,
+            initial_value=0,
+            reservation_id=row.reservation_key,
+            reservation_date=datetime.combine(business_date, time(12, 0)),
+        )
+        assert reserved is True
+        await CapReservationLedger.mark_reserved(row.reservation_key, owner)
+        await CapReservationLedger.mark_needs_reconciliation(
+            row.reservation_key,
+            "simulated temporary Redis uncertainty",
+            lease_owner=owner,
+        )
+
+        async with session_factory() as session:
+            await session.execute(
+                update(CapReservation)
+                .where(CapReservation.reservation_key == row.reservation_key)
+                .values(updated_at=get_app_now_naive() - timedelta(minutes=6))
+            )
+            await session.commit()
+
+        stats = await recovery_module.recover_cap_reservations(batch_size=10)
+        async with session_factory() as session:
+            recovered = await session.scalar(
+                select(CapReservation).where(
+                    CapReservation.reservation_key == row.reservation_key
+                )
+            )
+
+        assert recovered.state == "ROLLED_BACK"
+        assert await redis.get(row.redis_counter_key) == "0"
+        assert await redis.get(row.redis_token_key) is None
+        assert stats["claimed"] == 1
+        assert stats["rolled_back"] == 1
+        assert stats["needs_reconciliation"] == 0
+    finally:
+        if redis_keys:
+            await redis.delete(*redis_keys)
+        await redis.aclose()
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_mysql_database(database)
+
+
+@pytest.mark.asyncio
 async def test_mysql_concurrent_claim_allows_only_one_owner_for_same_reservation(monkeypatch):
     """并发首次插入相同稳定键时，唯一键/gap-lock 竞争只能产生一个有效 owner。"""
     database = _create_isolated_mysql_database()
