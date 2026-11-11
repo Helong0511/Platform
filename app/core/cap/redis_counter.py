@@ -218,7 +218,7 @@ class RedisCapManager:
             )
             current = int(current)
             if current == -2:
-                raise _CapReservationStateLost("Redis 日 Cap 计数 key 丢失或状态损坏，拒绝重试放行")
+                raise _CapReservationStateLost("Redis 日 Cap 计数 key 丢失（计数 key 丢失）或状态损坏，拒绝重试放行")
             if current < 0:
                 return False
             return True
@@ -270,7 +270,7 @@ class RedisCapManager:
             )
             current = int(current)
             if current == -2:
-                raise _CapReservationStateLost("Redis 总 Cap 计数 key 丢失或状态损坏，拒绝重试放行")
+                raise _CapReservationStateLost("Redis 总 Cap 计数 key 丢失（计数 key 丢失）或状态损坏，拒绝重试放行")
             if current < 0:
                 return False
             return True
