@@ -130,25 +130,21 @@ async def recover_cap_reservations(
                     continue
                 reason = f"Redis token PRESENT but atomic rollback returned {rollback_result}"
             elif token_state == "ABSENT":
-                daily_scope_expired = (
-                    row.cap_kind == "daily"
-                    and row.business_date is not None
-                    and (get_app_now_naive().date() - row.business_date).days >= 2
+                # token 缺失不能单独证明没有发生过 INCR：Redis allkeys-* 淘汰策略、
+                # 人工删除或部分数据丢失都可能只丢 token 而保留 counter。
+                # 只有 counter key 也明确不存在时，才可确认当前 Redis 中没有需要撤销的计数。
+                counter_exists = await RedisCapManager.counter_key_exists(
+                    row.redis_counter_key
                 )
-                counter_exists = (
-                    await RedisCapManager.counter_key_exists(row.redis_counter_key)
-                    if daily_scope_expired else None
-                )
-                if not row.redis_reserved or (daily_scope_expired and counter_exists is False):
-                    # 未确认预留且 token 不存在，或 Daily key 已自然过期：不再有本请求可撤销的有效名额。
+                if counter_exists is False:
                     await CapReservationLedger.finalize(
                         row.reservation_key, "ROLLED_BACK", lease_owner=owner
                     )
                     stats["rolled_back"] += 1
                     continue
                 reason = (
-                    "Redis token ABSENT while ledger says redis_reserved=true; "
-                    "cannot distinguish completed rollback from Redis token loss"
+                    "Redis token ABSENT while counter still exists or its existence is UNKNOWN; "
+                    "cannot distinguish no reservation, completed rollback, or token eviction"
                 )
             else:
                 daily_scope_expired = (
