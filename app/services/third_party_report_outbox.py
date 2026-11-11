@@ -197,7 +197,7 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
         )
         return {"success": False, "retryable": True, "reason": "missing_pixel_credentials"}
 
-    return await send_third_party_report(
+    send_result = await send_third_party_report(
         adsid=payload["adsid"],
         event=payload["event"],
         email=payload["email"],
@@ -216,6 +216,18 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
         report_log_id=report_log_id,
         event_key=payload["event_key"],
     )
+    # 发送函数的成功路径历史上返回 None；读取持久化状态，避免把已成功发送误计为 worker 失败。
+    if isinstance(send_result, dict):
+        return send_result
+    from app.core.third_party_report import _get_report_status
+
+    final_status = await _get_report_status(report_log_id)
+    return {
+        "success": final_status == "success",
+        "retryable": final_status != "success",
+        "reason": None if final_status == "success" else "report_status_not_confirmed",
+        "report_log_id": report_log_id,
+    }
 
 
 async def process_postback_report_outbox(
