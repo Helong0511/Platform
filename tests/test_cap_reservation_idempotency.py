@@ -324,3 +324,37 @@ async def test_rollback_keeps_reservation_token_when_counter_key_is_missing(monk
     assert result == -2
     assert token_key in redis.tokens
     assert key not in redis.values
+
+@pytest.mark.asyncio
+async def test_daily_reservation_uses_captured_date_even_if_clock_crosses_midnight(monkeypatch):
+    captured_date = datetime(2026, 11, 10, 23, 59, 59)
+    current_clock = datetime(2026, 11, 11, 0, 0, 1)
+    calls = []
+
+    class CaptureRedis:
+        async def eval(self, script, numkeys, *args):
+            assert script == redis_counter.RedisCapManager._RESERVE_LUA
+            calls.append(args)
+            return 1
+
+    async def fake_get_redis_client():
+        return CaptureRedis()
+
+    monkeypatch.setattr(redis_counter, "get_redis_client", fake_get_redis_client)
+    monkeypatch.setattr(redis_counter, "get_app_now_naive", lambda: current_clock)
+    monkeypatch.setattr(redis_counter.settings, "CAP_FAIL_OPEN", False)
+
+    result = await redis_counter.RedisCapManager.check_and_increment_daily(
+        offer_id=91,
+        limit=10,
+        publisher_id=7,
+        initial_value=3,
+        reservation_id="midnight-boundary-token",
+        reservation_date=captured_date,
+    )
+
+    expected_key = redis_counter.get_daily_cap_key(91, captured_date, 7)
+    assert result is True
+    assert calls[0][0] == expected_key
+    assert calls[0][1] == f"{expected_key}:reservation:midnight-boundary-token"
+
