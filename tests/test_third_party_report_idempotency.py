@@ -1,6 +1,8 @@
 """第三方广告事件日志幂等与跨事件隔离测试。"""
 from __future__ import annotations
 
+import asyncio
+
 from app.core import third_party_report
 
 
@@ -75,34 +77,22 @@ async def test_create_report_log_persists_event_key(monkeypatch):
 
 
 async def test_successful_existing_event_is_not_sent_again(monkeypatch):
-    class Result:
-        def scalar_one_or_none(self):
-            return "success"
-
-    class FakeDB:
-        async def execute(self, statement):
-            return Result()
-
-    class SessionContext:
-        async def __aenter__(self):
-            return FakeDB()
-
-        async def __aexit__(self, *args):
-            return False
-
     async def existing_log(**kwargs):
         return 41
+
+    async def not_claimed(report_log_id):
+        return False
+
+    async def existing_status(report_log_id):
+        return "success"
 
     class UnexpectedHTTPClient:
         def __init__(self, *args, **kwargs):
             raise AssertionError("successful duplicate event must not call Facebook")
 
     monkeypatch.setattr(third_party_report, "create_report_log", existing_log)
-    monkeypatch.setattr(
-        third_party_report,
-        "AsyncSessionLocal",
-        lambda: SessionContext(),
-    )
+    monkeypatch.setattr(third_party_report, "_claim_report_log", not_claimed)
+    monkeypatch.setattr(third_party_report, "_get_report_status", existing_status)
     monkeypatch.setattr(third_party_report.httpx, "AsyncClient", UnexpectedHTTPClient)
 
     result = await third_party_report.send_third_party_report(
@@ -122,3 +112,80 @@ async def test_successful_existing_event_is_not_sent_again(monkeypatch):
         "deduplicated": True,
         "report_log_id": 41,
     }
+
+
+async def test_report_log_claim_is_atomic_for_concurrent_senders(monkeypatch):
+    """两个并发发送者只有一个能取得同一事件日志的发送租约。"""
+    state = {"claimed": False, "commits": 0}
+
+    class Result:
+        def __init__(self, rowcount):
+            self.rowcount = rowcount
+
+    class FakeDB:
+        async def execute(self, statement):
+            # 模拟数据库 UPDATE ... WHERE lease expired 的原子行数仲裁。
+            if state["claimed"]:
+                return Result(0)
+            state["claimed"] = True
+            return Result(1)
+
+        async def commit(self):
+            state["commits"] += 1
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(
+        third_party_report,
+        "AsyncSessionLocal",
+        lambda: SessionContext(),
+    )
+
+    results = await asyncio.gather(
+        third_party_report._claim_report_log(41),
+        third_party_report._claim_report_log(41),
+    )
+
+    assert sorted(results) == [False, True]
+    assert state["commits"] == 2
+
+
+async def test_report_in_progress_does_not_send_duplicate_request(monkeypatch):
+    async def existing_log(**kwargs):
+        return 41
+
+    async def not_claimed(report_log_id):
+        return False
+
+    async def pending_status(report_log_id):
+        return "pending"
+
+    class UnexpectedHTTPClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("a concurrent sender must not call Facebook")
+
+    monkeypatch.setattr(third_party_report, "create_report_log", existing_log)
+    monkeypatch.setattr(third_party_report, "_claim_report_log", not_claimed)
+    monkeypatch.setattr(third_party_report, "_get_report_status", pending_status)
+    monkeypatch.setattr(third_party_report.httpx, "AsyncClient", UnexpectedHTTPClient)
+
+    result = await third_party_report.send_third_party_report(
+        adsid="ads-123",
+        event="ViewContent",
+        email=None,
+        ip=None,
+        phone=None,
+        ua=None,
+        facebook_pixel_id="isolated-pixel",
+        facebook_access_token="isolated-token",
+        source="postback",
+    )
+
+    assert result["success"] is False
+    assert result["retryable"] is True
+    assert result["reason"] == "report_in_progress"
