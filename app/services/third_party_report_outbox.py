@@ -324,5 +324,5 @@ async def process_postback_report_outbox(
                 stats["failed"] += 1
         except Exception:
             stats["failed"] += 1
-            logger.error("处理 Postback Report Outbox 失败：id=%s", report_id, exc_info=True)
+            logger.error("处理 Postback Report Outbox 失败：id=%s error_type=%s", report_id, type(exc).__name__)
     return stats
