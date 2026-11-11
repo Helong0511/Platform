@@ -5,6 +5,7 @@ from app.api_v1.system.third_party_reports import (
     _mask_report_pii,
     _sanitize_report_params,
     _safe_report_error_message,
+    _can_requeue_report,
 )
 
 
@@ -87,3 +88,45 @@ def test_report_error_message_is_classified_without_echoing_raw_details():
     assert _safe_report_error_message("像素凭据暂不可用，Outbox 将自动重试") == (
         "像素配置缺失或不可用；检查配置后可重新排队"
     )
+
+
+
+def test_manual_requeue_eligibility_matches_backend_guards():
+    from datetime import datetime, timedelta
+    from types import SimpleNamespace
+    from app.core.third_party_report import REPORT_LOG_LEASE_SECONDS
+
+    now = datetime(2026, 11, 11, 12, 0, 0)
+    base = {
+        "outbox_enqueued": True,
+        "status": "failed",
+        "short_link_id": 17,
+        "cloak_name": None,
+        "short_code": None,
+        "report_start_time": None,
+    }
+
+    assert _can_requeue_report(SimpleNamespace(**base), now) is True
+    assert _can_requeue_report(
+        SimpleNamespace(**{**base, "outbox_enqueued": False}), now
+    ) is False
+    assert _can_requeue_report(
+        SimpleNamespace(**{**base, "status": "pending"}), now
+    ) is False
+    assert _can_requeue_report(
+        SimpleNamespace(**{**base, "short_link_id": None}), now
+    ) is False
+    assert _can_requeue_report(
+        SimpleNamespace(**{
+            **base,
+            "report_start_time": now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS),
+        }),
+        now,
+    ) is False
+    assert _can_requeue_report(
+        SimpleNamespace(**{
+            **base,
+            "report_start_time": now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 2),
+        }),
+        now,
+    ) is True
