@@ -1,4 +1,4 @@
--- Cap Redis reservation 持久化账本迁移（MySQL 8.0）
+-- Cap Redis reservation 持久化账本迁移（MySQL 8.0.16+；CHECK 约束从 8.0.16 起强制执行）
 --
 -- 目的：
 -- 1. 在 Redis INCR 前独立持久化 PREPARED，避免进程崩溃后失去预留意图。
