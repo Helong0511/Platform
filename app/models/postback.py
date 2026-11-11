@@ -110,6 +110,7 @@ class PostbackForwardLog(Base):
     retry_count = Column(Integer, default=0, comment='重试次数')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')
     completed_at = Column(DateTime, nullable=True, comment='完成时间')
+    pii_scrubbed_at = Column(DateTime, nullable=True, comment='PII 按保留策略清理时间')
 
     # 关系
     conversion = relationship("PostbackConversion", foreign_keys=[conversion_id])
@@ -122,6 +123,7 @@ class PostbackForwardLog(Base):
         Index("idx_forward_log_publisher", "publisher_id"),
         Index("idx_forward_log_created_at", "created_at"),
         Index("idx_forward_log_success", "success"),
+        Index("idx_forward_log_pii_retention", "pii_scrubbed_at", "created_at", "id"),
     )
 
 class PostbackForwardQueue(Base):
