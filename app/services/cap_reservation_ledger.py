@@ -115,6 +115,7 @@ class CapReservationLedger:
                     existing.state = "PREPARED"
                     existing.prepared_at = get_app_now_naive()
                     existing.reserved_at = None
+                    existing.redis_reserved = False
                     existing.finalized_at = None
                     existing.last_error = None
                     existing.lease_owner = None
@@ -170,6 +171,7 @@ class CapReservationLedger:
                 )
                 .values(
                     state="RESERVED",
+                    redis_reserved=True,
                     reserved_at=get_app_now_naive(),
                     updated_at=get_app_now_naive(),
                     last_error=None,
@@ -202,6 +204,7 @@ class CapReservationLedger:
                 )
                 .values(
                     state=state,
+                    redis_reserved=(False if state == "ROLLED_BACK" else CapReservation.redis_reserved),
                     finalized_at=now,
                     updated_at=now,
                     lease_owner=None,
