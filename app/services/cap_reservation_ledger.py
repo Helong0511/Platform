@@ -291,6 +291,15 @@ class CapReservationLedger:
             )
             if row is None:
                 raise RuntimeError(f"Cap Reservation 不存在：{reservation_key}")
+            if row.state in FINAL_STATES and row.state != state:
+                raise RuntimeError(
+                    f"Cap Reservation 已进入相反终态，拒绝覆盖：current={row.state}, requested={state}"
+                )
+            if row.state not in FINAL_STATES:
+                if not lease_owner or row.lease_owner != lease_owner:
+                    raise RuntimeError(
+                        f"Cap Reservation lease owner 不匹配，拒绝终态更新：{reservation_key}"
+                    )
 
             token_cleaned = state == "ROLLED_BACK"
             if state == "COMMITTED":
