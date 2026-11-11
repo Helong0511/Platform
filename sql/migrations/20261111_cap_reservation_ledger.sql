@@ -21,8 +21,8 @@
 -- - redis_token_key 保存完整 token key 快照，不能在恢复时根据当前配置重新推导。
 
 CREATE TABLE IF NOT EXISTS cap_reservations (
-    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '预留账本主键',
-    reservation_key CHAR(64) NOT NULL COMMENT '稳定预留键：正式事件键与 Cap scope 的 SHA-256',
+    id INT NOT NULL AUTO_INCREMENT COMMENT '预留账本主键',
+    reservation_key VARCHAR(64) NOT NULL COMMENT '稳定预留键：正式事件键与 Cap scope 的 SHA-256',
     platform VARCHAR(50) NOT NULL COMMENT 'Postback 平台',
     conversion_id VARCHAR(255) NOT NULL COMMENT '正式转化事件 ID',
     event_name VARCHAR(100) NOT NULL DEFAULT 'default' COMMENT '标准化事件名称',
