@@ -559,3 +559,14 @@ CapReservation ORM、migration 和 `sql/platform.sql` 统一增加 CHECK 约束�
 - 以上代码修改已推送至修复分支，必须以最新 SHA 的 Backend/Frontend CI 及 Mock API Playwright E2E 结果为准。
 - 尚未证明真实浏览器对所有状态转换均已覆盖；需补充配置缺失、租约活动、租约过期、重试耗尽、重新排队及权限拒绝场景。
 - 错误摘要只提供运维分类，不取代受控服务端日志；不得把第三方响应正文直接开放给管理端。
+## 27. MySQL COMMIT ACK 丢失边界注入（2026-11-11）
+
+新增 CI 专用 MySQL 8.0/InnoDB 集成测试，使用独立测试表和合成 event_key，不触碰应用生产配置、不调用第三方接口：
+- 情形 A：先提交一条 pending 事件，再执行状态更新并让 MySQL 服务端完成 COMMIT；测试客户端随后主动抛出连接错误，模拟 COMMIT 响应未到达客户端。新连接读取到 success，且相同 event_key 的重复 INSERT 被唯一键拒绝，证明服务端已提交时 ACK 丢失不会生成第二条事件。
+- 情形 B：更新事务在提交前回滚并模拟连接错误；新连接仍读到 pending，随后使用同一 event_key 重试更新成功，记录数仍为一条。
+- 此测试验证真实隔离 MySQL/InnoDB 的事务持久化和唯一键边界；它通过客户端异常注入模拟 ACK 丢失，并非真实 TCP 中间人断连，也不是完整的 SQLAlchemy Outbox worker 端到端网络故障演练。应用层 ACK 失败、稳定 event_id 复用及 worker 恢复仍由独立测试覆盖。
+- 最新 Run #907（SHA 4f2f35cbc35b35f8bdda7d86c5f79526acd9f6be）Backend 319 passed / 1 skipped / 1 warning；Frontend npm ci、依赖公告检查、Lint、Build、Mock API Playwright E2E 全部成功。
+
+## 28. 第三方上报列表预览 Schema 修复（2026-11-11）
+
+列表 API 在序列化时生成脱敏后的 report_params_preview，但响应 Schema 曾遗漏该字段；FastAPI response_model 可能将额外字段过滤，导致管理页“完整上报参数”预览为空。现已在 ThirdPartyReportLogListResponse 中显式声明该字段，并新增 Schema 契约测试。该修复已包含在 Run #907。
