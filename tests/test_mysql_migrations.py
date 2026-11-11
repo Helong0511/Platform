@@ -154,6 +154,15 @@ def test_cap_reservation_migration_is_idempotent_and_matches_mysql_schema():
     baseline_schema = Path("sql/platform.sql").read_text(encoding="utf-8")
     assert "CREATE TABLE IF NOT EXISTS cap_reservations" in baseline_schema
     assert "redis_token_cleaned" in baseline_schema
+    for check_name in (
+        "chk_cap_reservation_key_sha256",
+        "chk_cap_reservation_offer_positive",
+        "chk_cap_reservation_publisher_positive",
+        "chk_cap_reservation_attempts_nonnegative",
+        "chk_cap_reservation_kind_date",
+        "chk_cap_reservation_state",
+    ):
+        assert check_name in baseline_schema
 
     connection = _connect()
     try:
