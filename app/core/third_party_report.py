@@ -229,6 +229,8 @@ async def _claim_report_log(report_log_id: int, lease_seconds: int = REPORT_LOG_
                 # PII 清理与发送认领必须在同一行锁/条件 UPDATE 上仲裁：
                 # 若清理先提交，已复制到 Worker 内存的旧载荷也不得再发送。
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
+                # 认领阶段即阻止耗尽预算的事件，避免空转占用 5 分钟租约。
+                ThirdPartyReportLog.attempt_count < ThirdPartyReportLog.max_attempts,
                 or_(
                     ThirdPartyReportLog.report_start_time.is_(None),
                     ThirdPartyReportLog.report_start_time < stale_before,
@@ -380,7 +382,24 @@ async def send_third_party_report(
         base_attempt_count = 0
         max_attempts_total = max_retries + (1 if use_hash else 0)
     if base_attempt_count >= max_attempts_total:
+        # 不留住刚取得的租约；该事件已耗尽预算，不得继续发起外部请求。
+        await update_report_log(
+            report_log_id,
+            status="failed",
+            report_start_time=get_app_now_naive() - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
+            completed_at=get_app_now_naive(),
+            clear_next_retry_time=True,
+        )
         return {"success": False, "retryable": False, "reason": "max_attempts_exhausted"}
+
+    # 每次 Worker 执行的总请求数（哈希请求 + 可选非哈希兜底）不得超过
+    # 数据库中剩余的累计预算，防止接近上限时仍固定发送 4 次而超额。
+    remaining_attempts = max_attempts_total - base_attempt_count
+    hash_attempts = min(
+        max_retries,
+        max(0, remaining_attempts - (1 if use_hash else 0)),
+    )
+    fallback_allowed = bool(use_hash and remaining_attempts > hash_attempts)
 
     async def _mark_failed_and_raise(error_msg: str):
         """将上报日志标为 failed 后抛出 ValueError，供上层中断流程。"""
@@ -447,7 +466,7 @@ async def send_third_party_report(
 
     logger.info("[第三方上报] 使用像素配置 - Pixel ID: %s, API 版本：%s", pixel_id, api_version)
     
-    for attempt in range(max_retries):
+    for attempt in range(hash_attempts):
         try:
             # 使用 Facebook Graph API
             url = f"https://graph.facebook.com/{api_version}/{pixel_id}/events"
@@ -519,7 +538,7 @@ async def send_third_party_report(
 
             logger.info(
                 "[第三方上报] 开始发送 (尝试 %s/%s): report_log_id=%s event=%s use_hash=%s",
-                attempt + 1, max_retries, report_log_id, event, use_hash,
+                attempt + 1, hash_attempts, report_log_id, event, use_hash,
             )
             if use_hash and (email or phone):
                 logger.debug(
@@ -542,7 +561,7 @@ async def send_third_party_report(
                             report_success_time = get_app_now_naive()
                             logger.info(
                                 "[第三方上报] report_log_id=%s 成功 (尝试 %s/%s), fbtrace_id=%s",
-                                report_log_id, attempt + 1, max_retries, log_id,
+                                report_log_id, attempt + 1, hash_attempts, log_id,
                             )
                             
                             await update_report_log(
@@ -637,7 +656,7 @@ async def send_third_party_report(
     failure_reasons_str = "\n" + "\n".join(failure_reasons) if failure_reasons else "\n无详细信息"
     
     # 如果使用哈希失败，尝试一次不使用哈希
-    if use_hash:
+    if fallback_allowed:
         logger.warning(f"[第三方上报] 所有哈希尝试失败，尝试一次不使用哈希...")
         try:
             # 使用 Facebook Graph API（使用自定义或全局配置）
@@ -695,12 +714,12 @@ async def send_third_party_report(
             await update_report_log(
                 report_log_id,
                 report_params=report_params_json,
-                attempt_count=base_attempt_count + max_retries + 1,
+                attempt_count=base_attempt_count + hash_attempts + 1,
             )
 
             logger.info(
                 "[第三方上报] 开始发送 (尝试 %s/%s - 不使用哈希): report_log_id=%s event=%s",
-                max_retries + 1, max_retries + 1, report_log_id, event,
+                hash_attempts + 1, hash_attempts + 1, report_log_id, event,
             )
 
             # 增加超时时间，应对网络延迟
@@ -717,7 +736,7 @@ async def send_third_party_report(
                             report_success_time = get_app_now_naive()
                             logger.info(
                                 "[第三方上报] report_log_id=%s 成功 (尝试 %s/%s - 不使用哈希), fbtrace_id=%s",
-                                report_log_id, max_retries + 1, max_retries + 1, log_id,
+                                report_log_id, hash_attempts + 1, hash_attempts + 1, log_id,
                             )
                             
                             await update_report_log(
@@ -783,7 +802,7 @@ async def send_third_party_report(
     )
 
     # 失败后释放发送租约；按累计尝试次数安排退避，达到预算后转为人工重试。
-    final_attempt_count = base_attempt_count + (max_retries + 1 if use_hash else max_retries)
+    final_attempt_count = base_attempt_count + (hash_attempts + (1 if fallback_allowed else 0))
     retry_at = None
     if final_attempt_count < max_attempts_total:
         retry_delay_minutes = min(5 * (2 ** (base_attempt_count // 4)), 60)
