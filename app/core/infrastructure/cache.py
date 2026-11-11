@@ -169,7 +169,8 @@ class MemoryCacheBackend(CacheBackend):
         """初始化有界 LRU 缓存，避免 Redis 故障期间高基数键耗尽进程内存。"""
         self._cache: OrderedDict[str, tuple[Any, Optional[float]]] = OrderedDict()
         self._max_entries = max(1, int(max_entries))
-        self._time = time.time
+        # TTL 使用单调时钟，避免系统时间被 NTP/人工校时回拨或跳跃影响过期判断。
+        self._time = time.monotonic
 
     async def get(self, key: str) -> Optional[Any]:
         """从内存获取缓存值，并更新 LRU 最近访问顺序。"""
