@@ -89,12 +89,24 @@ async def recover_cap_reservations(
         "needs_reconciliation": 0,
         "tokens_cleaned": 0,
         "cleanup_pending": 0,
+        "lease_lost": 0,
         "failed": 0,
     }
 
     for row in rows:
         owner = row.lease_owner
         try:
+            # 批量认领时所有行共用同一租约截止时间；逐条处理前续租。
+            # 若等待期间另一 Worker 已接管，则 owner 校验失败，本 Worker 必须跳过。
+            lease_renewed = await CapReservationLedger.renew_recovery_lease(
+                row.reservation_key,
+                owner,
+                lease_seconds=RECOVERY_LEASE_SECONDS,
+            )
+            if not lease_renewed:
+                stats["lease_lost"] += 1
+                continue
+
             if row.state == "COMMITTED":
                 await RedisCapManager.delete_reservation_token(row.redis_token_key)
                 await CapReservationLedger.mark_token_cleaned(
