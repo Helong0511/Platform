@@ -918,7 +918,7 @@ async def update_report_log_params(
             if not log_entry:
                 logger.warning(f"[第三方上报] 日志记录不存在: id={log_id}")
                 return False
-            if log_entry.pii_scrubbed_at is not None:
+            if getattr(log_entry, "pii_scrubbed_at", None) is not None:
                 logger.warning("[第三方上报] 已按保留策略清理个人信息的日志不可重新写入载荷: id=%s", log_id)
                 return False
             
