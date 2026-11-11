@@ -202,7 +202,7 @@ async def test_report_claim_query_limits_failed_retries_to_expired_leases(monkey
 
     class FakeDB:
         async def execute(self, statement):
-            captured["sql"] = str(statement.compile(dialect=mysql.dialect())).lower()
+            captured["sql"] = str(statement.compile(dialect=mysql.dialect(), compile_kwargs={"literal_binds": True})).lower()
             return Result()
 
         async def commit(self):
