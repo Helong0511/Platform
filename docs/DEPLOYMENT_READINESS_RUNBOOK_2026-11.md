@@ -368,3 +368,30 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - 此修复避免批次后半段的旧 owner 在租约丢失后继续操作；单条 Redis 操作仍依赖 Redis 客户端的 5 秒 socket timeout 和任务级异常处理。
 - MySQL/Redis 集成测试只使用 CI 临时实例和随机合成标识，不连接生产服务。
 - 完整 migration/backup/rollback、PII 保留政策、Outbox 配置生命周期组合及其它业务模块全量审计仍是合并/上线阻断项。PR 保持 Draft。
+
+
+## 21. 认证时权限缓存新鲜度与账号状态即时生效（2026-11-11，Run #1117 / #1119）
+
+### 发现的问题
+
+- `permission_cache` 默认 TTL 为 300 秒。旧 `get_current_user` 路径先读取 Redis 权限缓存，再读取完整 User 行；缓存命中时，旧逻辑可能在缓存显示 `is_active=true`、`login_restricted=false` 时放行已经在数据库中被禁用/限制登录的账号。
+- 旧路径随后仍查询完整 User 对象，因此权限缓存并未真正省去 User 表查询，却增加一次 Redis/DB 权限读取和缓存失效竞态。
+- 用户服务会尝试调用 `invalidate_user_permission_cache`，但 Redis 不可用、跨 Worker 失效失败时，不能把账号停用的安全性依赖于缓存 TTL。
+
+### 修复
+
+- `get_current_user` 现在直接从当前请求的数据库会话读取 User 行，并以数据库最新的 `is_active`、`login_restricted`、`login_message` 做认证判定。
+- 认证路径不再先读 `get_user_permissions` 缓存后又重复查询 User 表；避免旧缓存放行禁用账号，也避免缓存显示旧禁用状态导致账号重新启用后继续被误拒绝。
+- 角色授权仍由返回的数据库 User 对象交给 `require_admin`、`require_client` 等依赖执行；资源归属仍由各业务服务查询数据库进行校验。
+- 新增三项回归测试：缓存模拟旧的“仍启用”状态但数据库已禁用；缓存模拟未限制但数据库已限制登录；数据库当前有效账号不受旧缓存影响。测试同时断言认证流程不再访问权限缓存。
+
+### CI 证据
+
+- Run #1117（SHA `a90b33d0a2119323f20efc21fff4816a1b04da88`）：Backend **405 passed、1 skipped、1 warning**；Frontend Lint/Build/Playwright 全部通过。
+- Run #1119（SHA `70d588fb3759e028dcf72a2d02f398b44dc9b2b8`）：Backend **406 passed、1 skipped、1 warning**；Frontend Lint、Build、Playwright Mock API E2E 全部通过。Run #1119：[查看 CI](https://github.com/Helong0511/Platform/actions/runs/43005368581)。
+
+### 结论
+
+- 账号禁用和登录限制不再依赖 5 分钟权限缓存的失效及时性。
+- 权限缓存模块仍可供其它明确允许短暂陈旧的只读展示/优化场景使用；不得用于绕过实时账号状态和资源归属校验。
+- 其余 RBAC 路由覆盖、数据租户隔离、迁移/备份恢复和 PII 治理仍需继续审计。PR 保持 Draft，不合并、不部署。
