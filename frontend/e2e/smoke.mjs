@@ -76,7 +76,7 @@ const mockApi = async (page) => {
               report_start_time: '2026-11-11T09:00:00',
               next_retry_time: new Date(Date.now() + 300000).toISOString(),
               outbox_enqueued: true, outbox_error_category: '第三方请求超时',
-              can_requeue: true, use_hash: true
+              can_requeue: true, outbox_payload_editable: false, use_hash: true
             },
             {
               id: 2, source: 'postback', adsid: 'e2e-ad-config-missing', event: 'Purchase',
@@ -86,7 +86,7 @@ const mockApi = async (page) => {
               report_start_time: null, next_retry_time: null,
               outbox_enqueued: true,
               outbox_error_category: '像素配置缺失或不可用；检查配置后可重新排队',
-              can_requeue: false, use_hash: true
+              can_requeue: false, outbox_payload_editable: false, use_hash: true
             }
           ],
           total: 2,
@@ -229,6 +229,9 @@ try {
     await reportRows.nth(1).waitFor({ timeout: 10000 });
     assert.equal(await reportRows.nth(0).getByRole('button', { name: '重新排队' }).count(), 1);
     assert.equal(await reportRows.nth(1).getByRole('button', { name: '重新排队' }).count(), 0);
+    // 已经尝试发送的 Outbox 载荷不可编辑，也不可切换哈希方式。
+    assert.equal(await reportRows.nth(0).getByRole('button', { name: '编辑' }).count(), 0);
+    assert.equal(await reportRows.nth(0).getByRole('button', { name: '启用' }).count(), 0);
 
     await reportRows.nth(1).getByRole('button', { name: '详情' }).click();
     await page.getByRole('dialog', { name: '上报日志详情' })
