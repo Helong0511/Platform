@@ -156,3 +156,75 @@ async def test_real_redis_cap_rollback_preserves_token_when_counter_is_zero():
     finally:
         await redis.delete(counter_key, token_key)
         await redis.aclose()
+
+
+
+@pytest.mark.asyncio
+async def test_real_redis_cap_reservation_token_lifetime_and_corrupt_counter_fail_closed():
+    """验证账本 token 无固定 TTL、稳定 token 幂等，以及损坏计数值 fail-closed。"""
+    redis = Redis.from_url(REDIS_URL, decode_responses=True)
+    suffix = uuid.uuid4().hex
+    daily_key = f"ci:cap:daily:{suffix}"
+    daily_token = f"{daily_key}:reservation:stable-token"
+    total_key = f"ci:cap:total:{suffix}"
+    total_token = f"{total_key}:reservation:stable-token"
+    corrupt_key = f"ci:cap:corrupt:{suffix}"
+    corrupt_token = f"{corrupt_key}:reservation:stable-token"
+
+    try:
+        assert await redis.ping() is True
+
+        first = await redis.eval(
+            RedisCapManager._RESERVE_LUA, 2,
+            daily_key, daily_token, 48 * 3600, 3, 10, 0,
+        )
+        assert first == 4
+        assert await redis.ttl(daily_key) > 0
+        assert await redis.ttl(daily_token) == -1
+
+        # 相同 token 重试只返回原计数，不重复 INCR。
+        retry = await redis.eval(
+            RedisCapManager._RESERVE_LUA, 2,
+            daily_key, daily_token, 48 * 3600, 3, 10, 0,
+        )
+        assert retry == 4
+        assert await redis.get(daily_key) == "4"
+        assert await redis.ttl(daily_token) == -1
+
+        # Total counter 和活动 token 都必须持久化，直到账本终态清理 token。
+        total = await redis.eval(
+            RedisCapManager._RESERVE_LUA, 2,
+            total_key, total_token, 0, 7, 10, 0,
+        )
+        assert total == 8
+        assert await redis.ttl(total_key) == -1
+        assert await redis.ttl(total_token) == -1
+
+        # 已存在但非整数的 Redis counter 不能被 DB 初值覆盖。
+        await redis.set(corrupt_key, "not-an-integer")
+        corrupt_result = await redis.eval(
+            RedisCapManager._RESERVE_LUA, 2,
+            corrupt_key, corrupt_token, 48 * 3600, 0, 10, 0,
+        )
+        assert corrupt_result == -2
+        assert await redis.get(corrupt_key) == "not-an-integer"
+        assert await redis.get(corrupt_token) is None
+
+        # 正常 rollback 只撤销一次，并清理 token；重复 rollback 不会误减。
+        rollback = await redis.eval(
+            RedisCapManager._ROLLBACK_RESERVATION_LUA, 2,
+            daily_key, daily_token,
+        )
+        assert rollback == 3
+        duplicate_rollback = await redis.eval(
+            RedisCapManager._ROLLBACK_RESERVATION_LUA, 2,
+            daily_key, daily_token,
+        )
+        assert duplicate_rollback == 0
+        assert await redis.get(daily_key) == "3"
+    finally:
+        await redis.delete(
+            daily_key, daily_token, total_key, total_token,
+            corrupt_key, corrupt_token,
+        )
+        await redis.aclose()
