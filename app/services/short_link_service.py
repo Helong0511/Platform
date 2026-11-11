@@ -420,8 +420,10 @@ class ShortLinkService(BaseService[ShortLink]):
         await self.db.flush()
         await self.db.refresh(short_link)
 
-        # 清除缓存，确保数据一致性
+        # 清除跳转缓存与像素配置缓存，确保 URL、启停状态、有效期及凭据轮换即时生效。
         await invalidate_short_link_cache(short_link.short_code)
+        from app.services.cloak_pixel_mapping import invalidate_cloak_cache
+        invalidate_cloak_cache(short_code=short_link.short_code)
 
         logger.info(f"短链接更新成功: {short_link.short_code}")
         return short_link
@@ -451,8 +453,10 @@ class ShortLinkService(BaseService[ShortLink]):
         await self.db.delete(short_link)
         await self.db.flush()
 
-        # 清除缓存和Redis计数器，确保数据一致性
+        # 清除跳转缓存和像素配置缓存，避免已删除短链继续使用旧 Pixel/token。
         await invalidate_short_link_cache(short_code)
+        from app.services.cloak_pixel_mapping import invalidate_cloak_cache
+        invalidate_cloak_cache(short_code=short_code)
         # 清理Redis中的点击计数器，避免同步失败
         await cleanup_click_counter(short_code)
 
