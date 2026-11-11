@@ -101,6 +101,7 @@ class ThirdPartyReportLogListResponse(BaseSchema):
     outbox_enqueued: bool = Field(False, description="是否属于持久化 Outbox 事件")
     next_retry_time: Optional[datetime] = Field(None, description="下次自动重试时间")
     outbox_error_category: Optional[str] = Field(None, description="脱敏后的 Outbox 失败原因分类")
+    can_requeue: bool = Field(False, description="当前是否满足人工重新排队条件")
 
     model_config = {
         "from_attributes": True
