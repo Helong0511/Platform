@@ -146,3 +146,29 @@ async def test_distributed_lock_owner_tokens_are_unique():
 
 async def _async_value(value):
     return value
+
+
+@pytest.mark.asyncio
+async def test_memory_cache_fallback_uses_process_local_lock(monkeypatch):
+    """Redis 降级时同一事件循环内同 key 仍应互斥，不得伪装成分布式锁。"""
+    from app.core.infrastructure import cache_advanced as cache_advanced_mod
+
+    class FakeMemoryCache:
+        # MemoryCacheBackend 不含 redis 属性。
+        pass
+
+    cache = FakeMemoryCache()
+    monkeypatch.setattr(
+        cache_advanced_mod,
+        "get_cache_backend",
+        lambda: _async_value(cache),
+    )
+
+    first = cache_advanced_mod.DistributedLock("memory-fallback-key", timeout=10)
+    second = cache_advanced_mod.DistributedLock("memory-fallback-key", timeout=10)
+
+    assert await first.acquire() is True
+    assert await second.acquire() is False
+    assert await first.release() is True
+    assert await second.acquire() is True
+    assert await second.release() is True
