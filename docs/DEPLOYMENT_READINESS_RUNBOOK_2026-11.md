@@ -115,8 +115,9 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 3. 检查 `missing_event_keys=0`，重复键查询无结果；确认 `unique_event_key` 已创建，且旧的 `unique_source_adsid` 已按迁移预期替换。
 4. 执行 `sql/migrations/20261111_third_party_report_outbox.sql`。
 5. 核验 Outbox 五个字段和 `idx_third_party_outbox_due`，与 ORM `ThirdPartyReportLog` 定义一致。
-6. 发布同一 SHA 的兼容应用代码；先保持 Outbox worker 禁用，执行隔离/受控验证后再按发布审批启用 worker。
-7. 确认新旧 API/worker 不混跑；观察 pending、failed、重试耗尽和租约恢复指标后再恢复正常流量。
+6. 执行 `sql/migrations/20261112_third_party_report_pii_retention.sql`，核对 `pii_scrubbed_at` 与 `idx_third_party_pii_retention`；该迁移只新增元数据，不清理历史数据。
+7. 发布同一 SHA 的兼容应用代码；先保持 Outbox worker 禁用，执行隔离/受控验证后再按发布审批启用 worker。
+8. 确认新旧 API/worker 不混跑；观察 pending、failed、重试耗尽和租约恢复指标后再恢复正常流量。
 
 `sql/platform.sql` 是完整建库基线，已经包含 `event_key`、Outbox 字段及相关索引；它不是在线增量迁移脚本。已有数据库必须按上面的两个增量迁移顺序执行，禁止对现有生产库直接运行会 DROP/重建表的完整基线脚本。
 
@@ -139,8 +140,19 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - 上述测试只使用 CI 临时 MySQL 8.0.46、临时 Redis、独立随机数据库和合成数据；不连接生产服务。
 - Run #923 曾因新增测试的调用记录断言错误而失败（324 passed、1 failed）；已修正测试断言，Run #924 全绿。随后 Run #925 增加真实 MySQL COMMIT 响应丢失测试并全绿。
 - 仍未完成：完整旧 schema 到新 schema 的真实升级/中断重跑/兼容回滚演练；Outbox 配置生命周期与发送租约压力测试；PII 数据保留、删除、访问审计政策核定；全项目业务模块最终回归。
-- PII 代码核对：第三方 Report Outbox 持久化 email、phone、IP、UA；管理 API 有字段脱敏，但当前没有查到针对 `third_party_report_logs` 的自动 PII 到期清理任务。保留时长与删除/归档要求需业务负责人确认，确认前不擅自设定法定保留期限；该项继续阻断发布。
+- PII 生命周期修复：新增 `pii_scrubbed_at` 标记、扫描索引、分批清除服务和每日调度任务；仅清理已成功或明确终态且租约失效的旧记录载荷，保留 `event_key`/事件审计骨架；待重试 Outbox 不会被清理。默认 `THIRD_PARTY_REPORT_PII_RETENTION_DAYS=0`（关闭），须经业务/合规负责人确定期限后显式设置；未设置前不得声称已自动执行个人信息到期清理。
 - PR #1 继续保持 Draft；最新 CI 通过不代表迁移已获生产审批，也不构成部署许可。
+
+## 9.5 第三方上报 PII 保留与清理策略
+
+- 环境变量：`THIRD_PARTY_REPORT_PII_RETENTION_DAYS`，必须为非负整数；默认 `0`，即关闭自动清理（fail-safe）。
+- 只有业务/合规负责人书面确认保留期限、目的与适用司法辖区后，发布负责人才能设置正整数天数；本仓库不自行推断法定期限。
+- 每日 03:15 的任务按批次最多 200 条处理；使用 InnoDB 行锁和 `SKIP LOCKED` 避免与其它清理 Worker 重复处理。
+- 仅清理超过期限的终态 `success` 记录、旧非 Outbox 终态记录，以及明确耗尽自动重试且租约失效的 Outbox `failed` 记录；pending、具有下次重试时间、活动租约或重试未耗尽的事件不会被清理。
+- 清除字段：`email`、`ip`、`phone`、`ua`、`report_params`、`response_body`、第三方 `log_id`；失败详情替换为固定说明。
+- 保留字段：事件幂等键 `event_key`、事件身份/来源、金额与货币、状态及关键时间，用于防止重复入账和保留最小审计证据。
+- 清理后通过 `pii_scrubbed_at` 阻止 worker 发送、管理员重新排队或编辑已清理载荷。此标记不是删除整条日志；数据库备份、日志副本和第三方接收方数据仍须另行纳入保留/删除政策。
+- 上线前必须完成隔离 MySQL 迁移演练、清理 Worker 回归测试，并由负责人批准具体保留天数；未批准时保持 0，不得开启自动清理。
 
 ## 9.4 当前验收缺口
 
