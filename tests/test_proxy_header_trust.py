@@ -1,5 +1,6 @@
 """反向代理信任边界测试：客户端不能伪造 Cloudflare IP 头影响应用 IP 识别。"""
 from pathlib import Path
+from types import SimpleNamespace
 
 from starlette.requests import Request
 
@@ -32,11 +33,13 @@ def _request(peer_ip: str, headers: dict[str, str]) -> Request:
 def test_untrusted_peer_cannot_spoof_client_ip_headers(monkeypatch):
     from app.core import config
 
-    monkeypatch.setattr(config.settings, "TRUST_PROXY_HEADERS", True)
     monkeypatch.setattr(
-        config.settings,
-        "get_trusted_proxy_ips",
-        lambda: ["127.0.0.1", "::1"],
+        config,
+        "settings",
+        SimpleNamespace(
+            TRUST_PROXY_HEADERS=True,
+            get_trusted_proxy_ips=lambda: ["127.0.0.1", "::1"],
+        ),
     )
 
     request = _request(
