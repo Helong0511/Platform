@@ -83,7 +83,7 @@ async def test_sync_all_caps_locks_rows_and_never_resets_existing_today_redis_ke
 
     assert db.query._for_update_arg is not None
     assert str(db.query._order_by_clauses[0]) == "offer_caps.id ASC"
-    assert stats == {"success": 1, "failed": 0}
+    assert stats == {"success": 1, "failed": 0, "skipped": 0}
     # 新业务日的 Redis key 已经包含真实预留，不能因为 DB 日期旧而被清零。
     assert cap.current_daily_count == 4
     assert cap.cap_start_date == now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -280,5 +280,79 @@ async def test_sync_all_caps_reports_failure_when_commit_rolls_back_batch(monkey
 
     stats = await cap_sync.CapSynchronizer(db).sync_all_active_caps()
 
-    assert stats == {"success": 0, "failed": 1}
+    assert stats == {"success": 0, "failed": 1, "skipped": 0}
     assert db.rolled_back is True
+
+
+@pytest.mark.asyncio
+async def test_sync_all_caps_reports_missing_redis_counter_as_skipped(monkeypatch):
+    now = datetime(2026, 11, 11, 12, 0, 0)
+    cap = SimpleNamespace(
+        id=10,
+        offer_id=100,
+        publisher_id=20,
+        daily_cap=10,
+        total_cap=100,
+        cap_start_date=now,
+        current_daily_count=4,
+        current_total_count=9,
+        is_active=True,
+    )
+    db = _FakeDB([cap])
+    redis = _FakeRedis({
+        cap_sync.get_daily_cap_key(100, now, 20): "4",
+        # total key intentionally missing: unknown snapshot is not a successful sync.
+    })
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(cap_sync, "get_redis_client", fake_redis)
+    monkeypatch.setattr(cap_sync, "get_app_now_naive", lambda: now)
+
+    stats = await cap_sync.CapSynchronizer(db).sync_all_active_caps()
+
+    assert stats == {"success": 0, "failed": 0, "skipped": 1}
+    assert db.committed is True
+
+
+@pytest.mark.asyncio
+async def test_sync_all_caps_rolls_back_entire_batch_after_one_counter_read_fails(monkeypatch):
+    now = datetime(2026, 11, 11, 12, 0, 0)
+    caps = [
+        SimpleNamespace(
+            id=11, offer_id=101, publisher_id=21, daily_cap=10, total_cap=100,
+            cap_start_date=now, current_daily_count=1, current_total_count=2,
+            is_active=True,
+        ),
+        SimpleNamespace(
+            id=12, offer_id=102, publisher_id=22, daily_cap=10, total_cap=100,
+            cap_start_date=now, current_daily_count=3, current_total_count=4,
+            is_active=True,
+        ),
+    ]
+
+    class FailingRedis(_FakeRedis):
+        async def get(self, key):
+            if key == cap_sync.get_total_cap_key(102, 22):
+                raise RuntimeError("redis read failed")
+            return await super().get(key)
+
+    db = _FakeDB(caps)
+    redis = FailingRedis({
+        cap_sync.get_daily_cap_key(101, now, 21): "2",
+        cap_sync.get_total_cap_key(101, 21): "3",
+        cap_sync.get_daily_cap_key(102, now, 22): "4",
+    })
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(cap_sync, "get_redis_client", fake_redis)
+    monkeypatch.setattr(cap_sync, "get_app_now_naive", lambda: now)
+
+    stats = await cap_sync.CapSynchronizer(db).sync_all_active_caps()
+
+    assert stats == {"success": 0, "failed": 2, "skipped": 0}
+    assert db.rolled_back is True
+    assert db.committed is False
