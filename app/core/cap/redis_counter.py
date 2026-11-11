@@ -134,7 +134,9 @@ class RedisCapManager:
     # 仅当本次 token 仍存在时撤销一次；重复调用不会误减其他请求的计数。
     _ROLLBACK_RESERVATION_LUA = """
     if redis.call('EXISTS', KEYS[2]) == 0 then
-        return 0
+        -- token 缺失无法证明此前没有 INCR，也无法区分已回滚与 token 被淘汰。
+        -- 返回独立错误码，调用方必须结合持久化账本状态对账，不能假报回滚成功。
+        return -3
     end
     -- 计数器缺失可能是独立淘汰/重启；保留 token 作为恢复证据，
     -- 不能先删 token 再返回，否则永久丢失本次预留的撤销依据。
