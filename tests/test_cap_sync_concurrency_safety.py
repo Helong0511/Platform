@@ -356,3 +356,44 @@ async def test_sync_all_caps_rolls_back_entire_batch_after_one_counter_read_fail
     assert stats == {"success": 0, "failed": 2, "skipped": 0}
     assert db.rolled_back is True
     assert db.committed is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing_counter", ["daily", "total"])
+async def test_sync_single_cap_returns_false_and_rolls_back_when_counter_key_missing(
+    monkeypatch, missing_counter
+):
+    now = datetime(2026, 11, 11, 12, 0, 0)
+    cap = SimpleNamespace(
+        id=21,
+        offer_id=121,
+        publisher_id=31,
+        daily_cap=10,
+        total_cap=100,
+        cap_start_date=now - timedelta(days=1),
+        current_daily_count=7,
+        current_total_count=17,
+    )
+    values = {
+        cap_sync.get_daily_cap_key(121, now, 31): "8",
+        cap_sync.get_total_cap_key(121, 31): "18",
+    }
+    if missing_counter == "daily":
+        values.pop(cap_sync.get_daily_cap_key(121, now, 31))
+    else:
+        values.pop(cap_sync.get_total_cap_key(121, 31))
+
+    db = _FakeDB([cap])
+    redis = _FakeRedis(values)
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(cap_sync, "get_redis_client", fake_redis)
+    monkeypatch.setattr(cap_sync, "get_app_now_naive", lambda: now)
+
+    result = await cap_sync.CapSynchronizer(db).sync_single_cap(21)
+
+    assert result is False
+    assert db.rolled_back is True
+    assert db.committed is False
