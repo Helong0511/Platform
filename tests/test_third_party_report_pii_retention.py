@@ -366,3 +366,52 @@ async def test_forward_log_retention_clears_expanded_url_request_and_response(mo
     assert "for update skip locked" in captured["sql"]
     assert "postback_forward_queue" in captured["sql"]
     assert "not (exists" in captured["sql"]
+
+
+@pytest.mark.asyncio
+async def test_unretryable_outbox_without_config_reference_is_terminal_for_pii_retention(monkeypatch):
+    """缺少配置引用且 next_retry_time 为空的失败 Outbox 不可重排，应能按期限清理。"""
+    captured = []
+
+    class ScalarRows:
+        def all(self):
+            return []
+
+    class Result:
+        def scalars(self):
+            return ScalarRows()
+
+    class FakeDB:
+        async def execute(self, statement):
+            captured.append(str(statement.compile(dialect=mysql.dialect())).lower())
+            return Result()
+
+        async def rollback(self):
+            return None
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(retention, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(
+        retention,
+        "get_app_now_naive",
+        lambda: datetime(2026, 11, 11, 12, 0, 0),
+    )
+
+    result = await retention.scrub_expired_third_party_report_pii(
+        retention_days=90,
+        batch_size=20,
+    )
+
+    assert result["scrubbed"] == 0
+    sql = captured[0]
+    assert "third_party_report_logs.next_retry_time is null" in sql
+    assert "third_party_report_logs.short_link_id is null" in sql
+    assert "third_party_report_logs.cloak_name is null" in sql
+    assert "third_party_report_logs.short_code is null" in sql
+    assert "third_party_report_logs.outbox_enqueued is true" in sql
