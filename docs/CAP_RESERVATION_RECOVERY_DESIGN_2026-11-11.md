@@ -401,7 +401,7 @@ CapReservation ORM、migration 和 `sql/platform.sql` 统一增加 CHECK 约束�
 
 ### 当前验收状态
 
-**阻断项：** 尚未修复。当前代码不能据此认定第三方上报具备端到端可靠投递；在完成事务性 Outbox、恢复 worker 和故障注入测试前，禁止合并。
+**代码修复已接入分支，验收仍阻断。** 后续提交已新增 `enqueue_postback_report()`，并由 `PostbackProcessor` 在转化主事务提交前调用；Outbox 行与转化、下游转发队列共同提交。提交后仅做低延迟 worker 触发，真正恢复由持久化调度任务负责。当前仍须通过最新 CI 和隔离故障注入，不能据代码存在就认定可靠投递已验收。
 
 
 ## 19. 第三方上报重试链路与恢复任务缺失（2026-11-11）
@@ -422,4 +422,17 @@ CapReservation ORM、migration 和 `sql/platform.sql` 统一增加 CHECK 约束�
 
 ### 当前验收状态
 
-**阻断项：** 第三方上报不仅存在转化提交与日志创建之间的崩溃窗口，现有人工重试缺少必需凭据，且未发现周期性 pending/过期租约恢复任务。上述问题必须统一通过事务性 Outbox + 可恢复 Worker 修复，不能仅靠在重复 Postback 分支补发解决。
+**实现状态：核心链路已接入，仍需验收。** 当前分支已新增第三方 Report Outbox 服务：转化事务内写入待发送事件；worker 发送时按短链/斗篷配置引用重新解析凭据，不将 access token 写入 Outbox；新增每分钟调度任务；人工重试改为将失败的 Outbox 行原子重置为 pending 并等待同一 worker 消费，不再依赖进程内 `asyncio.create_task()`。另修复 `create_report_log()` 引用未定义 `event_key` 的运行时错误。新增 Outbox 入队、配置动态解析、发送结果归一化和调度注册测试。
+
+仍未通过最新 CI 和完整故障注入验收。必须继续验证：转化事务提交/回滚边界、并发相同事件唯一键冲突、worker 多实例竞争、远端成功但本地状态更新失败、配置轮换/缺失、重试预算耗尽、人工重试并发，以及旧版非 Outbox 日志的处理提示。CI 结果未完成前本节仍为合并阻断项。
+
+
+## 20. Outbox 实现接入记录与待验收事项（2026-11-11）
+
+- 已新增 `app/services/third_party_report_outbox.py`：转化事务入队、短链/斗篷配置引用解析、单条发送、批量扫描。
+- `PostbackProcessor` 在 conversion commit 前调用 `_enqueue_third_party_report_if_needed()`；Outbox 与 conversion、下游转发队列同事务提交。
+- 新增 `app/scheduler_module/tasks/third_party_report_tasks.py`，并在 task_names/task_config 注册每分钟恢复任务。
+- `retry_report_log()` 现在只对 `outbox_enqueued=true` 且失败的行做条件 UPDATE，写入立即可重试时间；不再创建进程内后台任务。非 Outbox 旧日志不允许伪装为已成功重试。
+- 发送函数成功路径可能返回 None，Outbox worker 已在调用后回读持久化状态，避免把已成功事件误计为 worker 失败。
+- 新增 Outbox 服务单测和 scheduler registration 契约测试；第三方日志创建、人工重试测试也已更新。
+- 上述仅为代码提交记录。不得将测试文件存在等同于测试通过；必须以最新 head 的 CI 结果及隔离 MySQL/Redis/mock HTTP 故障注入结果作为验收证据。
