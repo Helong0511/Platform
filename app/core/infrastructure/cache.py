@@ -8,6 +8,7 @@ import time
 import re
 import hashlib
 import logging
+from collections import OrderedDict
 from abc import ABC, abstractmethod
 from datetime import date, datetime
 from decimal import Decimal
@@ -160,34 +161,51 @@ class RedisCacheBackend(CacheBackend):
 
 
 class MemoryCacheBackend(CacheBackend):
-    """内存缓存后端实现（Redis不可用时的降级方案）"""
-    
-    def __init__(self):
-        """初始化进程内字典缓存，键值附带可选过期时间戳。"""
-        self._cache: Dict[str, tuple[Any, Optional[float]]] = {}
+    """内存缓存后端实现（Redis不可用时的有界降级方案）。"""
+
+    DEFAULT_MAX_ENTRIES = 10000
+
+    def __init__(self, max_entries: int = DEFAULT_MAX_ENTRIES):
+        """初始化有界 LRU 缓存，避免 Redis 故障期间高基数键耗尽进程内存。"""
+        self._cache: OrderedDict[str, tuple[Any, Optional[float]]] = OrderedDict()
+        self._max_entries = max(1, int(max_entries))
         self._time = time.time
-    
+
     async def get(self, key: str) -> Optional[Any]:
-        """从内存获取缓存值"""
-        if key not in self._cache:
+        """从内存获取缓存值，并更新 LRU 最近访问顺序。"""
+        entry = self._cache.get(key)
+        if entry is None:
             return None
-        
-        value, expire_time = self._cache[key]
-        
-        # 检查是否过期
-        if expire_time and self._time() > expire_time:
-            del self._cache[key]
+
+        value, expire_time = entry
+        if expire_time is not None and self._time() >= expire_time:
+            self._cache.pop(key, None)
             return None
-        
+
+        self._cache.move_to_end(key)
         return value
-    
+
     async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
-        """设置内存缓存值"""
+        """写入缓存；达到容量上限时淘汰最久未访问项。"""
         expire_time = None
         if ttl:
-            expire_time = self._time() + ttl
-        
+            expire_time = self._time() + max(0, ttl)
+
         self._cache[key] = (value, expire_time)
+        self._cache.move_to_end(key)
+
+        # 先清除已过期的最旧条目，避免在缓存写入高峰期保留过期对象。
+        now = self._time()
+        expired_keys = [
+            cache_key
+            for cache_key, (_, expires_at) in self._cache.items()
+            if expires_at is not None and now >= expires_at
+        ]
+        for cache_key in expired_keys:
+            self._cache.pop(cache_key, None)
+
+        while len(self._cache) > self._max_entries:
+            self._cache.popitem(last=False)
         return True
     
     async def delete(self, key: str) -> bool:
@@ -218,12 +236,13 @@ class MemoryCacheBackend(CacheBackend):
         if key not in self._cache:
             return False
         
-        # 检查是否过期
-        value, expire_time = self._cache[key]
-        if expire_time and self._time() > expire_time:
+        # 检查是否过期，并更新 LRU 最近访问顺序。
+        _, expire_time = self._cache[key]
+        if expire_time is not None and self._time() >= expire_time:
             del self._cache[key]
             return False
-        
+
+        self._cache.move_to_end(key)
         return True
 
 
