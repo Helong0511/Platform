@@ -43,8 +43,9 @@ class CapSynchronizer:
         """
         redis = await get_redis_client()
         if not redis:
-            logger.warning("Redis 不可用，跳过 Cap 同步")
-            return {'success': 0, 'failed': 0}
+            # 同步未执行不能报告为 0 成功、0 失败，否则调度任务会误记为成功。
+            logger.error("Redis 不可用，Cap 同步无法完成")
+            raise RuntimeError("Redis 不可用，无法完成 Cap 计数同步")
         
         # 查询所有活跃的 Cap 配置
         result = await self.db.execute(
