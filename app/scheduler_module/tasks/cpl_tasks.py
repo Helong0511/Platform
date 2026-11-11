@@ -2,14 +2,14 @@
 CPL 系统定时任务模块。
 
 功能说明：
-- 当前包含每日 Cap 计数重置：UTC 零点将各产品/渠道当日转化上限计数归零
+- 当前包含每日 Cap 计数重置：业务时区零点将各产品/渠道当日转化上限计数归零
 - 调用 ``app.core.cap.reset_daily_caps``
 
 在系统中的位置：
-- 由 RESET_DAILY_CAPS_TASK_NAME 在每天 00:00 UTC 触发
+- 由 RESET_DAILY_CAPS_TASK_NAME 在每天 00:00（调度器配置时区，默认 Asia/Shanghai） 触发
 
 注意事项：
-1. Cap 重置时间与业务统计时区（北京）可能不同，报表须标注 UTC 边界
+1. Cap 重置使用调度器配置时区（默认 Asia/Shanghai），须与业务统计日界保持一致
 2. 重置失败会导致当日 Cap 不准，应配置告警
 """
 import logging
@@ -30,7 +30,7 @@ async def reset_daily_caps_task():
     调用 core.cap.reset_daily_caps 更新数据库中的当日计数；
     成功或失败均写入 task_result_store，并记录耗时便于运维排查。
 
-    建议调度: 每天 00:00 UTC 执行一次。
+    建议调度: 每天 00:00（调度器配置时区，默认 Asia/Shanghai） 执行一次。
 
     异常:
         重置失败时写入失败摘要后重新抛出，由调度器捕获
