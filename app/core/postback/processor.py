@@ -469,6 +469,12 @@ class PostbackProcessor:
         本次 Redis reservation，避免「DB 已提交但 Redis 被回退」导致 Cap 超卖。
         """
         try:
+            # 在 DB COMMIT 前续租，避免恢复 Worker 抢占仍在执行中的 Postback reservation。
+            for reservation in cap_reservations or []:
+                ledger_key = reservation[5] if len(reservation) > 5 else None
+                lease_owner = reservation[6] if len(reservation) > 6 else None
+                if ledger_key and lease_owner:
+                    await CapReservationLedger.renew_lease(ledger_key, lease_owner)
             await db.commit()
             # DB 转化事务已提交后再独立确认账本；失败时保留活动状态，由恢复 Worker 按正式事件键修复。
             for reservation in cap_reservations or []:
