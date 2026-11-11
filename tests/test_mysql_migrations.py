@@ -144,6 +144,56 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
             index_names = {row[2] for row in cursor.fetchall()}
             assert "unique_event_key" in index_names
             assert "unique_source_adsid" not in index_names
+
+            # Outbox 扩展必须兼容历史日志，并保存非敏感配置引用而非 access token。
+            _run_sql_file(
+                cursor,
+                "sql/migrations/20261111_third_party_report_outbox.sql",
+            )
+            cursor.execute(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'third_party_report_logs'"
+            )
+            outbox_columns = {row[0] for row in cursor.fetchall()}
+            assert {
+                "outbox_enqueued",
+                "short_link_id",
+                "cloak_name",
+                "short_code",
+                "click_time",
+                "next_retry_time",
+            }.issubset(outbox_columns)
+            assert "facebook_access_token" not in outbox_columns
+
+            cursor.execute(
+                "SELECT outbox_enqueued FROM third_party_report_logs WHERE id = 1"
+            )
+            assert cursor.fetchone() == (0,)
+            cursor.execute(
+                "UPDATE third_party_report_logs SET outbox_enqueued = 1, short_link_id = 7, "
+                "cloak_name = 'ci-cloak', short_code = 'ci-short', "
+                "next_retry_time = CURRENT_TIMESTAMP WHERE id = 1"
+            )
+            cursor.execute(
+                "SELECT outbox_enqueued, short_link_id, cloak_name, short_code "
+                "FROM third_party_report_logs WHERE id = 1"
+            )
+            assert cursor.fetchone() == (1, 7, "ci-cloak", "ci-short")
+
+            cursor.execute("SHOW INDEX FROM third_party_report_logs")
+            outbox_index_names = {row[2] for row in cursor.fetchall()}
+            assert "idx_third_party_outbox_due" in outbox_index_names
+
+            for column in (
+                "outbox_enqueued",
+                "short_link_id",
+                "cloak_name",
+                "short_code",
+                "click_time",
+                "next_retry_time",
+                "idx_third_party_outbox_due",
+            ):
+                assert column in baseline_schema
     finally:
         connection.close()
 
