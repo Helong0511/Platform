@@ -1,9 +1,24 @@
 """HTTPS 代理头信任边界测试：客户端不能伪造代理头跳过 HTTPS 强制。"""
 import pytest
+from types import SimpleNamespace
 from starlette.requests import Request
 from starlette.responses import Response
 
 from app.core import https_middleware
+
+
+
+
+def _configure_settings(monkeypatch, *, trust_proxy_headers=True, trusted_ips=None):
+    monkeypatch.setattr(
+        https_middleware,
+        "settings",
+        SimpleNamespace(
+            is_production=True,
+            TRUST_PROXY_HEADERS=trust_proxy_headers,
+            get_trusted_proxy_ips=lambda: trusted_ips or ["127.0.0.1", "::1"],
+        ),
+    )
 
 
 def _request(*, peer_ip: str, path: str = "/api/private", headers=None):
@@ -29,13 +44,7 @@ def _request(*, peer_ip: str, path: str = "/api/private", headers=None):
 
 @pytest.mark.asyncio
 async def test_untrusted_client_cannot_spoof_forwarded_proto_or_cloudflare_header(monkeypatch):
-    monkeypatch.setattr(https_middleware.settings, "is_production", True)
-    monkeypatch.setattr(https_middleware.settings, "TRUST_PROXY_HEADERS", True)
-    monkeypatch.setattr(
-        https_middleware.settings,
-        "get_trusted_proxy_ips",
-        lambda: ["127.0.0.1", "::1"],
-    )
+    _configure_settings(monkeypatch, trusted_ips=["127.0.0.1", "::1"])
     middleware = https_middleware.HTTPSRedirectMiddleware(lambda scope, receive, send: None)
     called = False
 
@@ -87,13 +96,7 @@ async def test_configured_local_reverse_proxy_may_forward_https_scheme(monkeypat
 
 @pytest.mark.asyncio
 async def test_cloudflare_client_ip_header_alone_never_proves_https(monkeypatch):
-    monkeypatch.setattr(https_middleware.settings, "is_production", True)
-    monkeypatch.setattr(https_middleware.settings, "TRUST_PROXY_HEADERS", True)
-    monkeypatch.setattr(
-        https_middleware.settings,
-        "get_trusted_proxy_ips",
-        lambda: ["127.0.0.1"],
-    )
+    _configure_settings(monkeypatch, trusted_ips=["127.0.0.1"])
     middleware = https_middleware.HTTPSRedirectMiddleware(lambda scope, receive, send: None)
 
     async def call_next(_request):
@@ -120,12 +123,10 @@ async def test_cloudflare_client_ip_header_alone_never_proves_https(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_disabling_proxy_header_trust_disables_all_header_exceptions(monkeypatch):
-    monkeypatch.setattr(https_middleware.settings, "is_production", True)
-    monkeypatch.setattr(https_middleware.settings, "TRUST_PROXY_HEADERS", False)
-    monkeypatch.setattr(
-        https_middleware.settings,
-        "get_trusted_proxy_ips",
-        lambda: ["127.0.0.1"],
+    _configure_settings(
+        monkeypatch,
+        trust_proxy_headers=False,
+        trusted_ips=["127.0.0.1"],
     )
     middleware = https_middleware.HTTPSRedirectMiddleware(lambda scope, receive, send: None)
 
