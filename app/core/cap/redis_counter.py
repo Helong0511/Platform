@@ -136,7 +136,7 @@ class RedisCapManager:
         return -2
     end
     local current = tonumber(redis.call('GET', KEYS[1]) or '0')
-    if not current then
+    if not current or current < 0 or current ~= math.floor(current) then
         return -2
     end
     -- token 存在但计数已经为 0，说明计数状态被外部重置/破坏；
