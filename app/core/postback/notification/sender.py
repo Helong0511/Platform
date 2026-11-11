@@ -103,7 +103,7 @@ async def send_notification_async(
                 f"转化通知发送失败: conversion_id={conversion.id}, "
                 f"product_id={product.id if product else None}, "
                 f"client_id={client.id if client else None}, "
-                channel={notification_channel}, "
+                f"channel={notification_channel}, "
                 f"status=failed"
             )
             if raise_on_failure:
@@ -166,7 +166,7 @@ async def send_to_address(
             ok = await send_telegram_notify_async(address, message)
             if ok:
                 logger.debug(
-                    f"Telegram 通知已发送: chat_id={address}, "
+                    "Telegram 通知已发送："
                     f"message_length={len(message)}"
                 )
             return ok
@@ -186,20 +186,20 @@ async def send_to_address(
             )
         else:
             logger.error(
-                f"不支持的通知渠道: channel={channel}, address={address[:50]}, "
+                f"不支持的通知渠道: channel={channel}, "
                 f"status=unsupported_channel"
             )
             return False
 
     except asyncio.TimeoutError:
         logger.error(
-            f"发送通知超时: channel={channel}, address={address[:50]}, "
+            f"发送通知超时: channel={channel}, "
             f"timeout=5.0s"
         )
         return False
     except Exception as e:
         logger.error(
-            f"发送通知异常: channel={channel}, address={address[:50]}, "
+            f"发送通知异常: channel={channel}, "
             f"error_type={type(e).__name__}"
         )
         return False
@@ -241,20 +241,20 @@ async def send_webhook_notification(
 
             if 200 <= response.status_code < 300:
                 logger.debug(
-                    f"Webhook 通知已发送: url={url[:50]}, "
+                    "Webhook 通知已发送："
                     f"status={response.status_code}"
                 )
                 return True
             else:
                 logger.error(
-                    f"Webhook 通知返回非成功状态: url={url[:50]}, "
+                    "Webhook 通知返回非成功状态："
                     f"status={response.status_code}, "
                 )
                 return False
 
     except httpx.TimeoutException:
         logger.error(
-            f"Webhook 通知超时: url={url[:50]}, timeout=10.0s"
+            "Webhook 通知超时：timeout=10.0s"
         )
         return False
     except Exception as e:
