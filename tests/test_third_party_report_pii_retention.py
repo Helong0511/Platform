@@ -364,3 +364,5 @@ async def test_forward_log_retention_clears_expanded_url_request_and_response(mo
     assert "postback_forward_logs.pii_scrubbed_at is null" in captured["sql"]
     assert "postback_forward_logs.completed_at is not null" in captured["sql"]
     assert "for update skip locked" in captured["sql"]
+    assert "postback_forward_queue" in captured["sql"]
+    assert "not (exists" in captured["sql"]
