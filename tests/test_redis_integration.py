@@ -193,6 +193,17 @@ async def test_real_redis_cap_reservation_token_lifetime_and_corrupt_counter_fai
         assert await redis.get(daily_key) == "4"
         assert await redis.ttl(daily_token) == -1
 
+        # 已有 token 的幂等重试也必须拒绝损坏的非整数计数，且保留 token 证据。
+        await redis.set(daily_key, "4.5")
+        corrupt_retry = await redis.eval(
+            RedisCapManager._RESERVE_LUA, 2,
+            daily_key, daily_token, 48 * 3600, 3, 10, 0,
+        )
+        assert corrupt_retry == -2
+        assert await redis.get(daily_key) == "4.5"
+        assert await redis.get(daily_token) == "1"
+        await redis.set(daily_key, 4)
+
         # Total counter 和活动 token 都必须持久化，直到账本终态清理 token。
         total = await redis.eval(
             RedisCapManager._RESERVE_LUA, 2,
