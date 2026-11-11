@@ -147,3 +147,33 @@ def test_bridge_html_write_path_rejects_symlink_target(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="拒绝符号链接或特殊文件"):
         cloak_scripts_paths.resolve_bridge_html_write_path("master")
     assert outside.read_text(encoding="utf-8") == "<html>outside content must remain</html>"
+
+
+def test_bridge_static_resource_allows_regular_allowlisted_asset(tmp_path):
+    from app.routes.short_link.cloak_bridge import resolve_bridge_static_path
+
+    asset = tmp_path / "109.png"
+    asset.write_bytes(b"\\x89PNG\\r\\n")
+    assert resolve_bridge_static_path("109.png", (str(tmp_path),)) == str(asset)
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["../outside.png", "../../etc/passwd", ".env", "secret.txt", "nested/logo.png", "bad\\\\name.png"],
+)
+def test_bridge_static_resource_rejects_traversal_and_unlisted_types(tmp_path, filename):
+    from app.routes.short_link.cloak_bridge import resolve_bridge_static_path
+
+    assert resolve_bridge_static_path(filename, (str(tmp_path),)) is None
+
+
+def test_bridge_static_resource_does_not_follow_symlink(tmp_path):
+    from app.routes.short_link.cloak_bridge import resolve_bridge_static_path
+
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(b"outside")
+    bridge_dir = tmp_path / "bridge"
+    bridge_dir.mkdir()
+    (bridge_dir / "logo.png").symlink_to(outside)
+
+    assert resolve_bridge_static_path("logo.png", (str(bridge_dir),)) is None
