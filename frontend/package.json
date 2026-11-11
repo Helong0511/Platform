@@ -7,7 +7,9 @@
     "dev": "vite --port 3310",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "eslint --ext .js,.vue src --quiet"
+    "lint": "eslint --ext .js,.vue src --quiet",
+    "audit": "npm audit",
+    "audit:production": "npm audit --omit=dev"
   },
   "browserslist": [
     "defaults",
