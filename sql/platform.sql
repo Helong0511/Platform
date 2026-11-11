@@ -1071,6 +1071,12 @@ CREATE TABLE IF NOT EXISTS `third_party_report_logs`  (
   `conversion_id` VARCHAR(255) NULL DEFAULT NULL COMMENT '转化ID',
   `currency` VARCHAR(10) NULL DEFAULT NULL COMMENT '货币类型',
   `amount` DECIMAL(12, 4) NULL DEFAULT NULL COMMENT '支付金额',
+  `outbox_enqueued` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否由转化事务创建的持久化 Outbox 事件',
+  `short_link_id` INT NULL DEFAULT NULL COMMENT '用于恢复像素配置的短链接 ID（非外键，保留删除后的证据）',
+  `cloak_name` VARCHAR(100) NULL DEFAULT NULL COMMENT '斗篷配置名称（仅配置引用）',
+  `short_code` VARCHAR(100) NULL DEFAULT NULL COMMENT '短链接短码（仅配置引用）',
+  `click_time` DATETIME NULL DEFAULT NULL COMMENT '点击发生时间，用于稳定构造 Meta event_time/fbc',
+  `next_retry_time` DATETIME NULL DEFAULT NULL COMMENT 'Outbox 下次可重试时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `unique_event_key`(`event_key` ASC) USING BTREE,
   INDEX `idx_third_party_source`(`source` ASC) USING BTREE,
@@ -1079,7 +1085,8 @@ CREATE TABLE IF NOT EXISTS `third_party_report_logs`  (
   INDEX `idx_third_party_status`(`status` ASC) USING BTREE,
   INDEX `idx_third_party_created_at`(`created_at` ASC) USING BTREE,
   INDEX `idx_third_party_status_created`(`status` ASC, `created_at` ASC) USING BTREE,
-  INDEX `idx_conversion_id`(`conversion_id` ASC) USING BTREE
+  INDEX `idx_conversion_id`(`conversion_id` ASC) USING BTREE,
+  INDEX `idx_third_party_outbox_due`(`outbox_enqueued` ASC, `status` ASC, `next_retry_time` ASC, `report_start_time` ASC, `id` ASC) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '第三方上报日志表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
