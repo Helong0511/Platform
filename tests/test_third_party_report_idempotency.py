@@ -483,6 +483,124 @@ async def test_admin_cannot_change_outbox_event_identity(monkeypatch):
     assert log_entry.conversion_id == "conversion-original"
     assert log_entry.event_key == "platform-scoped-event-key"
 
+async def test_attempted_outbox_payload_is_immutable(monkeypatch):
+    from datetime import datetime
+
+    log_entry = type(
+        "ReportLog",
+        (),
+        {
+            "id": 203,
+            "source": "postback",
+            "adsid": "fbclid-attempted",
+            "event": "Purchase",
+            "conversion_id": "conversion-attempted",
+            "event_key": "stable-attempted-event-key",
+            "outbox_enqueued": True,
+            "status": "failed",
+            "attempt_count": 1,
+            "report_start_time": datetime(2026, 11, 11, 11, 59, 0),
+            "email": "original@example.invalid",
+        },
+    )()
+
+    class Result:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return log_entry
+
+    class FakeDB:
+        committed = False
+
+        async def execute(self, statement):
+            return Result()
+
+        async def commit(self):
+            self.committed = True
+
+    class SessionContext:
+        def __init__(self):
+            self.db = FakeDB()
+
+        async def __aenter__(self):
+            return self.db
+
+        async def __aexit__(self, *args):
+            return False
+
+    context = SessionContext()
+    monkeypatch.setattr(third_party_report, "AsyncSessionLocal", lambda: context)
+
+    assert await third_party_report.update_report_log_params(
+        log_id=203,
+        email="changed@example.invalid",
+    ) is False
+    assert context.db.committed is False
+    assert log_entry.email == "original@example.invalid"
+
+
+async def test_unattempted_failed_outbox_payload_can_be_corrected_after_lease_expiry(monkeypatch):
+    from datetime import datetime, timedelta
+
+    now = datetime(2026, 11, 11, 12, 0, 0)
+    log_entry = type(
+        "ReportLog",
+        (),
+        {
+            "id": 204,
+            "source": "postback",
+            "adsid": "fbclid-not-attempted",
+            "event": "Purchase",
+            "conversion_id": "conversion-not-attempted",
+            "event_key": "stable-not-attempted-event-key",
+            "outbox_enqueued": True,
+            "status": "failed",
+            "attempt_count": 0,
+            "report_start_time": now - timedelta(seconds=third_party_report.REPORT_LOG_LEASE_SECONDS + 2),
+            "email": "old@example.invalid",
+        },
+    )()
+
+    class Result:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return log_entry
+
+    class FakeDB:
+        committed = False
+
+        async def execute(self, statement):
+            return Result()
+
+        async def commit(self):
+            self.committed = True
+
+    class SessionContext:
+        def __init__(self):
+            self.db = FakeDB()
+
+        async def __aenter__(self):
+            return self.db
+
+        async def __aexit__(self, *args):
+            return False
+
+    context = SessionContext()
+    monkeypatch.setattr(third_party_report, "AsyncSessionLocal", lambda: context)
+    monkeypatch.setattr(third_party_report, "get_app_now_naive", lambda: now)
+
+    assert await third_party_report.update_report_log_params(
+        log_id=204,
+        email="corrected@example.invalid",
+    ) is True
+    assert context.db.committed is True
+    assert log_entry.email == "corrected@example.invalid"
+
+
 async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(monkeypatch, caplog):
     """实际执行发送函数：远端接收后本地成功状态提交失败，重试仍使用相同 event_id。"""
     state = {"status": "pending", "http_event_ids": [], "ack_attempts": 0, "claim": 0}
