@@ -20,6 +20,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.cap.redis_counter import RedisCapManager
 from app.core.utils import get_app_now_naive
+from app.core.postback.processor import PostbackProcessor
+from app.core.postback.checks.cap_checker import CapChecker
 from app.models.cap_reservation import CapReservation
 from app.services import cap_reservation_ledger as ledger_module
 from app.services import cap_reservation_recovery as recovery_module
@@ -269,6 +271,94 @@ async def test_mysql_redis_recovery_keeps_committed_conversion_and_cleans_token(
     assert result["stats"]["committed"] == 1
     assert result["stats"]["tokens_cleaned"] == 1
 
+
+
+@pytest.mark.asyncio
+async def test_mysql_commit_response_lost_after_commit_preserves_cap_reservation(monkeypatch):
+    """MySQL 已提交但客户端收到断线异常时，不得回退 Redis Cap。"""
+    database = _create_isolated_mysql_database()
+    engine = None
+    try:
+        _initialize_isolated_schema(database)
+        password = quote_plus(os.getenv("MYSQL_INTEGRATION_PASSWORD", ""))
+        user = quote_plus(os.getenv("MYSQL_INTEGRATION_USER", "root"))
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:"
+            f"{int(os.getenv('MYSQL_INTEGRATION_PORT', '3306'))}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        conversion_id = 990001
+        async with session_factory() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO postback_conversions "
+                    "(id, platform, conversion_id, event_name) "
+                    "VALUES (:id, :platform, :conversion_id, :event_name)"
+                ),
+                {
+                    "id": conversion_id,
+                    "platform": "ci",
+                    "conversion_id": "commit-response-lost",
+                    "event_name": "purchase",
+                },
+            )
+
+            class CommitThenDisconnect:
+                async def commit(self):
+                    await session.commit()
+                    # 模拟 MySQL COMMIT 已成功，但响应在网络中丢失。
+                    raise OSError("simulated connection loss after COMMIT")
+
+                async def rollback(self):
+                    await session.rollback()
+
+                async def execute(self, statement):
+                    return await session.execute(statement)
+
+            finalized = []
+            rolled_back = []
+
+            async def renew_lease(*args, **kwargs):
+                return None
+
+            async def finalize(*args, **kwargs):
+                finalized.append((args, kwargs))
+
+            async def rollback_reservations(reservations):
+                rolled_back.extend(reservations)
+
+            from app.core.postback import processor as processor_module
+            monkeypatch.setattr(processor_module.CapReservationLedger, "renew_lease", renew_lease)
+            monkeypatch.setattr(processor_module.CapReservationLedger, "finalize", finalize)
+            monkeypatch.setattr(CapChecker, "rollback_reservations", rollback_reservations)
+
+            reservations = [
+                (
+                    "daily", 77, 12, datetime(2026, 11, 11),
+                    "a" * 64, "b" * 64, "ci-lease-owner", True,
+                )
+            ]
+            with pytest.raises(OSError, match="after COMMIT"):
+                await PostbackProcessor._commit_conversion_with_cap_reconciliation(
+                    db=CommitThenDisconnect(),
+                    conversion_id=conversion_id,
+                    cap_reservations=reservations,
+                )
+
+            assert rolled_back == []
+            assert finalized == [
+                (("b" * 64, "COMMITTED"), {"lease_owner": "ci-lease-owner"})
+            ]
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_mysql_database(database)
 
 
 @pytest.mark.asyncio
