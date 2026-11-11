@@ -1858,4 +1858,44 @@ CREATE TABLE IF NOT EXISTS short_link_click_sync_batches (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='短链接点击刷盘幂等账本';
 
+-- Cap Reservation 持久化账本：与 Postback DB 事务解耦，支持 Redis 预留崩溃恢复。
+CREATE TABLE IF NOT EXISTS cap_reservations (
+    id INT NOT NULL AUTO_INCREMENT COMMENT '预留账本主键',
+    reservation_key VARCHAR(64) NOT NULL COMMENT '稳定预留键：正式事件键与 Cap scope 的 SHA-256',
+    platform VARCHAR(50) NOT NULL COMMENT 'Postback 平台',
+    conversion_id VARCHAR(255) NOT NULL COMMENT '正式转化事件 ID',
+    event_name VARCHAR(100) NOT NULL DEFAULT 'default' COMMENT '标准化事件名称',
+    offer_id INT NOT NULL COMMENT '预留时的 Offer ID 快照',
+    publisher_id INT NULL COMMENT '预留时的 Publisher ID 快照；NULL 表示全局渠道范围',
+    cap_kind VARCHAR(10) NOT NULL COMMENT 'Cap 类型：daily 或 total',
+    business_date DATE NULL COMMENT 'Daily 业务日期；Total 必须为 NULL',
+    redis_counter_key VARCHAR(255) NOT NULL COMMENT 'Redis 计数器 Key 快照',
+    redis_token_key VARCHAR(512) NOT NULL COMMENT 'Redis reservation token Key 快照',
+    redis_reserved BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否确认 Redis Lua 已成功预留；区分 fail-open 无 token 路径',
+    redis_token_cleaned BOOLEAN NOT NULL DEFAULT FALSE COMMENT '终态后是否已清理 Redis token；清理失败由恢复任务重试',
+    state VARCHAR(24) NOT NULL DEFAULT 'PREPARED'
+        COMMENT 'PREPARED/RESERVED/COMMITTED/ROLLED_BACK/NEEDS_RECONCILIATION',
+    attempts INT NOT NULL DEFAULT 0 COMMENT '恢复尝试次数',
+    lease_owner VARCHAR(64) NULL COMMENT '恢复 Worker 租约持有者',
+    lease_expires_at DATETIME NULL COMMENT '恢复 Worker 租约到期时间',
+    last_error TEXT NULL COMMENT '最近一次恢复错误摘要',
+    prepared_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'PREPARED 创建时间',
+    reserved_at DATETIME NULL COMMENT 'Redis 预留确认时间',
+    finalized_at DATETIME NULL COMMENT '终态确认时间',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_cap_reservation_key (reservation_key),
+    KEY idx_cap_reservation_state_updated (state, updated_at),
+    KEY idx_cap_reservation_lease (state, lease_expires_at),
+    KEY idx_cap_reservation_event (platform, conversion_id, event_name),
+    KEY idx_cap_reservation_scope (offer_id, publisher_id, cap_kind, business_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Cap Redis 预留持久化账本';
+
+-- 迁移后人工核验（仅隔离环境或正式发布审批窗口执行）：
+-- SHOW CREATE TABLE cap_reservations;
+-- SHOW INDEX FROM cap_reservations;
+-- SELECT COUNT(*) FROM cap_reservations;
+
 SET FOREIGN_KEY_CHECKS = 1;
