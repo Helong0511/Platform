@@ -37,6 +37,18 @@ from app.core.url.url_params_util import (
 
 logger = logging.getLogger(__name__)
 
+
+def _safe_forward_log_request_summary(payload: Optional[Dict[str, Any]]) -> Optional[str]:
+    """转发日志只保留请求字段数量，不持久化可能含 PII 的参数值。"""
+    if not payload:
+        return None
+    return json.dumps(
+        {"redacted": True, "field_count": len(payload)},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
 # 通知是尽力而为的旁路任务，不应占用 Postback 队列租约。
 # 保留 Task 引用，避免后台通知协程在完成前被垃圾回收。
 _notification_tasks: set[asyncio.Task] = set()
@@ -304,11 +316,15 @@ class PostbackForwarder:
             conversion_id=conversion.id,  # 转化 ID
             product_id=conversion.product_id,  # 产品 ID
             publisher_id=publisher_id,  # 渠道 ID
-            downstream_url=final_url,  # 下游 URL
-            request_method=method,  # 请求方法
-            request_params=json.dumps(params, ensure_ascii=False) if params else None,  # 请求参数
-            response_status=status_code,  # 响应状态码
-            response_body=response_content[:1000] if response_content else None,  # 响应内容（限制长度）
+            # 仅保存配置模板；实际 URL 可能已展开 click_id/email 等个人数据。
+            downstream_url=base_url,
+            request_method=method,
+            # 请求值和响应正文可能回显个人信息，转发日志仅保留字段数量。
+            request_params=_safe_forward_log_request_summary(
+                request_params if request_params is not None else (json_data or params)
+            ),
+            response_status=status_code,
+            response_body=None,
             success=final_success,  # 是否成功
             error_message="下游响应未满足成功检查规则" if not final_success else None,  # 脱敏错误信息
             created_at=get_app_now_naive(),  # 创建时间
@@ -556,11 +572,14 @@ class PostbackForwarder:
             conversion_id=conversion.id,
             product_id=conversion.product_id,
             publisher_id=None,
-            downstream_url=final_url,
+            # 不保存展开后的个人数据 URL、请求参数值或下游响应正文。
+            downstream_url=base_url,
             request_method=method,
-            request_params=json.dumps(params, ensure_ascii=False) if params else None,
+            request_params=_safe_forward_log_request_summary(
+                request_params if request_params is not None else (json_data or params)
+            ),
             response_status=status_code,
-            response_body=response_content[:1000] if response_content else None,
+            response_body=None,
             success=final_success,
             error_message="下游响应未满足成功检查规则" if not final_success else None,
             created_at=get_app_now_naive(),
