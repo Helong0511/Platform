@@ -132,6 +132,7 @@ class CloakPixelMappingService:
         # 在 TTL 内继续使用旧 Pixel ID 或 Token。
         cache_key = f"{short_code}:{dp}"
         if use_cache:
+            self.invalidate_cache(cache_key)
             logger.debug(
                 "[斗篷像素映射] 已绕过进程内凭证缓存，使用数据库权威配置：dp=%s, short_code=%s",
                 dp,
