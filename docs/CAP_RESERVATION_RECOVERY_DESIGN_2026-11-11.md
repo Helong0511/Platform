@@ -402,3 +402,24 @@ CapReservation ORM、migration 和 `sql/platform.sql` 统一增加 CHECK 约束�
 ### 当前验收状态
 
 **阻断项：** 尚未修复。当前代码不能据此认定第三方上报具备端到端可靠投递；在完成事务性 Outbox、恢复 worker 和故障注入测试前，禁止合并。
+
+
+## 19. 第三方上报重试链路与恢复任务缺失（2026-11-11）
+
+### 已核实的问题
+
+1. `retry_report_log()` 从 `ThirdPartyReportLog` 读取事件后调用 `send_third_party_report()`，但没有传入必需的 `facebook_pixel_id` 和 `facebook_access_token`。发送函数会在入口因凭据缺失返回 `missing_facebook_credentials`，因此当前人工重试路径不能完成实际重发。
+2. `send_third_party_report()` 创建的日志状态为 `pending`。当前调度任务注册配置中能找到 Postback 转发队列恢复任务，但没有找到第三方上报 pending/过期租约扫描恢复任务。若进程在认领后崩溃，租约过期本身不会自动触发再次发送。
+3. 当前 `retry_report_log()` 通过 `asyncio.create_task()` 发起发送，没有持久化任务队列；进程在任务调度与执行之间退出时，没有独立的持久化调度器保证重新投递。
+
+### 修复要求
+
+- 以事务性 Outbox/持久化队列作为唯一待发送来源，写入必须与转化事务同提交。
+- 不得将 access token 明文写入事件表、Outbox、日志或任务参数。Worker 必须按可信关联（click_id/short_link_id/斗篷配置）在执行时重新解析当前有效配置；缺少配置时记录明确的可重试/不可重试原因，不得假报成功。
+- 增加周期性恢复 Worker：扫描 pending 且未认领、租约过期的任务；以原子条件 UPDATE 认领；限制每轮批量与并发；记录下次重试时间、最大尝试次数、终态及告警。
+- 人工重试必须调用同一持久化入队/认领路径，不能直接 create_task 绕开队列。
+- 测试必须覆盖缺少配置、配置轮换、worker 崩溃、租约过期、任务提交与调度间崩溃、远端成功但本地 ACK 失败、并发人工重试和幂等键稳定性。
+
+### 当前验收状态
+
+**阻断项：** 第三方上报不仅存在转化提交与日志创建之间的崩溃窗口，现有人工重试缺少必需凭据，且未发现周期性 pending/过期租约恢复任务。上述问题必须统一通过事务性 Outbox + 可恢复 Worker 修复，不能仅靠在重复 Postback 分支补发解决。
