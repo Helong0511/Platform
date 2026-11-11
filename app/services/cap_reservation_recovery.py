@@ -76,6 +76,7 @@ async def recover_cap_reservations(
         "rolled_back": 0,
         "needs_reconciliation": 0,
         "tokens_cleaned": 0,
+        "cleanup_pending": 0,
         "failed": 0,
     }
 
@@ -102,10 +103,14 @@ async def recover_cap_reservations(
                 )
 
             if event_id is not None:
-                await CapReservationLedger.finalize(
+                token_cleaned = await CapReservationLedger.finalize(
                     row.reservation_key, "COMMITTED", lease_owner=owner
                 )
                 stats["committed"] += 1
+                if token_cleaned:
+                    stats["tokens_cleaned"] += 1
+                else:
+                    stats["cleanup_pending"] += 1
                 continue
 
             # 即使 redis_reserved=false 也必须检查 token：进程可能在 Redis Lua 成功后、
