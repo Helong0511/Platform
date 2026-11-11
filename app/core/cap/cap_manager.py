@@ -398,10 +398,11 @@ async def increment_cap_count(
                     publisher_id=group_publisher_id, reservation_date=today_start,
                     reservation_id=reservation_id,
                 )
-            reserved.append((
-                "daily", group_offer_id, group_publisher_id, today_start,
-                reservation_id, ledger_key, lease_owner, redis_reserved,
-            ))
+            if redis_reserved or ledger_key:
+                reserved.append((
+                    "daily", group_offer_id, group_publisher_id, today_start,
+                    reservation_id, ledger_key, lease_owner, redis_reserved,
+                ))
 
             # 多个配置共享同一实际计数，保持 DB 快照一致；fail-open 时也只增加一次。
             for cap in group_caps:
@@ -458,10 +459,11 @@ async def increment_cap_count(
                     publisher_id=group_publisher_id, reservation_date=None,
                     reservation_id=reservation_id,
                 )
-            reserved.append((
-                "total", group_offer_id, group_publisher_id, None,
-                reservation_id, ledger_key, lease_owner, redis_reserved,
-            ))
+            if redis_reserved or ledger_key:
+                reserved.append((
+                    "total", group_offer_id, group_publisher_id, None,
+                    reservation_id, ledger_key, lease_owner, redis_reserved,
+                ))
 
             for cap in group_caps:
                 if not cap.cap_start_date:
