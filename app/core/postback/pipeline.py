@@ -87,7 +87,7 @@ async def step_validate_offer_status(ctx: PostbackPipelineContext) -> bool:
             )
             offer_obj = r.scalars().first()
         except Exception as e:
-            logger.warning("Offer 状态校验查询失败（放行）: offer_id=%s err=%s", offer_id, e)
+            logger.warning("Offer 状态校验查询失败（放行）：offer_id=%s error_type=%s", offer_id, type(e).__name__)
             return True  # 查询失败不阻断，避免基础设施故障导致转化丢失
 
     if offer_obj and (not offer_obj.is_active or offer_obj.status != "Active"):
