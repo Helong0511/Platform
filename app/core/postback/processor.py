@@ -106,7 +106,7 @@ class PostbackProcessor:
         # 详细日志：开始处理 Postback
         logger.info(f"=== PostBack 接收处理开始 ===")
         logger.info(f"平台: {platform}")
-        logger.info(f"请求 IP: {request_ip}")
+        logger.info("请求 IP 已接收：present=%s", bool(request_ip))
         logger.debug(f"原始数据键: {list(raw_data.keys()) if isinstance(raw_data, dict) else type(raw_data)}")
 
         # Redis Cap reservation 不参与数据库事务；任何未提交阶段的异常都必须精确回退。
@@ -121,7 +121,7 @@ class PostbackProcessor:
             # ========== 第 1 步：IP 验证 ==========
             logger.info("=== 第 1 步：IP 验证 ===")
             ip_valid, cleaned_ip = await IpValidator.validate(request_ip, db)
-            logger.info(f"IP 验证结果: {ip_valid}, 清理后 IP: {cleaned_ip}")
+            logger.info("IP 验证结果: valid=%s", ip_valid)
             
             if not ip_valid:
                 logger.warning("IP 验证失败，处理失败流程")
@@ -138,7 +138,7 @@ class PostbackProcessor:
                 # 使用平台特定处理器验证
                 data_valid, error_msg = await handler.validate(raw_data)
                 if not data_valid:
-                    logger.warning(f"数据验证失败：platform={platform}, error={error_msg}")
+                    logger.warning("数据验证失败：platform=%s", platform)
                     return {
                         "success": True,
                         "message": "数据验证失败",
@@ -153,7 +153,7 @@ class PostbackProcessor:
                 # 回退到通用验证和标准化
                 data_valid, errors = DataValidator.validate(raw_data, platform)
                 if not data_valid:
-                    logger.warning(f"数据验证失败：platform={platform}, errors={errors}")
+                    logger.warning("数据验证失败：platform=%s error_count=%s", platform, len(errors))
                     return {
                         "success": True,
                         "message": "数据验证失败",
@@ -164,12 +164,12 @@ class PostbackProcessor:
                 logger.info("=== 第 3 步：数据标准化 ===")
                 normalized_data = DataNormalizer.normalize(raw_data, platform)
             
-            logger.info(f"标准化后数据: {normalized_data}")
+            logger.info("Postback 数据标准化完成：field_count=%s", len(normalized_data))
             
             # ========== 第 4 步：Click ID 关联 ==========
             logger.info("=== 第 4 步：Click ID 关联 ===")
             click_id = normalized_data.get('click_id')
-            logger.info(f"关联 Click ID: {click_id}")
+            logger.info("Click ID 关联开始：click_id_present=%s", bool(click_id))
             
             pipe_ctx = PostbackPipelineContext(
                 platform=platform,
@@ -181,7 +181,10 @@ class PostbackProcessor:
             click_association = await step_associate_click(pipe_ctx)
             click_association = pipe_ctx.click_association
 
-            logger.info(f"Click 关联结果: {click_association}")
+            logger.info(
+                "Click 关联完成：field_count=%s",
+                len(click_association) if isinstance(click_association, dict) else 0,
+            )
 
             # ========== 第 4.5 步：Offer 激活状态校验 ==========
             logger.info("=== 第 4.5 步：Offer 激活状态校验 ===")
@@ -198,7 +201,7 @@ class PostbackProcessor:
             logger.info("=== 第 5 步：重复检测 ===")
             conversion_id = normalized_data.get('conversion_id')
             event_name = normalized_data.get('event_name')
-            logger.info(f"检测重复：conversion_id={conversion_id}, event_name={event_name}")
+            logger.info("检测重复：platform=%s event_name=%s", platform, event_name)
 
             pipe_ctx.normalized_data = normalized_data
             is_dup = await step_check_duplicate(pipe_ctx)
@@ -220,15 +223,14 @@ class PostbackProcessor:
                 final_payout, deduction_info, skip_save_and_forward = await step_apply_discount(pipe_ctx)
             except DeductionProcessingError as ded_err:
                 await db.rollback()
-                logger.error("扣量计算失败，已回滚：%s", ded_err, exc_info=True)
+                logger.error("扣量计算失败，已回滚：error_type=%s", type(ded_err).__name__)
                 return {
                     "success": False,
                     "message": "扣量计算失败，请重试",
                     "retryable": True,
                 }
             logger.info(
-                f"扣量计算结果：final_payout={final_payout}, "
-                f"skip_save={skip_save_and_forward}, 扣量信息：{deduction_info}"
+                f"扣量计算结果：final_payout={final_payout}, skip_save={skip_save_and_forward}"
             )
 
             if skip_save_and_forward:
@@ -328,17 +330,14 @@ class PostbackProcessor:
                 )
                 if not is_duplicate_event:
                     logger.error(
-                        "转化保存触发非重复事件 IntegrityError，已回滚并拒绝伪装成功：platform=%s conversion_id=%s event_name=%s",
+                        "转化保存触发非重复事件 IntegrityError，已回滚：platform=%s event_name=%s",
                         platform,
-                        normalized_data.get("conversion_id"),
                         normalized_data.get("event_name"),
-                        exc_info=True,
                     )
                     raise
                 logger.info(
-                    "并发重复转化，已跳过：platform=%s conversion_id=%s event_name=%s",
+                    "并发重复转化，已跳过：platform=%s event_name=%s",
                     platform,
-                    normalized_data.get("conversion_id"),
                     normalized_data.get("event_name"),
                 )
                 return {
@@ -350,11 +349,10 @@ class PostbackProcessor:
                 if cap_reservations:
                     cap_rollback_attempted = True
                     await CapChecker.rollback_reservations(cap_reservations)
-                logger.error("保存转化记录失败，已回滚：%s", save_err, exc_info=True)
+                logger.error("保存转化记录失败，已回滚：error_type=%s", type(save_err).__name__)
                 raise
             logger.info(
-                f"转化记录保存成功：ID={conversion.id}, "
-                f"conversion_id={conversion.conversion_id}"
+                f"转化记录保存成功：ID={conversion.id}"
             )
 
             # 转发任务与转化记录在同一事务入队，避免提交后进程崩溃造成首次转发丢失。
@@ -422,7 +420,7 @@ class PostbackProcessor:
                     )
             
             logger.info(
-                "持久化下游转发任务已入队：conversion_id=%s queued=%s",
+                "持久化下游转发任务已入队：conversion_record_id=%s queued=%s",
                 conversion.id,
                 queued_forwards,
             )
@@ -433,7 +431,7 @@ class PostbackProcessor:
                 await PostbackNotifier.notify_conversion(conversion, db)
                 logger.info("通知发送完成")
             except Exception as e:
-                logger.warning(f"通知发送失败：{e}", exc_info=True)
+                logger.warning("通知发送失败：error_type=%s", type(e).__name__)
             
             # ========== 完成 ==========
             logger.info("=== PostBack 处理完成 ===")
@@ -458,16 +456,15 @@ class PostbackProcessor:
                     await CapChecker.rollback_reservations(cap_reservations)
                 except Exception:
                     logger.critical(
-                        "Postback 在 COMMIT 前异常，Cap reservation 回退失败，需对账：reservations=%s",
-                        cap_reservations,
-                        exc_info=True,
+                        "Postback 在 COMMIT 前异常，Cap reservation 回退失败，需对账：reservation_count=%s",
+                        len(cap_reservations),
                     )
             # 发生异常时回滚数据库事务
             try:
                 await db.rollback()
             except Exception:
                 logger.error("Postback 异常后的数据库回滚失败", exc_info=True)
-            logger.error(f"Postback 处理失败，已回滚事务：platform={platform}, error={str(e)}", exc_info=True)
+            logger.error("Postback 处理失败，已回滚事务：platform=%s error_type=%s", platform, type(e).__name__)
             raise
     
     @staticmethod
@@ -755,10 +752,9 @@ class PostbackProcessor:
             click_time=click_association.get("click_time"),
         )
         logger.info(
-            "第三方 Report Outbox 已写入转化事务：id=%s event=%s conversion_id=%s",
+            "第三方 Report Outbox 已写入转化事务：id=%s event=%s",
             outbox_id,
             fb_event,
-            conversion_id,
         )
         return outbox_id
 
@@ -803,7 +799,7 @@ class PostbackProcessor:
                     "⚠️ Postback IP 验证失败",
                     "",
                     f"平台：{platform}",
-                    f"转化 ID/点击 ID: {conversion_id_hint}",
+                    "转化 ID/点击 ID: [已省略]",
                     "说明：IP 为空或无法获取，已拒绝处理（不入库、不转发）。"
                 ]
                 
@@ -815,12 +811,12 @@ class PostbackProcessor:
                     commit=False,
                 )
         except Exception as e:
-            logger.warning(f"发送 IP 验证失败通知失败：{e}")
+            logger.warning("发送 IP 验证失败通知失败：error_type=%s", type(e).__name__)
 
         try:
             await db.commit()
         except Exception as e:
-            logger.warning(f"提交 IP 失败通知记录失败: {e}")
+            logger.warning("提交 IP 失败通知记录失败：error_type=%s", type(e).__name__)
             await db.rollback()
         
         return {
