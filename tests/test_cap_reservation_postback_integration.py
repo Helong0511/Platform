@@ -216,8 +216,12 @@ async def test_postback_commit_finalizes_ledger_after_database_commit(monkeypatc
     async def finalize(*args, **kwargs):
         calls.append(("ledger_finalize", args, kwargs))
 
+    async def renew_lease(*args, **kwargs):
+        return None
+
     from app.core.postback import processor as processor_module
     monkeypatch.setattr(processor_module.CapReservationLedger, "finalize", finalize)
+    monkeypatch.setattr(processor_module.CapReservationLedger, "renew_lease", renew_lease)
 
     await PostbackProcessor._commit_conversion_with_cap_reconciliation(
         db=FakeDB(),
