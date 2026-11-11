@@ -621,7 +621,7 @@ async def upload_cloak_bridge_html(
     # ---------- 异常处理 ----------
     try:
         target_path = resolve_bridge_html_write_path(config.cloak_name)
-    except (FileNotFoundError, PermissionError) as exc:
+    except (FileNotFoundError, PermissionError, ValueError) as exc:
         raise_api_exception(ErrorCode.VALIDATION_ERROR, detail=str(exc))
 
     # ---------- 异常处理 ----------
