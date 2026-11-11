@@ -90,6 +90,46 @@ jobs:
         with:
           node-version: "24"
       - run: npm ci
+      # 审计只查询公开 npm Advisory 数据；不访问生产服务。
+      # 先区分全量与生产依赖风险，保留报告而不因未修复项中断其它 CI 验收。
+      - name: Report frontend dependency advisories
+        run: |
+          npm audit --json > "$RUNNER_TEMP/npm-audit-all.json" || true
+          npm audit --omit=dev --json > "$RUNNER_TEMP/npm-audit-production.json" || true
+          node --input-type=commonjs <<'NODE'
+          const fs = require('node:fs');
+
+          for (const [label, path] of [
+            ['all dependencies', process.env.RUNNER_TEMP + '/npm-audit-all.json'],
+            ['production dependencies', process.env.RUNNER_TEMP + '/npm-audit-production.json'],
+          ]) {
+            let report;
+            try {
+              report = JSON.parse(fs.readFileSync(path, 'utf8'));
+            } catch (error) {
+              console.log(`[npm audit] ${label}: report unavailable: ${error.message}`);
+              continue;
+            }
+
+            const meta = report.metadata?.vulnerabilities || {};
+            console.log(
+              `[npm audit] ${label}: total=${meta.total ?? 'unknown'}, ` +
+              `critical=${meta.critical ?? 'unknown'}, high=${meta.high ?? 'unknown'}, ` +
+              `moderate=${meta.moderate ?? 'unknown'}, low=${meta.low ?? 'unknown'}`
+            );
+
+            for (const [name, item] of Object.entries(report.vulnerabilities || {})) {
+              const advisories = (item.via || []).map((entry) => (
+                typeof entry === 'string' ? entry : `${entry.title} (${entry.url})`
+              ));
+              console.log(
+                `[npm audit] ${name}: severity=${item.severity}, direct=${item.isDirect}, ` +
+                `range=${item.range}, fix=${JSON.stringify(item.fixAvailable)}, ` +
+                `via=${advisories.join('; ')}`
+              );
+            }
+          }
+          NODE
       - run: npm run lint
       - run: npm run build
       - name: Install pinned Playwright browser runner
