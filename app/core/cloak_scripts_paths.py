@@ -22,10 +22,10 @@ from typing import Optional
 
 from app.core.bridge_html_sanitize import sanitize_bridge_html_strict
 
-# 桥页模板 LRU 缓存：键为规范化绝对路径，值为 (mtime, 文本内容)
+# 桥页模板 LRU 缓存：键为规范化绝对路径，值为 (mtime_ns, size, inode, 文本内容)
 # 文件 mtime 变化或 invalidate_bridge_template_cache 调用时自动失效
 _MAX_BRIDGE_TEMPLATE_CACHE_ENTRIES = 128
-_bridge_template_cache: OrderedDict[str, tuple[float, str]] = OrderedDict()
+_bridge_template_cache: OrderedDict[str, tuple[int, int, int, str]] = OrderedDict()
 
 # 生产环境桥页根目录（与部署脚本约定一致）
 SCRIPTS_DIR_SERVER = "/data/Platform/scripts"
@@ -123,19 +123,20 @@ def read_bridge_html_template_cached(absolute_path: str) -> str:
     norm = os.path.normpath(os.path.abspath(absolute_path))
     try:
         st = os.stat(norm)
-        mtime = st.st_mtime
+        # 使用纳秒时间、文件大小和 inode，避免同一秒内原子替换时 mtime 精度碰撞。
+        signature = (st.st_mtime_ns, st.st_size, st.st_ino)
     except OSError:
         raise
 
     cached = _bridge_template_cache.get(norm)
-    if cached is not None and cached[0] == mtime:
+    if cached is not None and cached[:3] == signature:
         _bridge_template_cache.move_to_end(norm)
-        return cached[1]
+        return cached[3]
 
     with open(norm, "r", encoding="utf-8") as f:
         content = f.read()
 
-    _bridge_template_cache[norm] = (mtime, content)
+    _bridge_template_cache[norm] = (*signature, content)
     _bridge_template_cache.move_to_end(norm)
     while len(_bridge_template_cache) > _MAX_BRIDGE_TEMPLATE_CACHE_ENTRIES:
         _bridge_template_cache.popitem(last=False)
