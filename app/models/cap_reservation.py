@@ -4,7 +4,7 @@ Cap Redis reservation 持久化账本模型。
 该表记录 Redis 计数预留与 Postback 数据库事务之间的跨存储状态。
 不设置 Offer/Publisher 外键：账本必须在业务对象删除后仍保留恢复证据。
 """
-from sqlalchemy import Column, Integer, String, Date, DateTime, Text, Boolean, Index, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Date, DateTime, Text, Boolean, CheckConstraint, Index, UniqueConstraint
 
 from app.core.utils import get_app_now_naive
 from app.models.base import Base
@@ -48,6 +48,20 @@ class CapReservation(Base):
     )
 
     __table_args__ = (
+        # 在数据库层强制账本关键语义，避免绕过 Service 的写入破坏恢复依据。
+        CheckConstraint("CHAR_LENGTH(reservation_key) = 64", name="chk_cap_reservation_key_sha256"),
+        CheckConstraint("offer_id > 0", name="chk_cap_reservation_offer_positive"),
+        CheckConstraint("publisher_id IS NULL OR publisher_id > 0", name="chk_cap_reservation_publisher_positive"),
+        CheckConstraint("attempts >= 0", name="chk_cap_reservation_attempts_nonnegative"),
+        CheckConstraint(
+            "(cap_kind = 'daily' AND business_date IS NOT NULL) OR "
+            "(cap_kind = 'total' AND business_date IS NULL)",
+            name="chk_cap_reservation_kind_date",
+        ),
+        CheckConstraint(
+            "state IN ('PREPARED', 'RESERVED', 'COMMITTED', 'ROLLED_BACK', 'NEEDS_RECONCILIATION')",
+            name="chk_cap_reservation_state",
+        ),
         UniqueConstraint("reservation_key", name="uq_cap_reservation_key"),
         Index("idx_cap_reservation_state_updated", "state", "updated_at"),
         Index("idx_cap_reservation_lease", "state", "lease_expires_at"),
