@@ -46,7 +46,10 @@ from app.models.models import (
     ShortLink,
 )
 from app.services.telegram_notification_service import TelegramNotificationService
-from app.core.third_party_report import send_third_party_report
+from app.services.third_party_report_outbox import (
+    enqueue_postback_report,
+    process_postback_report_outbox,
+)
 from app.core.utils import get_app_now_naive
 from app.services.cap_reservation_ledger import CapReservationLedger
 from app.core.url.url_params_util import (
@@ -112,6 +115,7 @@ class PostbackProcessor:
         cap_reservations: list[tuple] = []
         cap_rollback_attempted = False
         cap_commit_reconciliation_started = False
+        third_party_report_outbox_id: Optional[int] = None
 
         try:
             # ========== 第 1 步：IP 验证 ==========
@@ -373,7 +377,15 @@ class PostbackProcessor:
                 forward_product=should_forward_prod,
             )
 
-            # ========== 第 11 步：提交事务（Cap / 短链 / 转化 / 转发队列原子提交） ==========
+            # 第三方事件 Outbox 与转化、Cap、下游队列同一事务提交，封闭 commit 后进程崩溃漏报窗口。
+            third_party_report_outbox_id = await PostbackProcessor._enqueue_third_party_report_if_needed(
+                platform=platform,
+                click_association=click_association,
+                normalized_data=normalized_data,
+                db=db,
+            )
+
+            # ========== 第 11 步：提交事务（Cap / 短链 / 转化 / 转发队列 / 第三方 Outbox 原子提交） ==========
             logger.info("=== 第 11 步：提交事务 ====")
             cap_commit_reconciliation_started = True
             await PostbackProcessor._commit_conversion_with_cap_reconciliation(
@@ -394,16 +406,20 @@ class PostbackProcessor:
                         "当前无可用事件循环，首次转发由持久化队列定时任务接管"
                     )
 
-            # 入库成功后再做第三方像素上报，避免 DB 回滚后产生幽灵 CAPI 事件
-            try:
-                await PostbackProcessor._send_third_party_report_if_needed(
-                    click_association=click_association,
-                    normalized_data=normalized_data,
-                    raw_data=raw_data,
-                    db=db,
-                )
-            except Exception as pixel_err:
-                logger.error("第三方像素上报失败（转化已入库）: %s", pixel_err, exc_info=True)
+            # 提交后立即尝试消费 Outbox 仅作为低延迟优化；进程崩溃时由每分钟调度任务恢复。
+            if third_party_report_outbox_id:
+                try:
+                    asyncio.get_running_loop().create_task(
+                        process_postback_report_outbox(
+                            batch_size=1,
+                            report_log_id=third_party_report_outbox_id,
+                        )
+                    )
+                except RuntimeError:
+                    logger.warning(
+                        "当前无可用事件循环，第三方 Report Outbox 将由持久化调度任务接管：id=%s",
+                        third_party_report_outbox_id,
+                    )
             
             logger.info(
                 "持久化下游转发任务已入队：conversion_id=%s queued=%s",
@@ -617,15 +633,16 @@ class PostbackProcessor:
         return queued
 
     @staticmethod
-    async def _send_third_party_report_if_needed(
+    async def _enqueue_third_party_report_if_needed(
+        *,
+        platform: str,
         click_association: Optional[Dict[str, Any]],
         normalized_data: Dict[str, Any],
-        raw_data: Dict[str, Any],
         db: AsyncSession,
-    ) -> None:
-        """去重通过后执行第三方像素上报，避免重复 CAPI 事件。"""
+    ) -> Optional[int]:
+        """在转化主事务中持久化第三方上报 Outbox，不在请求线程直接发送网络请求。"""
         if not click_association:
-            return
+            return None
 
         raw_url_params = click_association.get("url_params")
         if isinstance(raw_url_params, dict):
@@ -643,157 +660,107 @@ class PostbackProcessor:
         email = scalar_query_value(url_params.get("email"))
         phone = scalar_query_value(url_params.get("phone"))
 
-        # 使用标准化后的 Decimal 金额，兼容 BFT 的 PayOut/pay_out 等别名。
-        # 仅在调用外部像素 API 时转换为 float，内部结算金额始终保留 Decimal。
+        if not fbclid and not dp:
+            logger.debug("未检测到 fbclid/dp，不创建第三方 Report Outbox")
+            return None
+
+        cloak_cfg_pb = None
+        if dp:
+            result = await db.execute(
+                select(CloakConfig).where(CloakConfig.cloak_name == str(dp).strip())
+            )
+            cloak_cfg_pb = result.scalars().first()
+
+        short_link_id = click_association.get("short_link_id")
+        short_code = click_association.get("short_code")
+        if short_link_id:
+            short_link = await db.scalar(
+                select(ShortLink).where(ShortLink.id == short_link_id).limit(1)
+            )
+            if short_link and short_link.short_code:
+                short_code = short_link.short_code
+
         amount_raw = normalized_data.get("payout")
         try:
             amount_decimal = Decimal(str(amount_raw))
             amount = (
-                float(amount_decimal)
+                amount_decimal
                 if amount_decimal.is_finite() and amount_decimal >= 0
-                else 0.0
+                else Decimal("0")
             )
         except (InvalidOperation, ValueError, TypeError):
-            amount = 0.0
+            amount = Decimal("0")
 
-        if not fbclid and not dp:
-            logger.debug("未检测到 fbclid/dp，跳过第三方上报")
-            return
-
-        cloak_cfg_pb = None
-        if dp:
+        use_cfg_pb = bool(
+            cloak_cfg_pb
+            and getattr(cloak_cfg_pb, "is_enabled", False)
+            and getattr(cloak_cfg_pb, "postback_report_enabled", False)
+        )
+        if use_cfg_pb:
+            fb_event = (cloak_cfg_pb.postback_report_event or "Purchase").strip() or "Purchase"
+            cur_send = (cloak_cfg_pb.postback_report_currency or "USD").strip().upper() or "USD"
+            fixed_val = getattr(cloak_cfg_pb, "postback_report_value", None)
             try:
-                cr_pb = await db.execute(
-                    select(CloakConfig).where(CloakConfig.cloak_name == str(dp).strip())
-                )
-                cloak_cfg_pb = cr_pb.scalars().first()
-            except Exception as exc:
-                logger.warning("查询斗篷 postback 配置失败：%s", exc)
-
-        from app.core.config import settings
-        from app.services.cloak_pixel_mapping import get_cloak_pixel_config
-
-        # 像素凭证仅来自短链自定义或启用中的斗篷配置，不再回退全局 FACEBOOK_*
-        facebook_pixel_id: Optional[str] = None
-        facebook_access_token: Optional[str] = None
-        facebook_api_version: Optional[str] = settings.FACEBOOK_API_VERSION
-        config_source = "未解析"
-        short_link = None
-
-        short_link_id = click_association.get("short_link_id")
-        if short_link_id:
-            try:
-                result = await db.execute(select(ShortLink).where(ShortLink.id == short_link_id))
-                short_link = result.scalars().first()
-                if short_link and short_link.facebook_pixel_id and short_link.facebook_access_token:
-                    facebook_pixel_id = short_link.facebook_pixel_id
-                    facebook_access_token = short_link.facebook_access_token
-                    facebook_api_version = short_link.facebook_api_version or settings.FACEBOOK_API_VERSION
-                    config_source = f"短链接配置 (short_link_id={short_link_id})"
-            except Exception as exc:
-                logger.warning("查询数据库像素配置失败：%s", exc)
-
-        if not facebook_access_token and dp and short_link and short_link.short_code:
-            try:
-                cloak_pixel_config = await get_cloak_pixel_config(
-                    db=db,
-                    dp=dp,
-                    short_code=short_link.short_code,
-                    use_cache=True,
-                )
-                if cloak_pixel_config:
-                    facebook_pixel_id = cloak_pixel_config.get("facebook_pixel_id")
-                    facebook_access_token = cloak_pixel_config.get("facebook_access_token")
-                    facebook_api_version = (
-                        cloak_pixel_config.get("facebook_api_version")
-                        or settings.FACEBOOK_API_VERSION
-                    )
-                    config_source = f"斗篷配置表[{dp}]"
-            except Exception as exc:
-                logger.warning("查询斗篷配置表失败：%s", exc)
-
-        if not facebook_pixel_id or not facebook_access_token:
-            logger.info(
-                "无可用像素凭证，跳过第三方上报：dp=%s source=%s",
-                dp,
-                config_source,
-            )
-            return
-
-        logger.info("像素配置来源：%s", config_source)
-
-        try:
-            click_time = click_association.get("click_time")
-            # 斗篷总开关关闭时不按本斗篷做 postback CAPI
-            use_cfg_pb = bool(
-                cloak_cfg_pb
-                and getattr(cloak_cfg_pb, "is_enabled", False)
-                and getattr(cloak_cfg_pb, "postback_report_enabled", False)
-            )
-            if use_cfg_pb:
-                fb_event = (cloak_cfg_pb.postback_report_event or "Purchase").strip() or "Purchase"
-                cur_send = (cloak_cfg_pb.postback_report_currency or "USD").strip().upper() or "USD"
-                fixed_val = getattr(cloak_cfg_pb, "postback_report_value", None)
-                try:
-                    fixed_val = float(fixed_val) if fixed_val is not None else None
-                except (TypeError, ValueError):
-                    fixed_val = None
-                if fb_event == "Purchase":
-                    amt_send = fixed_val if (fixed_val is not None and fixed_val > 0) else amount
-                else:
-                    amt_send = None
-                    cur_send = None
-            else:
-                fb_event = "Purchase"
-                cur_send = "USD"
-                amt_send = amount
-
-            if fb_event == "Purchase" and (amt_send is None or amt_send <= 0):
-                logger.warning("Purchase 金额无效，跳过第三方上报")
-                return
-
-            report_adsid = fbclid or (
-                scalar_query_value(url_params.get("click_id"))
-                or scalar_query_value(url_params.get("cid"))
-                or (str(click_id).strip() if click_id else None)
-                or (
-                    str(normalized_data.get("conversion_id")).strip()
-                    if normalized_data.get("conversion_id")
-                    else None
-                )
-            )
-            if not report_adsid:
-                logger.warning("缺少可用 adsid，跳过第三方上报")
-                return
-
-            report_kw: Dict[str, Any] = {
-                "adsid": report_adsid,
-                "conversion_id": str(click_id)[:200],
-                "event": fb_event,
-                "email": email,
-                "ip": ip,
-                "phone": phone,
-                "ua": ua,
-                "source": "postback",
-                "click_time": click_time,
-                "facebook_pixel_id": facebook_pixel_id,
-                "facebook_access_token": facebook_access_token,
-                "facebook_api_version": facebook_api_version,
-            }
+                fixed_val = Decimal(str(fixed_val)) if fixed_val is not None else None
+            except (TypeError, ValueError, InvalidOperation):
+                fixed_val = None
             if fb_event == "Purchase":
-                report_kw["currency"] = cur_send or "USD"
-                report_kw["amount"] = float(amt_send)
+                amt_send = fixed_val if fixed_val is not None and fixed_val > 0 else amount
+            else:
+                amt_send = None
+                cur_send = None
+        else:
+            fb_event = "Purchase"
+            cur_send = "USD"
+            amt_send = amount
 
-            await send_third_party_report(**report_kw)
-            logger.info(
-                "第三方上报成功：adsid=%s fbclid=%s dp=%s event=%s",
-                report_adsid,
-                fbclid,
-                dp,
-                fb_event,
+        if fb_event == "Purchase" and (amt_send is None or amt_send <= 0):
+            logger.warning("Purchase 金额无效，不创建第三方 Report Outbox")
+            return None
+
+        report_adsid = fbclid or (
+            scalar_query_value(url_params.get("click_id"))
+            or scalar_query_value(url_params.get("cid"))
+            or (str(click_id).strip() if click_id else None)
+            or (
+                str(normalized_data.get("conversion_id")).strip()
+                if normalized_data.get("conversion_id")
+                else None
             )
-        except Exception as exc:
-            logger.error("第三方上报失败：%s", exc)
+        )
+        if not report_adsid:
+            logger.warning("缺少可用 adsid，不创建第三方 Report Outbox")
+            return None
+
+        conversion_id = str(normalized_data.get("conversion_id") or "").strip()
+        if not conversion_id:
+            # 正常 DataValidator 应拒绝无稳定事件 ID；这里再做一道防御。
+            raise ValueError("第三方 Report Outbox 缺少稳定 conversion_id")
+
+        outbox_id = await enqueue_postback_report(
+            db,
+            platform=platform,
+            adsid=report_adsid,
+            event=fb_event,
+            conversion_id=conversion_id,
+            email=email,
+            ip=ip,
+            phone=phone,
+            ua=ua,
+            currency=cur_send,
+            amount=amt_send,
+            short_link_id=int(short_link_id) if short_link_id else None,
+            cloak_name=str(dp).strip() if dp else None,
+            short_code=str(short_code).strip() if short_code else None,
+            click_time=click_association.get("click_time"),
+        )
+        logger.info(
+            "第三方 Report Outbox 已写入转化事务：id=%s event=%s conversion_id=%s",
+            outbox_id,
+            fb_event,
+            conversion_id,
+        )
+        return outbox_id
 
     @staticmethod
     async def _handle_ip_failure(
