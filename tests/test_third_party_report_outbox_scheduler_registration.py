@@ -105,3 +105,29 @@ async def test_pii_retention_scheduler_failure_does_not_persist_exception_text(
     assert "buyer@example.invalid" not in caplog.text
     assert "203.0.113.10" not in caplog.text
     assert "secret-payload" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_pii_retention_scheduler_runs_both_log_retention_paths(monkeypatch):
+    from app.scheduler_module.tasks import third_party_report_tasks as tasks
+    from app.services import third_party_report_pii_retention as retention
+
+    calls = []
+
+    async def scrub_reports(**kwargs):
+        calls.append(("reports", kwargs["batch_size"]))
+        return {"enabled": True, "selected": 2, "scrubbed": 2, "retention_days": 90}
+
+    async def scrub_forward_logs(**kwargs):
+        calls.append(("forward_logs", kwargs["batch_size"]))
+        return {"enabled": True, "selected": 3, "scrubbed": 3, "retention_days": 90}
+
+    monkeypatch.setattr(retention, "scrub_expired_third_party_report_pii", scrub_reports)
+    monkeypatch.setattr(retention, "scrub_expired_postback_forward_log_pii", scrub_forward_logs)
+    monkeypatch.setattr(tasks, "set_task_result", lambda *args: None)
+
+    result = await tasks.scrub_third_party_report_pii_task()
+
+    assert calls == [("reports", 200), ("forward_logs", 200)]
+    assert result["scrubbed"] == 2
+    assert result["postback_forward_logs"]["scrubbed"] == 3
