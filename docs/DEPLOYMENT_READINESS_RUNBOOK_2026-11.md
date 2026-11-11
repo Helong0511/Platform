@@ -148,7 +148,7 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - 环境变量：`THIRD_PARTY_REPORT_PII_RETENTION_DAYS`，必须为非负整数；默认 `0`，即关闭自动清理（fail-safe）。
 - 只有业务/合规负责人书面确认保留期限、目的与适用司法辖区后，发布负责人才能设置正整数天数；本仓库不自行推断法定期限。
 - 每日 03:15 的任务按批次最多 200 条处理；使用 InnoDB 行锁和 `SKIP LOCKED` 避免与其它清理 Worker 重复处理。
-- 仅清理超过期限的终态 `success` 记录、旧非 Outbox 终态记录，以及明确耗尽自动重试且租约失效的 Outbox `failed` 记录；pending、具有下次重试时间、活动租约或重试未耗尽的事件不会被清理。
+- 仅清理超过期限的终态 `success` 记录、旧非 Outbox 终态记录，以及明确耗尽自动重试且租约失效的 Outbox `failed` 记录（即使 `next_retry_time` 留有历史时间戳）；pending、具有下次重试时间、活动租约或重试未耗尽的事件不会被清理。
 - 清除字段：`adsid`（置空）、`conversion_id`、`email`、`ip`、`phone`、`ua`、`report_params`、`response_body`、第三方 `log_id`、短链/斗篷配置引用及 `click_time`；失败详情替换为固定说明。
 - 保留字段：事件幂等键 `event_key`（哈希形式的最小去重标识）、来源/事件类型、金额与货币、状态及创建/完成时间，用于防止重复入账和保留最小审计证据。`event_key` 仍属于需要纳入备份和后续删除评估的假名化标识。
 - 清理后通过 `pii_scrubbed_at` 阻止 worker 发送、管理员重新排队或编辑已清理载荷。此标记不是删除整条日志；数据库备份、日志副本和第三方接收方数据仍须另行纳入保留/删除政策。
