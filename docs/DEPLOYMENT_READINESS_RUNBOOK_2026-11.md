@@ -249,3 +249,15 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - 还需逐一审计 `cloak_configs` 的创建、更新、删除、启停、改名及桥页上传/删除路径，确认每条写路径均纳入同一失效协议。
 - 本轮仅使用隔离 CI 数据库/Redis 与合成凭证；未连接生产服务器、数据库、Redis 或真实 Meta API。当前修复等待最新 SHA 的完整 CI 结果，不得以 Run #1063 作为新 SHA 的验证证据。
 - PR #1 保持 Draft，不合并、不部署。
+
+
+### 16.1 多 Worker 缓存一致性临时修复验收（Run #1068）
+
+- 最新应用/测试提交：`419414a65266f8e9e57ea66851e2929c6f4c1148`。
+- GitHub Actions Run #1068：Backend、Frontend Lint、Frontend Build、Playwright Mock API Browser E2E 全部成功。
+- Backend：**366 passed、1 skipped、1 warning**；Python compile 成功。唯一 skip 是仓库默认 gitignore 下未提交的本机核对脚本，CI 不依赖该脚本；warning 是 passlib 在 Python 3.11 使用 `crypt` 的弃用提示。
+- 新增双 Worker 服务实例回归测试：Worker A 读取旧 Pixel/Token 后，数据库发生轮换，Worker B 和 Worker A 后续读取都必须取得新配置，证明当前路径不再命中进程内旧缓存。
+- 本次测试通过不代表共享缓存已实现；当前采用数据库权威直读，性能影响仍需独立压测。Redis 共享缓存版本化失效协议尚未开发，不得提前启用本地缓存。
+- Run #1068：[查看 CI](https://github.com/Helong0511/Platform/actions/runs/42997889155)。
+- Run #1067 因后续提交触发 PR concurrency 而取消；不作为通过证据。
+- 仍须评估数据库查询额外负载，并继续审计 cloak_configs 的所有变更入口；PR 继续 Draft，不合并、不部署。
