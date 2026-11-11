@@ -11,7 +11,7 @@
 无以上两者时返回 None（不再回退全局 FACEBOOK_PIXEL_ID / FACEBOOK_ACCESS_TOKEN）。
 API 版本缺省仍可用 settings.FACEBOOK_API_VERSION（仅版本号，非像素凭证）。
 
-缓存：内存缓存键为 {short_code}:{dp}，TTL 1 小时；配置或桥页变更时调用 invalidate_cloak_cache_for_dp。
+缓存：旧版进程内缓存结构仅为兼容保留，运行时读取路径已禁用；多 Worker 场景下每次从数据库读取权威配置，避免旧 Pixel 凭证跨进程滞留。待共享缓存版本化失效协议完成并验证后才可重新启用缓存。
 """
 import logging
 import re
@@ -69,11 +69,11 @@ class CloakPixelMappingService:
     2. 根据斗篷名称高效查询像素配置
     3. 参数验证与错误处理
     4. 详细的日志记录
-    5. 缓存机制提高查询效率
+    5. 当前为保证 Gunicorn 多 Worker 配置一致性，每次从数据库读取，不使用进程内凭证缓存
     """
     
     def __init__(self):
-        """初始化内存缓存与时间戳表，TTL 默认 1 小时。"""
+        """初始化兼容旧版缓存容器；当前运行路径不读写该本地凭证缓存。"""
         # 内存缓存：{short_code: pixel_config}
         self._cache: Dict[str, Dict[str, Any]] = {}
         # 缓存过期时间（秒）
