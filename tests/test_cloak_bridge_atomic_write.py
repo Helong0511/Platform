@@ -92,3 +92,25 @@ def test_read_only_existing_bridge_is_not_deleted_before_atomic_replace(tmp_path
 
     assert resolved == str(target)
     assert target.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize(
+    "unsafe_name",
+    ["../outside", "../../etc/passwd", "/tmp/escape", "nested/name", "name\\\\other", ".", ".."],
+)
+def test_bridge_html_filename_rejects_path_traversal(unsafe_name):
+    with pytest.raises(ValueError, match="斗篷名称无效"):
+        cloak_scripts_paths.bridge_html_filename(unsafe_name)
+
+
+@pytest.mark.parametrize(
+    "unsafe_filename",
+    ["../outside.html", "../../etc/passwd.html", "/tmp/escape.html", "nested/name.html"],
+)
+def test_bridge_html_read_path_rejects_non_local_filename(unsafe_filename):
+    with pytest.raises(ValueError, match="桥页文件名无效"):
+        cloak_scripts_paths.resolve_bridge_html_read_path(unsafe_filename)
+
+
+def test_bridge_html_exists_treats_legacy_unsafe_name_as_unavailable():
+    assert cloak_scripts_paths.bridge_html_exists("../outside") is False
