@@ -32,6 +32,7 @@ def test_sanitize_report_params_recursively():
                     "ph": ["4155550123"],
                     "client_ip_address": "198.51.100.7",
                     "client_user_agent": "private-meta-agent",
+                    "external_id": "customer-unique-identifier",
                 }
             }],
         }
@@ -48,6 +49,7 @@ def test_sanitize_report_params_recursively():
     assert sanitized["data"][0]["user_data"]["ph"] == ["415****0123"]
     assert sanitized["data"][0]["user_data"]["client_ip_address"] == "198.51.*.*"
     assert sanitized["data"][0]["user_data"]["client_user_agent"] == "[已隐藏]"
+    assert sanitized["data"][0]["user_data"]["external_id"] == "[已隐藏]"
     assert sanitized["event"] == "Purchase"
 
 
