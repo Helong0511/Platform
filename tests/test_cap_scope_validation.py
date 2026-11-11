@@ -145,7 +145,19 @@ async def test_update_cap_rejects_in_place_counter_scope_migration():
 
 @pytest.mark.asyncio
 async def test_delete_cap_locks_row_before_deleting_orm_entity():
-    existing = SimpleNamespace(id=42)
+    existing = SimpleNamespace(
+        id=42,
+        cap_type="offer",
+        advertiser_id=None,
+        offer_id=10,
+        publisher_id=3,
+        daily_cap=100,
+        total_cap=500,
+        current_daily_count=8,
+        current_total_count=30,
+        cap_start_date=None,
+        is_active=True,
+    )
     class _DeleteDB:
         def __init__(self):
             self.statement = None
@@ -163,8 +175,12 @@ async def test_delete_cap_locks_row_before_deleting_orm_entity():
             self.flushed = True
 
     db = _DeleteDB()
-    await _service(db).delete_cap(42, current_user=SimpleNamespace(id=1))
+    snapshot = await _service(db).delete_cap(42, current_user=SimpleNamespace(id=1))
 
+    assert snapshot["cap_id"] == 42
+    assert snapshot["offer_id"] == 10
+    assert snapshot["publisher_id"] == 3
+    assert snapshot["current_total_count"] == 30
     assert "for update" in db.statement
     assert db.deleted == [existing]
     assert db.flushed is True
