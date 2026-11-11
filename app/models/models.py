@@ -10,6 +10,7 @@ from app.models.ad_data_health import AdDataDayBaseline, AdDataHealthAlert, AdDa
 from app.models.system import ScheduledTask, UserAuditLog, CountryInfo, CountryAlias
 from app.models.postback import PostbackConversion, PostbackForwardLog, PostbackForwardQueue, ClientNotificationConfig, ProductNotificationConfig, AdminNotificationConfig, CloakConfig, PostbackNotification, ShortLink, ShortLinkClickSyncBatch, PendingPostbackConversion
 from app.models.cpl import Advertiser, Publisher, Offer, OfferPublisherAssignment, Click, OfferCap, OfferDiscount, AdvertiserTest, AffiliateTest
+from app.models.cap_reservation import CapReservation
 from app.models.deduction import ConversionDeductionConfig, ConversionDeductionLog
 from app.models.security import SensitivePathProbeLog, SensitiveBlockedIP, PostbackIpWhitelist
 from app.models.third_party import ThirdPartyReportLog
@@ -46,6 +47,7 @@ __all__ = [
     "OfferDiscount",
     "AdvertiserTest",
     "AffiliateTest",
+    "CapReservation",
     "ConversionDeductionConfig",
     "ConversionDeductionLog",
     "SensitivePathProbeLog",
