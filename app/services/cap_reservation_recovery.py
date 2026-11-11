@@ -9,7 +9,7 @@ import logging
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 
 from app.core.cap.redis_counter import RedisCapManager
 from app.core.database import AsyncSessionLocal
@@ -38,12 +38,25 @@ async def recover_cap_reservations(
         result = await session.execute(
             select(CapReservation)
             .where(
-                CapReservation.state.in_(("PREPARED", "RESERVED")),
                 or_(
-                    CapReservation.lease_owner.is_(None),
-                    CapReservation.lease_expires_at.is_(None),
-                    CapReservation.lease_expires_at <= now,
-                ),
+                    and_(
+                        CapReservation.state.in_(("PREPARED", "RESERVED")),
+                        or_(
+                            CapReservation.lease_owner.is_(None),
+                            CapReservation.lease_expires_at.is_(None),
+                            CapReservation.lease_expires_at <= now,
+                        ),
+                    ),
+                    and_(
+                        CapReservation.state == "COMMITTED",
+                        CapReservation.redis_token_cleaned.is_(False),
+                        or_(
+                            CapReservation.lease_owner.is_(None),
+                            CapReservation.lease_expires_at.is_(None),
+                            CapReservation.lease_expires_at <= now,
+                        ),
+                    ),
+                )
             )
             .order_by(CapReservation.prepared_at.asc(), CapReservation.id.asc())
             .limit(batch_size)
@@ -62,12 +75,21 @@ async def recover_cap_reservations(
         "committed": 0,
         "rolled_back": 0,
         "needs_reconciliation": 0,
+        "tokens_cleaned": 0,
         "failed": 0,
     }
 
     for row in rows:
         owner = row.lease_owner
         try:
+            if row.state == "COMMITTED":
+                await RedisCapManager.delete_reservation_token(row.redis_token_key)
+                await CapReservationLedger.mark_token_cleaned(
+                    row.reservation_key, owner
+                )
+                stats["tokens_cleaned"] += 1
+                continue
+
             async with AsyncSessionLocal() as session:
                 event_id = await session.scalar(
                     select(PostbackConversion.id)
@@ -128,17 +150,19 @@ async def recover_cap_reservations(
                 row.reservation_key,
                 exc_info=True,
             )
-            try:
-                await CapReservationLedger.mark_needs_reconciliation(
-                    row.reservation_key, str(exc), lease_owner=owner
-                )
-                stats["needs_reconciliation"] += 1
-            except Exception:
-                logger.critical(
-                    "Cap Reservation 恢复失败且无法保存对账状态：%s",
-                    row.reservation_key,
-                    exc_info=True,
-                )
+            # COMMITTED token 清理失败不改变业务终态；保留/等待租约到期后重试清理。
+            if row.state != "COMMITTED":
+                try:
+                    await CapReservationLedger.mark_needs_reconciliation(
+                        row.reservation_key, str(exc), lease_owner=owner
+                    )
+                    stats["needs_reconciliation"] += 1
+                except Exception:
+                    logger.critical(
+                        "Cap Reservation 恢复失败且无法保存对账状态：%s",
+                        row.reservation_key,
+                        exc_info=True,
+                    )
 
     logger.info("Cap Reservation 恢复任务完成：%s", stats)
     return stats
