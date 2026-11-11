@@ -118,7 +118,10 @@ class ClickAssociator:
                 )
                 association["advertiser"] = r.scalars().first()
         except Exception as e:
-            logger.warning("令牌关联 ORM  enrichment 失败（不影响 ID 归因）: %s", e)
+            logger.warning(
+                "令牌关联 ORM enrichment 失败（不影响 ID 归因）：%s",
+                type(e).__name__,
+            )
 
         return association
 
