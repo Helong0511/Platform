@@ -130,8 +130,13 @@ class CloakPixelMappingService:
         if use_cache:
             cached_config = self._get_from_cache(cache_key)
             if cached_config:
-                logger.info(f"[斗篷像素映射] 缓存命中：dp={dp}, short_code={short_code}")
-                return cached_config
+                cached_expiry = cached_config.get("expires_at")
+                if cached_expiry is not None and cached_expiry <= get_app_now_naive():
+                    # 过期时间可自然到达，不一定伴随 DB 更新；缓存命中时也必须校验。
+                    self.invalidate_cache(cache_key)
+                else:
+                    logger.info(f"[斗篷像素映射] 缓存命中：dp={dp}, short_code={short_code}")
+                    return cached_config
         
         try:
             # 从数据库查询短链接信息
@@ -230,6 +235,7 @@ class CloakPixelMappingService:
                 "short_code": short_link.short_code,
                 "original_url": short_link.original_url,
                 "is_active": short_link.is_active,
+                "expires_at": short_link.expires_at,
                 "title": short_link.title,
                 "offer_id": short_link.offer_id,
                 "channel_id": short_link.channel_id,
@@ -362,6 +368,15 @@ class CloakPixelMappingService:
             self._cache_timestamps.clear()
             logger.info("[斗篷像素映射] 所有缓存已清除")
 
+    def invalidate_cache_for_short_code(self, short_code: str) -> None:
+        """清除指定短链的全部 dp 缓存，短链配置轮换/停用/删除后调用。"""
+        if not short_code:
+            return
+        prefix = f"{short_code}:"
+        keys = [key for key in list(self._cache.keys()) if key.startswith(prefix)]
+        for cache_key in keys:
+            self.invalidate_cache(cache_key)
+
     def invalidate_cache_for_dp(self, dp: str) -> None:
         """清除所有 short_code:dp 形式的条目（桥页上传/删除或斗篷更名后应调用）。"""
         if not dp or not re.match(r"^[a-zA-Z0-9_-]+$", dp):
@@ -416,16 +431,12 @@ def invalidate_cloak_cache_for_dp(dp: str) -> None:
 
 
 def invalidate_cloak_cache(short_code: Optional[str] = None, dp: Optional[str] = None) -> None:
-    """
-    便捷函数：使缓存失效
-    
-    使用示例：
-    # 清除特定 dp 的缓存
-    invalidate_cloak_cache(short_code="temp_42e8c1b0", dp="master")
-    
-    # 清除所有缓存
-    invalidate_cloak_cache()
-    """
-    cloak_pixel_service.invalidate_cache(
-        cache_key=f"{short_code}:{dp}" if short_code and dp else None
-    )
+    """使指定短链/斗篷缓存失效；无参数时清空全部缓存。"""
+    if short_code and dp:
+        cloak_pixel_service.invalidate_cache(cache_key=f"{short_code}:{dp}")
+    elif short_code:
+        cloak_pixel_service.invalidate_cache_for_short_code(short_code)
+    elif dp:
+        cloak_pixel_service.invalidate_cache_for_dp(dp)
+    else:
+        cloak_pixel_service.invalidate_cache()
