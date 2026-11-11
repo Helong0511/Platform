@@ -170,6 +170,8 @@ async def test_real_redis_cap_reservation_token_lifetime_and_corrupt_counter_fai
     total_token = f"{total_key}:reservation:stable-token"
     corrupt_key = f"ci:cap:corrupt:{suffix}"
     corrupt_token = f"{corrupt_key}:reservation:stable-token"
+    fraction_key = f"ci:cap:fraction:{suffix}"
+    fraction_token = f"{fraction_key}:reservation:stable-token"
 
     try:
         assert await redis.ping() is True
@@ -210,6 +212,17 @@ async def test_real_redis_cap_reservation_token_lifetime_and_corrupt_counter_fai
         assert await redis.get(corrupt_key) == "not-an-integer"
         assert await redis.get(corrupt_token) is None
 
+        # 回滚遇到非整数计数时也必须保留 token，不能先删证据再让 DECR 抛错。
+        await redis.set(fraction_key, "1.5")
+        await redis.set(fraction_token, "1")
+        fraction_rollback = await redis.eval(
+            RedisCapManager._ROLLBACK_RESERVATION_LUA, 2,
+            fraction_key, fraction_token,
+        )
+        assert fraction_rollback == -2
+        assert await redis.get(fraction_key) == "1.5"
+        assert await redis.get(fraction_token) == "1"
+
         # 正常 rollback 只撤销一次，并清理 token；重复 rollback 不会误减。
         rollback = await redis.eval(
             RedisCapManager._ROLLBACK_RESERVATION_LUA, 2,
@@ -225,6 +238,6 @@ async def test_real_redis_cap_reservation_token_lifetime_and_corrupt_counter_fai
     finally:
         await redis.delete(
             daily_key, daily_token, total_key, total_token,
-            corrupt_key, corrupt_token,
+            corrupt_key, corrupt_token, fraction_key, fraction_token,
         )
         await redis.aclose()
