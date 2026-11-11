@@ -133,7 +133,7 @@ const mockApi = async (page) => {
       return;
     }
 
-    if (/\\/third-party-reports\\/\\d+\\/retry$/.test(normalizedPath) && request.method() === 'POST') {
+    if (normalizedPath.startsWith('/api/v1/third-party-reports/') && normalizedPath.endsWith('/retry') && request.method() === 'POST') {
       await route.fulfill({
         status: 200, headers,
         body: JSON.stringify({ code: 200, message: '已重新排队，后台 worker 将处理；请稍后刷新查看结果', data: { success: true } })
