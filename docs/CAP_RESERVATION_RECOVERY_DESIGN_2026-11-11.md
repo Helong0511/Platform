@@ -401,4 +401,4 @@ CapReservation ORM、migration 和 `sql/platform.sql` 统一增加 CHECK 约束�
 
 ### 当前验收状态
 
-<badge>阻断项</badge> 尚未修复。当前代码不能据此认定第三方上报具备端到端可靠投递；在完成事务性 Outbox、恢复 worker 和故障注入测试前，禁止合并。
+**阻断项：** 尚未修复。当前代码不能据此认定第三方上报具备端到端可靠投递；在完成事务性 Outbox、恢复 worker 和故障注入测试前，禁止合并。
