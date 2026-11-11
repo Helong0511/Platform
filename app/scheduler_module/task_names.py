@@ -20,7 +20,6 @@
 
 # Postback 下游转发队列处理
 POSTBACK_FORWARD_QUEUE_TASK_NAME = "Postback转发队列处理"
-THIRD_PARTY_REPORT_OUTBOX_TASK_NAME = "第三方上报 Outbox 恢复"
 
 # ==================== 任务名称常量定义 ====================
 # 数据归档任务
@@ -100,7 +99,6 @@ AD_DATA_HEALTH_SCAN_TASK_NAME = "广告数据健康巡检"
 
 TASK_NAME_MAP = {
     "forward_tasks": POSTBACK_FORWARD_QUEUE_TASK_NAME,
-    "third_party_report_tasks": THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
     "archive_old_data": ARCHIVE_DATA_TASK_NAME,
     "cleanup_old_logs": CLEANUP_LOGS_TASK_NAME,
     "cleanup_file_logs": CLEANUP_FILE_LOGS_TASK_NAME,
@@ -133,7 +131,6 @@ TASK_NAME_MAP = {
 
 ALL_TASK_NAMES = [
     POSTBACK_FORWARD_QUEUE_TASK_NAME,
-    THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
     ARCHIVE_DATA_TASK_NAME,
     CLEANUP_SESSIONS_TASK_NAME,
     CLEANUP_SENSITIVE_PROBES_TASK_NAME,
