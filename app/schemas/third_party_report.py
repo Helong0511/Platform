@@ -41,11 +41,7 @@ class ThirdPartyReportLogBase(BaseSchema):
     attempt_count: int = Field(0, description="尝试次数")
     max_attempts: int = Field(3, description="最大尝试次数")
     response_status: Optional[int] = Field(None, description="响应状态码")
-    response_body: Optional[str] = Field(None, description="响应内容")
     log_id: Optional[str] = Field(None, max_length=100, description="日志ID")
-    outbox_enqueued: bool = Field(False, description="是否属于持久化 Outbox 事件")
-    next_retry_time: Optional[datetime] = Field(None, description="下次自动重试时间")
-    outbox_error_category: Optional[str] = Field(None, description="脱敏后的 Outbox 失败原因分类")
     """
     第三方上报日志响应模型
     
@@ -102,6 +98,9 @@ class ThirdPartyReportLogListResponse(BaseSchema):
     report_start_time: Optional[datetime] = None
     report_success_time: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    outbox_enqueued: bool = Field(False, description="是否属于持久化 Outbox 事件")
+    next_retry_time: Optional[datetime] = Field(None, description="下次自动重试时间")
+    outbox_error_category: Optional[str] = Field(None, description="脱敏后的 Outbox 失败原因分类")
 
     model_config = {
         "from_attributes": True
