@@ -174,12 +174,12 @@ def test_cap_reservation_migration_is_idempotent_and_matches_mysql_schema():
             cursor.execute(
                 "INSERT INTO cap_reservations "
                 "(reservation_key, platform, conversion_id, event_name, offer_id, "
-                "cap_kind, redis_counter_key, redis_token_key, state) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "cap_kind, business_date, redis_counter_key, redis_token_key, state) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (
                     "a" * 64, "ci", "conversion-1", "purchase", 77,
-                    "daily", "counter:key", "counter:key:reservation:" + "a" * 64,
-                    "PREPARED",
+                    "daily", "2026-11-11", "counter:key",
+                    "counter:key:reservation:" + "a" * 64, "PREPARED",
                 ),
             )
             _run_sql_file(cursor, migration)
