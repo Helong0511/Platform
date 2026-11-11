@@ -62,6 +62,9 @@ class CapSynchronizer:
 
         for cap in caps:
             missing_counter = False
+            # 先暂存快照，所有启用的计数器均可读取后才更新 ORM，避免部分同步。
+            synced_daily_count = None
+            synced_total_count = None
             try:
                 # 同步每日 Cap
                 if cap.daily_cap:
@@ -75,8 +78,7 @@ class CapSynchronizer:
                             and cap.cap_start_date.date() == today_start.date()
                             else 0
                         )
-                        cap.current_daily_count = max(int(redis_count), db_daily_count)
-                        cap.cap_start_date = today_start
+                        synced_daily_count = max(int(redis_count), db_daily_count)
                     else:
                         # 缺 key 表示没有可同步的 Redis 快照，不将其伪报为成功同步。
                         missing_counter = True
@@ -86,13 +88,19 @@ class CapSynchronizer:
                     redis_key = get_total_cap_key(cap.offer_id, cap.publisher_id)
                     redis_count = await redis.get(redis_key)
                     if redis_count is not None:
-                        cap.current_total_count = max(int(redis_count), cap.current_total_count or 0)
+                        synced_total_count = max(int(redis_count), cap.current_total_count or 0)
                     else:
                         missing_counter = True
 
                 if missing_counter:
+                    # 与单条同步保持一致：缺少任一计数器时不提交该 Cap 的部分快照。
                     stats["skipped"] += 1
                 else:
+                    if synced_daily_count is not None:
+                        cap.current_daily_count = synced_daily_count
+                        cap.cap_start_date = today_start
+                    if synced_total_count is not None:
+                        cap.current_total_count = synced_total_count
                     stats["success"] += 1
 
             except Exception as e:
