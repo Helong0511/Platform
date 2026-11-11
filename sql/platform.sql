@@ -1050,7 +1050,7 @@ CREATE TABLE IF NOT EXISTS `third_party_report_logs`  (
   `source` VARCHAR(50) NOT NULL COMMENT '上报来源：short_link/斗篷点击, postback/转化回调',
   `adsid` VARCHAR(500) NOT NULL COMMENT '广告事件ID',
   `event` VARCHAR(50) NOT NULL COMMENT '事件类型：ViewContent, Purchase',
-  `event_key` VARCHAR(64) NOT NULL COMMENT '事件幂等键：source、adsid、event、conversion_id 的 SHA-256',
+  `event_key` VARCHAR(64) NOT NULL COMMENT '事件幂等键：稳定事件身份字段的 SHA-256（ViewContent 不含后补 conversion_id）',
   `use_hash` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否对email、ip、phone进行哈希处理：True=哈希，False=不哈希',
   `email` VARCHAR(255) NULL DEFAULT NULL COMMENT '邮箱（原始值）',
   `ip` VARCHAR(50) NULL DEFAULT NULL COMMENT 'IP地址（原始值）',
