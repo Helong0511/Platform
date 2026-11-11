@@ -192,3 +192,35 @@ NEEDS_RECONCILIATION
 3. 检查历史正式转化表是否存在 NULL/空 conversion_id 或 NULL event_name；只读统计应在隔离数据快照上执行，生产数据不得由本审计连接。
 4. 检查现有唯一约束冲突分支是否只在真正的事件重复时触发；不能把其他唯一字段冲突一律报告为重复事件。
 5. 对历史 NULL event_name 的转换规则必须由业务语义决定，迁移不得静默将 NULL 改成 default。
+
+
+## 12. 已核实的模型、迁移与任务注册机制（2026-11-11）
+
+### ORM 与会话
+
+- ORM 基类为 `app.models.base.Base`；`app.models.models` 聚合导入各模型模块。
+- `app.core.database.AsyncSessionLocal` 是当前异步会话工厂，可创建独立账本会话；它使用同一配置数据库引擎/连接池，不是独立数据库。
+- `create_tables()` 只调用 `Base.metadata.create_all`。它可以创建缺失的新表，但不会为已有表自动增加/修改列和索引。
+- 因此新增 Reservation 模型仍必须配套显式 SQL migration；不能以应用启动的 create_all 代替迁移。
+- 当前仓库已有手工 SQL migration 目录 `sql/migrations/`，脚本注释要求先隔离环境演练、生产备份审批，并明确 MySQL DDL 隐式提交及独立回退步骤。此次审计和 CI 不执行生产迁移。
+
+### Scheduler 注册
+
+- 任务配置来源是 `app/scheduler_module/task_config.py`；启动初始化会将配置同步到 `scheduled_tasks`，注册器按 task_config 动态加载函数。
+- 新增恢复任务必须同步 task_config、任务函数、任务结果存储和测试；若新增任务名常量，还要检查 `task_names.py` 的映射/ALL_TASK_NAMES 清单一致性。
+- 账本恢复任务不能只靠单进程内存锁；需要数据库行锁/租约与条件状态更新，确保多 worker 或调度重叠时只由一个 worker 处理同一条记录。
+- 恢复任务必须有独立的失败/积压指标：PREPARED/RESERVED 超时数量、最老未解决年龄、Redis UNKNOWN 数量、回滚失败数量。任何 UNKNOWN 均不得被自动当成 ABSENT。
+
+### 推荐实现顺序（确认后再逐阶段落代码）
+
+1. 新增 ORM `CapReservation` 并从统一模型模块导出；建立 migration（唯一键、状态/时间索引、必要外键策略）。
+2. 设计独立 ledger service：PREPARED 先 commit；Redis 操作成功后标记 RESERVED；主业务转化 commit 后标记 COMMITTED。
+3. 让 Cap manager 接收由账本产生的稳定 token；重试必须复用 token。现有随机 UUID 只能作为无账本兼容路径，不能继续用于可恢复 reservation。
+4. 增加 Redis token 三态查询（PRESENT / ABSENT / UNKNOWN），必须避免 Redis 不可用、key 缺失、token 缺失三者混为一谈。
+5. 增加恢复任务：先用正式事件唯一键查询转化；存在则 COMMITTED；明确不存在且 token PRESENT 才原子回滚；Redis UNKNOWN 保持待处理并告警。
+6. 处理跨日 Daily key、Total 永久 key、Redis 整体数据丢失及 DB 基线恢复；Redis key 缺失不能直接按 0 初始化。
+7. 完成故障注入和并发测试后，再做隔离 MySQL/Redis CI 全量回归。
+
+### 当前实现边界
+
+以上是架构核验和实施约束，不代表账本、恢复 Worker、三态查询或 migration 已经实现。当前孤儿预留风险仍然存在，PR 不具备部署条件。
