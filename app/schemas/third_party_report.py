@@ -36,7 +36,6 @@ class ThirdPartyReportLogBase(BaseSchema):
     outbox_enqueued: bool = Field(False, description="是否属于持久化 Outbox 事件")
     next_retry_time: Optional[datetime] = Field(None, description="下次自动重试时间")
     error_message: Optional[str] = Field(None, description="失败原因（不包含凭据）")
-    response_body: Optional[str] = Field(None, description="第三方响应内容")
     use_hash: bool = Field(True, description="是否对email、ip、phone进行哈希处理")
     status: str = Field(..., max_length=20, description="状态")
     attempt_count: int = Field(0, description="尝试次数")
