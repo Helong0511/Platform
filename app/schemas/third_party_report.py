@@ -45,6 +45,7 @@ class ThirdPartyReportLogBase(BaseSchema):
     log_id: Optional[str] = Field(None, max_length=100, description="日志ID")
     outbox_enqueued: bool = Field(False, description="是否属于持久化 Outbox 事件")
     next_retry_time: Optional[datetime] = Field(None, description="下次自动重试时间")
+    outbox_error_category: Optional[str] = Field(None, description="脱敏后的 Outbox 失败原因分类")
     """
     第三方上报日志响应模型
     
