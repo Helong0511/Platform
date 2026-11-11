@@ -325,3 +325,29 @@ async def test_forward_queue_trigger_does_not_log_raw_exception_details(
     assert "203.0.113.10" not in caplog.text
     assert "secret-payload" not in caplog.text
     assert "RuntimeError" in caplog.text
+
+
+def test_forward_log_request_summary_never_persists_parameter_values():
+    import json
+
+    from app.core.postback.forwarder import _safe_forward_log_request_summary
+
+    summary = _safe_forward_log_request_summary(
+        {
+            "email": "buyer@example.invalid",
+            "ip": "203.0.113.10",
+            "click_id": "private-click-id",
+            "payout": "12.50",
+        }
+    )
+
+    assert json.loads(summary) == {"redacted": True, "field_count": 4}
+    for sensitive_value in (
+        "buyer@example.invalid",
+        "203.0.113.10",
+        "private-click-id",
+        "12.50",
+    ):
+        assert sensitive_value not in summary
+    assert _safe_forward_log_request_summary(None) is None
+    assert _safe_forward_log_request_summary({}) is None
