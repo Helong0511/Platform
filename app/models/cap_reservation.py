@@ -49,7 +49,7 @@ class CapReservation(Base):
 
     __table_args__ = (
         # 在数据库层强制账本关键语义，避免绕过 Service 的写入破坏恢复依据。
-        CheckConstraint("CHAR_LENGTH(reservation_key) = 64", name="chk_cap_reservation_key_sha256"),
+        CheckConstraint("LENGTH(reservation_key) = 64", name="chk_cap_reservation_key_sha256"),
         CheckConstraint("offer_id > 0", name="chk_cap_reservation_offer_positive"),
         CheckConstraint("publisher_id IS NULL OR publisher_id > 0", name="chk_cap_reservation_publisher_positive"),
         CheckConstraint("attempts >= 0", name="chk_cap_reservation_attempts_nonnegative"),
