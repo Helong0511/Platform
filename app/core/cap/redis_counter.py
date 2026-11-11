@@ -87,7 +87,13 @@ class RedisCapManager:
         return existing
     end
     local limit = tonumber(ARGV[3])
-    local db_count = tonumber(ARGV[2]) or 0
+    local db_count = tonumber(ARGV[2])
+    if not limit or limit <= 0 or limit ~= math.floor(limit) then
+        return -2
+    end
+    if not db_count or db_count < 0 or db_count ~= math.floor(db_count) then
+        return -2
+    end
     local redis_value = redis.call('GET', KEYS[1])
     -- 达到上限时也必须清除旧 Total key 的 TTL，不能让满额计数器自动消失。
     if redis_value and counter_ttl == 0 then
