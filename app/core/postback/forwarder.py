@@ -11,6 +11,7 @@ Postback 转发器（重构版）
 5. 记录转发日志
 6. 发送通知（失败时）
 """
+import asyncio
 import logging
 import json
 from typing import Dict, Any, Optional
@@ -35,6 +36,41 @@ from app.core.url.url_params_util import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 通知是尽力而为的旁路任务，不应占用 Postback 队列租约。
+# 保留 Task 引用，避免后台通知协程在完成前被垃圾回收。
+_notification_tasks: set[asyncio.Task] = set()
+
+
+def _schedule_admin_notification(
+    *,
+    message: str,
+    telegram_chat_id: str,
+    notification_type: str,
+) -> None:
+    """异步调度管理员通知，不阻塞下游回传队列的确认/重试。"""
+    task = asyncio.create_task(
+        TelegramNotificationService.send_admin_notification(
+            message=message,
+            telegram_chat_id=telegram_chat_id,
+            notification_type=notification_type,
+        )
+    )
+    _notification_tasks.add(task)
+
+    def _on_done(completed: asyncio.Task) -> None:
+        _notification_tasks.discard(completed)
+        if completed.cancelled():
+            return
+        try:
+            error = completed.exception()
+        except Exception as exc:
+            logger.warning("读取 Postback 通知后台任务结果失败: %s", exc)
+            return
+        if error:
+            logger.warning("Postback 管理员通知后台任务异常: %s", error, exc_info=error)
+
+    task.add_done_callback(_on_done)
 
 
 class PostbackForwarder:
@@ -340,13 +376,11 @@ class PostbackForwarder:
                     f"响应：{response_content[:200] if response_content else '无'}"
                 ]
                 
-                # 发送 Telegram 通知
-                await TelegramNotificationService.send_admin_notification(
+                # 通知异步旁路发送，不能让 Telegram 限流/网络重试延长队列租约。
+                _schedule_admin_notification(
                     message="\n".join(msg_lines),
                     telegram_chat_id=admin_config.telegram_chat_id,
                     notification_type='forward_failure',
-                    db=db,
-                    commit=False,
                 )
                 
         except Exception as e:
@@ -388,13 +422,11 @@ class PostbackForwarder:
                     f"响应：{response_content[:200] if response_content else '无'}"
                 ]
                 
-                # 发送 Telegram 通知
-                await TelegramNotificationService.send_admin_notification(
+                # 通知异步旁路发送，不能让 Telegram 限流/网络重试延长队列租约。
+                _schedule_admin_notification(
                     message="\n".join(msg_lines),
                     telegram_chat_id=admin_config.telegram_chat_id,
                     notification_type='forward_success',
-                    db=db,
-                    commit=False,
                 )
                 
         except Exception as e:
