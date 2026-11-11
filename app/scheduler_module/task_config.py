@@ -47,6 +47,7 @@ from typing import Dict, Any
 from app.scheduler_module.task_names import (
     CAP_RESERVATION_RECOVERY_TASK_NAME,
     THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
+    THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME,
 )
 
 # 任务配置类型定义
@@ -206,6 +207,15 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "description": "每分钟恢复已过期租约的 Cap Reservation；仅对 Redis token 明确存在的孤儿预留执行幂等回滚，未知状态转人工对账",
     },
 
+    THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME: {
+        "task_name": THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME,
+        "task_module": "app.scheduler_module.tasks.third_party_report_tasks",
+        "task_function": "scrub_third_party_report_pii_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "15 3 * * *",
+        "description": "按显式批准的保留天数清除终态第三方上报记录中的个人信息；默认关闭，不影响待重试 Outbox",
+    },
     THIRD_PARTY_REPORT_OUTBOX_TASK_NAME: {
         "task_name": THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
         "task_module": "app.scheduler_module.tasks.third_party_report_tasks",
