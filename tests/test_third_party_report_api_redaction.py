@@ -181,3 +181,11 @@ def test_report_list_and_detail_mask_adsid_before_returning():
     source = Path("app/api_v1/system/third_party_reports.py").read_text(encoding="utf-8")
     assert 'item["adsid"] = _mask_report_ad_identifier(item.get("adsid"))' in source
     assert 'safe_data["adsid"] = _mask_report_ad_identifier(safe_data.get("adsid"))' in source
+
+
+def test_report_api_errors_never_echo_raw_exception_details():
+    """DB/driver 异常可能携带 SQL 参数或 PII，API 错误响应只返回固定文案。"""
+    from pathlib import Path
+    source = Path("app/api_v1/system/third_party_reports.py").read_text(encoding="utf-8")
+    assert "str(e)" not in source
+    assert "detail=f" not in source
