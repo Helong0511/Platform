@@ -141,3 +141,30 @@ async def test_update_cap_rejects_in_place_counter_scope_migration():
         )
 
     assert "不允许原地修改 Cap 的归属范围" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_delete_cap_locks_row_before_deleting_orm_entity():
+    existing = SimpleNamespace(id=42)
+    class _DeleteDB:
+        def __init__(self):
+            self.statement = None
+            self.deleted = []
+            self.flushed = False
+
+        async def execute(self, statement):
+            self.statement = str(statement).lower()
+            return _Result(rows=[existing])
+
+        async def delete(self, entity):
+            self.deleted.append(entity)
+
+        async def flush(self):
+            self.flushed = True
+
+    db = _DeleteDB()
+    await _service(db).delete_cap(42, current_user=SimpleNamespace(id=1))
+
+    assert "for update" in db.statement
+    assert db.deleted == [existing]
+    assert db.flushed is True
