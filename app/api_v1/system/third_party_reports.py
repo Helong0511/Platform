@@ -80,6 +80,18 @@ def _mask_report_pii(value: Optional[str], field: str) -> Optional[str]:
     return raw
 
 
+def _mask_report_ad_identifier(value: Optional[str]) -> Optional[str]:
+    """对 fbclid/click_id 等可关联用户的广告标识仅展示首尾片段。"""
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return raw
+    if len(raw) <= 8:
+        return "[已隐藏]"
+    return f"{raw[:4]}…{raw[-4:]}"
+
+
 def _is_outbox_processing(log, now: Optional[datetime] = None) -> bool:
     """按与 worker 相同的发送租约展示处理中状态，避免前端硬编码租约时长。"""
     if not getattr(log, "outbox_enqueued", False):
@@ -272,6 +284,8 @@ async def get_third_party_reports(
         # ---------- 循环处理 ----------
         for log in logs:
             item = ThirdPartyReportLogListResponse.model_validate(log).model_dump()
+            # fbclid/click_id 属于可关联用户的在线标识，列表仅显示首尾片段。
+            item["adsid"] = _mask_report_ad_identifier(item.get("adsid"))
             # ---------- 条件分支 ----------
             safe_params = _sanitize_report_params(log.report_params)
             if safe_params:
@@ -447,6 +461,7 @@ async def get_third_party_report(
         safe_data = ThirdPartyReportLogResponse.model_validate(log).model_dump()
         for field in ("email", "phone", "ip", "ua"):
             safe_data[field] = _mask_report_pii(safe_data.get(field), field)
+        safe_data["adsid"] = _mask_report_ad_identifier(safe_data.get("adsid"))
         safe_data["report_params"] = _sanitize_report_params(safe_data.get("report_params"))
         safe_data["error_message"] = _safe_report_error_message(safe_data.get("error_message"))
         # 第三方响应原文可能回显请求数据，管理端不提供原始 response_body。
