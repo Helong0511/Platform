@@ -366,3 +366,123 @@ def test_cap_reservation_migration_is_idempotent_and_matches_mysql_schema():
             assert columns["redis_token_cleaned"] == ("tinyint(1)", "NO")
     finally:
         connection.close()
+
+
+
+def test_mysql_outbox_commit_ack_loss_preserves_stable_event_identity():
+    """在隔离 MySQL/InnoDB 上注入 COMMIT 响应丢失，验证两种提交结果都可安全恢复。
+
+    此测试在 COMMIT 已由服务端执行后，故意让测试客户端抛出连接错误，
+    模拟客户端未收到 COMMIT 响应；另验证事务实际回滚时，同一 event_key 可重试。
+    不调用真实第三方接口，也不连接生产数据库。
+    """
+    table = "third_party_report_ack_loss_ci"
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(f"DROP TABLE IF EXISTS {table}")
+            cursor.execute(
+                f"CREATE TABLE {table} ("
+                "id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "event_key CHAR(64) NOT NULL, "
+                "status VARCHAR(20) NOT NULL, "
+                "UNIQUE KEY uq_ack_loss_event_key (event_key)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+
+        # 情形一：MySQL 已提交，但客户端没有收到 COMMIT ACK。
+        committed_key = hashlib.sha256(b"ci-outbox-commit-ack-lost").hexdigest()
+        connection.autocommit(False)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"INSERT INTO {table} (event_key, status) VALUES (%s, %s)",
+                (committed_key, "pending"),
+            )
+        connection.commit()
+
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f"UPDATE {table} SET status = %s WHERE event_key = %s",
+                    ("success", committed_key),
+                )
+            connection.commit()  # InnoDB 服务端已确认事务提交。
+            raise pymysql.err.OperationalError(
+                2013, "simulated lost COMMIT acknowledgement after server commit"
+            )
+        except pymysql.err.OperationalError as exc:
+            assert "simulated lost COMMIT acknowledgement" in str(exc)
+        finally:
+            connection.close()
+
+        # 新连接核对真实持久化结果：成功状态已经提交，事件仍只有一条。
+        verify = _connect()
+        try:
+            with verify.cursor() as cursor:
+                cursor.execute(
+                    f"SELECT status, COUNT(*) OVER () FROM {table} WHERE event_key = %s",
+                    (committed_key,),
+                )
+                assert cursor.fetchone() == ("success", 1)
+                with pytest.raises(pymysql.err.IntegrityError):
+                    cursor.execute(
+                        f"INSERT INTO {table} (event_key, status) VALUES (%s, %s)",
+                        (committed_key, "pending"),
+                    )
+        finally:
+            verify.close()
+
+        # 情形二：连接故障发生在事务提交前，数据库回滚；同一 event_key 重试成功。
+        rolled_back_key = hashlib.sha256(b"ci-outbox-commit-not-applied").hexdigest()
+        retry_connection = _connect()
+        retry_connection.autocommit(False)
+        try:
+            with retry_connection.cursor() as cursor:
+                cursor.execute(
+                    f"INSERT INTO {table} (event_key, status) VALUES (%s, %s)",
+                    (rolled_back_key, "pending"),
+                )
+            retry_connection.commit()
+            with retry_connection.cursor() as cursor:
+                cursor.execute(
+                    f"UPDATE {table} SET status = %s WHERE event_key = %s",
+                    ("success", rolled_back_key),
+                )
+            retry_connection.rollback()
+            raise pymysql.err.OperationalError(
+                2013, "simulated connection loss before COMMIT was applied"
+            )
+        except pymysql.err.OperationalError as exc:
+            assert "before COMMIT was applied" in str(exc)
+        finally:
+            retry_connection.close()
+
+        retry_verify = _connect()
+        try:
+            retry_verify.autocommit(False)
+            with retry_verify.cursor() as cursor:
+                cursor.execute(
+                    f"SELECT status FROM {table} WHERE event_key = %s",
+                    (rolled_back_key,),
+                )
+                assert cursor.fetchone() == ("pending",)
+                cursor.execute(
+                    f"UPDATE {table} SET status = %s WHERE event_key = %s",
+                    ("success", rolled_back_key),
+                )
+            retry_verify.commit()
+            with retry_verify.cursor() as cursor:
+                cursor.execute(
+                    f"SELECT status, COUNT(*) OVER () FROM {table} WHERE event_key = %s",
+                    (rolled_back_key,),
+                )
+                assert cursor.fetchone() == ("success", 1)
+        finally:
+            retry_verify.close()
+    finally:
+        cleanup = _connect()
+        try:
+            with cleanup.cursor() as cursor:
+                cursor.execute(f"DROP TABLE IF EXISTS {table}")
+        finally:
+            cleanup.close()
