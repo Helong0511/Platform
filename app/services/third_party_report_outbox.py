@@ -53,6 +53,7 @@ async def enqueue_postback_report(
         .where(ThirdPartyReportLog.event_key == event_key)
         .with_for_update()
     )
+    has_config_reference = bool(short_link_id or (cloak_name and short_code))
     if existing is not None:
         existing.outbox_enqueued = True
         existing.short_link_id = short_link_id
@@ -60,8 +61,15 @@ async def enqueue_postback_report(
         existing.short_code = short_code
         existing.click_time = click_time
         existing.max_attempts = max(int(existing.max_attempts or 0), 12)
-        if existing.status != "success" and existing.next_retry_time is None:
-            existing.next_retry_time = now
+        if existing.status != "success":
+            if has_config_reference:
+                existing.status = "pending"
+                existing.next_retry_time = now
+                existing.error_message = None
+            else:
+                existing.status = "failed"
+                existing.next_retry_time = None
+                existing.error_message = "缺少短链接/斗篷配置引用，无法自动解析像素凭据"
         await db.flush()
         return int(existing.id)
 
@@ -78,15 +86,19 @@ async def enqueue_postback_report(
         currency=currency,
         amount=amount,
         use_hash=True,
-        status="pending",
+        status="pending" if has_config_reference else "failed",
         attempt_count=0,
         max_attempts=12,
+        error_message=(
+            None if has_config_reference
+            else "缺少短链接/斗篷配置引用，无法自动解析像素凭据"
+        ),
         outbox_enqueued=True,
         short_link_id=short_link_id,
         cloak_name=cloak_name,
         short_code=short_code,
         click_time=click_time,
-        next_retry_time=now,
+        next_retry_time=now if has_config_reference else None,
         created_at=now,
     )
     db.add(row)
@@ -167,6 +179,9 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             "cloak_name": row.cloak_name,
             "short_code": row.short_code,
         }
+
+    if not (payload["short_link_id"] or (payload["cloak_name"] and payload["short_code"])):
+        return {"success": False, "retryable": False, "reason": "missing_config_reference"}
 
     try:
         pixel_id, access_token, api_version = await _resolve_pixel_credentials(
