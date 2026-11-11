@@ -60,7 +60,7 @@ def _mask_report_pii(value: Optional[str], field: str) -> Optional[str]:
         local, domain = raw.rsplit("@", 1)
         return f"{local[:1]}***@{domain}"
     if normalized == "phone":
-        digits = re.sub(r"\\D", "", raw)
+        digits = re.sub(r"\D", "", raw)
         if len(digits) < 7:
             return "***"
         return f"{digits[:3]}****{digits[-4:]}"
