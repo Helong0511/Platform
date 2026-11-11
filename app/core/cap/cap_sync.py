@@ -98,7 +98,12 @@ class CapSynchronizer:
             logger.info(f"Cap 同步完成：成功 {stats['success']}/{len(caps)}, 失败 {stats['failed']}")
         except Exception as e:
             logger.error(f"提交 Cap 同步失败：{e}", exc_info=True)
-            await self.db.rollback()
+            try:
+                await self.db.rollback()
+            except Exception:
+                logger.error("Cap 同步提交失败后的回滚也失败", exc_info=True)
+            # 整个事务回滚后，本批次没有任何 DB 更新可计为成功。
+            stats = {"success": 0, "failed": len(caps)}
         
         return stats
     
