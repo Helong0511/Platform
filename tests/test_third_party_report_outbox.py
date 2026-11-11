@@ -793,3 +793,82 @@ async def test_manual_retry_sql_rejects_deleted_short_link_events(monkeypatch):
     assert "third_party_report_logs.error_message !=" in captured["sql"]
     params = " ".join(str(value) for value in captured["params"].values())
     assert "短链接已删除，无法解析像素配置" in params
+
+
+async def test_outbox_payload_scrubbed_after_read_cannot_reach_remote_sender(monkeypatch):
+    """Worker 先读取载荷、PII 清理随后提交时，最终发送认领必须失败。"""
+    from types import SimpleNamespace
+    from app.core import third_party_report
+
+    row = SimpleNamespace(
+        id=301,
+        outbox_enqueued=True,
+        pii_scrubbed_at=None,  # 首次读取时尚未清理
+        status="pending",
+        next_retry_time=datetime(2026, 11, 11, 11, 59, 0),
+        adsid="fbclid-before-scrub",
+        event="Purchase",
+        conversion_id="conversion-before-scrub",
+        email="private@example.invalid",
+        ip="203.0.113.31",
+        phone="",
+        ua="private-agent",
+        source="postback",
+        use_hash=True,
+        currency="USD",
+        amount=31.0,
+        click_time=None,
+        event_key="stable-event-before-scrub",
+        short_link_id=301,
+        cloak_name=None,
+        short_code=None,
+    )
+
+    class FakeDB:
+        async def scalar(self, statement):
+            return row
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    async def credentials(**kwargs):
+        # 模拟耗时配置解析期间，清理任务已提交 PII 清除。
+        row.pii_scrubbed_at = datetime(2026, 11, 11, 12, 0, 0)
+        row.adsid = ""
+        row.email = None
+        row.ip = None
+        row.phone = None
+        row.ua = None
+        row.conversion_id = None
+        return "pixel-ci", "token-ci", "v23.0"
+
+    async def claim_after_scrub(report_log_id):
+        assert report_log_id == 301
+        # 与真实条件 UPDATE 等价：已清理的事件无法再获得发送租约。
+        return row.pii_scrubbed_at is None
+
+    async def status_pending(report_log_id):
+        return "pending"
+
+    class UnexpectedHTTPClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("已清理的 Outbox 载荷不得发送到第三方")
+
+    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(
+        outbox, "get_app_now_naive", lambda: datetime(2026, 11, 11, 12, 0, 0)
+    )
+    monkeypatch.setattr(outbox, "_resolve_pixel_credentials", credentials)
+    monkeypatch.setattr(third_party_report, "_claim_report_log", claim_after_scrub)
+    monkeypatch.setattr(third_party_report, "_get_report_status", status_pending)
+    monkeypatch.setattr(third_party_report.httpx, "AsyncClient", UnexpectedHTTPClient)
+
+    result = await outbox.process_postback_report_outbox_item(301)
+
+    assert result["success"] is False
+    assert result["retryable"] is True
+    assert result["reason"] == "report_in_progress"
