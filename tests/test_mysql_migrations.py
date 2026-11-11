@@ -110,6 +110,7 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
                     log_id VARCHAR(100) NULL,
                     error_message TEXT NULL,
                     status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     report_start_time DATETIME NULL,
                     completed_at DATETIME NULL,
                     PRIMARY KEY (id),
