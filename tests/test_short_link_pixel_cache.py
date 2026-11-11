@@ -130,3 +130,67 @@ async def test_short_link_update_and_delete_invalidate_pixel_config_cache(monkey
     await service.delete_short_link(link_id=7, current_user=user)
 
     assert invalidated == ["short-cache-lifecycle", "short-cache-lifecycle"]
+
+
+@pytest.mark.asyncio
+async def test_multiple_worker_instances_never_serve_stale_pixel_credentials(monkeypatch):
+    """不同 Gunicorn Worker 的服务实例必须以数据库当前值为准。"""
+    short_link = SimpleNamespace(
+        short_code="multi-worker-link",
+        is_active=True,
+        expires_at=None,
+        facebook_pixel_id="123456789012345",
+        facebook_access_token="old-token",
+        facebook_api_version="v23.0",
+        original_url="https://example.invalid",
+        title="multi-worker",
+        offer_id=None,
+        channel_id=None,
+    )
+
+    class ScalarRows:
+        def first(self):
+            return short_link
+
+    class Result:
+        def scalars(self):
+            return ScalarRows()
+
+    class FakeDB:
+        async def execute(self, statement):
+            return Result()
+
+    monkeypatch.setattr(cloak_pixel_mapping, "bridge_html_exists", lambda dp: False)
+    monkeypatch.setattr(
+        cloak_pixel_mapping,
+        "get_app_now_naive",
+        lambda: datetime(2026, 11, 11, 12, 0, 0),
+    )
+
+    # 模拟 Worker A 读取并曾经持有旧配置；Worker B 在数据库提交配置轮换。
+    worker_a = CloakPixelMappingService()
+    worker_b = CloakPixelMappingService()
+    db = FakeDB()
+
+    first = await worker_a.get_pixel_config_by_dp_param(
+        db=db, dp="master", short_code="multi-worker-link", use_cache=True
+    )
+    assert first["facebook_access_token"] == "old-token"
+
+    short_link.facebook_pixel_id = "987654321098765"
+    short_link.facebook_access_token = "new-token"
+
+    # 即使 Worker B 没有收到 Worker A 的本地缓存失效通知，也必须读到新值。
+    second = await worker_b.get_pixel_config_by_dp_param(
+        db=db, dp="master", short_code="multi-worker-link", use_cache=True
+    )
+    third = await worker_a.get_pixel_config_by_dp_param(
+        db=db, dp="master", short_code="multi-worker-link", use_cache=True
+    )
+
+    assert second["facebook_pixel_id"] == "987654321098765"
+    assert second["facebook_access_token"] == "new-token"
+    assert third["facebook_pixel_id"] == "987654321098765"
+    assert third["facebook_access_token"] == "new-token"
+    assert worker_a._cache == {}
+    assert worker_b._cache == {}
