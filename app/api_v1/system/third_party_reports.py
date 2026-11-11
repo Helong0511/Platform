@@ -69,7 +69,7 @@ def _mask_report_pii(value: Optional[str], field: str) -> Optional[str]:
             return raw.split(":")[0] + ":****"
         parts = raw.split(".")
         return ".".join(parts[:2] + ["*", "*"]) if len(parts) == 4 else "***"
-    if normalized in {"ua", "user_agent", "client_user_agent"}:
+    if normalized in {"ua", "user_agent", "client_user_agent", "external_id"}:
         return "[已隐藏]"
     return raw
 
