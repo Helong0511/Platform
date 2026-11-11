@@ -230,6 +230,7 @@ async def test_report_claim_query_limits_failed_retries_to_expired_leases(monkey
     assert await third_party_report._claim_report_log(41) is True
     sql = captured["sql"]
     assert "status in" in sql
+    assert "third_party_report_logs.pii_scrubbed_at is null" in sql
     assert "report_start_time is null" in sql
     assert "report_start_time <" in sql
 
