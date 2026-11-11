@@ -318,3 +318,21 @@ NEEDS_RECONCILIATION
 - 本轮 Run #750 的新提交测试没有隔离租约续期操作；已修正测试 mock，Run #751 通过。
  
 这些历史 Run 保留为审计证据；不能把旧 SHA 的失败直接算作最新 HEAD 的失败，也不能用最新绿色 CI 声称旧 Run 本身被改写。后续任何提交仍必须重新核验最新 SHA。
+
+
+## 16. 跨存储集成、租约竞争与运行监控补充
+
+- 新增 `tests/test_cap_reservation_mysql_redis_integration.py`：每次测试创建独立临时 MySQL database，执行账本 migration，建立最小正式事件表；使用 CI Redis DB14 执行真实 Lua reservation / rollback。
+- 覆盖真实崩溃场景：Redis Lua 已成功但进程在 RESERVED 标记前退出；恢复 Worker 按稳定 token 回滚。
+- 覆盖正式转化已提交：恢复 Worker 保留 counter、删除 token、确认 COMMITTED。
+- 覆盖并发首次 claim：两个请求竞争相同稳定键，只允许一个 lease owner；对 MySQL 1205/1213 死锁/锁等待竞争回滚后重新读取赢家，网络错误仍向上抛出。
+- 覆盖两个恢复 Worker 同时领取：依赖 `FOR UPDATE SKIP LOCKED` 与 lease，只能有一个 worker 回滚同一条记录。
+- 新增恢复积压状态查询：PREPARED / RESERVED / NEEDS_RECONCILIATION 数量、COMMITTED token cleanup pending 数量、最老待处理年龄；调度任务将这些指标写入任务结果并在异常/积压时告警。
+- Redis Lua 对现存 counter、DB baseline、Cap limit 都校验为非负/正整数；回滚前先校验计数格式，损坏时返回未知状态并保留 token，不先删除证据再执行 DECR。
+- Daily token 与 Total token 在账本终态前不设置固定 TTL。Daily 业务日已过去至少两天且 48h counter key 已不存在时，恢复任务仅清理历史 token，不对已过期 counter 执行 DECR。
+- 新增 `sql/platform.sql` 的完整建表定义，保证新数据库初始化和增量 migration 都包含 Cap Reservation 表。
+- 新增 `docs/DEPLOYMENT_READINESS_RUNBOOK_2026-11.md`，明确旧版本随机 token 切换风险、MySQL migration 顺序、独立 Scheduler 服务启用顺序、观察指标与回滚边界。
+
+### 最新跨存储验收证据
+
+Run #783 / SHA `042026e6c654753ec91b2ec72748c85d94b11f61`：Backend、Frontend、Playwright Mock API E2E 全绿，293 passed、1 skipped。此 SHA 已覆盖真实隔离 MySQL + Redis 的崩溃恢复、提交保留、并发 claim 和双恢复 Worker 测试。后续任何代码提交仍须重新验收最新 SHA。
