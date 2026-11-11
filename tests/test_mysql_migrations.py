@@ -200,6 +200,35 @@ def test_cap_reservation_migration_is_idempotent_and_matches_mysql_schema():
             }.issubset(index_names)
 
             cursor.execute(
+                "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations' "
+                "AND CONSTRAINT_TYPE = 'CHECK'"
+            )
+            check_names = {row[0] for row in cursor.fetchall()}
+            assert {
+                "chk_cap_reservation_key_sha256",
+                "chk_cap_reservation_offer_positive",
+                "chk_cap_reservation_publisher_positive",
+                "chk_cap_reservation_attempts_nonnegative",
+                "chk_cap_reservation_kind_date",
+                "chk_cap_reservation_state",
+            }.issubset(check_names)
+
+            # 数据库必须真正拒绝非法账本语义，不能只依赖 Python Service 校验。
+            with pytest.raises(pymysql.err.IntegrityError):
+                cursor.execute(
+                    "INSERT INTO cap_reservations "
+                    "(reservation_key, platform, conversion_id, event_name, offer_id, "
+                    "cap_kind, business_date, redis_counter_key, redis_token_key, state) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (
+                        "b" * 64, "ci", "conversion-invalid", "purchase", 77,
+                        "daily", None, "counter:key", "counter:key:reservation:invalid",
+                        "PREPARED",
+                    ),
+                )
+
+            cursor.execute(
                 "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE "
                 "FROM information_schema.COLUMNS "
                 "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'"
