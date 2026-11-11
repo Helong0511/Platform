@@ -261,3 +261,18 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - Run #1068：[查看 CI](https://github.com/Helong0511/Platform/actions/runs/42997889155)。
 - Run #1067 因后续提交触发 PR concurrency 而取消；不作为通过证据。
 - 仍须评估数据库查询额外负载，并继续审计 cloak_configs 的所有变更入口；PR 继续 Draft，不合并、不部署。
+
+
+## 17. 桥页文件系统边界与静态资源安全（2026-11-11，Run #1085）
+
+- 最新应用/测试代码 SHA：`98565600ca11ca98756d47c1f918ce09947a49ba`。
+- GitHub Actions Run #1085：Backend、Frontend Lint、Frontend Build、Playwright Mock API Browser E2E 全部成功。
+- Backend：**392 passed、1 skipped、1 warning**；Python compile 成功。Skip 为本机核对脚本未提交（CI 不依赖）；warning 为 passlib 在 Python 3.11 使用 `crypt` 的弃用提示。
+- 对 `/change` 桥页读取路径进行纵深检查：仅依赖 Pydantic 校验不足以保护历史数据库脏数据及内部调用。现由文件系统边界再次校验斗篷名和单层 `.html` 文件名；路径穿越、绝对路径、嵌套路径被拒绝。历史非法名称在可用性检查中按不可用处理。
+- 桥页读取通过 `lstat` 检查普通文件，不跟随符号链接；上传目标拒绝符号链接和特殊文件。桥页上传采用同目录临时文件、flush/fsync、`os.replace` 原子替换，避免读取到半写入 HTML；替换失败保留旧桥页。
+- 桥页模板缓存签名使用 `mtime_ns + size + inode`，覆盖原子替换后文件系统时间戳精度不足的情况；每个 Worker 都重新检查文件元数据。
+- `/bridge/{filename}` 静态资源路由新增独立解析器：限制单层文件名和已声明 MIME 扩展名白名单，仅返回普通文件，拒绝路径穿越、未知扩展名、符号链接及特殊文件。当前仓库桥页资源引用 `/bridge/109.png`，在白名单内。
+- 新增测试覆盖原子写入/替换失败保留旧文件/缓存签名刷新/只读目标/路径穿越/历史非法名称/符号链接/静态资源扩展名白名单。
+- Run #1084（SHA `de9d5e58497e4567b179a6b7e03fac62ed8f5567`）曾因 4 个错误提示断言失败（388 passed、4 failed、1 skipped）；已修正文件名校验错误归一化。该失败 run 不计入验收。Run #1085：[查看 CI](https://github.com/Helong0511/Platform/actions/runs/42999653442)。
+- 仍需在部署环境隔离副本验证目录属主/权限、原子替换和文件系统语义；CI 不等于生产文件系统演练。没有连接生产服务器或真实第三方接口。
+- PR #1 保持 Draft，不合并、不部署。
