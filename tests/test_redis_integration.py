@@ -263,5 +263,7 @@ async def test_real_redis_cap_reservation_token_lifetime_and_corrupt_counter_fai
         await redis.delete(
             daily_key, daily_token, total_key, total_token,
             corrupt_key, corrupt_token, fraction_key, fraction_token,
+            f"{corrupt_key}:baseline", f"{corrupt_token}:baseline",
+            f"{corrupt_key}:limit", f"{corrupt_token}:limit",
         )
         await redis.aclose()
