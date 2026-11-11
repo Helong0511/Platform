@@ -713,17 +713,32 @@ async def test_mysql_tcp_proxy_drops_real_commit_ack_and_preserves_cap_reservati
                     pass
 
             async def forward_mysql_to_client():
+                # 按 MySQL packet framing 解析响应，只丢弃 COMMIT 对应的 OK(0x00) 包；
+                # 不能因 COMMIT 已发出就误丢此前/其它命令的响应。
+                response_buffer = bytearray()
                 while True:
                     chunk = await upstream_reader.read(65536)
                     if not chunk:
                         break
-                    if commit_seen.is_set():
-                        # MySQL 已执行 COMMIT 并返回结果；故意丢弃 OK 包并断开客户端 TCP。
-                        ack_dropped.set()
-                        client_writer.close()
-                        upstream_writer.close()
-                        return
-                    client_writer.write(chunk)
+                    response_buffer.extend(chunk)
+                    while len(response_buffer) >= 4:
+                        payload_length = int.from_bytes(response_buffer[:3], "little")
+                        packet_length = payload_length + 4
+                        if len(response_buffer) < packet_length:
+                            break
+                        packet = bytes(response_buffer[:packet_length])
+                        payload = packet[4:]
+                        del response_buffer[:packet_length]
+                        if commit_seen.is_set() and payload[:1] == b"\\x00":
+                            # 只在确认收到 COMMIT 成功 OK 包时制造 ACK 丢失。
+                            ack_dropped.set()
+                            client_writer.close()
+                            upstream_writer.close()
+                            return
+                        client_writer.write(packet)
+                        await client_writer.drain()
+                if response_buffer:
+                    client_writer.write(response_buffer)
                     await client_writer.drain()
 
             try:
@@ -816,8 +831,10 @@ async def test_mysql_tcp_proxy_drops_real_commit_ack_and_preserves_cap_reservati
                 commit_error = exc
             assert commit_error is not None, f"COMMIT 未产生断连异常；观察到的 SQL 命令：{observed_queries}"
 
-        assert commit_seen.is_set(), "TCP 代理未观察到 MySQL COMMIT 命令"
-        assert ack_dropped.is_set(), "TCP 代理未丢弃 COMMIT 响应并断开连接"
+        assert any(query.strip().upper() == "COMMIT" for query in observed_queries), (
+            f"TCP 代理未观察到独立 COMMIT 命令：{observed_queries}"
+        )
+        assert ack_dropped.is_set(), "TCP 代理未捕获并丢弃 COMMIT 对应的 MySQL OK(0x00) 包"
         assert rolled_back == [], "COMMIT 结果未知时不得回退 Redis Cap reservation"
         assert finalized == [], "连接断开且无法确认时应保留账本，由恢复 Worker 对账"
 
