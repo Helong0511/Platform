@@ -148,7 +148,7 @@ async def update_report_log(
     更新第三方上报日志记录
     """
     if not log_id:
-        return
+        return False
     try:
         async with AsyncSessionLocal() as db:
             result = await db.execute(
@@ -183,8 +183,11 @@ async def update_report_log(
                 if clear_next_retry_time:
                     log_entry.next_retry_time = None
                 await db.commit()
+                return True
+            return False
     except Exception as e:
         logger.warning("[第三方上报] 更新日志记录失败：%s", type(e).__name__)
+        return False
 
 
 async def _get_report_status(report_log_id: int) -> Optional[str]:
@@ -549,11 +552,23 @@ async def send_third_party_report(
 
             # 存储完整上报参数
             report_params_json = json.dumps(send_data, ensure_ascii=False)
-            await update_report_log(
+            attempt_persisted = await update_report_log(
                 report_log_id,
                 report_params=report_params_json,
                 attempt_count=base_attempt_count + attempt + 1,
             )
+            if attempt_persisted is False:
+                # 不能在累计尝试次数未持久化时发起外部请求，否则故障重试可能突破预算。
+                logger.warning(
+                    "[第三方上报] 尝试次数持久化失败，暂停本轮发送：report_log_id=%s",
+                    report_log_id,
+                )
+                return {
+                    "success": False,
+                    "retryable": True,
+                    "reason": "attempt_state_persist_failed",
+                    "report_log_id": report_log_id,
+                }
 
             logger.info(
                 "[第三方上报] 开始发送 (尝试 %s/%s): report_log_id=%s event=%s use_hash=%s",
@@ -730,11 +745,22 @@ async def send_third_party_report(
 
             # 存储完整上报参数
             report_params_json = json.dumps(send_data, ensure_ascii=False)
-            await update_report_log(
+            attempt_persisted = await update_report_log(
                 report_log_id,
                 report_params=report_params_json,
                 attempt_count=base_attempt_count + hash_attempts + 1,
             )
+            if attempt_persisted is False:
+                logger.warning(
+                    "[第三方上报] 非哈希兜底尝试次数持久化失败，暂停发送：report_log_id=%s",
+                    report_log_id,
+                )
+                return {
+                    "success": False,
+                    "retryable": True,
+                    "reason": "attempt_state_persist_failed",
+                    "report_log_id": report_log_id,
+                }
 
             logger.info(
                 "[第三方上报] 开始发送 (尝试 %s/%s - 不使用哈希): report_log_id=%s event=%s",
