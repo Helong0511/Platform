@@ -1,0 +1,152 @@
+"""Crash recovery worker safety tests; all storage clients are isolated mocks."""
+from types import SimpleNamespace
+
+import pytest
+
+from app.services import cap_reservation_recovery as recovery
+
+
+class _Rows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _Session:
+    def __init__(self, rows=None, event_id=None):
+        self.rows = rows or []
+        self.event_id = event_id
+        self.commits = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def execute(self, statement):
+        return _Rows(self.rows)
+
+    async def scalar(self, statement):
+        return self.event_id
+
+    async def commit(self):
+        self.commits += 1
+
+
+def _reservation(*, state="PREPARED", redis_reserved=False, redis_token_cleaned=False):
+    return SimpleNamespace(
+        id=1,
+        reservation_key="f" * 64,
+        platform="isolated",
+        conversion_id="conversion-1",
+        event_name="purchase",
+        offer_id=77,
+        publisher_id=12,
+        cap_kind="daily",
+        business_date=None,
+        redis_counter_key="counter:key",
+        redis_token_key="counter:key:reservation:" + "f" * 64,
+        redis_reserved=redis_reserved,
+        redis_token_cleaned=redis_token_cleaned,
+        state=state,
+        attempts=0,
+        lease_owner=None,
+        lease_expires_at=None,
+        prepared_at=None,
+        updated_at=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_recovery_rolls_back_token_created_before_reserved_marker(monkeypatch):
+    row = _reservation(redis_reserved=False)
+    sessions = [_Session(rows=[row]), _Session(event_id=None)]
+    calls = []
+
+    def session_factory():
+        return sessions.pop(0)
+
+    async def token_state(counter_key, token_key):
+        return "PRESENT"
+
+    async def rollback(counter_key, token_key):
+        calls.append(("rollback", counter_key, token_key))
+        return 3
+
+    async def finalize(key, state, **kwargs):
+        calls.append(("finalize", key, state, kwargs))
+
+    monkeypatch.setattr(recovery, "AsyncSessionLocal", session_factory)
+    monkeypatch.setattr(recovery.RedisCapManager, "get_reservation_token_state", token_state)
+    monkeypatch.setattr(recovery.RedisCapManager, "rollback_reservation_keys", rollback)
+    monkeypatch.setattr(recovery.CapReservationLedger, "finalize", finalize)
+
+    stats = await recovery.recover_cap_reservations()
+
+    assert stats["rolled_back"] == 1
+    assert calls[0] == ("rollback", "counter:key", row.redis_token_key)
+    assert calls[1][0:3] == ("finalize", row.reservation_key, "ROLLED_BACK")
+    assert calls[1][3]["lease_owner"] == row.lease_owner
+
+
+@pytest.mark.asyncio
+async def test_recovery_does_not_decrement_when_reserved_token_is_absent(monkeypatch):
+    row = _reservation(state="RESERVED", redis_reserved=True)
+    sessions = [_Session(rows=[row]), _Session(event_id=None)]
+    calls = []
+
+    def session_factory():
+        return sessions.pop(0)
+
+    async def token_state(counter_key, token_key):
+        return "ABSENT"
+
+    async def mark_needs(key, error, **kwargs):
+        calls.append((key, error, kwargs))
+
+    async def forbidden_rollback(*args):
+        raise AssertionError("ABSENT token must never cause DECR")
+
+    monkeypatch.setattr(recovery, "AsyncSessionLocal", session_factory)
+    monkeypatch.setattr(recovery.RedisCapManager, "get_reservation_token_state", token_state)
+    monkeypatch.setattr(recovery.RedisCapManager, "rollback_reservation_keys", forbidden_rollback)
+    monkeypatch.setattr(recovery.CapReservationLedger, "mark_needs_reconciliation", mark_needs)
+
+    stats = await recovery.recover_cap_reservations()
+
+    assert stats["needs_reconciliation"] == 1
+    assert calls[0][0] == row.reservation_key
+    assert "token ABSENT" in calls[0][1]
+
+
+@pytest.mark.asyncio
+async def test_recovery_cleans_token_for_already_committed_ledger(monkeypatch):
+    row = _reservation(state="COMMITTED", redis_reserved=True, redis_token_cleaned=False)
+    session = _Session(rows=[row])
+    calls = []
+
+    def session_factory():
+        return session
+
+    async def delete_token(token_key):
+        calls.append(("delete", token_key))
+        return True
+
+    async def mark_cleaned(key, owner):
+        calls.append(("cleaned", key, owner))
+
+    monkeypatch.setattr(recovery, "AsyncSessionLocal", session_factory)
+    monkeypatch.setattr(recovery.RedisCapManager, "delete_reservation_token", delete_token)
+    monkeypatch.setattr(recovery.CapReservationLedger, "mark_token_cleaned", mark_cleaned)
+
+    stats = await recovery.recover_cap_reservations()
+
+    assert stats["tokens_cleaned"] == 1
+    assert calls[0] == ("delete", row.redis_token_key)
+    assert calls[1] == ("cleaned", row.reservation_key, row.lease_owner)
