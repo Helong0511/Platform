@@ -59,8 +59,7 @@ class UrlBuilder:
         ))
         
         logger.debug(
-            "构建 Postback URL 完成：host=%s parameter_count=%s",
-            parsed.hostname,
+            "构建 Postback URL 完成：parameter_count=%s",
             len(merged_params),
         )
         
