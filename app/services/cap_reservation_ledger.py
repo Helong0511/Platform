@@ -404,7 +404,7 @@ class CapReservationLedger:
         if lease_owner:
             conditions.append(CapReservation.lease_owner == lease_owner)
         async with AsyncSessionLocal() as session:
-            await session.execute(
+            result = await session.execute(
                 update(CapReservation)
                 .where(*conditions)
                 .values(
@@ -417,3 +417,13 @@ class CapReservationLedger:
                 )
             )
             await session.commit()
+            if result.rowcount != 1:
+                current = await session.scalar(
+                    select(CapReservation.state).where(
+                        CapReservation.reservation_key == reservation_key
+                    )
+                )
+                if current != "NEEDS_RECONCILIATION":
+                    raise RuntimeError(
+                        f"Cap Reservation 无法进入 NEEDS_RECONCILIATION：{reservation_key}, state={current}"
+                    )
