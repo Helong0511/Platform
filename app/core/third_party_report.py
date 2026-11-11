@@ -124,9 +124,9 @@ async def create_report_log(
                 if existing_id:
                     return int(existing_id)
         except Exception as lookup_exc:
-            logger.warning("[第三方上报] 并发创建冲突后读取事件日志失败: %s", lookup_exc)
+            logger.warning("[第三方上报] 并发创建冲突后读取事件日志失败：%s", type(lookup_exc).__name__)
     except Exception as e:
-        logger.warning("[第三方上报] 创建日志记录失败: %s", e)
+        logger.warning("[第三方上报] 创建日志记录失败：%s", type(e).__name__)
     return 0
 
 async def update_report_log(
@@ -883,7 +883,7 @@ async def retry_report_log(log_id: int):
             logger.info("[第三方上报] Outbox 事件已重新排队，等待持久化 worker：id=%s", log_id)
             return True
     except Exception as exc:
-        logger.warning("[第三方上报] Outbox 重试入队失败：id=%s error=%s", log_id, exc, exc_info=True)
+        logger.warning("[第三方上报] Outbox 重试入队失败：id=%s error_type=%s", log_id, type(exc).__name__)
         return False
 
 
@@ -983,5 +983,5 @@ async def update_report_log_params(
             return True
             
     except Exception as e:
-        logger.warning(f"[第三方上报] 更新日志参数失败: {e}")
+        logger.warning("[第三方上报] 更新日志参数失败：%s", type(e).__name__)
         return False
