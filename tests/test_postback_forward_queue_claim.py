@@ -230,3 +230,26 @@ async def test_retry_enqueue_skips_when_conversion_row_is_missing():
             return FakeResult()
 
     assert await _lock_conversion_for_queue_enqueue(FakeDB(), 404) is False
+
+def test_latest_forward_log_query_uses_primary_key_as_tiebreaker():
+    from app.scheduler_module.tasks.forward_tasks import _latest_forward_log_query
+
+    query = _latest_forward_log_query(101, publisher_id=31)
+    sql = str(query.compile(dialect=mysql.dialect())).upper()
+
+    assert "ORDER BY" in sql
+    assert "POSTBACK_FORWARD_LOGS.CREATED_AT DESC" in sql
+    assert "POSTBACK_FORWARD_LOGS.ID DESC" in sql
+    assert "POSTBACK_FORWARD_LOGS.PUBLISHER_ID" in sql
+    assert "LIMIT" in sql
+
+
+def test_latest_product_forward_log_query_excludes_publisher_logs():
+    from app.scheduler_module.tasks.forward_tasks import _latest_forward_log_query
+
+    query = _latest_forward_log_query(101, product_id=41)
+    sql = str(query.compile(dialect=mysql.dialect())).upper()
+
+    assert "POSTBACK_FORWARD_LOGS.PRODUCT_ID" in sql
+    assert "POSTBACK_FORWARD_LOGS.PUBLISHER_ID IS NULL" in sql
+    assert "POSTBACK_FORWARD_LOGS.ID DESC" in sql
