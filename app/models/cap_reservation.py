@@ -29,6 +29,7 @@ class CapReservation(Base):
     redis_counter_key = Column(String(255), nullable=False, comment="Redis 计数器 Key 快照")
     redis_token_key = Column(String(512), nullable=False, comment="Redis reservation token Key 快照")
     redis_reserved = Column(Boolean, nullable=False, default=False, comment="是否确认 Redis Lua 已成功预留；区分 fail-open 无 token 路径")
+    redis_token_cleaned = Column(Boolean, nullable=False, default=False, comment="终态后是否已清理 Redis token；清理失败由恢复任务重试")
     state = Column(
         String(24), nullable=False, default="PREPARED",
         comment="状态：PREPARED/RESERVED/COMMITTED/ROLLED_BACK/NEEDS_RECONCILIATION",
