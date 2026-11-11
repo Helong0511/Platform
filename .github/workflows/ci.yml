@@ -96,6 +96,8 @@ jobs:
       # 临时在隔离 CI 工作区重新生成 lockfile；完整验收通过后才提交到修复分支。
       - name: Regenerate frontend lockfile for ESLint migration
         run: |
+          # Major ESLint/Vue parser peer updates require a clean resolution graph.
+          rm -f package-lock.json
           npm install --package-lock-only --ignore-scripts
           npm audit fix --package-lock-only --ignore-scripts || true
       - name: Upload regenerated frontend lockfile
