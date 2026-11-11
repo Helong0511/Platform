@@ -502,97 +502,32 @@ async def get_current_user(
             error_code=ErrorCode.TOKEN_INVALID,
         )
 
-    # ====== 查询用户（使用权限缓存优化） ======
-    # 尝试使用权限缓存，减少数据库查询
-    try:
-        from app.core.permission_cache import get_user_permissions
-        
-        # 先检查缓存中的权限信息
-        permissions = await get_user_permissions(int(user_id), db)
-        
-        # 如果缓存中有权限信息，先进行基本检查
-        if permissions.get("role") is None:
-            _raise_auth(
-                "用户不存在",
-                error_code=ErrorCode.USER_NOT_FOUND,
-                http_status=status.HTTP_404_NOT_FOUND,
-            )
+    # 每次认证都读取当前用户行：角色、禁用状态和登录限制必须反映数据库最新值。
+    # 原权限缓存路径仍会再次查询 User 表，既未省去 DB 查询，又可能因缓存过期延迟账号状态变更。
+    result = await db.execute(select(User).where(User.id == int(user_id)))
+    user = result.scalars().first()
 
-        if not permissions.get("is_active", True):
-            _raise_auth(
-                "用户已被禁用",
-                error_code=ErrorCode.USER_DISABLED,
-                http_status=status.HTTP_403_FORBIDDEN,
-            )
+    if user is None:
+        _raise_auth(
+            "用户不存在",
+            error_code=ErrorCode.USER_NOT_FOUND,
+            http_status=status.HTTP_404_NOT_FOUND,
+        )
 
-        if permissions.get("login_restricted", False):
-            _raise_auth(
-                "登录已被限制",
-                error_code=ErrorCode.FORBIDDEN,
-                http_status=status.HTTP_403_FORBIDDEN,
-            )
-        
-        # 如果缓存检查通过，仍然需要查询完整的用户对象（因为需要返回User对象）
-        # 但可以优化：如果只需要权限检查，可以直接使用缓存
-        result = await db.execute(select(User).where(User.id == int(user_id)))
-        user = result.scalars().first()
-        
-        if user is None:
-            _raise_auth(
-                "用户不存在",
-                error_code=ErrorCode.USER_NOT_FOUND,
-                http_status=status.HTTP_404_NOT_FOUND,
-            )
+    if not user.is_active:
+        _raise_auth(
+            "用户已被禁用",
+            error_code=ErrorCode.USER_DISABLED,
+            http_status=status.HTTP_403_FORBIDDEN,
+        )
+    if user.login_restricted:
+        _raise_auth(
+            user.login_message or "登录已被限制",
+            error_code=ErrorCode.FORBIDDEN,
+            http_status=status.HTTP_403_FORBIDDEN,
+        )
 
-        # 权限缓存只用于减少关联权限查询；账号禁用/限制登录必须以本次 DB 行为准。
-        # 即使跨 Worker Redis 缓存失效失败，也不能让已禁用账号在 5 分钟 TTL 内继续访问。
-        if not user.is_active:
-            _raise_auth(
-                "用户已被禁用",
-                error_code=ErrorCode.USER_DISABLED,
-                http_status=status.HTTP_403_FORBIDDEN,
-            )
-        if user.login_restricted:
-            _raise_auth(
-                user.login_message or "登录已被限制",
-                error_code=ErrorCode.FORBIDDEN,
-                http_status=status.HTTP_403_FORBIDDEN,
-            )
-
-        return user
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        # 缓存功能失败，回退到直接查询数据库
-        logger.warning(f"权限缓存检查失败，回退到数据库查询: {e}")
-        
-        # 从数据库查询用户信息
-        result = await db.execute(select(User).where(User.id == int(user_id)))
-        user = result.scalars().first()
-
-        if user is None:
-            _raise_auth(
-                "用户不存在",
-                error_code=ErrorCode.USER_NOT_FOUND,
-                http_status=status.HTTP_404_NOT_FOUND,
-            )
-
-        if not user.is_active:
-            _raise_auth(
-                "用户已被禁用",
-                error_code=ErrorCode.USER_DISABLED,
-                http_status=status.HTTP_403_FORBIDDEN,
-            )
-
-        if user.login_restricted:
-            _raise_auth(
-                user.login_message or "登录已被限制",
-                error_code=ErrorCode.FORBIDDEN,
-                http_status=status.HTTP_403_FORBIDDEN,
-            )
-
-        return user
+    return user
 
 
 # ====== 管理员权限依赖 ======
