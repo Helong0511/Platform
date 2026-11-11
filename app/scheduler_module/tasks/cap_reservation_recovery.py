@@ -19,6 +19,7 @@ async def cap_reservation_recovery_task():
             f"执行完成：claimed={stats['claimed']} committed={stats['committed']} "
             f"rolled_back={stats['rolled_back']} "
             f"needs_reconciliation={stats['needs_reconciliation']} "
+            f"tokens_cleaned={stats['tokens_cleaned']} "
             f"failed={stats['failed']} duration={duration:.2f}s"
         )
         set_task_result(CAP_RESERVATION_RECOVERY_TASK_NAME, message)
