@@ -196,3 +196,20 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - Run #1016 因紧随其后的修正提交触发同一 PR concurrency group 而被取消；不作为验收证据。Run #1017 是最终修正 SHA 的完整通过结果。
 - 本测试证明指定的 MySQL COMMIT ACK 丢失路径在隔离环境可重现且当前恢复逻辑不会错误回滚 Cap reservation；仍不能替代真实多节点长时间网络抖动、Redis failover/数据淘汰、数据库进程重启、跨区域时钟偏差与生产级压力测试。
 - 合并阻断项仍包括：完整旧 schema + 历史数据迁移/中断重跑/兼容回滚演练；Outbox 配置生命周期与高并发多 Worker 压力验证；所有未纳入自动清理的数据类别的 PII 保留/访问/删除审批；其它业务模块的全量回归。PR 继续 Draft，不合并、不部署。
+
+
+## 13. 增量迁移中断续跑与重复执行验收（2026-11-11，Run #1022）
+
+- 验证提交：`5f3fc53237c1f548116e04f046c89babbc80400e`。
+- GitHub Actions Run #1022：Backend、Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- Backend：**349 passed、1 skipped、1 warning**；隔离 MySQL migration tests 实际执行通过。
+- 发现并修复此前三份增量迁移的恢复性缺口：若在部分 DDL 已执行后中断，原始 `ADD COLUMN` / `ADD INDEX` 语句直接重跑会因重复字段/索引失败。
+- 现在以下迁移逐项检查 `information_schema.COLUMNS` / `information_schema.STATISTICS`，只创建缺失结构；数据回填仅处理 `event_key IS NULL`，NOT NULL 收敛和索引创建可重复执行：
+  - `20261110_third_party_report_event_idempotency.sql`
+  - `20261111_third_party_report_outbox.sql`
+  - `20261112_third_party_report_pii_retention.sql`
+- `tests/test_mysql_migrations.py` 新增真实 MySQL 场景：模拟事件幂等迁移已添加 event_key 但尚未回填时中断；模拟 Outbox 已创建首字段时中断；模拟 PII 迁移已创建第一张表标记列时中断。三种场景均续跑完成，并对完整迁移重复执行，确认历史事件键、PII 原始历史内容、默认 outbox 状态及索引仍正确。
+- 同一测试还覆盖旧版日志表、中文/特殊字符 event_key 回填、事件级唯一键、Outbox 历史默认值、PII 迁移不删除历史数据，以及 Cap reservation ledger 的 MySQL CHECK / UNIQUE / INDEX 约束。
+- Run #1022：[查看 CI](https://github.com/Helong0511/Platform/actions/runs/42992422404)。
+- 该结果证明当前三份迁移在测试覆盖的 DDL 中断点可续跑，并能重复执行；**不等于**完整发布演练已结束。仍需在隔离副本完成从生产代表性旧 schema/数据出发的全流程升级、备份恢复、每个 DDL 边界故障注入、worker 停止/恢复、应用兼容回滚和 schema/data diff 审核。
+- 不得在生产环境尝试本次测试；生产迁移仍须独立备份、审批和维护窗口。
