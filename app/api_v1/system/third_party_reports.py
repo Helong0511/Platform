@@ -370,7 +370,7 @@ async def update_third_party_report(
         if not success:
             raise_api_exception(
                 ErrorCode.RESOURCE_NOT_FOUND,
-                detail="日志记录不存在或更新失败"
+                detail="日志记录不存在、Outbox 事件身份字段不可修改或更新失败"
             )
 
         await log_update(
@@ -402,8 +402,8 @@ async def update_third_party_report(
 @router.post(
     "/{log_id}/retry",
     response_model=ResponseBaseSchema[dict],
-    summary="重新上报第三方上报日志",
-    description="触发重新上报指定的第三方上报日志，仅管理员可访问"
+    summary="重新排队第三方上报日志",
+    description="将符合条件的失败 Outbox 事件重新排队，由持久化 worker 发送，仅管理员可访问"
 )
 async def retry_third_party_report(
         request: Request,
@@ -412,10 +412,10 @@ async def retry_third_party_report(
         current_user: User = Depends(require_admin)
 ):
     """
-    对失败的第三方上报记录执行手动重试。
+    对具备有效配置引用的失败 Outbox 记录执行持久化重新排队。
 
     权限：仅管理员。
-    触发重新上报并更新日志状态；操作写审计日志。
+    本接口不直接发送网络请求；由定时 worker 读取并发送，操作写审计日志。
     """
     # ---------- 入口：参数与依赖准备 ----------
     # ---------- 异常处理 ----------
@@ -426,7 +426,7 @@ async def retry_third_party_report(
         if not success:
             raise_api_exception(
                 ErrorCode.RESOURCE_NOT_FOUND,
-                detail="日志记录不存在或重新上报失败"
+                detail="日志不存在，或当前状态/配置引用不满足重试条件（仅支持失败的 Outbox 记录）"
             )
 
         await log_user_action(
@@ -442,7 +442,7 @@ async def retry_third_party_report(
 
         return ResponseBaseSchema.success(
             data={"success": True},
-            message="已触发重新上报，请稍后刷新查看结果"
+            message="已重新排队，后台 worker 将处理；请稍后刷新查看结果"
         )
         
     except HTTPException:
