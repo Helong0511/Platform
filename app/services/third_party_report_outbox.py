@@ -315,6 +315,7 @@ async def process_postback_report_outbox(
                 ),
             )
         )
+        await db.commit()
         result = await db.execute(
             select(ThirdPartyReportLog.id)
             .where(*conditions)
