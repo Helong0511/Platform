@@ -292,3 +292,29 @@ NEEDS_RECONCILIATION
 6. 最新 HEAD 的 Backend、Frontend、Playwright Mock API E2E 必须全部通过；任何旧 SHA 的成功结果都不能替代最新 SHA。
 7. PR #1 在以上事项全部验收前必须保持 Draft，不得合并 main；严禁连接生产服务。
 
+
+
+## 15. 当前 CI 验收与历史失败复核（2026-11-11）
+
+### 最新 HEAD 验收
+
+- Run #755：SHA `01faeda301c9df4b9997abd2fa63282da8b266a1`。
+- Backend / Frontend / Playwright Mock API E2E 全部成功。
+- Backend：286 passed、1 skipped、1 warning、0 failed。
+- 新增 MySQL 8.0 隔离迁移集成测试实际执行 Cap Reservation migration 两次，验证幂等性、已插入账本数据保留、字段类型、NULL 语义、索引和 utf8mb4_unicode_ci。
+- 1 skipped 是仓库既有本地核对脚本未检出提示，不是 Cap Reservation 测试跳过。
+- 链接：https://github.com/Helong0511/Platform/actions/runs/42962433620
+
+### 历史失败归因
+
+对分支近期历史失败记录进行日志抽查，发现它们来自不同旧 SHA，主要包括：
+
+- Publisher 转发队列测试 FakeDB 未模拟新增的转化行锁查询结果；后续修正测试夹具并在后续 SHA 通过。
+- 前端日汇总文件的 ESLint 无用赋值；后续代码修复并在最新 lint/build 通过。
+- 第三方上报手动重试测试假设 SQL 将状态字面量内联，实际 SQLAlchemy 使用绑定参数；后续测试改为验证绑定参数语义。
+- Cap scope 测试 FakeDB 未模拟新增的 Offer 行锁查询；后续夹具更新并在后续全量测试通过。
+- 短链点击刷盘的提交响应不确定、ACK 失败和重放测试曾失败；后续实现修复并通过全量测试。
+- pytest-asyncio session fixture 与 function loop 的作用域冲突；后续统一异步资源清理/loop 作用域。
+- 本轮 Run #750 的新提交测试没有隔离租约续期操作；已修正测试 mock，Run #751 通过。
+ 
+这些历史 Run 保留为审计证据；不能把旧 SHA 的失败直接算作最新 HEAD 的失败，也不能用最新绿色 CI 声称旧 Run 本身被改写。后续任何提交仍必须重新核验最新 SHA。
