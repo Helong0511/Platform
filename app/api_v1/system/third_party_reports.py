@@ -80,6 +80,19 @@ def _mask_report_pii(value: Optional[str], field: str) -> Optional[str]:
     return raw
 
 
+def _is_outbox_processing(log, now: Optional[datetime] = None) -> bool:
+    """按与 worker 相同的发送租约展示处理中状态，避免前端硬编码租约时长。"""
+    if not getattr(log, "outbox_enqueued", False):
+        return False
+    if getattr(log, "status", None) not in {"pending", "failed"}:
+        return False
+    report_start_time = getattr(log, "report_start_time", None)
+    if report_start_time is None:
+        return False
+    now = now or get_app_now_naive()
+    return report_start_time >= now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS)
+
+
 def _can_requeue_report(log, now: Optional[datetime] = None) -> bool:
     """与 retry_report_log 使用同一配置引用及租约条件，避免前端误显示不可执行操作。"""
     if not getattr(log, "outbox_enqueued", False) or getattr(log, "status", None) != "failed":
@@ -250,6 +263,7 @@ async def get_third_party_reports(
 
         # 转换为响应模型
         serialize_started_at = perf_counter()
+        now = get_app_now_naive()
         log_responses = []
         # ---------- 循环处理 ----------
         for log in logs:
@@ -264,8 +278,9 @@ async def get_third_party_reports(
             item["outbox_error_category"] = (
                 _safe_report_error_message(log.error_message) if log.outbox_enqueued else None
             )
-            item["can_requeue"] = _can_requeue_report(log)
-            item["outbox_payload_editable"] = is_outbox_payload_editable(log)
+            item["can_requeue"] = _can_requeue_report(log, now)
+            item["outbox_payload_editable"] = is_outbox_payload_editable(log, now)
+            item["outbox_processing"] = _is_outbox_processing(log, now)
             log_responses.append(item)
         serialize_elapsed_ms = int((perf_counter() - serialize_started_at) * 1000)
         total_elapsed_ms = int((perf_counter() - started_at) * 1000)
