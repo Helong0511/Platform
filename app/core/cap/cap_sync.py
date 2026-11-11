@@ -56,17 +56,17 @@ class CapSynchronizer:
         )
         caps = result.scalars().all()
         
-        stats = {'success': 0, 'failed': 0}
+        stats = {"success": 0, "failed": 0, "skipped": 0}
         now = get_app_now_naive()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        
+
         for cap in caps:
+            missing_counter = False
             try:
                 # 同步每日 Cap
                 if cap.daily_cap:
                     redis_key = get_daily_cap_key(cap.offer_id, now, cap.publisher_id)
                     redis_count = await redis.get(redis_key)
-                    
                     if redis_count is not None:
                         # 当前业务日取 DB/Redis 较大值，防止 Redis 数据回退降低已确认计数。
                         db_daily_count = (
@@ -77,35 +77,52 @@ class CapSynchronizer:
                         )
                         cap.current_daily_count = max(int(redis_count), db_daily_count)
                         cap.cap_start_date = today_start
-                    # key 缺失时不创建或清零，避免掩盖仍在途的 reservation token。
-                
+                    else:
+                        # 缺 key 表示没有可同步的 Redis 快照，不将其伪报为成功同步。
+                        missing_counter = True
+
                 # 同步总 Cap
                 if cap.total_cap:
                     redis_key = get_total_cap_key(cap.offer_id, cap.publisher_id)
                     redis_count = await redis.get(redis_key)
-                    
                     if redis_count is not None:
                         cap.current_total_count = max(int(redis_count), cap.current_total_count or 0)
-                
-                stats['success'] += 1
-                
+                    else:
+                        missing_counter = True
+
+                if missing_counter:
+                    stats["skipped"] += 1
+                else:
+                    stats["success"] += 1
+
             except Exception as e:
-                logger.error(f"同步 Cap 失败：cap_id={cap.id}, error={e}", exc_info=True)
-                stats['failed'] += 1
-        
-        # 提交数据库更新
+                logger.error("同步 Cap 失败：cap_id=%s, error=%s", cap.id, e, exc_info=True)
+                stats["failed"] += 1
+
+        # 任一条记录同步失败时回滚整个批次，避免同一批次部分字段被提交。
+        if stats["failed"]:
+            try:
+                await self.db.rollback()
+            except Exception:
+                logger.error("Cap 同步失败后的回滚也失败", exc_info=True)
+            stats = {"success": 0, "failed": len(caps), "skipped": 0}
+            logger.error("Cap 同步批次已整体回滚：共 %s 条", len(caps))
+            return stats
+
         try:
             await self.db.commit()
-            logger.info(f"Cap 同步完成：成功 {stats['success']}/{len(caps)}, 失败 {stats['failed']}")
+            logger.info(
+                "Cap 同步完成：成功 %s，跳过（Redis key 缺失）%s，失败 %s",
+                stats["success"], stats["skipped"], stats["failed"],
+            )
         except Exception as e:
-            logger.error(f"提交 Cap 同步失败：{e}", exc_info=True)
+            logger.error("提交 Cap 同步失败：%s", e, exc_info=True)
             try:
                 await self.db.rollback()
             except Exception:
                 logger.error("Cap 同步提交失败后的回滚也失败", exc_info=True)
-            # 整个事务回滚后，本批次没有任何 DB 更新可计为成功。
-            stats = {"success": 0, "failed": len(caps)}
-        
+            stats = {"success": 0, "failed": len(caps), "skipped": 0}
+
         return stats
     
     async def sync_single_cap(self, cap_id: int) -> bool:
