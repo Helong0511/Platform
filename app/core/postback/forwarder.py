@@ -310,7 +310,7 @@ class PostbackForwarder:
             response_status=status_code,  # 响应状态码
             response_body=response_content[:1000] if response_content else None,  # 响应内容（限制长度）
             success=final_success,  # 是否成功
-            error_message=check_message if not final_success else None,  # 错误信息
+            error_message="下游响应未满足成功检查规则" if not final_success else None,  # 脱敏错误信息
             created_at=get_app_now_naive(),  # 创建时间
             completed_at=get_app_now_naive()  # 完成时间
         )
@@ -562,7 +562,7 @@ class PostbackForwarder:
             response_status=status_code,
             response_body=response_content[:1000] if response_content else None,
             success=final_success,
-            error_message=check_message if not final_success else None,
+            error_message="下游响应未满足成功检查规则" if not final_success else None,
             created_at=get_app_now_naive(),
             completed_at=get_app_now_naive(),
         )
