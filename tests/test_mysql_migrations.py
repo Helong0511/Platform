@@ -60,6 +60,7 @@ def _event_key(source: str, adsid: str, event: str, conversion_id: str | None) -
 
 
 def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
+    baseline_schema = Path("sql/platform.sql").read_text(encoding="utf-8")
     connection = _connect()
     try:
         with connection.cursor() as cursor:
