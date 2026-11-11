@@ -305,7 +305,7 @@ async def send_to_channel(
                 logger.warning("邮件通知需要配置邮箱地址（email_address）")
                 return False
             # TODO: 实现邮件通知
-            logger.warning(f"邮件通知功能尚未实现: recipient={recipient}")
+            logger.warning("邮件通知功能尚未实现：收件人已配置")
             return False
         elif channel == 'sms':
             # 使用产品配置的手机号
@@ -313,17 +313,17 @@ async def send_to_channel(
                 logger.warning("短信通知需要配置手机号（phone_number）")
                 return False
             # TODO: 实现短信通知
-            logger.warning(f"短信通知功能尚未实现: recipient={recipient}")
+            logger.warning("短信通知功能尚未实现：收件人已配置")
             return False
         else:
             logger.warning(f"不支持的通知渠道: {channel}")
             return False
 
     except asyncio.TimeoutError:
-        logger.warning(f"发送通知超时: channel={channel}, recipient={recipient}")
+        logger.warning("发送通知超时：channel=%s", channel)
         return False
     except Exception as e:
         logger.warning(
-            f"发送通知失败: channel={channel}, recipient={recipient}, error={str(e)}"
+            "发送通知失败：channel=%s error_type=%s"
         )
         return False
