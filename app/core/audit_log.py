@@ -57,7 +57,8 @@ async def log_user_action(
         success: bool = True,
         error_message: Optional[str] = None,
         details: Optional[Dict[str, Any]] = None,
-        request_params: Optional[Dict[str, Any]] = None
+        request_params: Optional[Dict[str, Any]] = None,
+        strict: bool = False
 ) -> None:
     """
     记录用户操作日志
@@ -79,6 +80,7 @@ async def log_user_action(
         error_message: 错误信息
         details: 详细信息（字典格式，会自动转换为JSON）
         request_params: 请求参数（字典格式，会自动转换为JSON，不包含敏感信息）
+        strict: 严格模式；关键业务要求审计日志准备失败时向上抛出
     """
     # 检查操作类型是否在白名单中
     if action_type not in ALLOWED_ACTION_TYPES:
@@ -198,12 +200,12 @@ async def log_user_action(
 
     except Exception as e:
         # 日志记录失败不应该影响业务逻辑，但需要详细记录错误
-        logger.error(
-            f"记录用户操作日志失败: action_type={action_type}, "
-            f"username={final_username}, resource_type={resource_type}, "
-            f"error={e}",
-            exc_info=True
+        logger.exception(
+            "记录用户操作日志失败: action_type=%s, username=%s, resource_type=%s",
+            action_type, final_username, resource_type,
         )
+        if strict:
+            raise
 
 
 async def commit_audit_log(db: AsyncSession) -> None:
@@ -270,7 +272,8 @@ async def log_create(
         request: Optional[Request] = None,
         success: bool = True,
         error_message: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
+        strict: bool = False
 ) -> None:
     """记录创建操作"""
     await log_user_action(
@@ -283,7 +286,8 @@ async def log_create(
         request=request,
         success=success,
         error_message=error_message,
-        details=details
+        details=details,
+        strict=strict
     )
 
 
@@ -296,7 +300,8 @@ async def log_update(
         request: Optional[Request] = None,
         success: bool = True,
         error_message: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
+        strict: bool = False
 ) -> None:
     """记录更新操作"""
     await log_user_action(
@@ -309,7 +314,8 @@ async def log_update(
         request=request,
         success=success,
         error_message=error_message,
-        details=details
+        details=details,
+        strict=strict
     )
 
 
@@ -322,7 +328,8 @@ async def log_delete(
         request: Optional[Request] = None,
         success: bool = True,
         error_message: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
+        strict: bool = False
 ) -> None:
     """记录删除操作"""
     await log_user_action(
@@ -335,7 +342,8 @@ async def log_delete(
         request=request,
         success=success,
         error_message=error_message,
-        details=details
+        details=details,
+        strict=strict
     )
 
 
