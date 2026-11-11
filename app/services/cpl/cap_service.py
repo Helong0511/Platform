@@ -9,7 +9,7 @@ Cap（转化上限）服务层。
 - 被管理端 Cap 管理 API 调用
 
 注意事项：
-1. Cap 归零由 ``cpl_tasks.reset_daily_caps`` 在 UTC 0 点执行
+1. Cap 归零由 ``cpl_tasks.reset_daily_caps`` 按调度器配置时区的每日 00:00 执行（默认 Asia/Shanghai）
 2. 修改 Cap 配置后应同步 Redis/内存计数状态（如有缓存）
 """
 import logging
