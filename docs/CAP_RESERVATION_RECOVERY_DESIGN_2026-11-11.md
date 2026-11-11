@@ -436,3 +436,32 @@ CapReservation ORM、migration 和 `sql/platform.sql` 统一增加 CHECK 约束�
 - 发送函数成功路径可能返回 None，Outbox worker 已在调用后回读持久化状态，避免把已成功事件误计为 worker 失败。
 - 新增 Outbox 服务单测和 scheduler registration 契约测试；第三方日志创建、人工重试测试也已更新。
 - 上述仅为代码提交记录。不得将测试文件存在等同于测试通过；必须以最新 head 的 CI 结果及隔离 MySQL/Redis/mock HTTP 故障注入结果作为验收证据。
+
+## 21. 第三方 Report Outbox 最新 CI 与二次审查（2026-11-11）
+
+### 最新 CI 证据
+
+- 最新已完成 CI：Run #855，commit `41992463ec60ec2c703a0ba01114e36c63bcf3c4`，结论 `success`。
+- Backend：依赖安装、Python compile、unit tests 全部成功。
+- Frontend：`npm ci`、lint、build 全部成功。
+- Playwright：隔离前端服务 + Mock API 浏览器 E2E 全部成功。
+- CI 使用隔离 MySQL/Redis 容器和 mock API；没有连接生产服务器、生产数据库、生产缓存、生产队列或真实 Meta 接口。
+- Run #855 只证明该提交在现有自动化覆盖范围内通过，不代表真实第三方网络、生产数据或发布迁移已验收。
+
+### 本轮二次代码审查核实
+
+- Outbox 发送前由 `_claim_report_log()` 使用条件 UPDATE 认领，状态、租约过期时间和下次重试时间均参与仲裁；多 worker 扫描同一批 ID 时，只有取得租约的一方能进入发送路径。
+- 失败发送按累计 attempt_count 与 max_attempts 计算退避；达到预算后不再自动进入 due scan，管理员可通过人工重试显式重置预算。
+- 缺少当前像素凭据时，不调用第三方接口；记录失败原因并设置后续重试时间，允许配置恢复后重新发送。
+- 成功事件的稳定 event_id 来自持久化 event_key；远端响应成功后本地状态更新失败时，当前代码会在租约过期后重新尝试同一 event_id，而不是创建新事件身份。
+- 调度任务每分钟执行，单轮 batch_size=20；批量扫描上限为 100。调度任务结果记录 selected/success/retryable/failed 与耗时。
+
+### 仍然阻断最终合并的验证缺口
+
+1. 现有 `test_report_log_claim_is_atomic_for_concurrent_senders` 是模拟数据库条件 UPDATE 的并发单测；尚需补充隔离 MySQL 上两个独立 session/worker 真实争抢同一行的集成测试，验证实际事务隔离、行锁和 rowcount。
+2. 需要故障注入覆盖「第三方已接收事件、应用在写 success 状态前退出」以及「success UPDATE commit 响应丢失」；验证租约过期后的恢复结果，并记录外部平台 event_id 去重的边界，不得假设外部系统一定提供 exactly-once。
+3. 需要覆盖 attempt_count 达到 max_attempts、人工重试并发、配置恢复、短链被删除、斗篷配置被禁用等完整状态转换；检查管理端能否清楚区分自动重试中、自动重试耗尽、配置缺失和人工重新排队。
+4. 需要在隔离 MySQL 上实际执行第三方 Outbox 两个 migration，核对已有表兼容、索引、唯一键、字符集、字段默认值及独立回滚方案。CI 的单元测试不能替代 DDL 发布演练。
+5. 必须检查 report_params 的持久化内容与保留周期；哈希发送失败后的非哈希 fallback 会改变上报参数敏感度，需确认业务授权、访问权限、日志展示和清理策略。此项不是凭据专项，不得因凭据安全排除而跳过。
+
+**结论：Run #855 全绿；Outbox 核心代码已接入，但上述真实 MySQL 并发、崩溃故障注入、管理端状态可见性和 migration 演练仍未验收。PR 继续保持 Draft，禁止合并 main。**
