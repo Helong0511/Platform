@@ -88,3 +88,43 @@ async def test_preflight_uses_db_floor_and_never_recreates_missing_redis_keys(
 
     assert allowed is expected
     assert redis.writes == []
+
+@pytest.mark.asyncio
+async def test_preflight_refreshes_daily_business_date_together_with_redis_key(monkeypatch):
+    """预检查跨午夜时，Redis key 与 DB 日计数必须使用同一业务日期。"""
+    clock = iter([
+        datetime(2026, 11, 10, 23, 59, 59),
+        datetime(2026, 11, 11, 0, 0, 1),
+    ])
+    cap = SimpleNamespace(
+        offer_id=902,
+        publisher_id=34,
+        advertiser_id=None,
+        cap_type="offer",
+        is_active=True,
+        daily_cap=8,
+        total_cap=None,
+        cap_start_date=datetime(2026, 11, 10, 0, 0, 0),
+        current_daily_count=8,
+        current_total_count=0,
+    )
+    redis = _Redis({})
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(cap_manager, "get_redis_client", fake_redis)
+    monkeypatch.setattr(cap_manager, "get_app_now_naive", lambda: next(clock))
+    monkeypatch.setattr(cap_manager.settings, "CAP_FAIL_OPEN", False)
+
+    allowed, reason = await cap_manager.check_cap(
+        db=_DB(cap),
+        offer_id=902,
+        publisher_id=34,
+    )
+
+    # key 已切换到 11 月 11 日，昨日 DB=8 不能错误地阻止今日请求。
+    assert allowed is True
+    assert reason is None
+    assert redis.writes == []
+
