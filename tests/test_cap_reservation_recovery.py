@@ -126,6 +126,54 @@ async def test_recovery_does_not_decrement_when_reserved_token_is_absent(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_recovery_retries_needs_reconciliation_after_backoff(monkeypatch):
+    """Redis 短暂不可用进入 NEEDS_RECONCILIATION 后，恢复可用时必须自动重试。"""
+    from datetime import datetime, timedelta
+    from sqlalchemy.dialects import mysql
+
+    row = _reservation(state="NEEDS_RECONCILIATION")
+    row.updated_at = datetime(2026, 11, 11, 11, 50, 0)
+    sessions = [_Session(rows=[row]), _Session(event_id=None)]
+    captured = {}
+    calls = []
+
+    class QuerySession(_Session):
+        async def execute(self, statement):
+            captured["sql"] = str(statement.compile(dialect=mysql.dialect())).lower()
+            return _Rows(self.rows)
+
+    def session_factory():
+        return QuerySession(rows=[row]) if len(sessions) == 2 and not captured else sessions.pop(0)
+
+    async def token_state(counter_key, token_key):
+        return "PRESENT"
+
+    async def rollback(counter_key, token_key):
+        calls.append(("rollback", counter_key, token_key))
+        return 1
+
+    async def finalize(key, state, **kwargs):
+        calls.append(("finalize", key, state, kwargs))
+
+    monkeypatch.setattr(recovery, "AsyncSessionLocal", session_factory)
+    monkeypatch.setattr(
+        recovery, "get_app_now_naive",
+        lambda: datetime(2026, 11, 11, 12, 0, 0),
+    )
+    monkeypatch.setattr(recovery.RedisCapManager, "get_reservation_token_state", token_state)
+    monkeypatch.setattr(recovery.RedisCapManager, "rollback_reservation_keys", rollback)
+    monkeypatch.setattr(recovery.CapReservationLedger, "finalize", finalize)
+
+    stats = await recovery.recover_cap_reservations()
+
+    assert "needs_reconciliation" in captured["sql"]
+    assert "updated_at" in captured["sql"]
+    assert stats["rolled_back"] == 1
+    assert calls[0] == ("rollback", row.redis_counter_key, row.redis_token_key)
+    assert calls[1][0:3] == (row.reservation_key, "ROLLED_BACK")
+
+
+@pytest.mark.asyncio
 async def test_recovery_cleans_token_for_already_committed_ledger(monkeypatch):
     row = _reservation(state="COMMITTED", redis_reserved=True, redis_token_cleaned=False)
     session = _Session(rows=[row])
