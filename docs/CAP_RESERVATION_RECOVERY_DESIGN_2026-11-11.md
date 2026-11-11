@@ -158,3 +158,37 @@ NEEDS_RECONCILIATION
 - 迁移前后需明确新旧应用混跑策略；不允许一部分 worker 写账本、另一部分 worker 不写账本却共同修改同一 Redis Cap counter。
 - 回滚应用版本前，必须先停止新恢复 worker，并制定账本与 Redis token 的保留策略；禁止直接删表或清空 Redis token。
 - PR 必须在实现、故障注入、隔离 CI 全绿及发布/回滚手册完成前保持 Draft。
+
+
+## 11. 已核实的现有 Postback 幂等约束（2026-11-11 代码核对补充）
+
+本节是对上文事件身份设计的代码核验补充：
+
+- `PostbackConversion` 模型确实定义了数据库唯一约束 `uq_postback_platform_conversion_event(platform, conversion_id, event_name)`。因此正式转化的主事件键不是推测出来的，而是现有数据库约束。
+- `DataNormalizer.normalize()` 将缺失或空白 `event_name` 统一为非空字符串 `default`，并将 conversion_id 标准化为字符串；`DuplicateChecker` 在保存前按 platform + conversion_id + event_name 预查。
+- `PostbackConversion.event_name` ORM 列目前仍声明 nullable=True，但正常标准化路径会提供 `default`。历史数据或绕过标准化的写入仍可能写入 NULL；MySQL UNIQUE 对 NULL 的处理不能保证 NULL 事件键唯一。新增 Reservation 不能把历史 NULL 与字符串 default 默认为同一事件，必须按正式业务规则确定兼容处理。
+- `conversion_id` 在模型层 NOT NULL，但标准化后可能是空字符串；在 Reservation 开始前必须确认验证器是否拒绝空字符串。若没有拒绝，应在同一改造中 fail-closed 拒绝无稳定事件 ID 的 Postback，不能给空 ID 自动生成每次请求不同的幂等键。
+- 现有唯一约束可作为最终并发防重保护；预查只是快速路径，不能替代唯一约束。两个并发请求同时通过 DuplicateChecker 时，后续唯一约束冲突分支必须回滚各自 reservation。
+- `transaction_id` 和 `request_id` 是独立的 nullable unique 字段，不应在没有上游语义证明前拿其中任一字段替代三元组事件身份。
+
+### Reservation 唯一键建议（以现有数据库业务键为基础）
+
+每个 Redis scope 的每一种计数类型独立一条账本记录。稳定唯一键建议由以下规范化字段构成，再进行 SHA-256：
+
+`platform | conversion_id | event_name | offer_id | publisher_scope | cap_kind | business_date`
+
+其中：
+
+- `platform`、`conversion_id`、`event_name` 使用与正式转化保存完全一致的标准化值。
+- `publisher_scope` 必须明确区分全局 NULL 与具体 publisher ID；不能把 NULL 转为空字符串后与其他业务字段产生歧义。
+- `cap_kind` 为 daily / total；Daily 必须包含固定业务日期，Total 日期使用固定空值标记。
+- Redis token 应由账本行稳定生成并先提交，再执行 Redis Lua；重试同一事件/同一 scope/type 必须复用同一 token。
+- 现有 cap_manager 对相同 `(offer_id, publisher_id)` 下多个 Cap 配置只预留一次 Daily、一次 Total。因此账本也按 Redis 实际计数 scope 建记录，不能按 OfferCap ORM 行数创建重复预留。
+
+### 还需在实现前完成的验证
+
+1. 检查 `DataValidator` 是否拒绝空 `conversion_id`，并检查所有 Postback 入口是否统一经过 DataNormalizer。
+2. 在隔离 MySQL 中验证现有唯一约束实际存在、列字符集/排序规则与大小写比较语义；不能只依赖 ORM 定义。
+3. 检查历史正式转化表是否存在 NULL/空 conversion_id 或 NULL event_name；只读统计应在隔离数据快照上执行，生产数据不得由本审计连接。
+4. 检查现有唯一约束冲突分支是否只在真正的事件重复时触发；不能把其他唯一字段冲突一律报告为重复事件。
+5. 对历史 NULL event_name 的转换规则必须由业务语义决定，迁移不得静默将 NULL 改成 default。
