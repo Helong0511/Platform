@@ -213,3 +213,25 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - Run #1022：[查看 CI](https://github.com/Helong0511/Platform/actions/runs/42992422404)。
 - 该结果证明当前三份迁移在测试覆盖的 DDL 中断点可续跑，并能重复执行；**不等于**完整发布演练已结束。仍需在隔离副本完成从生产代表性旧 schema/数据出发的全流程升级、备份恢复、每个 DDL 边界故障注入、worker 停止/恢复、应用兼容回滚和 schema/data diff 审核。
 - 不得在生产环境尝试本次测试；生产迁移仍须独立备份、审批和维护窗口。
+
+
+## 14. 第三方日志 PII 生命周期与 API 脱敏补充（2026-11-11，Run #1043 / #1045）
+
+- Run #1043 验证 SHA：`660acaa2d6eb71e9f9c4afbc11a36978c6cdc1d2`；Backend **354 passed、1 skipped、1 warning**，Frontend Lint/Build/Playwright E2E 全部通过。
+- 管理端第三方上报日志列表和详情原先会返回完整 `adsid`。该字段可能承载 fbclid/click_id 等可关联用户的在线标识。现改为只显示首尾片段；短标识直接隐藏，查询过滤仍可使用管理员输入的原值。
+- 第三方日志 API 的列表、统计、详情、更新、重排队异常响应原先把 `str(e)` 放入响应 detail，可能回显 SQL 参数、请求值或 PII。现全部改为固定通用错误文案；服务端日志只记录异常类型。
+- 新增回归测试覆盖 adsid 脱敏、列表/详情均应用脱敏，以及 API 不回显原始异常文本。
+- Run #1043：[查看 CI](https://github.com/Helong0511/Platform/actions/runs/42994645439)。
+
+## 15. PII 清理终态识别、调度批次与 Outbox 耗尽状态（2026-11-11，Run #1045）
+
+- 最新已验证应用代码 SHA：`367abbc1b16f53b04d9d5f8ffed8c75e1bca7ad0`。
+- GitHub Actions Run #1045：Backend、Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功；Backend Python compile 与 unit test job 均通过。
+- PII 清理终态条件新增：失败 Outbox 若没有短链/斗篷有效配置引用且 `next_retry_time IS NULL`，属于不可人工重排的终态，可按获批保留期限清理；避免无配置引用的失败事件永久保留 PII。
+- 每日 PII 调度不再在综合清理（已同时处理第三方日志与下游转发日志）后重复执行第二次 forward sweep，保持每类每次最多 200 条的批次上限。独立 forward 清理函数仍保留给受控单独调用。
+- PII 保留期限为 0 时，综合清理函数返回两类日志各自的零计数；调度任务据此正常记录“关闭/跳过”，不会因缺少字典键而失败。默认仍为 0，不会自动删除数据。
+- Outbox 达到自动重试上限后若 worker 崩溃留下 `pending` + 过期租约，扫描任务会先将其收敛为 `failed`、清空下次重试时间并记录完成时间，避免永久隐藏在 pending 状态。
+- 耗尽状态收敛和统计增加 `next_retry_time` 条件，利用现有 `idx_third_party_outbox_due (outbox_enqueued, status, next_retry_time, report_start_time, id)` 限定扫描范围，避免每分钟对历史日志做无界全表扫描。
+- 已修正 scrubbed Outbox 记录的 worker 查询过滤：现在可以读取到清理标记并返回明确的 `pii_payload_scrubbed` 拒绝原因，而不是因 SQL 过滤提前返回 `outbox_not_found`。
+- Run #1045：[查看 CI](https://github.com/Helong0511/Platform/actions/runs/42994911629)。
+- PII 自动清理仍未启用；必须由业务/合规负责人批准期限、目的、访问权限及适用司法辖区后，才允许设置非零天数。
