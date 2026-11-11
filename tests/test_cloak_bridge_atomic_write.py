@@ -40,3 +40,28 @@ def test_atomic_write_bridge_html_keeps_old_file_when_replace_fails(tmp_path, mo
 
     assert target.read_text(encoding="utf-8") == old_content
     assert sorted(path.name for path in tmp_path.iterdir()) == ["master.html"]
+
+
+def test_template_cache_detects_atomic_replace_even_with_same_mtime(tmp_path):
+    target = tmp_path / "master.html"
+    target.write_text("<html>old cached template</html>", encoding="utf-8")
+    cloak_scripts_paths.invalidate_bridge_template_cache()
+    assert cloak_scripts_paths.read_bridge_html_template_cached(str(target)) == (
+        "<html>old cached template</html>"
+    )
+    original_stat = target.stat()
+
+    cloak_scripts_paths.atomic_write_bridge_html(
+        str(target),
+        "<html>new replacement template</html>",
+    )
+    # 模拟低精度文件系统/快速覆盖：即使 mtime 相同，也必须识别 inode 变化。
+    os.utime(
+        target,
+        ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+    )
+
+    assert cloak_scripts_paths.read_bridge_html_template_cached(str(target)) == (
+        "<html>new replacement template</html>"
+    )
+    cloak_scripts_paths.invalidate_bridge_template_cache()
