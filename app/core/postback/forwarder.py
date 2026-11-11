@@ -320,8 +320,9 @@ class PostbackForwarder:
             downstream_url=base_url,
             request_method=method,
             # 请求值和响应正文可能回显个人信息，转发日志仅保留字段数量。
+            request_data=_safe_forward_log_request_summary(json_data),
             request_params=_safe_forward_log_request_summary(
-                request_params if request_params is not None else (json_data or params)
+                request_params if request_params is not None else params
             ),
             response_status=status_code,
             response_body=None,
@@ -575,8 +576,9 @@ class PostbackForwarder:
             # 不保存展开后的个人数据 URL、请求参数值或下游响应正文。
             downstream_url=base_url,
             request_method=method,
+            request_data=_safe_forward_log_request_summary(json_data),
             request_params=_safe_forward_log_request_summary(
-                request_params if request_params is not None else (json_data or params)
+                request_params if request_params is not None else params
             ),
             response_status=status_code,
             response_body=None,
