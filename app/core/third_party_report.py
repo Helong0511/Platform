@@ -823,6 +823,8 @@ def is_outbox_payload_editable(report_log, now: Optional[datetime] = None) -> bo
     """只有尚未尝试发送、失败且租约已释放的 Outbox 才允许修正发送载荷。"""
     if not getattr(report_log, "outbox_enqueued", False):
         return False
+    if getattr(report_log, "pii_scrubbed_at", None) is not None:
+        return False
     if getattr(report_log, "status", None) != "failed":
         return False
     if int(getattr(report_log, "attempt_count", 0) or 0) > 0:
