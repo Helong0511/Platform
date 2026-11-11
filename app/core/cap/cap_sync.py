@@ -48,7 +48,10 @@ class CapSynchronizer:
         
         # 查询所有活跃的 Cap 配置
         result = await self.db.execute(
-            select(OfferCap).where(OfferCap.is_active == True).with_for_update()
+            select(OfferCap)
+            .where(OfferCap.is_active == True)
+            .order_by(OfferCap.id.asc())
+            .with_for_update()
         )
         caps = result.scalars().all()
         
@@ -116,7 +119,10 @@ class CapSynchronizer:
         try:
             # 查询 Cap 配置
             result = await self.db.execute(
-                select(OfferCap).where(OfferCap.id == cap_id).with_for_update()
+                select(OfferCap)
+                .where(OfferCap.id == cap_id)
+                .order_by(OfferCap.id.asc())
+                .with_for_update()
             )
             cap = result.scalars().first()
             
