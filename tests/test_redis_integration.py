@@ -223,6 +223,19 @@ async def test_real_redis_cap_reservation_token_lifetime_and_corrupt_counter_fai
         assert await redis.get(corrupt_key) == "not-an-integer"
         assert await redis.get(corrupt_token) is None
 
+        invalid_baseline = await redis.eval(
+            RedisCapManager._RESERVE_LUA, 2,
+            f"{corrupt_key}:baseline", f"{corrupt_token}:baseline",
+            48 * 3600, "not-an-integer", 10, 0,
+        )
+        invalid_limit = await redis.eval(
+            RedisCapManager._RESERVE_LUA, 2,
+            f"{corrupt_key}:limit", f"{corrupt_token}:limit",
+            48 * 3600, 0, 0, 0,
+        )
+        assert invalid_baseline == -2
+        assert invalid_limit == -2
+
         # 回滚遇到非整数计数时也必须保留 token，不能先删证据再让 DECR 抛错。
         await redis.set(fraction_key, "1.5")
         await redis.set(fraction_token, "1")
