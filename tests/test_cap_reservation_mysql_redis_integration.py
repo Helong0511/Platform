@@ -14,7 +14,7 @@ from urllib.parse import quote_plus
 import pymysql
 import pytest
 from redis.asyncio import Redis
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.cap.redis_counter import RedisCapManager
@@ -124,6 +124,7 @@ async def _run_recovery_scenario(monkeypatch, *, conversion_committed: bool):
     database = _create_isolated_mysql_database()
     engine = None
     redis = Redis.from_url(REDIS_URL, decode_responses=True)
+    redis_keys = []
     try:
         _initialize_isolated_schema(database)
         password = quote_plus(os.getenv("MYSQL_INTEGRATION_PASSWORD", ""))
@@ -165,6 +166,7 @@ async def _run_recovery_scenario(monkeypatch, *, conversion_committed: bool):
         )
         assert claimed is True
         assert owner
+        redis_keys.extend([row.redis_counter_key, row.redis_token_key])
 
         reserved = await RedisCapManager.check_and_increment_daily(
             offer_id,
@@ -180,7 +182,7 @@ async def _run_recovery_scenario(monkeypatch, *, conversion_committed: bool):
         if conversion_committed:
             async with session_factory() as session:
                 await session.execute(
-                    __import__("sqlalchemy").text(
+                    text(
                         "INSERT INTO postback_conversions "
                         "(platform, conversion_id, event_name) "
                         "VALUES (:platform, :conversion_id, :event_name)"
@@ -222,6 +224,8 @@ async def _run_recovery_scenario(monkeypatch, *, conversion_committed: bool):
             "token_value": token_value,
         }
     finally:
+        if redis_keys:
+            await redis.delete(*redis_keys)
         await redis.aclose()
         if engine is not None:
             await engine.dispose()
