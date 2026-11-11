@@ -136,7 +136,6 @@ async def send_notification_async(
             f"发送转化通知异常: conversion_id={conversion.id}, "
             f"product_id={product.id if product else None}, "
             f"client_id={client.id if client else None}, "
-            "
             f"channel={notification_channel if 'notification_channel' in locals() else 'unknown'}, "
             f"error_type={type(e).__name__}"
         )
