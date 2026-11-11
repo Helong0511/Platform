@@ -640,7 +640,10 @@ async def update_short_link(
             details={"updated_fields": list(update_data.keys())},
         )
         await commit_audit_log(db)
-    
+        # 服务层先行失效一次；事务提交后再失效，避免并发读取在 commit 前重建旧配置缓存。
+        from app.services.cloak_pixel_mapping import invalidate_cloak_cache
+        invalidate_cloak_cache(short_code=short_link.short_code)
+
     # 构建完整的短链接URL
     base_url = str(request.base_url).rstrip('/')
     response_data = ShortLinkResponse.model_validate(short_link)
@@ -684,7 +687,10 @@ async def delete_short_link(
         request=request,
     )
     await commit_audit_log(db)
-    
+    # 删除事务提交后再次失效，避免并发请求重建已删除短链的旧像素配置缓存。
+    from app.services.cloak_pixel_mapping import invalidate_cloak_cache
+    invalidate_cloak_cache(short_code=short_code)
+
     return ResponseBaseSchema.success(data={"message": "短链接已删除"})
 
 
