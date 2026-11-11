@@ -625,7 +625,7 @@ async def send_third_party_report(
                             error_msg = "第三方未确认接收事件"
                             failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
                             logger.warning(
-                                f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{max_retries}): {error_msg}")
+                                f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{hash_attempts}): {error_msg}")
                             await update_report_log(
                                 report_log_id,
                                 response_status=response.status_code,
@@ -635,7 +635,7 @@ async def send_third_party_report(
                         error_msg = "第三方响应 JSON 解析失败"
                         failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
                         logger.warning(
-                            f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{max_retries}): {error_msg}")
+                            f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{hash_attempts}): {error_msg}")
                         await update_report_log(
                             report_log_id,
                             response_status=response.status_code,
@@ -645,7 +645,7 @@ async def send_third_party_report(
                     error_msg = f"第三方返回 HTTP {response.status_code}"
                     failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
                     logger.warning(
-                        f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{max_retries}): {error_msg}")
+                        f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{hash_attempts}): {error_msg}")
                     await update_report_log(
                         report_log_id,
                         response_status=response.status_code,
@@ -655,18 +655,18 @@ async def send_third_party_report(
         except httpx.TimeoutException:
             error_msg = "请求超时"
             failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
-            logger.warning(f"[第三方上报] ✗ 超时 (尝试 {attempt + 1}/{max_retries})")
+            logger.warning(f"[第三方上报] ✗ 超时 (尝试 {attempt + 1}/{hash_attempts})")
         except httpx.ConnectError:
             error_msg = "连接失败"
             failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
-            logger.warning(f"[第三方上报] ✗ 连接失败 (尝试 {attempt + 1}/{max_retries})")
+            logger.warning(f"[第三方上报] ✗ 连接失败 (尝试 {attempt + 1}/{hash_attempts})")
         except Exception as e:
             error_msg = f"请求异常（{type(e).__name__}）"
             failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
-            logger.warning("[第三方上报] 请求异常（尝试 %s/%s）：%s", attempt + 1, max_retries, type(e).__name__)
+            logger.warning("[第三方上报] 请求异常（尝试 %s/%s）：%s", attempt + 1, hash_attempts, type(e).__name__)
 
         # 指数退避策略
-        if attempt < max_retries - 1:
+        if attempt < hash_attempts - 1:
             delay = base_delay * (2 ** attempt)
             logger.debug("[第三方上报] 等待 %s 秒后重试...", delay)
             await asyncio.sleep(delay)
