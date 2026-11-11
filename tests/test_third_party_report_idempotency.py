@@ -478,3 +478,83 @@ async def test_admin_cannot_change_outbox_event_identity(monkeypatch):
     assert context.db.committed is False
     assert log_entry.conversion_id == "conversion-original"
     assert log_entry.event_key == "platform-scoped-event-key"
+
+async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(monkeypatch):
+    """实际执行发送函数：远端接收后本地成功状态提交失败，重试仍使用相同 event_id。"""
+    state = {"status": "pending", "http_event_ids": [], "ack_attempts": 0, "claim": 0}
+
+    class Response:
+        status_code = 200
+        text = '{"events_received":1,"fbtrace_id":"isolated-trace"}'
+
+        @staticmethod
+        def json():
+            return {"events_received": 1, "fbtrace_id": "isolated-trace"}
+
+    class FakeHTTPClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, *, json, params):
+            state["http_event_ids"].append(json["data"][0]["event_id"])
+            return Response()
+
+    async def claim(report_log_id):
+        state["claim"] += 1
+        return True
+
+    async def attempt_state(report_log_id):
+        return state["ack_attempts"], 12
+
+    async def persist_update(report_log_id, **kwargs):
+        # 模拟 update_report_log 内部吞掉 DB commit 异常：
+        # attempt_count 可落库，但 status=success 的 ACK 未落库。
+        if kwargs.get("status") == "success":
+            return
+        if kwargs.get("attempt_count") is not None:
+            state["ack_attempts"] = kwargs["attempt_count"]
+
+    async def read_status(report_log_id):
+        return state["status"]
+
+    monkeypatch.setattr(third_party_report, "_claim_report_log", claim)
+    monkeypatch.setattr(third_party_report, "_get_report_attempt_state", attempt_state)
+    monkeypatch.setattr(third_party_report, "update_report_log", persist_update)
+    monkeypatch.setattr(third_party_report, "_get_report_status", read_status)
+    monkeypatch.setattr(third_party_report.httpx, "AsyncClient", FakeHTTPClient)
+    async def no_sleep(*_):\n        return None\n\n    monkeypatch.setattr(third_party_report.asyncio, "sleep", no_sleep)
+
+    common = {
+        "adsid": "fbclid-ack-loss",
+        "event": "Purchase",
+        "email": None,
+        "ip": None,
+        "phone": None,
+        "ua": None,
+        "facebook_pixel_id": "isolated-pixel",
+        "facebook_access_token": "isolated-token",
+        "source": "postback",
+        "conversion_id": "conversion-ack-loss",
+        "currency": "USD",
+        "amount": 21.0,
+        "report_log_id": 119,
+        "event_key": "stable-event-id-ack-loss",
+    }
+
+    first = await third_party_report.send_third_party_report(**common)
+    assert first is None
+    assert state["status"] == "pending"
+
+    # 模拟租约到期后 worker 恢复；数据库仍未确认第一次发送成功。
+    second = await third_party_report.send_third_party_report(**common)
+    assert second is None
+    assert state["http_event_ids"] == [
+        "stable-event-id-ack-loss",
+        "stable-event-id-ack-loss",
+    ]
