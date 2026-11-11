@@ -9,7 +9,7 @@ import logging
 from datetime import timedelta
 from typing import Optional
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 
 from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive
@@ -290,6 +290,31 @@ async def process_postback_report_outbox(
         conditions.append(ThirdPartyReportLog.id == report_log_id)
 
     async with AsyncSessionLocal() as db:
+        # 进程可能在 attempt_count 已到上限后崩溃，留下 pending + 过期租约；
+        # 这类记录不会进入 due scan，必须先收敛为 failed，才能进入 exhausted 监控与人工处置。
+        await db.execute(
+            update(ThirdPartyReportLog)
+            .where(
+                ThirdPartyReportLog.outbox_enqueued.is_(True),
+                ThirdPartyReportLog.pii_scrubbed_at.is_(None),
+                ThirdPartyReportLog.status.in_(("pending", "failed")),
+                ThirdPartyReportLog.attempt_count >= ThirdPartyReportLog.max_attempts,
+                or_(
+                    ThirdPartyReportLog.report_start_time.is_(None),
+                    ThirdPartyReportLog.report_start_time < stale_before,
+                ),
+            )
+            .values(
+                status="failed",
+                next_retry_time=None,
+                report_start_time=stale_before,
+                completed_at=func.coalesce(ThirdPartyReportLog.completed_at, now),
+                error_message=func.coalesce(
+                    ThirdPartyReportLog.error_message,
+                    "自动重试次数已耗尽；需要管理员检查后决定后续处理",
+                ),
+            )
+        )
         result = await db.execute(
             select(ThirdPartyReportLog.id)
             .where(*conditions)
