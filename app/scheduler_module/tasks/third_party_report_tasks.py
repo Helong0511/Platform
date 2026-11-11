@@ -27,8 +27,14 @@ async def process_third_party_report_outbox_task():
             logger.info(message)
         return stats
     except Exception as exc:
-        set_task_result(THIRD_PARTY_REPORT_OUTBOX_TASK_NAME, f"执行失败：{exc}")
-        logger.error("第三方 Report Outbox 恢复任务失败", exc_info=True)
+        set_task_result(
+            THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
+            f"执行失败：{type(exc).__name__}",
+        )
+        logger.error(
+            "第三方 Report Outbox 恢复任务失败：error_type=%s",
+            type(exc).__name__,
+        )
         raise
 
 
@@ -51,6 +57,12 @@ async def scrub_third_party_report_pii_task():
         logger.info("第三方上报 PII 生命周期任务：%s", message)
         return stats
     except Exception as exc:
-        set_task_result(THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME, f"执行失败：{exc}")
-        logger.error("第三方上报 PII 生命周期任务失败", exc_info=True)
+        set_task_result(
+            THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME,
+            f"执行失败：{type(exc).__name__}",
+        )
+        logger.error(
+            "第三方上报 PII 生命周期任务失败：error_type=%s",
+            type(exc).__name__,
+        )
         raise
