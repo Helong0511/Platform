@@ -1,7 +1,7 @@
 """
 Cap Reservation 崩溃恢复服务。
 
-只处理租约到期的 PREPARED / RESERVED 记录；正式转化存在则保留计数，
+处理租约到期的 PREPARED / RESERVED，以及退避后可重试的 NEEDS_RECONCILIATION 记录；正式转化存在则保留计数，
 确认未提交且 token PRESENT 才允许按原始 Redis key/token 原子回滚。
 ABSENT / UNKNOWN 不执行 DECR，转入 NEEDS_RECONCILIATION。
 """
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 RECOVERY_LEASE_SECONDS = 300
 RECOVERY_BATCH_SIZE = 100
+RECONCILIATION_RETRY_SECONDS = 300
 
 
 async def recover_cap_reservations(
@@ -41,6 +42,17 @@ async def recover_cap_reservations(
                 or_(
                     and_(
                         CapReservation.state.in_(("PREPARED", "RESERVED")),
+                        or_(
+                            CapReservation.lease_owner.is_(None),
+                            CapReservation.lease_expires_at.is_(None),
+                            CapReservation.lease_expires_at <= now,
+                        ),
+                    ),
+                    and_(
+                        CapReservation.state == "NEEDS_RECONCILIATION",
+                        CapReservation.updated_at <= now - timedelta(
+                            seconds=RECONCILIATION_RETRY_SECONDS
+                        ),
                         or_(
                             CapReservation.lease_owner.is_(None),
                             CapReservation.lease_expires_at.is_(None),
