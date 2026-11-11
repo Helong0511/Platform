@@ -44,7 +44,10 @@
 """
 from typing import Dict, Any
 
-from app.scheduler_module.task_names import CAP_RESERVATION_RECOVERY_TASK_NAME
+from app.scheduler_module.task_names import (
+    CAP_RESERVATION_RECOVERY_TASK_NAME,
+    THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
+)
 
 # 任务配置类型定义
 TaskConfig = Dict[str, Any]
@@ -473,6 +476,16 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "result_getter_function": "get_task_result",
         "cron_expression": "*/1 * * * *",
         "description": "每分钟处理到期的渠道/产品 Postback 转发任务与失败重试，确保进程重启后可恢复",
+    },
+
+    THIRD_PARTY_REPORT_OUTBOX_TASK_NAME: {
+        "task_name": THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
+        "task_module": "app.scheduler_module.tasks.third_party_report_tasks",
+        "task_function": "process_third_party_report_outbox_task",
+        "result_getter_module": "app.scheduler_module.tasks.third_party_report_tasks",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "*/1 * * * *",
+        "description": "每分钟扫描并恢复到期的第三方 Postback Report Outbox，按当前短链/斗篷配置解析像素凭据",
     },
 
 }
