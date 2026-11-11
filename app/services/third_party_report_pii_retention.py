@@ -100,6 +100,7 @@ async def scrub_expired_third_party_report_pii(
             row.pii_scrubbed_at = now
         if rows:
             await db.commit()
+            logger.info("第三方上报 PII 到期清理完成：scrubbed=%s retention_days=%s", len(rows), days)
         else:
             await db.rollback()
 
