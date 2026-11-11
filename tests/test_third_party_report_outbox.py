@@ -757,6 +757,7 @@ async def test_outbox_marks_deleted_short_link_terminal_without_retry(monkeypatc
 
 async def test_manual_retry_sql_rejects_deleted_short_link_events(monkeypatch):
     from sqlalchemy.dialects import mysql
+    from app.core import third_party_report as report_core
 
     captured = {}
 
@@ -780,14 +781,14 @@ async def test_manual_retry_sql_rejects_deleted_short_link_events(monkeypatch):
         async def __aexit__(self, *args):
             return False
 
-    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(report_core, "AsyncSessionLocal", lambda: SessionContext())
     monkeypatch.setattr(
-        outbox,
+        report_core,
         "get_app_now_naive",
         lambda: datetime(2026, 11, 11, 12, 0, 0),
     )
 
-    assert await outbox.retry_report_log(94) is False
+    assert await report_core.retry_report_log(94) is False
     assert "third_party_report_logs.error_message is null" in captured["sql"]
     assert "third_party_report_logs.error_message !=" in captured["sql"]
     params = " ".join(str(value) for value in captured["params"].values())
