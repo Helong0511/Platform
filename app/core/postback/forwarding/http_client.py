@@ -65,6 +65,9 @@ class HttpClient:
     CONNECT_TIMEOUT = 5
     # 限制重定向跳数，确保单次下游 HTTP 请求的最长耗时可被队列租约覆盖。
     MAX_REDIRECTS = 10
+    # HTTPX 的读超时是单次读操作超时，不是整个响应的总时限；
+    # 使用外层总 deadline，避免下游逐块慢速响应无限占用队列租约。
+    TOTAL_REQUEST_TIMEOUT_SECONDS = 60
 
     @staticmethod
     async def send_request(
@@ -98,13 +101,19 @@ class HttpClient:
             ) as client:
 
                 if normalized_method == "GET":
-                    response = await client.get(url, params=params, headers=headers)
+                    response = await asyncio.wait_for(
+                        client.get(url, params=params, headers=headers),
+                        timeout=HttpClient.TOTAL_REQUEST_TIMEOUT_SECONDS,
+                    )
                 elif normalized_method == "POST":
-                    response = await client.post(
-                        url,
-                        params=params,
-                        json=json_data,
-                        headers=headers,
+                    response = await asyncio.wait_for(
+                        client.post(
+                            url,
+                            params=params,
+                            json=json_data,
+                            headers=headers,
+                        ),
+                        timeout=HttpClient.TOTAL_REQUEST_TIMEOUT_SECONDS,
                     )
                 else:  # 前置白名单校验保证不可达
                     raise AssertionError("未处理的 Postback HTTP 方法")
@@ -118,6 +127,14 @@ class HttpClient:
                 )
 
                 return success, response.status_code, content
+
+        except asyncio.TimeoutError:
+            logger.error(
+                "HTTP 请求超过总时限：%s（%.0fs）",
+                url[:100],
+                HttpClient.TOTAL_REQUEST_TIMEOUT_SECONDS,
+            )
+            return False, 0, "Timeout: Total request deadline exceeded"
 
         except httpx.TimeoutException as e:
             logger.error(f"HTTP 请求超时：{url[:100]}, error={str(e)}")
