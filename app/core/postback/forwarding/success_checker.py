@@ -55,7 +55,7 @@ class SuccessChecker:
             success = False
             message = f"不支持的成功检查类型：{check_type}"
 
-        logger.info("Postback 成功检查：%s, success=%s", message, success)
+        logger.info("Postback 成功检查：type=%s success=%s", check_type, success)
         return success, message
 
     @staticmethod
@@ -68,7 +68,7 @@ class SuccessChecker:
                 raise ValueError("成功检查配置必须是 JSON 对象")
             return config
         except (json.JSONDecodeError, ValueError, TypeError) as exc:
-            logger.warning("成功检查配置无效，使用默认状态码规则：%s", exc)
+            logger.warning("成功检查配置无效，使用默认状态码规则：%s", type(exc).__name__)
             return SuccessChecker.DEFAULT_SUCCESS_CHECK.copy()
 
     @staticmethod
