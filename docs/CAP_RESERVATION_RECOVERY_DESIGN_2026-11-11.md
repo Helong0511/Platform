@@ -338,3 +338,10 @@ NEEDS_RECONCILIATION
 ### 最新跨存储验收证据
 
 Run #783 / SHA `042026e6c654753ec91b2ec72748c85d94b11f61`：Backend、Frontend、Playwright Mock API E2E 全绿，293 passed、1 skipped。此 SHA 已覆盖真实隔离 MySQL + Redis 的崩溃恢复、提交保留、并发 claim 和双恢复 Worker 测试。后续任何代码提交仍须重新验收最新 SHA。
+
+
+### 14. 租约与 Redis token 丢失边界补充（2026-11-11）
+
+- 重复 Postback 不得仅因 PREPARED/RESERVED 租约过期就接管活动账本。旧 Worker 可能只是长时间暂停，并未死亡；若新请求复用同一 Redis token，旧请求随后恢复并回滚，可能撤销新请求已提交的名额。现已改为：PREPARED/RESERVED 对业务重试始终返回处理中；只有恢复 Worker 在核验正式转化与 Redis token 后才能接管。
+- Redis token ABSENT 不等于没有发生过 INCR。allkeys 淘汰策略、人工删除或部分 Redis 数据丢失可能只删除 token 而保留 counter。恢复逻辑现要求同时检查 counter key：只有 token ABSENT 且 counter key 明确不存在，才可结束为 ROLLED_BACK；counter 仍存在或无法确认存在性时进入 NEEDS_RECONCILIATION，不执行 DECR。
+- 对应新增隔离 MySQL 集成测试：过期租约不得被重复 Postback 抢占；新增恢复单测：token 丢失但 counter 仍存在时必须转人工对账。
