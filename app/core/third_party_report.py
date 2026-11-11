@@ -349,11 +349,9 @@ async def send_third_party_report(
             existing_status = await _get_report_status(report_log_id)
             if existing_status == "success":
                 logger.info(
-                    "[第三方上报] 相同事件已成功上报，跳过重复发送: source=%s adsid=%s event=%s conversion_id=%s",
-                    source,
-                    adsid,
+                    "[第三方上报] 相同事件已成功上报，跳过重复发送: report_log_id=%s event=%s",
+                    report_log_id,
                     event,
-                    conversion_id,
                 )
                 return {"success": True, "deduplicated": True, "report_log_id": report_log_id}
             return {
@@ -418,7 +416,7 @@ async def send_third_party_report(
         if missing_fields:
             logger.warning(
                 f"[第三方上报] {event} 事件字段不完整，仍尝试上报: "
-                f"missing_fields={missing_fields}, adsid={adsid}, conversion_id={conversion_id}"
+                f"report_log_id={report_log_id}, missing_fields={missing_fields}"
             )
 
     # 如果是 Purchase 事件，更新对应的 ViewContent 事件的 conversion_id
@@ -439,9 +437,9 @@ async def send_third_party_report(
                     # 更新 ViewContent 事件的 conversion_id
                     view_content_log.conversion_id = conversion_id
                     await db.commit()
-                    logger.info(f"[第三方上报] 已更新 ViewContent 事件的 conversion_id: adsid={adsid}, conversion_id={conversion_id}")
+                    logger.info("[第三方上报] 已关联 ViewContent 转化日志：report_log_id=%s", report_log_id)
                 else:
-                    logger.info(f"[第三方上报] 未找到对应的 ViewContent 事件: adsid={adsid}")
+                    logger.info("[第三方上报] 未找到可关联的 ViewContent 事件：report_log_id=%s", report_log_id)
         except Exception as e:
             logger.warning(f"[第三方上报] 更新 ViewContent 事件的 conversion_id 失败: {e}")
 
@@ -518,9 +516,8 @@ async def send_third_party_report(
             )
 
             logger.info(
-                "[第三方上报] 开始发送 (尝试 %s/%s): adsid=%s, use_hash=%s, email=%s, phone=%s",
-                attempt + 1, max_retries, adsid, use_hash,
-                mask_email(email), mask_phone(phone),
+                "[第三方上报] 开始发送 (尝试 %s/%s): report_log_id=%s event=%s use_hash=%s",
+                attempt + 1, max_retries, report_log_id, event, use_hash,
             )
             if use_hash and (email or phone):
                 logger.debug(
@@ -542,8 +539,8 @@ async def send_third_party_report(
                             log_id = response_json.get("fbtrace_id", "")
                             report_success_time = get_app_now_naive()
                             logger.info(
-                                "[第三方上报] adsid=%s 成功 (尝试 %s/%s), fbtrace_id=%s",
-                                adsid, attempt + 1, max_retries, log_id,
+                                "[第三方上报] report_log_id=%s 成功 (尝试 %s/%s), fbtrace_id=%s",
+                                report_log_id, attempt + 1, max_retries, log_id,
                             )
                             
                             await update_report_log(
@@ -701,9 +698,8 @@ async def send_third_party_report(
             )
 
             logger.info(
-                "[第三方上报] 开始发送 (尝试 %s/%s - 不使用哈希): adsid=%s, email=%s, phone=%s",
-                max_retries + 1, max_retries + 1, adsid,
-                mask_email(email), mask_phone(phone),
+                "[第三方上报] 开始发送 (尝试 %s/%s - 不使用哈希): report_log_id=%s event=%s",
+                max_retries + 1, max_retries + 1, report_log_id, event,
             )
 
             # 增加超时时间，应对网络延迟
@@ -719,8 +715,8 @@ async def send_third_party_report(
                             log_id = response_json.get("fbtrace_id", "")
                             report_success_time = get_app_now_naive()
                             logger.info(
-                                "[第三方上报] adsid=%s 成功 (尝试 %s/%s - 不使用哈希), fbtrace_id=%s",
-                                adsid, max_retries + 1, max_retries + 1, log_id,
+                                "[第三方上报] report_log_id=%s 成功 (尝试 %s/%s - 不使用哈希), fbtrace_id=%s",
+                                report_log_id, max_retries + 1, max_retries + 1, log_id,
                             )
                             
                             await update_report_log(
