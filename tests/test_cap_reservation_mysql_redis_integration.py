@@ -653,3 +653,180 @@ async def test_expired_lease_is_not_reclaimed_by_duplicate_postback(monkeypatch)
         if engine is not None:
             await engine.dispose()
         _drop_isolated_mysql_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_tcp_proxy_drops_real_commit_ack_and_preserves_cap_reservation(monkeypatch):
+    """通过 TCP 代理丢弃真实 MySQL COMMIT OK 包，验证断线后的 fail-safe 行为。"""
+    database = _create_isolated_mysql_database()
+    direct_engine = None
+    proxy_engine = None
+    proxy_server = None
+    commit_seen = asyncio.Event()
+    ack_dropped = asyncio.Event()
+    try:
+        _initialize_isolated_schema(database)
+        password = quote_plus(os.getenv("MYSQL_INTEGRATION_PASSWORD", ""))
+        user = quote_plus(os.getenv("MYSQL_INTEGRATION_USER", "root"))
+        mysql_port = int(os.getenv("MYSQL_INTEGRATION_PORT", "3306"))
+        direct_url = (
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{mysql_port}/{database}"
+            "?charset=utf8mb4"
+        )
+        direct_engine = create_async_engine(direct_url, pool_pre_ping=True)
+
+        async def proxy_client(client_reader, client_writer):
+            upstream_reader, upstream_writer = await asyncio.open_connection(
+                MYSQL_HOST, mysql_port
+            )
+
+            async def forward_client_to_mysql():
+                buffer = bytearray()
+                while True:
+                    chunk = await client_reader.read(65536)
+                    if not chunk:
+                        break
+                    buffer.extend(chunk)
+                    # MySQL packet = 3-byte payload length + sequence + payload。
+                    while len(buffer) >= 4:
+                        payload_length = int.from_bytes(buffer[:3], "little")
+                        packet_length = payload_length + 4
+                        if len(buffer) < packet_length:
+                            break
+                        packet = bytes(buffer[:packet_length])
+                        payload = packet[4:]
+                        upstream_writer.write(packet)
+                        # 只识别 COM_QUERY 的完整 COMMIT 语句，避免匹配 SQL 参数文本。
+                        if payload[:1] == b"\\x03" and payload[1:].strip().upper() == b"COMMIT":
+                            commit_seen.set()
+                        await upstream_writer.drain()
+                        del buffer[:packet_length]
+                if buffer:
+                    upstream_writer.write(buffer)
+                    await upstream_writer.drain()
+                try:
+                    upstream_writer.write_eof()
+                except (AttributeError, OSError, RuntimeError):
+                    pass
+
+            async def forward_mysql_to_client():
+                while True:
+                    chunk = await upstream_reader.read(65536)
+                    if not chunk:
+                        break
+                    if commit_seen.is_set():
+                        # MySQL 已执行 COMMIT 并返回结果；故意丢弃 OK 包并断开客户端 TCP。
+                        ack_dropped.set()
+                        client_writer.close()
+                        upstream_writer.close()
+                        return
+                    client_writer.write(chunk)
+                    await client_writer.drain()
+
+            try:
+                await asyncio.gather(
+                    forward_client_to_mysql(),
+                    forward_mysql_to_client(),
+                    return_exceptions=True,
+                )
+            finally:
+                client_writer.close()
+                upstream_writer.close()
+                try:
+                    await client_writer.wait_closed()
+                except (OSError, RuntimeError):
+                    pass
+                try:
+                    await upstream_writer.wait_closed()
+                except (OSError, RuntimeError):
+                    pass
+
+        proxy_server = await asyncio.start_server(proxy_client, "127.0.0.1", 0)
+        proxy_port = proxy_server.sockets[0].getsockname()[1]
+        proxy_url = (
+            f"mysql+aiomysql://{user}:{password}@127.0.0.1:{proxy_port}/{database}"
+            "?charset=utf8mb4"
+        )
+        proxy_engine = create_async_engine(
+            proxy_url,
+            pool_pre_ping=False,
+            connect_args={"connect_timeout": 5, "read_timeout": 5, "write_timeout": 5},
+        )
+        proxy_sessions = async_sessionmaker(
+            bind=proxy_engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+
+        conversion_id = 990002
+        rolled_back = []
+        finalized = []
+
+        async def renew_lease(*args, **kwargs):
+            return None
+
+        async def finalize(*args, **kwargs):
+            finalized.append((args, kwargs))
+
+        async def rollback_reservations(reservations):
+            rolled_back.extend(reservations)
+
+        from app.core.postback import processor as processor_module
+        monkeypatch.setattr(
+            processor_module.CapReservationLedger, "renew_lease", renew_lease
+        )
+        monkeypatch.setattr(
+            processor_module.CapReservationLedger, "finalize", finalize
+        )
+        monkeypatch.setattr(
+            CapChecker, "rollback_reservations", rollback_reservations
+        )
+
+        reservations = [
+            (
+                "daily", 77, 12, datetime(2026, 11, 11),
+                "a" * 64, "b" * 64, "ci-lease-owner", True,
+            )
+        ]
+        async with proxy_sessions() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO postback_conversions "
+                    "(id, platform, conversion_id, event_name) "
+                    "VALUES (:id, :platform, :conversion_id, :event_name)"
+                ),
+                {
+                    "id": conversion_id,
+                    "platform": "ci",
+                    "conversion_id": "tcp-proxy-commit-ack-lost",
+                    "event_name": "purchase",
+                },
+            )
+            with pytest.raises(Exception):
+                await PostbackProcessor._commit_conversion_with_cap_reconciliation(
+                    db=session,
+                    conversion_id=conversion_id,
+                    cap_reservations=reservations,
+                )
+
+        assert commit_seen.is_set(), "TCP 代理未观察到 MySQL COMMIT 命令"
+        assert ack_dropped.is_set(), "TCP 代理未丢弃 COMMIT 响应并断开连接"
+        assert rolled_back == [], "COMMIT 结果未知时不得回退 Redis Cap reservation"
+        assert finalized == [], "连接断开且无法确认时应保留账本，由恢复 Worker 对账"
+
+        # 使用绕过代理的新连接确认 MySQL 实际已提交；只使用本测试随机数据库。
+        async with direct_engine.connect() as connection:
+            persisted = await connection.scalar(
+                text("SELECT COUNT(*) FROM postback_conversions WHERE id = :id"),
+                {"id": conversion_id},
+            )
+        assert persisted == 1, "MySQL 实际未提交，无法证明 COMMIT ACK 丢失场景"
+    finally:
+        if proxy_server is not None:
+            proxy_server.close()
+            await proxy_server.wait_closed()
+        if proxy_engine is not None:
+            await proxy_engine.dispose()
+        if direct_engine is not None:
+            await direct_engine.dispose()
+        _drop_isolated_mysql_database(database)
