@@ -95,7 +95,11 @@ def _is_outbox_processing(log, now: Optional[datetime] = None) -> bool:
 
 def _can_requeue_report(log, now: Optional[datetime] = None) -> bool:
     """与 retry_report_log 使用同一配置引用及租约条件，避免前端误显示不可执行操作。"""
-    if not getattr(log, "outbox_enqueued", False) or getattr(log, "status", None) != "failed":
+    if (
+        not getattr(log, "outbox_enqueued", False)
+        or getattr(log, "status", None) != "failed"
+        or getattr(log, "pii_scrubbed_at", None) is not None
+    ):
         return False
     has_config_reference = bool(
         getattr(log, "short_link_id", None)
