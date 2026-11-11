@@ -189,6 +189,7 @@ class CapReservationLedger:
         if row.state == "ROLLED_BACK":
             row.state = "PREPARED"
             row.redis_reserved = False
+            row.redis_token_cleaned = False
             row.prepared_at = now
             row.reserved_at = None
             row.finalized_at = None
