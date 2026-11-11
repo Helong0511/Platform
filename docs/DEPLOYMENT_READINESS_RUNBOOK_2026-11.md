@@ -276,3 +276,31 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - Run #1084（SHA `de9d5e58497e4567b179a6b7e03fac62ed8f5567`）曾因 4 个错误提示断言失败（388 passed、4 failed、1 skipped）；已修正文件名校验错误归一化。该失败 run 不计入验收。Run #1085：[查看 CI](https://github.com/Helong0511/Platform/actions/runs/42999653442)。
 - 仍需在部署环境隔离副本验证目录属主/权限、原子替换和文件系统语义；CI 不等于生产文件系统演练。没有连接生产服务器或真实第三方接口。
 - PR #1 保持 Draft，不合并、不部署。
+
+
+## 18. Outbox 尝试预算持久化与 Daily Reservation 孤儿 token 恢复（2026-11-11，Run #1095 / #1097）
+
+### Outbox 发送预算与 PII 清理竞态
+
+- Run #1089（SHA `e09a7ce36eede66cb8d870bdb14d7718aefacbdb`）新增 PII 清理与 Outbox 发送之间的竞态保护：发送租约条件 UPDATE 同时要求 `pii_scrubbed_at IS NULL`，并增加“Worker 已读取载荷、清理随后提交、最终认领失败”的回归测试。Backend / Frontend / Playwright 全部通过。
+- 后续复核发现固定每轮 3 次哈希请求 + 1 次非哈希兜底可能在累计次数接近 `max_attempts` 时超出预算。现在按数据库剩余预算计算哈希尝试次数和兜底是否可执行；认领 SQL 也要求 `attempt_count < max_attempts`，耗尽事件不会再占用 300 秒租约。
+- `update_report_log` 现在返回持久化成功/失败状态。哈希请求或非哈希兜底请求发送前，必须先成功提交本次 `attempt_count` 与请求载荷；若数据库未确认持久化，则 fail-closed 暂停外部请求，避免 DB 故障时持续发送而突破自动重试预算。
+- 新增预算边界测试（新事件、剩余 2 次、剩余 1 次、预算耗尽、不使用哈希）及“尝试次数持久化失败不得调用第三方”的回归测试。
+- Run #1093：SHA `e3142cca605e525e67418ecbe4b3752f4cbdd77f`，Backend **394 passed、1 skipped、1 warning**，Frontend Lint/Build/Playwright 全部通过。
+- Run #1097：SHA `4a4b7613cc9fa78729e13bc3342bd3c90cef1e70`，Backend **396 passed、1 skipped、1 warning**，Frontend Lint/Build/Playwright 全部通过。Run #1097：[查看 CI](https://github.com/Helong0511/Platform/actions/runs/43002383440)。
+
+### Cap Daily 计数器与 Reservation token 生命周期
+
+- Daily counter 设置 48 小时 TTL；Reservation token 不设置固定 TTL，必须等账本终态后清理。
+- 发现恢复任务只在 token 状态 `UNKNOWN` 时处理“Daily 业务日已过且 counter key 已自然过期”的孤儿 token；token 状态实际为 `PRESENT` 时，旧逻辑仍尝试对已不存在的 counter 执行原子回滚，随后进入 `NEEDS_RECONCILIATION`，无法自动收敛。
+- 现已补充 `PRESENT` 分支：确认业务日期至少已过 2 天且 Redis counter key 明确不存在时，只删除孤儿 token，不执行 `DECR`，再将账本结束为 `ROLLED_BACK`。若 counter 仍存在或无法确认，继续保留证据并进入对账流程。
+- 新增 token `PRESENT`、Daily counter 缺失的独立回归测试；保留既有 `UNKNOWN` / `ABSENT` 分支的 fail-closed 保护。
+- Run #1095：SHA `69518a653720f05a13a8930c7f1dbcd0d2d5936a`，Backend **395 passed、1 skipped、1 warning**，Frontend Lint/Build/Playwright 全部通过。Run #1095：[查看 CI](https://github.com/Helong0511/Platform/actions/runs/43002032772)。
+
+### 本节结论与剩余限制
+
+- 上述验证仅使用 GitHub Actions 临时 MySQL / Redis、合成数据及 Mock API；没有连接生产服务器、生产数据库、生产 Redis、生产队列或真实第三方接口。
+- 第三方上报采用 at-least-once + 稳定 event_id 幂等保护，不承诺 exactly-once。COMMIT ACK 丢失、远端已接收但本地 ACK 未确认时，仍可能重试同一 event_id。
+- 手工管理员重试会重置该事件当前自动重试计数；属于显式人工操作，仍需结合审计日志、权限与业务流程核查。
+- Daily 业务日过期后，只有 counter key 明确不存在才清理孤儿 token；Redis 查询 UNKNOWN、counter 仍存在或状态不一致时绝不猜测扣减。
+- PR 仍保持 Draft。完整 migration/backup/rollback、Outbox 配置生命周期压力组合、PII 政策审批及其它业务模块全量复核仍是合并/上线阻断项。
