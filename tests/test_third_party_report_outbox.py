@@ -164,7 +164,12 @@ async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
 
     async def send(**kwargs):
         captured["send"] = kwargs
-        return {"success": True, "report_log_id": 91}
+        # 兼容旧发送函数成功路径返回 None；worker 必须回读持久化状态。
+        return None
+
+    async def report_status(report_log_id):
+        assert report_log_id == 91
+        return "success"
 
     monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
     monkeypatch.setattr(
@@ -174,6 +179,9 @@ async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
     )
     monkeypatch.setattr(outbox, "_resolve_pixel_credentials", resolve)
     monkeypatch.setattr(outbox, "send_third_party_report", send)
+    monkeypatch.setattr(
+        "app.core.third_party_report._get_report_status", report_status
+    )
 
     result = await outbox.process_postback_report_outbox_item(91)
 
