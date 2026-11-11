@@ -257,7 +257,7 @@ async def test_real_redis_cap_reservation_token_lifetime_and_corrupt_counter_fai
             RedisCapManager._ROLLBACK_RESERVATION_LUA, 2,
             daily_key, daily_token,
         )
-        assert duplicate_rollback == 0
+        assert duplicate_rollback == -3  # token 缺失必须进入对账，不能假报成功
         assert await redis.get(daily_key) == "3"
     finally:
         await redis.delete(
