@@ -340,3 +340,31 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - 代码层的代理头信任边界及 Nginx 头覆盖配置已修复并通过隔离 CI。
 - 生产防火墙/安全组是否限制源站访问无法从仓库代码证明，仍需部署前人工核实。
 - PR 保持 Draft；不合并、不部署。其余 migration/backup/rollback、Outbox/Cap 故障组合、PII 政策和其它业务模块审计仍未关闭。
+
+
+## 20. Cap Reservation 批量恢复租约续期与 MySQL rowcount 边界（2026-11-11，Run #1113 / #1114）
+
+### 发现的问题
+
+- 恢复 Worker 每批最多认领 100 条记录，所有行最初使用同一个 300 秒租约截止时间，然后按行串行执行 MySQL 查询和 Redis 检查/回滚。
+- Redis 故障时单次 socket timeout 可达 5 秒；后半批记录可能在轮到处理前租约已过期，被其他 Worker 接管。旧 Worker 若仍继续处理，会与新 owner 争抢同一条 reservation。
+- 增加逐条续租后，第一次 MySQL + Redis 集成测试又暴露 rowcount 边界：刚完成批量认领时，续租写入与原租约截止时间可能完全相同；MySQL 在 changed-rows 语义下返回 rowcount=0，导致 Worker 误以为 lease 已丢失并跳过记录。
+
+### 修复
+
+- 新增 `CapReservationLedger.renew_recovery_lease`：只允许当前 `lease_owner` 续租；支持 PREPARED、RESERVED、NEEDS_RECONCILIATION，以及尚未清理 token 的 COMMITTED 终态。
+- 恢复 Worker 每条记录开始处理前都续租；续租返回 false 时增加 `lease_lost` 计数并立即跳过，不能继续检查/修改 Redis。
+- 续租截止时间至少比当前时间多 `lease_seconds + 1` 秒，确保与刚认领时的截止时间不同，避免 MySQL changed-row count=0 被误判。
+- 新增单元测试：模拟批次第二条记录已被其他 Worker 接管，验证旧 Worker 只处理第一条，第二条不再触碰 Redis。
+- 保留 MySQL + Redis 真实隔离集成测试，覆盖孤儿预留回滚、已提交转化保留/清理 token、NEEDS_RECONCILIATION 退避后恢复，以及多恢复 Worker 不重复回滚。
+
+### CI 证据
+
+- Run #1113（SHA `b13b052b109766f0fecbfcc5d56a296ae57b560a`）出现 **4 failed、399 passed、1 skipped、1 warning**。失败集中在 4 个真实 MySQL + Redis 恢复集成测试，根因是续租 SQL 的截止时间与原值相同，rowcount=0 被误判为 lease_lost。保留该失败记录。
+- Run #1114（SHA `eff1377092acf6b3aec55c73ab79df0369879ed2`）：Backend **403 passed、1 skipped、1 warning**；Frontend Lint、Build、Playwright Mock API E2E 全部通过。Run #1114：[查看 CI](https://github.com/Helong0511/Platform/actions/runs/43004636477)。
+
+### 剩余限制
+
+- 此修复避免批次后半段的旧 owner 在租约丢失后继续操作；单条 Redis 操作仍依赖 Redis 客户端的 5 秒 socket timeout 和任务级异常处理。
+- MySQL/Redis 集成测试只使用 CI 临时实例和随机合成标识，不连接生产服务。
+- 完整 migration/backup/rollback、PII 保留政策、Outbox 配置生命周期组合及其它业务模块全量审计仍是合并/上线阻断项。PR 保持 Draft。
