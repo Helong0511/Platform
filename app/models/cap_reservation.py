@@ -4,7 +4,7 @@ Cap Redis reservation 持久化账本模型。
 该表记录 Redis 计数预留与 Postback 数据库事务之间的跨存储状态。
 不设置 Offer/Publisher 外键：账本必须在业务对象删除后仍保留恢复证据。
 """
-from sqlalchemy import Column, Integer, String, Date, DateTime, Text, Index, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Date, DateTime, Text, Boolean, Index, UniqueConstraint
 
 from app.core.utils import get_app_now_naive
 from app.models.base import Base
@@ -28,6 +28,7 @@ class CapReservation(Base):
     business_date = Column(Date, nullable=True, comment="Daily 业务日期；Total 必须为 NULL")
     redis_counter_key = Column(String(255), nullable=False, comment="Redis 计数器 Key 快照")
     redis_token_key = Column(String(512), nullable=False, comment="Redis reservation token Key 快照")
+    redis_reserved = Column(Boolean, nullable=False, default=False, comment="是否确认 Redis Lua 已成功预留；区分 fail-open 无 token 路径")
     state = Column(
         String(24), nullable=False, default="PREPARED",
         comment="状态：PREPARED/RESERVED/COMMITTED/ROLLED_BACK/NEEDS_RECONCILIATION",
