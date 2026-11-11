@@ -410,3 +410,61 @@ async def test_wrong_lease_owner_cannot_finalize_or_delete_reservation_token(mon
         if engine is not None:
             await engine.dispose()
         _drop_isolated_mysql_database(database)
+
+
+@pytest.mark.asyncio
+async def test_expired_lease_is_not_reclaimed_by_duplicate_postback(monkeypatch):
+    """租约过期不代表旧 worker 已死亡；只能由恢复 Worker 核验后接管。"""
+    database = _create_isolated_mysql_database()
+    engine = None
+    try:
+        _initialize_isolated_schema(database)
+        password = quote_plus(os.getenv("MYSQL_INTEGRATION_PASSWORD", ""))
+        user = quote_plus(os.getenv("MYSQL_INTEGRATION_USER", "root"))
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:"
+            f"{int(os.getenv('MYSQL_INTEGRATION_PORT', '3306'))}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(ledger_module, "AsyncSessionLocal", session_factory)
+
+        identity = {
+            "platform": "ci",
+            "conversion_id": f"expired-lease-{uuid.uuid4().hex}",
+            "event_name": "purchase",
+            "offer_id": int(uuid.uuid4().int % 900_000_000) + 100_000_000,
+            "publisher_id": None,
+            "cap_kind": "total",
+            "business_date": None,
+        }
+        first, claimed, first_owner = await CapReservationLedger.prepare_and_claim(**identity)
+        assert claimed is True
+        assert first_owner
+
+        async with session_factory() as session:
+            await session.execute(
+                update(CapReservation)
+                .where(CapReservation.reservation_key == first.reservation_key)
+                .values(lease_expires_at=get_app_now_naive() - timedelta(seconds=1))
+            )
+            await session.commit()
+
+        duplicate, duplicate_claimed, duplicate_owner = (
+            await CapReservationLedger.prepare_and_claim(**identity)
+        )
+
+        assert duplicate.reservation_key == first.reservation_key
+        assert duplicate_claimed is False
+        assert duplicate_owner is None
+        assert duplicate.lease_owner == first_owner
+        assert duplicate.state == "PREPARED"
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_mysql_database(database)
