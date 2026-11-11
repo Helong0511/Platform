@@ -103,6 +103,7 @@ class ThirdPartyReportLogListResponse(BaseSchema):
     outbox_error_category: Optional[str] = Field(None, description="脱敏后的 Outbox 失败原因分类")
     report_params_preview: Optional[str] = Field(None, description="脱敏后的上报参数预览")
     can_requeue: bool = Field(False, description="当前是否满足人工重新排队条件")
+    outbox_payload_editable: bool = Field(False, description="Outbox 是否仍允许修改发送载荷")
 
     model_config = {
         "from_attributes": True
