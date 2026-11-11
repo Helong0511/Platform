@@ -58,7 +58,7 @@ class DataNormalizer:
             'raw_data': raw_data,  # 保存原始数据
         }
         
-        logger.debug(f"数据标准化完成：platform={platform}, conversion_id={normalized['conversion_id']}")
+        logger.debug("数据标准化完成：platform=%s field_count=%s", platform, len(normalized))
         return normalized
     
     @staticmethod
