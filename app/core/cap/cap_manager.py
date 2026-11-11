@@ -440,28 +440,31 @@ async def reset_daily_caps(db: AsyncSession) -> None:
     会丢失已经发生的 reservation。历史日期 key 由 TTL 自然回收。
     """
     try:
-        now = get_app_now_naive()
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-
+        # 先锁定全部有效的每日 Cap，再读取业务日期。
+        # 不能在等待行锁前计算 today_start：任务可能在锁等待期间跨过午夜，
+        # 用旧日期筛选/重置会漏掉刚跨日的记录，或写入过期的日期标记。
         query = (
             select(OfferCap)
             .where(
                 and_(
                     OfferCap.is_active == True,
                     OfferCap.daily_cap > 0,
-                    or_(
-                        OfferCap.cap_start_date.is_(None),
-                        OfferCap.cap_start_date < today_start,
-                    ),
                 )
             )
             .order_by(OfferCap.id.asc())
             .with_for_update()
         )
         result = await db.execute(query)
-        caps_to_reset = result.scalars().all()
+        locked_caps = result.scalars().all()
 
-        # 行锁保证与 increment_cap_count 的 SELECT ... FOR UPDATE 串行执行。
+        # 必须在获得所有目标行锁之后读取业务日期，确保与转化预留串行化时使用当前日期。
+        now = get_app_now_naive()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        caps_to_reset = [
+            cap for cap in locked_caps
+            if cap.cap_start_date is None or cap.cap_start_date < today_start
+        ]
+
         # 不通过 bulk UPDATE 绕开 ORM 行锁状态，也不清理今天可能已经创建的 Redis key。
         for cap in caps_to_reset:
             cap.current_daily_count = 0
