@@ -33,7 +33,7 @@ class ThirdPartyReportLog(Base):
     event_key = Column(
         String(64),
         nullable=False,
-        comment='事件幂等键：source、adsid、event、conversion_id 的 SHA-256',
+        comment='事件幂等键：稳定事件身份字段的 SHA-256（ViewContent 不含后补 conversion_id）',
     )
     conversion_id = Column(String(255), nullable=True, index=True, comment='转化ID')
     use_hash = Column(Boolean, default=True, nullable=False, comment='是否对email、ip、phone进行哈希处理：True=哈希，False=不哈希')
