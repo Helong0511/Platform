@@ -54,22 +54,22 @@ def _mask_report_pii(value: Optional[str], field: str) -> Optional[str]:
     if not raw:
         return raw
     normalized = field.lower()
-    if normalized == "email":
+    if normalized in {"email", "em"}:
         if "@" not in raw:
             return "***"
         local, domain = raw.rsplit("@", 1)
         return f"{local[:1]}***@{domain}"
-    if normalized == "phone":
+    if normalized in {"phone", "ph"}:
         digits = re.sub(r"\D", "", raw)
         if len(digits) < 7:
             return "***"
         return f"{digits[:3]}****{digits[-4:]}"
-    if normalized == "ip":
+    if normalized in {"ip", "client_ip_address"}:
         if ":" in raw:
             return raw.split(":")[0] + ":****"
         parts = raw.split(".")
         return ".".join(parts[:2] + ["*", "*"]) if len(parts) == 4 else "***"
-    if normalized in {"ua", "user_agent"}:
+    if normalized in {"ua", "user_agent", "client_user_agent"}:
         return "[已隐藏]"
     return raw
 
@@ -83,18 +83,23 @@ def _sanitize_report_params(raw: Optional[str]) -> Optional[str]:
     except (TypeError, ValueError):
         return "[参数内容不可解析，已隐藏]"
 
-    sensitive_keys = {"email", "phone", "ip", "ua", "user_agent"}
+    sensitive_keys = {
+        "email", "em", "phone", "ph", "ip", "client_ip_address",
+        "ua", "user_agent", "client_user_agent", "external_id",
+    }
 
     def sanitize(value):
         if isinstance(value, dict):
             cleaned = {}
             for key, item in value.items():
                 key_name = str(key).lower()
-                cleaned[key] = (
-                    _mask_report_pii(item, key_name)
-                    if key_name in sensitive_keys and item is not None
-                    else sanitize(item)
-                )
+                if key_name in sensitive_keys and item is not None:
+                    if isinstance(item, list):
+                        cleaned[key] = [_mask_report_pii(part, key_name) for part in item]
+                    else:
+                        cleaned[key] = _mask_report_pii(item, key_name)
+                else:
+                    cleaned[key] = sanitize(item)
             return cleaned
         if isinstance(value, list):
             return [sanitize(item) for item in value]
