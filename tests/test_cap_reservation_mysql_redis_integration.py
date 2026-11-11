@@ -664,6 +664,7 @@ async def test_mysql_tcp_proxy_drops_real_commit_ack_and_preserves_cap_reservati
     proxy_server = None
     commit_seen = asyncio.Event()
     ack_dropped = asyncio.Event()
+    observed_queries = []
     try:
         _initialize_isolated_schema(database)
         password = quote_plus(os.getenv("MYSQL_INTEGRATION_PASSWORD", ""))
@@ -697,8 +698,10 @@ async def test_mysql_tcp_proxy_drops_real_commit_ack_and_preserves_cap_reservati
                         payload = packet[4:]
                         upstream_writer.write(packet)
                         # 只识别 COM_QUERY 的完整 COMMIT 语句，避免匹配 SQL 参数文本。
-                        if payload[:1] == b"\\x03" and payload[1:].lstrip().upper().startswith(b"COMMIT"):
-                            commit_seen.set()
+                        if payload[:1] == b"\\x03":
+                            observed_queries.append(payload[1:].decode("utf-8", "replace")[:120])
+                            if payload[1:].lstrip().upper().startswith(b"COMMIT"):
+                                commit_seen.set()
                         await upstream_writer.drain()
                         del buffer[:packet_length]
                 if buffer:
@@ -802,12 +805,16 @@ async def test_mysql_tcp_proxy_drops_real_commit_ack_and_preserves_cap_reservati
                     "event_name": "purchase",
                 },
             )
-            with pytest.raises(Exception):
+            commit_error = None
+            try:
                 await PostbackProcessor._commit_conversion_with_cap_reconciliation(
                     db=session,
                     conversion_id=conversion_id,
                     cap_reservations=reservations,
                 )
+            except Exception as exc:
+                commit_error = exc
+            assert commit_error is not None, f"COMMIT 未产生断连异常；观察到的 SQL 命令：{observed_queries}"
 
         assert commit_seen.is_set(), "TCP 代理未观察到 MySQL COMMIT 命令"
         assert ack_dropped.is_set(), "TCP 代理未丢弃 COMMIT 响应并断开连接"
