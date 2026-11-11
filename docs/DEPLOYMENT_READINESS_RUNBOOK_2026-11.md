@@ -235,3 +235,17 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - 已修正 scrubbed Outbox 记录的 worker 查询过滤：现在可以读取到清理标记并返回明确的 `pii_payload_scrubbed` 拒绝原因，而不是因 SQL 过滤提前返回 `outbox_not_found`。
 - Run #1045：[查看 CI](https://github.com/Helong0511/Platform/actions/runs/42994911629)。
 - PII 自动清理仍未启用；必须由业务/合规负责人批准期限、目的、访问权限及适用司法辖区后，才允许设置非零天数。
+
+
+## 16. Gunicorn 多 Worker Pixel 凭证缓存一致性（2026-11-11）
+
+- Run #1063（SHA `5903b39a16bdfad25b510e115e152be6d8328cfe`）的 Backend、Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功；该 SHA 不含本节后续修复。
+- 复核发现 `CloakPixelMappingService` 使用进程内全局字典缓存 Pixel ID / CAPI Token，TTL 为 3600 秒。Gunicorn 多 Worker 之间不共享该字典；短链更新/删除或斗篷配置变更时，当前进程的同步失效函数无法通知其它 Worker。其它 Worker 因而可能在 TTL 内继续使用旧凭证、旧启停状态或旧配置。
+- 为先消除跨 Worker 继续使用旧凭证的正确性风险，本轮采取保守的临时措施：`get_pixel_config_by_dp_param` 每次都以数据库为权威来源，绕过本地凭证缓存；兼容保留 `use_cache` 参数和缓存失效 API，避免调用方接口破坏。数据库查询失败时返回无可用配置，不返回旧缓存。
+- 增加 `test_multiple_worker_instances_never_serve_stale_pixel_credentials`：模拟两个独立 Worker 服务实例；Worker A 读取旧配置后，数据库发生 Token/Pixel 轮换，随后两个实例再次查询都必须返回新值，且不能从各自本地字典命中旧配置。
+- 修复提交：`e9d5fb4`（绕过本地凭证缓存）、`6c4b9e9`（每次权威查询时清除当前进程遗留条目）、`fd78633`（多 Worker 回归测试）。
+- **性能代价**：每次解析 Pixel 配置都会执行数据库查询；需通过 CI 基准或隔离压测评估 QPS、数据库连接池占用和查询延迟。正确性优先于未经跨 Worker 证明的本地缓存性能。
+- 后续优化目标：引入 Redis 共享缓存与版本化失效协议（按 short_code / dp 维度），所有配置写入路径必须在数据库事务提交后发布失效版本；Redis 不可用或版本读取失败时必须绕过缓存并查询数据库，绝不回退到旧本地凭证。需覆盖多进程、多实例、Redis failover、网络分区、写提交与失效通知之间的竞态后，才能重新启用共享缓存。
+- 还需逐一审计 `cloak_configs` 的创建、更新、删除、启停、改名及桥页上传/删除路径，确认每条写路径均纳入同一失效协议。
+- 本轮仅使用隔离 CI 数据库/Redis 与合成凭证；未连接生产服务器、数据库、Redis 或真实 Meta API。当前修复等待最新 SHA 的完整 CI 结果，不得以 Run #1063 作为新 SHA 的验证证据。
+- PR #1 保持 Draft，不合并、不部署。
