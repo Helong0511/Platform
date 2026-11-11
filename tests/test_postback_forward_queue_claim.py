@@ -396,3 +396,82 @@ def test_forward_log_api_response_redacts_historical_personal_data():
         "private-click-id",
     ):
         assert sensitive_value not in serialized
+
+
+@pytest.mark.asyncio
+async def test_notification_sender_does_not_log_recipient_address(monkeypatch, caplog):
+    import logging
+
+    from app.core.postback.notification.sender import send_to_address
+
+    with caplog.at_level(logging.ERROR):
+        result = await send_to_address(
+            "buyer@example.invalid",
+            "unsupported-channel",
+            "synthetic notification",
+        )
+
+    assert result is False
+    assert "buyer@example.invalid" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_webhook_sender_does_not_log_url_or_response_body(monkeypatch, caplog):
+    import logging
+
+    from app.core import ssrf_guard
+    from app.core.postback.notification import sender
+
+    class Response:
+        status_code = 503
+        text = "buyer@example.invalid 203.0.113.10 secret-response"
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            return Response()
+
+    monkeypatch.setattr(ssrf_guard, "validate_outbound_url", lambda url: (True, ""))
+    monkeypatch.setattr(sender.httpx, "AsyncClient", FakeClient)
+
+    url = "https://hooks.invalid/path?email=buyer%40example.invalid"
+    with caplog.at_level(logging.ERROR):
+        result = await sender.send_webhook_notification(
+            url=url,
+            message="synthetic notification",
+        )
+
+    assert result is False
+    for sensitive_value in (
+        "buyer@example.invalid",
+        "203.0.113.10",
+        "secret-response",
+        "hooks.invalid/path?email",
+    ):
+        assert sensitive_value not in caplog.text
+
+
+def test_url_builder_does_not_log_expanded_tracking_parameters(caplog):
+    import logging
+
+    from app.core.postback.forwarding.url_builder import UrlBuilder
+
+    with caplog.at_level(logging.DEBUG):
+        url, params = UrlBuilder.build_postback_url(
+            "https://downstream.invalid/callback",
+            {"conversion_id": "private-conversion-id", "payout": "12.50"},
+            {"click_id": "private-click-id", "url_params": {}},
+        )
+
+    assert "private-conversion-id" in url
+    assert "private-click-id" in params["click_id"]
+    assert "private-conversion-id" not in caplog.text
+    assert "private-click-id" not in caplog.text
