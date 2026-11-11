@@ -11,7 +11,7 @@ import json
 from typing import Optional
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, update, or_, and_
+from sqlalchemy import select, update, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
