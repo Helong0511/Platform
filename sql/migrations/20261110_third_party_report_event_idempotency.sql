@@ -19,7 +19,7 @@
 -- 1. 先允许为空，兼容历史数据回填。
 ALTER TABLE third_party_report_logs
     ADD COLUMN event_key VARCHAR(64) NULL
-    COMMENT '事件幂等键：source、adsid、event、conversion_id 的 SHA-256'
+    COMMENT '事件幂等键：稳定事件身份字段的 SHA-256（ViewContent 不含后补 conversion_id）'
     AFTER event;
 
 -- 2. 与 app/core/third_party_report.py 的长度前缀算法保持一致；ViewContent 的后补 conversion_id 是关联元数据，不参与事件身份。
@@ -50,7 +50,7 @@ HAVING COUNT(*) > 1;
 ALTER TABLE third_party_report_logs
     DROP INDEX unique_source_adsid,
     MODIFY COLUMN event_key VARCHAR(64) NOT NULL
-        COMMENT '事件幂等键：source、adsid、event、conversion_id 的 SHA-256',
+        COMMENT '事件幂等键：稳定事件身份字段的 SHA-256（ViewContent 不含后补 conversion_id）',
     ADD UNIQUE INDEX unique_event_key (event_key);
 
 -- 5. 迁移后验证。
