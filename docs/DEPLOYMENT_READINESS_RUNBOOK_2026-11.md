@@ -77,7 +77,7 @@
 
 - 最新通过的跨存储 CI：Run #783，SHA `042026e6c654753ec91b2ec72748c85d94b11f61`。
 - Run #783：Backend / Frontend / Playwright Mock API E2E 全部成功；293 passed、1 skipped。
-- CI 使用临时 MySQL 8.0 数据库与 Redis DB14，包含真实跨存储孤儿回滚、已提交转化保留、并发 claim 和双恢复 Worker 验证。
+- CI 使用临时 MySQL 8.0 数据库与 Redis DB14，包含真实跨存储孤儿回滚、已提交转化保留、并发 claim 和双恢复 Worker 验证；当前账本 CHECK 约束需由最新 SHA 的迁移测试重新验证。
 - 上述证据仅证明 CI 隔离环境通过，不代表已在生产环境部署或验证。
 
 
