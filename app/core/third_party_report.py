@@ -532,10 +532,8 @@ async def send_third_party_report(
             # 增加超时时间，应对网络延迟
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(url, json=send_data, params=params)
-                logger.debug(
-                    "[第三方上报] 响应: status=%s, content=%s",
-                    response.status_code, response.text[:200],
-                )
+                # 第三方响应可能回显 user_data；日志只记录状态，不记录响应正文。
+                logger.debug("[第三方上报] 响应状态: status=%s", response.status_code)
 
                 if response.status_code == 200:
                     try:
@@ -552,7 +550,7 @@ async def send_third_party_report(
                                 report_log_id,
                                 status="success",
                                 response_status=response.status_code,
-                                response_body=response.text[:2000],
+                                response_body=None,
                                 log_id_from_response=log_id,
                                 report_success_time=report_success_time,
                                 completed_at=report_success_time,
@@ -562,7 +560,7 @@ async def send_third_party_report(
                             # 当Purchase事件上报成功时，发送Telegram通知
                             if fb_event_name == "Purchase":
                                 notification_message = f"💰 Purchase事件上报成功！\n"
-                                notification_message += f"广告事件ID: {adsid}\n"
+                                notification_message += f"上报日志ID: {report_log_id}\n"
                                 if amount:
                                     notification_message += f"金额: {amount} {currency if currency else ''}\n"
                                 notification_message += f"时间: {report_success_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
@@ -588,34 +586,34 @@ async def send_third_party_report(
                             
                             return
                         else:
-                            error_msg = f"message: {response_json.get('messages', 'unknown')}, fbtrace_id: {response_json.get('fbtrace_id', '')}"
+                            error_msg = "第三方未确认接收事件"
                             failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
                             logger.warning(
                                 f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{max_retries}): {error_msg}")
                             await update_report_log(
                                 report_log_id,
                                 response_status=response.status_code,
-                                response_body=response.text[:2000]
+                                response_body=None
                             )
                     except Exception as parse_err:
-                        error_msg = f"JSON解析失败: {str(parse_err)}, 原始响应: {response.text[:100]}"
+                        error_msg = "第三方响应 JSON 解析失败"
                         failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
                         logger.warning(
                             f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{max_retries}): {error_msg}")
                         await update_report_log(
                             report_log_id,
                             response_status=response.status_code,
-                            response_body=response.text[:2000]
+                            response_body=None
                         )
                 else:
-                    error_msg = f"状态码: {response.status_code}, 响应: {response.text[:100]}"
+                    error_msg = f"第三方返回 HTTP {response.status_code}"
                     failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
                     logger.warning(
                         f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{max_retries}): {error_msg}")
                     await update_report_log(
                         report_log_id,
                         response_status=response.status_code,
-                        response_body=response.text[:2000]
+                        response_body=None
                     )
 
         except httpx.TimeoutException:
@@ -627,9 +625,9 @@ async def send_third_party_report(
             failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
             logger.warning(f"[第三方上报] ✗ 连接失败 (尝试 {attempt + 1}/{max_retries})")
         except Exception as e:
-            error_msg = f"异常: {str(e)}"
+            error_msg = f"请求异常（{type(e).__name__}）"
             failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
-            logger.warning(f"[第三方上报] ✗ 异常 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
+            logger.warning("[第三方上报] 请求异常（尝试 %s/%s）：%s", attempt + 1, max_retries, type(e).__name__)
 
         # 指数退避策略
         if attempt < max_retries - 1:
@@ -711,10 +709,8 @@ async def send_third_party_report(
             # 增加超时时间，应对网络延迟
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(url, json=send_data, params=params)
-                logger.debug(
-                    "[第三方上报] 响应: status=%s, content=%s",
-                    response.status_code, response.text[:200],
-                )
+                # 第三方响应可能回显 user_data；日志只记录状态，不记录响应正文。
+                logger.debug("[第三方上报] 响应状态: status=%s", response.status_code)
 
                 if response.status_code == 200:
                     try:
@@ -731,7 +727,7 @@ async def send_third_party_report(
                                 report_log_id,
                                 status="success",
                                 response_status=response.status_code,
-                                response_body=response.text[:2000],
+                                response_body=None,
                                 log_id_from_response=log_id,
                                 report_success_time=report_success_time,
                                 completed_at=report_success_time,
@@ -739,34 +735,34 @@ async def send_third_party_report(
                             )
                             return
                         else:
-                            error_msg = f"message: {response_json.get('messages', 'unknown')}, fbtrace_id: {response_json.get('fbtrace_id', '')}"
+                            error_msg = "第三方未确认接收事件"
                             failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
                             logger.warning(
                                 f"[第三方上报] ✗ 失败 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希): {error_msg}")
                             await update_report_log(
                                 report_log_id,
                                 response_status=response.status_code,
-                                response_body=response.text[:2000]
+                                response_body=None
                             )
                     except Exception as parse_err:
-                        error_msg = f"JSON解析失败: {str(parse_err)}, 原始响应: {response.text[:100]}"
+                        error_msg = "第三方响应 JSON 解析失败"
                         failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
                         logger.warning(
                             f"[第三方上报] ✗ 失败 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希): {error_msg}")
                         await update_report_log(
                             report_log_id,
                             response_status=response.status_code,
-                            response_body=response.text[:2000]
+                            response_body=None
                         )
                 else:
-                    error_msg = f"状态码: {response.status_code}, 响应: {response.text[:100]}"
+                    error_msg = f"第三方返回 HTTP {response.status_code}"
                     failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
                     logger.warning(
                         f"[第三方上报] ✗ 失败 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希): {error_msg}")
                     await update_report_log(
                         report_log_id,
                         response_status=response.status_code,
-                        response_body=response.text[:2000]
+                        response_body=None
                     )
 
         except httpx.TimeoutException:
@@ -778,13 +774,16 @@ async def send_third_party_report(
             failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
             logger.warning(f"[第三方上报] ✗ 连接失败 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希)")
         except Exception as e:
-            error_msg = f"异常: {str(e)}"
+            error_msg = f"请求异常（{type(e).__name__}）"
             failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
-            logger.warning(f"[第三方上报] ✗ 异常 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希): {str(e)}")
+            logger.warning("[第三方上报] 请求异常（不使用哈希）：%s", type(e).__name__)
 
     # 更新失败原因字符串
     failure_reasons_str = "\n" + "\n".join(failure_reasons) if failure_reasons else "\n无详细信息"
-    logger.error(f"[第三方上报] ❌ 全部 {len(failure_reasons)} 次尝试失败: adsid={adsid}, 失败原因:{failure_reasons_str}")
+    logger.error(
+        "[第三方上报] 全部尝试失败：report_log_id=%s event=%s attempts=%s",
+        report_log_id, event, len(failure_reasons),
+    )
 
     # 失败后释放发送租约；按累计尝试次数安排退避，达到预算后转为人工重试。
     final_attempt_count = base_attempt_count + (max_retries + 1 if use_hash else max_retries)
@@ -808,15 +807,15 @@ async def send_third_party_report(
         await send_telegram_message(
             settings.TELEGRAM_ADMIN,
             f"⚠️ 第三方上报失败\n\n"
-            f"AdsID: {adsid}\n"
-            f"IP: {ip}\n"
-            f"尝试次数: {max_retries}\n"
+            f"日志ID: {report_log_id}\n"
+            f"事件类型: {event}\n"
+            f"尝试次数: {final_attempt_count}\n"
             f"失败原因:{failure_reasons_str}\n"
             f"时间: {time.strftime('%Y-%m-%d %H:%M:%S')}"
         )
         logger.info("[第三方上报] 告警已发送")
     except Exception as notify_err:
-        logger.warning(f"[第三方上报] 发送告警失败: {notify_err}")
+        logger.warning("[第三方上报] 发送告警失败：%s", type(notify_err).__name__)
 
 
 def is_outbox_payload_editable(report_log, now: Optional[datetime] = None) -> bool:
