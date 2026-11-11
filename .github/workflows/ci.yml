@@ -75,7 +75,14 @@ jobs:
         # 收集仓库中所有测试文件；没有测试时必须失败，禁止“无测试绿色通过”。
         run: |
           shopt -s nullglob
-          mapfile -t TEST_FILES < <(git ls-files 'tests/test_*.py' 'tests/**/test_*.py' | grep -v '^tests/manual/' || true)
+          # -z + NUL 分隔可保留中文、空格和特殊字符；关闭 quotePath 避免 pytest 收到转义后的伪路径。
+          mapfile -d '' -t TRACKED_TEST_FILES < <(
+            git -c core.quotePath=false ls-files -z -- 'tests/test_*.py' 'tests/**/test_*.py'
+          )
+          TEST_FILES=()
+          for test_file in "${TRACKED_TEST_FILES[@]}"; do
+            [[ "$test_file" == tests/manual/* ]] || TEST_FILES+=("$test_file")
+          done
           if [ ${#TEST_FILES[@]} -eq 0 ]; then
             echo "::error::No tests/test_*.py found; refusing to skip pytest."
             exit 1
