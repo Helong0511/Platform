@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cap import check_cap, increment_cap_count, rollback_cap_redis_counts
 from app.core.cap.redis_counter import RedisCapManager
 from app.core.config import settings
+from app.services.cap_reservation_ledger import CapReservationLedger
 
 logger = logging.getLogger(__name__)
 
@@ -118,32 +119,48 @@ class CapChecker:
     async def rollback_reservations(
         reservations: list[tuple],
     ) -> None:
-        """尝试回退全部本次预留；收集失败后统一报告，避免首个故障阻断后续回滚。"""
+        """按账本记录回滚 Redis；fail-open 记录只结束账本，不执行 DECR。"""
         failures = []
         for reservation in reservations:
             kind, offer_id, publisher_id = reservation[:3]
             reservation_date = reservation[3] if len(reservation) > 3 else None
             reservation_id = reservation[4] if len(reservation) > 4 else None
+            ledger_key = reservation[5] if len(reservation) > 5 else None
+            lease_owner = reservation[6] if len(reservation) > 6 else None
+            redis_reserved = reservation[7] if len(reservation) > 7 else True
             try:
-                if kind == "daily":
-                    result = await RedisCapManager.decrement_daily(
-                        offer_id,
-                        publisher_id,
-                        reservation_date=reservation_date,
-                        reservation_id=reservation_id,
-                    )
-                elif kind == "total":
-                    result = await RedisCapManager.decrement_total(
-                        offer_id, publisher_id, reservation_id=reservation_id
-                    )
-                else:
-                    failures.append(f"unknown kind={kind}, offer_id={offer_id}")
-                    continue
-                if result < 0:
-                    failures.append(
-                        f"kind={kind}, offer_id={offer_id}, token={reservation_id}"
+                if redis_reserved:
+                    if kind == "daily":
+                        result = await RedisCapManager.decrement_daily(
+                            offer_id, publisher_id,
+                            reservation_date=reservation_date,
+                            reservation_id=reservation_id,
+                        )
+                    elif kind == "total":
+                        result = await RedisCapManager.decrement_total(
+                            offer_id, publisher_id, reservation_id=reservation_id
+                        )
+                    else:
+                        failures.append(f"unknown kind={kind}, offer_id={offer_id}")
+                        continue
+                    if result < 0:
+                        raise RuntimeError(
+                            f"Redis rollback unresolved: kind={kind}, offer_id={offer_id}, token={reservation_id}"
+                        )
+                if ledger_key:
+                    await CapReservationLedger.finalize(
+                        ledger_key, "ROLLED_BACK", lease_owner=lease_owner
                     )
             except Exception as exc:
+                if ledger_key:
+                    try:
+                        await CapReservationLedger.mark_needs_reconciliation(
+                            ledger_key, str(exc), lease_owner=lease_owner
+                        )
+                    except Exception:
+                        logger.critical(
+                            "Cap Reservation 状态更新失败：%s", ledger_key, exc_info=True
+                        )
                 failures.append(
                     f"kind={kind}, offer_id={offer_id}, token={reservation_id}, error={exc}"
                 )
