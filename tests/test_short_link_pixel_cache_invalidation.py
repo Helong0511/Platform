@@ -85,3 +85,22 @@ async def test_delete_short_link_invalidates_pixel_cache_and_click_counter(monke
     assert calls["redirect"] == ["cache-delete-001"]
     assert calls["pixel"] == [("cache-delete-001", None)]
     assert calls["counter"] == ["cache-delete-001"]
+
+
+def test_short_link_api_reinvalidates_pixel_cache_after_commit():
+    from pathlib import Path
+
+    source = Path("app/api_v1/tracking/short_links.py").read_text(encoding="utf-8")
+    update_commit = source.index("await commit_audit_log(db)", source.index("async def update_short_link"))
+    update_invalidate = source.index(
+        "invalidate_cloak_cache(short_code=short_link.short_code)",
+        update_commit,
+    )
+    delete_commit = source.index("await commit_audit_log(db)", source.index("async def delete_short_link"))
+    delete_invalidate = source.index(
+        "invalidate_cloak_cache(short_code=short_code)",
+        delete_commit,
+    )
+
+    assert update_invalidate > update_commit
+    assert delete_invalidate > delete_commit
