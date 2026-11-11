@@ -300,7 +300,7 @@ async def test_sync_all_caps_reports_missing_redis_counter_as_skipped(monkeypatc
     )
     db = _FakeDB([cap])
     redis = _FakeRedis({
-        cap_sync.get_daily_cap_key(100, now, 20): "4",
+        cap_sync.get_daily_cap_key(100, now, 20): "8",
         # total key intentionally missing: unknown snapshot is not a successful sync.
     })
 
@@ -313,6 +313,9 @@ async def test_sync_all_caps_reports_missing_redis_counter_as_skipped(monkeypatc
     stats = await cap_sync.CapSynchronizer(db).sync_all_active_caps()
 
     assert stats == {"success": 0, "failed": 0, "skipped": 1}
+    # Daily key 虽可读取，但 Total key 缺失时不提交该 Cap 的部分快照。
+    assert cap.current_daily_count == 4
+    assert cap.current_total_count == 9
     assert db.committed is True
 
 
