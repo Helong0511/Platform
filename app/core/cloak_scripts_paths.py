@@ -23,6 +23,10 @@ from typing import Optional
 
 from app.core.bridge_html_sanitize import sanitize_bridge_html_strict
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # 桥页模板 LRU 缓存：键为规范化绝对路径，值为 (mtime_ns, size, inode, 文本内容)
 # 文件 mtime 变化或 invalidate_bridge_template_cache 调用时自动失效
 _MAX_BRIDGE_TEMPLATE_CACHE_ENTRIES = 128
@@ -61,7 +65,15 @@ def resolve_bridge_html_read_path(bridge_page_name: str) -> Optional[str]:
         raise ValueError("桥页文件名无效")
     for base in iter_bridge_search_bases():
         path = os.path.join(base, bridge_page_name)
-        if os.path.isfile(path):
+        try:
+            file_stat = os.lstat(path)
+        except FileNotFoundError:
+            continue
+        # 桥页是应用主动对外返回的 HTML；不跟随符号链接，避免读取脚本目录外文件。
+        if stat.S_ISLNK(file_stat.st_mode):
+            logger.warning("拒绝读取符号链接桥页：%s", path)
+            continue
+        if stat.S_ISREG(file_stat.st_mode):
             return path
     return None
 
@@ -202,7 +214,10 @@ def resolve_bridge_html_write_path(cloak_name: str) -> str:
     name = bridge_html_filename(cloak_name)
     for base in iter_bridge_search_bases():
         candidate = os.path.join(base, name)
-        if os.path.isfile(candidate):
+        if os.path.lexists(candidate):
+            candidate_stat = os.lstat(candidate)
+            if stat.S_ISLNK(candidate_stat.st_mode) or not stat.S_ISREG(candidate_stat.st_mode):
+                raise ValueError("桥页目标必须是普通文件，拒绝符号链接或特殊文件")
             if os.access(candidate, os.W_OK):
                 return candidate
             # 原子替换只要求父目录可写，不要求旧文件本身可写。
