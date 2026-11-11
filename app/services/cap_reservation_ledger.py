@@ -165,18 +165,20 @@ class CapReservationLedger:
                         if winner is None:
                             raise
                         return await CapReservationLedger._claim_existing(
-                            retry_session, winner, owner, now, expires
+                            retry_session, winner, owner, lease_seconds
                         )
                 await session.refresh(row)
                 return row, True, owner
 
             return await CapReservationLedger._claim_existing(
-                session, row, owner, now, expires
+                session, row, owner, lease_seconds
             )
 
     @staticmethod
-    async def _claim_existing(session, row, owner, now, expires):
-        """仅允许租约过期的可恢复状态被新请求接管。"""
+    async def _claim_existing(session, row, owner, lease_seconds):
+        """仅允许租约过期的可恢复状态被新请求接管；等待行锁后重新计算租约时间。"""
+        now = get_app_now_naive()
+        expires = now + timedelta(seconds=lease_seconds)
         if row.state == "COMMITTED":
             await session.commit()
             return row, False, None
