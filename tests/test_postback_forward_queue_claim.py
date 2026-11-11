@@ -253,3 +253,75 @@ def test_latest_product_forward_log_query_excludes_publisher_logs():
     assert "POSTBACK_FORWARD_LOGS.PRODUCT_ID" in sql
     assert "POSTBACK_FORWARD_LOGS.PUBLISHER_ID IS NULL" in sql
     assert "POSTBACK_FORWARD_LOGS.ID DESC" in sql
+
+
+import logging
+from types import SimpleNamespace
+
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_forward_queue_worker_does_not_log_raw_exception_details(
+    monkeypatch, caplog
+):
+    from app.core.postback.forwarder import PostbackForwarder
+    from app.scheduler_module.tasks import forward_tasks
+
+    conversion = SimpleNamespace(id=31, click_id=None)
+    task = SimpleNamespace(
+        id=41,
+        conversion_id=31,
+        publisher_id=51,
+        product_id=None,
+        retry_count=0,
+    )
+
+    class ScalarResult:
+        def first(self):
+            return conversion
+
+    class Result:
+        def scalars(self):
+            return ScalarResult()
+
+    class FakeDB:
+        async def execute(self, statement):
+            return Result()
+
+    async def fail_forward(*args, **kwargs):
+        raise RuntimeError("buyer@example.invalid 203.0.113.10 secret-payload")
+
+    async def no_retry(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(PostbackForwarder, "forward_to_publisher", fail_forward)
+    monkeypatch.setattr(forward_tasks, "_schedule_or_drop_retry", no_retry)
+
+    with caplog.at_level(logging.ERROR):
+        await forward_tasks.process_single_task(FakeDB(), task)
+
+    assert "buyer@example.invalid" not in caplog.text
+    assert "203.0.113.10" not in caplog.text
+    assert "secret-payload" not in caplog.text
+    assert "RuntimeError" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_forward_queue_trigger_does_not_log_raw_exception_details(
+    monkeypatch, caplog
+):
+    from app.scheduler_module.tasks import forward_tasks
+
+    async def fail():
+        raise RuntimeError("buyer@example.invalid 203.0.113.10 secret-payload")
+
+    monkeypatch.setattr(forward_tasks, "process_forward_queue", fail)
+
+    with caplog.at_level(logging.ERROR):
+        await forward_tasks.trigger_forward_processing()
+
+    assert "buyer@example.invalid" not in caplog.text
+    assert "203.0.113.10" not in caplog.text
+    assert "secret-payload" not in caplog.text
+    assert "RuntimeError" in caplog.text
