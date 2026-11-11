@@ -34,5 +34,6 @@ def test_cap_reservation_preserves_global_publisher_scope_and_total_date_semanti
     assert table.c.publisher_id.nullable is True
     assert table.c.business_date.nullable is True
     assert table.c.redis_reserved.nullable is False
+    assert table.c.redis_token_cleaned.nullable is False
     assert table.c.reservation_key.type.length == 64
     assert table.c.redis_token_key.type.length == 512
