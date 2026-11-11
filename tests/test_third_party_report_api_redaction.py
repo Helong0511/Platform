@@ -140,6 +140,13 @@ def test_manual_requeue_eligibility_matches_backend_guards():
         }),
         now,
     ) is True
+    assert _can_requeue_report(
+        SimpleNamespace(**{
+            **base,
+            "error_message": "短链接已删除，无法解析像素配置",
+        }),
+        now,
+    ) is False
 
 
 
