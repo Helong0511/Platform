@@ -279,6 +279,44 @@ class RedisCapManager:
             return RedisCapManager._lua_failure_result()
             
     @staticmethod
+    async def get_reservation_token_state(counter_key: str, token_key: str) -> str:
+        """
+        返回 PRESENT / ABSENT / UNKNOWN。
+        Redis 不可用、token 存在但 counter 丢失、数据格式损坏均为 UNKNOWN。
+        """
+        redis = await get_redis_client()
+        if not redis:
+            return "UNKNOWN"
+        try:
+            token_value, counter_value = await redis.mget(token_key, counter_key)
+            if token_value is None:
+                return "ABSENT"
+            if counter_value is None:
+                return "UNKNOWN"
+            int(counter_value)  # 校验计数值格式，损坏时不能冒险回滚。
+            return "PRESENT"
+        except Exception:
+            logger.error("读取 Cap Reservation token 状态失败：%s", token_key, exc_info=True)
+            return "UNKNOWN"
+
+    @staticmethod
+    async def rollback_reservation_keys(counter_key: str, token_key: str) -> int:
+        """只根据账本保存的原始 key/token 原子回滚，不重新推导业务 scope。"""
+        redis = await get_redis_client()
+        if not redis:
+            return -1
+        try:
+            return int(await redis.eval(
+                RedisCapManager._ROLLBACK_RESERVATION_LUA,
+                2,
+                counter_key,
+                token_key,
+            ))
+        except Exception:
+            logger.error("按持久化账本回滚 Cap Reservation 失败：%s", token_key, exc_info=True)
+            return -1
+
+    @staticmethod
     async def delete_reservation_token(token_key: str) -> bool:
         """终态账本确认后删除幂等 token，不修改已提交的 Cap counter。"""
         if not token_key:
