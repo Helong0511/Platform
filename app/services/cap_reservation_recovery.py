@@ -124,19 +124,46 @@ async def recover_cap_reservations(
                     stats["rolled_back"] += 1
                     continue
                 reason = f"Redis token PRESENT but atomic rollback returned {rollback_result}"
-            elif token_state == "ABSENT" and not row.redis_reserved:
-                # PREPARED 且未确认预留、token 又不存在：没有本请求可撤销的 Redis 名额。
-                await CapReservationLedger.finalize(
-                    row.reservation_key, "ROLLED_BACK", lease_owner=owner
-                )
-                stats["rolled_back"] += 1
-                continue
             elif token_state == "ABSENT":
+                daily_scope_expired = (
+                    row.cap_kind == "daily"
+                    and row.business_date is not None
+                    and (get_app_now_naive().date() - row.business_date).days >= 2
+                )
+                counter_exists = (
+                    await RedisCapManager.counter_key_exists(row.redis_counter_key)
+                    if daily_scope_expired else None
+                )
+                if not row.redis_reserved or (daily_scope_expired and counter_exists is False):
+                    # 未确认预留且 token 不存在，或 Daily key 已自然过期：不再有本请求可撤销的有效名额。
+                    await CapReservationLedger.finalize(
+                        row.reservation_key, "ROLLED_BACK", lease_owner=owner
+                    )
+                    stats["rolled_back"] += 1
+                    continue
                 reason = (
                     "Redis token ABSENT while ledger says redis_reserved=true; "
                     "cannot distinguish completed rollback from Redis token loss"
                 )
             else:
+                daily_scope_expired = (
+                    row.cap_kind == "daily"
+                    and row.business_date is not None
+                    and (get_app_now_naive().date() - row.business_date).days >= 2
+                )
+                counter_exists = (
+                    await RedisCapManager.counter_key_exists(row.redis_counter_key)
+                    if daily_scope_expired else None
+                )
+                if daily_scope_expired and counter_exists is False:
+                    # Daily 业务日已结束且 48h counter key 已自然过期；清理孤儿 token 即可，
+                    # 不对不存在的历史计数器执行 DECR。
+                    await RedisCapManager.delete_reservation_token(row.redis_token_key)
+                    await CapReservationLedger.finalize(
+                        row.reservation_key, "ROLLED_BACK", lease_owner=owner
+                    )
+                    stats["rolled_back"] += 1
+                    continue
                 reason = "Redis token state UNKNOWN; Redis unavailable or counter state missing"
 
             await CapReservationLedger.mark_needs_reconciliation(
