@@ -75,14 +75,14 @@
 
 ## 7. 本轮验证证据（2026-11-11 更新）
 
-- 最新全量 CI：Run #807，SHA `b16fd7f3b5111aa681e2e9c1e5ea1b394305a3b9`。
-- Run #807：Backend / Frontend lint/build / Playwright Mock API E2E 全部成功；Backend 为 300 passed、1 skipped、1 warning。
+- 最新全量 CI：Run #808，SHA `41ad452653b1e1579f3721e3f84b0fcecb302a0b`。
+- Run #808：Backend / Frontend lint/build / Playwright Mock API E2E 全部成功；Backend 为 300 passed、1 skipped、1 warning。
 - Backend 使用隔离 MySQL 8.0 与 Redis 服务，覆盖 Reservation migration 的 CHECK 约束实际执行、ORM SQLite 约束、Postback reservation 生命周期、并发 claim、恢复 Worker 双 worker 和 token 丢失/计数 key 保留的对账保护。
 - 历史 CI 失败修复记录：
   - Run #750：集成测试未隔离账本会话导致缺少表；后续通过测试隔离和显式 mock 修复。
   - Run #777：Redis counter missing 错误文本与测试断言不一致；已修复为明确兼容的 fail-closed 错误信息。
   - Run #806：MySQL CHECK 约束错误码 3819 被测试错误地期待为 IntegrityError；已改为 OperationalError 并断言错误码 3819，Run #807 全绿。
-- Run #807 前端 npm audit 仍报告 2 个 production High advisories，均属于用户明确排除的凭据/重定向敏感头安全专项；本轮未改动该专项，详见第 8 节。
+- Run #808 前端 npm audit 仍报告 2 个 production High advisories，均属于用户明确排除的凭据/重定向敏感头安全专项；本轮未改动该专项，详见第 8 节。
 - 上述证据仅证明对应 SHA 在隔离 CI 环境通过，不代表已在生产环境部署或验证。后续任何代码提交仍须重新验收最新 SHA。
 
 
