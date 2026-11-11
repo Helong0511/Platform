@@ -336,6 +336,7 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
             for column in (
                 "pii_scrubbed_at",
                 "idx_third_party_pii_retention",
+                "idx_forward_log_pii_retention",
                 "outbox_enqueued",
                 "short_link_id",
                 "cloak_name",
