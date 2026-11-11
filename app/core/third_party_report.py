@@ -514,8 +514,8 @@ async def send_third_party_report(
             )
 
             logger.info(
-                "[第三方上报] 开始发送 (尝试 %s/%s): adsid=%s, ip=%s, use_hash=%s, email=%s, phone=%s",
-                attempt + 1, max_retries, adsid, ip, use_hash,
+                "[第三方上报] 开始发送 (尝试 %s/%s): adsid=%s, use_hash=%s, email=%s, phone=%s",
+                attempt + 1, max_retries, adsid, use_hash,
                 mask_email(email), mask_phone(phone),
             )
             if use_hash and (email or phone):
@@ -699,8 +699,8 @@ async def send_third_party_report(
             )
 
             logger.info(
-                "[第三方上报] 开始发送 (尝试 %s/%s - 不使用哈希): adsid=%s, ip=%s, email=%s, phone=%s",
-                max_retries + 1, max_retries + 1, adsid, ip,
+                "[第三方上报] 开始发送 (尝试 %s/%s - 不使用哈希): adsid=%s, email=%s, phone=%s",
+                max_retries + 1, max_retries + 1, adsid,
                 mask_email(email), mask_phone(phone),
             )
 
