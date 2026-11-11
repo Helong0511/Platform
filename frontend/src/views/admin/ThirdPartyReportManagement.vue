@@ -242,13 +242,13 @@
           </el-descriptions-item>
           <el-descriptions-item label="尝试次数">{{ currentLog.attempt_count }} / {{ currentLog.max_attempts
           }}</el-descriptions-item>
-          <el-descriptions-item :label="currentLog.use_hash ? '邮箱（已哈希）' : '邮箱'">
+          <el-descriptions-item label="邮箱（已脱敏）">
             {{ currentLog.email || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item :label="currentLog.use_hash ? 'IP地址（已哈希）' : 'IP地址'">
+          <el-descriptions-item label="IP地址（已脱敏）">
             {{ currentLog.ip || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item :label="currentLog.use_hash ? '手机号（已哈希）' : '手机号'">
+          <el-descriptions-item label="手机号（已脱敏）">
             {{ currentLog.phone || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="哈希处理">
@@ -274,7 +274,7 @@
           <el-descriptions-item label="完成时间">
             {{ currentLog.completed_at ? formatDateTime(currentLog.completed_at) : '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="用户代理" :span="2">
+          <el-descriptions-item label="用户代理（已隐藏）" :span="2">
             {{ currentLog.ua || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="完整上报参数" :span="2" v-if="currentLog.report_params">
@@ -324,19 +324,19 @@
           <el-input v-model.number="editForm.amount" type="number" placeholder="请输入支付金额" />
         </el-form-item>
         <el-form-item label="邮箱">
-          <el-input v-model="editForm.email" placeholder="请输入邮箱" />
+          <el-input v-model="editForm.email" placeholder="留空保持原值；输入新邮箱以替换" />
         </el-form-item>
         <el-form-item label="IP地址">
-          <el-input v-model="editForm.ip" placeholder="请输入IP地址" />
+          <el-input v-model="editForm.ip" placeholder="留空保持原值；输入新 IP 以替换" />
         </el-form-item>
         <el-form-item label="手机号">
-          <el-input v-model="editForm.phone" placeholder="请输入手机号" />
+          <el-input v-model="editForm.phone" placeholder="留空保持原值；输入新手机号以替换" />
         </el-form-item>
         <el-form-item label="用户代理">
-          <el-input v-model="editForm.ua" type="textarea" :rows="3" placeholder="请输入用户代理" />
+          <el-input v-model="editForm.ua" type="textarea" :rows="3" placeholder="留空保持原值；输入新 UA 以替换" />
         </el-form-item>
         <el-form-item label="完整上报参数">
-          <el-input v-model="editForm.report_params" type="textarea" :rows="4" placeholder="请输入完整上报参数（JSON格式）" />
+          <el-input v-model="editForm.report_params" type="textarea" :rows="4" placeholder="留空保持原值；输入新的 JSON 参数以替换" />
         </el-form-item>
         <el-form-item label="哈希处理">
           <el-switch v-model="editForm.use_hash" />
@@ -477,11 +477,11 @@ const handleEdit = async (log) => {
     editForm.conversion_id = detail.conversion_id || '';
     editForm.currency = detail.currency || '';
     editForm.amount = detail.amount || '';
-    editForm.email = detail.email || '';
-    editForm.ip = detail.ip || '';
-    editForm.phone = detail.phone || '';
-    editForm.ua = detail.ua || '';
-    editForm.report_params = detail.report_params || '';
+    editForm.email = ''; // 详情接口只返回脱敏值，留空表示不修改原始字段。
+    editForm.ip = ''; // 详情接口只返回脱敏值，留空表示不修改原始字段。
+    editForm.phone = ''; // 详情接口只返回脱敏值，留空表示不修改原始字段。
+    editForm.ua = ''; // 详情接口只返回脱敏值，留空表示不修改原始字段。
+    editForm.report_params = ''; // 详情接口只返回脱敏值，留空表示不修改原始字段。
     editForm.use_hash = detail.use_hash !== false;
     editDialogVisible.value = true;
   } catch (error) {
