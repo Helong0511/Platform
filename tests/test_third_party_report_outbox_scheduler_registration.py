@@ -137,3 +137,37 @@ async def test_pii_retention_scheduler_runs_one_bounded_combined_sweep(monkeypat
     assert calls == [("combined", 200)]
     assert result["scrubbed"] == 5
     assert result["postback_forward_logs_scrubbed"] == 3
+
+
+@pytest.mark.asyncio
+async def test_pii_retention_scheduler_handles_disabled_policy_without_key_error(monkeypatch):
+    from app.scheduler_module.tasks import third_party_report_tasks as tasks
+    from app.services import third_party_report_pii_retention as retention
+
+    captured = {}
+
+    async def disabled(**kwargs):
+        assert kwargs["batch_size"] == 200
+        return {
+            "enabled": False,
+            "retention_days": 0,
+            "selected": 0,
+            "scrubbed": 0,
+            "third_party_report_logs_scrubbed": 0,
+            "postback_forward_logs_scrubbed": 0,
+        }
+
+    monkeypatch.setattr(retention, "scrub_expired_third_party_report_pii", disabled)
+    monkeypatch.setattr(
+        tasks,
+        "set_task_result",
+        lambda name, message: captured.update(name=name, message=message),
+    )
+
+    result = await tasks.scrub_third_party_report_pii_task()
+
+    assert result["enabled"] is False
+    assert result["third_party_report_logs_scrubbed"] == 0
+    assert result["postback_forward_logs_scrubbed"] == 0
+    assert captured["name"] == THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME
+    assert "enabled=False" in captured["message"]
