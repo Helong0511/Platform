@@ -43,6 +43,17 @@ class ThirdPartyReportLog(Base):
     ua = Column(Text, nullable=True, comment='用户代理')
     currency = Column(String(10), nullable=True, comment='货币类型')
     amount = Column(Numeric(12, 4), nullable=True, comment='支付金额')
+
+    # Postback 事务性 Outbox 元数据；只保存配置引用，不保存 Facebook access token。
+    outbox_enqueued = Column(
+        Boolean, nullable=False, default=False, server_default="0",
+        comment="是否由转化事务创建的持久化 Outbox 事件",
+    )
+    short_link_id = Column(Integer, nullable=True, comment="用于恢复像素配置的短链接 ID（非外键，保留删除后的证据）")
+    cloak_name = Column(String(100), nullable=True, comment="斗篷配置名称（仅配置引用）")
+    short_code = Column(String(100), nullable=True, comment="短链接短码（仅配置引用）")
+    click_time = Column(DateTime, nullable=True, comment="点击发生时间，用于稳定构造 Meta event_time/fbc")
+    next_retry_time = Column(DateTime, nullable=True, index=True, comment="Outbox 下次可重试时间")
     report_params = Column(Text, nullable=True, comment='完整上报参数（JSON格式）')
 
     
@@ -71,5 +82,13 @@ class ThirdPartyReportLog(Base):
         Index("idx_third_party_created_at", "created_at"),
         Index("idx_third_party_status_created", "status", "created_at"),
         UniqueConstraint('event_key', name='unique_event_key'),
+        Index(
+            "idx_third_party_outbox_due",
+            "outbox_enqueued",
+            "status",
+            "next_retry_time",
+            "report_start_time",
+            "id",
+        ),
     )
 
