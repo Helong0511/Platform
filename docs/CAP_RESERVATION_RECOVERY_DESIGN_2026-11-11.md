@@ -380,3 +380,25 @@ CapReservation ORM、migration 和 `sql/platform.sql` 统一增加 CHECK 约束�
 ### 验收边界
 
 以上修改已提交修复分支；必须以包含这些变更的最新 SHA 重新运行 Backend、MySQL 8.0 隔离迁移、Redis DB14 集成、Frontend lint/build 和 Playwright Mock API E2E。历史 Run #783 不能代替新提交验收。
+
+## 18. 2026-11-11 Postback 第三方事件上报崩溃窗口（待修复）
+
+### 发现
+
+当前 `PostbackProcessor.process()` 的顺序是：先提交转化记录与下游转发队列事务，再调用 `_send_third_party_report_if_needed()`。而 `send_third_party_report()` 在被调用后才创建 `ThirdPartyReportLog` 并持久化事件幂等键。
+
+因此存在一个明确的进程崩溃窗口：数据库已提交转化，但进程在创建第三方上报日志之前退出。上游重试时，重复转化检查会提前返回“重复转化”，不会重新执行第三方上报。该事件可能永久漏报。现有第三方事件日志的幂等和租约机制只能保护“日志已创建之后”的发送阶段，不能覆盖“转化提交成功、日志尚未创建”的窗口。
+
+### 修复要求（不得连接生产环境）
+
+1. 将第三方上报任务改为事务性 Outbox：在转化记录事务中创建待发送事件记录，转化与 Outbox 必须同一 DB transaction commit。
+2. Outbox 必须保存稳定事件身份、可恢复的非凭据请求参数、状态、尝试次数、租约与下次重试时间；不得把 access token 等凭据写入 Outbox。
+3. 后台 worker 以原子条件更新认领任务；租约过期可恢复，成功/失败状态必须持久化。
+4. Worker 从受控配置源解析像素配置与凭据；配置缺失/不可用时保留可重试状态，不得伪装发送成功。
+5. 重复 Postback 不应再次创建相同事件，但必须允许已有待发送 Outbox 继续被 worker 处理。
+6. 覆盖“转化事务提交后立即崩溃”“Outbox worker 发送前崩溃”“远端成功但本地状态更新失败”“并发 worker 竞争”“凭据配置暂时不可用”等故障注入测试。
+7. 使用隔离 DB、模拟 HTTP 和合成数据验收；不得访问生产数据库、Redis、队列或第三方接口。
+
+### 当前验收状态
+
+<badge>阻断项</badge> 尚未修复。当前代码不能据此认定第三方上报具备端到端可靠投递；在完成事务性 Outbox、恢复 worker 和故障注入测试前，禁止合并。
