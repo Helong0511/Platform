@@ -18,10 +18,10 @@ async def process_third_party_report_outbox_task():
         message = (
             f"执行完成：selected={stats['selected']} success={stats['success']} "
             f"retryable={stats['retryable']} failed={stats['failed']} "
-            f"duration={duration:.2f}s"
+            f"exhausted={stats['exhausted']} duration={duration:.2f}s"
         )
         set_task_result(THIRD_PARTY_REPORT_OUTBOX_TASK_NAME, message)
-        if stats["retryable"] or stats["failed"]:
+        if stats["retryable"] or stats["failed"] or stats["exhausted"]:
             logger.warning("第三方 Report Outbox 存在待重试/失败事件：%s", message)
         else:
             logger.info(message)
