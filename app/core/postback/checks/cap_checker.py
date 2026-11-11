@@ -95,6 +95,7 @@ class CapChecker:
         publisher_id: Optional[int],
         advertiser_id: Optional[int],
         db: AsyncSession,
+        reservation_context: Optional[dict] = None,
     ) -> Tuple[bool, str, list[tuple]]:
         """
         增加 Cap 并返回本次真正预留的 Redis 计数器列表。
@@ -112,6 +113,7 @@ class CapChecker:
             db=db,
             session_flush=True,
             include_reservations=True,
+            reservation_context=reservation_context,
         )
         return result
 
