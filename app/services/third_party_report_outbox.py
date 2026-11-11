@@ -59,6 +59,7 @@ async def enqueue_postback_report(
         existing.cloak_name = cloak_name
         existing.short_code = short_code
         existing.click_time = click_time
+        existing.max_attempts = max(int(existing.max_attempts or 0), 12)
         if existing.status != "success" and existing.next_retry_time is None:
             existing.next_retry_time = now
         await db.flush()
