@@ -379,6 +379,7 @@ async def test_forward_log_retention_clears_expanded_url_request_and_response(mo
 async def test_unretryable_outbox_without_config_reference_is_terminal_for_pii_retention(monkeypatch):
     """缺少配置引用且 next_retry_time 为空的失败 Outbox 不可重排，应能按期限清理。"""
     captured = []
+    captured_params = []
 
     class ScalarRows:
         def all(self):
@@ -390,7 +391,9 @@ async def test_unretryable_outbox_without_config_reference_is_terminal_for_pii_r
 
     class FakeDB:
         async def execute(self, statement):
-            captured.append(str(statement.compile(dialect=mysql.dialect())).lower())
+            compiled = statement.compile(dialect=mysql.dialect())
+            captured.append(str(compiled).lower())
+            captured_params.append(compiled.params)
             return Result()
 
         async def rollback(self):
@@ -422,3 +425,5 @@ async def test_unretryable_outbox_without_config_reference_is_terminal_for_pii_r
     assert "third_party_report_logs.cloak_name is null" in sql
     assert "third_party_report_logs.short_code is null" in sql
     assert "third_party_report_logs.outbox_enqueued is true" in sql
+    params = " ".join(str(value) for value in captured_params[0].values())
+    assert "短链接已删除，无法解析像素配置" in params
