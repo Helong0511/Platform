@@ -433,7 +433,7 @@ class CapService(BaseService[OfferCap]):
             self,
             cap_id: int,
             current_user: User
-    ) -> None:
+    ) -> Dict[str, Any]:
         """
         物理删除 Cap 配置。
 
@@ -458,10 +458,25 @@ class CapService(BaseService[OfferCap]):
 
         try:
             # 删除已锁定的 ORM 实体，避免绕过当前事务内的行锁对象。
+            # 物理删除前保留配置快照，供 API 写入可追溯的审计详情。
+            deleted_snapshot = {
+                "cap_id": cap.id,
+                "cap_type": cap.cap_type,
+                "advertiser_id": cap.advertiser_id,
+                "offer_id": cap.offer_id,
+                "publisher_id": cap.publisher_id,
+                "daily_cap": cap.daily_cap,
+                "total_cap": cap.total_cap,
+                "current_daily_count": cap.current_daily_count,
+                "current_total_count": cap.current_total_count,
+                "cap_start_date": cap.cap_start_date,
+                "is_active": cap.is_active,
+            }
             await self.db.delete(cap)
             await self.db.flush()
 
             logger.info(f"Cap配置删除成功: cap_id={cap_id}")
+            return deleted_snapshot
         except Exception as e:
             await self.db.rollback()
             logger.error(f"删除Cap配置失败: {str(e)}", exc_info=True)
