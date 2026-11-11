@@ -188,3 +188,42 @@ async def test_scrubbed_outbox_payload_is_not_editable():
         pii_scrubbed_at=datetime(2026, 11, 11, 12, 0, 0),
     )
     assert is_outbox_payload_editable(row) is False
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_refuses_a_scrubbed_row(monkeypatch):
+    from datetime import datetime
+    from app.services import third_party_report_outbox as outbox
+
+    row = SimpleNamespace(
+        id=11,
+        pii_scrubbed_at=datetime(2026, 11, 11, 12, 0, 0),
+        outbox_enqueued=True,
+        status="pending",
+        next_retry_time=datetime(2026, 11, 11, 11, 59, 0),
+    )
+
+    class FakeDB:
+        async def scalar(self, statement):
+            return row
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(
+        outbox,
+        "get_app_now_naive",
+        lambda: datetime(2026, 11, 11, 12, 0, 0),
+    )
+
+    result = await outbox.process_postback_report_outbox_item(11)
+    assert result == {
+        "success": False,
+        "retryable": False,
+        "reason": "pii_payload_scrubbed",
+    }
