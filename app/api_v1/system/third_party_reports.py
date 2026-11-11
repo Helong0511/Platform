@@ -74,6 +74,24 @@ def _mask_report_pii(value: Optional[str], field: str) -> Optional[str]:
     return raw
 
 
+def _safe_report_error_message(value: Optional[str]) -> Optional[str]:
+    """只向管理端返回归类后的失败原因，避免第三方响应/异常原文携带 PII。"""
+    if not value:
+        return None
+    raw = str(value).lower()
+    if "像素凭据" in value or "配置引用" in value or "short_link" in raw:
+        return "像素配置缺失或不可用；检查配置后可重新排队"
+    if "超时" in value or "timeout" in raw:
+        return "第三方请求超时"
+    if "连接失败" in value or "connect" in raw:
+        return "第三方连接失败"
+    if "json解析失败" in value or "parse" in raw:
+        return "第三方响应解析失败"
+    if "状态码" in value or "fbtrace_id" in raw:
+        return "第三方返回非成功状态"
+    return "上报失败；详细错误已隐藏，请查看受控服务端日志"
+
+
 def _sanitize_report_params(raw: Optional[str]) -> Optional[str]:
     """递归脱敏 JSON 中的邮箱、手机号、IP 和 UA；非法 JSON 不向接口透出原文。"""
     if not raw:
@@ -384,6 +402,8 @@ async def get_third_party_report(
         for field in ("email", "phone", "ip", "ua"):
             safe_data[field] = _mask_report_pii(safe_data.get(field), field)
         safe_data["report_params"] = _sanitize_report_params(safe_data.get("report_params"))
+        safe_data["error_message"] = _safe_report_error_message(safe_data.get("error_message"))
+        # 第三方响应原文可能回显请求数据，管理端不提供原始 response_body。
 
         return ResponseBaseSchema.success(
             data=safe_data,
