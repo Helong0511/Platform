@@ -58,7 +58,7 @@ async def test_outbox_scheduler_failure_does_not_persist_exception_text(monkeypa
 
     captured = {}
 
-    async def fail():
+    async def fail(**kwargs):
         raise RuntimeError("buyer@example.invalid 203.0.113.10 secret-payload")
 
     monkeypatch.setattr(tasks, "process_postback_report_outbox", fail)
