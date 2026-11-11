@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive
@@ -144,9 +144,18 @@ class CapReservationLedger:
                 session.add(row)
                 try:
                     await session.commit()
-                except IntegrityError:
+                except (IntegrityError, OperationalError) as exc:
+                    if isinstance(exc, OperationalError):
+                        mysql_error_code = (
+                            exc.orig.args[0]
+                            if getattr(exc, "orig", None) and getattr(exc.orig, "args", None)
+                            else None
+                        )
+                        # 只把 MySQL 死锁/锁等待超时视为并发抢占竞争；网络故障仍向上抛出。
+                        if mysql_error_code not in {1205, 1213}:
+                            raise
                     await session.rollback()
-                    # 唯一键竞争时重新读取并走同一行锁/租约判断，不盲目继续 Redis 操作。
+                    # 唯一键竞争或 InnoDB gap-lock 死锁后重新读取赢家记录与租约。
                     async with AsyncSessionLocal() as retry_session:
                         winner = await retry_session.scalar(
                             select(CapReservation)
