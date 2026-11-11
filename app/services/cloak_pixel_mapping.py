@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.models import ShortLink, CloakConfig
 from app.core.config import settings
 from app.core.cloak_scripts_paths import bridge_html_exists
+from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,9 @@ class CloakPixelMappingService:
             
             if not short_link.is_active:
                 logger.warning(f"[斗篷像素映射] 斗篷已停用：short_code={short_code}")
+                return None
+            if short_link.expires_at and short_link.expires_at <= get_app_now_naive():
+                logger.warning("[斗篷像素映射] 短链接已过期：short_code=%s", short_code)
                 return None
             
             # 查询斗篷配置表（仅 is_enabled=True 且存在桥页）
