@@ -38,6 +38,8 @@ async def scrub_expired_third_party_report_pii(
             "retention_days": 0,
             "selected": 0,
             "scrubbed": 0,
+            "third_party_report_logs_scrubbed": 0,
+            "postback_forward_logs_scrubbed": 0,
             "message": "未配置 PII 保留期限，按 fail-safe 策略跳过清理",
         }
 
