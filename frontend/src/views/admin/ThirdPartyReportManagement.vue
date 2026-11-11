@@ -183,11 +183,15 @@
         </el-table-column>
         <el-table-column v-if="columnVisibility.use_hash" prop="use_hash" label="哈希处理" width="120" align="center">
           <template #default="scope">
-            <el-button size="small" :type="scope.row.use_hash ? 'success' : 'danger'"
+            <el-button v-if="!scope.row.outbox_enqueued || scope.row.outbox_payload_editable"
+              size="small" :type="scope.row.use_hash ? 'success' : 'danger'"
               @click="handleHashToggle(scope.row)" :loading="scope.row._hashLoading"
               :disabled="scope.row._hashLoading || loading">
               {{ scope.row.use_hash ? '启用' : '禁用' }}
             </el-button>
+            <el-tag v-else :type="scope.row.use_hash ? 'success' : 'danger'" size="small">
+              {{ scope.row.use_hash ? '已启用' : '已禁用' }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column v-if="columnVisibility.created_at" prop="created_at" label="创建时间" width="180">
@@ -215,7 +219,8 @@
             <el-button type="primary" link size="small" @click="handleViewDetail(scope.row)">
               详情
             </el-button>
-            <el-button type="warning" link size="small" @click="handleEdit(scope.row)">
+            <el-button v-if="!scope.row.outbox_enqueued || scope.row.outbox_payload_editable"
+              type="warning" link size="small" @click="handleEdit(scope.row)">
               编辑
             </el-button>
             <el-button v-if="scope.row.can_requeue"
