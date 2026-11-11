@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import stat
@@ -22,8 +23,6 @@ from pathlib import Path
 from typing import Optional
 
 from app.core.bridge_html_sanitize import sanitize_bridge_html_strict
-
-import logging
 
 logger = logging.getLogger(__name__)
 
