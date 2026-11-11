@@ -127,20 +127,16 @@ class CapSynchronizer:
     
     async def sync_single_cap(self, cap_id: int) -> bool:
         """
-        同步单个 Cap 配置
-        
-        Args:
-            cap_id: Cap ID
-        
-        Returns:
-            bool: 是否成功
+        同步单个 Cap 配置。
+
+        Redis key 缺失代表计数未知：不提交部分字段更新，并返回 False。
         """
         redis = await get_redis_client()
         if not redis:
+            logger.error("Redis 不可用，无法同步单个 Cap：cap_id=%s", cap_id)
             return False
-        
+
         try:
-            # 查询 Cap 配置
             result = await self.db.execute(
                 select(OfferCap)
                 .where(OfferCap.id == cap_id)
@@ -148,19 +144,21 @@ class CapSynchronizer:
                 .with_for_update()
             )
             cap = result.scalars().first()
-            
+
             if not cap:
-                logger.warning(f"Cap 配置不存在：cap_id={cap_id}")
+                logger.warning("Cap 配置不存在：cap_id=%s", cap_id)
+                await self.db.rollback()
                 return False
-            
+
             now = get_app_now_naive()
-            
-            # 同步每日 Cap
+            missing_keys = []
+
             if cap.daily_cap:
                 redis_key = get_daily_cap_key(cap.offer_id, now, cap.publisher_id)
                 redis_count = await redis.get(redis_key)
-                
-                if redis_count is not None:
+                if redis_count is None:
+                    missing_keys.append("daily")
+                else:
                     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
                     db_daily_count = (
                         cap.current_daily_count or 0
@@ -170,24 +168,37 @@ class CapSynchronizer:
                     )
                     cap.current_daily_count = max(int(redis_count), db_daily_count)
                     cap.cap_start_date = today_start
-            
-            # 同步总 Cap
+
             if cap.total_cap:
                 redis_key = get_total_cap_key(cap.offer_id, cap.publisher_id)
                 redis_count = await redis.get(redis_key)
-                
-                if redis_count is not None:
-                    cap.current_total_count = max(int(redis_count), cap.current_total_count or 0)
-            
+                if redis_count is None:
+                    missing_keys.append("total")
+                else:
+                    cap.current_total_count = max(
+                        int(redis_count), cap.current_total_count or 0
+                    )
+
+            if missing_keys:
+                await self.db.rollback()
+                logger.warning(
+                    "单个 Cap 同步跳过：Redis 计数 key 缺失，cap_id=%s, counters=%s",
+                    cap_id, ",".join(missing_keys),
+                )
+                return False
+
             await self.db.commit()
-            logger.info(f"单个 Cap 同步成功：cap_id={cap_id}")
+            logger.info("单个 Cap 同步成功：cap_id=%s", cap_id)
             return True
-            
+
         except Exception as e:
-            logger.error(f"同步单个 Cap 失败：cap_id={cap_id}, error={e}", exc_info=True)
-            await self.db.rollback()
+            logger.error("同步单个 Cap 失败：cap_id=%s, error=%s", cap_id, e, exc_info=True)
+            try:
+                await self.db.rollback()
+            except Exception:
+                logger.exception("单个 Cap 同步失败后的回滚也失败：cap_id=%s", cap_id)
             return False
-    
+
     async def cleanup_expired_caps(self) -> int:
         """
         清理过期的 Cap 缓存
