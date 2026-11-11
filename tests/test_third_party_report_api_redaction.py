@@ -72,6 +72,7 @@ def test_third_party_report_response_schemas_expose_outbox_state():
 
     assert "outbox_error_category" in ThirdPartyReportLogListResponse.model_fields
     assert "error_message" in ThirdPartyReportLogResponse.model_fields
+    assert "response_body" not in ThirdPartyReportLogResponse.model_fields
 
 
 
