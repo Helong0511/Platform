@@ -1,4 +1,7 @@
 """Cap Reservation 账本 ORM 必须进入统一 metadata，供迁移与建表工具发现。"""
+from sqlalchemy import create_engine, insert
+from sqlalchemy.exc import IntegrityError
+
 from app.models import Base, CapReservation
 
 
@@ -46,3 +49,32 @@ def test_cap_reservation_preserves_global_publisher_scope_and_total_date_semanti
     assert table.c.redis_token_cleaned.nullable is False
     assert table.c.reservation_key.type.length == 64
     assert table.c.redis_token_key.type.length == 512
+
+
+def test_cap_reservation_check_constraints_are_portable_and_enforced_by_sqlite():
+    """ORM CHECK 表达式应可在 SQLite 单测中执行，MySQL migration 再做独立验证。"""
+    engine = create_engine("sqlite:///:memory:")
+    try:
+        CapReservation.__table__.create(engine)
+        invalid_row = {
+            "reservation_key": "too-short",
+            "platform": "ci",
+            "conversion_id": "conversion-1",
+            "event_name": "purchase",
+            "offer_id": 77,
+            "publisher_id": None,
+            "cap_kind": "daily",
+            "business_date": None,
+            "redis_counter_key": "counter:key",
+            "redis_token_key": "counter:key:reservation:too-short",
+            "redis_reserved": False,
+            "redis_token_cleaned": False,
+            "state": "PREPARED",
+            "attempts": 0,
+        }
+        with engine.begin() as connection:
+            import pytest
+            with pytest.raises(IntegrityError):
+                connection.execute(insert(CapReservation.__table__).values(**invalid_row))
+    finally:
+        engine.dispose()
