@@ -80,7 +80,12 @@ async def cap_sync_task():
                 f"skipped_missing_redis_key={skipped} failed=0"
             )
             set_task_result(CAP_SYNC_TASK_NAME, msg)
-            logger.info(msg)
+            if skipped:
+                # Redis key 缺失表示真实计数未知；任务虽然没有发生 DB 写入失败，
+                # 但本轮并未完整同步，必须在调度日志中显式暴露为需关注状态。
+                logger.warning("Cap 同步部分完成，存在未知计数快照：%s", msg)
+            else:
+                logger.info(msg)
     except Exception as e:
         set_task_result(CAP_SYNC_TASK_NAME, f"执行失败: {str(e)}")
         logger.error(f"Cap 计数同步任务失败: {e}", exc_info=True)
