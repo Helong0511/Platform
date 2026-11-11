@@ -167,3 +167,16 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 
 在以上项目完成前，第三方 Outbox 迁移/回滚仍是合并及发布阻断项。
 
+
+
+## 11. 最新验收记录（2026-11-11，Run #1010）
+
+- 验证提交：`3c51b8443c0893ad5de67cf5d14c807e8bfa1f85`。
+- GitHub Actions Run #1010：Backend、Frontend Lint、Frontend Build、Playwright Mock API Browser E2E 全部成功。
+- Backend：348 passed、1 skipped、1 warning；Python 编译通过。唯一 skip 是本地核对脚本未检出，CI 不依赖该脚本；warning 为 Python 3.11 环境中 passlib 使用的 `crypt` 弃用提示。
+- Frontend：`npm ci`、依赖 Advisory 报告、Lint、Build、Playwright Chromium 安装、隔离 Vite 服务启动及浏览器 E2E 全部成功。E2E 覆盖登录校验、认证失败/成功、管理员导航、Outbox 重试资格/详情、退出登录、移动端抽屉及客户端 RBAC。
+- 本轮修复 Outbox 批量 Worker 的异常处理缺陷：异常分支此前引用未绑定的 `exc`，单条任务异常可能在日志阶段再次触发 `NameError`。现已绑定异常并将失败计数纳入批次统计，新增 `tests/test_third_party_report_outbox_worker_errors.py` 回归测试。
+- 同时将 Outbox 凭据解析失败日志改为仅记录异常类型和内部日志 ID，不记录原始异常文本，避免第三方响应内容或 PII 进入日志。
+- Run #1010 的所有验证仅使用 GitHub Actions 临时 MySQL/Redis、合成数据和 Mock API；未连接生产服务器、生产数据库、生产缓存、生产队列或真实第三方接口。
+- Run #1010 仅证明该 SHA 的 CI 验证通过，不替代真实数据库网络断连代理故障注入、完整 migration/rollback 演练、业务/隐私保留政策审批及全项目剩余模块复核。
+- PR #1 继续保持 Draft，不合并、不部署。后续任何应用代码变更仍须对最新 SHA 重新运行完整 CI。
