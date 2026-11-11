@@ -271,7 +271,7 @@ class CapReservationLedger:
         *,
         lease_owner: Optional[str] = None,
     ) -> None:
-        """提交账本终态；COMMITTED 前先删除 token，失败则保留活动状态供恢复重试。"""
+        """提交账本终态；Redis token 清理失败单独记录并交由恢复任务重试。"""
         if state not in FINAL_STATES:
             raise ValueError(f"非法 Cap Reservation 终态：{state}")
         now = get_app_now_naive()
@@ -291,11 +291,31 @@ class CapReservationLedger:
             if row is None:
                 raise RuntimeError(f"Cap Reservation 不存在：{reservation_key}")
 
-            # 先删除 token 再提交 COMMITTED。若 Redis 不可用，账本仍保持活动状态，
-            # 恢复任务可在确认正式转化存在后重试；若 DB 更新失败，重复 DEL 是幂等的。
+            token_cleaned = state == "ROLLED_BACK"
             if state == "COMMITTED":
-                # 即使 redis_reserved 尚未落库，Redis Lua 也可能已成功；DEL 是幂等清理。
-                await RedisCapManager.delete_reservation_token(row.redis_token_key)
+                # token 即使在 RESERVED 标记前也可能已由 Lua 创建；终态清理必须覆盖此窗口。
+                try:
+                    await RedisCapManager.delete_reservation_token(row.redis_token_key)
+                    token_cleaned = True
+                except Exception:
+                    token_cleaned = False
+                    logger.critical(
+                        "转化已提交，但 Redis Reservation token 尚未清理，将由恢复任务重试：%s",
+                        reservation_key,
+                        exc_info=True,
+                    )
+
+            if row.state == state:
+                # 幂等重复终态请求也可补写 token 清理结果。
+                if state == "COMMITTED" and token_cleaned:
+                    row.redis_token_cleaned = True
+                    row.lease_owner = None
+                    row.lease_expires_at = None
+                    row.updated_at = now
+                    await session.commit()
+                else:
+                    await session.commit()
+                return
 
             result = await session.execute(
                 update(CapReservation)
@@ -303,11 +323,12 @@ class CapReservationLedger:
                 .values(
                     state=state,
                     redis_reserved=(False if state == "ROLLED_BACK" else CapReservation.redis_reserved),
+                    redis_token_cleaned=token_cleaned,
                     finalized_at=now,
                     updated_at=now,
                     lease_owner=None,
                     lease_expires_at=None,
-                    last_error=None,
+                    last_error=None if token_cleaned else "Redis token cleanup pending",
                 )
             )
             await session.commit()
@@ -320,6 +341,41 @@ class CapReservationLedger:
                 if current != state:
                     raise RuntimeError(
                         f"Cap Reservation 终态更新失败：expected={state}, actual={current}"
+                    )
+
+    @staticmethod
+    async def mark_token_cleaned(
+        reservation_key: str,
+        lease_owner: str,
+    ) -> None:
+        """恢复任务成功删除已提交 token 后，确认清理完成并释放租约。"""
+        now = get_app_now_naive()
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                update(CapReservation)
+                .where(
+                    CapReservation.reservation_key == reservation_key,
+                    CapReservation.state == "COMMITTED",
+                    CapReservation.lease_owner == lease_owner,
+                )
+                .values(
+                    redis_token_cleaned=True,
+                    lease_owner=None,
+                    lease_expires_at=None,
+                    updated_at=now,
+                    last_error=None,
+                )
+            )
+            await session.commit()
+            if result.rowcount != 1:
+                row = await session.scalar(
+                    select(CapReservation).where(
+                        CapReservation.reservation_key == reservation_key
+                    )
+                )
+                if row is None or row.state != "COMMITTED" or not row.redis_token_cleaned:
+                    raise RuntimeError(
+                        f"Cap Reservation token 清理状态更新失败：{reservation_key}"
                     )
 
     @staticmethod
