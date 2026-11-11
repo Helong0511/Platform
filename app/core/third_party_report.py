@@ -11,7 +11,7 @@ import json
 from typing import Optional
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, update, or_
+from sqlalchemy import select, update, or_, and_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,8 @@ from app.models.models import ThirdPartyReportLog
 from app.core.log_utils import mask_email, mask_hash_prefix, mask_phone
 
 logger = logging.getLogger(__name__)
+
+REPORT_LOG_LEASE_SECONDS = 300
 
 
 def sha256_hash(value: Optional[str]) -> str:
@@ -179,7 +181,7 @@ async def _get_report_status(report_log_id: int) -> Optional[str]:
         return result.scalar_one_or_none()
 
 
-async def _claim_report_log(report_log_id: int, lease_seconds: int = 300) -> bool:
+async def _claim_report_log(report_log_id: int, lease_seconds: int = REPORT_LOG_LEASE_SECONDS) -> bool:
     """原子认领一条待上报事件，避免并发请求同时发送同一事件。
 
     失败状态允许立即重试；pending 状态仅允许首次认领或租约过期后恢复。
@@ -192,9 +194,8 @@ async def _claim_report_log(report_log_id: int, lease_seconds: int = 300) -> boo
             update(ThirdPartyReportLog)
             .where(
                 ThirdPartyReportLog.id == report_log_id,
-                ThirdPartyReportLog.status != "success",
+                ThirdPartyReportLog.status.in_(("pending", "failed")),
                 or_(
-                    ThirdPartyReportLog.status == "failed",
                     ThirdPartyReportLog.report_start_time.is_(None),
                     ThirdPartyReportLog.report_start_time < stale_before,
                 ),
@@ -330,6 +331,8 @@ async def send_third_party_report(
             report_log_id,
             status="failed",
             error_message=error_msg,
+            # 将租约标记为已释放，允许失败事件立即被后续重试认领。
+            report_start_time=get_app_now_naive() - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
             completed_at=get_app_now_naive()
         )
         raise ValueError(error_msg)
@@ -707,6 +710,8 @@ async def send_third_party_report(
         report_log_id,
         status="failed",
         error_message=failure_reasons_str.strip(),
+        # 失败后释放发送租约；下一次重试仍需通过数据库原子认领。
+        report_start_time=get_app_now_naive() - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
         completed_at=get_app_now_naive()
     )
 
