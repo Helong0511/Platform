@@ -463,7 +463,7 @@ class PostbackProcessor:
             try:
                 await db.rollback()
             except Exception:
-                logger.error("Postback 异常后的数据库回滚失败", exc_info=True)
+                logger.error("Postback 异常后的数据库回滚失败")
             logger.error("Postback 处理失败，已回滚事务：platform=%s error_type=%s", platform, type(e).__name__)
             raise
     
