@@ -76,7 +76,7 @@ jobs:
             echo "::error::No tests/test_*.py found; refusing to skip pytest."
             exit 1
           fi
-          pytest "${TEST_FILES[@]}" -q --tb=short
+          pytest "${TEST_FILES[@]}" -q -rs --tb=short
 
   frontend:
     timeout-minutes: 20
