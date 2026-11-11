@@ -329,7 +329,7 @@ async def get_third_party_reports(
         logger.error("获取第三方上报日志列表失败：%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取日志列表失败：{str(e)}"
+            detail="获取日志列表失败，请稍后重试"
         )
 
 
@@ -423,7 +423,7 @@ async def get_third_party_report_stats(
         logger.error("获取第三方上报统计信息失败：%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取统计信息失败：{str(e)}"
+            detail="获取统计信息失败，请稍后重试"
         )
 
 
@@ -477,7 +477,7 @@ async def get_third_party_report(
         logger.error("获取第三方上报日志详情失败：%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取日志详情失败：{str(e)}"
+            detail="获取日志详情失败，请稍后重试"
         )
 
 
@@ -547,7 +547,7 @@ async def update_third_party_report(
         logger.error("更新第三方上报日志参数失败：%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"更新日志参数失败：{str(e)}"
+            detail="更新日志参数失败，请稍后重试"
         )
 
 
@@ -603,5 +603,5 @@ async def retry_third_party_report(
         logger.error("重新上报第三方上报日志失败：%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"重新上报失败：{str(e)}"
+            detail="重新上报失败，请稍后重试"
         )
