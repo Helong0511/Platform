@@ -47,3 +47,17 @@ async def test_memory_cache_rejects_unbounded_capacity_configuration():
     assert len(cache._cache) == 1
     assert await cache.get("only") is None
     assert await cache.get("second") == "value"
+
+
+
+@pytest.mark.asyncio
+async def test_memory_cache_delete_pattern_uses_literal_glob_semantics():
+    cache = MemoryCacheBackend()
+    await cache.set("user:1.profile", "target")
+    await cache.set("user:1Xprofile", "must-keep")
+    await cache.set("user:2.profile", "other-user")
+
+    assert await cache.delete_pattern("user:1.*") == 1
+    assert await cache.get("user:1.profile") is None
+    assert await cache.get("user:1Xprofile") == "must-keep"
+    assert await cache.get("user:2.profile") == "other-user"
