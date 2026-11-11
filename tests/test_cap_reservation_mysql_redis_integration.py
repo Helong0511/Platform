@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from datetime import date, datetime, time, timedelta
@@ -261,3 +262,59 @@ async def test_mysql_redis_recovery_keeps_committed_conversion_and_cleans_token(
     assert result["token_value"] is None
     assert result["stats"]["committed"] == 1
     assert result["stats"]["tokens_cleaned"] == 1
+
+
+
+@pytest.mark.asyncio
+async def test_mysql_concurrent_claim_allows_only_one_owner_for_same_reservation(monkeypatch):
+    """并发首次插入相同稳定键时，唯一键/gap-lock 竞争只能产生一个有效 owner。"""
+    database = _create_isolated_mysql_database()
+    engine = None
+    try:
+        _initialize_isolated_schema(database)
+        password = quote_plus(os.getenv("MYSQL_INTEGRATION_PASSWORD", ""))
+        user = quote_plus(os.getenv("MYSQL_INTEGRATION_USER", "root"))
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:"
+            f"{int(os.getenv('MYSQL_INTEGRATION_PORT', '3306'))}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(ledger_module, "AsyncSessionLocal", session_factory)
+
+        identity = {
+            "platform": "ci",
+            "conversion_id": f"concurrent-{uuid.uuid4().hex}",
+            "event_name": "purchase",
+            "offer_id": int(uuid.uuid4().int % 900_000_000) + 100_000_000,
+            "publisher_id": int(uuid.uuid4().int % 900_000_000) + 100_000_000,
+            "cap_kind": "total",
+            "business_date": None,
+        }
+        results = await asyncio.gather(
+            CapReservationLedger.prepare_and_claim(**identity),
+            CapReservationLedger.prepare_and_claim(**identity),
+        )
+
+        assert sum(1 for _row, claimed, _owner in results if claimed) == 1
+        assert results[0][0].reservation_key == results[1][0].reservation_key
+        assert sum(1 for _row, _claimed, owner in results if owner) == 1
+
+        async with session_factory() as session:
+            rows = (
+                await session.scalars(
+                    select(CapReservation).where(
+                        CapReservation.reservation_key == results[0][0].reservation_key
+                    )
+                )
+            ).all()
+        assert len(rows) == 1
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_mysql_database(database)
