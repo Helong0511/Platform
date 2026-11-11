@@ -503,3 +503,12 @@ CapReservation ORM、migration 和 `sql/platform.sql` 统一增加 CHECK 约束�
 
 - 该故障注入验证的是应用层状态机与稳定事件身份，不是 MySQL 实际断连/COMMIT 响应丢失的端到端演练。
 - 仍需 CI 通过，并在隔离 MySQL 环境增加提交响应丢失/连接中断测试；生产发布前另行执行备份、迁移和回滚演练。
+
+## 24. ViewContent 事件身份与 Purchase 关联字段隔离（2026-11-11）
+
+- 复核发现：Purchase 发送时会给历史 ViewContent 日志补写 `conversion_id`，但 ViewContent 原事件的 event_key 已在创建时生成；若把后补 conversion_id 纳入重算，会改变已发送事件身份并破坏重试去重。
+- 修正原则：ViewContent 的幂等键只由 source、adsid、event（以及存在时的平台维度）决定；后补 conversion_id 仅作为关联元数据，不参与 ViewContent 身份。Purchase 等转化事件仍使用 conversion_id 区分事件。
+- `build_event_idempotency_key()` 已按上述规则规范化；事件幂等键迁移回填 SQL 同步对 ViewContent 忽略 conversion_id，保持历史数据与新代码一致。
+- 新增回归断言：同一 ViewContent 在 conversion_id 为空和后补 Purchase conversion_id 时生成相同 event_key，且与 Purchase event_key 不同。
+- 该修正仍需最新 CI 的后端全量测试和 MySQL migration 测试通过；不代表真实生产数据已完成迁移或核对。
+
