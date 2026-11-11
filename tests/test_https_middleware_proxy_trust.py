@@ -86,7 +86,7 @@ async def test_configured_local_reverse_proxy_may_forward_https_scheme(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_cloudflare_http_origin_exception_requires_trusted_proxy(monkeypatch):
+async def test_cloudflare_client_ip_header_alone_never_proves_https(monkeypatch):
     monkeypatch.setattr(https_middleware.settings, "is_production", True)
     monkeypatch.setattr(https_middleware.settings, "TRUST_PROXY_HEADERS", True)
     monkeypatch.setattr(
@@ -99,14 +99,14 @@ async def test_cloudflare_http_origin_exception_requires_trusted_proxy(monkeypat
     async def call_next(_request):
         return Response("passed")
 
-    trusted_response = await middleware.dispatch(
+    trusted_proxy_response = await middleware.dispatch(
         _request(
             peer_ip="127.0.0.1",
             headers={"CF-Connecting-IP": "203.0.113.9"},
         ),
         call_next,
     )
-    untrusted_response = await middleware.dispatch(
+    untrusted_peer_response = await middleware.dispatch(
         _request(
             peer_ip="203.0.113.9",
             headers={"CF-Connecting-IP": "203.0.113.9"},
@@ -114,8 +114,8 @@ async def test_cloudflare_http_origin_exception_requires_trusted_proxy(monkeypat
         call_next,
     )
 
-    assert trusted_response.status_code == 200
-    assert untrusted_response.status_code == 301
+    assert trusted_proxy_response.status_code == 301
+    assert untrusted_peer_response.status_code == 301
 
 
 @pytest.mark.asyncio
