@@ -193,7 +193,7 @@ async def delete_cap(
     删除后写审计日志并失效相关 Cap 计数缓存。
     """
     cap_service: CapService = await get_cap_service(db)
-    await cap_service.delete_cap(cap_id, current_user)
+    deleted_snapshot = await cap_service.delete_cap(cap_id, current_user)
     await log_delete(
         db=db,
         user=current_user,
@@ -201,6 +201,7 @@ async def delete_cap(
         resource_id=cap_id,
         resource_name=f"Cap-{cap_id}",
         request=request,
+        details={"deleted_cap": deleted_snapshot},
     )
     await commit_audit_log(db)
     return ResponseBaseSchema.success(data={"message": "Cap配置已删除"})
