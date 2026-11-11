@@ -535,7 +535,7 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
     async def no_sleep(*_):
         return None
 
-    monkeypatch.setattr(third_party_report.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
 
     common = {
         "adsid": "fbclid-ack-loss",
