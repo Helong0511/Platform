@@ -11,7 +11,7 @@ def test_nginx_access_log_omits_query_string_referer_user_agent_and_forwarded_fo
     log_format = config.split("log_format main", 1)[1].split(";", 1)[0]
 
     assert "$request_method $uri $server_protocol" in log_format
-    assert "$request" not in log_format
+    assert '"$request"' not in log_format
     assert "$request_uri" not in log_format
     assert "$http_referer" not in log_format
     assert "$http_user_agent" not in log_format
