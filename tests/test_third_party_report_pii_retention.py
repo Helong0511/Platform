@@ -22,6 +22,8 @@ async def test_retention_is_disabled_by_default_without_opening_database(monkeyp
 
     assert result["enabled"] is False
     assert result["scrubbed"] == 0
+    assert result["third_party_report_logs_scrubbed"] == 0
+    assert result["postback_forward_logs_scrubbed"] == 0
     assert opened is False
 
 
