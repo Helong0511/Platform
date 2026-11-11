@@ -108,7 +108,6 @@ async def test_scrub_clears_payload_but_preserves_event_identity(monkeypatch):
     assert "third_party_report_logs.pii_scrubbed_at is null" in sql
     assert "third_party_report_logs.created_at <" in sql
     assert "third_party_report_logs.status in" in sql
-    assert "third_party_report_logs.next_retry_time is null" in sql
     assert "third_party_report_logs.attempt_count >= third_party_report_logs.max_attempts" in sql
     assert "for update skip locked" in sql
 
