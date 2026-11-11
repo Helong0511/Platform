@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive
-from app.core.cap.redis_counter import get_daily_cap_key, get_total_cap_key
+from app.core.cap.redis_counter import RedisCapManager, get_daily_cap_key, get_total_cap_key
 from app.models.cap_reservation import CapReservation
 
 logger = logging.getLogger(__name__)
@@ -241,7 +241,7 @@ class CapReservationLedger:
         *,
         lease_owner: Optional[str] = None,
     ) -> None:
-        """将账本推进到已确认终态；仅允许 COMMITTED 或 ROLLED_BACK。"""
+        """提交账本终态；COMMITTED 后清理 token，但绝不修改已提交计数器。"""
         if state not in FINAL_STATES:
             raise ValueError(f"非法 Cap Reservation 终态：{state}")
         now = get_app_now_naive()
@@ -251,7 +251,15 @@ class CapReservationLedger:
         ]
         if lease_owner:
             conditions.append(CapReservation.lease_owner == lease_owner)
+        token_key_to_cleanup = None
         async with AsyncSessionLocal() as session:
+            row = await session.scalar(
+                select(CapReservation)
+                .where(CapReservation.reservation_key == reservation_key)
+                .with_for_update()
+            )
+            if row and state == "COMMITTED" and row.redis_reserved:
+                token_key_to_cleanup = row.redis_token_key
             result = await session.execute(
                 update(CapReservation)
                 .where(*conditions)
@@ -276,6 +284,16 @@ class CapReservationLedger:
                     raise RuntimeError(
                         f"Cap Reservation 终态更新失败：expected={state}, actual={current}"
                     )
+        # DB 已确认 COMMITTED 后才删除 token。若 Redis 清理失败，账本终态仍可用于后续清理任务。
+        if token_key_to_cleanup:
+            try:
+                await RedisCapManager.delete_reservation_token(token_key_to_cleanup)
+            except Exception:
+                logger.critical(
+                    "Cap Reservation 已提交但 Redis token 清理失败，需后台清理：%s",
+                    token_key_to_cleanup,
+                    exc_info=True,
+                )
 
     @staticmethod
     async def mark_needs_reconciliation(
