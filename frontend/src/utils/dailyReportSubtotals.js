@@ -69,12 +69,12 @@ export function aggregateAdDataMetrics(rows, options = {}) {
       ? (totals.revenue_before_deduct / totals.display_count) * 1000
       : 0;
 
+  const cpcRevenue = isAdmin ? totals.revenue_before_deduct : totals.revenue_after_deduct;
   const cpc = cpcSummaryMode === 'sum'
     ? totals.cpcSum
-    : (() => {
-      const revenue = isAdmin ? totals.revenue_before_deduct : totals.revenue_after_deduct;
-      return totals.click_count > 0 ? revenue / totals.click_count : 0;
-    })();
+    : totals.click_count > 0
+      ? cpcRevenue / totals.click_count
+      : 0;
 
   return {
     request_count: totals.request_count,
