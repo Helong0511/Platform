@@ -1068,6 +1068,7 @@ CREATE TABLE IF NOT EXISTS `third_party_report_logs`  (
   `report_start_time` DATETIME NULL DEFAULT NULL COMMENT '上报开始时间',
   `report_success_time` DATETIME NULL DEFAULT NULL COMMENT '上报成功时间',
   `completed_at` DATETIME NULL DEFAULT NULL COMMENT '完成时间',
+  `pii_scrubbed_at` DATETIME NULL DEFAULT NULL COMMENT 'PII 按保留策略清理时间；保留事件幂等键',
   `conversion_id` VARCHAR(255) NULL DEFAULT NULL COMMENT '转化ID',
   `currency` VARCHAR(10) NULL DEFAULT NULL COMMENT '货币类型',
   `amount` DECIMAL(12, 4) NULL DEFAULT NULL COMMENT '支付金额',
@@ -1084,6 +1085,7 @@ CREATE TABLE IF NOT EXISTS `third_party_report_logs`  (
   INDEX `idx_third_party_event`(`event` ASC) USING BTREE,
   INDEX `idx_third_party_status`(`status` ASC) USING BTREE,
   INDEX `idx_third_party_created_at`(`created_at` ASC) USING BTREE,
+  INDEX `idx_third_party_pii_retention`(`pii_scrubbed_at` ASC, `created_at` ASC, `id` ASC) USING BTREE,
   INDEX `idx_third_party_status_created`(`status` ASC, `created_at` ASC) USING BTREE,
   INDEX `idx_conversion_id`(`conversion_id` ASC) USING BTREE,
   INDEX `idx_third_party_outbox_due`(`outbox_enqueued` ASC, `status` ASC, `next_retry_time` ASC, `report_start_time` ASC, `id` ASC) USING BTREE
