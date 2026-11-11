@@ -895,13 +895,35 @@ async def update_report_log_params(
                 logger.warning(f"[第三方上报] 日志记录不存在: id={log_id}")
                 return False
             
-            # 更新参数
+            # 事件身份必须与 event_key 保持一致。
+            identity_changed = (
+                (adsid is not None and adsid != log_entry.adsid)
+                or (event is not None and event != log_entry.event)
+                or (conversion_id is not None and conversion_id != log_entry.conversion_id)
+            )
+            # Outbox event_key 还包含平台维度，但日志表不保存平台字段；
+            # 因此不允许管理员修改已入队事件的身份字段，避免无法正确重算幂等键。
+            if log_entry.outbox_enqueued and identity_changed:
+                logger.warning(
+                    "[第三方上报] 拒绝修改 Outbox 事件身份字段: id=%s",
+                    log_id,
+                )
+                return False
+
+            # 普通历史日志允许修正身份字段，但必须同步重算唯一幂等键。
             if adsid is not None:
                 log_entry.adsid = adsid
             if event is not None:
                 log_entry.event = event
             if conversion_id is not None:
                 log_entry.conversion_id = conversion_id
+            if identity_changed:
+                log_entry.event_key = build_event_idempotency_key(
+                    log_entry.source,
+                    log_entry.adsid,
+                    log_entry.event,
+                    log_entry.conversion_id,
+                )
             if email is not None:
                 log_entry.email = email
             if ip is not None:
