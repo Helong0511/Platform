@@ -831,6 +831,13 @@ async def retry_report_log(log_id: int):
                     ThirdPartyReportLog.outbox_enqueued.is_(True),
                     ThirdPartyReportLog.status == "failed",
                     or_(
+                        ThirdPartyReportLog.short_link_id.is_not(None),
+                        (
+                            ThirdPartyReportLog.cloak_name.is_not(None)
+                            & ThirdPartyReportLog.short_code.is_not(None)
+                        ),
+                    ),
+                    or_(
                         ThirdPartyReportLog.report_start_time.is_(None),
                         ThirdPartyReportLog.report_start_time < stale_lease_time,
                     ),
