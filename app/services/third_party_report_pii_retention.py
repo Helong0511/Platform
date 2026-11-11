@@ -6,12 +6,13 @@
 import logging
 from datetime import timedelta
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, exists, or_, select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive
 from app.models.third_party import ThirdPartyReportLog
+from app.models.postback import PostbackForwardLog, PostbackForwardQueue
 
 logger = logging.getLogger(__name__)
 
@@ -95,17 +96,68 @@ async def scrub_expired_third_party_report_pii(
                 else None
             )
             row.pii_scrubbed_at = now
-        if rows:
+        # 下游转发日志也可能包含 URL 参数、请求体、响应正文和失败详情。
+        # 仍存在重试队列的目标不能清理，避免影响未完成的投递诊断/重试。
+        active_forward_queue = exists(
+            select(PostbackForwardQueue.id).where(
+                PostbackForwardQueue.conversion_id == PostbackForwardLog.conversion_id,
+                or_(
+                    and_(
+                        PostbackForwardLog.publisher_id.is_not(None),
+                        PostbackForwardQueue.publisher_id == PostbackForwardLog.publisher_id,
+                    ),
+                    and_(
+                        PostbackForwardLog.product_id.is_not(None),
+                        PostbackForwardQueue.product_id == PostbackForwardLog.product_id,
+                    ),
+                ),
+            )
+        )
+        forward_result = await db.execute(
+            select(PostbackForwardLog)
+            .where(
+                PostbackForwardLog.created_at < cutoff,
+                PostbackForwardLog.completed_at.is_not(None),
+                PostbackForwardLog.pii_scrubbed_at.is_(None),
+                ~active_forward_queue,
+            )
+            .order_by(PostbackForwardLog.created_at.asc(), PostbackForwardLog.id.asc())
+            .limit(batch_size)
+            .with_for_update(skip_locked=True)
+        )
+        forward_rows = list(forward_result.scalars().all())
+        for row in forward_rows:
+            # downstream_url 非空约束保留，写入固定占位符；原始 URL 不再可恢复。
+            row.downstream_url = "[已按保留策略清除]"
+            row.request_data = None
+            row.request_params = None
+            row.response_body = None
+            row.error_message = (
+                "历史转发载荷已按配置的数据保留策略清除"
+                if not row.success
+                else None
+            )
+            row.pii_scrubbed_at = now
+
+        if rows or forward_rows:
             await db.commit()
-            logger.info("第三方上报 PII 到期清理完成：scrubbed=%s retention_days=%s", len(rows), days)
+            logger.info(
+                "PII 到期清理完成：third_party=%s postback_forward=%s retention_days=%s",
+                len(rows), len(forward_rows), days,
+            )
         else:
             await db.rollback()
 
+    total_scrubbed = len(rows) + len(forward_rows)
     return {
         "enabled": True,
         "retention_days": days,
-        "selected": len(rows),
-        "scrubbed": len(rows),
+        "selected": total_scrubbed,
+        "scrubbed": total_scrubbed,
+        "third_party_report_logs_scrubbed": len(rows),
+        "postback_forward_logs_scrubbed": len(forward_rows),
         "cutoff": cutoff.isoformat(sep=" "),
-        "message": f"已清除 {len(rows)} 条终态上报记录中的个人信息载荷",
+        "message": (
+            f"已清除 {len(rows)} 条第三方上报日志和 {len(forward_rows)} 条下游转发日志中的个人信息载荷"
+        ),
     }
