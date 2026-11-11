@@ -697,3 +697,36 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
     ]
     # 原始客户端 IP 不得进入应用日志（TEST-NET 合成地址）。
     assert "198.51.100.77" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_report_claim_exception_does_not_leak_exception_text(monkeypatch, caplog):
+    async def create_log(**kwargs):
+        return 909
+
+    async def fail_claim(report_log_id):
+        raise RuntimeError("buyer@example.invalid 203.0.113.10 secret-payload")
+
+    monkeypatch.setattr(third_party_report, "create_report_log", create_log)
+    monkeypatch.setattr(third_party_report, "_claim_report_log", fail_claim)
+
+    result = await third_party_report.send_third_party_report(
+        adsid="ads-privacy-test",
+        event="Purchase",
+        email="buyer@example.invalid",
+        ip="203.0.113.10",
+        phone="",
+        ua="private-agent",
+        facebook_pixel_id="isolated-pixel",
+        facebook_access_token="isolated-token",
+        source="postback",
+        conversion_id="conversion-privacy-test",
+        currency="USD",
+        amount=12.5,
+    )
+
+    assert result["success"] is False
+    assert result["reason"] == "report_claim_unavailable"
+    assert "buyer@example.invalid" not in caplog.text
+    assert "203.0.113.10" not in caplog.text
+    assert "secret-payload" not in caplog.text
