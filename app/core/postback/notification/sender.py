@@ -94,7 +94,7 @@ async def send_notification_async(
                 f"转化通知发送成功: conversion_id={conversion.id}, "
                 f"product_id={product.id if product else None}, "
                 f"client_id={client.id if client else None}, "
-                channel={notification_channel}"
+                f"channel={notification_channel}"
             )
             return True
         else:
