@@ -72,7 +72,8 @@ async def create_report_log(
     """
     按事件身份创建上报日志；相同事件重试复用同一日志，不同事件独立留痕。
     """
-    event_key = event_key or build_event_idempotency_key(source, adsid, event, conversion_id)
+    # 此函数尚未接收外部 event_key；必须从稳定业务字段生成，避免引用未定义局部变量。
+    event_key = build_event_idempotency_key(source, adsid, event, conversion_id)
     try:
         async with AsyncSessionLocal() as db:
             result = await db.execute(
