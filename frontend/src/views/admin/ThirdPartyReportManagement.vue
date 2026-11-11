@@ -486,15 +486,19 @@ const formatJson = formatReportJson;
 const getOutboxLabel = (row) => {
   if (!row?.outbox_enqueued) return '非队列事件';
   if (row.status === 'success') return '已成功';
+  if (row.error_message?.includes('凭据') || row.error_message?.includes('配置引用')) return '配置缺失';
   if ((row.attempt_count || 0) >= (row.max_attempts || 0)) return '重试耗尽';
-  if (row.next_retry_time) return '等待/可重试';
+  if (row.status === 'pending' && row.report_start_time) return '处理中';
+  if (row.next_retry_time) {
+    return new Date(row.next_retry_time).getTime() > Date.now() ? '等待重试' : '等待 worker';
+  }
   return '待核查';
 };
 
 const getOutboxTag = (row) => {
   const label = getOutboxLabel(row);
   if (label === '已成功') return 'success';
-  if (label === '重试耗尽' || label === '待核查') return 'danger';
+  if (label === '重试耗尽' || label === '待核查' || label === '配置缺失') return 'danger';
   return 'warning';
 };
 
