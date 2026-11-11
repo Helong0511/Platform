@@ -122,36 +122,37 @@ class HttpClient:
                 content = response.text
 
                 logger.info(
-                    f"HTTP 请求完成：method={method}, url={url[:100]}, "
-                    f"status={response.status_code}, success={success}"
+                    "HTTP 请求完成：method=%s status=%s success=%s",
+                    method,
+                    response.status_code,
+                    success,
                 )
 
                 return success, response.status_code, content
 
         except asyncio.TimeoutError:
             logger.error(
-                "HTTP 请求超过总时限：%s（%.0fs）",
-                url[:100],
+                "HTTP 请求超过总时限：%.0fs",
                 HttpClient.TOTAL_REQUEST_TIMEOUT_SECONDS,
             )
             return False, 0, "Timeout: Total request deadline exceeded"
 
         except httpx.TimeoutException as e:
-            logger.error(f"HTTP 请求超时：{url[:100]}, error={str(e)}")
-            return False, 0, f"Timeout: {str(e)}"
+            logger.error("HTTP 请求超时：%s", type(e).__name__)
+            return False, 0, "Timeout"
 
         except httpx.RequestError as e:
             err = str(e)
             if err.startswith("SSRF blocked:"):
-                logger.warning("Postback 重定向/出站被 SSRF 防护拦截：%s", err)
-                return False, 0, err
-            logger.error(f"HTTP 请求失败：{url[:100]}, error={err}")
-            return False, 0, f"Request Error: {err}"
+                logger.warning("Postback 重定向/出站被 SSRF 防护拦截")
+                return False, 0, "SSRF blocked"
+            logger.error("HTTP 请求失败：%s", type(e).__name__)
+            return False, 0, f"Request Error: {type(e).__name__}"
 
-        except SSRFForbiddenError as e:
-            logger.warning("Postback SSRFForbiddenError：%s", e.reason)
-            return False, 0, f"SSRF blocked: {e.reason}"
+        except SSRFForbiddenError:
+            logger.warning("Postback SSRF 防护拒绝出站请求")
+            return False, 0, "SSRF blocked"
 
         except Exception as e:
-            logger.error(f"HTTP 请求异常：{url[:100]}, error={str(e)}", exc_info=True)
-            return False, 0, f"Exception: {str(e)}"
+            logger.error("HTTP 请求异常：%s", type(e).__name__)
+            return False, 0, f"Exception: {type(e).__name__}"
