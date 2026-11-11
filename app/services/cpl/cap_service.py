@@ -397,9 +397,18 @@ class CapService(BaseService[OfferCap]):
             exclude_cap_id=cap_id,
         )
 
+        # 在持有行锁时记录修改前值，供 API 写入完整的变更审计。
+        # 仅记录本次请求涉及的模型字段，避免把无关字段或敏感信息写入审计。
+        audit_before = {
+            key: getattr(cap, key)
+            for key in update_data
+            if hasattr(cap, key)
+        }
+
         # 如果首次设置 total_cap 且尚无 cap_start_date，设置开始日期。
         if 'total_cap' in update_data and update_data['total_cap'] and not cap.cap_start_date:
             update_data['cap_start_date'] = get_app_now_naive()  # 使用北京时间
+            audit_before.setdefault("cap_start_date", cap.cap_start_date)
 
         for key, value in update_data.items():
             if hasattr(cap, key):
@@ -418,6 +427,8 @@ class CapService(BaseService[OfferCap]):
             result = await self.db.execute(query)
             # 使用joinedload时，为了安全起见使用unique()去重
             cap = result.unique().scalars().first()
+            # refresh 后重新附加快照，供 API 记录实际变更前后的值。
+            cap._audit_before = audit_before
 
             logger.info(f"Cap配置更新成功: cap_id={cap_id}")
             return cap
