@@ -53,6 +53,17 @@ async def scrub_expired_third_party_report_pii(
                 or_(
                     ThirdPartyReportLog.outbox_enqueued.is_(False),
                     ThirdPartyReportLog.attempt_count >= ThirdPartyReportLog.max_attempts,
+                    # 无配置引用且没有下次重试时间的 Outbox 失败事件不可重排，
+                    # 属于终态；否则会永久保留 PII 载荷而永远无法被清理。
+                    and_(
+                        ThirdPartyReportLog.outbox_enqueued.is_(True),
+                        ThirdPartyReportLog.next_retry_time.is_(None),
+                        ThirdPartyReportLog.short_link_id.is_(None),
+                        or_(
+                            ThirdPartyReportLog.cloak_name.is_(None),
+                            ThirdPartyReportLog.short_code.is_(None),
+                        ),
+                    ),
                 ),
             ),
         ),
