@@ -86,14 +86,8 @@ async def recover_cap_reservations(
                 stats["committed"] += 1
                 continue
 
-            # Fail-open 或 Redis 不可用路径明确没有预留 token；DB 事务不存在时可安全终结。
-            if not row.redis_reserved:
-                await CapReservationLedger.finalize(
-                    row.reservation_key, "ROLLED_BACK", lease_owner=owner
-                )
-                stats["rolled_back"] += 1
-                continue
-
+            # 即使 redis_reserved=false 也必须检查 token：进程可能在 Redis Lua 成功后、
+            # 写入 RESERVED 状态前被杀死。token PRESENT 时必须撤销该孤儿预留。
             token_state = await RedisCapManager.get_reservation_token_state(
                 row.redis_counter_key, row.redis_token_key
             )
@@ -108,10 +102,17 @@ async def recover_cap_reservations(
                     stats["rolled_back"] += 1
                     continue
                 reason = f"Redis token PRESENT but atomic rollback returned {rollback_result}"
+            elif token_state == "ABSENT" and not row.redis_reserved:
+                # PREPARED 且未确认预留、token 又不存在：没有本请求可撤销的 Redis 名额。
+                await CapReservationLedger.finalize(
+                    row.reservation_key, "ROLLED_BACK", lease_owner=owner
+                )
+                stats["rolled_back"] += 1
+                continue
             elif token_state == "ABSENT":
                 reason = (
                     "Redis token ABSENT while ledger says redis_reserved=true; "
-                    "cannot distinguish completed rollback from Redis data loss"
+                    "cannot distinguish completed rollback from Redis token loss"
                 )
             else:
                 reason = "Redis token state UNKNOWN; Redis unavailable or counter state missing"
