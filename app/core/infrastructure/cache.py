@@ -6,7 +6,6 @@ import asyncio
 import json
 import fnmatch
 import time
-import re
 import hashlib
 import logging
 from collections import OrderedDict
