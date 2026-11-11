@@ -4,6 +4,7 @@ import json
 from app.api_v1.system.third_party_reports import (
     _mask_report_pii,
     _sanitize_report_params,
+    _safe_report_error_message,
 )
 
 
@@ -70,3 +71,16 @@ def test_third_party_report_response_schemas_expose_outbox_state():
         assert "next_retry_time" in response_schema.model_fields
 
     assert "error_message" in ThirdPartyReportLogResponse.model_fields
+
+
+
+def test_report_error_message_is_classified_without_echoing_raw_details():
+    raw_ip = "198.51.100.77"
+    raw = f"尝试 1: 状态码: 400, 响应: email=alice@example.invalid ip={raw_ip}"
+    safe = _safe_report_error_message(raw)
+    assert safe == "第三方返回非成功状态"
+    assert "alice@example.invalid" not in safe
+    assert raw_ip not in safe
+    assert _safe_report_error_message("像素凭据暂不可用，Outbox 将自动重试") == (
+        "像素配置缺失或不可用；检查配置后可重新排队"
+    )
