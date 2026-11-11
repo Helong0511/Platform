@@ -20,7 +20,7 @@
     "echarts": "6.1.0",
     "element-plus": "^2.11.7",
     "pinia": "3.0.3",
-    "vue": "3.5.22",
+    "vue": "3.5.45",
     "vue-router": "4.6.3"
   },
   "devDependencies": {
@@ -29,6 +29,9 @@
     "eslint-plugin-vue": "9.28.0",
     "linkedom": "^0.18.12",
     "postcss": "8.5.26",
-    "vite": "7.3.6"
+    "vite": "7.3.8"
+  },
+  "overrides": {
+    "follow-redirects": "1.16.0"
   }
 }
