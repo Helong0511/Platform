@@ -268,7 +268,11 @@ async def test_manual_retry_claim_is_conditional_on_failed_status(monkeypatch):
     class FakeDB:
         async def execute(self, statement):
             if statement.__class__.__name__ == "Update":
-                captured["sql"] = str(statement.compile(dialect=mysql.dialect())).lower()
+                compiled = statement.compile(dialect=mysql.dialect())
+                captured["sql"] = str(compiled).lower()
+                captured["params"] = {
+                    key: str(value).lower() for key, value in compiled.params.items()
+                }
                 return Result(rowcount=1)
             return Result(value=log_entry)
 
@@ -297,7 +301,8 @@ async def test_manual_retry_claim_is_conditional_on_failed_status(monkeypatch):
 
     assert await third_party_report.retry_report_log(41) is True
     assert captured["committed"] is True
-    assert "status = 'failed'" in captured["sql"]
+    assert "third_party_report_logs.status = %s" in captured["sql"]
+    assert "failed" in captured["params"].values()
     assert "report_start_time is null" in captured["sql"]
     assert "report_start_time <" in captured["sql"]
     assert scheduled == [True]
