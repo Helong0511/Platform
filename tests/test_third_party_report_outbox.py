@@ -583,3 +583,173 @@ async def test_remote_acceptance_with_lost_local_ack_retries_same_event_id(monke
     assert second["success"] is True
     assert attempts == ["stable-event-id-ack-lost", "stable-event-id-ack-lost"]
     assert remote_accepted == {"stable-event-id-ack-lost"}
+
+
+async def test_pixel_resolver_rejects_disabled_short_link_even_when_credentials_exist(monkeypatch):
+    from types import SimpleNamespace
+
+    short_link = SimpleNamespace(
+        is_active=False,
+        expires_at=None,
+        facebook_pixel_id="pixel-disabled",
+        facebook_access_token="token-disabled",
+        facebook_api_version="v23.0",
+    )
+
+    class FakeDB:
+        async def scalar(self, statement):
+            return short_link
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(
+        outbox,
+        "get_app_now_naive",
+        lambda: datetime(2026, 11, 11, 12, 0, 0),
+    )
+
+    result = await outbox._resolve_pixel_credentials(
+        short_link_id=31,
+        cloak_name="disabled-cloak",
+        short_code="disabled-code",
+    )
+
+    assert result == (None, None, None)
+
+
+async def test_pixel_resolver_rejects_expired_short_link_even_when_credentials_exist(monkeypatch):
+    from types import SimpleNamespace
+
+    short_link = SimpleNamespace(
+        is_active=True,
+        expires_at=datetime(2026, 11, 10, 23, 59, 59),
+        facebook_pixel_id="pixel-expired",
+        facebook_access_token="token-expired",
+        facebook_api_version="v23.0",
+    )
+
+    class FakeDB:
+        async def scalar(self, statement):
+            return short_link
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(
+        outbox,
+        "get_app_now_naive",
+        lambda: datetime(2026, 11, 11, 12, 0, 0),
+    )
+
+    result = await outbox._resolve_pixel_credentials(
+        short_link_id=32,
+        cloak_name="expired-cloak",
+        short_code="expired-code",
+    )
+
+    assert result == (None, None, None)
+
+
+async def test_pixel_resolver_marks_physically_deleted_short_link(monkeypatch):
+    class FakeDB:
+        async def scalar(self, statement):
+            return None
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+
+    try:
+        await outbox._resolve_pixel_credentials(
+            short_link_id=33,
+            cloak_name="deleted-cloak",
+            short_code="deleted-code",
+        )
+    except outbox.OutboxConfigReferenceDeleted:
+        pass
+    else:
+        raise AssertionError("物理删除的短链接必须明确识别为不可恢复配置引用")
+
+
+async def test_outbox_marks_deleted_short_link_terminal_without_retry(monkeypatch):
+    from types import SimpleNamespace
+
+    row = SimpleNamespace(
+        id=93,
+        outbox_enqueued=True,
+        pii_scrubbed_at=None,
+        status="pending",
+        next_retry_time=datetime(2026, 11, 11, 11, 59, 0),
+        adsid="fbclid-deleted",
+        event="Purchase",
+        conversion_id="conversion-deleted",
+        email="",
+        ip="",
+        phone="",
+        ua="",
+        source="postback",
+        use_hash=True,
+        currency="USD",
+        amount=9.0,
+        click_time=None,
+        event_key="stable-deleted-event",
+        short_link_id=34,
+        cloak_name="deleted-cloak",
+        short_code="deleted-code",
+    )
+
+    class FakeDB:
+        async def scalar(self, statement):
+            return row
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    captured = {}
+
+    async def deleted(**kwargs):
+        raise outbox.OutboxConfigReferenceDeleted()
+
+    async def claim(report_id):
+        assert report_id == 93
+        return True
+
+    async def update(report_id, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(outbox, "get_app_now_naive", lambda: datetime(2026, 11, 11, 12, 0, 0))
+    monkeypatch.setattr(outbox, "_resolve_pixel_credentials", deleted)
+    monkeypatch.setattr(outbox, "_claim_report_log", claim)
+    monkeypatch.setattr(outbox, "update_report_log", update)
+
+    result = await outbox.process_postback_report_outbox_item(93)
+
+    assert result == {
+        "success": False,
+        "retryable": False,
+        "reason": "short_link_deleted",
+    }
+    assert captured["status"] == "failed"
+    assert captured["error_message"] == "短链接已删除，无法解析像素配置"
+    assert captured["clear_next_retry_time"] is True
