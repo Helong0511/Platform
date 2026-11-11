@@ -26,6 +26,14 @@ def test_sanitize_report_params_recursively():
             },
             "event": "Purchase",
             "items": [{"email": "bob@example.invalid"}],
+            "data": [{
+                "user_data": {
+                    "em": ["alice@example.invalid"],
+                    "ph": ["4155550123"],
+                    "client_ip_address": "198.51.100.7",
+                    "client_user_agent": "private-meta-agent",
+                }
+            }],
         }
     )
 
@@ -36,6 +44,10 @@ def test_sanitize_report_params_recursively():
     assert sanitized["user"]["ip"] == "203.0.*.*"
     assert sanitized["user"]["ua"] == "[已隐藏]"
     assert sanitized["items"][0]["email"] == "b***@example.invalid"
+    assert sanitized["data"][0]["user_data"]["em"] == ["a***@example.invalid"]
+    assert sanitized["data"][0]["user_data"]["ph"] == ["415****0123"]
+    assert sanitized["data"][0]["user_data"]["client_ip_address"] == "198.51.*.*"
+    assert sanitized["data"][0]["user_data"]["client_user_agent"] == "[已隐藏]"
     assert sanitized["event"] == "Purchase"
 
 
