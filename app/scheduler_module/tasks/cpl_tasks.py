@@ -69,10 +69,18 @@ async def cap_sync_task():
         async with AsyncSessionLocal() as db:
             synchronizer = CapSynchronizer(db)
             stats = await synchronizer.sync_all_active_caps()
-            await db.commit()
-            msg = f"执行成功: success={stats.get('success', 0)} failed={stats.get('failed', 0)}"
+            failed = stats.get("failed", 0)
+            skipped = stats.get("skipped", 0)
+            if failed:
+                raise RuntimeError(
+                    f"Cap 同步批次失败并已回滚：failed={failed}"
+                )
+            msg = (
+                f"执行完成: success={stats.get('success', 0)} "
+                f"skipped_missing_redis_key={skipped} failed=0"
+            )
             set_task_result(CAP_SYNC_TASK_NAME, msg)
-            logger.debug(msg)
+            logger.info(msg)
     except Exception as e:
         set_task_result(CAP_SYNC_TASK_NAME, f"执行失败: {str(e)}")
         logger.error(f"Cap 计数同步任务失败: {e}", exc_info=True)
