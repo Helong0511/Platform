@@ -439,6 +439,7 @@ async def test_outbox_scan_is_bounded_and_filters_due_unexpired_attempts(monkeyp
             sql = str(compiled).lower()
             if sql.lstrip().startswith("update "):
                 captured["exhausted_update_sql"] = sql
+                captured["exhausted_update_params"] = compiled.params
             else:
                 captured["sql"] = sql
                 captured["params"] = {
@@ -483,8 +484,8 @@ async def test_outbox_scan_is_bounded_and_filters_due_unexpired_attempts(monkeyp
     assert captured["normalization_committed"] is True
     assert "update third_party_report_logs" in captured["exhausted_update_sql"]
     assert "third_party_report_logs.status in" in captured["exhausted_update_sql"]
-    assert "'pending'" in captured["exhausted_update_sql"]
-    assert "'failed'" in captured["exhausted_update_sql"]
+    update_params = " ".join(str(value).lower() for value in captured["exhausted_update_params"].values())
+    assert "pending" in update_params and "failed" in update_params
     assert "third_party_report_logs.pii_scrubbed_at is null" in captured["exhausted_update_sql"]
     assert "third_party_report_logs.report_start_time is null" in captured["exhausted_update_sql"]
     assert "third_party_report_logs.outbox_enqueued is true" in captured["exhausted_update_sql"]
