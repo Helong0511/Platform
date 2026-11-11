@@ -425,8 +425,8 @@ async def retry_third_party_report(
         # ---------- 条件分支 ----------
         if not success:
             raise_api_exception(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                detail="日志不存在，或当前状态/配置引用不满足重试条件（仅支持失败的 Outbox 记录）"
+                ErrorCode.CONFLICT,
+                detail="当前日志不可重试：仅支持有有效配置引用且未处于活动租约中的失败 Outbox 记录"
             )
 
         await log_user_action(
