@@ -9,9 +9,9 @@ import httpx
 import hashlib
 import json
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -168,6 +168,43 @@ async def update_report_log(
         logger.warning(f"[第三方上报] 更新日志记录失败: {e}")
 
 
+async def _get_report_status(report_log_id: int) -> Optional[str]:
+    """读取事件上报状态；读取失败由调用方按不可安全发送处理。"""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(ThirdPartyReportLog.status)
+            .where(ThirdPartyReportLog.id == report_log_id)
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+
+async def _claim_report_log(report_log_id: int, lease_seconds: int = 300) -> bool:
+    """原子认领一条待上报事件，避免并发请求同时发送同一事件。
+
+    失败状态允许立即重试；pending 状态仅允许首次认领或租约过期后恢复。
+    发送进程异常退出时，租约到期后可由后续请求接管。
+    """
+    now = get_app_now_naive()
+    stale_before = now - timedelta(seconds=max(30, lease_seconds))
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            update(ThirdPartyReportLog)
+            .where(
+                ThirdPartyReportLog.id == report_log_id,
+                ThirdPartyReportLog.status != "success",
+                or_(
+                    ThirdPartyReportLog.status == "failed",
+                    ThirdPartyReportLog.report_start_time.is_(None),
+                    ThirdPartyReportLog.report_start_time < stale_before,
+                ),
+            )
+            .values(report_start_time=now)
+        )
+        await db.commit()
+        return (result.rowcount or 0) == 1
+
+
 async def send_third_party_report(
         adsid: str,
         event: str,
@@ -256,32 +293,35 @@ async def send_third_party_report(
 
     event_key = build_event_idempotency_key(source, adsid, event, conversion_id)
     try:
-        async with AsyncSessionLocal() as db:
-            status_result = await db.execute(
-                select(ThirdPartyReportLog.status)
-                .where(ThirdPartyReportLog.id == report_log_id)
-                .limit(1)
-            )
-            existing_status = status_result.scalar_one_or_none()
-    except Exception as status_exc:
-        # 无法确认该事件是否已成功上报时，不盲目重发；稳定 event_id 供后续安全重试。
+        claimed = await _claim_report_log(report_log_id)
+        if not claimed:
+            existing_status = await _get_report_status(report_log_id)
+            if existing_status == "success":
+                logger.info(
+                    "[第三方上报] 相同事件已成功上报，跳过重复发送: source=%s adsid=%s event=%s conversion_id=%s",
+                    source,
+                    adsid,
+                    event,
+                    conversion_id,
+                )
+                return {"success": True, "deduplicated": True, "report_log_id": report_log_id}
+            return {
+                "success": False,
+                "retryable": True,
+                "reason": "report_in_progress",
+                "report_log_id": report_log_id,
+            }
+    except Exception as claim_exc:
+        # 无法确认是否成功认领时禁止发送，避免并发重复上报。
         logger.error(
-            "[第三方上报] 无法读取事件日志状态，跳过本次发送以避免重复事件: id=%s error=%s",
+            "[第三方上报] 事件认领失败，跳过发送: id=%s error=%s",
             report_log_id,
-            status_exc,
+            claim_exc,
             exc_info=True,
         )
-        return {"success": False, "retryable": True, "reason": "report_status_unavailable"}
+        return {"success": False, "retryable": True, "reason": "report_claim_unavailable"}
 
-    if existing_status == "success":
-        logger.info(
-            "[第三方上报] 相同事件已成功上报，跳过重复发送: source=%s adsid=%s event=%s conversion_id=%s",
-            source,
-            adsid,
-            event,
-            conversion_id,
-        )
-        return {"success": True, "deduplicated": True, "report_log_id": report_log_id}
+
 
     async def _mark_failed_and_raise(error_msg: str):
         """将上报日志标为 failed 后抛出 ValueError，供上层中断流程。"""
@@ -342,9 +382,6 @@ async def send_third_party_report(
                     logger.info(f"[第三方上报] 未找到对应的 ViewContent 事件: adsid={adsid}")
         except Exception as e:
             logger.warning(f"[第三方上报] 更新 ViewContent 事件的 conversion_id 失败: {e}")
-
-    report_start_time = get_app_now_naive()
-    await update_report_log(report_log_id, report_start_time=report_start_time)
 
     logger.info("[第三方上报] 使用像素配置 - Pixel ID: %s, API 版本：%s", pixel_id, api_version)
     
