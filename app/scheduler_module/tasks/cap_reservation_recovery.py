@@ -20,10 +20,11 @@ async def cap_reservation_recovery_task():
             f"rolled_back={stats['rolled_back']} "
             f"needs_reconciliation={stats['needs_reconciliation']} "
             f"tokens_cleaned={stats['tokens_cleaned']} "
+            f"cleanup_pending={stats['cleanup_pending']} "
             f"failed={stats['failed']} duration={duration:.2f}s"
         )
         set_task_result(CAP_RESERVATION_RECOVERY_TASK_NAME, message)
-        if stats["needs_reconciliation"] or stats["failed"]:
+        if stats["needs_reconciliation"] or stats["cleanup_pending"] or stats["failed"]:
             logger.warning("Cap Reservation 恢复任务存在待对账项：%s", message)
         else:
             logger.info(message)
