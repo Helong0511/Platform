@@ -372,3 +372,25 @@ def test_cap_conversion_status_fits_database_column(cap_ok, expected):
     status = conversion_status_for_cap(cap_ok)
     assert status == expected
     assert len(status) <= 20
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("existing_id", "expected"), [(101, True), (None, False)])
+async def test_integrity_error_is_duplicate_only_when_event_unique_key_exists(
+    existing_id,
+    expected,
+):
+    """其他完整性错误不能被误报成重复转化成功。"""
+
+    class FakeDB:
+        async def execute(self, statement):
+            return _Result(scalar=existing_id)
+
+    result = await PostbackProcessor._conversion_event_exists(
+        db=FakeDB(),
+        platform="isolated-test",
+        conversion_id="conversion-101",
+        event_name="purchase",
+    )
+
+    assert result is expected
