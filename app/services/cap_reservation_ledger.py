@@ -224,15 +224,45 @@ class CapReservationLedger:
             )
             await session.commit()
             if result.rowcount != 1:
-                current = await session.scalar(
-                    select(CapReservation.state).where(
+                current = await session.execute(
+                    select(CapReservation.state, CapReservation.lease_owner).where(
                         CapReservation.reservation_key == reservation_key
                     )
                 )
-                if current != "RESERVED":
+                current_state, current_owner = current.one_or_none() or (None, None)
+                if current_state != "RESERVED" or current_owner != lease_owner:
                     raise RuntimeError(
-                        f"Cap Reservation 状态转换 PREPARED->RESERVED 失败：{current}"
+                        f"Cap Reservation 状态转换/租约校验失败：state={current_state}, owner_matches={current_owner == lease_owner}"
                     )
+
+    @staticmethod
+    async def renew_lease(
+        reservation_key: str,
+        lease_owner: str,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    ) -> None:
+        """在 Postback 主事务提交前续租，防止恢复 Worker 与仍在执行的请求竞争。"""
+        if lease_seconds < 30 or lease_seconds > 3600:
+            raise ValueError("Reservation lease_seconds 必须在 30 到 3600 秒之间")
+        now = get_app_now_naive()
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                update(CapReservation)
+                .where(
+                    CapReservation.reservation_key == reservation_key,
+                    CapReservation.state.in_(("PREPARED", "RESERVED")),
+                    CapReservation.lease_owner == lease_owner,
+                )
+                .values(
+                    lease_expires_at=now + timedelta(seconds=lease_seconds),
+                    updated_at=now,
+                )
+            )
+            await session.commit()
+            if result.rowcount != 1:
+                raise RuntimeError(
+                    f"Cap Reservation lease 续租失败，拒绝提交业务事务：{reservation_key}"
+                )
 
     @staticmethod
     async def finalize(
