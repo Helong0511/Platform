@@ -239,6 +239,9 @@ async def get_third_party_reports(
                 item["report_params_preview"] = f"{preview}..." if len(safe_params) > 120 else preview
             else:
                 item["report_params_preview"] = None
+            item["outbox_error_category"] = (
+                _safe_report_error_message(log.error_message) if log.outbox_enqueued else None
+            )
             log_responses.append(item)
         serialize_elapsed_ms = int((perf_counter() - serialize_started_at) * 1000)
         total_elapsed_ms = int((perf_counter() - started_at) * 1000)
