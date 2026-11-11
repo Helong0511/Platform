@@ -63,6 +63,8 @@ class HttpClient:
 
     DEFAULT_TIMEOUT = 12
     CONNECT_TIMEOUT = 5
+    # 限制重定向跳数，确保单次下游 HTTP 请求的最长耗时可被队列租约覆盖。
+    MAX_REDIRECTS = 10
 
     @staticmethod
     async def send_request(
@@ -91,6 +93,7 @@ class HttpClient:
                     connect=HttpClient.CONNECT_TIMEOUT,
                 ),
                 follow_redirects=True,
+                max_redirects=HttpClient.MAX_REDIRECTS,
                 trust_env=False,
             ) as client:
 
