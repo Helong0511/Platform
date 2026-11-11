@@ -97,9 +97,13 @@ async def test_scrub_clears_payload_but_preserves_event_identity(monkeypatch):
     # 幂等与审计标识不变，避免重复事件在清理后重新入账。
     assert row.event_key == "stable-event-key"
     assert row.source == "postback"
-    assert row.adsid == "fbclid-ci"
+    assert row.adsid == ""
     assert row.event == "Purchase"
-    assert row.conversion_id == "conversion-ci"
+    assert row.conversion_id is None
+    assert row.short_link_id is None
+    assert row.cloak_name is None
+    assert row.short_code is None
+    assert row.click_time is None
     sql = captured["sql"]
     assert "third_party_report_logs.pii_scrubbed_at is null" in sql
     assert "third_party_report_logs.created_at <" in sql
