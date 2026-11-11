@@ -87,7 +87,7 @@ async def _lock_conversion_for_queue_enqueue(
         .where(PostbackConversion.id == conversion_id)
         .with_for_update()
     )
-    return result.scalar_one_or_none() is not None
+    return result.scalars().first() is not None
 
 
 class PostbackForwarder:
