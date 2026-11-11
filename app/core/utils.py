@@ -70,7 +70,8 @@ def get_client_ip(request: Request) -> str:
        ``TRUSTED_PROXIES`` / ``TRUSTED_PROXY_IPS`` 时，才解析代理头。
     3. 对 X-Forwarded-For 从右向左跳过可信代理，取第一个非可信 IP
        （即「最右侧可信链之外的真实客户端」）。
-    4. 优先使用 Cloudflare 的 CF-Connecting-IP（由边缘节点覆盖写入）。
+    4. CF-Connecting-IP 仅在可信代理链路读取；Nginx 必须将其覆盖为
+       real_ip 模块解析后的 $remote_addr，禁止透传客户端原始同名请求头。
     """
     try:
         from app.core.config import settings
