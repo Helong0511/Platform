@@ -74,6 +74,7 @@ async def test_enqueue_postback_report_reuses_existing_event(monkeypatch):
             "status": "failed",
             "next_retry_time": None,
             "outbox_enqueued": False,
+            "max_attempts": 3,
         },
     )()
 
