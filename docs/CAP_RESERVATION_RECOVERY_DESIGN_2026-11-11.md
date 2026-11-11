@@ -224,3 +224,25 @@ NEEDS_RECONCILIATION
 ### 当前实现边界
 
 以上是架构核验和实施约束，不代表账本、恢复 Worker、三态查询或 migration 已经实现。当前孤儿预留风险仍然存在，PR 不具备部署条件。
+
+
+## 13. 账本基础结构与服务已落地（2026-11-11 后续提交）
+
+以下内容已实际提交到审计分支；它们属于基础设施阶段，不应误报为完整恢复闭环：
+
+- ORM：`app/models/cap_reservation.py`，包含稳定唯一键、正式事件字段、Cap scope、Redis counter/token key 快照、状态、尝试次数、租约字段及恢复索引。
+- 模型聚合：`app/models/models.py` 与 `app/models/__init__.py` 均导出 `CapReservation`，使共享 `Base.metadata` 能发现新表。
+- SQL migration：`sql/migrations/20261111_cap_reservation_ledger.sql`，字段类型与 ORM 对齐；迁移文件只供发布评审，CI 不执行生产迁移。
+- 独立服务：`app/services/cap_reservation_ledger.py` 使用 `AsyncSessionLocal`，提供稳定身份生成、独立会话 PREPARED 创建、RESERVED 标记、COMMITTED/ROLLED_BACK 终态确认和 NEEDS_RECONCILIATION 标记。
+- 测试：`tests/test_cap_reservation_model.py` 验证 metadata 注册和索引；`tests/test_cap_reservation_ledger_identity.py` 验证稳定键、publisher NULL scope、Daily 日期、cap kind 和非法输入。
+
+### 仍未完成、仍然阻断上线的部分
+
+1. `CapReservationLedger.prepare()` 尚未接入 `increment_cap_count()`；当前 Redis reservation 仍由 cap_manager 生成随机 UUID。
+2. `mark_reserved/finalize` 尚未接入 Postback 预留、DB commit、rollback 与 commit reconciliation 生命周期。
+3. Redis token 三态核验尚未实现；Redis UNKNOWN、counter key missing、token ABSENT 尚无统一恢复语义。
+4. 恢复 Worker、数据库 lease 抢占、条件状态更新、任务配置与积压监控尚未实现。
+5. Daily 48 小时 key/token 生命周期、Total 长期 token 保留、Redis 整体数据丢失、历史基线恢复尚未完成设计验证与故障注入。
+6. 当前新增测试仅验证模型与稳定身份规则，不覆盖跨存储事务恢复，不代表孤儿 reservation 风险已消除。
+
+下一步必须先明确 fail-open 时“没有 Redis token 但 DB Cap 快照随转化提交”的账本状态语义，再接入 Cap manager；不能简单将所有 `None` 当成 RESERVED，也不能在 Redis 结果 UNKNOWN 时误标 ROLLED_BACK。
