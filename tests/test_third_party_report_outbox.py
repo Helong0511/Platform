@@ -206,30 +206,125 @@ async def test_outbox_worker_rejects_invalid_batch_size():
         await outbox.process_postback_report_outbox(batch_size=101)
 
 
-def test_third_party_report_outbox_scheduler_is_registered():
-    from app.scheduler_module.task_config import TASK_CONFIGS
-    from app.scheduler_module.task_names import (
-        ALL_TASK_NAMES,
-        TASK_NAME_MAP,
-        THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
-    )
-    from app.scheduler_module.task_registry import load_function_by_path
-    from app.scheduler_module.tasks.third_party_report_tasks import (
-        process_third_party_report_outbox_task,
+async def test_outbox_missing_credentials_keeps_event_retryable(monkeypatch):
+    from datetime import timedelta
+
+    row = type(
+        "ReportRow",
+        (),
+        {
+            "id": 92,
+            "outbox_enqueued": True,
+            "status": "pending",
+            "next_retry_time": datetime(2026, 11, 11, 11, 59, 0),
+            "adsid": "fbclid-no-credentials",
+            "event": "Purchase",
+            "conversion_id": "conversion-no-credentials",
+            "email": "",
+            "ip": "",
+            "phone": "",
+            "ua": "",
+            "source": "postback",
+            "use_hash": True,
+            "currency": "USD",
+            "amount": 8.5,
+            "click_time": None,
+            "event_key": "stable-event-key-92",
+            "short_link_id": 12,
+            "cloak_name": "cloak-92",
+            "short_code": "short-92",
+        },
+    )()
+
+    class FakeDB:
+        async def scalar(self, statement):
+            return row
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    captured = {}
+
+    async def resolve(**kwargs):
+        return None, None, None
+
+    async def claim(report_id):
+        assert report_id == 92
+        return True
+
+    async def update(report_id, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(outbox, "get_app_now_naive", lambda: datetime(2026, 11, 11, 12, 0, 0))
+    monkeypatch.setattr(outbox, "_resolve_pixel_credentials", resolve)
+    monkeypatch.setattr(outbox, "_claim_report_log", claim)
+    monkeypatch.setattr(outbox, "update_report_log", update)
+
+    result = await outbox.process_postback_report_outbox_item(92)
+
+    assert result["retryable"] is True
+    assert result["reason"] == "missing_pixel_credentials"
+    assert captured["status"] == "failed"
+    assert captured["next_retry_time"] == datetime(2026, 11, 11, 12, 5, 0)
+    assert "access_token" not in captured
+
+
+async def test_postback_report_outbox_is_enqueued_in_conversion_session(monkeypatch):
+    from app.core.postback.processor import PostbackProcessor
+
+    class FakeResult:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return None
+
+    class FakeDB:
+        async def execute(self, statement):
+            return FakeResult()
+
+        async def scalar(self, statement):
+            return type("ShortLink", (), {"short_code": "short-ci"})()
+
+    db = FakeDB()
+    captured = {}
+
+    async def capture_enqueue(received_db, **kwargs):
+        captured["db"] = received_db
+        captured["payload"] = kwargs
+        return 103
+
+    monkeypatch.setattr(
+        "app.core.postback.processor.enqueue_postback_report",
+        capture_enqueue,
     )
 
-    config = TASK_CONFIGS[THIRD_PARTY_REPORT_OUTBOX_TASK_NAME]
-    assert THIRD_PARTY_REPORT_OUTBOX_TASK_NAME in ALL_TASK_NAMES
-    assert TASK_NAME_MAP["third_party_report_tasks"] == THIRD_PARTY_REPORT_OUTBOX_TASK_NAME
-    assert config["cron_expression"] == "* * * * *"
-    task = load_function_by_path(
-        f"{config['task_module']}.{config['task_function']}"
+    report_id = await PostbackProcessor._enqueue_third_party_report_if_needed(
+        platform="platform-ci",
+        click_association={
+            "click_id": "click-ci",
+            "short_link_id": 55,
+            "url_params": {"fbclid": "fbclid-ci"},
+            "ip": "203.0.113.55",
+            "user_agent": "ci-agent",
+            "click_time": datetime(2026, 11, 11, 10, 0, 0),
+        },
+        normalized_data={"conversion_id": "conversion-ci", "payout": "12.50"},
+        db=db,
     )
-    assert task is process_third_party_report_outbox_task
-    getter = load_function_by_path(
-        f"{config['result_getter_module']}.{config['result_getter_function']}"
-    )
-    assert callable(getter)
+
+    assert report_id == 103
+    assert captured["db"] is db
+    assert captured["payload"]["platform"] == "platform-ci"
+    assert captured["payload"]["event"] == "Purchase"
+    assert captured["payload"]["conversion_id"] == "conversion-ci"
+    assert captured["payload"]["short_link_id"] == 55
+    assert captured["payload"]["short_code"] == "short-ci"
 
 
 async def test_outbox_scan_is_bounded_and_filters_due_unexpired_attempts(monkeypatch):
