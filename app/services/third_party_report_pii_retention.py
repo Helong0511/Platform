@@ -51,10 +51,7 @@ async def scrub_expired_third_party_report_pii(
                 ThirdPartyReportLog.status == "failed",
                 or_(
                     ThirdPartyReportLog.outbox_enqueued.is_(False),
-                    and_(
-                        ThirdPartyReportLog.next_retry_time.is_(None),
-                        ThirdPartyReportLog.attempt_count >= ThirdPartyReportLog.max_attempts,
-                    ),
+                    ThirdPartyReportLog.attempt_count >= ThirdPartyReportLog.max_attempts,
                 ),
             ),
         ),
