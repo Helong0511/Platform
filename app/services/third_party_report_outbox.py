@@ -173,7 +173,7 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
         )
         if row is None:
             return {"success": False, "reason": "outbox_not_found"}
-        if row.pii_scrubbed_at is not None:
+        if getattr(row, "pii_scrubbed_at", None) is not None:
             return {"success": False, "retryable": False, "reason": "pii_payload_scrubbed"}
         if row.status == "success":
             return {"success": True, "deduplicated": True}
