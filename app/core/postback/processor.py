@@ -62,6 +62,26 @@ class PostbackProcessor:
     """Postback 统一处理器"""
     
     @staticmethod
+    async def _conversion_event_exists(
+        *,
+        db: AsyncSession,
+        platform: str,
+        conversion_id: str,
+        event_name: str,
+    ) -> bool:
+        """IntegrityError 后仅在事件唯一键已存在时判定为并发重复。"""
+        result = await db.execute(
+            select(PostbackConversion.id)
+            .where(
+                PostbackConversion.platform == platform,
+                PostbackConversion.conversion_id == conversion_id,
+                PostbackConversion.event_name == event_name,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    @staticmethod
     async def process(
         platform: str,
         raw_data: Dict[str, Any],
@@ -285,12 +305,32 @@ class PostbackProcessor:
             try:
                 conversion = await step_save_conversion(pipe_ctx)
             except IntegrityError:
-                # 先回滚 DB 事务，再精确回退本次真正预留的 Redis key。
+                # 先回滚失败事务，再按正式事件唯一键核验；不能把外键/其他唯一约束错误误报为重复。
                 await db.rollback()
+                is_duplicate_event = await PostbackProcessor._conversion_event_exists(
+                    db=db,
+                    platform=platform,
+                    conversion_id=normalized_data.get("conversion_id") or "",
+                    event_name=normalized_data.get("event_name") or "default",
+                )
                 if cap_reservations:
                     cap_rollback_attempted = True
                     await CapChecker.rollback_reservations(cap_reservations)
-                logger.info("并发重复转化，已跳过：platform=%s", platform)
+                if not is_duplicate_event:
+                    logger.error(
+                        "转化保存触发非重复事件 IntegrityError，已回滚并拒绝伪装成功：platform=%s conversion_id=%s event_name=%s",
+                        platform,
+                        normalized_data.get("conversion_id"),
+                        normalized_data.get("event_name"),
+                        exc_info=True,
+                    )
+                    raise
+                logger.info(
+                    "并发重复转化，已跳过：platform=%s conversion_id=%s event_name=%s",
+                    platform,
+                    normalized_data.get("conversion_id"),
+                    normalized_data.get("event_name"),
+                )
                 return {
                     "success": True,
                     "message": "重复转化，已跳过",
