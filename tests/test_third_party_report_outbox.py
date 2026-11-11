@@ -753,3 +753,42 @@ async def test_outbox_marks_deleted_short_link_terminal_without_retry(monkeypatc
     assert captured["status"] == "failed"
     assert captured["error_message"] == "短链接已删除，无法解析像素配置"
     assert captured["clear_next_retry_time"] is True
+
+
+async def test_manual_retry_sql_rejects_deleted_short_link_events(monkeypatch):
+    from sqlalchemy.dialects import mysql
+
+    captured = {}
+
+    class Result:
+        rowcount = 0
+
+    class FakeDB:
+        async def execute(self, statement):
+            compiled = statement.compile(dialect=mysql.dialect())
+            captured["sql"] = str(compiled).lower()
+            captured["params"] = compiled.params
+            return Result()
+
+        async def commit(self):
+            return None
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(
+        outbox,
+        "get_app_now_naive",
+        lambda: datetime(2026, 11, 11, 12, 0, 0),
+    )
+
+    assert await outbox.retry_report_log(94) is False
+    assert "third_party_report_logs.error_message is null" in captured["sql"]
+    assert "third_party_report_logs.error_message !=" in captured["sql"]
+    params = " ".join(str(value) for value in captured["params"].values())
+    assert "短链接已删除，无法解析像素配置" in params
