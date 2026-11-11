@@ -611,6 +611,9 @@ class PostbackForwarder:
                     PostbackForwardQueue.conversion_id == conversion.id,
                     PostbackForwardQueue.publisher_id == publisher_id,
                 )
+                # 使用当前读：在 MySQL REPEATABLE READ 下，普通 SELECT 可能沿用
+                # 等待行锁前建立的旧快照，看不到刚由前一个事务提交的队列记录。
+                .with_for_update()
             )
             if existing.scalars().first():
                 logger.debug(
@@ -675,6 +678,8 @@ class PostbackForwarder:
                     PostbackForwardQueue.product_id == product_id,
                     PostbackForwardQueue.publisher_id.is_(None),
                 )
+                # 与渠道级查询一样必须读取最新已提交状态，避免旧快照导致重复插入。
+                .with_for_update()
             )
             if existing.scalars().first():
                 logger.debug(
