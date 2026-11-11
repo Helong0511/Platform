@@ -1,16 +1,71 @@
--- 第三方上报 PII 到期清理元数据。
+-- 第三方上报与下游转发日志 PII 到期清理元数据。
 -- 清理任务默认关闭（THIRD_PARTY_REPORT_PII_RETENTION_DAYS=0）；必须先确定并审批适用保留期限。
--- 仅新增可追踪清理标记与扫描索引，不会在迁移时删除或改写历史数据。
-ALTER TABLE third_party_report_logs
-    ADD COLUMN pii_scrubbed_at DATETIME NULL
-        COMMENT 'PII 按保留策略清理时间；保留事件幂等键' AFTER completed_at,
-    ADD INDEX idx_third_party_pii_retention
-        (pii_scrubbed_at, created_at, id);
+-- 本迁移仅新增清理标记与扫描索引，不会删除或改写历史数据。
+-- 每个 DDL 均按 information_schema 做存在性检查，可在任意 DDL 边界中断后安全重跑。
 
--- 下游转发日志也持久化 URL 参数/请求体/响应体，按相同策略清理已完成且不再有待重试队列的记录。
-ALTER TABLE postback_forward_logs
-    ADD COLUMN pii_scrubbed_at DATETIME NULL
-        COMMENT 'PII 按保留策略清理时间' AFTER completed_at,
-    ADD INDEX idx_forward_log_pii_retention
-        (pii_scrubbed_at, created_at, id);
+SET @has_col = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'third_party_report_logs'
+      AND COLUMN_NAME = 'pii_scrubbed_at'
+);
+SET @ddl = IF(
+    @has_col = 0,
+    'ALTER TABLE third_party_report_logs ADD COLUMN pii_scrubbed_at DATETIME NULL COMMENT ''PII 按保留策略清理时间；保留事件幂等键'' AFTER completed_at',
+    'SELECT 1'
+);
+PREPARE migration_stmt FROM @ddl;
+EXECUTE migration_stmt;
+DEALLOCATE PREPARE migration_stmt;
 
+SET @has_index = (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'third_party_report_logs'
+      AND INDEX_NAME = 'idx_third_party_pii_retention'
+);
+SET @ddl = IF(
+    @has_index = 0,
+    'ALTER TABLE third_party_report_logs ADD INDEX idx_third_party_pii_retention (pii_scrubbed_at, created_at, id)',
+    'SELECT 1'
+);
+PREPARE migration_stmt FROM @ddl;
+EXECUTE migration_stmt;
+DEALLOCATE PREPARE migration_stmt;
+
+SET @has_col = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'postback_forward_logs'
+      AND COLUMN_NAME = 'pii_scrubbed_at'
+);
+SET @ddl = IF(
+    @has_col = 0,
+    'ALTER TABLE postback_forward_logs ADD COLUMN pii_scrubbed_at DATETIME NULL COMMENT ''PII 按保留策略清理时间'' AFTER completed_at',
+    'SELECT 1'
+);
+PREPARE migration_stmt FROM @ddl;
+EXECUTE migration_stmt;
+DEALLOCATE PREPARE migration_stmt;
+
+SET @has_index = (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'postback_forward_logs'
+      AND INDEX_NAME = 'idx_forward_log_pii_retention'
+);
+SET @ddl = IF(
+    @has_index = 0,
+    'ALTER TABLE postback_forward_logs ADD INDEX idx_forward_log_pii_retention (pii_scrubbed_at, created_at, id)',
+    'SELECT 1'
+);
+PREPARE migration_stmt FROM @ddl;
+EXECUTE migration_stmt;
+DEALLOCATE PREPARE migration_stmt;
+
+-- 迁移后核验；新增标记必须为空，历史 PII 不会在迁移时被清理。
+SELECT TABLE_NAME, COLUMN_NAME
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND ((TABLE_NAME = 'third_party_report_logs' AND COLUMN_NAME = 'pii_scrubbed_at')
+    OR (TABLE_NAME = 'postback_forward_logs' AND COLUMN_NAME = 'pii_scrubbed_at'));
