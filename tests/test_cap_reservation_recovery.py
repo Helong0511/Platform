@@ -276,3 +276,39 @@ async def test_recovery_status_reports_backlog_and_oldest_pending_age(monkeypatc
         "committed_token_cleanup_pending": 2,
         "oldest_pending_seconds": 600,
     }
+
+
+@pytest.mark.asyncio
+async def test_absent_token_with_existing_counter_requires_reconciliation(monkeypatch):
+    """token 可能被独立淘汰；counter 仍在时不能把 ABSENT 当成未预留。"""
+    row = _reservation(state="PREPARED", redis_reserved=False)
+    sessions = [_Session(rows=[row]), _Session(event_id=None)]
+    calls = []
+
+    def session_factory():
+        return sessions.pop(0)
+
+    async def token_state(counter_key, token_key):
+        return "ABSENT"
+
+    async def counter_exists(counter_key):
+        return True
+
+    async def mark_needs(key, error, **kwargs):
+        calls.append((key, error, kwargs))
+
+    async def forbidden_finalize(*args, **kwargs):
+        raise AssertionError("counter exists: ABSENT token must not finalize as rolled back")
+
+    monkeypatch.setattr(recovery, "AsyncSessionLocal", session_factory)
+    monkeypatch.setattr(recovery.RedisCapManager, "get_reservation_token_state", token_state)
+    monkeypatch.setattr(recovery.RedisCapManager, "counter_key_exists", counter_exists)
+    monkeypatch.setattr(recovery.CapReservationLedger, "mark_needs_reconciliation", mark_needs)
+    monkeypatch.setattr(recovery.CapReservationLedger, "finalize", forbidden_finalize)
+
+    stats = await recovery.recover_cap_reservations()
+
+    assert stats["needs_reconciliation"] == 1
+    assert calls[0][0] == row.reservation_key
+    assert "token ABSENT" in calls[0][1]
+    assert "counter still exists" in calls[0][1]
