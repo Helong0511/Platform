@@ -55,21 +55,36 @@ async def enqueue_postback_report(
     )
     has_config_reference = bool(short_link_id or (cloak_name and short_code))
     if existing is not None:
+        # 已进入 Outbox 的事件身份和发送载荷不可被重复 Postback 改写；
+        # 已成功/已尝试/仍持有租约的旧日志也不能被重新打开。
+        if getattr(existing, "outbox_enqueued", False):
+            return int(existing.id)
+
+        attempts = int(getattr(existing, "attempt_count", 0) or 0)
+        report_start_time = getattr(existing, "report_start_time", None)
+        active_lease = bool(
+            report_start_time
+            and report_start_time >= now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS)
+        )
+        if existing.status == "success" or attempts > 0 or active_lease:
+            return int(existing.id)
+
+        # 仅允许从未尝试发送、且没有活动租约的旧日志升级为 Outbox；
+        # 此时补充非敏感配置引用，不改变事件身份及 PII/金额等业务载荷。
         existing.outbox_enqueued = True
         existing.short_link_id = short_link_id
         existing.cloak_name = cloak_name
         existing.short_code = short_code
         existing.click_time = click_time
         existing.max_attempts = max(int(existing.max_attempts or 0), 12)
-        if existing.status != "success":
-            if has_config_reference:
-                existing.status = "pending"
-                existing.next_retry_time = now
-                existing.error_message = None
-            else:
-                existing.status = "failed"
-                existing.next_retry_time = None
-                existing.error_message = "缺少短链接/斗篷配置引用，无法自动解析像素凭据"
+        if has_config_reference:
+            existing.status = "pending"
+            existing.next_retry_time = now
+            existing.error_message = None
+        else:
+            existing.status = "failed"
+            existing.next_retry_time = None
+            existing.error_message = "缺少短链接/斗篷配置引用，无法自动解析像素凭据"
         await db.flush()
         return int(existing.id)
 
