@@ -43,19 +43,25 @@ async def scrub_expired_third_party_report_pii(
     now = get_app_now_naive()
     cutoff = now - timedelta(days=days)
     stale_lease = now - timedelta(seconds=300)
-    terminal = or_(
-        ThirdPartyReportLog.status == "success",
-        and_(
-            ThirdPartyReportLog.status == "failed",
-            ThirdPartyReportLog.next_retry_time.is_(None),
-            ThirdPartyReportLog.attempt_count >= ThirdPartyReportLog.max_attempts,
-            or_(
-                ThirdPartyReportLog.report_start_time.is_(None),
-                ThirdPartyReportLog.report_start_time < stale_lease,
+    terminal = and_(
+        ThirdPartyReportLog.status.in_(("success", "failed")),
+        or_(
+            ThirdPartyReportLog.status == "success",
+            and_(
+                ThirdPartyReportLog.status == "failed",
+                or_(
+                    ThirdPartyReportLog.outbox_enqueued.is_(False),
+                    and_(
+                        ThirdPartyReportLog.next_retry_time.is_(None),
+                        ThirdPartyReportLog.attempt_count >= ThirdPartyReportLog.max_attempts,
+                    ),
+                ),
             ),
         ),
-        # 旧的非 Outbox 日志没有后台重试能力，可按相同保留策略清理。
-        ThirdPartyReportLog.outbox_enqueued.is_(False),
+        or_(
+            ThirdPartyReportLog.report_start_time.is_(None),
+            ThirdPartyReportLog.report_start_time < stale_lease,
+        ),
     )
 
     async with AsyncSessionLocal() as db:
