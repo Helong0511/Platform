@@ -360,3 +360,50 @@ async def test_absent_token_with_existing_counter_requires_reconciliation(monkey
     assert calls[0][0] == row.reservation_key
     assert "token ABSENT" in calls[0][1]
     assert "counter still exists" in calls[0][1]
+
+
+@pytest.mark.asyncio
+async def test_expired_daily_present_token_cleans_orphan_without_decrementing_missing_counter(monkeypatch):
+    """Daily counter 过期后 token 仍为 PRESENT：清理 token，不对缺失 counter 执行 DECR。"""
+    from datetime import date, datetime
+
+    row = _reservation(state="RESERVED", redis_reserved=True)
+    row.business_date = date(2026, 11, 8)
+    sessions = [_Session(rows=[row]), _Session(event_id=None)]
+    calls = []
+
+    def session_factory():
+        return sessions.pop(0)
+
+    async def token_state(counter_key, token_key):
+        return "PRESENT"
+
+    async def counter_exists(counter_key):
+        return False
+
+    async def delete_token(token_key):
+        calls.append(("delete", token_key))
+        return True
+
+    async def finalize(key, state, **kwargs):
+        calls.append(("finalize", key, state, kwargs))
+
+    async def forbidden_rollback(*args):
+        raise AssertionError("过期且不存在的 Daily counter 不得执行 DECR")
+
+    monkeypatch.setattr(recovery, "AsyncSessionLocal", session_factory)
+    monkeypatch.setattr(
+        recovery, "get_app_now_naive",
+        lambda: datetime(2026, 11, 11, 12, 0, 0),
+    )
+    monkeypatch.setattr(recovery.RedisCapManager, "get_reservation_token_state", token_state)
+    monkeypatch.setattr(recovery.RedisCapManager, "counter_key_exists", counter_exists)
+    monkeypatch.setattr(recovery.RedisCapManager, "delete_reservation_token", delete_token)
+    monkeypatch.setattr(recovery.RedisCapManager, "rollback_reservation_keys", forbidden_rollback)
+    monkeypatch.setattr(recovery.CapReservationLedger, "finalize", finalize)
+
+    stats = await recovery.recover_cap_reservations()
+
+    assert stats["rolled_back"] == 1
+    assert calls[0] == ("delete", row.redis_token_key)
+    assert calls[1][0:3] == ("finalize", row.reservation_key, "ROLLED_BACK")
