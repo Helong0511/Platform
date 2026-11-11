@@ -23,7 +23,10 @@ def test_forward_task_lease_is_longer_than_http_connect_timeout():
     # HTTP connect timeout 当前为 5 秒；租约须明显长于单次正常转发时间。
     from app.core.postback.forwarding.http_client import HttpClient
 
-    assert FORWARD_TASK_LEASE_SECONDS >= HttpClient.CONNECT_TIMEOUT * 10
+    # 需覆盖完整 HTTP 响应超时预算（最多 10 次重定向）并留出 DB/调度余量。
+    request_budget = HttpClient.DEFAULT_TIMEOUT * (HttpClient.MAX_REDIRECTS + 1)
+    assert FORWARD_TASK_LEASE_SECONDS >= request_budget + 60
+    assert HttpClient.MAX_REDIRECTS == 10
 
 
 
@@ -103,3 +106,43 @@ def test_initial_forward_tasks_can_be_enqueued_in_conversion_transaction():
     assert len(db.added) == 2
     assert {item.publisher_id for item in db.added} == {31, None}
     assert {item.conversion_id for item in db.added} == {101}
+
+
+
+async def test_admin_telegram_notification_does_not_hold_forward_queue_worker(monkeypatch):
+    """Telegram 限流/重试属于旁路，不应占用转发任务租约。"""
+    import asyncio
+
+    from app.core.postback import forwarder
+    from app.services.telegram_notification_service import TelegramNotificationService
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_notification(**kwargs):
+        started.set()
+        await release.wait()
+        return True
+
+    monkeypatch.setattr(
+        TelegramNotificationService,
+        "send_admin_notification",
+        staticmethod(slow_notification),
+    )
+
+    forwarder._schedule_admin_notification(
+        message="isolated test notification",
+        telegram_chat_id="123456",
+        notification_type="forward_success",
+    )
+
+    await asyncio.wait_for(started.wait(), timeout=1)
+    pending = [
+        task for task in forwarder._notification_tasks
+        if not task.done()
+    ]
+    assert len(pending) == 1
+
+    release.set()
+    await asyncio.wait_for(asyncio.gather(*pending), timeout=1)
+    assert not forwarder._notification_tasks
