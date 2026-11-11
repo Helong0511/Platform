@@ -115,15 +115,15 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 3. 检查 `missing_event_keys=0`，重复键查询无结果；确认 `unique_event_key` 已创建，且旧的 `unique_source_adsid` 已按迁移预期替换。
 4. 执行 `sql/migrations/20261111_third_party_report_outbox.sql`。
 5. 核验 Outbox 五个字段和 `idx_third_party_outbox_due`，与 ORM `ThirdPartyReportLog` 定义一致。
-6. 执行 `sql/migrations/20261112_third_party_report_pii_retention.sql`，核对 `pii_scrubbed_at` 与 `idx_third_party_pii_retention`；该迁移只新增元数据，不清理历史数据。
+6. 执行 `sql/migrations/20261112_third_party_report_pii_retention.sql`，核对 `third_party_report_logs.pii_scrubbed_at` / `idx_third_party_pii_retention` 及 `postback_forward_logs.pii_scrubbed_at` / `idx_forward_log_pii_retention`；该迁移只新增元数据，不清理历史数据。
 7. 发布同一 SHA 的兼容应用代码；先保持 Outbox worker 禁用，执行隔离/受控验证后再按发布审批启用 worker。
 8. 确认新旧 API/worker 不混跑；观察 pending、failed、重试耗尽和租约恢复指标后再恢复正常流量。
 
-`sql/platform.sql` 是完整建库基线，已经包含 `event_key`、Outbox 字段及相关索引；它不是在线增量迁移脚本。已有数据库必须按上面的两个增量迁移顺序执行，禁止对现有生产库直接运行会 DROP/重建表的完整基线脚本。
+`sql/platform.sql` 是完整建库基线，已经包含 `event_key`、Outbox 字段及相关索引；它不是在线增量迁移脚本。已有数据库必须按上面的增量迁移编号顺序执行，禁止对现有生产库直接运行会 DROP/重建表的完整基线脚本。
 
 ### 9.3 回滚原则与兼容边界
 
-- MySQL DDL 可能隐式提交；两份迁移不能按一个事务整体回滚。**默认回滚只回应用代码，不删除新增列、索引或历史事件记录。**
+- MySQL DDL 可能隐式提交；三份迁移不能按一个事务整体回滚。**默认回滚只回应用代码，不删除新增列、索引或历史事件记录。**
 - Outbox migration 新增列/索引可以保留；回退应用前必须停止新 Outbox worker，并确认已入队事件的处置方案（由兼容 worker 继续处理，或暂停并保留待恢复队列），不得静默丢弃。
 - event-id migration 将 `event_key` 改为 NOT NULL 并替换旧唯一索引。旧版应用若不写 `event_key`，不能直接回滚到该旧二进制版本；必须使用仍能生成/写入 `event_key` 的兼容回滚版本。若不存在兼容版本，回滚被阻断，需先制定并在隔离库演练 schema 与数据回退方案。
 - 不得自动 DROP `event_key`、Outbox 字段或索引；不得未经审批恢复旧 `unique_source_adsid`，因为新数据可能已允许同一 source/adsid 下存在不同 event。
@@ -140,7 +140,7 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - 上述测试只使用 CI 临时 MySQL 8.0.46、临时 Redis、独立随机数据库和合成数据；不连接生产服务。
 - Run #923 曾因新增测试的调用记录断言错误而失败（324 passed、1 failed）；已修正测试断言，Run #924 全绿。随后 Run #925 增加真实 MySQL COMMIT 响应丢失测试并全绿。
 - 仍未完成：完整旧 schema 到新 schema 的真实升级/中断重跑/兼容回滚演练；Outbox 配置生命周期与发送租约压力测试；PII 数据保留、删除、访问审计政策核定；全项目业务模块最终回归。
-- PII 生命周期修复：新增 `pii_scrubbed_at` 标记、扫描索引、分批清除服务和每日调度任务；仅清理已成功或明确终态且租约失效的旧记录载荷，保留 `event_key`/事件审计骨架；待重试 Outbox 不会被清理。默认 `THIRD_PARTY_REPORT_PII_RETENTION_DAYS=0`（关闭），须经业务/合规负责人确定期限后显式设置；未设置前不得声称已自动执行个人信息到期清理。
+- PII 生命周期修复：新增第三方上报与下游转发日志的 `pii_scrubbed_at` 标记、扫描索引、分批清除服务和每日调度任务；仅清理终态历史载荷，保留 `event_key`/最小审计骨架；待重试 Outbox 不会被清理。默认 `THIRD_PARTY_REPORT_PII_RETENTION_DAYS=0`（关闭），须经业务/合规负责人确定期限后显式设置；未设置前不得声称已自动执行个人信息到期清理。
 - PR #1 继续保持 Draft；最新 CI 通过不代表迁移已获生产审批，也不构成部署许可。
 
 ## 9.5 第三方上报 PII 保留与清理策略
