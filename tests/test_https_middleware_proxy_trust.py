@@ -7,8 +7,6 @@ from starlette.responses import Response
 from app.core import https_middleware
 
 
-
-
 def _configure_settings(monkeypatch, *, trust_proxy_headers=True, trusted_ips=None):
     monkeypatch.setattr(
         https_middleware,
@@ -71,13 +69,7 @@ async def test_untrusted_client_cannot_spoof_forwarded_proto_or_cloudflare_heade
 
 @pytest.mark.asyncio
 async def test_configured_local_reverse_proxy_may_forward_https_scheme(monkeypatch):
-    monkeypatch.setattr(https_middleware.settings, "is_production", True)
-    monkeypatch.setattr(https_middleware.settings, "TRUST_PROXY_HEADERS", True)
-    monkeypatch.setattr(
-        https_middleware.settings,
-        "get_trusted_proxy_ips",
-        lambda: ["127.0.0.1", "::1"],
-    )
+    _configure_settings(monkeypatch, trusted_ips=["127.0.0.1", "::1"])
     middleware = https_middleware.HTTPSRedirectMiddleware(lambda scope, receive, send: None)
 
     async def call_next(_request):
