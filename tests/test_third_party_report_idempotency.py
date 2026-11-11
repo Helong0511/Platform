@@ -364,3 +364,117 @@ async def test_telegram_failure_does_not_retry_successful_purchase_report(monkey
 
     assert state["http_calls"] == 1
     assert state["statuses"] == ["success"]
+
+
+
+async def test_admin_identity_edit_recomputes_non_outbox_event_key(monkeypatch):
+    log_entry = type(
+        "ReportLog",
+        (),
+        {
+            "id": 201,
+            "source": "short_link",
+            "adsid": "old-adsid",
+            "event": "ViewContent",
+            "conversion_id": "old-conversion",
+            "event_key": "old-key",
+            "outbox_enqueued": False,
+        },
+    )()
+
+    class Result:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return log_entry
+
+    class FakeDB:
+        committed = False
+
+        async def execute(self, statement):
+            return Result()
+
+        async def commit(self):
+            self.committed = True
+
+    class SessionContext:
+        def __init__(self):
+            self.db = FakeDB()
+
+        async def __aenter__(self):
+            return self.db
+
+        async def __aexit__(self, *args):
+            return False
+
+    context = SessionContext()
+    monkeypatch.setattr(
+        third_party_report, "AsyncSessionLocal", lambda: context
+    )
+
+    assert await third_party_report.update_report_log_params(
+        log_id=201,
+        adsid="new-adsid",
+        event="Purchase",
+        conversion_id="new-conversion",
+    ) is True
+    assert context.db.committed is True
+    assert log_entry.event_key == third_party_report.build_event_idempotency_key(
+        "short_link", "new-adsid", "Purchase", "new-conversion"
+    )
+
+
+async def test_admin_cannot_change_outbox_event_identity(monkeypatch):
+    log_entry = type(
+        "ReportLog",
+        (),
+        {
+            "id": 202,
+            "source": "postback",
+            "adsid": "fbclid-original",
+            "event": "Purchase",
+            "conversion_id": "conversion-original",
+            "event_key": "platform-scoped-event-key",
+            "outbox_enqueued": True,
+        },
+    )()
+
+    class Result:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return log_entry
+
+    class FakeDB:
+        committed = False
+
+        async def execute(self, statement):
+            return Result()
+
+        async def commit(self):
+            self.committed = True
+
+    class SessionContext:
+        def __init__(self):
+            self.db = FakeDB()
+
+        async def __aenter__(self):
+            return self.db
+
+        async def __aexit__(self, *args):
+            return False
+
+    context = SessionContext()
+    monkeypatch.setattr(
+        third_party_report, "AsyncSessionLocal", lambda: context
+    )
+
+    assert await third_party_report.update_report_log_params(
+        log_id=202,
+        conversion_id="conversion-mutated",
+    ) is False
+    assert context.db.committed is False
+    assert log_entry.conversion_id == "conversion-original"
+    assert log_entry.event_key == "platform-scoped-event-key"
