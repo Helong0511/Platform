@@ -159,6 +159,21 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
                     (*rows[1], _event_key(*rows[1])),
                 )
 
+            cursor.execute(
+                "SELECT downstream_url, request_params, response_body, pii_scrubbed_at "
+                "FROM postback_forward_logs WHERE id = 1"
+            )
+            forward_row = cursor.fetchone()
+            assert forward_row[:3] == (
+                "https://partner.invalid/postback?click_id=private",
+                '{"click_id":"private"}',
+                '{"echo":"private"}',
+            )
+            assert forward_row[3] is None
+            cursor.execute("SHOW INDEX FROM postback_forward_logs")
+            forward_index_names = {row[2] for row in cursor.fetchall()}
+            assert "idx_forward_log_pii_retention" in forward_index_names
+
             cursor.execute("SHOW INDEX FROM third_party_report_logs")
             index_names = {row[2] for row in cursor.fetchall()}
             assert "unique_event_key" in index_names
@@ -211,6 +226,38 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
                     "alice@example.invalid", "203.0.113.8", "4155550123",
                     "ci-private-agent", '{"email":"alice@example.invalid"}',
                     '{"echo":"alice@example.invalid"}',
+                ),
+            )
+            cursor.execute(
+                """
+                CREATE TABLE postback_forward_logs (
+                    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    conversion_id INT NOT NULL,
+                    product_id INT NULL,
+                    publisher_id INT NULL,
+                    downstream_url VARCHAR(500) NOT NULL,
+                    request_method VARCHAR(10) NOT NULL,
+                    request_data TEXT NULL,
+                    request_params TEXT NULL,
+                    response_status INT NULL,
+                    response_body TEXT NULL,
+                    success TINYINT(1) NULL,
+                    error_message TEXT NULL,
+                    retry_count INT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    completed_at DATETIME NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            cursor.execute(
+                "INSERT INTO postback_forward_logs "
+                "(conversion_id, downstream_url, request_method, request_params, "
+                "response_body, success, created_at, completed_at) "
+                "VALUES (1, %s, 'GET', %s, %s, 1, NOW(), NOW())",
+                (
+                    "https://partner.invalid/postback?click_id=private",
+                    '{"click_id":"private"}',
+                    '{"echo":"private"}',
                 ),
             )
             _run_sql_file(
