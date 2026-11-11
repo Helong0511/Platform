@@ -303,3 +303,64 @@ async def test_completed_forward_log_payload_is_scrubbed_after_retention(monkeyp
     assert "not (exists" in sql
     assert "postback_forward_queue" in sql
     assert "for update skip locked" in sql
+
+
+@pytest.mark.asyncio
+async def test_forward_log_retention_clears_expanded_url_request_and_response(monkeypatch):
+    now = datetime(2026, 11, 11, 12, 0, 0)
+    row = SimpleNamespace(
+        id=81,
+        downstream_url="https://downstream.invalid/cb?email=alice%40example.invalid",
+        request_data='{"email":"alice@example.invalid","ip":"203.0.113.8"}',
+        request_params='{"click_id":"private-click-id"}',
+        response_body='{"echo":"alice@example.invalid"}',
+        error_message="response echoed alice@example.invalid",
+        pii_scrubbed_at=None,
+    )
+    captured = {}
+
+    class ScalarRows:
+        def all(self):
+            return [row]
+
+    class Result:
+        def scalars(self):
+            return ScalarRows()
+
+    class FakeDB:
+        async def execute(self, statement):
+            captured["sql"] = str(statement.compile(dialect=mysql.dialect())).lower()
+            return Result()
+
+        async def commit(self):
+            captured["committed"] = True
+
+        async def rollback(self):
+            captured["rolled_back"] = True
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(retention, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(retention, "get_app_now_naive", lambda: now)
+
+    result = await retention.scrub_expired_postback_forward_log_pii(
+        retention_days=90,
+        batch_size=10,
+    )
+
+    assert result["scrubbed"] == 1
+    assert captured["committed"] is True
+    assert row.downstream_url == "已按配置的数据保留策略清除"
+    assert row.request_data is None
+    assert row.request_params is None
+    assert row.response_body is None
+    assert row.error_message is None
+    assert row.pii_scrubbed_at == now
+    assert "postback_forward_logs.pii_scrubbed_at is null" in captured["sql"]
+    assert "postback_forward_logs.completed_at is not null" in captured["sql"]
+    assert "for update skip locked" in captured["sql"]
