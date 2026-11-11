@@ -182,3 +182,43 @@ async def test_postback_http_total_deadline_bounds_slow_streaming_response(monke
 
     assert result == (False, 0, "Timeout: Total request deadline exceeded")
     assert captured["max_redirects"] == HttpClient.MAX_REDIRECTS
+
+
+
+async def test_retry_enqueue_serializes_on_conversion_row_lock():
+    """并发入队前必须对 conversion 主记录加 MySQL 行锁。"""
+    from sqlalchemy.dialects import mysql
+
+    from app.core.postback.forwarder import _lock_conversion_for_queue_enqueue
+
+    captured = {}
+
+    class FakeResult:
+        def scalar_one_or_none(self):
+            return 101
+
+    class FakeDB:
+        async def execute(self, statement):
+            compiled = statement.compile(dialect=mysql.dialect())
+            captured["sql"] = str(compiled).upper()
+            captured["params"] = compiled.params
+            return FakeResult()
+
+    assert await _lock_conversion_for_queue_enqueue(FakeDB(), 101) is True
+    assert "FOR UPDATE" in captured["sql"]
+    assert "POSTBACK_CONVERSIONS.ID" in captured["sql"]
+    assert 101 in captured["params"].values()
+
+
+async def test_retry_enqueue_skips_when_conversion_row_is_missing():
+    from app.core.postback.forwarder import _lock_conversion_for_queue_enqueue
+
+    class FakeResult:
+        def scalar_one_or_none(self):
+            return None
+
+    class FakeDB:
+        async def execute(self, statement):
+            return FakeResult()
+
+    assert await _lock_conversion_for_queue_enqueue(FakeDB(), 404) is False
