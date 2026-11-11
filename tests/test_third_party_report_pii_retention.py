@@ -208,8 +208,11 @@ async def test_outbox_worker_refuses_a_scrubbed_row(monkeypatch):
         next_retry_time=datetime(2026, 11, 11, 11, 59, 0),
     )
 
+    captured = {}
+
     class FakeDB:
         async def scalar(self, statement):
+            captured["sql"] = str(statement.compile(dialect=mysql.dialect())).lower()
             return row
 
     class SessionContext:
@@ -232,6 +235,8 @@ async def test_outbox_worker_refuses_a_scrubbed_row(monkeypatch):
         "retryable": False,
         "reason": "pii_payload_scrubbed",
     }
+    assert "third_party_report_logs.outbox_enqueued is true" in captured["sql"]
+    assert "third_party_report_logs.pii_scrubbed_at is null" not in captured["sql"]
 
 
 @pytest.mark.asyncio
