@@ -142,7 +142,24 @@
           </template>
         </el-table-column>
         <el-table-column v-if="columnVisibility.attempt_count" prop="attempt_count" label="尝试次数" width="100"
-          align="center" />
+          align="center">
+          <template #default="scope">
+            {{ scope.row.attempt_count || 0 }} / {{ scope.row.max_attempts || 0 }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="outbox_enqueued" label="持久化队列" width="120" align="center">
+          <template #default="scope">
+            <el-tag v-if="scope.row.outbox_enqueued" :type="getOutboxTag(scope.row)" size="small">
+              {{ getOutboxLabel(scope.row) }}
+            </el-tag>
+            <span v-else>非队列事件</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="next_retry_time" label="下次重试时间" width="180">
+          <template #default="scope">
+            {{ scope.row.next_retry_time ? formatDateTime(scope.row.next_retry_time) : '-' }}
+          </template>
+        </el-table-column>
         <el-table-column v-if="columnVisibility.response_status" prop="response_status" label="响应状态码" width="120"
           align="center">
           <template #default="scope">
@@ -196,9 +213,9 @@
             <el-button type="warning" link size="small" @click="handleEdit(scope.row)">
               编辑
             </el-button>
-            <el-button v-if="scope.row.status === 'failed'" type="danger" link size="small"
-              @click="handleRetry(scope.row)">
-              重新上报
+            <el-button v-if="scope.row.outbox_enqueued && scope.row.status === 'failed'"
+              type="danger" link size="small" @click="handleRetry(scope.row)">
+              重新排队
             </el-button>
           </template>
         </el-table-column>
@@ -242,6 +259,15 @@
           </el-descriptions-item>
           <el-descriptions-item label="尝试次数">{{ currentLog.attempt_count }} / {{ currentLog.max_attempts
           }}</el-descriptions-item>
+          <el-descriptions-item label="持久化队列状态">
+            <el-tag v-if="currentLog.outbox_enqueued" :type="getOutboxTag(currentLog)" size="small">
+              {{ getOutboxLabel(currentLog) }}
+            </el-tag>
+            <span v-else>非队列事件，不支持持久化重新排队</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="下次重试时间">
+            {{ currentLog.next_retry_time ? formatDateTime(currentLog.next_retry_time) : '-' }}
+          </el-descriptions-item>
           <el-descriptions-item label="邮箱（已脱敏）">
             {{ currentLog.email || '-' }}
           </el-descriptions-item>
@@ -456,6 +482,22 @@ const editForm = reactive({
 
 const formatJson = formatReportJson;
 
+// 根据持久化 Outbox 字段准确展示重试状态，避免将普通失败日志误认为可重试。
+const getOutboxLabel = (row) => {
+  if (!row?.outbox_enqueued) return '非队列事件';
+  if (row.status === 'success') return '已成功';
+  if ((row.attempt_count || 0) >= (row.max_attempts || 0)) return '重试耗尽';
+  if (row.next_retry_time) return '等待/可重试';
+  return '待核查';
+};
+
+const getOutboxTag = (row) => {
+  const label = getOutboxLabel(row);
+  if (label === '已成功') return 'success';
+  if (label === '重试耗尽' || label === '待核查') return 'danger';
+  return 'warning';
+};
+
 // 查看详情
 const handleViewDetail = async (log) => {
   try {
@@ -518,7 +560,7 @@ const handleSaveEdit = async () => {
 const handleRetry = async (log) => {
   try {
     await ElMessageBox.confirm(
-      '确定要重新上报这条日志吗？',
+      '确定将这条失败的 Outbox 事件重新排队吗？后台 worker 将在符合条件时发送。',
       '提示',
       {
         confirmButtonText: '确定',
@@ -527,7 +569,7 @@ const handleRetry = async (log) => {
       }
     );
     await retryThirdPartyReport(log.id);
-    ElMessage.success('已触发重新上报，请稍后刷新查看结果');
+    ElMessage.success('已重新排队，后台 worker 将处理；请稍后刷新查看结果');
     fetchLogs();
   } catch (error) {
     if (error !== 'cancel') {
