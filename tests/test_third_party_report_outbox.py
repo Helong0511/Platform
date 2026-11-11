@@ -204,3 +204,29 @@ async def test_outbox_worker_rejects_invalid_batch_size():
         await outbox.process_postback_report_outbox(batch_size=0)
     with pytest.raises(ValueError):
         await outbox.process_postback_report_outbox(batch_size=101)
+
+
+def test_third_party_report_outbox_scheduler_is_registered():
+    from app.scheduler_module.task_config import TASK_CONFIGS
+    from app.scheduler_module.task_names import (
+        ALL_TASK_NAMES,
+        TASK_NAME_MAP,
+        THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
+    )
+    from app.scheduler_module.task_registry import load_function_by_path
+    from app.scheduler_module.tasks.third_party_report_tasks import (
+        process_third_party_report_outbox_task,
+    )
+
+    config = TASK_CONFIGS[THIRD_PARTY_REPORT_OUTBOX_TASK_NAME]
+    assert THIRD_PARTY_REPORT_OUTBOX_TASK_NAME in ALL_TASK_NAMES
+    assert TASK_NAME_MAP["third_party_report_tasks"] == THIRD_PARTY_REPORT_OUTBOX_TASK_NAME
+    assert config["cron_expression"] == "* * * * *"
+    task = load_function_by_path(
+        f"{config['task_module']}.{config['task_function']}"
+    )
+    assert task is process_third_party_report_outbox_task
+    getter = load_function_by_path(
+        f"{config['result_getter_module']}.{config['result_getter_function']}"
+    )
+    assert callable(getter)
