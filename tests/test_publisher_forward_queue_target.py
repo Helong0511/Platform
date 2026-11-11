@@ -27,9 +27,11 @@ class _FakeDB:
     def __init__(self, publisher=None, execute_results=None):
         self.publisher = publisher
         self.execute_results = list(execute_results or [])
+        self.statements = []
         self.added = []
 
     async def execute(self, statement):
+        self.statements.append(statement)
         if self.execute_results:
             return _Result(self.execute_results.pop(0))
         return _Result(self.publisher)
@@ -85,6 +87,11 @@ async def test_publisher_retry_queue_does_not_store_product_target():
     )
 
     assert len(db.added) == 1
+    # 去重查询必须是 MySQL 当前读，不能读取等待行锁前的旧一致性快照。
+    from sqlalchemy.dialects import mysql
+
+    dedupe_sql = str(db.statements[1].compile(dialect=mysql.dialect())).upper()
+    assert "FOR UPDATE" in dedupe_sql
     task = db.added[0]
     assert task.publisher_id == 44
     assert task.product_id is None
