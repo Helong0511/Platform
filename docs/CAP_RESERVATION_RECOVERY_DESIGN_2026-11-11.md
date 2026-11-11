@@ -345,3 +345,16 @@ Run #783 / SHA `042026e6c654753ec91b2ec72748c85d94b11f61`：Backend、Frontend�
 - 重复 Postback 不得仅因 PREPARED/RESERVED 租约过期就接管活动账本。旧 Worker 可能只是长时间暂停，并未死亡；若新请求复用同一 Redis token，旧请求随后恢复并回滚，可能撤销新请求已提交的名额。现已改为：PREPARED/RESERVED 对业务重试始终返回处理中；只有恢复 Worker 在核验正式转化与 Redis token 后才能接管。
 - Redis token ABSENT 不等于没有发生过 INCR。allkeys 淘汰策略、人工删除或部分 Redis 数据丢失可能只删除 token 而保留 counter。恢复逻辑现要求同时检查 counter key：只有 token ABSENT 且 counter key 明确不存在，才可结束为 ROLLED_BACK；counter 仍存在或无法确认存在性时进入 NEEDS_RECONCILIATION，不执行 DECR。
 - 对应新增隔离 MySQL 集成测试：过期租约不得被重复 Postback 抢占；新增恢复单测：token 丢失但 counter 仍存在时必须转人工对账。
+
+
+### 15. 数据库约束加固（2026-11-11）
+
+账本模型和 MySQL migration 已增加同名 CHECK 约束，防止绕过 Service 的写入破坏恢复依据：
+
+- SHA-256 reservation_key 必须为 64 字符。
+- offer_id 必须为正数；publisher_id 只能为 NULL 或正数。
+- attempts 不得为负数。
+- Daily 必须有 business_date；Total 必须没有 business_date。
+- state 只能为状态机定义的五种状态。
+
+MySQL 目标版本为 8.0.16+（CHECK 约束实际执行版本）。隔离 CI 的 migration 集成测试负责校验建表和实际 ORM 写入；正式数据库仍未连接、迁移仍未执行。
