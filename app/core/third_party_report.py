@@ -313,6 +313,7 @@ async def send_third_party_report(
         }
 
     # 直接发送路径创建日志；事务性 Outbox 路径复用转化事务中已提交的日志行。
+    using_existing_report_log = bool(report_log_id)
     if not report_log_id:
         report_log_id = await create_report_log(
             source=source,
@@ -366,7 +367,11 @@ async def send_third_party_report(
 
 
 
-    base_attempt_count, max_attempts_total = await _get_report_attempt_state(report_log_id)
+    if using_existing_report_log:
+        base_attempt_count, max_attempts_total = await _get_report_attempt_state(report_log_id)
+    else:
+        base_attempt_count = 0
+        max_attempts_total = max_retries + (1 if use_hash else 0)
     if base_attempt_count >= max_attempts_total:
         return {"success": False, "retryable": False, "reason": "max_attempts_exhausted"}
 
