@@ -130,14 +130,16 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 
 ### 10. 最新验收记录（2026-11-11，PR #1 持续审计）
 
-- 最新已通过 CI：Run #925，SHA `8019b4f3c8a5ccac7d687449475269fef6af4f55`。
-- Backend：326 passed、1 skipped、1 warning；Python 编译通过。
+- 最新已通过 CI：Run #927，SHA `7b5326152aecf4852985b49f03b44928273d2ab5`。
+- Backend：327 passed、1 skipped、1 warning；Python 编译通过。
 - Frontend：依赖审计步骤、Lint、Build、Playwright Mock API E2E 均通过。
 - 本轮新增隔离 MySQL 故障注入：在真实临时 MySQL 事务 COMMIT 成功后，模拟客户端收到连接中断异常；验证应用重新查询到正式转化后保留 Redis Cap 预留、不执行回滚，并尝试把账本标记为 COMMITTED。
 - 本轮新增 Cap `NEEDS_RECONCILIATION` 退避重试逻辑：超过 5 分钟后重新核对正式转化与 Redis token/counter；未能确认时仍保持待核对，不做猜测性 DECR。
+- 本轮进一步新增真实 MySQL + Redis 集成测试：先把账本置为 `NEEDS_RECONCILIATION`，将 `updated_at` 回拨到退避窗口之前，再运行真实恢复 Worker；验证账本转为 `ROLLED_BACK`、Redis counter 回到 0、token 被删除。
 - 上述测试只使用 CI 临时 MySQL 8.0.46、临时 Redis、独立随机数据库和合成数据；不连接生产服务。
 - Run #923 曾因新增测试的调用记录断言错误而失败（324 passed、1 failed）；已修正测试断言，Run #924 全绿。随后 Run #925 增加真实 MySQL COMMIT 响应丢失测试并全绿。
 - 仍未完成：完整旧 schema 到新 schema 的真实升级/中断重跑/兼容回滚演练；Outbox 配置生命周期与发送租约压力测试；PII 数据保留、删除、访问审计政策核定；全项目业务模块最终回归。
+- PII 代码核对：第三方 Report Outbox 持久化 email、phone、IP、UA；管理 API 有字段脱敏，但当前没有查到针对 `third_party_report_logs` 的自动 PII 到期清理任务。保留时长与删除/归档要求需业务负责人确认，确认前不擅自设定法定保留期限；该项继续阻断发布。
 - PR #1 继续保持 Draft；最新 CI 通过不代表迁移已获生产审批，也不构成部署许可。
 
 ## 9.4 当前验收缺口
