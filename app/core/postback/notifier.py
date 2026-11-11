@@ -314,8 +314,7 @@ class PostbackNotifier:
                 except Exception as e:
                     # Redis 操作失败时，降级为实时发送
                     logger.warning(
-                        f"将通知加入汇总队列失败，降级为实时发送: conversion_id={conversion.id}, "
-                        f"error={str(e)}"
+                        f"将通知加入汇总队列失败，降级为实时发送：error_type={type(e).__name__}"
                     )
                     if 'telegram' in channels and telegram_chat_id:
                         asyncio.create_task(
@@ -334,9 +333,7 @@ class PostbackNotifier:
         except Exception as e:
             # 通知失败不影响主流程，只记录日志
             logger.warning(
-                f"发送转化通知失败: conversion_id={conversion.id}, "
-                f"product_id={conversion.product_id}, client_id={conversion.client_id}, "
-                f"error={str(e)}",
+                f"发送转化通知失败：error_type={type(e).__name__}",
                 exc_info=True
             )
 
