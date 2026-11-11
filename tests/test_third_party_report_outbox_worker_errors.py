@@ -22,6 +22,9 @@ async def test_batch_worker_counts_item_exception_without_masking_it(monkeypatch
         async def execute(self, statement):
             return QueryResult()
 
+        async def commit(self):
+            return None
+
         async def scalar(self, statement):
             return 0
 
