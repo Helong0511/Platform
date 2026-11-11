@@ -39,6 +39,17 @@ def _get_local_lock(key: str) -> asyncio.Lock:
         locks[key] = lock
     return lock
 
+
+async def _acquire_local_lock(owner: "DistributedLock") -> bool:
+    """Redis 不可用时降级为当前进程内互斥，不冒充跨进程锁。"""
+    local_lock = _get_local_lock(owner.key)
+    if local_lock.locked():
+        return False
+    await local_lock.acquire()
+    owner._local_lock = local_lock
+    logger.warning("Redis 分布式锁不可用，降级为进程内互斥：%s", owner.key)
+    return True
+
 # 特殊标记：表示"确实为空"（用于缓存穿透保护）
 class NoneMarker:
     """None 值标记（区分缓存未命中和确实为空）"""
@@ -216,19 +227,11 @@ class DistributedLock:
                     logger.debug(f"获取分布式锁失败（已被占用）：{self.key}")
                     return False
             except Exception as e:
-                logger.error(f"获取分布式锁失败：{e}", exc_info=True)
-                return False
+                logger.error("获取 Redis 分布式锁失败，尝试进程内降级：%s", e, exc_info=True)
+                return await _acquire_local_lock(self)
         else:
-            # Redis 不可用时仅提供当前进程、当前事件循环内的互斥保护。
             # 不得返回 True 假装获得了跨进程分布式锁。
-            local_lock = _get_local_lock(self.key)
-            if local_lock.locked():
-                logger.debug(f"本地缓存锁已被占用：{self.key}")
-                return False
-            await local_lock.acquire()
-            self._local_lock = local_lock
-            logger.warning(f"Redis 不可用，使用进程内缓存锁降级：{self.key}")
-            return True
+            return await _acquire_local_lock(self)
     
     async def release(self) -> bool:
         """
@@ -239,6 +242,14 @@ class DistributedLock:
         """
         cache = await get_cache_backend()
         
+        if self._local_lock is not None:
+            if self._local_lock.locked():
+                self._local_lock.release()
+                self._local_lock = None
+                return True
+            self._local_lock = None
+            return False
+
         if hasattr(cache, 'redis') and cache.redis:
             try:
                 # Lua 将 owner 校验与删除合并为单条原子操作，避免锁过期/重获期间误删新锁。
@@ -257,10 +268,6 @@ class DistributedLock:
                 logger.error(f"释放分布式锁失败：{e}", exc_info=True)
                 return False
         else:
-            if self._local_lock is not None and self._local_lock.locked():
-                self._local_lock.release()
-                self._local_lock = None
-                return True
             logger.debug(f"本地缓存锁未由当前实例持有：{self.key}")
             return False
 
