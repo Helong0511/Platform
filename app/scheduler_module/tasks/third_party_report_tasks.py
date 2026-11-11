@@ -30,3 +30,27 @@ async def process_third_party_report_outbox_task():
         set_task_result(THIRD_PARTY_REPORT_OUTBOX_TASK_NAME, f"执行失败：{exc}")
         logger.error("第三方 Report Outbox 恢复任务失败", exc_info=True)
         raise
+
+
+async def scrub_third_party_report_pii_task():
+    """每天执行一次；保留天数未获批准（配置为 0）时安全跳过。"""
+    from app.services.third_party_report_pii_retention import (
+        scrub_expired_third_party_report_pii,
+    )
+    from app.scheduler_module.task_names import (
+        THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME,
+    )
+
+    try:
+        stats = await scrub_expired_third_party_report_pii(batch_size=200)
+        message = (
+            f"执行完成：enabled={stats['enabled']} selected={stats['selected']} "
+            f"scrubbed={stats['scrubbed']} retention_days={stats['retention_days']}"
+        )
+        set_task_result(THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME, message)
+        logger.info("第三方上报 PII 生命周期任务：%s", message)
+        return stats
+    except Exception as exc:
+        set_task_result(THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME, f"执行失败：{exc}")
+        logger.error("第三方上报 PII 生命周期任务失败", exc_info=True)
+        raise
