@@ -226,6 +226,9 @@ async def _claim_report_log(report_log_id: int, lease_seconds: int = REPORT_LOG_
             .where(
                 ThirdPartyReportLog.id == report_log_id,
                 ThirdPartyReportLog.status.in_(("pending", "failed")),
+                # PII 清理与发送认领必须在同一行锁/条件 UPDATE 上仲裁：
+                # 若清理先提交，已复制到 Worker 内存的旧载荷也不得再发送。
+                ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                 or_(
                     ThirdPartyReportLog.report_start_time.is_(None),
                     ThirdPartyReportLog.report_start_time < stale_before,
