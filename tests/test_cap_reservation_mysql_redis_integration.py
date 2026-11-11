@@ -341,3 +341,72 @@ async def test_mysql_recovery_workers_cannot_double_rollback_same_reservation(mo
     assert result["state"] == "ROLLED_BACK"
     assert result["counter_value"] == "0"
     assert result["token_value"] is None
+
+
+
+@pytest.mark.asyncio
+async def test_wrong_lease_owner_cannot_finalize_or_delete_reservation_token(monkeypatch):
+    database = _create_isolated_mysql_database()
+    engine = None
+    redis = Redis.from_url(REDIS_URL, decode_responses=True)
+    redis_keys = []
+    try:
+        _initialize_isolated_schema(database)
+        password = quote_plus(os.getenv("MYSQL_INTEGRATION_PASSWORD", ""))
+        user = quote_plus(os.getenv("MYSQL_INTEGRATION_USER", "root"))
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:"
+            f"{int(os.getenv('MYSQL_INTEGRATION_PORT', '3306'))}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(ledger_module, "AsyncSessionLocal", session_factory)
+        from app.core.cap import redis_counter
+
+        async def isolated_redis_client():
+            return redis
+
+        monkeypatch.setattr(redis_counter, "get_redis_client", isolated_redis_client)
+
+        row, claimed, owner = await CapReservationLedger.prepare_and_claim(
+            platform="ci",
+            conversion_id=f"wrong-owner-{uuid.uuid4().hex}",
+            event_name="purchase",
+            offer_id=int(uuid.uuid4().int % 900_000_000) + 100_000_000,
+            publisher_id=None,
+            cap_kind="total",
+            business_date=None,
+        )
+        assert claimed is True
+        redis_keys.append(row.redis_token_key)
+        await redis.set(row.redis_token_key, "1")
+
+        with pytest.raises(RuntimeError, match="lease owner"):
+            await CapReservationLedger.finalize(
+                row.reservation_key,
+                "COMMITTED",
+                lease_owner="not-the-owner",
+            )
+
+        async with session_factory() as session:
+            current = await session.scalar(
+                select(CapReservation).where(
+                    CapReservation.reservation_key == row.reservation_key
+                )
+            )
+
+        assert current.state == "PREPARED"
+        assert current.lease_owner == owner
+        assert await redis.get(row.redis_token_key) == "1"
+    finally:
+        if redis_keys:
+            await redis.delete(*redis_keys)
+        await redis.aclose()
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_mysql_database(database)
