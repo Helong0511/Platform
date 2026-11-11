@@ -1,4 +1,4 @@
-"""短链 Pixel 配置缓存生命周期回归测试。"""
+"""短链 Pixel 配置生命周期与多 Worker 权威读取回归测试。"""
 from datetime import datetime
 from types import SimpleNamespace
 
