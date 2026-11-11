@@ -848,6 +848,10 @@ async def retry_report_log(log_id: int):
                     ThirdPartyReportLog.status == "failed",
                     ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                     or_(
+                        ThirdPartyReportLog.error_message.is_(None),
+                        ThirdPartyReportLog.error_message != "短链接已删除，无法解析像素配置",
+                    ),
+                    or_(
                         ThirdPartyReportLog.short_link_id.is_not(None),
                         (
                             ThirdPartyReportLog.cloak_name.is_not(None)
