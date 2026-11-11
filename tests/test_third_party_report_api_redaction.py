@@ -3,6 +3,7 @@ import json
 
 from app.api_v1.system.third_party_reports import (
     _mask_report_pii,
+    _mask_report_ad_identifier,
     _sanitize_report_params,
     _safe_report_error_message,
     _can_requeue_report,
@@ -164,3 +165,19 @@ def test_outbox_processing_state_uses_the_backend_lease_duration():
     assert _is_outbox_processing(
         SimpleNamespace(**{**base, "outbox_enqueued": False}), now
     ) is False
+
+
+def test_ad_click_identifier_is_partially_masked_in_admin_responses():
+    """fbclid/click_id 属于可关联用户的在线标识，管理端不返回完整原值。"""
+    assert _mask_report_ad_identifier("fbclid-1234567890") == "fbcl…7890"
+    assert _mask_report_ad_identifier("12345678") == "[已隐藏]"
+    assert _mask_report_ad_identifier("123456789") == "1234…6789"
+    assert _mask_report_ad_identifier("") == ""
+    assert _mask_report_ad_identifier(None) is None
+
+
+def test_report_list_and_detail_mask_adsid_before_returning():
+    from pathlib import Path
+    source = Path("app/api_v1/system/third_party_reports.py").read_text(encoding="utf-8")
+    assert 'item["adsid"] = _mask_report_ad_identifier(item.get("adsid"))' in source
+    assert 'safe_data["adsid"] = _mask_report_ad_identifier(safe_data.get("adsid"))' in source
