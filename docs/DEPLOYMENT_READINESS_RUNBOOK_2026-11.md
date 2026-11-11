@@ -141,24 +141,25 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - Run #923 曾因新增测试的调用记录断言错误而失败（324 passed、1 failed）；已修正测试断言，Run #924 全绿。随后 Run #925 增加真实 MySQL COMMIT 响应丢失测试并全绿。
 - 仍未完成：完整旧 schema 到新 schema 的真实升级/中断重跑/兼容回滚演练；Outbox 配置生命周期与发送租约压力测试；PII 数据保留、删除、访问审计政策核定；全项目业务模块最终回归。
 - PII 生命周期修复：新增第三方上报与下游转发日志的 `pii_scrubbed_at` 标记、扫描索引、分批清除服务和每日调度任务；仅清理终态历史载荷，保留 `event_key`/最小审计骨架；待重试 Outbox 不会被清理。默认 `THIRD_PARTY_REPORT_PII_RETENTION_DAYS=0`（关闭），须经业务/合规负责人确定期限后显式设置；未设置前不得声称已自动执行个人信息到期清理。
-- PR #1 继续保持 Draft；最新 CI 通过不代表迁移已获生产审批，也不构成部署许可。
+- 最新代码头为 `5891ae5c6a24`；Run #1006 Backend / Frontend 全绿（346 passed? 需以完整 CI 汇总为准），PR #1 继续保持 Draft；CI 通过不代表迁移已获生产审批，也不构成部署许可。
 
 ## 9.5 第三方上报 PII 保留与清理策略
 
 - 环境变量：`THIRD_PARTY_REPORT_PII_RETENTION_DAYS`，必须为非负整数；默认 `0`，即关闭自动清理（fail-safe）。
 - 只有业务/合规负责人书面确认保留期限、目的与适用司法辖区后，发布负责人才能设置正整数天数；本仓库不自行推断法定期限。
-- 每日 03:15 的任务按批次最多 200 条处理；使用 InnoDB 行锁和 `SKIP LOCKED` 避免与其它清理 Worker 重复处理。
+- 每日 03:15 的任务对每类日志每次最多处理 200 条（两类日志合计最多 400 条）；使用 InnoDB 行锁和 `SKIP LOCKED` 避免与其它清理 Worker 重复处理。
 - 仅清理超过期限的终态 `success` 记录、旧非 Outbox 终态记录，以及明确耗尽自动重试且租约失效的 Outbox `failed` 记录（即使 `next_retry_time` 留有历史时间戳）；pending、具有下次重试时间、活动租约或重试未耗尽的事件不会被清理。
 - 清除字段：`adsid`（置空）、`conversion_id`、`email`、`ip`、`phone`、`ua`、`report_params`、`response_body`、第三方 `log_id`、短链/斗篷配置引用及 `click_time`；失败详情替换为固定说明。
-- 下游转发日志 `postback_forward_logs` 同样纳入该保留期限：清除历史展开后的 `downstream_url`、`request_data`、`request_params`、`response_body` 和 `error_message`，保留转化/产品/渠道关联、HTTP 状态、成功状态及时间等最小审计字段；通过 `pii_scrubbed_at` 阻止对已清理日志执行手动补发。
-- 新写入的下游转发日志只保存未展开的 URL 配置模板、请求字段数量摘要，不保存实际请求参数值或下游响应正文；真正用于失败重试的 `postback_forward_queue` 仍需保留必要请求载荷直到成功或达到重试终态，必须纳入后续数据保留决策。
+- 下游转发日志 `postback_forward_logs` 同样纳入该保留期限：仅清理已完成、超过期限且不存在对应待重试队列项的日志；清除历史展开后的 `downstream_url`、`request_data`、`request_params`、`response_body` 和 `error_message`，保留转化/产品/渠道关联、HTTP 状态、成功状态及时间等最小审计字段；通过 `pii_scrubbed_at` 阻止对已清理日志执行手动补发。
+- 新写入的下游转发日志只保存未展开的 URL 配置模板、请求字段数量摘要，不保存实际请求参数值或下游响应正文；历史下游转发日志的管理员 API 也会脱敏 URL、请求载荷和错误详情。真正用于失败重试的 `postback_forward_queue` 仍需保留必要请求载荷直到成功或达到重试终态，必须纳入后续数据保留决策。
 - 保留字段：事件幂等键 `event_key`（哈希形式的最小去重标识）、来源/事件类型、金额与货币、状态及创建/完成时间，用于防止重复入账和保留最小审计证据。`event_key` 仍属于需要纳入备份和后续删除评估的假名化标识。
 - 清理后通过 `pii_scrubbed_at` 阻止 worker 发送、管理员重新排队或编辑已清理载荷。此标记不是删除整条日志；数据库备份、日志副本和第三方接收方数据仍须另行纳入保留/删除政策。
+- **尚未纳入自动清理的业务数据**：`postback_conversions` 中的 `ip`、`click_id`、设备广告 ID 和 `raw_data`；待处理 `postback_forward_queue` 的重试请求载荷；`postback_notifications.notification_message`（可能包含客户姓名、转化标识）。这些字段可能承担归因、对账、重试或通知历史用途，必须由业务/合规负责人另行确定期限、用途和访问权限；本轮不得宣称全系统 PII 删除已完成。
 - 上线前必须完成隔离 MySQL 迁移演练、清理 Worker 回归测试，并由负责人批准具体保留天数；未批准时保持 0，不得开启自动清理。
 
 ## 9.4 当前验收缺口
 
-- [ ] 两份迁移按真实顺序在隔离 MySQL 上完成从旧 schema/代表性历史数据到新 schema 的升级演练。
+- [ ] 三份增量迁移按真实顺序在隔离 MySQL 上完成从旧 schema/代表性历史数据到新 schema 的升级演练。
 - [ ] 覆盖重复 event_key、历史 NULL conversion_id、超长字段、唯一键冲突和中途失败后的恢复/重跑行为。
 - [ ] 演练代码回滚兼容性，证明旧版本不会因 NOT NULL `event_key` 写入失败；否则必须提供兼容回滚构建。
 - [ ] 演练 worker 停止、pending Outbox 保留、恢复后继续发送及稳定 event_id 不变。
