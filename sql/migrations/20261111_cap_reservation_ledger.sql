@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS cap_reservations (
     redis_counter_key VARCHAR(255) NOT NULL COMMENT 'Redis 计数器 Key 快照',
     redis_token_key VARCHAR(512) NOT NULL COMMENT 'Redis reservation token Key 快照',
     redis_reserved BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否确认 Redis Lua 已成功预留；区分 fail-open 无 token 路径',
+    redis_token_cleaned BOOLEAN NOT NULL DEFAULT FALSE COMMENT '终态后是否已清理 Redis token；清理失败由恢复任务重试',
     state VARCHAR(24) NOT NULL DEFAULT 'PREPARED'
         COMMENT 'PREPARED/RESERVED/COMMITTED/ROLLED_BACK/NEEDS_RECONCILIATION',
     attempts INT NOT NULL DEFAULT 0 COMMENT '恢复尝试次数',
