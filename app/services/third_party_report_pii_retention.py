@@ -55,6 +55,7 @@ async def scrub_expired_third_party_report_pii(
                 or_(
                     ThirdPartyReportLog.outbox_enqueued.is_(False),
                     ThirdPartyReportLog.attempt_count >= ThirdPartyReportLog.max_attempts,
+                    ThirdPartyReportLog.error_message == "短链接已删除，无法解析像素配置",
                     # 无配置引用且没有下次重试时间的 Outbox 失败事件不可重排，
                     # 属于终态；否则会永久保留 PII 载荷而永远无法被清理。
                     and_(
