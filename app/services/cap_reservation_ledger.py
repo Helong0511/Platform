@@ -1,14 +1,15 @@
 """
 Cap Reservation 独立持久化账本服务。
 
-所有账本写入使用独立 AsyncSessionLocal，不加入 Postback 主业务事务。
-此服务仅提供幂等记录与状态转换；Redis 恢复 Worker 和 Postback 全链路接入
-必须在后续阶段完成，不能将“有账本表”误认为已经具备自动恢复能力。
+账本写入使用独立 AsyncSessionLocal，不加入 Postback 主业务事务。
+prepare_and_claim() 使用数据库行锁与租约，防止同一事件的并发 Postback
+同时操作同一个稳定 Redis token。
 """
 import hashlib
 import json
 import logging
-from datetime import date, datetime
+import uuid
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import select, update
@@ -16,13 +17,14 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive
-from app.models.cap_reservation import CapReservation
 from app.core.cap.redis_counter import get_daily_cap_key, get_total_cap_key
+from app.models.cap_reservation import CapReservation
 
 logger = logging.getLogger(__name__)
 
 ACTIVE_STATES = ("PREPARED", "RESERVED", "NEEDS_RECONCILIATION")
 FINAL_STATES = ("COMMITTED", "ROLLED_BACK")
+DEFAULT_LEASE_SECONDS = 300
 
 
 def normalize_event_name(event_name: Optional[str]) -> str:
@@ -50,6 +52,8 @@ def build_reservation_identity(
         raise ValueError("conversion_id 不能为空")
     if not isinstance(offer_id, int) or offer_id <= 0:
         raise ValueError("offer_id 必须为正整数")
+    if publisher_id is not None and int(publisher_id) <= 0:
+        raise ValueError("publisher_id 必须为正整数或 NULL")
     if normalized_kind == "daily" and business_date is None:
         raise ValueError("Daily Reservation 必须提供 business_date")
     if normalized_kind == "total" and business_date is not None:
@@ -60,7 +64,6 @@ def build_reservation_identity(
         "conversion_id": str(conversion_id).strip(),
         "event_name": normalize_event_name(event_name),
         "offer_id": offer_id,
-        # 明确区分全局 scope 与 publisher id，避免 NULL/数字字符串歧义。
         "publisher_scope": "global" if publisher_id is None else f"publisher:{int(publisher_id)}",
         "cap_kind": normalized_kind,
         "business_date": business_date.isoformat() if business_date else "total",
@@ -74,7 +77,7 @@ class CapReservationLedger:
     """独立数据库会话上的账本写入与状态机。"""
 
     @staticmethod
-    async def prepare(
+    async def prepare_and_claim(
         *,
         platform: str,
         conversion_id: str,
@@ -83,7 +86,16 @@ class CapReservationLedger:
         publisher_id: Optional[int],
         cap_kind: str,
         business_date: Optional[date],
-    ) -> CapReservation:
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    ) -> tuple[CapReservation, bool, Optional[str]]:
+        """
+        独立提交 PREPARED 并领取短租约。
+
+        返回 (row, claimed, lease_owner)。claimed=False 表示同一事件已在处理、
+        已提交或需要人工/恢复 Worker 对账；调用方必须拒绝继续操作 Redis。
+        """
+        if lease_seconds < 30 or lease_seconds > 3600:
+            raise ValueError("Reservation lease_seconds 必须在 30 到 3600 秒之间")
         identity = build_reservation_identity(
             platform=platform,
             conversion_id=conversion_id,
@@ -93,87 +105,120 @@ class CapReservationLedger:
             cap_kind=cap_kind,
             business_date=business_date,
         )
-        if cap_kind.lower() == "daily":
+        now = get_app_now_naive()
+        owner = uuid.uuid4().hex
+        expires = now + timedelta(seconds=lease_seconds)
+        kind = identity["cap_kind"]
+        if kind == "daily":
             counter_key = get_daily_cap_key(
-                offer_id,
-                datetime.combine(business_date, datetime.min.time()),
-                publisher_id,
+                offer_id, datetime.combine(business_date, datetime.min.time()), publisher_id
             )
         else:
             counter_key = get_total_cap_key(offer_id, publisher_id)
         token_key = f"{counter_key}:reservation:{identity['reservation_key']}"
 
         async with AsyncSessionLocal() as session:
-            existing = await session.scalar(
+            row = await session.scalar(
                 select(CapReservation)
                 .where(CapReservation.reservation_key == identity["reservation_key"])
                 .with_for_update()
             )
-            if existing is not None:
-                if existing.state == "ROLLED_BACK":
-                    # 同一事件重试：仅在已确认回滚的终态重新打开同一稳定 token。
-                    existing.state = "PREPARED"
-                    existing.prepared_at = get_app_now_naive()
-                    existing.reserved_at = None
-                    existing.redis_reserved = False
-                    existing.finalized_at = None
-                    existing.last_error = None
-                    existing.lease_owner = None
-                    existing.lease_expires_at = None
-                    await session.commit()
-                elif existing.state in ACTIVE_STATES or existing.state == "COMMITTED":
-                    return existing
-                else:
-                    raise RuntimeError(
-                        f"未知 Cap Reservation 状态，拒绝覆盖：{existing.state}"
-                    )
-                return existing
-
-            row = CapReservation(
-                reservation_key=identity["reservation_key"],
-                platform=identity["platform"],
-                conversion_id=identity["conversion_id"],
-                event_name=identity["event_name"],
-                offer_id=offer_id,
-                publisher_id=publisher_id,
-                cap_kind=cap_kind.lower(),
-                business_date=business_date,
-                redis_counter_key=counter_key,
-                redis_token_key=token_key,
-                state="PREPARED",
-            )
-            session.add(row)
-            try:
-                await session.commit()
-            except IntegrityError:
-                # 并发请求可能同时首次创建相同稳定键；回滚后读取赢家记录。
-                await session.rollback()
-                winner = await session.scalar(
-                    select(CapReservation).where(
-                        CapReservation.reservation_key == identity["reservation_key"]
-                    )
+            if row is None:
+                row = CapReservation(
+                    reservation_key=identity["reservation_key"],
+                    platform=identity["platform"],
+                    conversion_id=identity["conversion_id"],
+                    event_name=identity["event_name"],
+                    offer_id=offer_id,
+                    publisher_id=publisher_id,
+                    cap_kind=kind,
+                    business_date=business_date,
+                    redis_counter_key=counter_key,
+                    redis_token_key=token_key,
+                    redis_reserved=False,
+                    state="PREPARED",
+                    lease_owner=owner,
+                    lease_expires_at=expires,
+                    prepared_at=now,
                 )
-                if winner is None:
-                    raise
-                return winner
-            await session.refresh(row)
-            return row
+                session.add(row)
+                try:
+                    await session.commit()
+                except IntegrityError:
+                    await session.rollback()
+                    # 唯一键竞争时重新读取并走同一行锁/租约判断，不盲目继续 Redis 操作。
+                    async with AsyncSessionLocal() as retry_session:
+                        winner = await retry_session.scalar(
+                            select(CapReservation)
+                            .where(CapReservation.reservation_key == identity["reservation_key"])
+                            .with_for_update()
+                        )
+                        if winner is None:
+                            raise
+                        return await CapReservationLedger._claim_existing(
+                            retry_session, winner, owner, now, expires
+                        )
+                await session.refresh(row)
+                return row, True, owner
+
+            return await CapReservationLedger._claim_existing(
+                session, row, owner, now, expires
+            )
 
     @staticmethod
-    async def mark_reserved(reservation_key: str) -> None:
+    async def _claim_existing(session, row, owner, now, expires):
+        """仅允许租约过期的可恢复状态被新请求接管。"""
+        if row.state == "COMMITTED":
+            await session.commit()
+            return row, False, None
+        if row.state == "NEEDS_RECONCILIATION":
+            await session.commit()
+            return row, False, None
+        if row.state not in {"PREPARED", "RESERVED", "ROLLED_BACK"}:
+            await session.commit()
+            raise RuntimeError(f"未知 Cap Reservation 状态，拒绝继续：{row.state}")
+        if (
+            row.state != "ROLLED_BACK"
+            and row.lease_owner
+            and row.lease_expires_at
+            and row.lease_expires_at > now
+        ):
+            await session.commit()
+            return row, False, None
+
+        if row.state == "ROLLED_BACK":
+            row.state = "PREPARED"
+            row.redis_reserved = False
+            row.prepared_at = now
+            row.reserved_at = None
+            row.finalized_at = None
+            row.last_error = None
+        row.lease_owner = owner
+        row.lease_expires_at = expires
+        row.attempts = int(row.attempts or 0) + 1
+        row.updated_at = now
+        await session.commit()
+        await session.refresh(row)
+        return row, True, owner
+
+    @staticmethod
+    async def mark_reserved(reservation_key: str, lease_owner: str) -> None:
         """Redis Lua 明确返回预留成功后，独立提交 RESERVED。"""
+        now = get_app_now_naive()
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 update(CapReservation)
                 .where(
                     CapReservation.reservation_key == reservation_key,
                     CapReservation.state == "PREPARED",
+                    CapReservation.lease_owner == lease_owner,
                 )
                 .values(
                     state="RESERVED",
                     redis_reserved=True,
-                    reserved_at=get_app_now_naive(),
-                    updated_at=get_app_now_naive(),
+                    reserved_at=now,
+                    lease_expires_at=now + timedelta(seconds=DEFAULT_LEASE_SECONDS),
+                    updated_at=now,
                     last_error=None,
                 )
             )
@@ -190,18 +235,26 @@ class CapReservationLedger:
                     )
 
     @staticmethod
-    async def finalize(reservation_key: str, state: str) -> None:
+    async def finalize(
+        reservation_key: str,
+        state: str,
+        *,
+        lease_owner: Optional[str] = None,
+    ) -> None:
         """将账本推进到已确认终态；仅允许 COMMITTED 或 ROLLED_BACK。"""
         if state not in FINAL_STATES:
             raise ValueError(f"非法 Cap Reservation 终态：{state}")
         now = get_app_now_naive()
+        conditions = [
+            CapReservation.reservation_key == reservation_key,
+            CapReservation.state.in_(ACTIVE_STATES),
+        ]
+        if lease_owner:
+            conditions.append(CapReservation.lease_owner == lease_owner)
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 update(CapReservation)
-                .where(
-                    CapReservation.reservation_key == reservation_key,
-                    CapReservation.state.in_(ACTIVE_STATES),
-                )
+                .where(*conditions)
                 .values(
                     state=state,
                     redis_reserved=(False if state == "ROLLED_BACK" else CapReservation.redis_reserved),
@@ -228,16 +281,21 @@ class CapReservationLedger:
     async def mark_needs_reconciliation(
         reservation_key: str,
         error: str,
+        *,
+        lease_owner: Optional[str] = None,
     ) -> None:
         """保留无法确定的跨存储状态，绝不擅自删除 token 或扣减计数。"""
         now = get_app_now_naive()
+        conditions = [
+            CapReservation.reservation_key == reservation_key,
+            CapReservation.state.in_(ACTIVE_STATES),
+        ]
+        if lease_owner:
+            conditions.append(CapReservation.lease_owner == lease_owner)
         async with AsyncSessionLocal() as session:
             await session.execute(
                 update(CapReservation)
-                .where(
-                    CapReservation.reservation_key == reservation_key,
-                    CapReservation.state.in_(ACTIVE_STATES),
-                )
+                .where(*conditions)
                 .values(
                     state="NEEDS_RECONCILIATION",
                     attempts=CapReservation.attempts + 1,
