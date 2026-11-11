@@ -135,11 +135,13 @@ class RedisCapManager:
     if not current then
         return -2
     end
-    redis.call('DEL', KEYS[2])
-    if current > 0 then
-        return redis.call('DECR', KEYS[1])
+    -- token 存在但计数已经为 0，说明计数状态被外部重置/破坏；
+    -- 保留 token 作为恢复证据，不能静默删除后假装回滚成功。
+    if current <= 0 then
+        return -2
     end
-    return 0
+    redis.call('DEL', KEYS[2])
+    return redis.call('DECR', KEYS[1])
     """
 
     # Lua：原子回滚（decr 后若 <0 则归零，避免并发 set 覆盖丢失计数）
