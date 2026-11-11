@@ -498,10 +498,8 @@ const getOutboxLabel = (row) => {
   if (row.status === 'success') return '已成功';
   if (row.outbox_error_category?.includes('配置缺失')) return '配置缺失';
   if ((row.attempt_count || 0) >= (row.max_attempts || 0)) return '重试耗尽';
-  if (row.status === 'pending') {
-    const claimedAt = row.report_start_time ? new Date(row.report_start_time).getTime() : 0;
-    return claimedAt && Date.now() - claimedAt < 15 * 60 * 1000 ? '处理中' : '等待 worker';
-  }
+  if (row.outbox_processing) return '处理中';
+  if (row.status === 'pending') return '等待 worker';
   if (row.next_retry_time) {
     return new Date(row.next_retry_time).getTime() > Date.now() ? '等待重试' : '等待 worker';
   }
