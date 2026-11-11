@@ -208,17 +208,20 @@ async def log_user_action(
 
 async def commit_audit_log(db: AsyncSession) -> None:
     """
-    提交会话中的审计日志。
-    当业务操作已在 service 内 commit 后，需单独提交审计记录时调用。
+    提交当前事务（包含业务变更和审计日志）。
+
+    提交失败必须向上抛出：调用方不能在业务事务已回滚时仍返回成功响应。
+    回滚仅用于清理失败事务，不得吞掉原始提交异常。
     """
     try:
         await db.commit()
-    except Exception as e:
-        logger.warning(f"提交审计日志失败: {e}")
+    except Exception:
+        logger.exception("提交业务变更及审计日志失败，事务已尝试回滚")
         try:
             await db.rollback()
         except Exception:
-            pass
+            logger.exception("提交失败后的数据库事务回滚也失败")
+        raise
 
 
 # 便捷函数
