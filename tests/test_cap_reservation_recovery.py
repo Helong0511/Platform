@@ -39,6 +39,18 @@ class _Session:
         self.commits += 1
 
 
+@pytest.fixture(autouse=True)
+def _stub_recovery_lease_renewal(monkeypatch):
+    async def renew_recovery_lease(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(
+        recovery.CapReservationLedger,
+        "renew_recovery_lease",
+        renew_recovery_lease,
+    )
+
+
 def _reservation(*, state="PREPARED", redis_reserved=False, redis_token_cleaned=False):
     return SimpleNamespace(
         id=1,
@@ -407,3 +419,65 @@ async def test_expired_daily_present_token_cleans_orphan_without_decrementing_mi
     assert stats["rolled_back"] == 1
     assert calls[0] == ("delete", row.redis_token_key)
     assert calls[1][0:3] == ("finalize", row.reservation_key, "ROLLED_BACK")
+
+
+@pytest.mark.asyncio
+async def test_recovery_skips_row_after_another_worker_claims_its_lease(monkeypatch):
+    """批次后半段租约已被其他 Worker 接管时，旧 Worker 必须跳过该行。"""
+    first = _reservation(state="RESERVED", redis_reserved=True)
+    second = _reservation(state="RESERVED", redis_reserved=True)
+    second.reservation_key = "e" * 64
+    second.redis_token_key = "counter:key:reservation:" + "e" * 64
+    sessions = [
+        _Session(rows=[first, second]),
+        _Session(event_id=None),
+    ]
+    renewed = []
+    token_checks = []
+    finalized = []
+
+    def session_factory():
+        return sessions.pop(0)
+
+    async def renew_lease(key, owner, **kwargs):
+        renewed.append((key, owner))
+        return key == first.reservation_key
+
+    async def token_state(counter_key, token_key):
+        token_checks.append(token_key)
+        return "ABSENT"
+
+    async def counter_exists(counter_key):
+        return False
+
+    async def finalize(key, state, **kwargs):
+        finalized.append((key, state, kwargs))
+
+    monkeypatch.setattr(recovery, "AsyncSessionLocal", session_factory)
+    monkeypatch.setattr(
+        recovery.CapReservationLedger,
+        "renew_recovery_lease",
+        renew_lease,
+    )
+    monkeypatch.setattr(
+        recovery.RedisCapManager,
+        "get_reservation_token_state",
+        token_state,
+    )
+    monkeypatch.setattr(
+        recovery.RedisCapManager,
+        "counter_key_exists",
+        counter_exists,
+    )
+    monkeypatch.setattr(recovery.CapReservationLedger, "finalize", finalize)
+
+    stats = await recovery.recover_cap_reservations(batch_size=2)
+
+    assert stats["rolled_back"] == 1
+    assert stats["lease_lost"] == 1
+    assert [item[0] for item in renewed] == [
+        first.reservation_key,
+        second.reservation_key,
+    ]
+    assert token_checks == [first.redis_token_key]
+    assert finalized[0][0:2] == (first.reservation_key, "ROLLED_BACK")
