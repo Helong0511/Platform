@@ -18,6 +18,7 @@ def test_cap_reservation_has_stable_key_and_recovery_indexes():
         if constraint.__class__.__name__ == "UniqueConstraint"
     }
     index_names = {index.name for index in table.indexes}
+    check_names = {constraint.name for constraint in table.constraints if constraint.__class__.__name__ == "CheckConstraint"}
 
     assert "uq_cap_reservation_key" in unique_constraints
     assert {
@@ -26,6 +27,14 @@ def test_cap_reservation_has_stable_key_and_recovery_indexes():
         "idx_cap_reservation_event",
         "idx_cap_reservation_scope",
     }.issubset(index_names)
+    assert {
+        "chk_cap_reservation_key_sha256",
+        "chk_cap_reservation_offer_positive",
+        "chk_cap_reservation_publisher_positive",
+        "chk_cap_reservation_attempts_nonnegative",
+        "chk_cap_reservation_kind_date",
+        "chk_cap_reservation_state",
+    }.issubset(check_names)
 
 
 def test_cap_reservation_preserves_global_publisher_scope_and_total_date_semantics():
