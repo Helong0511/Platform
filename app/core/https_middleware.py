@@ -41,15 +41,27 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
         if not settings.is_production:
             return await call_next(request)
 
-        # 检查协议（支持代理情况）
+        # 只有直连对端属于显式配置的可信代理时，才允许读取代理协议/Cloudflare 头。
+        # 不能仅凭客户端可伪造的 X-Forwarded-Proto / CF-Connecting-IP 绕过 HTTPS。
         scheme = request.url.scheme
-        # 检查 X-Forwarded-Proto 头（反向代理会设置）
-        forwarded_proto = request.headers.get("X-Forwarded-Proto", "").lower()
-
-        # 检查是否来自 Cloudflare（通过 CF-Connecting-IP 头部判断）
-        # 如果使用 Cloudflare Flexible SSL，允许来自 Cloudflare 的 HTTP 请求
-        cf_connecting_ip = request.headers.get("CF-Connecting-IP")
-        is_from_cloudflare = cf_connecting_ip is not None
+        peer_ip = request.client.host if request.client else ""
+        trusted_proxy_ips = set(settings.get_trusted_proxy_ips())
+        trusted_proxy = bool(
+            settings.TRUST_PROXY_HEADERS
+            and peer_ip
+            and peer_ip in trusted_proxy_ips
+        )
+        forwarded_proto = (
+            request.headers.get("X-Forwarded-Proto", "").strip().lower()
+            if trusted_proxy else ""
+        )
+        # Cloudflare Flexible SSL 兼容仅在可信反向代理链路上生效；
+        # Nginx 必须按 cloudflare_real_ip.conf 仅信任 Cloudflare 官方源站网段。
+        cf_connecting_ip = (
+            request.headers.get("CF-Connecting-IP", "").strip()
+            if trusted_proxy else ""
+        )
+        is_from_cloudflare = bool(cf_connecting_ip)
 
         # 特殊路径豁免：/bridge/ 路由（桥页静态资源）允许 HTTP
         # 因为这是内部代理请求，Nginx 会处理 SSL
