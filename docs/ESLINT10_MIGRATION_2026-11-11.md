@@ -26,3 +26,8 @@ Official references:
 The lockfile is being regenerated in an isolated CI workspace. The workflow commits the generated lockfile only after backend tests, frontend lint/build, and Playwright E2E all pass. A subsequent CI run must use the committed lockfile directly with `npm ci`; only that run establishes the migration as verified.
 
 No production server, database, Redis, cache, queue, or live third-party endpoint is used.
+
+
+## Peer dependency resolution
+
+The first lockfile-only update correctly stopped with `ERESOLVE`: the previous lock graph still contained `eslint-plugin-vue@9.28.0` and its old Vue parser peer while the manifest now requests plugin v10. The workflow does not use `--force` or `--legacy-peer-deps`. It now resolves a fresh lockfile from the declared manifest in the isolated CI workspace, then runs `npm ci`, lint, build and browser E2E before the lockfile can be committed.
