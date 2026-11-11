@@ -293,7 +293,9 @@ class CapReservationLedger:
                     ),
                 )
                 .values(
-                    lease_expires_at=now + timedelta(seconds=lease_seconds),
+                    # 至少推进 1 秒，避免 MySQL matched/changed rows 语义下，
+                    # 与刚刚批量认领写入相同时间戳时 rowcount=0 被误判为租约丢失。
+                    lease_expires_at=now + timedelta(seconds=lease_seconds + 1),
                     updated_at=now,
                 )
             )
