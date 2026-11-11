@@ -56,7 +56,10 @@ def _run_sql_file(cursor, relative_path: str) -> None:
 
 
 def _event_key(source: str, adsid: str, event: str, conversion_id: str | None) -> str:
-    parts = (source or "", adsid or "", event or "", conversion_id or "")
+    # 必须与应用和 SQL migration 的身份规则一致：ViewContent 的 conversion_id
+    # 可能由后续 Purchase 补写，仅用于关联，不属于 ViewContent 的幂等身份。
+    identity_conversion_id = "" if event == "ViewContent" else (conversion_id or "")
+    parts = (source or "", adsid or "", event or "", identity_conversion_id)
     identity = "".join(f"{len(part)}:{part}" for part in parts)
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
