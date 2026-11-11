@@ -230,7 +230,7 @@ NEEDS_RECONCILIATION
 
 以下内容已实际提交到审计分支；它们属于基础设施阶段，不应误报为完整恢复闭环：
 
-- ORM：`app/models/cap_reservation.py`，包含稳定唯一键、正式事件字段、Cap scope、Redis counter/token key 快照、状态、尝试次数、租约字段及恢复索引。
+- ORM：`app/models/cap_reservation.py`，包含稳定唯一键、正式事件字段、Cap scope、Redis counter/token key 快照、`redis_reserved` 标志、状态、尝试次数、租约字段及恢复索引。`redis_reserved=false + COMMITTED` 可明确表达 fail-open 下没有 Redis token、但 DB Cap 快照随业务事务提交的路径。
 - 模型聚合：`app/models/models.py` 与 `app/models/__init__.py` 均导出 `CapReservation`，使共享 `Base.metadata` 能发现新表。
 - SQL migration：`sql/migrations/20261111_cap_reservation_ledger.sql`，字段类型与 ORM 对齐；迁移文件只供发布评审，CI 不执行生产迁移。
 - 独立服务：`app/services/cap_reservation_ledger.py` 使用 `AsyncSessionLocal`，提供稳定身份生成、独立会话 PREPARED 创建、RESERVED 标记、COMMITTED/ROLLED_BACK 终态确认和 NEEDS_RECONCILIATION 标记。
