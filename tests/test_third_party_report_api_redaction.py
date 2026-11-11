@@ -103,6 +103,7 @@ def test_manual_requeue_eligibility_matches_backend_guards():
     now = datetime(2026, 11, 11, 12, 0, 0)
     base = {
         "outbox_enqueued": True,
+        "pii_scrubbed_at": None,
         "status": "failed",
         "short_link_id": 17,
         "cloak_name": None,
@@ -119,6 +120,9 @@ def test_manual_requeue_eligibility_matches_backend_guards():
     ) is False
     assert _can_requeue_report(
         SimpleNamespace(**{**base, "short_link_id": None}), now
+    ) is False
+    assert _can_requeue_report(
+        SimpleNamespace(**{**base, "pii_scrubbed_at": now}), now
     ) is False
     assert _can_requeue_report(
         SimpleNamespace(**{
