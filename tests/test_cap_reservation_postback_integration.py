@@ -314,3 +314,31 @@ async def test_recovery_rollback_uses_exact_persisted_redis_keys(monkeypatch):
         2,
         ("persisted:counter:key", "persisted:token:key"),
     )]
+
+@pytest.mark.asyncio
+async def test_missing_redis_token_does_not_finalize_active_ledger_as_rolled_back(monkeypatch):
+    """token 消失但计数状态不明时，必须保留账本待对账，不能假报回滚成功。"""
+    marked = []
+    finalized = []
+
+    async def decrement(*args, **kwargs):
+        return -3  # token absent / state ambiguous
+
+    async def mark_needs(key, error, **kwargs):
+        marked.append((key, error, kwargs))
+
+    async def finalize(*args, **kwargs):
+        finalized.append((args, kwargs))
+
+    monkeypatch.setattr(cap_manager.RedisCapManager, "decrement_daily", decrement)
+    monkeypatch.setattr(cap_manager.CapReservationLedger, "mark_needs_reconciliation", mark_needs)
+    monkeypatch.setattr(cap_manager.CapReservationLedger, "finalize", finalize)
+
+    with pytest.raises(RuntimeError, match="rollback incomplete"):
+        await cap_manager._rollback_reserved_redis([
+            ("daily", 77, 12, datetime(2026, 11, 11), "missing-token", "ledger-key", "lease-owner", True)
+        ])
+
+    assert marked and marked[0][0] == "ledger-key"
+    assert "-3" in marked[0][1] or "unknown" in marked[0][1].lower()
+    assert finalized == []
