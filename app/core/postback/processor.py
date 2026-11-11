@@ -307,15 +307,16 @@ class PostbackProcessor:
             except IntegrityError:
                 # 先回滚失败事务，再按正式事件唯一键核验；不能把外键/其他唯一约束错误误报为重复。
                 await db.rollback()
+                # 先撤销本次预留，再做只读重复核验；避免核验查询自身失败时留下可回滚的 Redis 预留。
+                if cap_reservations:
+                    cap_rollback_attempted = True
+                    await CapChecker.rollback_reservations(cap_reservations)
                 is_duplicate_event = await PostbackProcessor._conversion_event_exists(
                     db=db,
                     platform=platform,
                     conversion_id=normalized_data.get("conversion_id") or "",
                     event_name=normalized_data.get("event_name") or "default",
                 )
-                if cap_reservations:
-                    cap_rollback_attempted = True
-                    await CapChecker.rollback_reservations(cap_reservations)
                 if not is_duplicate_event:
                     logger.error(
                         "转化保存触发非重复事件 IntegrityError，已回滚并拒绝伪装成功：platform=%s conversion_id=%s event_name=%s",
