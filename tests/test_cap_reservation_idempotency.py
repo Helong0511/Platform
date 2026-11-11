@@ -33,7 +33,7 @@ class _AmbiguousRedis:
             self.rollback_calls += 1
             key, token_key = args
             if token_key not in self.tokens:
-                return 0
+                return -3
             # 与 Lua 保持一致：计数 key 丢失时保留 token，避免丢失恢复证据。
             if key not in self.values:
                 return -2
