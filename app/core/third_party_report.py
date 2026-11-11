@@ -301,18 +301,18 @@ async def send_third_party_report(
     # 直接发送路径创建日志；事务性 Outbox 路径复用转化事务中已提交的日志行。
     if not report_log_id:
         report_log_id = await create_report_log(
-        source=source,
-        adsid=adsid,
-        event=event,
-        email=email,
-        ip=ip,
-        phone=phone,
-        ua=ua,
-        max_attempts=max_retries,
-        use_hash=use_hash,
-        conversion_id=conversion_id,
-        currency=currency,
-        amount=amount
+            source=source,
+            adsid=adsid,
+            event=event,
+            email=email,
+            ip=ip,
+            phone=phone,
+            ua=ua,
+            max_attempts=max_retries,
+            use_hash=use_hash,
+            conversion_id=conversion_id,
+            currency=currency,
+            amount=amount,
         )
 
     if not report_log_id:
@@ -320,7 +320,7 @@ async def send_third_party_report(
         logger.error(f"[第三方上报] {error_msg}")
         raise ValueError(error_msg)
 
-    event_key = build_event_idempotency_key(source, adsid, event, conversion_id)
+    event_key = event_key or build_event_idempotency_key(source, adsid, event, conversion_id)
     try:
         claimed = await _claim_report_log(report_log_id)
         if not claimed:
