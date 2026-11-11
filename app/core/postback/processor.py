@@ -265,14 +265,12 @@ class PostbackProcessor:
                         },
                     )
                 )
-            except Exception:
+            except Exception as cap_error:
                 # CapChecker/increment_cap_count 已按实际预留回退 Redis，此处勿再全量 DECR
                 await db.rollback()
                 logger.error(
-                    "Cap 计数递增异常，已回滚：offer_id=%s publisher_id=%s",
-                    offer_id,
-                    publisher_id,
-                    exc_info=True,
+                    "Cap 计数递增异常，已回滚：error_type=%s",
+                    type(cap_error).__name__,
                 )
                 return {
                     "success": False,
@@ -497,21 +495,19 @@ class PostbackProcessor:
                         await CapReservationLedger.finalize(
                             ledger_key, "COMMITTED", lease_owner=lease_owner
                         )
-                    except Exception:
+                    except Exception as ledger_error:
                         logger.critical(
-                            "转化已提交但 Cap Reservation 账本终态更新失败，等待恢复：%s",
-                            ledger_key, exc_info=True,
+                            "转化已提交但 Cap Reservation 账本终态更新失败，等待恢复：error_type=%s",
+                            type(ledger_error).__name__,
                         )
             return
         except Exception as commit_error:
             try:
                 await db.rollback()
-            except Exception:
+            except Exception as rollback_error:
                 logger.critical(
-                    "Postback COMMIT 异常后 DB rollback 也失败；保留 Redis Cap reservation，"
-                    "需人工/巡检核对 conversion_id=%s",
-                    conversion_id,
-                    exc_info=True,
+                    "Postback COMMIT 异常后 DB rollback 也失败；保留 Redis Cap reservation：error_type=%s",
+                    type(rollback_error).__name__,
                 )
                 raise commit_error
 
@@ -522,24 +518,20 @@ class PostbackProcessor:
                     .limit(1)
                 )
                 committed = result.scalar_one_or_none() is not None
-            except Exception:
+            except Exception as lookup_error:
                 logger.critical(
-                    "Postback COMMIT 结果无法确认；为避免 Cap 超卖，保留 Redis reservation，"
-                    "conversion_id=%s",
-                    conversion_id,
-                    exc_info=True,
+                    "Postback COMMIT 结果无法确认；为避免 Cap 超卖，保留 Redis reservation：error_type=%s",
+                    type(lookup_error).__name__,
                 )
                 raise commit_error
 
             if not committed and cap_reservations:
                 try:
                     await CapChecker.rollback_reservations(cap_reservations)
-                except Exception:
+                except Exception as rollback_error:
                     logger.critical(
-                        "Postback COMMIT 确认未提交，但 Redis Cap reservation 回退失败；"
-                        "conversion_id=%s",
-                        conversion_id,
-                        exc_info=True,
+                        "Postback COMMIT 确认未提交，但 Redis Cap reservation 回退失败：error_type=%s",
+                        type(rollback_error).__name__,
                     )
             elif committed:
                 # COMMIT 响应丢失但正式转化已存在：保留 Redis 计数并补记账本终态。
@@ -551,15 +543,13 @@ class PostbackProcessor:
                             await CapReservationLedger.finalize(
                                 ledger_key, "COMMITTED", lease_owner=lease_owner
                             )
-                        except Exception:
+                        except Exception as ledger_error:
                             logger.critical(
-                                "正式转化已存在但 Reservation 账本无法标记 COMMITTED：%s",
-                                ledger_key, exc_info=True,
+                                "正式转化已存在但 Reservation 账本无法标记 COMMITTED：error_type=%s",
+                                type(ledger_error).__name__,
                             )
                 logger.critical(
-                    "Postback COMMIT 返回异常但 DB 已确认转化存在；保留 Redis Cap reservation，"
-                    "conversion_id=%s",
-                    conversion_id,
+                    "Postback COMMIT 返回异常但 DB 已确认转化存在；保留 Redis Cap reservation"
                 )
             raise commit_error
 
