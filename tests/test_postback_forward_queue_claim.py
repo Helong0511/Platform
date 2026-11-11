@@ -193,9 +193,13 @@ async def test_retry_enqueue_serializes_on_conversion_row_lock():
 
     captured = {}
 
-    class FakeResult:
-        def scalar_one_or_none(self):
+    class FakeScalars:
+        def first(self):
             return 101
+
+    class FakeResult:
+        def scalars(self):
+            return FakeScalars()
 
     class FakeDB:
         async def execute(self, statement):
@@ -213,9 +217,13 @@ async def test_retry_enqueue_serializes_on_conversion_row_lock():
 async def test_retry_enqueue_skips_when_conversion_row_is_missing():
     from app.core.postback.forwarder import _lock_conversion_for_queue_enqueue
 
-    class FakeResult:
-        def scalar_one_or_none(self):
+    class FakeScalars:
+        def first(self):
             return None
+
+    class FakeResult:
+        def scalars(self):
+            return FakeScalars()
 
     class FakeDB:
         async def execute(self, statement):
