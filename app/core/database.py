@@ -158,7 +158,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
         except Exception as e:
             # 发生真正的数据库异常时，回滚事务并记录错误
-            logger.error(f"数据库会话错误: {str(e)}", exc_info=True)
+            # SQLAlchemy 异常消息可能包含绑定参数；日志只保留异常类型，不记录原始数据。
+            logger.error("数据库会话错误：exception_type=%s", type(e).__name__)
             await session.rollback()
             raise
         finally:
@@ -182,7 +183,8 @@ async def get_postback_db() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             raise
         except Exception as e:
-            logger.error(f"Postback 数据库会话错误: {str(e)}", exc_info=True)
+            # Postback 参数可能包含 IP、邮箱、click_id 等 PII，禁止写入异常日志。
+            logger.error("Postback 数据库会话错误：exception_type=%s", type(e).__name__)
             await session.rollback()
             raise
         finally:
@@ -206,7 +208,8 @@ async def get_db_readonly() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             raise
         except Exception as e:
-            logger.error(f"只读数据库会话错误: {str(e)}", exc_info=True)
+            # 只读查询错误同样不输出 SQL 参数或原始异常文本。
+            logger.error("只读数据库会话错误：exception_type=%s", type(e).__name__)
             await session.rollback()
             raise
         finally:
