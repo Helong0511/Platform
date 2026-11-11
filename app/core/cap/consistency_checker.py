@@ -33,8 +33,10 @@ async def check_cap_consistency(
 
         redis = await get_redis_client()
         if not redis:
-            logger.warning("Redis不可用，无法进行一致性检查")
-            return inconsistencies
+            # 无法读取 Redis 时，不能把“未知”伪装成“无不一致”。
+            # 通过异常让 API 返回失败状态，调用方可明确区分检查失败与检查通过。
+            logger.error("Redis不可用，Cap一致性检查无法完成")
+            raise RuntimeError("Redis 不可用，无法完成 Cap 计数一致性检查")
 
         now = get_app_now_naive()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
