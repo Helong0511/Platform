@@ -224,7 +224,7 @@ def test_cap_reservation_migration_is_idempotent_and_matches_mysql_schema():
             }.issubset(check_names)
 
             # 数据库必须真正拒绝非法账本语义，不能只依赖 Python Service 校验。
-            with pytest.raises(pymysql.err.IntegrityError):
+            with pytest.raises(pymysql.err.OperationalError) as check_error:
                 cursor.execute(
                     "INSERT INTO cap_reservations "
                     "(reservation_key, platform, conversion_id, event_name, offer_id, "
@@ -236,6 +236,8 @@ def test_cap_reservation_migration_is_idempotent_and_matches_mysql_schema():
                         "PREPARED",
                     ),
                 )
+            # MySQL CHECK 约束错误码 3819 在 PyMySQL 中映射为 OperationalError。
+            assert check_error.value.args[0] == 3819
 
             cursor.execute(
                 "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE "
