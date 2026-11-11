@@ -96,6 +96,8 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
                     event VARCHAR(50) NOT NULL,
                     conversion_id VARCHAR(255) NULL,
                     amount DECIMAL(12, 2) NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    report_start_time DATETIME NULL,
                     PRIMARY KEY (id),
                     UNIQUE KEY unique_source_adsid (source, adsid)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
