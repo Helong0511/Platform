@@ -246,3 +246,49 @@ NEEDS_RECONCILIATION
 6. 当前新增测试仅验证模型与稳定身份规则，不覆盖跨存储事务恢复，不代表孤儿 reservation 风险已消除。
 
 下一步必须先明确 fail-open 时“没有 Redis token 但 DB Cap 快照随转化提交”的账本状态语义，再接入 Cap manager；不能简单将所有 `None` 当成 RESERVED，也不能在 Redis 结果 UNKNOWN 时误标 ROLLED_BACK。
+
+
+## 14. Postback 接入与恢复任务实现（2026-11-11）
+
+### 已落地的运行时链路
+
+- Postback 将标准化后的 `platform + conversion_id + event_name` 传入 Cap Manager。
+- 每个实际 Redis scope 的 Daily / Total 计数器预留前，账本服务使用独立 `AsyncSessionLocal` 提交 PREPARED，并通过数据库行锁 + 5 分钟 lease claim 防止同一事件并发请求复用同一 token。
+- Redis reservation token 使用账本 SHA-256 稳定键；同一事件重试不会生成随机新 token。
+- Redis Lua 成功后独立标记 RESERVED；若 Redis 预留成功但标记失败，会按同一 token 补偿，无法确认时进入 NEEDS_RECONCILIATION。
+- Fail-open 没有真实 Redis token 时，账本保持 `redis_reserved=false`，但仍随 Postback 业务提交/回滚完成终态，避免恢复任务误 DECR。
+- Postback DB COMMIT 前续租；DB commit 成功后将账本标记 COMMITTED；保存失败/明确未提交时按原始 token 回滚并标记 ROLLED_BACK。
+- COMMIT 响应不确定时仍以正式转化事件键核验；正式事件存在则保留计数并完成 COMMITTED；未知结果保留账本待恢复。
+- Daily 与 Total 活动 token 不使用固定 TTL；终态后清理 token。COMMITTED token 清理失败会记录 `redis_token_cleaned=false`，恢复任务后续重试。
+
+### 恢复 Worker
+
+- 新增 `app/services/cap_reservation_recovery.py`。
+- 新增调度任务 `Cap Reservation 崩溃恢复`，每分钟执行，任务配置在 `task_config.py`。
+- 通过 MySQL `FOR UPDATE SKIP LOCKED` + lease 领取到期 PREPARED / RESERVED 和待清理的 COMMITTED 记录，多 Worker 不会同时处理同一行。
+- 恢复顺序：先按正式唯一事件键查转化；存在则 COMMITTED；不存在时检查 Redis token 三态。
+- token PRESENT：只按账本保存的 counter key + token key 调用原子 rollback。
+- PREPARED 且 `redis_reserved=false`、token ABSENT：可安全终结 ROLLED_BACK。
+- `redis_reserved=true` 但 token ABSENT，或 Redis UNKNOWN、token 存在但 counter 丢失：进入 NEEDS_RECONCILIATION，绝不猜测性 DECR。
+- COMMITTED token 清理失败单独重试，不回退已提交计数。
+
+### 新增测试
+
+- Postback stable token 注入、Fail-open 无 token、RESERVED 状态标记、同事件租约竞争拒绝。
+- DB commit 前续租、commit 后终态确认。
+- Redis token PRESENT / ABSENT / UNKNOWN 与原始 key 原子回滚。
+- 崩溃发生在 Redis Lua 成功后、账本 RESERVED 标记前的恢复。
+- Redis token ABSENT 时不做猜测性 DECR。
+- 已提交账本 token 清理失败后的重试路径。
+- ORM 与 SQL migration 包含 `redis_reserved`、`redis_token_cleaned` 两个标志字段。
+
+### 上线前仍必须完成
+
+1. 在隔离 MySQL 8.0 实际执行 migration 并核对 `SHOW CREATE TABLE`、索引、字段类型和字符集；当前 CI 的 SQLite 单测不能替代 MySQL DDL 演练。
+2. 补齐故障注入矩阵：PREPARED 后 kill、Redis Lua 执行后响应丢失、RESERVED 更新响应丢失、主 DB flush/commit 前后 kill、commit 响应丢失、Redis flush、Daily 跨日、Total 长期计数、多个恢复 Worker 竞争、恢复期间 Postback 重试。
+3. 验证 Cap 同步任务在账本待处理/NEEDS_RECONCILIATION 状态下不会将不确定计数固化成 DB 基线；必要时在缺 key 且同 scope 有未决账本时 fail-closed。
+4. 验证 Scheduler 多实例配置、任务启停、失败告警与积压监控；不能仅凭 task_config 有配置就认定生产调度器已经执行。
+5. 完成迁移发布顺序、备份、回滚、应用版本兼容及观察指标手册。
+6. 最新 HEAD 的 Backend、Frontend、Playwright Mock API E2E 必须全部通过；任何旧 SHA 的成功结果都不能替代最新 SHA。
+7. PR #1 在以上事项全部验收前必须保持 Draft，不得合并 main；严禁连接生产服务。
+
