@@ -9,7 +9,7 @@ import logging
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 
 from app.core.cap.redis_counter import RedisCapManager
 from app.core.database import AsyncSessionLocal
@@ -198,3 +198,43 @@ async def recover_cap_reservations(
 
     logger.info("Cap Reservation 恢复任务完成：%s", stats)
     return stats
+
+
+
+async def get_cap_reservation_recovery_status() -> dict:
+    """读取恢复积压、人工对账数量和最老待处理年龄，供调度任务告警。"""
+    now = get_app_now_naive()
+    async with AsyncSessionLocal() as session:
+        grouped = await session.execute(
+            select(CapReservation.state, func.count(CapReservation.id))
+            .where(
+                CapReservation.state.in_(
+                    ("PREPARED", "RESERVED", "NEEDS_RECONCILIATION")
+                )
+            )
+            .group_by(CapReservation.state)
+        )
+        counts = {state: int(count) for state, count in grouped.all()}
+        oldest_pending = await session.scalar(
+            select(func.min(CapReservation.prepared_at)).where(
+                CapReservation.state.in_(("PREPARED", "RESERVED"))
+            )
+        )
+        cleanup_pending = await session.scalar(
+            select(func.count(CapReservation.id)).where(
+                CapReservation.state == "COMMITTED",
+                CapReservation.redis_token_cleaned.is_(False),
+            )
+        )
+
+    oldest_age_seconds = (
+        max(0, int((now - oldest_pending).total_seconds()))
+        if oldest_pending is not None else 0
+    )
+    return {
+        "pending_prepared": counts.get("PREPARED", 0),
+        "pending_reserved": counts.get("RESERVED", 0),
+        "needs_reconciliation": counts.get("NEEDS_RECONCILIATION", 0),
+        "committed_token_cleanup_pending": int(cleanup_pending or 0),
+        "oldest_pending_seconds": oldest_age_seconds,
+    }
