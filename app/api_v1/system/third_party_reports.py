@@ -10,7 +10,7 @@
 - GET /stats         上报统计。
 
 说明：系统运维接口，含定时任务、审计日志、会话、缓存、斗篷与敏感路径探测。"""
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import re
 from decimal import Decimal
@@ -38,7 +38,12 @@ from app.schemas.third_party_report import (
     ThirdPartyReportLogResponseSingle,
 )
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
-from app.core.third_party_report import retry_report_log, update_report_log_params
+from app.core.third_party_report import (
+    REPORT_LOG_LEASE_SECONDS,
+    retry_report_log,
+    update_report_log_params,
+)
+from app.core.utils import get_app_now_naive
 
 # 创建路由实例
 router = APIRouter()
@@ -241,6 +246,20 @@ async def get_third_party_reports(
                 item["report_params_preview"] = None
             item["outbox_error_category"] = (
                 _safe_report_error_message(log.error_message) if log.outbox_enqueued else None
+            )
+            retry_lease_expired = (
+                log.report_start_time is None
+                or log.report_start_time < get_app_now_naive()
+                - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1)
+            )
+            has_config_reference = bool(
+                log.short_link_id or (log.cloak_name and log.short_code)
+            )
+            item["can_requeue"] = bool(
+                log.outbox_enqueued
+                and log.status == "failed"
+                and has_config_reference
+                and retry_lease_expired
             )
             log_responses.append(item)
         serialize_elapsed_ms = int((perf_counter() - serialize_started_at) * 1000)
