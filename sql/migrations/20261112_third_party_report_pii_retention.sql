@@ -14,10 +14,3 @@ ALTER TABLE postback_forward_logs
     ADD INDEX idx_forward_log_pii_retention
         (pii_scrubbed_at, created_at, id);
 
--- 下游 Postback 转发日志同样可能包含展开后的 click_id、邮箱、IP 和响应回显。
--- 与第三方上报日志使用同一审批后的保留期限；迁移只新增标记，不清理历史数据。
-ALTER TABLE postback_forward_logs
-    ADD COLUMN pii_scrubbed_at DATETIME NULL
-        COMMENT 'PII 按保留策略清理时间；保留转发审计骨架' AFTER completed_at,
-    ADD INDEX idx_forward_log_pii_retention
-        (pii_scrubbed_at, created_at, id);
