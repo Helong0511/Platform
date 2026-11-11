@@ -733,58 +733,81 @@ async def send_third_party_report(
 
 async def retry_report_log(log_id: int):
     """
-    重新上报指定的日志记录
+    原子触发失败事件重试。
+
+    只允许 failed 状态进入重试队列；通过条件 UPDATE 抢占状态转换，
+    防止两个管理员请求或重试请求覆盖正在发送中的租约。
     """
     try:
+        now = get_app_now_naive()
+        stale_lease_time = now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1)
         async with AsyncSessionLocal() as db:
-            result = await db.execute(select(ThirdPartyReportLog).where(ThirdPartyReportLog.id == log_id))
-            log_entry = result.scalars().first()
-            
-            if not log_entry:
-                logger.warning(f"[第三方上报] 日志记录不存在: id={log_id}")
-                return False
-            
-            # 重置日志状态
-            log_entry.status = "pending"
-            log_entry.attempt_count = 0
-            log_entry.response_status = None
-            log_entry.response_body = None
-            log_entry.log_id = None
-            log_entry.error_message = None
-            log_entry.report_start_time = None
-            log_entry.report_success_time = None
-            log_entry.completed_at = None
-            
+            claim_result = await db.execute(
+                update(ThirdPartyReportLog)
+                .where(
+                    ThirdPartyReportLog.id == log_id,
+                    ThirdPartyReportLog.status == "failed",
+                    or_(
+                        ThirdPartyReportLog.report_start_time.is_(None),
+                        ThirdPartyReportLog.report_start_time < stale_lease_time,
+                    ),
+                )
+                .values(
+                    status="pending",
+                    attempt_count=0,
+                    response_status=None,
+                    response_body=None,
+                    log_id=None,
+                    error_message=None,
+                    # 保留一个已过期时间戳，后续发送入口必须再通过原子认领。
+                    # 第二个管理员请求因 status 已变为 pending 而无法重复排队。
+                    report_start_time=stale_lease_time,
+                    report_success_time=None,
+                    completed_at=None,
+                )
+            )
             await db.commit()
-            
-            # 在后台任务中重新发送上报
-            from fastapi import BackgroundTasks
-            
-            # 创建一个后台任务来发送上报
+            if (claim_result.rowcount or 0) != 1:
+                logger.info(
+                    "[第三方上报] 重试未触发：日志不存在、非失败状态或已被其他请求认领: id=%s",
+                    log_id,
+                )
+                return False
+
+            result = await db.execute(
+                select(ThirdPartyReportLog).where(ThirdPartyReportLog.id == log_id)
+            )
+            log_entry = result.scalars().first()
+            if not log_entry:
+                logger.warning("[第三方上报] 重试状态已更新但日志读取失败: id=%s", log_id)
+                return False
+
+            # 后台任务仅负责发起发送；最终仍由 send_third_party_report 的
+            # _claim_report_log 原子 UPDATE 获取发送租约。
             async def background_send():
                 """后台重试：从日志条目解析金额/币种后再次调用第三方上报 API。"""
-                # ---------- 解析金额与币种 ----------
                 currency = log_entry.currency or "USD"
-                amount = log_entry.amount or 0.0
-                
-                # 如果log_entry中没有，从report_params中提取（向后兼容）
-                if not currency or amount is None:
-                    if log_entry.report_params:
-                        try:
-                            report_params = json.loads(log_entry.report_params)
-                            # 处理旧的 payData 格式
-                            if "payData" in report_params:
-                                currency = report_params["payData"].get("currency", "USD")
-                                amount = report_params["payData"].get("amount", 0.0)
-                            # 处理新的 Facebook API custom_data 格式
-                            elif "data" in report_params and len(report_params["data"]) > 0:
-                                event_data = report_params["data"][0]
-                                if "custom_data" in event_data:
-                                    currency = event_data["custom_data"].get("currency", "USD")
-                                    amount = event_data["custom_data"].get("value", 0.0)
-                        except (KeyError, TypeError, AttributeError):
-                            pass
-                
+                amount = log_entry.amount if log_entry.amount is not None else 0.0
+
+                if log_entry.report_params and (
+                    not log_entry.currency or log_entry.amount is None
+                ):
+                    try:
+                        report_params = json.loads(log_entry.report_params)
+                        if "payData" in report_params:
+                            currency = report_params["payData"].get("currency", currency)
+                            amount = report_params["payData"].get("amount", amount)
+                        elif "data" in report_params and report_params["data"]:
+                            event_data = report_params["data"][0]
+                            custom_data = event_data.get("custom_data", {})
+                            currency = custom_data.get("currency", currency)
+                            amount = custom_data.get("value", amount)
+                    except (KeyError, TypeError, AttributeError, ValueError):
+                        logger.warning(
+                            "[第三方上报] 重试日志参数解析失败，使用已保存的金额/币种: id=%s",
+                            log_id,
+                        )
+
                 await send_third_party_report(
                     adsid=log_entry.adsid,
                     event=log_entry.event,
@@ -796,15 +819,15 @@ async def retry_report_log(log_id: int):
                     use_hash=log_entry.use_hash,
                     conversion_id=log_entry.conversion_id,
                     currency=currency,
-                    amount=amount
+                    amount=amount,
                 )
+
             asyncio.create_task(background_send())
-            
-            logger.info("[第三方上报] 已触发重新上报: id=%s", log_id)
+            logger.info("[第三方上报] 已原子触发重新上报: id=%s", log_id)
             return True
-            
+
     except Exception as e:
-        logger.warning(f"[第三方上报] 重新上报失败: {e}")
+        logger.warning("[第三方上报] 重新上报失败: %s", e, exc_info=True)
         return False
 
 
