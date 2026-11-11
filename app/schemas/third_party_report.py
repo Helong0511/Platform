@@ -59,6 +59,7 @@ class ThirdPartyReportLogResponse(ThirdPartyReportLogBase):
     created_at: datetime
     report_start_time: Optional[datetime] = None
     report_success_time: Optional[datetime] = None
+    pii_scrubbed_at: Optional[datetime] = Field(None, description="个人信息载荷清理时间")
     """
     第三方上报日志列表响应模型（轻量字段）
     
@@ -99,6 +100,7 @@ class ThirdPartyReportLogListResponse(BaseSchema):
     report_success_time: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     outbox_enqueued: bool = Field(False, description="是否属于持久化 Outbox 事件")
+    pii_scrubbed_at: Optional[datetime] = Field(None, description="个人信息载荷清理时间")
     next_retry_time: Optional[datetime] = Field(None, description="下次自动重试时间")
     outbox_error_category: Optional[str] = Field(None, description="脱敏后的 Outbox 失败原因分类")
     report_params_preview: Optional[str] = Field(None, description="脱敏后的上报参数预览")
