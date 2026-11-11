@@ -47,7 +47,7 @@ class _AmbiguousRedis:
 
 
 @pytest.mark.asyncio
-async def test_total_cap_counter_has_no_ttl_but_reservation_token_expires(monkeypatch):
+async def test_total_cap_counter_and_pending_reservation_token_have_no_ttl(monkeypatch):
     calls = []
 
     class CaptureRedis:
@@ -78,13 +78,13 @@ async def test_total_cap_counter_has_no_ttl_but_reservation_token_expires(monkey
             0,
             "0",
             "500",
-            30 * 24 * 3600,
+            0,
         )
     ]
 
 
 @pytest.mark.asyncio
-async def test_daily_cap_counter_and_reservation_keep_daily_ttl(monkeypatch):
+async def test_daily_cap_counter_expires_but_pending_reservation_token_does_not(monkeypatch):
     calls = []
     now = datetime(2026, 11, 10, 12, 0, 0)
 
@@ -111,7 +111,7 @@ async def test_daily_cap_counter_and_reservation_keep_daily_ttl(monkeypatch):
 
     assert result is True
     assert calls[0][2] == redis_counter.DEFAULT_EXPIRE_SECONDS
-    assert calls[0][5] == redis_counter.DEFAULT_EXPIRE_SECONDS
+    assert calls[0][5] == 0  # 待处理 token 由账本终态控制
 
 
 def test_total_cap_reservation_script_persists_counter_without_expiry():
