@@ -64,3 +64,28 @@ async def test_existing_redis_key_is_reconciled_to_db_fallback_count(
     )
     assert "math.max(current, db_count)" in script
     assert "if not current then" in script
+
+
+@pytest.mark.asyncio
+async def test_recreated_cap_uses_existing_total_counter_when_db_baseline_is_zero(monkeypatch):
+    """删除配置再按相同 Offer/渠道重建时，不能因新行计数为 0 覆盖 Redis 历史总计数。"""
+    redis = _StatefulRedis(initial_value=17)
+
+    async def fake_get_redis_client():
+        return redis
+
+    monkeypatch.setattr(redis_counter, "get_redis_client", fake_get_redis_client)
+
+    allowed = await redis_counter.RedisCapManager.check_and_increment_total(
+        offer_id=902,
+        limit=30,
+        publisher_id=34,
+        initial_value=0,
+        reservation_id="recreated-cap-request",
+    )
+
+    assert allowed is True
+    assert redis.value == 18
+    assert redis.calls[0][2] == redis_counter.get_total_cap_key(902, 34)
+    assert redis.calls[0][5] == "0"
+    assert redis.calls[0][4] == 0  # Total key 必须保持永久有效。
