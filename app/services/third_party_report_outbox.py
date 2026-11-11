@@ -298,6 +298,12 @@ async def process_postback_report_outbox(
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                 ThirdPartyReportLog.status.in_(("pending", "failed")),
                 ThirdPartyReportLog.attempt_count >= ThirdPartyReportLog.max_attempts,
+                # 利用现有 (outbox_enqueued, status, next_retry_time, report_start_time, id) 索引，
+                # 避免每分钟为耗尽状态归一化执行全表扫描。
+                or_(
+                    ThirdPartyReportLog.next_retry_time.is_(None),
+                    ThirdPartyReportLog.next_retry_time <= now,
+                ),
                 or_(
                     ThirdPartyReportLog.report_start_time.is_(None),
                     ThirdPartyReportLog.report_start_time < stale_before,
@@ -327,6 +333,7 @@ async def process_postback_report_outbox(
             select(func.count(ThirdPartyReportLog.id)).where(
                 ThirdPartyReportLog.outbox_enqueued.is_(True),
                 ThirdPartyReportLog.status == "failed",
+                ThirdPartyReportLog.next_retry_time.is_(None),
                 ThirdPartyReportLog.attempt_count >= ThirdPartyReportLog.max_attempts,
             )
         )
