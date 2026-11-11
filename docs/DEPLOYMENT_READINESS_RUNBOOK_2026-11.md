@@ -180,3 +180,19 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - Run #1010 的所有验证仅使用 GitHub Actions 临时 MySQL/Redis、合成数据和 Mock API；未连接生产服务器、生产数据库、生产缓存、生产队列或真实第三方接口。
 - Run #1010 仅证明该 SHA 的 CI 验证通过，不替代真实数据库网络断连代理故障注入、完整 migration/rollback 演练、业务/隐私保留政策审批及全项目剩余模块复核。
 - PR #1 继续保持 Draft，不合并、不部署。后续任何应用代码变更仍须对最新 SHA 重新运行完整 CI。
+
+
+## 12. MySQL COMMIT ACK 丢失故障注入复核（2026-11-11，Run #1017）
+
+- 最新已通过应用代码 SHA：`2dfe450319e93a07031d667a88cc576e3629031c`。
+- GitHub Actions Run #1017：Backend、Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- Backend：**349 passed、1 skipped、1 warning**；Python compile 通过。skip 是可选的本机核对脚本未随仓库提交；warning 是 passlib 对 Python 3.11 `crypt` 模块的弃用提示。
+- 本轮对 Run #1015 的 TCP 故障注入进一步做了测试本身的正确性审查：旧代理在发出 COMMIT 后丢弃“下一段响应数据”，无法严格证明被丢弃的就是 COMMIT 成功确认。
+- 修订后，代理按 MySQL packet framing（3 字节 payload length + 1 字节 sequence + payload）解析服务端响应，仅在观察到独立 `COMMIT` 命令后丢弃对应 MySQL OK packet（payload 首字节 `0x00`），并断开客户端连接；其它响应包继续转发。
+- 测试随后通过独立直连临时 MySQL 的连接核验该 conversion 行确实已持久化，同时断言应用抛出连接异常、没有回滚 Redis Cap reservation、没有错误地提前 finalize reservation ledger。
+- 该测试使用 GitHub Actions 临时 MySQL 8.0 与随机隔离数据库、合成 conversion 数据；Redis 使用同一 CI job 的临时服务。未连接生产 MySQL、Redis、服务器或第三方接口。
+- 相关提交：`42f2a37`（只丢弃 COMMIT OK packet）、`2dfe450`（修正 MySQL OK opcode 字节字面量）。
+- Run #1017：[查看 CI](https://github.com/Helong0511/Platform/actions/runs/42991799970)。
+- Run #1016 因紧随其后的修正提交触发同一 PR concurrency group 而被取消；不作为验收证据。Run #1017 是最终修正 SHA 的完整通过结果。
+- 本测试证明指定的 MySQL COMMIT ACK 丢失路径在隔离环境可重现且当前恢复逻辑不会错误回滚 Cap reservation；仍不能替代真实多节点长时间网络抖动、Redis failover/数据淘汰、数据库进程重启、跨区域时钟偏差与生产级压力测试。
+- 合并阻断项仍包括：完整旧 schema + 历史数据迁移/中断重跑/兼容回滚演练；Outbox 配置生命周期与高并发多 Worker 压力验证；所有未纳入自动清理的数据类别的 PII 保留/访问/删除审批；其它业务模块的全量回归。PR 继续 Draft，不合并、不部署。
