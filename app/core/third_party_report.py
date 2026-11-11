@@ -4,7 +4,6 @@
 """
 import logging
 import time
-import asyncio
 import httpx
 import hashlib
 import json
@@ -810,19 +809,21 @@ async def send_third_party_report(
 
 async def retry_report_log(log_id: int):
     """
-    原子触发失败事件重试。
+    将失败的持久化 Outbox 事件重新排队。
 
-    只允许 failed 状态进入重试队列；通过条件 UPDATE 抢占状态转换，
-    防止两个管理员请求或重试请求覆盖正在发送中的租约。
+    不在请求进程中创建非持久化 asyncio task，也不从日志读取旧凭据；
+    worker 在实际发送时按短链/斗篷配置引用解析当前有效凭据。
+    非 Outbox 日志缺少可靠配置引用，拒绝伪装成可重试成功。
     """
+    now = get_app_now_naive()
+    stale_lease_time = now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1)
     try:
-        now = get_app_now_naive()
-        stale_lease_time = now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1)
         async with AsyncSessionLocal() as db:
-            claim_result = await db.execute(
+            result = await db.execute(
                 update(ThirdPartyReportLog)
                 .where(
                     ThirdPartyReportLog.id == log_id,
+                    ThirdPartyReportLog.outbox_enqueued.is_(True),
                     ThirdPartyReportLog.status == "failed",
                     or_(
                         ThirdPartyReportLog.report_start_time.is_(None),
@@ -836,8 +837,6 @@ async def retry_report_log(log_id: int):
                     response_body=None,
                     log_id=None,
                     error_message=None,
-                    # 保留一个已过期时间戳，后续发送入口必须再通过原子认领。
-                    # 第二个管理员请求因 status 已变为 pending 而无法重复排队。
                     report_start_time=stale_lease_time,
                     report_success_time=None,
                     completed_at=None,
@@ -845,46 +844,16 @@ async def retry_report_log(log_id: int):
                 )
             )
             await db.commit()
-            if (claim_result.rowcount or 0) != 1:
+            if (result.rowcount or 0) != 1:
                 logger.info(
-                    "[第三方上报] 重试未触发：日志不存在、非失败状态或已被其他请求认领: id=%s",
+                    "[第三方上报] 重试未入队：日志不存在、非 Outbox、非失败状态或租约仍有效: id=%s",
                     log_id,
                 )
                 return False
-
-            result = await db.execute(
-                select(ThirdPartyReportLog).where(ThirdPartyReportLog.id == log_id)
-            )
-            log_entry = result.scalars().first()
-            if not log_entry:
-                logger.warning("[第三方上报] 重试状态已更新但日志读取失败: id=%s", log_id)
-                return False
-
-            if not log_entry.outbox_enqueued:
-                # 旧日志没有配置引用，不能从日志中安全恢复 access token；拒绝创建一个必然失败的后台任务。
-                await update_report_log(
-                    log_id,
-                    status="failed",
-                    error_message="该历史日志没有可恢复的像素配置引用，无法自动重试；请由新 Outbox 事件承接",
-                    report_start_time=stale_lease_time,
-                    completed_at=now,
-                    clear_next_retry_time=True,
-                )
-                logger.warning("[第三方上报] 拒绝重试缺少配置引用的历史日志: id=%s", log_id)
-                return False
-
-            # Outbox 重试由同一 worker 重新解析当前短链接/斗篷配置，不从日志或请求参数恢复凭据。
-            async def background_send():
-                from app.services.third_party_report_outbox import process_postback_report_outbox_item
-
-                await process_postback_report_outbox_item(log_id)
-
-            asyncio.create_task(background_send())
-            logger.info("[第三方上报] 已原子触发 Outbox 重新投递: id=%s", log_id)
+            logger.info("[第三方上报] Outbox 事件已重新排队，等待持久化 worker：id=%s", log_id)
             return True
-
-    except Exception as e:
-        logger.warning("[第三方上报] 重新上报失败: %s", e, exc_info=True)
+    except Exception as exc:
+        logger.warning("[第三方上报] Outbox 重试入队失败：id=%s error=%s", log_id, exc, exc_info=True)
         return False
 
 
