@@ -49,6 +49,7 @@ from app.models.models import (
 from app.services.telegram_notification_service import TelegramNotificationService
 from app.core.third_party_report import send_third_party_report
 from app.core.utils import get_app_now_naive
+from app.services.cap_reservation_ledger import CapReservationLedger
 from app.core.url.url_params_util import (
     parse_stored_url_params,
     resolve_dp_from_url_params,
@@ -252,6 +253,11 @@ class PostbackProcessor:
                         publisher_id=publisher_id,
                         advertiser_id=advertiser_id,
                         db=db,
+                        reservation_context={
+                            "platform": platform,
+                            "conversion_id": normalized_data.get("conversion_id") or "",
+                            "event_name": normalized_data.get("event_name") or "default",
+                        },
                     )
                 )
             except Exception:
@@ -464,6 +470,20 @@ class PostbackProcessor:
         """
         try:
             await db.commit()
+            # DB 转化事务已提交后再独立确认账本；失败时保留活动状态，由恢复 Worker 按正式事件键修复。
+            for reservation in cap_reservations or []:
+                ledger_key = reservation[5] if len(reservation) > 5 else None
+                lease_owner = reservation[6] if len(reservation) > 6 else None
+                if ledger_key:
+                    try:
+                        await CapReservationLedger.finalize(
+                            ledger_key, "COMMITTED", lease_owner=lease_owner
+                        )
+                    except Exception:
+                        logger.critical(
+                            "转化已提交但 Cap Reservation 账本终态更新失败，等待恢复：%s",
+                            ledger_key, exc_info=True,
+                        )
             return
         except Exception as commit_error:
             try:
@@ -504,6 +524,20 @@ class PostbackProcessor:
                         exc_info=True,
                     )
             elif committed:
+                # COMMIT 响应丢失但正式转化已存在：保留 Redis 计数并补记账本终态。
+                for reservation in cap_reservations or []:
+                    ledger_key = reservation[5] if len(reservation) > 5 else None
+                    lease_owner = reservation[6] if len(reservation) > 6 else None
+                    if ledger_key:
+                        try:
+                            await CapReservationLedger.finalize(
+                                ledger_key, "COMMITTED", lease_owner=lease_owner
+                            )
+                        except Exception:
+                            logger.critical(
+                                "正式转化已存在但 Reservation 账本无法标记 COMMITTED：%s",
+                                ledger_key, exc_info=True,
+                            )
                 logger.critical(
                     "Postback COMMIT 返回异常但 DB 已确认转化存在；保留 Redis Cap reservation，"
                     "conversion_id=%s",
