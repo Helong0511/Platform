@@ -189,3 +189,40 @@ async def test_report_in_progress_does_not_send_duplicate_request(monkeypatch):
     assert result["success"] is False
     assert result["retryable"] is True
     assert result["reason"] == "report_in_progress"
+
+
+async def test_report_claim_query_limits_failed_retries_to_expired_leases(monkeypatch):
+    """失败状态不能绕过租约条件，否则两个并发重试仍会同时发送。"""
+    from sqlalchemy.dialects import mysql
+
+    captured = {}
+
+    class Result:
+        rowcount = 1
+
+    class FakeDB:
+        async def execute(self, statement):
+            captured["sql"] = str(statement.compile(dialect=mysql.dialect())).lower()
+            return Result()
+
+        async def commit(self):
+            return None
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(
+        third_party_report,
+        "AsyncSessionLocal",
+        lambda: SessionContext(),
+    )
+
+    assert await third_party_report._claim_report_log(41) is True
+    sql = captured["sql"]
+    assert "status in" in sql
+    assert "report_start_time is null" in sql
+    assert "report_start_time <" in sql
