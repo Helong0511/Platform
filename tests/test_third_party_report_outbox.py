@@ -119,6 +119,98 @@ async def test_enqueue_postback_report_reuses_existing_event(monkeypatch):
     assert db.flushed is True
 
 
+async def test_enqueue_does_not_reopen_or_mutate_attempted_outbox_payload(monkeypatch):
+    original = {
+        "id": 82,
+        "status": "failed",
+        "next_retry_time": None,
+        "outbox_enqueued": True,
+        "max_attempts": 12,
+        "attempt_count": 2,
+        "report_start_time": None,
+        "short_link_id": 20,
+        "cloak_name": "original-cloak",
+        "short_code": "original-code",
+        "click_time": datetime(2026, 11, 11, 10, 0, 0),
+        "error_message": "original failure",
+    }
+    existing = type("Existing", (), original.copy())()
+
+    class FakeDB:
+        async def scalar(self, statement):
+            return existing
+
+        async def flush(self):
+            raise AssertionError("attempted Outbox must not be mutated or flushed")
+
+    row_id = await outbox.enqueue_postback_report(
+        FakeDB(),
+        platform="bft",
+        adsid="fbclid-existing-outbox",
+        event="Purchase",
+        conversion_id="conversion-existing-outbox",
+        email="new@example.invalid",
+        ip="203.0.113.82",
+        phone="",
+        ua="new-agent",
+        currency="USD",
+        amount=99.0,
+        short_link_id=99,
+        cloak_name="new-cloak",
+        short_code="new-code",
+        click_time=datetime(2026, 11, 11, 12, 0, 0),
+    )
+
+    assert row_id == 82
+    for key, value in original.items():
+        assert getattr(existing, key) == value
+
+
+async def test_enqueue_does_not_reopen_successful_legacy_report(monkeypatch):
+    existing = type(
+        "Existing",
+        (),
+        {
+            "id": 83,
+            "status": "success",
+            "next_retry_time": None,
+            "outbox_enqueued": False,
+            "max_attempts": 3,
+            "attempt_count": 1,
+            "report_start_time": None,
+        },
+    )()
+
+    class FakeDB:
+        async def scalar(self, statement):
+            return existing
+
+        async def flush(self):
+            raise AssertionError("successful legacy report must not be reopened")
+
+    row_id = await outbox.enqueue_postback_report(
+        FakeDB(),
+        platform="bft",
+        adsid="fbclid-success-legacy",
+        event="Purchase",
+        conversion_id="conversion-success-legacy",
+        email=None,
+        ip=None,
+        phone=None,
+        ua=None,
+        currency="USD",
+        amount=1.0,
+        short_link_id=5,
+        cloak_name=None,
+        short_code=None,
+        click_time=None,
+    )
+
+    assert row_id == 83
+    assert existing.outbox_enqueued is False
+    assert existing.status == "success"
+
+
 async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
     row = type(
         "ReportRow",
