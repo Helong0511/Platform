@@ -12,7 +12,6 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive
 from app.models.third_party import ThirdPartyReportLog
-from app.models.postback import PostbackForwardLog
 from app.models.postback import PostbackForwardLog, PostbackForwardQueue
 
 logger = logging.getLogger(__name__)
@@ -198,6 +197,26 @@ async def scrub_expired_postback_forward_log_pii(
                 PostbackForwardLog.created_at < cutoff,
                 PostbackForwardLog.completed_at.is_not(None),
                 PostbackForwardLog.pii_scrubbed_at.is_(None),
+                # 有待重试任务时必须保留对应日志，避免破坏自动重试/人工核对链路。
+                ~exists(
+                    select(PostbackForwardQueue.id).where(
+                        PostbackForwardQueue.conversion_id == PostbackForwardLog.conversion_id,
+                        or_(
+                            PostbackForwardQueue.product_id == PostbackForwardLog.product_id,
+                            and_(
+                                PostbackForwardQueue.product_id.is_(None),
+                                PostbackForwardLog.product_id.is_(None),
+                            ),
+                        ),
+                        or_(
+                            PostbackForwardQueue.publisher_id == PostbackForwardLog.publisher_id,
+                            and_(
+                                PostbackForwardQueue.publisher_id.is_(None),
+                                PostbackForwardLog.publisher_id.is_(None),
+                            ),
+                        ),
+                    )
+                ),
             )
             .order_by(
                 PostbackForwardLog.created_at.asc(),
