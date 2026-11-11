@@ -302,6 +302,7 @@ async def increment_cap_count(
                     group_publisher_id,
                     initial_value=redis_init_val,
                     reservation_id=reservation_id,
+                    reservation_date=now,
                 )
             except Exception as e:
                 logger.error("Cap 日计数预留/补偿状态不确定，拒绝本次转化：%s", e, exc_info=True)
