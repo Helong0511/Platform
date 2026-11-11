@@ -263,6 +263,7 @@ class CloakPixelMappingService:
                 "short_code": short_link.short_code,
                 "original_url": short_link.original_url,
                 "is_active": short_link.is_active,
+                "expires_at": short_link.expires_at,
                 "title": short_link.title,
                 "offer_id": short_link.offer_id,
                 "channel_id": short_link.channel_id,
