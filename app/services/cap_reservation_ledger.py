@@ -271,8 +271,8 @@ class CapReservationLedger:
         state: str,
         *,
         lease_owner: Optional[str] = None,
-    ) -> None:
-        """提交账本终态；Redis token 清理失败单独记录并交由恢复任务重试。"""
+    ) -> bool:
+        """提交账本终态；返回 token 是否已清理，清理失败由恢复任务重试。"""
         if state not in FINAL_STATES:
             raise ValueError(f"非法 Cap Reservation 终态：{state}")
         now = get_app_now_naive()
@@ -325,7 +325,7 @@ class CapReservationLedger:
                     await session.commit()
                 else:
                     await session.commit()
-                return
+                return token_cleaned
 
             result = await session.execute(
                 update(CapReservation)
@@ -352,6 +352,7 @@ class CapReservationLedger:
                     raise RuntimeError(
                         f"Cap Reservation 终态更新失败：expected={state}, actual={current}"
                     )
+            return token_cleaned
 
     @staticmethod
     async def mark_token_cleaned(
