@@ -16,6 +16,10 @@ def test_event_idempotency_key_is_stable_and_event_scoped():
     assert view_key == third_party_report.build_event_idempotency_key(
         "postback", "ads-123", "ViewContent", None
     )
+    # Purchase 到来后补写到 ViewContent 的 conversion_id 不能改变原事件身份。
+    assert view_key == third_party_report.build_event_idempotency_key(
+        "postback", "ads-123", "ViewContent", "conversion-456"
+    )
     assert view_key != purchase_key
 
 
