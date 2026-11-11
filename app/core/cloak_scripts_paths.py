@@ -190,15 +190,12 @@ def resolve_bridge_html_write_path(cloak_name: str) -> str:
         if os.path.isfile(candidate):
             if os.access(candidate, os.W_OK):
                 return candidate
-            # 文件存在但不可写：目录可写时尝试删除后重写（等价覆盖）
+            # 原子替换只要求父目录可写，不要求旧文件本身可写。
+            # 不要提前删除旧文件：若后续上传失败，应保留当前可用桥页。
             if os.access(base, os.W_OK):
-                try:
-                    os.remove(candidate)
-                    return candidate
-                except OSError:
-                    pass
+                return candidate
             raise PermissionError(
-                "桥页文件不可写，无法覆盖上传。" + _permission_help_extra(candidate)
+                "桥页文件及其目录均不可写，无法原子替换上传。" + _permission_help_extra(candidate)
             )
 
     server, local = iter_bridge_search_bases()
