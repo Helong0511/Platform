@@ -150,7 +150,7 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
 
 
 def test_cap_reservation_migration_is_idempotent_and_matches_mysql_schema():
-    """在 CI 专用 MySQL 8.0 实际执行账本迁移，核对字段、索引和 utf8mb4。"""
+    """在 CI 专用 MySQL 8.0.16+ 实际执行账本迁移，核对 CHECK、字段、索引和 utf8mb4。"""
     baseline_schema = Path("sql/platform.sql").read_text(encoding="utf-8")
     assert "CREATE TABLE IF NOT EXISTS cap_reservations" in baseline_schema
     assert "redis_token_cleaned" in baseline_schema
