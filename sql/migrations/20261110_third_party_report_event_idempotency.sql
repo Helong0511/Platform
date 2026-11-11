@@ -22,14 +22,15 @@ ALTER TABLE third_party_report_logs
     COMMENT '事件幂等键：source、adsid、event、conversion_id 的 SHA-256'
     AFTER event;
 
--- 2. 与 app/core/third_party_report.py 的长度前缀算法保持一致。
+-- 2. 与 app/core/third_party_report.py 的长度前缀算法保持一致；ViewContent 的后补 conversion_id 是关联元数据，不参与事件身份。
 UPDATE third_party_report_logs
 SET event_key = SHA2(
     CONCAT(
         CHAR_LENGTH(source), ':', source,
         CHAR_LENGTH(adsid), ':', adsid,
         CHAR_LENGTH(event), ':', event,
-        CHAR_LENGTH(COALESCE(conversion_id, '')), ':', COALESCE(conversion_id, '')
+        CHAR_LENGTH(CASE WHEN event = 'ViewContent' THEN '' ELSE COALESCE(conversion_id, '') END), ':',
+        CASE WHEN event = 'ViewContent' THEN '' ELSE COALESCE(conversion_id, '') END
     ),
     256
 )
