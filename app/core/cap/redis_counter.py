@@ -75,7 +75,7 @@ class RedisCapManager:
             return -2
         end
         local existing = tonumber(redis.call('GET', KEYS[1]))
-        if not existing then
+        if not existing or existing < 0 or existing ~= math.floor(existing) then
             return -2
         end
         -- 即使本次只是幂等重试，也必须清除历史 Total key 的旧 TTL。
