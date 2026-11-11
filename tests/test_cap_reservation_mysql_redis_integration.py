@@ -729,7 +729,7 @@ async def test_mysql_tcp_proxy_drops_real_commit_ack_and_preserves_cap_reservati
                         packet = bytes(response_buffer[:packet_length])
                         payload = packet[4:]
                         del response_buffer[:packet_length]
-                        if commit_seen.is_set() and payload[:1] == b"\\x00":
+                        if commit_seen.is_set() and payload[:1] == b"\x00":
                             # 只在确认收到 COMMIT 成功 OK 包时制造 ACK 丢失。
                             ack_dropped.set()
                             client_writer.close()
