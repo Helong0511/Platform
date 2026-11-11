@@ -14,6 +14,8 @@
 from __future__ import annotations
 
 import os
+import stat
+import tempfile
 from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
@@ -56,6 +58,50 @@ def resolve_bridge_html_read_path(bridge_page_name: str) -> Optional[str]:
 def bridge_html_exists(cloak_name: str) -> bool:
     """任一候选路径存在同名文件即视为已部署桥页。"""
     return resolve_bridge_html_read_path(bridge_html_filename(cloak_name)) is not None
+
+
+def atomic_write_bridge_html(target_path: str, content: str) -> None:
+    """
+    以同目录临时文件 + os.replace 原子替换桥页，避免并发请求读到截断/半写入 HTML。
+
+    保留已有文件权限；新文件使用 0644。临时文件与目标文件处于同一文件系统，
+    确保 os.replace 不跨设备。写入前先 flush + fsync。
+    """
+    target = os.path.abspath(target_path)
+    parent = os.path.dirname(target)
+    try:
+        target_mode = stat.S_IMODE(os.stat(target).st_mode)
+    except FileNotFoundError:
+        target_mode = 0o644
+
+    fd, temporary_path = tempfile.mkstemp(
+        prefix=f".{os.path.basename(target)}.",
+        suffix=".tmp",
+        dir=parent,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary_path, target_mode)
+        # 原子替换：读取方只会看到完整旧文件或完整新文件。
+        os.replace(temporary_path, target)
+        # 尽力持久化目录项；部分平台/文件系统不支持目录 fsync。
+        try:
+            directory_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError:
+            pass
+    except Exception:
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def read_bridge_html_template_cached(absolute_path: str) -> str:
