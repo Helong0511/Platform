@@ -179,23 +179,17 @@ class CapReservationLedger:
         """仅允许租约过期的可恢复状态被新请求接管；等待行锁后重新计算租约时间。"""
         now = get_app_now_naive()
         expires = now + timedelta(seconds=lease_seconds)
-        if row.state == "COMMITTED":
+        if row.state in {"COMMITTED", "NEEDS_RECONCILIATION", "PREPARED", "RESERVED"}:
+            # 不能因为租约过期就允许重复 Postback 抢占活动账本。
+            # 原请求可能只是长时间暂停而非死亡；重复请求若复用同一 Redis token，
+            # 随后失败回滚可能撤销另一个请求已经提交的名额。
+            # 过期 PREPARED/RESERVED 只能由恢复 Worker 先核验正式事件和 Redis token，
+            # 再决定提交或回滚；业务请求只能等待恢复结束后重试。
             await session.commit()
             return row, False, None
-        if row.state == "NEEDS_RECONCILIATION":
-            await session.commit()
-            return row, False, None
-        if row.state not in {"PREPARED", "RESERVED", "ROLLED_BACK"}:
+        if row.state != "ROLLED_BACK":
             await session.commit()
             raise RuntimeError(f"未知 Cap Reservation 状态，拒绝继续：{row.state}")
-        if (
-            row.state != "ROLLED_BACK"
-            and row.lease_owner
-            and row.lease_expires_at
-            and row.lease_expires_at > now
-        ):
-            await session.commit()
-            return row, False, None
 
         if row.state == "ROLLED_BACK":
             row.state = "PREPARED"
