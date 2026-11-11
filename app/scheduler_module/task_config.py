@@ -206,6 +206,16 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "description": "每分钟恢复已过期租约的 Cap Reservation；仅对 Redis token 明确存在的孤儿预留执行幂等回滚，未知状态转人工对账",
     },
 
+    THIRD_PARTY_REPORT_OUTBOX_TASK_NAME: {
+        "task_name": THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
+        "task_module": "app.scheduler_module.tasks.third_party_report_tasks",
+        "task_function": "third_party_report_outbox_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "* * * * *",
+        "description": "每分钟投递转化事务中创建的第三方上报 Outbox；凭据仅从短链接/斗篷配置解析，不持久化 access token",
+    },
+
     # ========== TQT API获取数据任务 ==========
     "TQT API获取数据": {
         "task_name": "TQT API获取数据",
