@@ -38,6 +38,32 @@ def _due_forward_task_query(now):
     )
 
 
+def _latest_forward_log_query(
+    conversion_id: int,
+    *,
+    publisher_id: int | None = None,
+    product_id: int | None = None,
+):
+    """按稳定顺序读取目标最近一次转发日志，避免同秒日志顺序不确定。"""
+    query = (
+        select(PostbackForwardLog)
+        .where(PostbackForwardLog.conversion_id == conversion_id)
+        .order_by(
+            PostbackForwardLog.created_at.desc(),
+            PostbackForwardLog.id.desc(),
+        )
+        .limit(1)
+    )
+    if publisher_id is not None:
+        query = query.where(PostbackForwardLog.publisher_id == publisher_id)
+    elif product_id is not None:
+        query = query.where(
+            PostbackForwardLog.product_id == product_id,
+            PostbackForwardLog.publisher_id.is_(None),
+        )
+    return query
+
+
 async def trigger_forward_processing():
     """Fire-and-Forget 触发转发队列消费。"""
     try:
@@ -114,21 +140,11 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
                 await db.commit()
                 return
 
-            log_query = (
-                select(PostbackForwardLog)
-                .where(PostbackForwardLog.conversion_id == task.conversion_id)
-                .order_by(PostbackForwardLog.created_at.desc())
-                .limit(1)
+            log_query = _latest_forward_log_query(
+                task.conversion_id,
+                publisher_id=task.publisher_id,
+                product_id=task.product_id,
             )
-            if task.publisher_id:
-                log_query = log_query.where(
-                    PostbackForwardLog.publisher_id == task.publisher_id
-                )
-            elif task.product_id:
-                log_query = log_query.where(
-                    PostbackForwardLog.product_id == task.product_id,
-                    PostbackForwardLog.publisher_id.is_(None),
-                )
             latest_log = (await db.execute(log_query)).scalars().first()
 
             if latest_log and latest_log.success:
