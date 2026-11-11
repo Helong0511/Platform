@@ -361,6 +361,25 @@ class CapService(BaseService[OfferCap]):
                 detail=f"Cap配置ID {cap_id} 不存在"
             )
 
+        # Cap 的计数器以 Offer/渠道作为 Redis key 维度。
+        # 修改配置归属会让旧范围的 DB 计数被带入新范围，或让新旧范围共享错误的基线；
+        # 因此已有配置不允许原地迁移范围。需要调整范围时，应删除旧配置并新建目标范围配置。
+        scope_fields = ("cap_type", "advertiser_id", "offer_id", "publisher_id")
+        changed_scope = {
+            key: update_data[key]
+            for key in scope_fields
+            if key in update_data and update_data[key] != getattr(cap, key)
+        }
+        if changed_scope:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail=(
+                    "不允许原地修改 Cap 的归属范围（"
+                    + ", ".join(sorted(changed_scope.keys()))
+                    + "）；请删除旧配置后按目标范围重新创建，避免计数器串用"
+                ),
+            )
+
         # 先合并现有范围与更新字段，再执行与创建相同的完整校验。
         effective_scope = {
             "cap_type": cap.cap_type,
