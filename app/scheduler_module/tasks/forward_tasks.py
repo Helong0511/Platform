@@ -68,8 +68,8 @@ async def trigger_forward_processing():
     """Fire-and-Forget 触发转发队列消费。"""
     try:
         await process_forward_queue()
-    except Exception as e:
-        logger.error(f"触发转发处理任务失败: {e}", exc_info=True)
+    except Exception as exc:
+        logger.error("触发转发处理任务失败：error_type=%s", type(exc).__name__)
 
 
 async def process_forward_queue():
@@ -101,8 +101,8 @@ async def process_forward_queue():
 
             if processed:
                 logger.info("本轮转发队列处理结束：已领取 %s 条任务", processed)
-    except Exception as e:
-        logger.error(f"转发队列处理任务异常: {e}", exc_info=True)
+    except Exception as exc:
+        logger.error("转发队列处理任务异常：error_type=%s", type(exc).__name__)
 
 
 async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
@@ -155,14 +155,13 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
                 await _schedule_or_drop_retry(db, task)
         except Exception as forward_err:
             logger.error(
-                "转发重试执行失败: queue_id=%s err=%s",
+                "转发重试执行失败：queue_id=%s error_type=%s",
                 task.id,
-                forward_err,
-                exc_info=True,
+                type(forward_err).__name__,
             )
             await _schedule_or_drop_retry(db, task)
-    except Exception as e:
-        logger.error(f"处理单条转发任务失败: {e}", exc_info=True)
+    except Exception as exc:
+        logger.error("处理单条转发任务失败：error_type=%s", type(exc).__name__)
         await db.rollback()
 
 
