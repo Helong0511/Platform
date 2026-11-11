@@ -88,3 +88,61 @@ def test_single_flight_state_is_isolated_between_event_loops():
     assert lock_a is not lock_b
     assert futures_a is not futures_b
 
+
+
+@pytest.mark.asyncio
+async def test_distributed_lock_release_uses_atomic_owner_check(monkeypatch):
+    """锁到期后被新请求重获时，旧 owner 释放不得删除新锁。"""
+    from app.core.infrastructure import cache_advanced as cache_advanced_mod
+
+    class FakeRedis:
+        def __init__(self):
+            self.values = {}
+            self.eval_calls = 0
+
+        async def set(self, key, value, nx=False, ex=None):
+            if nx and key in self.values:
+                return None
+            self.values[key] = value
+            return True
+
+        async def eval(self, script, numkeys, key, owner):
+            self.eval_calls += 1
+            # 模拟旧锁刚过期、新 owner 已经拿到同一个 key 的交错时序。
+            self.values[key] = "new-owner-token"
+            if self.values.get(key) == owner:
+                del self.values[key]
+                return 1
+            return 0
+
+    class FakeCache:
+        def __init__(self, redis):
+            self.redis = redis
+
+    redis = FakeRedis()
+    monkeypatch.setattr(
+        cache_advanced_mod, "get_cache_backend",
+        lambda: _async_value(FakeCache(redis)),
+    )
+
+    lock = cache_advanced_mod.DistributedLock("single-flight-race", timeout=10)
+    assert len(lock.lock_value) >= 32
+    assert await lock.acquire() is True
+
+    # 释放脚本发现 key 已属于新 owner，必须保留新 owner 的锁。
+    assert await lock.release() is False
+    assert redis.eval_calls == 1
+    assert redis.values[lock.key] == "new-owner-token"
+
+
+@pytest.mark.asyncio
+async def test_distributed_lock_owner_tokens_are_unique():
+    from app.core.infrastructure.cache_advanced import DistributedLock
+
+    first = DistributedLock("token-uniqueness")
+    second = DistributedLock("token-uniqueness")
+    assert first.lock_value != second.lock_value
+
+
+async def _async_value(value):
+    return value
