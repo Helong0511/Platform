@@ -59,7 +59,10 @@ async def test_scrub_clears_payload_but_preserves_event_identity(monkeypatch):
     class FakeDB:
         async def execute(self, statement):
             compiled = statement.compile(dialect=mysql.dialect())
-            captured["sql"] = str(compiled).lower()
+            sql = str(compiled).lower()
+            captured.setdefault("sql", []).append(sql)
+            if "postback_forward_logs" in sql:
+                return type("EmptyResult", (), {"scalars": lambda self: type("Rows", (), {"all": lambda self: []})()})()
             return Result()
 
         async def commit(self):
@@ -104,7 +107,7 @@ async def test_scrub_clears_payload_but_preserves_event_identity(monkeypatch):
     assert row.cloak_name is None
     assert row.short_code is None
     assert row.click_time is None
-    sql = captured["sql"]
+    sql = captured["sql"][0]
     assert "third_party_report_logs.pii_scrubbed_at is null" in sql
     assert "third_party_report_logs.created_at <" in sql
     assert "third_party_report_logs.status in" in sql
@@ -140,6 +143,9 @@ async def test_failed_terminal_scrub_replaces_error_with_non_pii_marker(monkeypa
 
     class FakeDB:
         async def execute(self, statement):
+            sql = str(statement).lower()
+            if "postback_forward_logs" in sql:
+                return type("EmptyResult", (), {"scalars": lambda self: type("Rows", (), {"all": lambda self: []})()})()
             return Result()
 
         async def commit(self):
@@ -226,3 +232,74 @@ async def test_outbox_worker_refuses_a_scrubbed_row(monkeypatch):
         "retryable": False,
         "reason": "pii_payload_scrubbed",
     }
+
+
+@pytest.mark.asyncio
+async def test_completed_forward_log_payload_is_scrubbed_after_retention(monkeypatch):
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    now = datetime(2026, 11, 11, 12, 0, 0)
+    forward_row = SimpleNamespace(
+        id=81,
+        success=False,
+        downstream_url="https://partner.invalid/postback?click_id=private-click",
+        request_data='{"email":"alice@example.invalid"}',
+        request_params='{"ip":"203.0.113.8"}',
+        response_body='{"echo":"alice@example.invalid"}',
+        error_message="raw partner response includes PII",
+        pii_scrubbed_at=None,
+    )
+    captured = {"sql": []}
+
+    class ScalarRows:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def all(self):
+            return self.rows
+
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def scalars(self):
+            return ScalarRows(self.rows)
+
+    class FakeDB:
+        async def execute(self, statement):
+            sql = str(statement.compile(dialect=mysql.dialect())).lower()
+            captured["sql"].append(sql)
+            return Result([forward_row] if "postback_forward_logs" in sql else [])
+
+        async def commit(self):
+            captured["committed"] = True
+
+        async def rollback(self):
+            captured["rolled_back"] = True
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(retention, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(retention, "get_app_now_naive", lambda: now)
+
+    result = await retention.scrub_expired_third_party_report_pii(retention_days=90)
+
+    assert result["postback_forward_logs_scrubbed"] == 1
+    assert captured["committed"] is True
+    assert forward_row.downstream_url == "[已按保留策略清除]"
+    assert forward_row.request_data is None
+    assert forward_row.request_params is None
+    assert forward_row.response_body is None
+    assert forward_row.error_message == "历史转发载荷已按配置的数据保留策略清除"
+    assert forward_row.pii_scrubbed_at == now
+    sql = captured["sql"][1]
+    assert "postback_forward_logs.completed_at is not null" in sql
+    assert "not (exists" in sql
+    assert "postback_forward_queue" in sql
+    assert "for update skip locked" in sql
