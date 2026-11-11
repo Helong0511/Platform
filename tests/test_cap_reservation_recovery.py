@@ -170,7 +170,7 @@ async def test_recovery_retries_needs_reconciliation_after_backoff(monkeypatch):
     assert "updated_at" in captured["sql"]
     assert stats["rolled_back"] == 1
     assert calls[0] == ("rollback", row.redis_counter_key, row.redis_token_key)
-    assert calls[1][0:3] == (row.reservation_key, "ROLLED_BACK")
+    assert calls[1][0:3] == ("finalize", row.reservation_key, "ROLLED_BACK")
 
 
 @pytest.mark.asyncio
