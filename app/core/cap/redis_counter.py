@@ -279,6 +279,18 @@ class RedisCapManager:
             return RedisCapManager._lua_failure_result()
             
     @staticmethod
+    async def counter_key_exists(counter_key: str) -> Optional[bool]:
+        """检查计数 key 是否存在；None 表示 Redis 不可用或查询状态未知。"""
+        redis = await get_redis_client()
+        if not redis:
+            return None
+        try:
+            return bool(await redis.exists(counter_key))
+        except Exception:
+            logger.error("检查 Cap counter key 是否存在失败：%s", counter_key, exc_info=True)
+            return None
+
+    @staticmethod
     async def get_reservation_token_state(counter_key: str, token_key: str) -> str:
         """
         返回 PRESENT / ABSENT / UNKNOWN。
