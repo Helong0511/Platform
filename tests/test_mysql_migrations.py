@@ -193,7 +193,41 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
             outbox_index_names = {row[2] for row in cursor.fetchall()}
             assert "idx_third_party_outbox_due" in outbox_index_names
 
+            # PII 清理迁移仅增加标记/索引，不在迁移时删除历史数据。
+            cursor.execute(
+                "UPDATE third_party_report_logs SET email = %s, ip = %s, phone = %s, "
+                "ua = %s, report_params = %s, response_body = %s WHERE id = 1",
+                (
+                    "alice@example.invalid", "203.0.113.8", "4155550123",
+                    "ci-private-agent", '{"email":"alice@example.invalid"}',
+                    '{"echo":"alice@example.invalid"}',
+                ),
+            )
+            _run_sql_file(
+                cursor,
+                "sql/migrations/20261112_third_party_report_pii_retention.sql",
+            )
+            cursor.execute(
+                "SELECT email, ip, phone, ua, report_params, response_body, "
+                "pii_scrubbed_at, event_key FROM third_party_report_logs WHERE id = 1"
+            )
+            pii_row = cursor.fetchone()
+            assert pii_row[:6] == (
+                "alice@example.invalid", "203.0.113.8", "4155550123",
+                "ci-private-agent", '{"email":"alice@example.invalid"}',
+                '{"echo":"alice@example.invalid"}',
+            )
+            assert pii_row[6] is None
+            assert pii_row[7] == _event_key(*historical)
+
+            cursor.execute("SHOW INDEX FROM third_party_report_logs")
+            pii_index_names = {row[2] for row in cursor.fetchall()}
+            assert "idx_third_party_pii_retention" in pii_index_names
+
+
             for column in (
+                "pii_scrubbed_at",
+                "idx_third_party_pii_retention",
                 "outbox_enqueued",
                 "short_link_id",
                 "cloak_name",
