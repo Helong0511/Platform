@@ -73,6 +73,23 @@ def _schedule_admin_notification(
     task.add_done_callback(_on_done)
 
 
+async def _lock_conversion_for_queue_enqueue(
+    db: AsyncSession,
+    conversion_id: int,
+) -> bool:
+    """锁定转化主记录，串行化同一转化的队列去重检查与插入。
+
+    仅依赖「先 SELECT 队列、再 INSERT」会在并发首次入队时产生重复记录。
+    所有入队路径先锁同一转化行，再检查目标队列；锁持续到外层事务提交。
+    """
+    result = await db.execute(
+        select(PostbackConversion.id)
+        .where(PostbackConversion.id == conversion_id)
+        .with_for_update()
+    )
+    return result.scalar_one_or_none() is not None
+
+
 class PostbackForwarder:
     """Postback 转发器"""
     
@@ -582,6 +599,13 @@ class PostbackForwarder:
     ) -> None:
         """转发失败时写入重试队列，由定时任务指数退避重试。"""
         try:
+            # 对同一 conversion 加行锁，使并发首次入队的去重查询串行执行。
+            if not await _lock_conversion_for_queue_enqueue(db, conversion.id):
+                logger.warning(
+                    "转发入队跳过：转化记录不存在: conversion_id=%s",
+                    conversion.id,
+                )
+                return
             existing = await db.execute(
                 select(PostbackForwardQueue).where(
                     PostbackForwardQueue.conversion_id == conversion.id,
@@ -638,6 +662,13 @@ class PostbackForwarder:
     ) -> None:
         """产品级转发失败时写入重试队列。"""
         try:
+            # 与渠道级共用转化主记录锁，避免不同消费者同时插入重复产品任务。
+            if not await _lock_conversion_for_queue_enqueue(db, conversion.id):
+                logger.warning(
+                    "产品级转发入队跳过：转化记录不存在: conversion_id=%s",
+                    conversion.id,
+                )
+                return
             existing = await db.execute(
                 select(PostbackForwardQueue).where(
                     PostbackForwardQueue.conversion_id == conversion.id,
