@@ -304,3 +304,39 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - 手工管理员重试会重置该事件当前自动重试计数；属于显式人工操作，仍需结合审计日志、权限与业务流程核查。
 - Daily 业务日过期后，只有 counter key 明确不存在才清理孤儿 token；Redis 查询 UNKNOWN、counter 仍存在或状态不一致时绝不猜测扣减。
 - PR 仍保持 Draft。完整 migration/backup/rollback、Outbox 配置生命周期压力组合、PII 政策审批及其它业务模块全量复核仍是合并/上线阻断项。
+
+
+## 19. HTTPS 代理头信任与 Cloudflare 客户端 IP 防伪造（2026-11-11，Run #1109）
+
+### 发现的问题
+
+- `HTTPSRedirectMiddleware` 原先只要收到 `X-Forwarded-Proto: https` 或 `CF-Connecting-IP`，就可能放行 HTTP 请求；这两个请求头都不能在未验证代理来源时直接信任。
+- `get_client_ip` 虽然只在直连对端位于 `TRUSTED_PROXY_IPS` 时读取代理头，但 Nginx API 代理原先将客户端原始 `CF-Connecting-IP` 直接透传给应用。直接访问源站的客户端可伪造该头，影响 IP 归因、审计和按 IP 限流。
+- 项目已有 `TRUST_PROXY_HEADERS` / `TRUSTED_PROXIES` 配置；Gunicorn 绑定 `127.0.0.1:8960`，Nginx 通过本机回环地址代理。Nginx 的 `cloudflare_real_ip.conf` 通过 Cloudflare 官方网段限制 realip 头的来源信任。
+
+### 修复
+
+- HTTPS 中间件现在只有在 `TRUST_PROXY_HEADERS=true` 且 `request.client.host` 精确匹配配置的可信代理 IP 时，才接受 `X-Forwarded-Proto`。
+- `CF-Connecting-IP` 只用于客户端 IP 解析，不再作为 HTTPS/TLS 证明；可信代理发送该头也不能单独绕过 HTTPS 检查。
+- Nginx API 代理改为 `proxy_set_header CF-Connecting-IP $remote_addr;`，不再透传 `$http_cf_connecting_ip`。Nginx realip 模块仅在原始连接来源命中 Cloudflare 官方 CIDR 时才会把 `$remote_addr` 还原为访客 IP；直接访问源站时保留真实对端 IP，再覆盖写入应用请求头。
+- `get_client_ip` 文档明确要求 Nginx 覆盖该请求头，禁止透传客户端原始值。
+- 新增测试覆盖：外部客户端伪造 `X-Forwarded-Proto` / `CF-Connecting-IP`、可信本机代理转发 HTTPS、仅有 CF 客户端 IP 头不能绕过 HTTPS、关闭代理头信任、外部 peer 伪造 IP 头、Nginx 配置必须覆盖原始 CF 头。
+
+### CI 证据
+
+- Run #1104（SHA `b91f05af32ce6d7478071ebdc115c9c75fa03fca`）Backend 测试阶段出现 **5 failed、397 passed、1 skipped、1 warning**。失败根因是新增测试直接 monkeypatch Pydantic Settings 的只读 `is_production` property 和不存在的实例字段，测试初始化阶段抛出 AttributeError / ValueError，未进入被测逻辑。保留该失败记录。
+- 随后将测试改为替换被测模块的 settings 对象，不修改 Pydantic Settings 实例本身。
+- Run #1109（SHA `751e05027b8d050b3d2882dd9da0edf3ad104dd1`）：Backend **402 passed、1 skipped、1 warning**；Frontend Lint、Build、Playwright Mock API E2E 全部通过。Run #1109：[查看 CI](https://github.com/Helong0511/Platform/actions/runs/43003839190)。
+
+### 代理部署限制
+
+- 生产 Nginx 配置必须继续包含 `cloudflare_real_ip.conf`，并按 Cloudflare 官方发布的 IP ranges 维护 `set_real_ip_from`；不能仅因为请求带有 `CF-Connecting-IP` 就信任来源。
+- `TRUSTED_PROXIES` 必须只配置实际反向代理的直连地址（当前仓库示例为 loopback）；禁止配置任意客户端网段或宽泛网段。
+- 生产源站网络层应限制回源来源，只允许 Cloudflare 和明确批准的可信代理/运维来源。CI 无法证明生产防火墙实际生效，部署前仍须由运维在变更评审中核实；本轮没有连接或修改生产环境。
+- Cloudflare 官方说明：源站应允许 Cloudflare IP ranges，并阻止非 Cloudflare 来源直接访问；官方地址范围文档：https://developers.cloudflare.com/fundamentals/concepts/cloudflare-ip-addresses/ 及 https://www.cloudflare.com/ips/。
+
+### 结论
+
+- 代码层的代理头信任边界及 Nginx 头覆盖配置已修复并通过隔离 CI。
+- 生产防火墙/安全组是否限制源站访问无法从仓库代码证明，仍需部署前人工核实。
+- PR 保持 Draft；不合并、不部署。其余 migration/backup/rollback、Outbox/Cap 故障组合、PII 政策和其它业务模块审计仍未关闭。
