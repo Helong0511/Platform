@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive
 from app.models.third_party import ThirdPartyReportLog
+from app.models.postback import PostbackForwardLog
 from app.models.postback import PostbackForwardLog, PostbackForwardQueue
 
 logger = logging.getLogger(__name__)
@@ -160,4 +161,75 @@ async def scrub_expired_third_party_report_pii(
         "message": (
             f"已清除 {len(rows)} 条第三方上报日志和 {len(forward_rows)} 条下游转发日志中的个人信息载荷"
         ),
+    }
+
+
+async def scrub_expired_postback_forward_log_pii(
+    *,
+    retention_days: int | None = None,
+    batch_size: int = 200,
+) -> dict:
+    """清理到期下游转发日志中的请求/响应个人信息，保留最小审计骨架。"""
+    days = (
+        int(settings.THIRD_PARTY_REPORT_PII_RETENTION_DAYS)
+        if retention_days is None
+        else int(retention_days)
+    )
+    if days < 0:
+        raise ValueError("第三方上报 PII 保留天数不能小于 0")
+    if batch_size < 1 or batch_size > 1000:
+        raise ValueError("PII 清理 batch_size 必须在 1 到 1000 之间")
+    if days == 0:
+        return {
+            "enabled": False,
+            "retention_days": 0,
+            "selected": 0,
+            "scrubbed": 0,
+            "message": "未配置 PII 保留期限，按 fail-safe 策略跳过清理",
+        }
+
+    now = get_app_now_naive()
+    cutoff = now - timedelta(days=days)
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(PostbackForwardLog)
+            .where(
+                PostbackForwardLog.created_at < cutoff,
+                PostbackForwardLog.completed_at.is_not(None),
+                PostbackForwardLog.pii_scrubbed_at.is_(None),
+            )
+            .order_by(
+                PostbackForwardLog.created_at.asc(),
+                PostbackForwardLog.id.asc(),
+            )
+            .limit(batch_size)
+            .with_for_update(skip_locked=True)
+        )
+        rows = list(result.scalars().all())
+        for row in rows:
+            # 历史 downstream_url 可能已展开 click_id/email 等值，不能保留原 URL。
+            row.downstream_url = "已按配置的数据保留策略清除"
+            row.request_data = None
+            row.request_params = None
+            row.response_body = None
+            row.error_message = None
+            row.pii_scrubbed_at = now
+        if rows:
+            await db.commit()
+            logger.info(
+                "Postback 下游转发日志 PII 到期清理完成：scrubbed=%s retention_days=%s",
+                len(rows),
+                days,
+            )
+        else:
+            await db.rollback()
+
+    return {
+        "enabled": True,
+        "retention_days": days,
+        "selected": len(rows),
+        "scrubbed": len(rows),
+        "cutoff": cutoff.isoformat(sep=" "),
+        "message": f"已清除 {len(rows)} 条下游转发日志中的个人信息载荷",
     }
