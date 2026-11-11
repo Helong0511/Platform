@@ -227,3 +227,52 @@ async def test_expired_daily_absent_token_finalizes_without_redis_decrement(monk
 
     assert stats["rolled_back"] == 1
     assert calls[0][0:2] == (row.reservation_key, "ROLLED_BACK")
+
+
+
+@pytest.mark.asyncio
+async def test_recovery_status_reports_backlog_and_oldest_pending_age(monkeypatch):
+    from datetime import datetime
+
+    class StatusResult:
+        def all(self):
+            return [
+                ("PREPARED", 3),
+                ("RESERVED", 4),
+                ("NEEDS_RECONCILIATION", 1),
+            ]
+
+    class StatusSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, statement):
+            return StatusResult()
+
+        async def scalar(self, statement):
+            if not hasattr(self, "scalar_calls"):
+                self.scalar_calls = 0
+            self.scalar_calls += 1
+            return [
+                datetime(2026, 11, 11, 11, 50, 0),
+                2,
+            ][self.scalar_calls - 1]
+
+    monkeypatch.setattr(recovery, "AsyncSessionLocal", StatusSession)
+    monkeypatch.setattr(
+        recovery, "get_app_now_naive",
+        lambda: datetime(2026, 11, 11, 12, 0, 0),
+    )
+
+    status = await recovery.get_cap_reservation_recovery_status()
+
+    assert status == {
+        "pending_prepared": 3,
+        "pending_reserved": 4,
+        "needs_reconciliation": 1,
+        "committed_token_cleanup_pending": 2,
+        "oldest_pending_seconds": 600,
+    }
