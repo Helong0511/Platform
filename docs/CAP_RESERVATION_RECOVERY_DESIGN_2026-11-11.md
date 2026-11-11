@@ -570,3 +570,22 @@ CapReservation ORM、migration 和 `sql/platform.sql` 统一增加 CHECK 约束�
 ## 28. 第三方上报列表预览 Schema 修复（2026-11-11）
 
 列表 API 在序列化时生成脱敏后的 report_params_preview，但响应 Schema 曾遗漏该字段；FastAPI response_model 可能将额外字段过滤，导致管理页“完整上报参数”预览为空。现已在 ThirdPartyReportLogListResponse 中显式声明该字段，并新增 Schema 契约测试。该修复已包含在 Run #907。
+## 29. Outbox 载荷修改与事件身份一致性（2026-11-11）
+
+复核发现，管理端此前虽然禁止修改已入队 Outbox 的身份字段，但仍可修改 email/IP/phone/UA/currency/amount/report_params/use_hash。若远端已接收事件但本地 ACK 未确认，随后修改载荷并用同一 event_id 重试，会形成“同一幂等身份、不同事件载荷”的不一致。
+
+已采取 fail-closed 规则：
+- Outbox 事件身份字段（adsid/event/conversion_id）始终不可由管理端修改。
+- 只有 status=failed、attempt_count=0 且发送租约已释放的 Outbox 记录允许修正发送载荷；这类事件尚无发送尝试，适合修正配置缺失或初始数据错误。
+- 一旦有发送尝试、已成功或仍持有有效租约，载荷字段不可修改；后端在 SELECT FOR UPDATE 行锁内校验，避免与 worker 认领并发竞态。
+- 管理端按后端返回的 outbox_payload_editable 控制编辑和哈希切换；隐藏按钮只是交互提示，后端规则才是最终边界。
+- 新增已尝试事件拒绝修改、未尝试且租约过期事件允许修正的单元测试，并在 Playwright E2E 验证已尝试事件不显示编辑/哈希切换按钮。
+
+最新 Run #914（SHA 86662e43c369d765d4d8d39137c8f9814fcc2e9a）Backend 322 passed / 1 skipped / 1 warning；Frontend npm ci、依赖公告检查、Lint、Build 和 Mock API Playwright E2E 全部成功。
+
+## 30. Outbox 处理中状态使用服务端租约（2026-11-11）
+
+此前前端将“处理中”租约硬编码为 15 分钟，但 worker 实际 REPORT_LOG_LEASE_SECONDS 为 300 秒。租约过期后，UI 仍可能显示处理中。
+- API 新增 outbox_processing，统一使用 worker 的 REPORT_LOG_LEASE_SECONDS 计算有效租约；列表一次请求使用同一 now 快照计算 can_requeue、outbox_payload_editable、outbox_processing。
+- 前端不再硬编码租约时长；pending 且无有效租约显示等待 worker，持有有效租约显示处理中。
+- 新增边界测试，验证 300 秒租约内/外的状态；Run #914 已通过。
