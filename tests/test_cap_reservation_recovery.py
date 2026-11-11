@@ -128,7 +128,7 @@ async def test_recovery_does_not_decrement_when_reserved_token_is_absent(monkeyp
 @pytest.mark.asyncio
 async def test_recovery_retries_needs_reconciliation_after_backoff(monkeypatch):
     """Redis 短暂不可用进入 NEEDS_RECONCILIATION 后，恢复可用时必须自动重试。"""
-    from datetime import datetime, timedelta
+    from datetime import datetime
     from sqlalchemy.dialects import mysql
 
     row = _reservation(state="NEEDS_RECONCILIATION")
@@ -139,7 +139,7 @@ async def test_recovery_retries_needs_reconciliation_after_backoff(monkeypatch):
 
     class QuerySession(_Session):
         async def execute(self, statement):
-            captured["sql"] = str(statement.compile(dialect=mysql.dialect())).lower()
+            captured["sql"] = str(statement.compile(dialect=mysql.dialect(), compile_kwargs={"literal_binds": True})).lower()
             return _Rows(self.rows)
 
     def session_factory():
