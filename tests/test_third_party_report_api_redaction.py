@@ -56,3 +56,17 @@ def test_sanitize_report_params_recursively():
 def test_invalid_report_params_are_not_returned_raw():
     assert _sanitize_report_params("email=alice@example.invalid") == "[参数内容不可解析，已隐藏]"
     assert _sanitize_report_params(None) is None
+
+
+
+def test_third_party_report_response_schemas_expose_outbox_state():
+    from app.schemas.third_party_report import (
+        ThirdPartyReportLogListResponse,
+        ThirdPartyReportLogResponse,
+    )
+
+    for response_schema in (ThirdPartyReportLogResponse, ThirdPartyReportLogListResponse):
+        assert "outbox_enqueued" in response_schema.model_fields
+        assert "next_retry_time" in response_schema.model_fields
+
+    assert "error_message" in ThirdPartyReportLogResponse.model_fields
