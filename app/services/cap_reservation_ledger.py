@@ -293,7 +293,8 @@ class CapReservationLedger:
 
             # 先删除 token 再提交 COMMITTED。若 Redis 不可用，账本仍保持活动状态，
             # 恢复任务可在确认正式转化存在后重试；若 DB 更新失败，重复 DEL 是幂等的。
-            if state == "COMMITTED" and row.redis_reserved:
+            if state == "COMMITTED":
+                # 即使 redis_reserved 尚未落库，Redis Lua 也可能已成功；DEL 是幂等清理。
                 await RedisCapManager.delete_reservation_token(row.redis_token_key)
 
             result = await session.execute(
