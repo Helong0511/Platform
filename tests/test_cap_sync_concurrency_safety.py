@@ -243,3 +243,42 @@ async def test_missing_redis_cap_keys_are_unknown_not_zero_and_never_repaired(
     assert issue["db_total_count"] == 0
     assert redis.writes == []
     assert any("未执行自动覆盖修复" in item for item in issue["inconsistencies"])
+
+
+
+@pytest.mark.asyncio
+async def test_sync_all_caps_reports_failure_when_commit_rolls_back_batch(monkeypatch):
+    """DB commit 失败会回滚整批更新，统计不能继续报告逐行同步成功。"""
+    now = datetime(2026, 11, 11, 12, 0, 0)
+    cap = SimpleNamespace(
+        id=9,
+        offer_id=99,
+        publisher_id=19,
+        daily_cap=10,
+        total_cap=100,
+        cap_start_date=now,
+        current_daily_count=1,
+        current_total_count=2,
+        is_active=True,
+    )
+
+    class FailingCommitDB(_FakeDB):
+        async def commit(self):
+            raise RuntimeError("simulated commit failure")
+
+    db = FailingCommitDB([cap])
+    redis = _FakeRedis({
+        cap_sync.get_daily_cap_key(99, now, 19): "2",
+        cap_sync.get_total_cap_key(99, 19): "3",
+    })
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(cap_sync, "get_redis_client", fake_redis)
+    monkeypatch.setattr(cap_sync, "get_app_now_naive", lambda: now)
+
+    stats = await cap_sync.CapSynchronizer(db).sync_all_active_caps()
+
+    assert stats == {"success": 0, "failed": 1}
+    assert db.rolled_back is True
