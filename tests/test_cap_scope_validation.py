@@ -26,6 +26,9 @@ class _Result:
     def scalar_one_or_none(self):
         return self.scalar
 
+    def unique(self):
+        return self
+
 
 class _ScopeDB:
     def __init__(self, *, offer_advertiser_id=7, publisher_exists=True, duplicate_id=None):
@@ -184,3 +187,60 @@ async def test_delete_cap_locks_row_before_deleting_orm_entity():
     assert "for update" in db.statement
     assert db.deleted == [existing]
     assert db.flushed is True
+
+
+@pytest.mark.asyncio
+async def test_update_cap_captures_before_values_under_row_lock():
+    existing = SimpleNamespace(
+        id=6,
+        cap_type="offer",
+        advertiser_id=None,
+        offer_id=10,
+        publisher_id=3,
+        cap_start_date=None,
+        daily_cap=100,
+        total_cap=500,
+        current_daily_count=12,
+        current_total_count=40,
+        is_active=True,
+    )
+
+    class _UpdateAuditDB:
+        def __init__(self):
+            self.statements = []
+            self.flushed = False
+
+        async def execute(self, statement):
+            sql = str(statement).lower()
+            self.statements.append(sql)
+            if "from offers" in sql:
+                return _Result(rows=[SimpleNamespace(id=10, advertiser_id=7)])
+            if "from publishers" in sql:
+                return _Result(scalar=3)
+            if "from offer_caps" in sql:
+                # 初始锁定查询、重复范围校验、joinedload 回查均返回既有记录；
+                # 重复校验通过 scalar_one_or_none() 读取 None。
+                if "offer_caps.id !=" in sql or "offer_caps.id <>" in sql:
+                    return _Result(scalar=None)
+                if "offer_caps.id =" in sql and "join" not in sql:
+                    return _Result(rows=[existing])
+                return _Result(rows=[existing])
+            raise AssertionError(f"unexpected SQL: {sql}")
+
+        async def flush(self):
+            self.flushed = True
+
+        async def refresh(self, entity):
+            return None
+
+    db = _UpdateAuditDB()
+    updated = await _service(db).update_cap(
+        cap_id=6,
+        update_data={"daily_cap": 120},
+        current_user=SimpleNamespace(id=1),
+    )
+
+    assert db.flushed is True
+    assert updated.daily_cap == 120
+    assert updated._audit_before == {"daily_cap": 100}
+    assert any("for update" in sql for sql in db.statements)
