@@ -190,7 +190,7 @@ async def delete_cap(
     删除 Cap 配置。
 
     权限：仅管理员。
-    删除后写审计日志并失效相关 Cap 计数缓存。
+    删除前保存配置快照，删除后将快照写入审计日志；不清理 Redis 历史计数。
     """
     cap_service: CapService = await get_cap_service(db)
     deleted_snapshot = await cap_service.delete_cap(cap_id, current_user)
@@ -221,36 +221,34 @@ async def check_cap_consistency_api(
         current_user: User = Depends(get_current_user),
 ):
     """
-    检查 Cap 内存计数与数据库转化数是否一致。
+    检查 Cap 计数与数据库/Redis 状态是否一致。
 
     fix=true 仅保留兼容参数；为避免覆盖并发预留，不执行自动覆盖修复。
+    每次检查均记录审计结果，包括通过、发现问题及执行失败。
     """
-    # ---------- 入口：参数与依赖准备 ----------
     cap_service: CapService = await get_cap_service(db)
-    # ---------- 异常处理 ----------
     try:
         inconsistencies, message = await cap_service.check_cap_consistency(
             offer_id=offer_id, fix=fix
         )
-        logger.info("Cap计数一致性检查完成: %s", message)
-        # ---------- 条件分支 ----------
-        if fix and inconsistencies:
-            await log_user_action(
-                db=db,
-                action_type="API_ACCESS",
-                user=current_user,
-                resource_type="OFFER_CAP",
-                resource_id=offer_id or 0,
-                resource_name="Cap计数一致性检查（自动覆盖修复已禁用）",
-                request=request,
-                details={
-                    "inconsistency_count": len(inconsistencies),
-                    "offer_id": offer_id,
-                    "repair_performed": False,
-                    "reason": "防止 DB -> Redis 覆盖并发预留",
-                },
-            )
-            await commit_audit_log(db)
+        await log_user_action(
+            db=db,
+            action_type="API_ACCESS",
+            user=current_user,
+            resource_type="OFFER_CAP",
+            resource_id=offer_id or 0,
+            resource_name="Cap计数一致性检查",
+            request=request,
+            success=True,
+            details={
+                "outcome": "inconsistencies_found" if inconsistencies else "consistent",
+                "inconsistency_count": len(inconsistencies),
+                "offer_id": offer_id,
+                "fix_requested": fix,
+                "repair_performed": False,
+            },
+        )
+        await commit_audit_log(db)
         return ResponseBaseSchema.success(data=inconsistencies, message=message)
     except HTTPException:
         raise
@@ -259,6 +257,27 @@ async def check_cap_consistency_api(
         from app.core.exceptions import raise_api_exception
 
         logger.error("检查Cap计数一致性失败: %s", e, exc_info=True)
+        try:
+            await log_user_action(
+                db=db,
+                action_type="API_ACCESS",
+                user=current_user,
+                resource_type="OFFER_CAP",
+                resource_id=offer_id or 0,
+                resource_name="Cap计数一致性检查",
+                request=request,
+                success=False,
+                error_message=str(e)[:1000],
+                details={
+                    "outcome": "failed",
+                    "offer_id": offer_id,
+                    "fix_requested": fix,
+                    "repair_performed": False,
+                },
+            )
+            await commit_audit_log(db)
+        except Exception:
+            logger.exception("记录 Cap 一致性检查失败审计日志时发生异常")
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"检查Cap计数一致性失败: {str(e)}",
