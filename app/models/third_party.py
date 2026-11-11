@@ -2,7 +2,7 @@
 第三方上报日志 ORM 模型。
 """
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
-    UniqueConstraint, Date, Numeric
+    UniqueConstraint, Date, Numeric, text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -46,7 +46,7 @@ class ThirdPartyReportLog(Base):
 
     # Postback 事务性 Outbox 元数据；只保存配置引用，不保存 Facebook access token。
     outbox_enqueued = Column(
-        Boolean, nullable=False, default=False, server_default="0",
+        Boolean, nullable=False, default=False, server_default=text("0"),
         comment="是否由转化事务创建的持久化 Outbox 事件",
     )
     short_link_id = Column(Integer, nullable=True, comment="用于恢复像素配置的短链接 ID（非外键，保留删除后的证据）")
