@@ -482,3 +482,24 @@ CapReservation ORM、migration 和 `sql/platform.sql` 统一增加 CHECK 约束�
 - 最新分支 CI 必须覆盖新增脱敏单测；再增加 API 层响应模型测试，确认 FastAPI/Pydantic 序列化后不会重新暴露原始字段。
 - 应检查前端页面是否依赖原始 report_params/UA/email/phone/IP 明文；若依赖，需同步调整页面展示和排障文档，不能通过新增旁路接口绕过脱敏。
 - 仍需确定原始 PII 在数据库中的保留期限、清理机制、访问审计与合法业务目的；API 脱敏不等于数据库已完成数据最小化。
+
+## 23. 第三方已接收但本地成功 ACK 丢失的恢复验证（2026-11-11）
+
+### 故障窗口与预期语义
+
+1. worker 使用稳定的 `event_key` 作为 Meta `event_id` 发起请求。
+2. Meta 返回 `events_received > 0`，表示远端已接收。
+3. 本地更新 `status=success` 的数据库提交失败或响应丢失；现有日志更新函数可能吞掉该异常，因此本地仍显示 pending/failed。
+4. 发送租约到期后 worker 再次发送；必须复用同一条日志、同一 `event_key`、同一 `event_id`，不能重新创建业务事件身份。
+5. Meta 侧是否将相同 event_id 去重由 Meta 的事件去重语义决定；本系统只能保证重试身份稳定，不能宣称跨网络 exactly-once。
+
+### 新增自动化覆盖
+
+- Outbox worker 层测试模拟远端已接收、本地 ACK 未确认，第二次读取状态成功；两次调用携带完全相同的 event_id。
+- 发送函数层测试执行真实 `send_third_party_report` 控制流，模拟 success ACK 持久化失败但日志更新函数吞掉异常；确认重试仍携带原始 event_id。
+- 以上均为 mock HTTP 和隔离测试，不访问真实 Meta API 或生产数据库。
+
+### 验收限制
+
+- 该故障注入验证的是应用层状态机与稳定事件身份，不是 MySQL 实际断连/COMMIT 响应丢失的端到端演练。
+- 仍需 CI 通过，并在隔离 MySQL 环境增加提交响应丢失/连接中断测试；生产发布前另行执行备份、迁移和回滚演练。
