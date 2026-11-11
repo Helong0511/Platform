@@ -89,8 +89,19 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
+      # 在隔离 CI 工作区生成 lockfile；不触碰生产环境，也不自动提交依赖变更。
+      - name: Regenerate frontend lockfile with compatible fixes
+        run: |
+          npm install --package-lock-only --ignore-scripts
+          npm audit fix --package-lock-only --ignore-scripts || true
+      - name: Upload regenerated frontend lockfile
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-package-lock-${{ github.sha }}
+          path: frontend/package-lock.json
+          retention-days: 1
       - run: npm ci
-      # 审计只查询公开 npm Advisory 数据；不访问生产服务。
+      # 审计只查询公开 npm Advisory 数据；不访问生产服务.
       # 先区分全量与生产依赖风险，保留报告而不因未修复项中断其它 CI 验收。
       - name: Report frontend dependency advisories
         run: |
