@@ -61,3 +61,19 @@ async def test_memory_cache_delete_pattern_uses_literal_glob_semantics():
     assert await cache.get("user:1.profile") is None
     assert await cache.get("user:1Xprofile") == "must-keep"
     assert await cache.get("user:2.profile") == "other-user"
+
+@pytest.mark.asyncio
+async def test_memory_cache_ttl_uses_monotonic_clock(monkeypatch):
+    import app.core.infrastructure.cache as cache_module
+
+    clock = {"monotonic": 50.0, "wall": 1_800_000_000.0}
+    monkeypatch.setattr(cache_module.time, "monotonic", lambda: clock["monotonic"])
+    monkeypatch.setattr(cache_module.time, "time", lambda: clock["wall"])
+
+    cache = MemoryCacheBackend(max_entries=2)
+    await cache.set("short-lived", "value", ttl=5)
+
+    # 系统墙上时钟回拨不应延长 TTL；只由单调时钟决定过期。
+    clock["wall"] -= 86_400
+    clock["monotonic"] += 6
+    assert await cache.get("short-lived") is None
