@@ -111,3 +111,33 @@ async def test_cap_scope_rejects_unknown_cap_type():
             "offer_id": 10,
             "publisher_id": None,
         })
+
+
+@pytest.mark.asyncio
+async def test_update_cap_rejects_in_place_counter_scope_migration():
+    """Changing the Offer/publisher scope must not carry the old counter baseline."""
+    existing = SimpleNamespace(
+        id=5,
+        cap_type="offer",
+        advertiser_id=None,
+        offer_id=10,
+        publisher_id=3,
+        cap_start_date=None,
+        daily_cap=100,
+        total_cap=500,
+        is_active=True,
+    )
+
+    class _UpdateDB:
+        async def execute(self, statement):
+            return _Result(rows=[existing])
+
+    service = _service(_UpdateDB())
+    with pytest.raises(HTTPException) as exc:
+        await service.update_cap(
+            cap_id=5,
+            update_data={"publisher_id": 9},
+            current_user=SimpleNamespace(id=1),
+        )
+
+    assert "不允许原地修改 Cap 的归属范围" in str(exc.value.detail)
