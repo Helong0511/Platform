@@ -1,6 +1,6 @@
 # Cap Reservation 持久化账本与崩溃恢复设计
 
-> 状态：审计设计稿，尚未实现，不代表当前系统已具备恢复能力。  
+> 状态：实现与验收记录（2026-11-11）。Cap Reservation 账本、Postback 接入和恢复 Worker 已在后续章节落地；是否具备部署条件，以最新 SHA 的 CI、故障注入结果及部署手册为准。  
 > 适用范围：Postback 的 Daily / Total Cap Redis 预留。  
 > 安全边界：仅允许隔离 CI MySQL、隔离 Redis、合成数据和 mock；禁止连接生产环境。
 
@@ -16,7 +16,7 @@
 
 该流程能处理 Python 异常和 COMMIT 响应不确定，但不能处理进程被强制终止、主机重启或容器被直接杀死：进程不会执行 `except/finally`，Redis reservation 可能保留，而 DB 转化事务回滚。Total counter 没有 TTL，可能永久占用名额。现有 Cap 同步任务会将 Redis 计数同步回 DB，因此孤儿计数还可能被固化到 DB 快照。
 
-当前没有发现独立的 Cap reservation 持久化账本或崩溃恢复调度任务。现有 Redis token 只保留 30 天，不足以作为长期恢复依据。
+早期审计基线：当时尚未发现独立的 Cap reservation 持久化账本或崩溃恢复调度任务。该问题已在第 13、14 节记录后续实现；本段仅保留问题发现时的历史描述。
 
 ## 2. 设计目标
 
@@ -152,7 +152,7 @@ NEEDS_RECONCILIATION
 
 ## 10. 上线与回滚约束
 
-- 本设计尚未实现；不得据此部署。
+- 本设计早期阶段尚未实现；后续实现及部署约束见第 13–16 节和 `docs/DEPLOYMENT_READINESS_RUNBOOK_2026-11.md`。
 - 新表迁移必须先在隔离 MySQL 8.0 演练，验证重复执行、索引、字符集和备份恢复。
 - 生产迁移需单独备份、审批和维护窗口；当前审计/CI 禁止连接生产数据库。
 - 迁移前后需明确新旧应用混跑策略；不允许一部分 worker 写账本、另一部分 worker 不写账本却共同修改同一 Redis Cap counter。
@@ -223,7 +223,7 @@ NEEDS_RECONCILIATION
 
 ### 当前实现边界
 
-以上是架构核验和实施约束，不代表账本、恢复 Worker、三态查询或 migration 已经实现。当前孤儿预留风险仍然存在，PR 不具备部署条件。
+以上是早期架构核验和实施约束。账本、恢复 Worker、三态查询及 migration 的后续实现状态见第 13、14 节；最终部署门槛以第 15、16 节及部署手册为准。
 
 
 ## 13. 账本基础结构与服务已落地（2026-11-11 后续提交）
@@ -236,16 +236,16 @@ NEEDS_RECONCILIATION
 - 独立服务：`app/services/cap_reservation_ledger.py` 使用 `AsyncSessionLocal`，提供稳定身份生成、独立会话 PREPARED 创建、RESERVED 标记、COMMITTED/ROLLED_BACK 终态确认和 NEEDS_RECONCILIATION 标记。
 - 测试：`tests/test_cap_reservation_model.py` 验证 metadata 注册和索引；`tests/test_cap_reservation_ledger_identity.py` 验证稳定键、publisher NULL scope、Daily 日期、cap kind 和非法输入。
 
-### 仍未完成、仍然阻断上线的部分
+### 第 13 节编写时仍未完成的事项（历史状态，已由第 14 节后续实现覆盖）
 
-1. `CapReservationLedger.prepare()` 尚未接入 `increment_cap_count()`；当前 Redis reservation 仍由 cap_manager 生成随机 UUID。
+以下 1–6 项是第 13 节编写时的历史状态；第 14 节记录了后续代码接入和恢复 Worker 实现，不得将这些旧描述当作当前代码状态。\n\n1. `CapReservationLedger.prepare()` 尚未接入 `increment_cap_count()`；当时 Redis reservation 仍由 cap_manager 生成随机 UUID。
 2. `mark_reserved/finalize` 尚未接入 Postback 预留、DB commit、rollback 与 commit reconciliation 生命周期。
 3. Redis token 三态核验尚未实现；Redis UNKNOWN、counter key missing、token ABSENT 尚无统一恢复语义。
 4. 恢复 Worker、数据库 lease 抢占、条件状态更新、任务配置与积压监控尚未实现。
 5. Daily 48 小时 key/token 生命周期、Total 长期 token 保留、Redis 整体数据丢失、历史基线恢复尚未完成设计验证与故障注入。
 6. 当前新增测试仅验证模型与稳定身份规则，不覆盖跨存储事务恢复，不代表孤儿 reservation 风险已消除。
 
-下一步必须先明确 fail-open 时“没有 Redis token 但 DB Cap 快照随转化提交”的账本状态语义，再接入 Cap manager；不能简单将所有 `None` 当成 RESERVED，也不能在 Redis 结果 UNKNOWN 时误标 ROLLED_BACK。
+当时下一步需要明确 fail-open 的账本状态语义；该语义及其后续实现见第 14 节。无论如何，Redis 结果 UNKNOWN 时都不得误标 ROLLED_BACK。
 
 
 ## 14. Postback 接入与恢复任务实现（2026-11-11）
