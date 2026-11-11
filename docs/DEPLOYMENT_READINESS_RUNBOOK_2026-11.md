@@ -73,12 +73,17 @@
 - 不因恢复任务告警而手工删除 token 或执行无 token 的 DECR。
 - 不因 migration 是 `CREATE TABLE IF NOT EXISTS` 就跳过备份、审批和 MySQL 版本核验。
 
-## 7. 本轮验证证据
+## 7. 本轮验证证据（2026-11-11 更新）
 
-- 已验证的历史跨存储 CI：Run #783（SHA `042026e6c654753ec91b2ec72748c85d94b11f61`）和 Run #796（SHA `9d88eed4e3b070eeb32636cf666aeca801190421`）通过；Run #798（SHA `7a206ba5c911fe66e94658f3f903a706548b2bc1`）也通过当时的 Backend / Frontend / Playwright Mock API E2E。
-- Run #796 覆盖过期租约不得被重复 Postback 抢占；Run #798 覆盖 token ABSENT 与 counter 仍存在时转人工对账的实现代码，但其 checkout SHA 未包含随后增加的数据库 CHECK 约束与 SQLite 约束测试。
-- 当前分支 HEAD 后续又增加 MySQL migration CHECK 约束校验、SQLite ORM CHECK 执行验证、ORM server defaults 对齐及中文测试路径发现修复；这些提交尚无对应最新 HEAD 的 CI run，不能视为已验收。
-- 因此最新分支尚未达到转 Ready/合并门槛；必须先让最新 HEAD 的 Backend / Frontend / Playwright Mock API E2E 和隔离 MySQL/Redis 测试全部通过。历史 CI 证据不代表当前 HEAD 通过，也不代表已在生产环境部署或验证。
+- 最新全量 CI：Run #807，SHA `b16fd7f3b5111aa681e2e9c1e5ea1b394305a3b9`。
+- Run #807：Backend / Frontend lint/build / Playwright Mock API E2E 全部成功；Backend 为 300 passed、1 skipped、1 warning。
+- Backend 使用隔离 MySQL 8.0 与 Redis 服务，覆盖 Reservation migration 的 CHECK 约束实际执行、ORM SQLite 约束、Postback reservation 生命周期、并发 claim、恢复 Worker 双 worker 和 token 丢失/计数 key 保留的对账保护。
+- 历史 CI 失败修复记录：
+  - Run #750：集成测试未隔离账本会话导致缺少表；后续通过测试隔离和显式 mock 修复。
+  - Run #777：Redis counter missing 错误文本与测试断言不一致；已修复为明确兼容的 fail-closed 错误信息。
+  - Run #806：MySQL CHECK 约束错误码 3819 被测试错误地期待为 IntegrityError；已改为 OperationalError 并断言错误码 3819，Run #807 全绿。
+- Run #807 前端 npm audit 仍报告 2 个 production High advisories，均属于用户明确排除的凭据/重定向敏感头安全专项；本轮未改动该专项，详见第 8 节。
+- 上述证据仅证明对应 SHA 在隔离 CI 环境通过，不代表已在生产环境部署或验证。后续任何代码提交仍须重新验收最新 SHA。
 
 
 ## 8. 明确保留的范围外风险
