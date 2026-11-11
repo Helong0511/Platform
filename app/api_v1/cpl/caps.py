@@ -62,6 +62,7 @@ async def create_cap(
         resource_id=cap.id,
         resource_name=f"Cap-{cap.id}",
         request=request,
+        strict=True,
     )
     await commit_audit_log(db)
     return ResponseBaseSchema.success(data=cap_service.to_cap_response(cap))
@@ -178,6 +179,7 @@ async def update_cap(
             resource_id=cap_id,
             resource_name=f"Cap-{cap_id}",
             request=request,
+            strict=True,
             details={
                 "updated_fields": changed_fields,
                 "before": {key: audit_before[key] for key in changed_fields},
@@ -216,6 +218,7 @@ async def delete_cap(
         resource_name=f"Cap-{cap_id}",
         request=request,
         details={"deleted_cap": deleted_snapshot},
+        strict=True,
     )
     await commit_audit_log(db)
     return ResponseBaseSchema.success(data={"message": "Cap配置已删除"})
@@ -254,6 +257,7 @@ async def check_cap_consistency_api(
             resource_name="Cap计数一致性检查",
             request=request,
             success=True,
+            strict=True,
             details={
                 "outcome": "inconsistencies_found" if inconsistencies else "consistent",
                 "inconsistency_count": len(inconsistencies),
