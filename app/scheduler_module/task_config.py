@@ -44,6 +44,8 @@
 """
 from typing import Dict, Any
 
+from app.scheduler_module.task_names import CAP_RESERVATION_RECOVERY_TASK_NAME
+
 # 任务配置类型定义
 TaskConfig = Dict[str, Any]
 
@@ -191,8 +193,8 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "description": "每5分钟将 Redis Cap 计数同步到数据库",
     },
 
-    "Cap Reservation 崩溃恢复": {
-        "task_name": "Cap Reservation 崩溃恢复",
+    CAP_RESERVATION_RECOVERY_TASK_NAME: {
+        "task_name": CAP_RESERVATION_RECOVERY_TASK_NAME,
         "task_module": "app.scheduler_module.tasks.cap_reservation_recovery",
         "task_function": "cap_reservation_recovery_task",
         "result_getter_module": "app.scheduler_module.tasks.cap_reservation_recovery",
