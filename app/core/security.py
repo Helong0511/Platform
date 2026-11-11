@@ -544,6 +544,21 @@ async def get_current_user(
                 http_status=status.HTTP_404_NOT_FOUND,
             )
 
+        # 权限缓存只用于减少关联权限查询；账号禁用/限制登录必须以本次 DB 行为准。
+        # 即使跨 Worker Redis 缓存失效失败，也不能让已禁用账号在 5 分钟 TTL 内继续访问。
+        if not user.is_active:
+            _raise_auth(
+                "用户已被禁用",
+                error_code=ErrorCode.USER_DISABLED,
+                http_status=status.HTTP_403_FORBIDDEN,
+            )
+        if user.login_restricted:
+            _raise_auth(
+                user.login_message or "登录已被限制",
+                error_code=ErrorCode.FORBIDDEN,
+                http_status=status.HTTP_403_FORBIDDEN,
+            )
+
         return user
 
     except HTTPException:
