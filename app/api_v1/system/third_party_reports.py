@@ -111,6 +111,7 @@ def _can_requeue_report(log, now: Optional[datetime] = None) -> bool:
         not getattr(log, "outbox_enqueued", False)
         or getattr(log, "status", None) != "failed"
         or getattr(log, "pii_scrubbed_at", None) is not None
+        or getattr(log, "error_message", None) == "短链接已删除，无法解析像素配置"
     ):
         return False
     has_config_reference = bool(
