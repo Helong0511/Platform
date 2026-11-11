@@ -168,3 +168,19 @@ async def test_invalid_retention_and_batch_size_are_rejected():
         await retention.scrub_expired_third_party_report_pii(retention_days=-1)
     with pytest.raises(ValueError):
         await retention.scrub_expired_third_party_report_pii(retention_days=30, batch_size=1001)
+
+
+@pytest.mark.asyncio
+async def test_scrubbed_outbox_payload_is_not_editable():
+    from datetime import datetime
+    from types import SimpleNamespace
+    from app.core.third_party_report import is_outbox_payload_editable
+
+    row = SimpleNamespace(
+        outbox_enqueued=True,
+        status="failed",
+        attempt_count=0,
+        report_start_time=None,
+        pii_scrubbed_at=datetime(2026, 11, 11, 12, 0, 0),
+    )
+    assert is_outbox_payload_editable(row) is False
