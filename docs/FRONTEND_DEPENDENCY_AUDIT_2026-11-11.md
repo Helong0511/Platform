@@ -20,6 +20,9 @@
 | `brace-expansion` | 1.1.18 | 1.1.21 | 修复嵌套展开导致的 CPU / 栈耗尽 |
 | `js-yaml` | 4.3.1 | 4.3.2 | 修复 merge key 处理 CPU 风险 |
 | `postcss-selector-parser` | 6.1.4 | 6.1.6 | 修复选择器解析复杂度 DoS |
+| `eslint` | 8.57.0 | 10.14.0 | 迁移到当前支持版本及 flat config |
+| `eslint-plugin-vue` | 9.28.0 | 10.11.1 | 支持 ESLint 10 / Vue 3 flat config |
+| `minimatch` | 10.2.6 | 11.0.5 | 修复 GHSA-g3hv-75wg-m249；按 ESLint 上游已合并的兼容更新覆盖其受限依赖范围 |
 
 使用 npm lockfile-only 安装和审计修复在 CI 工作区重新生成锁文件；`follow-redirects` 通过 override 固定为 `1.16.0`，避免本轮修改凭据安全专项。
 
@@ -27,28 +30,30 @@
 
 修复后，CI npm audit 报告：
 
-- 全部依赖：2 项 High。
-- 生产依赖：2 项 High。
+- 全部依赖：2 项 High、0 Moderate。
+- 生产依赖：2 项 High、0 Moderate。
 - 两项均来自 `follow-redirects@1.16.0`，涉及跨域敏感请求头转发与凭据暴露，属于本轮明确排除的凭据安全范围。
 - `axios` 的剩余 audit 记录是由该 `follow-redirects` 子依赖引起，不是 Axios 自身其他公告仍未修复。
 
-## 尚未完成的依赖维护
+## 依赖维护结果与剩余工作
 
-以下项目目前仍会产生弃用提示，但不属于本次 npm audit 剩余的两个漏洞：
+ESLint 10 迁移已完成并通过 CI lint/build/E2E：
 
-- `eslint@8.57.0` 已停止支持。
-- `glob@7.2.3`、`rimraf@3.0.2`、`inflight@1.0.6` 仍由旧 ESLint 依赖链引入。
-- `@humanwhocodes/config-array` 与 `@humanwhocodes/object-schema` 已弃用。
+- `eslint@10.14.0`、`eslint-plugin-vue@10.11.1`、`@stylistic/eslint-plugin@5.10.0`、`@eslint/js@10.0.1`、`globals@17.14.0`。
+- 删除旧 `.eslintrc.cjs`，改用 `eslint.config.js`。
+- 旧依赖链 `glob@7`、`rimraf@3`、`inflight`、`@humanwhocodes/config-array`、`@humanwhocodes/object-schema` 已从 lockfile 消失。
+- 新增 `minimatch@11.0.5` override。ESLint 上游已合并 #21492，将 minimatch 提升到 11.0.1+；本项目所用 ESLint / config-array 仅使用 v11 保留的 `Minimatch` 构造和 `match` API。参考：https://github.com/eslint/eslint/issues/21463
 
-不能只强制覆盖这些传递依赖。下一步需要将 ESLint 迁移到 flat config，并核验 `eslint-plugin-vue` 的兼容性，再重新生成 lockfile 和运行完整前端测试。
+剩余两项 High 都来自 `follow-redirects@1.16.0`，与凭据敏感头转发有关，按本轮范围明确保留，不通过忽略审计或降低审计级别隐藏。
 
 ## 验证记录
 
-CI #621（提交 `fa904c4d1e503cf5c47f9acc4ee16cf2276ff49e`）：
+CI #634（提交 `d99b25703295a3bafe3ab29fb210508b62ff182a`）：
 
 - 后端：230 passed、1 skipped。
-- 前端：Lint、Build、Playwright E2E 通过。
+- 前端：ESLint 10 flat config 的 Lint、Build、Playwright E2E 通过。
+- npm audit：2 High、0 Moderate；均为明确排除的 `follow-redirects` 凭据安全告警。
 - 浏览器 E2E 使用 Mock API 和隔离前端服务。
 - CI 中使用的 MySQL / Redis 均为临时服务。
 
-锁文件由 CI 生成并作为工件上传；受限的自动提交步骤将在后续 CI 完整通过后，把同一份已验证锁文件写回修复分支。锁文件提交并在不再临时重生成的情况下再次通过 CI 前，不得将 PR 标记为可合并。
+CI 在后端和前端检查全部通过后，将生成的 lockfile 自动提交到修复分支。仍需由后续 CI 在不再临时重生成的情况下直接执行 `npm ci`，确认仓库提交的 lockfile 本身可复现。
