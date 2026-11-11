@@ -52,7 +52,7 @@
 - `failed`、`cleanup_pending`：应触发告警。
 - Postback 重复事件、Cap 超限率、Redis key 缺失/损坏、DB commit 错误及调度任务连续失败。
 
-恢复任务遵循 fail-closed：Redis 状态 UNKNOWN、Total token ABSENT 或 token 存在但 counter 丢失时，保留证据并进入 NEEDS_RECONCILIATION，不进行猜测性扣减。
+恢复任务遵循 fail-closed：Redis 状态 UNKNOWN、token ABSENT 但 counter 仍存在/无法确认存在性、或 token PRESENT 但 counter 丢失时，保留证据并进入 NEEDS_RECONCILIATION，不进行猜测性扣减。只有 token ABSENT 且对应 counter key 明确不存在时，才可结束当前 reservation；后续 Redis counter 必须从已提交 DB Cap 快照重新建立，不能从 0 覆盖 DB 基线。
 
 ## 5. 回滚策略
 
@@ -75,10 +75,10 @@
 
 ## 7. 本轮验证证据
 
-- 最新通过的跨存储 CI：Run #783，SHA `042026e6c654753ec91b2ec72748c85d94b11f61`。
-- Run #783：Backend / Frontend / Playwright Mock API E2E 全部成功；293 passed、1 skipped。
-- CI 使用临时 MySQL 8.0 数据库与 Redis DB14，包含真实跨存储孤儿回滚、已提交转化保留、并发 claim 和双恢复 Worker 验证；当前账本 CHECK 约束需由最新 SHA 的迁移测试重新验证。
-- 上述证据仅证明 CI 隔离环境通过，不代表已在生产环境部署或验证。
+- 已验证的历史跨存储 CI：Run #783（SHA `042026e6c654753ec91b2ec72748c85d94b11f61`）和 Run #796（SHA `9d88eed4e3b070eeb32636cf666aeca801190421`）通过；Run #798（SHA `7a206ba5c911fe66e94658f3f903a706548b2bc1`）也通过当时的 Backend / Frontend / Playwright Mock API E2E。
+- Run #796 覆盖过期租约不得被重复 Postback 抢占；Run #798 覆盖 token ABSENT 与 counter 仍存在时转人工对账的实现代码，但其 checkout SHA 未包含随后增加的数据库 CHECK 约束与 SQLite 约束测试。
+- 当前分支 HEAD 后续又增加 MySQL migration CHECK 约束校验、SQLite ORM CHECK 执行验证、ORM server defaults 对齐及中文测试路径发现修复；这些提交尚无对应最新 HEAD 的 CI run，不能视为已验收。
+- 因此最新分支尚未达到转 Ready/合并门槛；必须先让最新 HEAD 的 Backend / Frontend / Playwright Mock API E2E 和隔离 MySQL/Redis 测试全部通过。历史 CI 证据不代表当前 HEAD 通过，也不代表已在生产环境部署或验证。
 
 
 ## 8. 明确保留的范围外风险
