@@ -110,7 +110,9 @@ SET @has_due_index = (
         GROUP BY INDEX_NAME
         HAVING COUNT(*) = 5
            AND MAX(NON_UNIQUE) = 1
+           AND MAX(INDEX_TYPE) = 'BTREE'
            AND MAX(SUB_PART) IS NULL
+           AND SUM(CASE WHEN COLLATION = 'A' THEN 1 ELSE 0 END) = 5
            AND GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') = 'outbox_enqueued,status,next_retry_time,report_start_time,id'
     ) AS valid_outbox_index
 );
