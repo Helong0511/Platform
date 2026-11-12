@@ -403,9 +403,9 @@ async def check_click_count_stats(
                         "key": key
                     })
                 except Exception as get_error:
-                    logger.debug(f"获取Redis计数器值失败: key={key}, error={get_error}")
+                    logger.debug("获取Redis计数器值失败: error_type=%s", type(get_error).__name__)
         except Exception as e:
-            stats["redis_error"] = str(e)
+            stats["redis_error"] = "Redis 查询失败，请检查服务状态"
     
     # 获取数据库中的总点击次数
     # ---------- 异常处理 ----------
@@ -414,7 +414,7 @@ async def check_click_count_stats(
         total_clicks = result.scalar() or 0
         stats["database_total_clicks"] = int(total_clicks)
     except Exception as e:
-        stats["database_error"] = str(e)
+        stats["database_error"] = "数据库查询失败，请检查服务日志"
     
     # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=stats)
