@@ -693,3 +693,42 @@ PR 继续 Open / Draft；不合并 main、不部署。所有验证仅使用 GitH
 - `terminal_failed` 是持续积压数量，不代表自动重试；这些记录需要管理员检查配置引用、确认事件是否应补发，再按受控流程处理。
 - 对已清理 PII 的记录不计入该告警；Outbox worker 仍不得重新发送已清理载荷。
 - PR 继续 Open / Draft；不合并 main、不部署。
+
+
+
+## 31. 事件幂等迁移失败保护、Cap 日志脱敏与 IP 白名单端到端回归（2026-11-12，Run #1210）
+
+### 新发现与修复
+
+1. **事件幂等迁移的中断安全**
+   - 原迁移先删除旧的 `unique_source_adsid`，再创建新的 `unique_event_key`。
+   - 如果历史 `event_key` 存在碰撞，新唯一索引创建会失败，但旧唯一约束已被删除，迁移中断窗口内可能暂时失去唯一性保护。
+   - 已调整顺序：先完成 `event_key NOT NULL`，再创建 `unique_event_key`；只有确认新索引存在后才删除旧索引。
+   - 新增真实隔离 MySQL 故障测试：人为构造不同 source/adsid 共用同一 event_key，验证新索引创建失败时旧唯一索引仍存在、新索引不存在。
+
+2. **Cap ORM 刷新异常日志**
+   - `_refresh_offer_caps()` 不再记录数据库异常原文，只记录 OfferCap ID 与异常类型。
+   - 新增包含合成邮箱、IP 和 SQL 敏感值的异常回归测试，验证日志不包含原始内容。
+
+3. **PII 清理与 Outbox 活跃发送租约**
+   - PII 清理查询必须排除尚未过期的 `report_start_time` 租约，避免清理任务在活跃 worker 发送期间抢先擦除其载荷。
+   - 新增 SQL 编译回归断言，确保查询包含空租约和过期租约判断；PII 清理仍使用 `FOR UPDATE SKIP LOCKED`。
+
+4. **客户登录与刷新令牌 IP 白名单**
+   - 新增客户登录和刷新令牌端到端路由测试。
+   - 未显式配置回环地址时，127.0.0.1 不会被隐式放行；刷新令牌路径同样返回 403，不会轮换或撤销会话令牌。
+
+### CI 证据
+
+- Run #1210（SHA `e785a8a90fb7d419be4c0d2b448c5f32ab019234`）：Backend **464 passed、1 skipped、1 warning**；Python Compile 通过；Frontend Lint、Build、Playwright Mock API Browser E2E 全部通过。
+- Run #1210：https://github.com/Helong0511/Platform/actions/runs/43141093206。
+- Run #1209（SHA `a210de684637091d55f0eea1236105b83cf9c449`）被后续 PR 提交触发的 concurrency 机制取消；不作为验收依据，也未删除历史记录。
+
+### 仍未关闭的发布阻断项
+
+- 代表性旧 schema + 真实规模合成数据的完整迁移、全量备份恢复、每个 DDL 边界故障注入、应用兼容回滚及 schema/data diff。
+- Outbox 配置禁用/删除/轮换/恢复、发送中 lease 过期、Worker 崩溃、长时间网络故障、多 Worker 竞争的组合压力验收。
+- Cap Reservation Redis failover/淘汰、MySQL commit 阻塞/ACK 丢失、时钟偏差和多恢复 Worker 组合故障验收。
+- PII 保留期限与删除政策审批；PostbackConversion 原始数据、通知消息、备份副本和第三方接收方数据仍需独立治理。
+- RBAC/租户隔离、归因、统计、结算、API、队列和前端其它业务模块的最终全量回归。
+- PR 继续 Open / Draft；不合并 main、不部署；凭据安全专项仍按既定范围暂缓。
