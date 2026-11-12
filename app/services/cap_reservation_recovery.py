@@ -60,7 +60,7 @@ async def recover_cap_reservations(
                         ),
                     ),
                     and_(
-                        CapReservation.state == "COMMITTED",
+                        CapReservation.state.in_(("COMMITTED", "ROLLED_BACK")),
                         CapReservation.redis_token_cleaned.is_(False),
                         or_(
                             CapReservation.lease_owner.is_(None),
@@ -107,7 +107,7 @@ async def recover_cap_reservations(
                 stats["lease_lost"] += 1
                 continue
 
-            if row.state == "COMMITTED":
+            if row.state in ("COMMITTED", "ROLLED_BACK"):
                 await RedisCapManager.delete_reservation_token(row.redis_token_key)
                 await CapReservationLedger.mark_token_cleaned(
                     row.reservation_key, owner
@@ -172,6 +172,13 @@ async def recover_cap_reservations(
                     stats["rolled_back"] += 1
                     continue
                 reason = f"Redis token PRESENT but atomic rollback returned {rollback_result}"
+            elif token_state == "ROLLED_BACK":
+                # Redis 墓碑证明原子 DECR 已完成；只补记 DB 终态，不再次扣减。
+                await CapReservationLedger.finalize(
+                    row.reservation_key, "ROLLED_BACK", lease_owner=owner
+                )
+                stats["rolled_back"] += 1
+                continue
             elif token_state == "ABSENT":
                 # token 缺失不能单独证明没有发生过 INCR：Redis allkeys-* 淘汰策略、
                 # 人工删除或部分数据丢失都可能只丢 token 而保留 counter。
@@ -266,7 +273,7 @@ async def get_cap_reservation_recovery_status() -> dict:
         )
         cleanup_pending = await session.scalar(
             select(func.count(CapReservation.id)).where(
-                CapReservation.state == "COMMITTED",
+                CapReservation.state.in_(("COMMITTED", "ROLLED_BACK")),
                 CapReservation.redis_token_cleaned.is_(False),
             )
         )
