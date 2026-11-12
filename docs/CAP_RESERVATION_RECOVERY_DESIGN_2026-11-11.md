@@ -589,3 +589,17 @@ CapReservation ORM、migration 和 `sql/platform.sql` 统一增加 CHECK 约束�
 - API 新增 outbox_processing，统一使用 worker 的 REPORT_LOG_LEASE_SECONDS 计算有效租约；列表一次请求使用同一 now 快照计算 can_requeue、outbox_payload_editable、outbox_processing。
 - 前端不再硬编码租约时长；pending 且无有效租约显示等待 worker，持有有效租约显示处理中。
 - 新增边界测试，验证 300 秒租约内/外的状态；Run #914 已通过。
+
+## 17. 回滚墓碑与 DB ACK 丢失窗口（2026-11-12 补充）
+
+早期回滚 Lua 在同一原子脚本中执行 DEL reservation_token 与 DECR counter。如果 Redis 脚本成功后、MySQL 写入 ROLLED_BACK 前进程退出，恢复任务只能看到 token 缺失和 counter 仍存在，无法区分“已回滚”与“token 被淘汰”，因此只能进入人工对账。
+
+现已将回滚 token 改为持久化墓碑协议：
+
+1. Lua 校验 token 和 counter 后，将 token 值原子改为 ROLLED_BACK，并执行 DECR；墓碑不设置 TTL。
+2. 相同 reservation 的重复回滚看到墓碑时，只返回当前 counter，不再执行 DECR。
+3. 恢复状态读取新增 ROLLED_BACK，该状态即使在 Daily counter 自然过期后仍可证明回滚已完成。
+4. MySQL 账本先提交 ROLLED_BACK，并保持 redis_token_cleaned=false；之后恢复任务删除墓碑并确认清理。
+5. 终态清理扫描同时覆盖 COMMITTED 与 ROLLED_BACK，保证 DB ACK 后进程再次崩溃也可继续清理。
+
+故障注入必须覆盖：Redis Lua 成功后立即模拟进程退出、相同 token 再次回滚、MySQL 终态提交后但墓碑清理前退出，以及 Daily counter 过期但墓碑仍存在。所有场景必须断言 counter 最多减少一次。
