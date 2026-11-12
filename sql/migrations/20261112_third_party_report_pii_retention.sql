@@ -9,6 +9,7 @@ SET @has_col = (
       AND TABLE_NAME = 'third_party_report_logs'
       AND COLUMN_NAME = 'pii_scrubbed_at'
       AND COLUMN_TYPE = 'datetime' AND IS_NULLABLE = 'YES'
+      AND COLUMN_DEFAULT IS NULL AND EXTRA = ''
 );
 SET @ddl = IF(
     @has_col = 0,
@@ -52,6 +53,7 @@ SET @has_col = (
       AND TABLE_NAME = 'postback_forward_logs'
       AND COLUMN_NAME = 'pii_scrubbed_at'
       AND COLUMN_TYPE = 'datetime' AND IS_NULLABLE = 'YES'
+      AND COLUMN_DEFAULT IS NULL AND EXTRA = ''
 );
 SET @ddl = IF(
     @has_col = 0,
