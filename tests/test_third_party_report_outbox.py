@@ -873,3 +873,70 @@ async def test_outbox_payload_scrubbed_after_read_cannot_reach_remote_sender(mon
     assert result["success"] is False
     assert result["retryable"] is True
     assert result["reason"] == "report_in_progress"
+
+
+async def test_outbox_missing_config_reference_is_finalized_not_rescanned(monkeypatch):
+    from datetime import datetime
+
+    row = type(
+        "ReportRow",
+        (),
+        {
+            "id": 96,
+            "outbox_enqueued": True,
+            "status": "pending",
+            "next_retry_time": datetime(2026, 11, 11, 11, 59, 0),
+            "adsid": "fbclid-no-config",
+            "event": "Purchase",
+            "conversion_id": "conversion-no-config",
+            "email": "",
+            "ip": "",
+            "phone": "",
+            "ua": "",
+            "source": "postback",
+            "use_hash": True,
+            "currency": "USD",
+            "amount": 8.5,
+            "click_time": None,
+            "event_key": "stable-event-key-96",
+            "short_link_id": None,
+            "cloak_name": None,
+            "short_code": None,
+        },
+    )()
+
+    class FakeDB:
+        async def scalar(self, statement):
+            return row
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    captured = {}
+
+    async def claim(report_id):
+        assert report_id == 96
+        return True
+
+    async def update(report_id, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(
+        outbox, "get_app_now_naive",
+        lambda: datetime(2026, 11, 11, 12, 0, 0),
+    )
+    monkeypatch.setattr(outbox, "_claim_report_log", claim)
+    monkeypatch.setattr(outbox, "update_report_log", update)
+
+    result = await outbox.process_postback_report_outbox_item(96)
+
+    assert result["reason"] == "missing_config_reference"
+    assert result["retryable"] is False
+    assert captured["status"] == "failed"
+    assert captured["clear_next_retry_time"] is True
+    assert captured["completed_at"] == datetime(2026, 11, 11, 12, 0, 0)
