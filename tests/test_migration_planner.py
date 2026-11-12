@@ -88,3 +88,12 @@ def test_plan_rejects_dependency_gap(tmp_path: Path):
     only_second = (replace(entries[1], depends_on=("20261110_first",)),)
     with pytest.raises(MigrationManifestError, match="unknown dependency"):
         plan_migrations({}, repository_root=tmp_path, migrations=only_second)
+
+def test_plan_rejects_non_prefix_ledger(tmp_path: Path):
+    entries = _fixture(tmp_path)
+    with pytest.raises(MigrationManifestError, match="contiguous manifest prefix"):
+        plan_migrations(
+            {entries[1].revision: entries[1].sha256},
+            repository_root=tmp_path,
+            migrations=entries,
+        )
