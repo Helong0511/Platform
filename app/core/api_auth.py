@@ -158,6 +158,19 @@ def _is_client_ip_allowed(allowed_ips: str | None, client_ip: str | None) -> boo
     return remote_ip in allowed
 
 
+def _is_user_client_ip_allowed(clients, client_ip: str | None) -> bool:
+    """
+    对共享同一登录账号的多个 Client 采用交集策略：
+    每个已配置白名单的 Client 都必须允许当前来源 IP；空白配置不增加限制。
+    """
+    configured_policies = [
+        getattr(client, "allowed_ips", None)
+        for client in (clients or [])
+        if (getattr(client, "allowed_ips", None) or "").strip()
+    ]
+    return all(_is_client_ip_allowed(policy, client_ip) for policy in configured_policies)
+
+
 async def verify_client_request(
     request: any,  # ClientAPIBaseRequest 类型
     db: AsyncSession,
