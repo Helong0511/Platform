@@ -312,7 +312,6 @@ async def login(
     # 如果是客户角色，获取客户的api_enabled和has_publisher信息
     api_enabled = False
     has_publisher = False
-    client_record = get_first_loaded_collection_item(user, "clients")
     if user.role == UserRole.CLIENT and active_client_records:
         active_client_ids = [client.id for client in active_client_records]
         api_enabled = any(bool(client.api_enabled) for client in active_client_records)
