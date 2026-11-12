@@ -185,8 +185,8 @@ async def _rollback_reserved_redis(reserved: list[tuple]) -> None:
                     await CapReservationLedger.mark_needs_reconciliation(
                         ledger_key, f"Redis 回滚异常，error_type={type(exc).__name__}", lease_owner=lease_owner
                     )
-                except Exception:
-                    logger.critical("无法更新 Cap Reservation 对账状态：%s", ledger_key, exc_info=True)
+                except Exception as persist_exc:
+                    logger.critical("无法更新 Cap Reservation 对账状态：reservation_key=%s error_type=%s", ledger_key, type(persist_exc).__name__)
             failures.append(f"kind={kind}, offer_id={oid}, token={reservation_id}, error_type={type(exc).__name__}")
             logger.error("Cap reservation rollback failed; continue with remaining tokens：error_type=%s", type(exc).__name__)
     if failures:
@@ -476,7 +476,7 @@ async def increment_cap_count(
         return _result(True, "cap_ok")
         
     except Exception as e:
-        logger.error(f"增加Cap计数失败: {str(e)}", exc_info=True)
+        logger.error("增加Cap计数失败：error_type=%s", type(e).__name__)
         try:
             await _rollback_reserved_redis(reserved)
             reserved.clear()
@@ -560,6 +560,6 @@ async def reset_daily_caps(db: AsyncSession) -> None:
             len(caps_to_reset),
         )
     except Exception as e:
-        logger.error("每日 Cap 跨日重置失败: %s", e, exc_info=True)
+        logger.error("每日 Cap 跨日重置失败：error_type=%s", type(e).__name__)
         await db.rollback()
         raise
