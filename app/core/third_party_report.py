@@ -25,6 +25,27 @@ from app.core.log_utils import mask_email, mask_hash_prefix, mask_phone
 logger = logging.getLogger(__name__)
 
 REPORT_LOG_LEASE_SECONDS = 300
+# HTTPX 的 read timeout 限制相邻数据块之间的等待时间，不限制整个响应的墙钟时长。
+# 单次请求总时限必须明显短于租约，避免慢速持续回包让旧 Worker 长期占有请求。
+REPORT_HTTP_REQUEST_DEADLINE_SECONDS = 60
+
+
+def _report_http_request_deadline_seconds() -> float:
+    """单次 HTTP 总时限最多占租约的一半，为结果落库和调度留出安全余量。"""
+    if REPORT_LOG_LEASE_SECONDS <= 0 or REPORT_HTTP_REQUEST_DEADLINE_SECONDS <= 0:
+        raise ValueError("第三方上报租约和 HTTP 总时限必须为正数")
+    return min(
+        float(REPORT_HTTP_REQUEST_DEADLINE_SECONDS),
+        REPORT_LOG_LEASE_SECONDS / 2,
+    )
+
+
+async def _post_with_total_deadline(client, url, *, json, params):
+    """在 HTTPX 网络阶段超时之外，再限制整个请求的总墙钟时长。"""
+    return await asyncio.wait_for(
+        client.post(url, json=json, params=params),
+        timeout=_report_http_request_deadline_seconds(),
+    )
 
 
 def sha256_hash(value: Optional[str]) -> str:
@@ -668,7 +689,7 @@ async def send_third_party_report(
                     "report_log_id": report_log_id,
                 }
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(url, json=send_data, params=params)
+                response = await _post_with_total_deadline(client, url, json=send_data, params=params)
                 # 第三方响应可能回显 user_data；日志只记录状态，不记录响应正文。
                 logger.debug("[第三方上报] 响应状态: status=%s", response.status_code)
 
@@ -763,7 +784,7 @@ async def send_third_party_report(
                         response_body=None
                     )
 
-        except httpx.TimeoutException:
+        except (httpx.TimeoutException, asyncio.TimeoutError):
             error_msg = "请求超时"
             failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
             logger.warning(f"[第三方上报] ✗ 超时 (尝试 {attempt + 1}/{hash_attempts})")
@@ -876,7 +897,7 @@ async def send_third_party_report(
                     "report_log_id": report_log_id,
                 }
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(url, json=send_data, params=params)
+                response = await _post_with_total_deadline(client, url, json=send_data, params=params)
                 # 第三方响应可能回显 user_data；日志只记录状态，不记录响应正文。
                 logger.debug("[第三方上报] 响应状态: status=%s", response.status_code)
 
@@ -944,7 +965,7 @@ async def send_third_party_report(
                         response_body=None
                     )
 
-        except httpx.TimeoutException:
+        except (httpx.TimeoutException, asyncio.TimeoutError):
             error_msg = "请求超时"
             failure_reasons.append(f"尝试 {hash_attempts + 1} (不使用哈希): {error_msg}")
             logger.warning(f"[第三方上报] ✗ 超时 (尝试 {hash_attempts + 1}/{hash_attempts + 1} - 不使用哈希)")
