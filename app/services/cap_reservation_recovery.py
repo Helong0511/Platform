@@ -56,7 +56,7 @@ async def recover_cap_reservations(
                         or_(
                             CapReservation.lease_owner.is_(None),
                             CapReservation.lease_expires_at.is_(None),
-                            CapReservation.lease_expires_at <= now,
+                            CapReservation.lease_expires_at <= func.now(),
                         ),
                     ),
                     and_(
@@ -65,7 +65,7 @@ async def recover_cap_reservations(
                         or_(
                             CapReservation.lease_owner.is_(None),
                             CapReservation.lease_expires_at.is_(None),
-                            CapReservation.lease_expires_at <= now,
+                            CapReservation.lease_expires_at <= func.now(),
                         ),
                     ),
                 )
