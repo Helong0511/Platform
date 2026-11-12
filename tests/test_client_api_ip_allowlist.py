@@ -105,9 +105,24 @@ async def test_client_api_invalid_allowlist_fails_closed(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_client_api_loopback_remains_allowed_by_documented_contract(monkeypatch):
+async def test_client_api_loopback_is_not_implicitly_allowed(monkeypatch):
     monkeypatch.setattr(api_auth, "verify_signature", lambda **kwargs: True)
     client = make_client("192.0.2.10")
+
+    with pytest.raises(HTTPException) as caught:
+        await api_auth.verify_client_request(
+            make_request(),
+            FakeDB(client),
+            client_ip="127.0.0.1",
+        )
+
+    assert caught.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_client_api_loopback_is_allowed_when_explicitly_listed(monkeypatch):
+    monkeypatch.setattr(api_auth, "verify_signature", lambda **kwargs: True)
+    client = make_client("192.0.2.10, 127.0.0.1")
 
     result = await api_auth.verify_client_request(
         make_request(),
