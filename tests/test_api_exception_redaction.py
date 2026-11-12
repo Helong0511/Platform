@@ -77,3 +77,13 @@ def test_offer_link_operations_do_not_log_raw_exceptions():
     assert "error={str(e)}" not in source
     assert "exc_info=True" not in source
     assert "error_type=%s" in source
+
+
+def test_click_and_deduction_apis_do_not_log_or_return_raw_exceptions():
+    clicks_source = _source("app/api_v1/cpl/conversions/clicks.py")
+    deductions_source = _source("app/api_v1/cpl/conversions/deductions.py")
+    assert "str(e)" not in clicks_source
+    assert "exc_info=True" not in clicks_source
+    assert "str(e)" not in deductions_source
+    assert "detail=str(e)" not in deductions_source
+    assert "exc_info=True" not in deductions_source
