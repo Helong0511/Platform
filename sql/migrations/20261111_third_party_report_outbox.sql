@@ -92,11 +92,19 @@ PREPARE migration_stmt FROM @ddl;
 EXECUTE migration_stmt;
 DEALLOCATE PREPARE migration_stmt;
 
-SET @has_due_index = (
-    SELECT COUNT(*) FROM information_schema.STATISTICS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'third_party_report_logs'
-      AND INDEX_NAME = 'idx_third_party_outbox_due'
+-- 校验索引完整结构；错误的同名索引不得被当作已完成迁移。
+SET @has_index = (
+    SELECT COUNT(*)
+    FROM (
+        SELECT INDEX_NAME
+        FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'third_party_report_logs'
+          AND INDEX_NAME = 'idx_third_party_outbox_due'
+        GROUP BY INDEX_NAME
+        HAVING COUNT(*) = 5
+           AND GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') = 'outbox_enqueued,status,next_retry_time,report_start_time,id'
+    ) AS valid_outbox_index
 );
 SET @ddl = IF(
     @has_due_index = 0,
