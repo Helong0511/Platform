@@ -234,7 +234,7 @@ async def get_client(
     # 如果是客户用户，只能查看自己的客户信息
     # ---------- 条件分支 ----------
     if current_user.role == UserRole.CLIENT:
-        query = query.where(Client.user_id == current_user.id)
+        query = query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
 
     result = await db.execute(query)
     client = result.scalars().first()
