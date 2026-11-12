@@ -1099,3 +1099,51 @@ PR #1 继续 Open / Draft，不合并 main、不部署。所有验证继续仅�
 - 仍需增加 A/B Worker 故障注入：A 取得租约后暂停超过 TTL，B 接管并完成发送，A 恢复后不得发送 HTTP 或更新 B 的状态；并覆盖长 HTTP、Worker 崩溃及远端接收后 ACK 丢失。
 - 不宣称 exactly-once；远端已接收但本地 ACK 丢失仍可能按稳定 event_key 重试。
 - PR #1 继续 Open / Draft；不合并 main、不部署。
+
+## 49. Run #1390 / #1391 逐条测试证据与 A/B Worker 失租恢复（2026-11-12）
+
+### 对第 48 节日志证据的补充更正
+
+第 48 节所说“quiet 日志未展示具体测试节点”仅适用于 Run #1388。Run #1390 已使用 verbose pytest 输出逐条节点，确认此前同秒续租断言确实包含在 MySQL 测试中：
+
+- Run #1390：https://github.com/Helong0511/Platform/actions/runs/43173548384
+- SHA：`0122c2c9527aa2ee07e0837a3337b5cde9e200e0`
+- Backend：530 passed、1 skipped、1 warning。
+- `tests/test_third_party_report_outbox_mysql_integration.py::test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable` 通过；该用例包含同秒立即续租、旧令牌拒绝更新、新令牌更新、旧令牌续租失败和过期租约不可复活等断言。
+- Outbox MySQL 专项测试模块中另有 PII 保留、Schema bootstrap 串行化与 fail-closed 测试均通过。
+- Frontend Lint、Build、Playwright Mock API E2E 全部通过。
+
+### 新增 A/B Worker 组合故障测试
+
+提交：`87301d6f0a817be7bdd66a9cbfc1840c99e2232c`
+
+新增测试：
+`tests/test_third_party_report_outbox_mysql_integration.py::test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover`
+
+测试在每次运行独立创建的临时 MySQL 数据库中执行：
+1. Worker A 原子认领记录并持有令牌。
+2. 将测试时钟推进超过租约 TTL，模拟 A 长时间暂停。
+3. Worker B 接管同一记录并获得新令牌。
+4. A 恢复后，旧令牌续租返回 None。
+5. A 使用旧令牌更新状态返回 False，不能覆盖 B 的状态。
+6. B 使用新令牌更新成功，最终记录状态及令牌仍属于 B。
+
+发送前续租失败不构造 HTTP Client 的负向单测已在此前 Run #1390 验证通过；两组证据结合验证失租 Worker 不应进入外部发送路径。该 A/B MySQL 测试本身不调用任何外部 HTTP。
+
+### Run #1391 验收
+
+- Run：https://github.com/Helong0511/Platform/actions/runs/43173985432
+- SHA：`87301d6f0a817be7bdd66a9cbfc1840c99e2232c`
+- Backend：**531 passed、1 skipped、1 warning**。
+- 新增 A/B Worker MySQL 故障测试通过。
+- Cap Reservation MySQL + Redis 集成测试 11 项全部通过：孤儿 reservation 回滚、已提交转化保留、COMMIT ACK 丢失、NEEDS_RECONCILIATION 退避恢复、并发 claim、恢复 Worker 防双重回滚、错误 lease owner 拒绝终结/删除 token、重复 Postback 不接管过期租约、真实 MySQL TCP 代理丢弃 COMMIT ACK、Redis 回滚墓碑幂等、数据库时钟防本机时钟超前。
+- Outbox MySQL 集成测试（包括 A/B 新用例）全部通过。
+- Frontend：Lint、Build、Playwright Mock API Browser E2E 全部通过。
+- CI 使用临时 MySQL / Redis、独立随机测试数据库、Redis DB14、合成数据和 Mock API；未连接生产环境或真实第三方服务。
+- warning 仍为 passlib / Python 3.11 `crypt` 弃用提示；唯一 skip 为未提交的本机核对脚本。
+
+### 剩余 Cap Reservation 验收边界
+
+上述 11 项通过不等于 Cap 故障矩阵全部完成。仍需单独补充/核对 Redis failover、eviction、整库数据丢失后的可信基线重建、DB commit 阻塞/连接池耗尽、进程在各状态转换点被杀、跨日 Daily token、Total token 生命周期、DB/Redis 恢复期间多 Worker 竞争的组合场景。任何 UNKNOWN 都不得按 ABSENT 处理，任何无法证明的计数不得自动 DECR。
+
+PR #1 仍保持 Open / Draft；不合并 main、不部署。凭据安全专项和用户明确暂缓的前端 Production High advisory 不在本轮擅自处理。
