@@ -33,6 +33,22 @@ class _Result:
         return self.scalar
 
 
+@pytest.mark.asyncio
+async def test_cap_refresh_failure_does_not_log_raw_database_error(caplog):
+    class BrokenRefreshDB:
+        async def refresh(self, obj):
+            raise RuntimeError("alice@example.invalid 203.0.113.77 secret-sql-value")
+
+    cap = SimpleNamespace(id=77)
+    with caplog.at_level("DEBUG", logger=cap_manager.__name__):
+        await cap_manager._refresh_offer_caps(BrokenRefreshDB(), [cap])
+
+    assert "error_type=RuntimeError" in caplog.text
+    assert "alice@example.invalid" not in caplog.text
+    assert "203.0.113.77" not in caplog.text
+    assert "secret-sql-value" not in caplog.text
+
+
 class _FakeCapDB:
     def __init__(self, caps):
         self.caps = caps
