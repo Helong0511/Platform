@@ -29,7 +29,7 @@ async def cap_reservation_recovery_task():
             f"backlog_prepared={backlog['pending_prepared']} "
             f"backlog_reserved={backlog['pending_reserved']} "
             f"backlog_needs_reconciliation={backlog['needs_reconciliation']} "
-            f"backlog_token_cleanup={backlog['committed_token_cleanup_pending']} "
+            f"backlog_terminal_token_cleanup={backlog['terminal_token_cleanup_pending']} "
             f"oldest_pending_seconds={backlog['oldest_pending_seconds']} "
             f"failed={stats['failed']} duration={duration:.2f}s"
         )
@@ -39,7 +39,7 @@ async def cap_reservation_recovery_task():
             or stats["cleanup_pending"]
             or stats["failed"]
             or backlog["needs_reconciliation"]
-            or backlog["committed_token_cleanup_pending"]
+            or backlog["terminal_token_cleanup_pending"]
             or backlog["oldest_pending_seconds"] > 600
         ):
             logger.warning("Cap Reservation 恢复任务存在待对账项：%s", message)
