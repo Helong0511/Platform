@@ -61,7 +61,7 @@ def _client_user():
         is_active=True,
         login_restricted=False,
         login_message=None,
-        clients=[client],
+        clients=[SimpleNamespace(allowed_ips=""), client],
         verify_password=lambda password: password == "synthetic-password",
     )
     return user, client
