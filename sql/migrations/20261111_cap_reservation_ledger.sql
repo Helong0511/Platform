@@ -69,3 +69,128 @@ CREATE TABLE IF NOT EXISTS cap_reservations (
 -- SHOW CREATE TABLE cap_reservations;
 -- SHOW INDEX FROM cap_reservations;
 -- SELECT COUNT(*) FROM cap_reservations;
+
+-- CREATE TABLE IF NOT EXISTS 不会修复同名错误表。发布前必须 fail-closed，
+-- 防止把字段/索引/约束不兼容的旧表误认为迁移成功。
+SET @cap_reservation_schema_valid = (
+    SELECT
+        (SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations') = 23
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'id' AND COLUMN_TYPE = 'int' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'reservation_key' AND COLUMN_TYPE = 'varchar(64)' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'platform' AND COLUMN_TYPE = 'varchar(50)' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'conversion_id' AND COLUMN_TYPE = 'varchar(255)' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'event_name' AND COLUMN_TYPE = 'varchar(100)' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'offer_id' AND COLUMN_TYPE = 'int' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'publisher_id' AND COLUMN_TYPE = 'int' AND IS_NULLABLE = 'YES') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'cap_kind' AND COLUMN_TYPE = 'varchar(10)' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'business_date' AND COLUMN_TYPE = 'date' AND IS_NULLABLE = 'YES') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'redis_counter_key' AND COLUMN_TYPE = 'varchar(255)' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'redis_token_key' AND COLUMN_TYPE = 'varchar(512)' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'redis_reserved' AND COLUMN_TYPE = 'tinyint(1)' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'redis_token_cleaned' AND COLUMN_TYPE = 'tinyint(1)' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'state' AND COLUMN_TYPE = 'varchar(24)' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'attempts' AND COLUMN_TYPE = 'int' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'lease_owner' AND COLUMN_TYPE = 'varchar(64)' AND IS_NULLABLE = 'YES') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'lease_expires_at' AND COLUMN_TYPE = 'datetime' AND IS_NULLABLE = 'YES') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'last_error' AND COLUMN_TYPE = 'text' AND IS_NULLABLE = 'YES') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'prepared_at' AND COLUMN_TYPE = 'datetime' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'reserved_at' AND COLUMN_TYPE = 'datetime' AND IS_NULLABLE = 'YES') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'finalized_at' AND COLUMN_TYPE = 'datetime' AND IS_NULLABLE = 'YES') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'created_at' AND COLUMN_TYPE = 'datetime' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'updated_at' AND COLUMN_TYPE = 'datetime' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT TABLE_COLLATION FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations') = 'utf8mb4_unicode_ci'
+        AND (SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND CONSTRAINT_TYPE = 'CHECK'
+               AND CONSTRAINT_NAME IN (
+                   'chk_cap_reservation_key_sha256',
+                   'chk_cap_reservation_offer_positive',
+                   'chk_cap_reservation_publisher_positive',
+                   'chk_cap_reservation_attempts_nonnegative',
+                   'chk_cap_reservation_kind_date',
+                   'chk_cap_reservation_state'
+               )) = 6
+        AND (SELECT COUNT(*) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND INDEX_NAME IN (
+                   'PRIMARY', 'uq_cap_reservation_key',
+                   'idx_cap_reservation_state_updated', 'idx_cap_reservation_lease',
+                   'idx_cap_reservation_event', 'idx_cap_reservation_scope'
+               )) = 13
+        AND (SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX)
+             FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND INDEX_NAME = 'uq_cap_reservation_key') = 'reservation_key'
+        AND (SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX)
+             FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND INDEX_NAME = 'idx_cap_reservation_state_updated') = 'state,updated_at'
+        AND (SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX)
+             FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND INDEX_NAME = 'idx_cap_reservation_lease') = 'state,lease_expires_at'
+        AND (SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX)
+             FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND INDEX_NAME = 'idx_cap_reservation_event') = 'platform,conversion_id,event_name'
+        AND (SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX)
+             FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND INDEX_NAME = 'idx_cap_reservation_scope') = 'offer_id,publisher_id,cap_kind,business_date'
+);
+SET @cap_reservation_validation_sql = IF(
+    @cap_reservation_schema_valid,
+    'SELECT 1',
+    'SELECT * FROM __cap_reservations_schema_mismatch__'
+);
+PREPARE cap_reservation_schema_validation FROM @cap_reservation_validation_sql;
+EXECUTE cap_reservation_schema_validation;
+DEALLOCATE PREPARE cap_reservation_schema_validation;
