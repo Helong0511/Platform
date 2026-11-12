@@ -11,7 +11,7 @@
 - [ ] PR 最新 HEAD 的 Backend、Frontend lint/build、Playwright Mock API E2E 全绿。
 - [ ] CI 隔离 MySQL 8.0.16+ migration 测试通过；CI 隔离 MySQL + Redis 跨存储恢复测试通过，并验证 CHECK 约束确实拒绝非法账本行。
 - [ ] 生产 MySQL 版本满足 MySQL 8.0.16+（恢复任务依赖 `FOR UPDATE SKIP LOCKED`，账本 CHECK 约束也必须由数据库实际强制执行）。
-- [ ] 已确认部署包包含 `sql/migrations/20261111_cap_reservation_ledger.sql`、`sql/platform.sql` 和恢复任务代码。
+- [ ] 已确认部署包包含 `sql/migrations/20261110_short_link_click_sync_idempotency.sql`、`sql/migrations/20261111_cap_reservation_ledger.sql`、`sql/platform.sql` 和恢复任务代码。
 - [ ] 发布负责人已安排旧 Postback 请求排空窗口；不能在旧/新 worker 混跑期间启用新恢复任务。
 - [ ] 已完成旧版本 Redis Cap 计数与 DB 快照基线核对；不允许直接把 Redis 计数盲目同步到 DB。
 - [ ] MySQL 备份和 Redis RDB/AOF 备份已验证可恢复。
@@ -36,11 +36,12 @@
 3. 备份数据库；确认 Redis 持久化文件/快照可用。
 4. 在目标 MySQL 数据库执行 `sql/migrations/20261111_cap_reservation_ledger.sql`。该 DDL 为新增表，仍须按发布审批执行；不要在应用启动时依赖 `create_all()` 替代迁移。
 5. 使用只读核验确认 `cap_reservations` 的字段、唯一键、恢复索引和 `utf8mb4_unicode_ci`。
-6. 发布同一 SHA 的完整应用代码到所有 API worker；确认没有旧版本 worker。
-7. 启动/重启 API 服务：`Platform-backend.service`（其配置将 `ENABLE_SCHEDULER=false`）。
-8. 启动/重启独立调度服务：`Platform-scheduler.service`（其配置为单 worker、`ENABLE_SCHEDULER=true`）。
-9. 确认调度任务 `Cap Reservation 崩溃恢复` 已同步并按每分钟周期执行。
-10. 先进行受控内部 Postback 冒烟，检查账本状态与 Redis counter/token，再恢复正常 Postback 流量。
+6. 在发布短链接点击刷盘代码前，执行 `sql/migrations/20261110_short_link_click_sync_idempotency.sql`；核验 `short_link_click_sync_batches` 的五个字段、主键及两个复合索引，并确认历史表/数据未被覆盖。
+7. 发布同一 SHA 的完整应用代码到所有 API worker；确认没有旧版本 worker。
+8. 启动/重启 API 服务：`Platform-backend.service`（其配置将 `ENABLE_SCHEDULER=false`）。
+9. 启动/重启独立调度服务：`Platform-scheduler.service`（其配置为单 worker、`ENABLE_SCHEDULER=true`）。
+10. 确认调度任务 `Cap Reservation 崩溃恢复` 已同步并按每分钟周期执行。
+11. 先进行受控内部 Postback 冒烟，检查账本状态与 Redis counter/token，再恢复正常 Postback 流量。
 
 ## 4. 发布后观察
 
@@ -111,14 +112,15 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 ### 9.2 强制迁移顺序
 
 1. 完成数据库备份、恢复验证、维护窗口审批及上报流量排空。
-2. 执行 `sql/migrations/20261110_third_party_report_event_idempotency.sql`。
-3. 检查 `missing_event_keys=0`，重复键查询无结果；确认 `unique_event_key` 已创建，且旧的 `unique_source_adsid` 已按迁移预期替换。
-4. **大表回填评估（当前阻断项）**：该迁移中的 `UPDATE third_party_report_logs ... WHERE event_key IS NULL` 是一次全表范围回填，不是分批任务。执行前必须在隔离副本使用接近目标库规模与分布的合成数据测量耗时、事务/锁影响、redo/undo 与 binlog 增长、复制延迟、连接池占用及中断后重跑成本；确认维护窗口与写入排空策略。未完成评估前不得据此直接在生产执行。若需要改为分批回填，必须先设计可重入的批次边界、稳定排序键、并发写入兼容和最终 NULL/重复键校验，并在隔离环境完整演练后再替换发布步骤。
-4. 执行 `sql/migrations/20261111_third_party_report_outbox.sql`。
-5. 核验 Outbox 五个字段和 `idx_third_party_outbox_due`，与 ORM `ThirdPartyReportLog` 定义一致。
-6. 执行 `sql/migrations/20261112_third_party_report_pii_retention.sql`，核对 `third_party_report_logs.pii_scrubbed_at` / `idx_third_party_pii_retention` 及 `postback_forward_logs.pii_scrubbed_at` / `idx_forward_log_pii_retention`；该迁移只新增元数据，不清理历史数据。
-7. 发布同一 SHA 的兼容应用代码；先保持 Outbox worker 禁用，执行隔离/受控验证后再按发布审批启用 worker。
-8. 确认新旧 API/worker 不混跑；观察 pending、failed、重试耗尽和租约恢复指标后再恢复正常流量。
+2. 执行 `sql/migrations/20261110_short_link_click_sync_idempotency.sql`，核验 `short_link_click_sync_batches` 的字段、主键、索引顺序/唯一性和字符集；该表用于 Redis pending batch 与数据库入账之间的幂等确认，必须先于使用该账本的应用代码发布。
+3. 执行 `sql/migrations/20261110_third_party_report_event_idempotency.sql`。
+4. 检查 `missing_event_keys=0`，重复键查询无结果；确认 `unique_event_key` 已创建，且旧的 `unique_source_adsid` 已按迁移预期替换。
+5. **大表回填评估（当前阻断项）**：该迁移中的 `UPDATE third_party_report_logs ... WHERE event_key IS NULL` 是一次全表范围回填，不是分批任务。执行前必须在隔离副本使用接近目标库规模与分布的合成数据测量耗时、事务/锁影响、redo/undo 与 binlog 增长、复制延迟、连接池占用及中断后重跑成本；确认维护窗口与写入排空策略。未完成评估前不得据此直接在生产执行。若需要改为分批回填，必须先设计可重入的批次边界、稳定排序键、并发写入兼容和最终 NULL/重复键校验，并在隔离环境完整演练后再替换发布步骤。
+6. 执行 `sql/migrations/20261111_third_party_report_outbox.sql`。
+7. 核验 Outbox 六个字段和 `idx_third_party_outbox_due`，与 ORM `ThirdPartyReportLog` 定义一致。
+8. 执行 `sql/migrations/20261112_third_party_report_pii_retention.sql`，核对两张日志表的 `pii_scrubbed_at` 均为无默认值的可空 DATETIME，且两个保留索引均为 BTREE、完整列、升序、非唯一索引；该迁移只新增元数据，不清理历史数据。
+9. 发布同一 SHA 的兼容应用代码；先保持 Outbox worker 禁用，执行隔离/受控验证后再按发布审批启用 worker。
+10. 确认新旧 API/worker 不混跑；观察 pending、failed、重试耗尽和租约恢复指标后再恢复正常流量。
 
 `sql/platform.sql` 是完整建库基线，已经包含 `event_key`、Outbox 字段及相关索引；它不是在线增量迁移脚本。已有数据库必须按上面的增量迁移编号顺序执行，禁止对现有生产库直接运行会 DROP/重建表的完整基线脚本。
 
