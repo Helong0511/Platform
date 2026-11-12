@@ -48,7 +48,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.audit_log import log_login, log_logout, commit_audit_log
 from app.core.auth_response import build_token_json_response, clear_auth_cookies, raise_auth_error
-from app.core.api_auth import _is_user_client_ip_allowed
+from app.core.api_auth import _get_active_user_clients, _is_user_client_ip_allowed
 from app.core.auth_user_payload import build_auth_user_payload
 from app.core.async_orm import get_first_loaded_collection_item
 from app.core.config import settings
@@ -251,9 +251,26 @@ async def login(
 
     # ====== 客户 IP 白名单检查 ======
     # 登录与外部客户 API 共用同一白名单规则；回环地址也必须显式列入。
-    client_record = get_first_loaded_collection_item(user, "clients")
-    if user.role == UserRole.CLIENT and client_record:
-        if not _is_user_client_ip_allowed(getattr(user, "clients", None), client_ip):
+    active_client_records = (
+        _get_active_user_clients(getattr(user, "clients", None))
+        if user.role == UserRole.CLIENT
+        else []
+    )
+    if user.role == UserRole.CLIENT and not active_client_records:
+        await _record_login_failure(
+            db,
+            request,
+            user=user,
+            error_message="客户账号没有启用中的客户主体",
+        )
+        raise_auth_error(
+            ErrorCode.FORBIDDEN,
+            "当前客户账号没有可用的客户主体，请联系管理员",
+            http_status=status.HTTP_403_FORBIDDEN,
+        )
+    client_record = active_client_records[0] if active_client_records else None
+    if user.role == UserRole.CLIENT:
+        if not _is_user_client_ip_allowed(active_client_records, client_ip):
             logger.warning(
                 "客户登录失败：来源 IP 不在白名单中，user_id=%s",
                 user.id,
@@ -297,12 +314,13 @@ async def login(
     api_enabled = False
     has_publisher = False
     client_record = get_first_loaded_collection_item(user, "clients")
-    if user.role == UserRole.CLIENT and client_record:
-        api_enabled = bool(client_record.api_enabled)
+    if user.role == UserRole.CLIENT and active_client_records:
+        active_client_ids = [client.id for client in active_client_records]
+        api_enabled = any(bool(client.api_enabled) for client in active_client_records)
         publisher_check = await db.execute(
             select(func.count(Publisher.id)).where(
                 and_(
-                    Publisher.client_id == client_record.id,
+                    Publisher.client_id.in_(active_client_ids),
                     Publisher.is_active == True,
                 )
             )
