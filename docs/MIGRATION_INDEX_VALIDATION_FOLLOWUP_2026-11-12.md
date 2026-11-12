@@ -200,3 +200,74 @@
 - 自动 PII 清理默认配置仍为 `THIRD_PARTY_REPORT_PII_RETENTION_DAYS=0`，本轮没有启用任何真实数据清理。
 - 具体保留期限、业务审计需求和法律/合同要求仍需负责人审批；不能仅因技术测试通过就设置生产保留天数。
 - 当前 MySQL 集成测试证明目标匹配、活跃租约保护和基本清理结果，不替代真实备份恢复、长时间并发压力、跨 worker 故障注入。
+
+
+## 11. Schema bootstrap fail-closed 修复与模型索引冲突闭环（Run #1296 / #1298）
+
+### 11.1 启动 schema 初始化机制修复
+
+文件：`app/bootstrap/lifespan.py`
+
+- MySQL schema bootstrap 使用 session advisory lock `GET_LOCK('platform_schema_bootstrap', 60)` 串行化多个 API / scheduler worker 的建表检查。
+- 锁持有期间执行 `Base.metadata.create_all`，随后逐表核对 ORM metadata 声明的表和列。
+- 对已存在表，`create_all` 不会 ALTER 新列；结构核验发现缺表/缺列时抛错并拒绝启动。
+- 不再无条件忽略 MySQL 1684 或其它 schema 初始化异常。
+- 释放锁失败会记录异常类型；连接关闭会按 MySQL 语义释放 session advisory lock。
+- `init_db()` 失败也不再被 lifespan 静默吞掉。
+
+### 11.2 全量 ORM schema 创建暴露的重复索引
+
+Run #1295 对完整 `Base.metadata` 执行真实 MySQL create_all 时失败：
+
+- MySQL 1061：`Duplicate key name 'ix_user_sessions_token_type'`。
+- 根因：`app/models/session.py` 的 `token_type` 列声明 `index=True`，SQLAlchemy 已生成默认索引 `ix_user_sessions_token_type`；`__table_args__` 又显式声明同名 Index，导致创建同一表时重复创建。
+- 同一模型还对 `expires_at` 同时使用 `index=True` 和显式单列索引；此外主键 `id` 的 `index=True` 会产生不必要的主键重复索引。
+- 修复：保留 `token_type` / `expires_at` 列级索引声明，删除重复显式索引；移除主键 `id` 的冗余 `index=True`。
+- 这次错误证明之前 lifespan 的“记录错误后继续启动”会掩盖全量 schema 创建失败，fail-closed 改动成功暴露真实问题。
+
+### 11.3 多 Worker 默认管理员初始化竞态
+
+文件：`app/core/database.py`
+
+- 多 worker 同时启动时，可能同时查询到“尚无管理员”，然后竞争插入同一个默认管理员。
+- 唯一键只允许一个 worker 成功；其它 worker 可能得到 IntegrityError。
+- 现已只对 MySQL 1062 / 明确 duplicate entry / SQLite unique constraint 失败执行回滚后复查管理员：
+  - 如果管理员已由其它 worker 创建，视为并发初始化成功。
+  - 如果没有管理员，或错误不是重复键，继续抛错，不能吞掉真实 DB 问题。
+- 新增 `tests/test_database_init.py` 覆盖并发重复键成功确认和非重复完整性错误继续抛出。
+
+### 11.4 CI 验收记录
+
+- Run #1294：在全量 metadata 并发测试执行过久后，被后续测试拆分提交取消；不计为通过。
+- Run #1295：**500 passed、1 failed、1 skipped、1 warning**；失败是上述真实重复索引名，未计为通过。
+- Run #1296：**501 passed、1 skipped、1 warning**；完整 ORM schema 创建及列核验通过，Frontend 全部通过。
+- Run #1298：**503 passed、1 skipped、1 warning**；新增管理员初始化竞态测试通过，Frontend npm ci、Advisory、Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- Run #1296：https://github.com/Helong0511/Platform/actions/runs/43151042571
+- Run #1298：https://github.com/Helong0511/Platform/actions/runs/43151286645
+
+### 11.5 GET_LOCK 使用边界与发布前提
+
+MySQL 官方文档确认：
+- `GET_LOCK` 是独占 session-level named lock；同名锁被持有时其它 session 等待。
+- 返回 1 表示成功，0 表示超时，NULL 表示错误。
+- `COMMIT/ROLLBACK` 不释放该锁；必须调用 `RELEASE_LOCK` 或结束连接。
+- 锁名最大 64 字符，锁作用域是单个 MySQL Server，不是多节点集群全局协调。
+- `GET_LOCK` 对 statement-based replication 不安全；NDB Cluster 也不能依赖它跨节点协调。
+
+因此部署前仍需核实：
+- [ ] 生产 MySQL 是单一协调主节点/适用的拓扑，所有应用 worker 连接同一 MySQL Server。
+- [ ] 生产 binlog_format 与复制拓扑适合使用 `GET_LOCK`；若为 statement-based replication 或多主/多节点协调场景，需改用适配的锁服务或迁移锁表方案。
+- [ ] 人工 SQL migration 执行流程与应用启动锁协调；当前 SQL 文件尚未统一接入 runner，因此不能在应用 worker 运行期间随意执行 schema DDL。
+
+官方资料：
+- MySQL 8.0 Locking Functions / GET_LOCK：https://dev.mysql.com/doc/refman/8.0/en/locking-functions.html
+
+### 11.6 尚未达到上线条件的项目
+
+- [ ] 建立有序 migration runner / revision ledger / manifest，并让手工迁移与应用启动使用同一协调机制。
+- [ ] 启动 readiness 除表/列外，补充关键唯一约束与索引列顺序的结构核验；不能仅依赖 create_all。
+- [ ] 逻辑备份导出、导入隔离实例恢复及数据校验。
+- [ ] MySQL server crash、磁盘故障及 DDL 执行中断的更强故障注入。
+- [ ] Worker pause/resume、旧版本应用兼容回滚、schema/data diff、大规模数据升级耗时/锁等待评估。
+- [ ] PII 保留期限业务/合规审批仍未完成，默认仍为 0（禁用）。
+- [ ] PR #1 继续 Open / Draft；不合并 main、不部署、不访问生产环境；凭据安全专项仍按用户要求暂缓。
