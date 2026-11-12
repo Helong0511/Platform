@@ -40,6 +40,7 @@ def _is_loopback_host(host: str | None) -> bool:
 
 _SAFE_MYSQL_TARGET = (
     os.getenv("UNIT_TEST") == "1"
+    and os.getenv("GITHUB_ACTIONS") == "true"
     and os.getenv("MYSQL_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS") == "1"
     and _is_loopback_host(MYSQL_HOST)
     and MYSQL_DATABASE == "platform_ci"
