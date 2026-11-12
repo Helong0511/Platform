@@ -664,3 +664,32 @@ PR 继续 Open / Draft；不合并 main、不部署。所有验证仅使用 GitH
 - 该保护降低测试误连外部/生产资源的风险；CI 本身仍只验证代码、临时服务和合成数据，不能替代生产发布前的网络隔离、权限与基础设施审计。
 - 迁移全流程备份恢复、逐 DDL 中断、应用兼容回滚、Outbox 多 Worker 配置生命周期及 Cap Redis/MySQL 组合故障仍未全部验收。
 - PR 继续 Open / Draft；不合并 main、不部署；凭据安全专项继续按既定范围暂缓。
+
+
+
+## 30. Outbox 终态失败积压持续告警（2026-11-12，Run #1202）
+
+### 发现的问题
+
+- Outbox 对缺少短链接/斗篷配置引用的记录会正确终结为 `failed` 并清除 `next_retry_time`，防止扫描器每分钟重复选择。
+- 但原有 `exhausted` 计数只统计 `attempt_count >= max_attempts` 的记录；这类尚未尝试发送的配置缺失记录不会进入该计数。
+- 终态失败记录后续不再进入 due scan，调度任务的单轮 `failed` 也会恢复为 0，因此可能出现数据库持续存在失败 Outbox、调度状态却显示无积压且不再告警的情况。
+
+### 修复
+
+- `process_postback_report_outbox` 新增 `terminal_failed` 计数：统计仍未清理、`status=failed` 且 `next_retry_time IS NULL` 的 Outbox 行。
+- 原有 `exhausted` 保留其“自动重试次数耗尽”语义；`terminal_failed` 覆盖所有终态失败，包括配置引用缺失和重试耗尽，不把两者混为一谈。
+- 每分钟调度任务在任务结果中输出 `terminal_failed`；只要该计数非零，就持续写入 warning，直到管理员处置或记录按策略清理。
+- 新增 SQL 编译断言和调度告警测试；同时更新单条 Worker 异常测试夹具，确保所有 stats 返回契约一致。
+
+### CI 证据
+
+- Run #1201（SHA `02317a69037a2c8c727a9a449a1585fd4d093605`）发现一处测试 FakeDB 返回值断言未同步新增字段：Backend 1 failed、459 passed、1 skipped、1 warning；Frontend 全部通过。失败仅为测试夹具漏掉 `terminal_failed=0`，已更新并保留该历史失败记录。
+- Run #1202（SHA `da0eaf5dec85eda0b8b1fd1eeb2b221915008209`）：Backend **460 passed、1 skipped、1 warning**；Python Compile、Frontend Lint/Build、Playwright Mock API Browser E2E 全部通过。
+- Run #1202：https://github.com/Helong0511/Platform/actions/runs/43140432286。
+
+### 仍需注意
+
+- `terminal_failed` 是持续积压数量，不代表自动重试；这些记录需要管理员检查配置引用、确认事件是否应补发，再按受控流程处理。
+- 对已清理 PII 的记录不计入该告警；Outbox worker 仍不得重新发送已清理载荷。
+- PR 继续 Open / Draft；不合并 main、不部署。
