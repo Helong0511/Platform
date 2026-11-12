@@ -481,3 +481,47 @@ async def test_recovery_skips_row_after_another_worker_claims_its_lease(monkeypa
     ]
     assert token_checks == [first.redis_token_key]
     assert finalized[0][0:2] == (first.reservation_key, "ROLLED_BACK")
+
+
+@pytest.mark.asyncio
+async def test_recovery_exception_does_not_persist_or_log_raw_error(monkeypatch, caplog):
+    from datetime import datetime
+
+    row = _reservation(state="RESERVED", redis_reserved=True)
+    row.business_date = None
+    sessions = [_Session(rows=[row]), _Session(event_id=None)]
+    persisted_errors = []
+
+    def session_factory():
+        return sessions.pop(0)
+
+    async def token_state(counter_key, token_key):
+        raise RuntimeError(
+            "email=buyer@example.invalid ip=203.0.113.88 click_id=private-click"
+        )
+
+    async def mark_needs(key, error, **kwargs):
+        persisted_errors.append(error)
+
+    monkeypatch.setattr(recovery, "AsyncSessionLocal", session_factory)
+    monkeypatch.setattr(
+        recovery, "get_app_now_naive",
+        lambda: datetime(2026, 11, 11, 12, 0, 0),
+    )
+    monkeypatch.setattr(
+        recovery.RedisCapManager, "get_reservation_token_state", token_state
+    )
+    monkeypatch.setattr(
+        recovery.CapReservationLedger, "mark_needs_reconciliation", mark_needs
+    )
+
+    with caplog.at_level("ERROR", logger=recovery.__name__):
+        stats = await recovery.recover_cap_reservations()
+
+    assert stats["failed"] == 1
+    assert stats["needs_reconciliation"] == 1
+    assert persisted_errors == ["恢复异常，error_type=RuntimeError"]
+    assert "RuntimeError" in caplog.text
+    assert "buyer@example.invalid" not in caplog.text
+    assert "203.0.113.88" not in caplog.text
+    assert "private-click" not in caplog.text
