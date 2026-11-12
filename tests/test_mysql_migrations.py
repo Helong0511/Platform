@@ -792,12 +792,12 @@ def test_cap_reservation_migration_rejects_wrong_same_name_table():
                 "PRIMARY KEY (id), UNIQUE KEY uq_cap_reservation_key (reservation_key)"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
             )
-            with pytest.raises(pymysql.err.OperationalError) as migration_error:
+            with pytest.raises(pymysql.err.ProgrammingError) as migration_error:
                 _run_sql_file(
                     cursor,
                     "sql/migrations/20261111_cap_reservation_ledger.sql",
                 )
-            # 动态验证查询引用故意不存在的哨兵表，错误码 1146 表示 fail-closed。
+            # MySQL 1146 为不存在表；PyMySQL 将其映射为 ProgrammingError。
             assert migration_error.value.args[0] == 1146
             cursor.execute(
                 "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
