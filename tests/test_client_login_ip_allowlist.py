@@ -76,7 +76,7 @@ async def test_client_login_does_not_implicitly_allow_loopback(monkeypatch):
     monkeypatch.setattr(
         auth_api,
         "get_first_loaded_collection_item",
-        lambda user, relationship: client,
+        lambda user, relationship: user.clients[0],
     )
 
     async def record_failure(*args, **kwargs):
@@ -110,7 +110,7 @@ async def test_refresh_token_cannot_bypass_client_loopback_allowlist(monkeypatch
     monkeypatch.setattr(
         refresh_api,
         "get_first_loaded_collection_item",
-        lambda user, relationship: client,
+        lambda user, relationship: user.clients[0],
     )
     monkeypatch.setattr(refresh_api, "revoke_tokens_from_request", unexpected_revoke)
 
