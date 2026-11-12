@@ -18,11 +18,19 @@ PREPARE migration_stmt FROM @ddl;
 EXECUTE migration_stmt;
 DEALLOCATE PREPARE migration_stmt;
 
+-- 校验索引完整结构；错误的同名索引不得被当作已完成迁移。
 SET @has_index = (
-    SELECT COUNT(*) FROM information_schema.STATISTICS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'third_party_report_logs'
-      AND INDEX_NAME = 'idx_third_party_pii_retention'
+    SELECT COUNT(*)
+    FROM (
+        SELECT INDEX_NAME
+        FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'third_party_report_logs'
+          AND INDEX_NAME = 'idx_third_party_pii_retention'
+        GROUP BY INDEX_NAME
+        HAVING COUNT(*) = 3
+           AND GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') = 'pii_scrubbed_at,created_at,id'
+    ) AS valid_third_party_pii_index
 );
 SET @ddl = IF(
     @has_index = 0,
