@@ -99,7 +99,7 @@ EXECUTE migration_stmt;
 DEALLOCATE PREPARE migration_stmt;
 
 -- 校验索引完整结构；错误的同名索引不得被当作已完成迁移。
-SET @has_index = (
+SET @has_due_index = (
     SELECT COUNT(*)
     FROM (
         SELECT INDEX_NAME
