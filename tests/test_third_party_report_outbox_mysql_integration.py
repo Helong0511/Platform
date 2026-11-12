@@ -121,6 +121,9 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
         monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
 
         now = get_app_now_naive()
+        # 使用可控时钟推进租约令牌，避免依赖真实 sleep 或调度精度。
+        lease_clock = [now]
+        monkeypatch.setattr(report_module, "get_app_now_naive", lambda: lease_clock[0])
         event_identity = uuid.uuid4().hex
         event_key = hashlib.sha256(event_identity.encode("utf-8")).hexdigest()
         async with session_factory() as session:
@@ -159,14 +162,15 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
                 update(ThirdPartyReportLog)
                 .where(ThirdPartyReportLog.id == report_id)
                 .values(
-                    report_start_time=get_app_now_naive() - timedelta(minutes=6),
-                    next_retry_time=get_app_now_naive() - timedelta(minutes=1),
+                    report_start_time=lease_clock[0] - timedelta(minutes=6),
+                    next_retry_time=lease_clock[0] - timedelta(minutes=1),
                 )
             )
             await session.commit()
 
         # 过期租约只能由新 Worker 接管；旧 Worker 的租约令牌不能再修改状态。
         first_token = next(token for token in claims if token is not None)
+        lease_clock[0] += timedelta(seconds=1)
         new_token = await report_module._claim_report_log(report_id)
         assert new_token is not None
         assert new_token != first_token
