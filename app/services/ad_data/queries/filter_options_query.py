@@ -106,7 +106,7 @@ class FilterOptionsQuery:
                 query = query.where(Product.is_active == True)
 
                 if not is_admin(current_user):
-                    query = query.where(Client.user_id == current_user.id)
+                    query = query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
 
                 query = apply_date_range_filter(
                     query, AdData.date, start_date, end_date, default_to_current_month=True
@@ -302,7 +302,7 @@ class FilterOptionsQuery:
                 assignment_query, use_assignment_table
             )
             if not is_admin(current_user):
-                assignment_query = assignment_query.where(Client.user_id == current_user.id)
+                assignment_query = assignment_query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
             else:
                 client_filter = apply_client_ids_filter(
                     Client.id, parse_csv_ints(client_id, field="client_id")
@@ -325,7 +325,7 @@ class FilterOptionsQuery:
                 current_query = build_products_with_data_base_query()
                 current_query = current_query.join(AdData, AdData.product_id == Product.id)
                 current_query = current_query.join(Client, Product.client_id == Client.id)
-                current_query = current_query.where(Client.user_id == current_user.id)
+                current_query = current_query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
                 current_query = apply_date_range_filter(
                     current_query,
                     AdData.date,
@@ -398,7 +398,7 @@ class FilterOptionsQuery:
             query = query.where(Product.is_active == True)
 
             if not is_admin(current_user):
-                query = query.where(Client.user_id == current_user.id)
+                query = query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
             else:
                 client_filter = apply_client_ids_filter(
                     Client.id, parse_csv_ints(client_id, field="client_id")
