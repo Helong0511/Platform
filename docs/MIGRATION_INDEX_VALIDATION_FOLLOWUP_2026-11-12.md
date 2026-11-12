@@ -411,3 +411,25 @@ MySQL 官方文档确认：
 - `_schema_metadata_drift` 完整结构比较尚未实现。
 - 旧 schema + 合成历史数据升级、逻辑备份恢复、worker pause/resume、应用兼容回滚、schema/data diff、MySQL server crash 与大规模数据升级性能尚未完成。
 - PR #1 继续 Open / Draft；不合并 main、不部署、不访问生产环境；凭据安全专项继续暂缓。
+
+## 16. Cap Reservation updated_at ORM/DDL 一致性（2026-11-12）
+
+### 16.1 问题与修复
+
+- 对比 `app/models/cap_reservation.py` 与 `sql/migrations/20261111_cap_reservation_ledger.sql` 时发现，ORM 的 `updated_at` 定义为 `server_default=CURRENT_TIMESTAMP` 加应用层 `onupdate=get_app_now_naive`；迁移 SQL 之前额外声明了数据库级 `ON UPDATE CURRENT_TIMESTAMP`。
+- 两种建表路径因此具有不同的更新语义：ORM `create_all` 不会创建数据库自动更新属性，而手工 SQL 迁移会创建该属性。
+- 已移除迁移 SQL 中额外的 `ON UPDATE CURRENT_TIMESTAMP`，保持两条建表路径语义一致；迁移结构校验新增 `information_schema.COLUMNS.EXTRA` 检查，拒绝出现 `ON UPDATE` 的漂移结构。
+- 新增隔离 MySQL 回归测试：先创建正确表，再人为给 `updated_at` 增加数据库级 `ON UPDATE CURRENT_TIMESTAMP`，重跑迁移必须 fail-closed（1146），并确认错误结构未被自动覆盖。
+
+### 16.2 CI 结果
+
+- SQL 修复提交：`4bb1ff5418470c39cae3cdf6e81b8ca10e598eac`。
+- 回归测试提交：`1b98f0f8f10ada7474bf4308aaf56fe382377331`。
+- Run #1408 全部成功：Backend **542 passed、1 skipped、1 warning**；Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- Run #1408：https://github.com/Helong0511/Platform/actions/runs/43179489431
+- 唯一 warning 是 Passlib 在 Python 3.11 引用 `crypt` 的弃用警告；CI 中 MySQL/Redis 容器自身也输出初始化/配置警告。它们不代表本轮测试失败，但依赖兼容性仍需后续单独评估。
+
+### 16.3 尚未覆盖
+
+- 本轮仅统一 Cap Reservation `updated_at` 的 ORM/SQL 建表语义；尚未证明全部 ORM 模型与全部增量迁移在所有字段、索引、CHECK、字符集/排序规则和默认值上完全一致。
+- `_schema_metadata_drift` 仍只检查表/列是否存在；统一 Migration Runner、revision/checksum ledger、历史数据升级与恢复演练仍未完成。
