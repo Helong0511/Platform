@@ -209,7 +209,7 @@ async def get_scheduled_tasks(
                 task_list.append(ScheduledTaskResponse(**task_dict))
             except Exception as task_err:
                 # 单个任务转换失败，记录错误但继续处理其他任务
-                logger.error(f"转换任务 {task.task_name if hasattr(task, 'task_name') else '未知'} 失败: {task_err}", exc_info=True)
+                logger.error("转换定时任务响应失败: error_type=%s", type(task_err).__name__)
                 # 尝试使用基本字段构建响应
                 # ---------- 异常处理 ----------
                 try:
@@ -250,10 +250,10 @@ async def get_scheduled_tasks(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取定时任务列表失败: {e}", exc_info=True)
+        logger.error("获取定时任务列表失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取定时任务列表失败：{str(e)}"
+            detail="获取定时任务列表失败，请稍后重试"
         )
 
 
@@ -275,8 +275,8 @@ async def get_gam_scheduler_scheduled_task_config(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("获取 GAM 配置失败: %s", e, exc_info=True)
-        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"获取 GAM 配置失败：{e}")
+        logger.error("获取 GAM 配置失败: error_type=%s", type(e).__name__)
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail="获取 GAM 配置失败，请稍后重试")
 
 
 @router.put(
@@ -314,8 +314,8 @@ async def update_gam_scheduler_scheduled_task_config(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("保存 GAM 配置失败: %s", e, exc_info=True)
-        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"保存 GAM 配置失败：{e}")
+        logger.error("保存 GAM 配置失败: error_type=%s", type(e).__name__)
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail="保存 GAM 配置失败，请稍后重试")
 
 
 @router.post(
@@ -342,8 +342,8 @@ async def refresh_gam_report_types_scheduled_task(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("刷新 GAM 报表类型失败: %s", e, exc_info=True)
-        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"刷新 GAM 报表类型失败：{e}")
+        logger.error("刷新 GAM 报表类型失败: error_type=%s", type(e).__name__)
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail="刷新 GAM 报表类型失败，请稍后重试")
 
 
 @router.post(
@@ -396,8 +396,8 @@ async def upload_gam_credentials_scheduled_task(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("上传 GAM 密钥文件失败: %s", e, exc_info=True)
-        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"上传 GAM 密钥文件失败：{e}")
+        logger.error("上传 GAM 密钥文件失败: error_type=%s", type(e).__name__)
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail="上传 GAM 密钥文件失败，请检查文件格式后重试")
 
 
 @router.get(
@@ -434,10 +434,10 @@ async def get_task_queue_status(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取任务队列状态失败: {e}", exc_info=True)
+        logger.error("获取任务队列状态失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取任务队列状态失败：{str(e)}"
+            detail="获取任务队列状态失败，请稍后重试"
         )
 
 
@@ -466,10 +466,10 @@ async def get_scheduler_status(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取调度器状态失败: {e}", exc_info=True)
+        logger.error("获取调度器状态失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取调度器状态失败：{str(e)}"
+            detail="获取调度器状态失败，请稍后重试"
         )
 
 
@@ -511,10 +511,10 @@ async def get_scheduled_task(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取定时任务详情失败: {e}", exc_info=True)
+        logger.error("获取定时任务详情失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取定时任务详情失败：{str(e)}"
+            detail="获取定时任务详情失败，请稍后重试"
         )
 
 
@@ -598,7 +598,7 @@ async def update_scheduled_task(
                     )
                 await commit_audit_log(db)
             except Exception as log_error:
-                logger.warning(f"记录激活/禁用日志失败: {log_error}", exc_info=True)
+                logger.warning("记录激活/禁用日志失败: error_type=%s", type(log_error).__name__)
 
         # 审计日志：standard_report_type 变更
         old_rt = getattr(existing_task, "standard_report_type", None)
@@ -620,14 +620,14 @@ async def update_scheduled_task(
                 )
                 await commit_audit_log(db)
             except Exception as log_error:
-                logger.warning(f"记录标准维度变更日志失败: {log_error}", exc_info=True)
+                logger.warning("记录标准维度变更日志失败: error_type=%s", type(log_error).__name__)
 
         # 转换为响应模型并添加函数信息
         try:
             task_dict = ScheduledTaskResponse.model_validate(task).model_dump()
             _enrich_scheduled_task_dict(task, task_dict)
         except Exception as dict_error:
-            logger.warning(f"转换任务响应模型失败: {dict_error}，使用基本字段", exc_info=True)
+            logger.warning("转换任务响应模型失败，使用基本字段: error_type=%s", type(dict_error).__name__)
             task_dict = {
                 "id": task.id,
                 "task_name": task.task_name,
@@ -653,10 +653,10 @@ async def update_scheduled_task(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"更新定时任务失败: {e}", exc_info=True)
+        logger.error("更新定时任务失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"更新定时任务失败：{str(e)}"
+            detail="更新定时任务失败，请稍后重试"
         )
 
 
@@ -726,10 +726,10 @@ async def trigger_scheduled_task(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"触发定时任务失败: {e}", exc_info=True)
+        logger.error("触发定时任务失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"触发定时任务失败：{str(e)}"
+            detail="触发定时任务失败，请稍后重试"
         )
 
 
@@ -764,10 +764,10 @@ async def reload_scheduled_task(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"重新加载定时任务失败: {e}", exc_info=True)
+        logger.error("重新加载定时任务失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"重新加载定时任务失败：{str(e)}"
+            detail="重新加载定时任务失败，请稍后重试"
         )
 
 
@@ -798,10 +798,10 @@ async def reload_all_scheduled_tasks(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"重新加载所有定时任务失败: {e}", exc_info=True)
+        logger.error("重新加载所有定时任务失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"重新加载所有定时任务失败：{str(e)}"
+            detail="重新加载所有定时任务失败，请稍后重试"
         )
 
 
@@ -837,8 +837,8 @@ async def release_task_lock(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"释放任务锁失败: {e}", exc_info=True)
+        logger.error("释放任务锁失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"释放任务锁失败：{str(e)}"
+            detail="释放任务锁失败，请稍后重试"
         )
