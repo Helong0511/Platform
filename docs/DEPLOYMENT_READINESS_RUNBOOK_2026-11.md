@@ -987,3 +987,17 @@ PR #1 继续 Open / Draft，不合并 main、不部署。所有验证继续仅�
 - 1 skipped 为本地核对脚本未提交（CI 不依赖）；1 warning 为 passlib/Python 3.11 crypt 弃用提示。
 
 验证仅限 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
+
+
+## 43. 用户信息响应与登录能力开关的多客户聚合（2026-11-12，Run #1354）
+
+- 复核发现 /users、/users/me、/users/{id} 与用户导出仍使用 User.clients 的首条记录展示开关，可能导致多客户账号在登录响应与个人资料响应中看到不同能力状态。
+- 用户响应现在只从已预加载关系中筛选启用客户，并按 Client ID 稳定排序选择首个客户作为兼容的嵌套展示对象；不会触发异步 ORM 隐式懒加载。
+- api_enabled 与 has_publisher 按全部启用客户聚合；password_change_enabled 与 UserService.change_password 的既有策略保持一致：至少有一个启用客户，且所有关联客户（包括停用记录）均允许改密。
+- 登录与刷新令牌响应增加顶层 password_change_enabled，嵌套 client 的 api_enabled/password_change_enabled/has_publisher 与聚合结果一致，避免前端只读取首个客户时出现错误开关状态。
+- UserService.check_client_has_publisher 兼容单个 Client ID 与多个 Client ID，供旧调用和多客户聚合调用共用。
+- 新增测试覆盖用户响应的活动客户筛选/排序、密码修改策略，以及登录载荷顶层与嵌套能力标志一致性。
+- Run #1354（SHA 2e8f4e1d54735220d35481420d68db7ad2ca5b0e）：Backend **524 passed、1 skipped、1 warning**；Python Compile、Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。Run：https://github.com/Helong0511/Platform/actions/runs/43157508789。
+- 1 skipped 为本地核对脚本未提交（CI 不依赖）；1 warning 为 passlib/Python 3.11 crypt 弃用提示。
+
+验证仅限 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
