@@ -940,3 +940,15 @@ PR #1 继续 Open / Draft，不合并 main、不部署。所有验证继续仅�
 - 1 skipped 与 1 warning 的含义同前：本地核对脚本未提交（CI 不依赖）；passlib/Python 3.11 crypt 弃用提示尚未处理。
 
 验证仅限 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
+
+
+## 39. 已签发 Access Token 的客户主体停用即时生效（2026-11-12，Run #1331）
+
+- 复核发现：登录与刷新已拒绝“无启用 Client”的客户账号，但旧 access token 在过期前仍可能通过 get_current_user；仅依赖登录/刷新检查不足以立即收敛已停用客户账号。
+- get_current_user 现在在读取最新 User 状态后，对 CLIENT 角色执行一次有索引条件的 EXISTS 风格查询（Client.user_id + Client.is_active=true + LIMIT 1）；没有任何启用中 Client 时返回 403，阻断既有 access token 的后续认证。
+- 新增回归测试模拟旧 access token 仍有效、User 仍启用但全部 Client 已停用的情况，确认本次请求被拒绝；原管理员状态、登录限制和启用客户场景继续覆盖。
+- 该检查只针对 CLIENT 角色，不增加管理员请求的额外查询；客户认证请求增加一次轻量 Client 存在性查询，换取停用状态即时生效。后续仍需结合隔离环境压测评估该查询的负载与索引命中。
+- Run #1331（SHA a359c69e92cbbe0340eb4211bf49b9eac2921da7）：Backend **519 passed、1 skipped、1 warning**；Python Compile、Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。Run：https://github.com/Helong0511/Platform/actions/runs/43155023805。
+- 1 skipped 为本地核对脚本未提交（CI 不依赖）；1 warning 为 passlib/Python 3.11 crypt 弃用提示，仍待处理。
+
+验证仅限 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
