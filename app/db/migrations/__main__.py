@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from app.db.migrations.manifest import MigrationManifestError, validate_manifest
 from app.db.migrations.sql_parser import MigrationSQLParseError, split_mysql_statements
@@ -15,7 +16,7 @@ def _validate() -> int:
     migrations = validate_manifest()
     for migration in migrations:
         statements = split_mysql_statements(
-            (validate_manifest.__globals__["_repository_root"]() / migration.path).read_text(
+            (Path(__file__).resolve().parents[3] / migration.path).read_text(
                 encoding="utf-8"
             )
         )
