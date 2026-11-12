@@ -366,6 +366,7 @@ async def process_postback_report_outbox(
         exhausted_count = await db.scalar(
             select(func.count(ThirdPartyReportLog.id)).where(
                 ThirdPartyReportLog.outbox_enqueued.is_(True),
+                ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                 ThirdPartyReportLog.status == "failed",
                 ThirdPartyReportLog.next_retry_time.is_(None),
                 ThirdPartyReportLog.attempt_count >= ThirdPartyReportLog.max_attempts,
