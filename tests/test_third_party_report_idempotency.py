@@ -355,6 +355,10 @@ async def test_telegram_failure_does_not_retry_successful_purchase_report(monkey
 
     monkeypatch.setattr(third_party_report, "create_report_log", existing_log)
     monkeypatch.setattr(third_party_report, "_claim_report_log", claimed)
+    async def renew_claimed_lease(report_log_id, lease_token, lease_seconds=300):
+        return lease_token
+
+    monkeypatch.setattr(third_party_report, "_renew_report_log_lease", renew_claimed_lease)
     monkeypatch.setattr(third_party_report, "update_report_log", capture_update)
     monkeypatch.setattr(third_party_report.httpx, "AsyncClient", FakeHTTPClient)
     monkeypatch.setattr(third_party_report, "send_telegram_message", failed_notification)
@@ -664,6 +668,10 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
         return state["status"]
 
     monkeypatch.setattr(third_party_report, "_claim_report_log", claim)
+    async def renew_claimed_lease(report_log_id, lease_token, lease_seconds=300):
+        return lease_token
+
+    monkeypatch.setattr(third_party_report, "_renew_report_log_lease", renew_claimed_lease)
     monkeypatch.setattr(third_party_report, "_get_report_attempt_state", attempt_state)
     monkeypatch.setattr(third_party_report, "update_report_log", persist_update)
     monkeypatch.setattr(third_party_report, "_get_report_status", read_status)
