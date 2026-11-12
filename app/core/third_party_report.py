@@ -2,6 +2,7 @@
 第三方广告上报模块
 独立于其他模块，避免循环导入问题
 """
+import asyncio
 import logging
 import time
 import httpx
