@@ -393,7 +393,7 @@ async def diagnostic_bot(
             webhook_url = webhook_info.url if webhook_info.url else None
             # ---------- 条件分支 ----------
             if webhook_url:
-                recommendations.append(f"⚠️ 检测到 Webhook: {webhook_url}，这将阻止 polling 工作！请删除 webhook")
+                recommendations.append("⚠️ 检测到 Webhook，这可能阻止 polling 工作；请在 Telegram 管理端确认并按需删除")
         except Exception as e:
             logger.warning(f"检查 webhook 时出错: {e}")
 
