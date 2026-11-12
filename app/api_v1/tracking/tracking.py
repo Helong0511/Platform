@@ -94,10 +94,9 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
 
                 if attempt < max(1, int(max_retries)) - 1:
                     logger.warning(
-                        "异步保存点击记录遇到完整性错误，将重试: attempt=%s click_id=%s error=%s",
+                        "异步保存点击记录遇到完整性错误，将重试: attempt=%s error_type=%s",
                         attempt + 1,
-                        click_data.get("click_id"),
-                        exc,
+                        type(exc).__name__,
                     )
                     await asyncio.sleep(2 ** attempt)
                     continue
@@ -107,18 +106,15 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
                 await session.rollback()
                 if attempt < max(1, int(max_retries)) - 1:
                     logger.warning(
-                        "异步保存点击记录失败，将重试: attempt=%s click_id=%s error=%s",
+                        "异步保存点击记录失败，将重试: attempt=%s error_type=%s",
                         attempt + 1,
-                        click_data.get("click_id"),
-                        exc,
+                        type(exc).__name__,
                     )
                     await asyncio.sleep(2 ** attempt)
                     continue
                 logger.error(
-                    "异步保存点击记录最终失败: click_id=%s error=%s",
-                    click_data.get("click_id"),
-                    exc,
-                    exc_info=True,
+                    "异步保存点击记录最终失败: error_type=%s",
+                    type(exc).__name__,
                 )
                 raise
 
@@ -283,9 +279,9 @@ async def track_click(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"点击追踪失败: {str(e)}", exc_info=True)
+        logger.error("点击追踪失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"点击追踪失败: {str(e)}"
+            detail="点击追踪失败，请稍后重试"
         )
 
