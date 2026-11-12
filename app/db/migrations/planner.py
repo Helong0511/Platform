@@ -33,8 +33,9 @@ def plan_migrations(
         index for index, item in enumerate(ordered)
         if item.revision in applied_checksums
     ]
-    if applied_positions != sorted(applied_positions):
-        raise MigrationManifestError("ledger revisions are not in manifest order")
+    # 迁移按序执行，ledger 已应用项必须构成清单前缀；不能跳过旧 revision。
+    if applied_positions != list(range(len(applied_positions))):
+        raise MigrationManifestError("ledger revisions are not a contiguous manifest prefix")
 
     for revision, stored_checksum in applied_checksums.items():
         expected = by_revision[revision].sha256
