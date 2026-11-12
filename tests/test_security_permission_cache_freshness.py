@@ -37,15 +37,21 @@ class _ScalarResult:
     def first(self):
         return self.user
 
+    def scalar_one_or_none(self):
+        return self.user
+
 
 class _DB:
-    def __init__(self, user):
+    def __init__(self, user, active_client_id=101):
         self.user = user
+        self.active_client_id = active_client_id
         self.queries = 0
 
     async def execute(self, statement):
         self.queries += 1
-        return _ScalarResult(self.user)
+        if self.queries == 1:
+            return _ScalarResult(self.user)
+        return _ScalarResult(self.active_client_id)
 
 
 @pytest.mark.asyncio
@@ -126,4 +132,28 @@ async def test_active_user_is_not_blocked_by_stale_disabled_permission_cache(mon
     result = await security.get_current_user(_request(), db, "synthetic-access-token")
 
     assert result is user
-    assert db.queries == 1
+    assert db.queries == 2
+
+
+
+@pytest.mark.asyncio
+async def test_existing_access_token_is_rejected_after_all_client_memberships_are_disabled(monkeypatch):
+    user = SimpleNamespace(
+        id=54,
+        role=UserRole.CLIENT,
+        is_active=True,
+        login_restricted=False,
+        login_message=None,
+    )
+    db = _DB(user, active_client_id=None)
+
+    async def valid_token(token, db=None):
+        return {"sub": "54", "type": "access"}
+
+    monkeypatch.setattr(security.JWTUtils, "verify_token", valid_token)
+
+    with pytest.raises(HTTPException) as exc:
+        await security.get_current_user(_request(), db, "synthetic-access-token")
+
+    assert exc.value.status_code == 403
+    assert db.queries == 2
