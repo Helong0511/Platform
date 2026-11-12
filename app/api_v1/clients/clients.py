@@ -389,10 +389,10 @@ async def create_client(
 
     except Exception as e:
         # 注意：不需要手动回滚事务，get_db 依赖会自动处理
-        logger.error(f"创建客户失败: {str(e)}", exc_info=True)
+        logger.error("创建客户失败：error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"创建客户失败：{str(e)}。请检查数据格式或联系管理员"
+            detail="创建客户失败，请检查提交内容或联系管理员",
         )
 
 
@@ -496,10 +496,10 @@ async def update_client(
         raise
     except Exception as e:
         # 注意：不需要手动回滚事务，get_db 依赖会自动处理
-        logger.error(f"更新客户失败: {str(e)}", exc_info=True)
+        logger.error("更新客户失败：error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"更新客户失败：{str(e)}。请检查数据格式或联系管理员"
+            detail="更新客户失败，请检查提交内容或联系管理员",
         )
 
     logger.info(f"Client {client.company_name} updated by {current_user.username}")
@@ -652,10 +652,10 @@ async def update_client_switches(
         # ---------- 条件分支 ----------
         if isinstance(e, HTTPException):
             raise e
-        logger.error(f"更新客户开关失败: {str(e)}", exc_info=True)
+        logger.error("更新客户开关失败：error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"更新客户开关失败：{str(e)}。请检查数据格式或联系管理员"
+            detail="更新客户开关失败，请稍后重试",
         )
 
     logger.info(f"Client {client.company_name} switches updated by {current_user.username}: {update_details}")
@@ -676,7 +676,7 @@ async def update_client_switches(
     except HTTPException:
         raise
     except Exception as log_error:
-        logger.warning(f"记录更新日志失败: {str(log_error)}")
+        logger.warning("记录客户更新日志失败：error_type=%s", type(log_error).__name__)
 
     # 确保返回的数据包含最新的开关状态
     return ResponseBaseSchema.success(data=_client_public_dict(client))
