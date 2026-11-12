@@ -7,6 +7,7 @@ from sqlalchemy.dialects import mysql
 
 from app.core.security import require_admin_or_self, require_publisher_or_admin
 from app.models.models import UserRole
+from app.services.ad_data.queries.detail_query import DetailQueryBuilder
 
 
 class _ClientRows:
@@ -109,3 +110,27 @@ async def test_admin_or_self_guard_rejects_inactive_client_membership():
 
     assert exc.value.status_code == 403
     assert "clients.is_active is true" in db.statements[0]
+
+
+
+@pytest.mark.asyncio
+async def test_ad_data_detail_denies_inactive_owned_client(monkeypatch):
+    user = SimpleNamespace(id=910, role=UserRole.CLIENT)
+    row = (
+        SimpleNamespace(id=7001, product_id=8001),
+        SimpleNamespace(id=8001),
+        SimpleNamespace(id=101, user_id=910, is_active=False),
+        SimpleNamespace(id=910),
+        None,
+        None,
+    )
+
+    async def fake_fetch_by_id(self, data_id):
+        return row
+
+    monkeypatch.setattr(DetailQueryBuilder, "fetch_by_id", fake_fetch_by_id)
+
+    with pytest.raises(HTTPException) as exc:
+        await DetailQueryBuilder(db=None).fetch_and_authorize(7001, user)
+
+    assert "启用中客户账户" in str(exc.value.detail)
