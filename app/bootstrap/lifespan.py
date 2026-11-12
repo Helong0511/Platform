@@ -7,6 +7,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from sqlalchemy import inspect, text
 
 from app.core.cache_manager import CacheManager
 from app.core.config import settings
@@ -27,6 +28,73 @@ from app.scheduler_module import init_scheduled_tasks, shutdown_scheduler, start
 from app.scheduler_module.task_init import init_scheduled_tasks_in_db
 
 logger = logging.getLogger(__name__)
+
+_SCHEMA_BOOTSTRAP_LOCK_NAME = "platform_schema_bootstrap"
+
+
+def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
+    """核验 ORM 声明的表/列均存在；create_all 不会 ALTER 已存在的表。"""
+    target_metadata = metadata or Base.metadata
+    inspector = inspect(sync_connection)
+    missing_tables = []
+    missing_columns = {}
+
+    for table in target_metadata.sorted_tables:
+        if not inspector.has_table(table.name, schema=table.schema):
+            missing_tables.append(table.fullname)
+            continue
+        actual_columns = {
+            column["name"]
+            for column in inspector.get_columns(table.name, schema=table.schema)
+        }
+        absent = sorted(column.name for column in table.columns if column.name not in actual_columns)
+        if absent:
+            missing_columns[table.fullname] = absent
+
+    return {
+        "missing_tables": sorted(missing_tables),
+        "missing_columns": missing_columns,
+    }
+
+
+async def _bootstrap_database_schema() -> None:
+    """串行执行 create_all，并验证既有表没有缺少 ORM 所需列。"""
+    async with engine.connect() as connection:
+        lock_acquired = False
+        if engine.dialect.name == "mysql":
+            lock_result = await connection.execute(
+                text("SELECT GET_LOCK(:lock_name, :timeout_seconds)"),
+                {"lock_name": _SCHEMA_BOOTSTRAP_LOCK_NAME, "timeout_seconds": 60},
+            )
+            lock_acquired = lock_result.scalar_one_or_none() == 1
+            await connection.commit()
+            if not lock_acquired:
+                raise RuntimeError("未能在 60 秒内取得数据库 schema bootstrap 锁")
+
+        try:
+            async with connection.begin():
+                await connection.run_sync(Base.metadata.create_all)
+                drift = await connection.run_sync(_schema_metadata_drift)
+                if drift["missing_tables"] or drift["missing_columns"]:
+                    raise RuntimeError(
+                        "数据库 schema 与 ORM 不一致："
+                        f"missing_tables={drift['missing_tables']}; "
+                        f"missing_columns={drift['missing_columns']}"
+                    )
+        finally:
+            if lock_acquired:
+                try:
+                    await connection.execute(
+                        text("SELECT RELEASE_LOCK(:lock_name)"),
+                        {"lock_name": _SCHEMA_BOOTSTRAP_LOCK_NAME},
+                    )
+                    await connection.commit()
+                except Exception as exc:
+                    # 关闭连接也会释放 MySQL session advisory lock。
+                    logger.warning(
+                        "释放 schema bootstrap 锁失败：exception_type=%s",
+                        type(exc).__name__,
+                    )
 
 
 def _should_run_cache_warmup() -> bool:
@@ -76,69 +144,33 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.debug("点击落库策略日志跳过: %s", e)
 
-    # 确保数据库存在并创建表（多进程环境：每个 worker 都会执行，但数据库操作是安全的）
+    # 确保数据库 schema 就绪：MySQL advisory lock 串行化多 worker DDL，
+    # create_all 只补建缺失表；随后逐表核验 ORM 所需列，增量迁移缺失时拒绝启动。
     try:
         from app.db.database import create_database
 
-        # 创建数据库（如果不存在）
         await create_database()
-
-        # 创建所有表（如果不存在，使用 IF NOT EXISTS 语义）
-        # 导入所有模型以确保SQLAlchemy能够发现所有表
-        from app.models import (
-            User, Client, Product, AdData, ProductAssignment,
-            ScheduledTask, UserAuditLog, UserSession, TokenBlacklist,
-            PostbackConversion, PendingPostbackConversion, PostbackIpWhitelist
+        await _bootstrap_database_schema()
+        logger.info(f"[Worker PID:{worker_pid}] 数据库 schema 创建及结构核验完成")
+    except Exception as exc:
+        logger.error(
+            "[Worker PID:%s] 数据库 schema 初始化/核验失败，拒绝启动：exception_type=%s",
+            worker_pid,
+            type(exc).__name__,
         )
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        raise RuntimeError("数据库 schema 未达到应用启动要求，拒绝启动") from exc
 
-        logger.info(f"[Worker PID:{worker_pid}] 数据库表创建完成")
-    except Exception as e:
-        # 检查是否是 MySQL 并发 DDL 错误（错误代码 1684）
-        # 这个错误表示表正在被其他进程修改，可以安全忽略
-        is_concurrent_ddl_error = False
-        error_code = None
-
-        # 尝试从异常中提取错误代码
-        try:
-            if hasattr(e, 'orig'):
-                # SQLAlchemy 包装的异常 (sqlalchemy.exc.OperationalError)
-                orig = e.orig
-                if hasattr(orig, 'args') and len(orig.args) > 0:
-                    error_code = orig.args[0] if isinstance(orig.args[0], int) else None
-            elif hasattr(e, 'args') and len(e.args) > 0:
-                # 直接 pymysql 异常
-                error_code = e.args[0] if isinstance(e.args[0], int) else None
-
-            # 检查错误代码或错误消息
-            if error_code == 1684 or (str(e) and '1684' in str(e)):
-                is_concurrent_ddl_error = True
-        except Exception:
-            # 如果提取错误代码失败，检查错误消息
-            error_str = str(e)
-            if '1684' in error_str or 'concurrent DDL' in error_str.lower():
-                is_concurrent_ddl_error = True
-
-        if is_concurrent_ddl_error:
-            # 这是预期的并发行为，降级为信息级别
-            logger.info(
-                f"[Worker PID:{worker_pid}] 检测到并发 DDL 操作（表可能正在被其他 worker 创建），"
-                f"这是正常的多进程环境行为，继续启动..."
-            )
-        else:
-            # 其他错误，记录为错误级别
-            logger.error(f"[Worker PID:{worker_pid}] 数据库表创建失败: {e}", exc_info=True)
-            # 不抛出异常，允许应用继续启动（可能是表已存在或其他 worker 已创建）
-            logger.warning(f"[Worker PID:{worker_pid}] 继续启动应用...")
-
-    # 初始化数据库，创建默认管理员账户
+    # 初始化数据库，创建默认管理员账户；核心 DB 初始化失败时不得继续对外提供服务。
     try:
         await init_db()
         logger.info(f"[Worker PID:{worker_pid}] 数据库初始化完成（包括默认管理员账户）")
-    except Exception as e:
-        logger.error(f"[Worker PID:{worker_pid}] 数据库初始化失败: {e}", exc_info=True)
-        # 不抛出异常，允许应用继续启动
+    except Exception as exc:
+        logger.error(
+            "[Worker PID:%s] 数据库初始化失败，拒绝启动：exception_type=%s",
+            worker_pid,
+            type(exc).__name__,
+        )
+        raise RuntimeError("数据库初始化失败，拒绝启动") from exc
 
     # 加载标准维度配置（scheduled_tasks.standard_report_type → 内存）
     try:
