@@ -142,7 +142,7 @@ class ConversionService:
         if current_user.role == UserRole.CLIENT:
             # User 与 Client 是一对多关系；必须收集该用户的全部 Client，不能任取第一条。
             client_result = await self.db.execute(
-                select(Client.id).where(Client.user_id == current_user.id)
+                select(Client.id).where(Client.user_id == current_user.id, Client.is_active.is_(True))
             )
             client_ids = [int(value) for value in client_result.scalars().all()]
             if not client_ids:
@@ -640,14 +640,14 @@ class ConversionService:
         if current_user.role == UserRole.CLIENT:
             # 一个客户用户可能关联多个 Client；查询全部归属渠道，避免只取任意一条记录。
             client_result = await self.db.execute(
-                select(Client.id).where(Client.user_id == current_user.id)
+                select(Client.id).where(Client.user_id == current_user.id, Client.is_active.is_(True))
             )
             client_ids = [int(value) for value in client_result.scalars().all()]
             if not client_ids:
                 return []
 
             publisher_result = await self.db.execute(
-                select(Publisher.id).where(Publisher.client_id.in_(client_ids))
+                select(Publisher.id).where(Publisher.client_id.in_(client_ids), Publisher.is_active.is_(True))
             )
             client_publisher_ids = [int(value) for value in publisher_result.scalars().all()]
             if not client_publisher_ids:
