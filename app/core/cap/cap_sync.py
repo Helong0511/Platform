@@ -12,11 +12,15 @@ from sqlalchemy.future import select
 from sqlalchemy import and_
 
 from app.models.models import OfferCap
+from app.models.cap_reservation import CapReservation
 from app.core.redis_client import get_redis_client
 from app.core.cap.redis_counter import get_daily_cap_key, get_total_cap_key
 from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
+
+# 未决 Reservation 的 Redis 计数仍可能回滚，不能固化为数据库基线。
+ACTIVE_RESERVATION_STATES = ("PREPARED", "RESERVED", "NEEDS_RECONCILIATION")
 
 
 class CapSynchronizer:
@@ -55,12 +59,30 @@ class CapSynchronizer:
             .with_for_update()
         )
         caps = result.scalars().all()
-        
+
+        # 未决账本可能对应尚未提交的 Redis 预留；同步前先取出所有受影响 scope。
+        pending_result = await self.db.execute(
+            select(CapReservation.offer_id, CapReservation.publisher_id)
+            .where(CapReservation.state.in_(ACTIVE_RESERVATION_STATES))
+            .distinct()
+        )
+        pending_scopes = set(pending_result.all())
+
         stats = {"success": 0, "failed": 0, "skipped": 0}
         now = get_app_now_naive()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
         for cap in caps:
+            if (cap.offer_id, cap.publisher_id) in pending_scopes:
+                # 同一 Offer/Publisher 下任一 Cap 类型仍未决时，整条 Cap 不固化快照。
+                stats["skipped"] += 1
+                logger.warning(
+                    "Cap 同步跳过：存在未决 Reservation，offer_id=%s publisher_id=%s",
+                    cap.offer_id,
+                    cap.publisher_id,
+                )
+                continue
+
             missing_counter = False
             # 先暂存快照，所有启用的计数器均可读取后才更新 ORM，避免部分同步。
             synced_daily_count = None
@@ -156,6 +178,23 @@ class CapSynchronizer:
             if not cap:
                 logger.warning("Cap 配置不存在：cap_id=%s", cap_id)
                 await self.db.rollback()
+                return False
+
+            pending_result = await self.db.execute(
+                select(CapReservation.id)
+                .where(
+                    CapReservation.offer_id == cap.offer_id,
+                    CapReservation.publisher_id == cap.publisher_id,
+                    CapReservation.state.in_(ACTIVE_RESERVATION_STATES),
+                )
+                .limit(1)
+            )
+            if pending_result.scalars().first() is not None:
+                await self.db.rollback()
+                logger.warning(
+                    "单个 Cap 同步跳过：存在未决 Reservation，cap_id=%s",
+                    cap_id,
+                )
                 return False
 
             now = get_app_now_naive()
