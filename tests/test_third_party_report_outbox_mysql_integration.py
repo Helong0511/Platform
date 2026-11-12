@@ -193,6 +193,27 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
             expected_report_start_time=new_token,
         )
         assert current_update is True
+
+        # 当前 Worker 只能在原租约仍有效时续租，续租后旧令牌立即失效。
+        lease_clock[0] += timedelta(seconds=5)
+        renewed_token = await report_module._renew_report_log_lease(
+            report_id, new_token
+        )
+        assert renewed_token == lease_clock[0]
+        stale_renewal = await report_module._renew_report_log_lease(
+            report_id, new_token
+        )
+        assert stale_renewal is None
+
+        # 超过 TTL 后，旧 Worker 不得复活租约；新 Worker 可以接管。
+        lease_clock[0] += timedelta(seconds=report_module.REPORT_LOG_LEASE_SECONDS + 1)
+        expired_renewal = await report_module._renew_report_log_lease(
+            report_id, renewed_token
+        )
+        assert expired_renewal is None
+        replacement_token = await report_module._claim_report_log(report_id)
+        assert replacement_token == lease_clock[0]
+        assert replacement_token != renewed_token
     finally:
         if engine is not None:
             await engine.dispose()
