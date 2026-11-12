@@ -113,6 +113,7 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 1. 完成数据库备份、恢复验证、维护窗口审批及上报流量排空。
 2. 执行 `sql/migrations/20261110_third_party_report_event_idempotency.sql`。
 3. 检查 `missing_event_keys=0`，重复键查询无结果；确认 `unique_event_key` 已创建，且旧的 `unique_source_adsid` 已按迁移预期替换。
+4. **大表回填评估（当前阻断项）**：该迁移中的 `UPDATE third_party_report_logs ... WHERE event_key IS NULL` 是一次全表范围回填，不是分批任务。执行前必须在隔离副本使用接近目标库规模与分布的合成数据测量耗时、事务/锁影响、redo/undo 与 binlog 增长、复制延迟、连接池占用及中断后重跑成本；确认维护窗口与写入排空策略。未完成评估前不得据此直接在生产执行。若需要改为分批回填，必须先设计可重入的批次边界、稳定排序键、并发写入兼容和最终 NULL/重复键校验，并在隔离环境完整演练后再替换发布步骤。
 4. 执行 `sql/migrations/20261111_third_party_report_outbox.sql`。
 5. 核验 Outbox 五个字段和 `idx_third_party_outbox_due`，与 ORM `ThirdPartyReportLog` 定义一致。
 6. 执行 `sql/migrations/20261112_third_party_report_pii_retention.sql`，核对 `third_party_report_logs.pii_scrubbed_at` / `idx_third_party_pii_retention` 及 `postback_forward_logs.pii_scrubbed_at` / `idx_forward_log_pii_retention`；该迁移只新增元数据，不清理历史数据。
