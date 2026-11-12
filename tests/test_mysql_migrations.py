@@ -214,6 +214,73 @@ def test_event_migration_rejects_wrong_same_name_index_without_dropping_legacy_u
             cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
         connection.close()
 
+def test_outbox_migration_rejects_wrong_same_name_due_index():
+    """错误的同名 Outbox 索引必须阻断迁移，不能被静默视为已存在。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+            cursor.execute(
+                "CREATE TABLE third_party_report_logs ("
+                "id INT NOT NULL AUTO_INCREMENT, amount DECIMAL(12,2) NULL, "
+                "status VARCHAR(20) NOT NULL DEFAULT 'pending', report_start_time DATETIME NULL, "
+                "PRIMARY KEY (id), KEY idx_third_party_outbox_due (status)) "
+                "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            with pytest.raises(pymysql.err.OperationalError) as migration_error:
+                _run_sql_file(cursor, "sql/migrations/20261111_third_party_report_outbox.sql")
+            assert migration_error.value.args[0] == 1061
+            cursor.execute("SHOW INDEX FROM third_party_report_logs")
+            indexes = cursor.fetchall()
+            assert [row[4] for row in indexes if row[2] == "idx_third_party_outbox_due"] == ["status"]
+            cursor.execute(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'third_party_report_logs' "
+                "AND COLUMN_NAME = 'next_retry_time'"
+            )
+            assert cursor.fetchone() == ("next_retry_time",)
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+        connection.close()
+
+
+def test_pii_migration_rejects_wrong_same_name_retention_index():
+    """错误的同名 PII 扫描索引必须阻断迁移，避免跳过必要索引。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+            cursor.execute("DROP TABLE IF EXISTS postback_forward_logs")
+            cursor.execute(
+                "CREATE TABLE third_party_report_logs ("
+                "id INT NOT NULL AUTO_INCREMENT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "completed_at DATETIME NULL, PRIMARY KEY (id), "
+                "KEY idx_third_party_pii_retention (created_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            cursor.execute(
+                "CREATE TABLE postback_forward_logs ("
+                "id INT NOT NULL AUTO_INCREMENT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "completed_at DATETIME NULL, PRIMARY KEY (id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            with pytest.raises(pymysql.err.OperationalError) as migration_error:
+                _run_sql_file(cursor, "sql/migrations/20261112_third_party_report_pii_retention.sql")
+            assert migration_error.value.args[0] == 1061
+            cursor.execute("SHOW INDEX FROM third_party_report_logs")
+            indexes = cursor.fetchall()
+            assert [row[4] for row in indexes if row[2] == "idx_third_party_pii_retention"] == ["created_at"]
+            cursor.execute(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'third_party_report_logs' "
+                "AND COLUMN_NAME = 'pii_scrubbed_at'"
+            )
+            assert cursor.fetchone() == ("pii_scrubbed_at",)
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS postback_forward_logs")
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+        connection.close()
+
 def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
     baseline_schema = Path("sql/platform.sql").read_text(encoding="utf-8")
     connection = _connect()
