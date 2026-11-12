@@ -29,7 +29,9 @@ async def get_client_ids_for_user(db: AsyncSession, user: User) -> Optional[List
     if user.role != UserRole.CLIENT:
         return None
     result = await db.execute(
-        select(Client.id).where(Client.user_id == user.id).order_by(Client.id.asc())
+        select(Client.id)
+        .where(Client.user_id == user.id, Client.is_active.is_(True))
+        .order_by(Client.id.asc())
     )
     return [int(client_id) for client_id in result.scalars().all()]
 
