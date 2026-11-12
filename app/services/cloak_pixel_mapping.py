@@ -186,10 +186,13 @@ class CloakPixelMappingService:
 
             return pixel_config
             
-        except Exception as e:
-            logger.error(
-                f"[斗篷像素映射] 查询失败：dp={dp}, short_code={short_code}, error={str(e)}",
-                exc_info=True
+        except Exception as exc:
+            # 数据库异常可能携带 SQL 参数或个人信息；日志仅保留异常类型和内部配置定位字段。
+            logger.warning(
+                "[斗篷像素映射] 查询失败：dp=%s, short_code=%s, error_type=%s",
+                dp,
+                short_code,
+                type(exc).__name__,
             )
             return None
     
