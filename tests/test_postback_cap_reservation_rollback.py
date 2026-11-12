@@ -33,6 +33,10 @@ class _Result:
         return self.scalar
 
 
+
+async def _no_pending_reservations(**kwargs):
+    return 0
+
 @pytest.mark.asyncio
 async def test_cap_refresh_failure_does_not_log_raw_database_error(caplog):
     class BrokenRefreshDB:
@@ -97,6 +101,7 @@ async def test_fail_open_only_returns_reservations_that_really_incremented(monke
         total_succeeds,
     )
 
+monkeypatch.setattr(cap_manager.CapReservationLedger, "count_uncommitted_for_scope", _no_pending_reservations)
     ok, status, reservations = await cap_manager.increment_cap_count(
         db=db,
         offer_id=77,
@@ -250,6 +255,7 @@ async def test_successful_daily_reservation_records_business_date(monkeypatch):
         total_succeeds,
     )
 
+monkeypatch.setattr(cap_manager.CapReservationLedger, "count_uncommitted_for_scope", _no_pending_reservations)
     ok, status, reservations = await cap_manager.increment_cap_count(
         db=db,
         offer_id=77,

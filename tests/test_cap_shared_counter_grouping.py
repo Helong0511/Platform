@@ -37,6 +37,10 @@ class _DB:
         self.flushed = True
 
 
+
+async def _no_pending_reservations(**kwargs):
+    return 0
+
 @pytest.mark.asyncio
 async def test_overlapping_offer_and_advertiser_caps_reserve_shared_key_once(monkeypatch):
     now = datetime(2026, 11, 10, 12, 0, 0)
@@ -69,6 +73,7 @@ async def test_overlapping_offer_and_advertiser_caps_reserve_shared_key_once(mon
     monkeypatch.setattr(cap_manager.RedisCapManager, "check_and_increment_daily", reserve_daily)
     monkeypatch.setattr(cap_manager.RedisCapManager, "check_and_increment_total", reserve_total)
 
+monkeypatch.setattr(cap_manager.CapReservationLedger, "count_uncommitted_for_scope", _no_pending_reservations)
     ok, status, reservations = await cap_manager.increment_cap_count(
         db,
         offer_id=77,

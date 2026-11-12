@@ -53,6 +53,10 @@ def _daily_cap():
     )
 
 
+
+async def _no_pending_reservations(**kwargs):
+    return 0
+
 @pytest.mark.asyncio
 async def test_postback_fail_open_keeps_prepared_ledger_for_commit_without_fake_redis_token(monkeypatch):
     cap = _daily_cap()
@@ -78,6 +82,7 @@ async def test_postback_fail_open_keeps_prepared_ledger_for_commit_without_fake_
     monkeypatch.setattr(cap_manager.CapReservationLedger, "mark_reserved", mark_reserved)
     monkeypatch.setattr(cap_manager.RedisCapManager, "check_and_increment_daily", daily)
 
+monkeypatch.setattr(cap_manager.CapReservationLedger, "count_uncommitted_for_scope", _no_pending_reservations)
     ok, status, reservations = await cap_manager.increment_cap_count(
         db=db,
         offer_id=77,
@@ -126,6 +131,7 @@ async def test_postback_success_marks_ledger_reserved_with_stable_token(monkeypa
     monkeypatch.setattr(cap_manager.CapReservationLedger, "mark_reserved", mark_reserved)
     monkeypatch.setattr(cap_manager.RedisCapManager, "check_and_increment_daily", daily)
 
+monkeypatch.setattr(cap_manager.CapReservationLedger, "count_uncommitted_for_scope", _no_pending_reservations)
     ok, status, reservations = await cap_manager.increment_cap_count(
         db=db,
         offer_id=77,
@@ -378,6 +384,7 @@ async def test_pending_reservations_raise_redis_rebuild_baseline_not_db_snapshot
 
     monkeypatch.setattr(cap_manager.RedisCapManager, "check_and_increment_daily", daily)
 
+monkeypatch.setattr(cap_manager.CapReservationLedger, "count_uncommitted_for_scope", _no_pending_reservations)
     ok, status, reservations = await cap_manager.increment_cap_count(
         db=db,
         offer_id=77,
