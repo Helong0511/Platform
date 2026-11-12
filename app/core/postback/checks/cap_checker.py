@@ -64,7 +64,7 @@ class CapChecker:
             return True, "cap_ok"
             
         except Exception as e:
-            logger.error(f"Cap 检查失败：{e}", exc_info=True)
+            logger.error("Cap 检查失败：error_type=%s", type(e).__name__)
             if settings.CAP_FAIL_OPEN:
                 return True, "cap_check_error"
             return False, "cap_check_error"
@@ -157,18 +157,18 @@ class CapChecker:
                 if ledger_key:
                     try:
                         await CapReservationLedger.mark_needs_reconciliation(
-                            ledger_key, str(exc), lease_owner=lease_owner
+                            ledger_key, f"Redis 回滚异常，error_type={type(exc).__name__}", lease_owner=lease_owner
                         )
                     except Exception:
                         logger.critical(
                             "Cap Reservation 状态更新失败：%s", ledger_key, exc_info=True
                         )
                 failures.append(
-                    f"kind={kind}, offer_id={offer_id}, token={reservation_id}, error={exc}"
+                    f"kind={kind}, offer_id={offer_id}, token={reservation_id}, error_type={type(exc).__name__}"
                 )
                 logger.error(
-                    "Cap reservation rollback failed; continue with remaining tokens",
-                    exc_info=True,
+                    "Cap reservation rollback failed; continue with remaining tokens：error_type=%s",
+                    type(exc).__name__,
                 )
         if failures:
             raise RuntimeError(
