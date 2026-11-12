@@ -9,14 +9,12 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import date, datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.core.database import AsyncSessionLocal
-from app.core.utils import get_app_now_naive
 from app.core.cap.redis_counter import RedisCapManager, get_daily_cap_key, get_total_cap_key
 from app.models.cap_reservation import CapReservation
 
@@ -246,7 +244,6 @@ class CapReservationLedger:
         """在 Postback 主事务提交前续租，防止恢复 Worker 与仍在执行的请求竞争。"""
         if lease_seconds < 30 or lease_seconds > 3600:
             raise ValueError("Reservation lease_seconds 必须在 30 到 3600 秒之间")
-        now = get_app_now_naive()
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 update(CapReservation)
@@ -428,7 +425,6 @@ class CapReservationLedger:
         lease_owner: Optional[str] = None,
     ) -> None:
         """保留无法确定的跨存储状态，绝不擅自删除 token 或扣减计数。"""
-        now = get_app_now_naive()
         conditions = [
             CapReservation.reservation_key == reservation_key,
             CapReservation.state.in_(ACTIVE_STATES),
