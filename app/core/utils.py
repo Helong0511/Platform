@@ -35,15 +35,17 @@ from app.core.constants import PERCENTAGE_MULTIPLIER
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
 
-def get_app_now_sql_expression():
+def get_app_now_sql_expression(offset_seconds: int = 0):
     """返回 MySQL 侧的应用时区当前时间表达式，避免各 Worker 本机时钟偏差。
 
     数据库使用 UTC_TIMESTAMP() 作为统一时钟，再按应用时区当前 UTC offset
     转换为与 get_app_now_naive() 一致的 naive DATETIME。
     """
-    offset = datetime.now(APP_TIMEZONE).utcoffset()
-    offset_seconds = int(offset.total_seconds()) if offset is not None else 0
-    return func.timestampadd(text("SECOND"), offset_seconds, func.utc_timestamp())
+    timezone_offset = datetime.now(APP_TIMEZONE).utcoffset()
+    timezone_seconds = int(timezone_offset.total_seconds()) if timezone_offset is not None else 0
+    return func.timestampadd(
+        text("SECOND"), timezone_seconds + int(offset_seconds), func.utc_timestamp()
+    )
 
 
 def get_device_type(request: Request) -> str:
