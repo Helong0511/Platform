@@ -12,7 +12,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.core.database import AsyncSessionLocal
@@ -105,9 +105,7 @@ class CapReservationLedger:
             cap_kind=cap_kind,
             business_date=business_date,
         )
-        now = get_app_now_naive()
         owner = uuid.uuid4().hex
-        expires = now + timedelta(seconds=lease_seconds)
         kind = identity["cap_kind"]
         if kind == "daily":
             counter_key = get_daily_cap_key(
@@ -138,8 +136,9 @@ class CapReservationLedger:
                     redis_reserved=False,
                     state="PREPARED",
                     lease_owner=owner,
-                    lease_expires_at=expires,
-                    prepared_at=now,
+                    lease_expires_at=func.timestampadd(text("SECOND"), lease_seconds, func.now()),
+                    prepared_at=func.now(),
+                    updated_at=func.now(),
                 )
                 session.add(row)
                 try:
@@ -177,8 +176,6 @@ class CapReservationLedger:
     @staticmethod
     async def _claim_existing(session, row, owner, lease_seconds):
         """仅允许租约过期的可恢复状态被新请求接管；等待行锁后重新计算租约时间。"""
-        now = get_app_now_naive()
-        expires = now + timedelta(seconds=lease_seconds)
         if row.state in {"COMMITTED", "NEEDS_RECONCILIATION", "PREPARED", "RESERVED"}:
             # 不能因为租约过期就允许重复 Postback 抢占活动账本。
             # 原请求可能只是长时间暂停而非死亡；重复请求若复用同一 Redis token，
@@ -195,14 +192,14 @@ class CapReservationLedger:
             row.state = "PREPARED"
             row.redis_reserved = False
             row.redis_token_cleaned = False
-            row.prepared_at = now
+            row.prepared_at = func.now()
             row.reserved_at = None
             row.finalized_at = None
             row.last_error = None
         row.lease_owner = owner
-        row.lease_expires_at = expires
+        row.lease_expires_at = func.timestampadd(text("SECOND"), lease_seconds, func.now())
         row.attempts = int(row.attempts or 0) + 1
-        row.updated_at = now
+        row.updated_at = func.now()
         await session.commit()
         await session.refresh(row)
         return row, True, owner
@@ -210,7 +207,6 @@ class CapReservationLedger:
     @staticmethod
     async def mark_reserved(reservation_key: str, lease_owner: str) -> None:
         """Redis Lua 明确返回预留成功后，独立提交 RESERVED。"""
-        now = get_app_now_naive()
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 update(CapReservation)
@@ -222,9 +218,9 @@ class CapReservationLedger:
                 .values(
                     state="RESERVED",
                     redis_reserved=True,
-                    reserved_at=now,
-                    lease_expires_at=now + timedelta(seconds=DEFAULT_LEASE_SECONDS),
-                    updated_at=now,
+                    reserved_at=func.now(),
+                    lease_expires_at=func.timestampadd(text("SECOND"), DEFAULT_LEASE_SECONDS, func.now()),
+                    updated_at=func.now(),
                     last_error=None,
                 )
             )
@@ -260,8 +256,8 @@ class CapReservationLedger:
                     CapReservation.lease_owner == lease_owner,
                 )
                 .values(
-                    lease_expires_at=now + timedelta(seconds=lease_seconds),
-                    updated_at=now,
+                    lease_expires_at=func.timestampadd(text("SECOND"), lease_seconds, func.now()),
+                    updated_at=func.now(),
                 )
             )
             await session.commit()
@@ -279,7 +275,6 @@ class CapReservationLedger:
         """恢复 Worker 开始处理单条记录前续租；仅当前 owner 可延长租约。"""
         if lease_seconds < 30 or lease_seconds > 3600:
             raise ValueError("Reservation recovery lease_seconds 必须在 30 到 3600 秒之间")
-        now = get_app_now_naive()
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 update(CapReservation)
@@ -295,8 +290,8 @@ class CapReservationLedger:
                 .values(
                     # 至少推进 1 秒，避免 MySQL matched/changed rows 语义下，
                     # 与刚刚批量认领写入相同时间戳时 rowcount=0 被误判为租约丢失。
-                    lease_expires_at=now + timedelta(seconds=lease_seconds + 1),
-                    updated_at=now,
+                    lease_expires_at=func.timestampadd(text("SECOND"), lease_seconds + 1, func.now()),
+                    updated_at=func.now(),
                 )
             )
             await session.commit()
@@ -312,7 +307,6 @@ class CapReservationLedger:
         """提交账本终态；返回 token 是否已清理，清理失败由恢复任务重试。"""
         if state not in FINAL_STATES:
             raise ValueError(f"非法 Cap Reservation 终态：{state}")
-        now = get_app_now_naive()
         conditions = [
             CapReservation.reservation_key == reservation_key,
             CapReservation.state.in_(ACTIVE_STATES),
@@ -359,7 +353,7 @@ class CapReservationLedger:
                     row.redis_token_cleaned = True
                     row.lease_owner = None
                     row.lease_expires_at = None
-                    row.updated_at = now
+                    row.updated_at = func.now()
                     await session.commit()
                 else:
                     await session.commit()
@@ -372,8 +366,8 @@ class CapReservationLedger:
                     state=state,
                     redis_reserved=(False if state == "ROLLED_BACK" else CapReservation.redis_reserved),
                     redis_token_cleaned=token_cleaned,
-                    finalized_at=now,
-                    updated_at=now,
+                    finalized_at=func.now(),
+                    updated_at=func.now(),
                     lease_owner=None,
                     lease_expires_at=None,
                     last_error=None if token_cleaned else "Redis token cleanup pending",
@@ -398,7 +392,6 @@ class CapReservationLedger:
         lease_owner: str,
     ) -> None:
         """恢复任务删除 COMMITTED token 或 ROLLED_BACK 墓碑后，确认清理完成。"""
-        now = get_app_now_naive()
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 update(CapReservation)
@@ -411,7 +404,7 @@ class CapReservationLedger:
                     redis_token_cleaned=True,
                     lease_owner=None,
                     lease_expires_at=None,
-                    updated_at=now,
+                    updated_at=func.now(),
                     last_error=None,
                 )
             )
@@ -450,7 +443,7 @@ class CapReservationLedger:
                     state="NEEDS_RECONCILIATION",
                     attempts=CapReservation.attempts + 1,
                     last_error=(error or "unknown")[:8000],
-                    updated_at=now,
+                    updated_at=func.now(),
                     lease_owner=None,
                     lease_expires_at=None,
                 )
