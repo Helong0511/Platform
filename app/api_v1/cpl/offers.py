@@ -770,7 +770,7 @@ async def get_offer_stats(
     # 客户仅统计本客户渠道，避免共享 Offer 上泄露其他下游指标
     publisher_ids = None
     if current_user.role == UserRole.CLIENT:
-        client_id = await get_client_id_for_user(db, current_user)
+        client_ids = await get_client_ids_for_user(db, current_user)
         if not client_ids:
             publisher_ids = []
         else:
@@ -933,9 +933,9 @@ async def get_offer(
     # 从已加载的关联中获取广告主名称
     offer_data.advertiser_name = offer.advertiser.advertiser_name if offer.advertiser else None
     offer_data.assigned_publishers = assignments
-    client_id = await get_client_id_for_user(db, current_user)
+    client_ids = await get_client_ids_for_user(db, current_user)
     offer_data = _sanitize_offer_response_for_client(
-        offer_data, current_user, client_id=client_id
+        offer_data, current_user, client_ids=client_ids
     )
 
     return ResponseBaseSchema.success(data=offer_data)
