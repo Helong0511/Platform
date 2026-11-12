@@ -973,6 +973,6 @@ PR #1 继续 Open / Draft，不合并 main、不部署。所有验证继续仅�
 - 继续定向扫描发现 TB 搜索数据列表、总数统计、客户筛选项、产品筛选项（分配历史与当前归属双路径）及国家筛选查询，客户角色原先只按 Client.user_id 过滤。
 - 上述客户可见查询现统一附加 Client.is_active=true，避免停用 Client 仍通过 TB 数据、count、filter options 或分配历史回退路径访问统计数据。
 - 管理员查询不增加该限制，保留管理员查看历史客户数据的能力。
-- 本次提交之后必须检查最新 HEAD 的完整 CI；当前不把旧 Run #1340 视为本次 TB 搜索变更的验证证据。
+- Run #1341（SHA b2df034da4117f4d4651c475725b47a4e9f12972）：Backend **520 passed、1 skipped、1 warning**；Python Compile、Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。Run：https://github.com/Helong0511/Platform/actions/runs/43156414244。该 Run 覆盖本节 TB 搜索变更及此前同一 HEAD 的广告主/转化/广告数据/Dashboard/产品客户范围修复。
 
 验证仅限 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
