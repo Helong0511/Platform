@@ -69,7 +69,7 @@ def test_plan_rejects_unknown_ledger_revision(tmp_path: Path):
 
 def test_plan_rejects_ledger_order_drift(tmp_path: Path):
     entries = _fixture(tmp_path)
-    with pytest.raises(MigrationManifestError, match="not in manifest order"):
+    with pytest.raises(MigrationManifestError, match="contiguous manifest prefix"):
         plan_migrations(
             {
                 entries[1].revision: entries[1].sha256,
