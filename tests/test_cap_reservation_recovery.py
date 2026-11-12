@@ -333,6 +333,7 @@ async def test_recovery_status_reports_backlog_and_oldest_pending_age(monkeypatc
         "pending_prepared": 3,
         "pending_reserved": 4,
         "needs_reconciliation": 1,
+        "terminal_token_cleanup_pending": 2,
         "committed_token_cleanup_pending": 2,
         "oldest_pending_seconds": 600,
     }
