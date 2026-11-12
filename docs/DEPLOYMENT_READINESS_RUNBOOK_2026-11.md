@@ -1147,3 +1147,33 @@ PR #1 继续 Open / Draft，不合并 main、不部署。所有验证继续仅�
 上述 11 项通过不等于 Cap 故障矩阵全部完成。仍需单独补充/核对 Redis failover、eviction、整库数据丢失后的可信基线重建、DB commit 阻塞/连接池耗尽、进程在各状态转换点被杀、跨日 Daily token、Total token 生命周期、DB/Redis 恢复期间多 Worker 竞争的组合场景。任何 UNKNOWN 都不得按 ABSENT 处理，任何无法证明的计数不得自动 DECR。
 
 PR #1 仍保持 Open / Draft；不合并 main、不部署。凭据安全专项和用户明确暂缓的前端 Production High advisory 不在本轮擅自处理。
+
+## 50. 多 Client 登录确定性与启动 Schema Drift 验收（2026-11-12）
+
+### 多 Client 登录默认主体
+
+- 修复 `app/core/api_auth.py::_get_active_user_clients()`：先排除停用 Client，再按 Client ID 升序排序，避免 ORM 一对多关系无 `order_by` 时登录/刷新响应默认主体不确定。
+- 登录与 refresh 都使用同一 helper；API 能力和 Publisher 能力仍按全部启用 Client 聚合；IP 白名单仍按全部已配置策略交集判断；没有启用主体时 fail-closed。
+- 多 Client API Key 接口仍要求显式传入 `client_id`，并同时限制 `Client.user_id` 与 active 状态。
+- 新增 `tests/test_client_login_ip_allowlist.py::test_active_client_memberships_are_sorted_for_stable_login_payload`。
+- Run #1394：https://github.com/Helong0511/Platform/actions/runs/43174807079
+- SHA：`726936f160b2271c83769aaf810da55cd9c1173f`
+- Backend：**532 passed、1 skipped、1 warning**；Frontend Lint、Build、Playwright Mock API Browser E2E 全通过。
+- 唯一 skip 为未提交的本机核对脚本；warning 为 passlib / Python 3.11 `crypt` 弃用提示。
+
+### 启动 Schema Drift 行为复核
+
+- 当前 `app/bootstrap/lifespan.py` 已在启动阶段获取 MySQL session advisory lock，执行 `Base.metadata.create_all`，随后通过 `_schema_metadata_drift()` 检查 ORM 声明的所有表及列是否存在。
+- Schema 初始化或表/列核验失败时，lifespan 会抛出启动异常，不再吞掉异常后继续提供服务；这与本文件第 9.3 节早期观察到的“失败后继续启动”历史行为不同，后续记录以当前代码为准。
+- 新增 `tests/test_schema_metadata_drift.py`，覆盖缺表、缺列被准确报告，以及 schema 完整时无 drift。
+- 该测试提交：`6a0139bdc4254c678f61adbd3fc8fa963a0a9427`；其后续 CI 尚未完成，因此目前只是已提交、待 CI 验收，不能宣称测试已通过。
+
+### 仍然阻断部署的 Migration / Schema 问题
+
+- 当前应用启动仍会调用 `create_database()` 与 `Base.metadata.create_all`；`create_all` 只创建缺失表，不会将已有表升级到新列/索引/约束。
+- `_schema_metadata_drift()` 目前只核验表和列是否存在，不核验列类型、长度、NULL/default、唯一约束、CHECK、索引列顺序及 collation。
+- 仓库仍缺少统一有序 migration runner、revision ledger/manifest、checksum、并发执行锁与发布记录；SQL migrations 仍需按人工流程执行。
+- MySQL DDL 隐式提交，不能用事务 rollback 作为迁移回滚方案。完整备份恢复、代表性历史数据升级、每个 DDL 边界中断重跑、旧应用兼容回滚和 schema/data diff 仍未完成。
+- 第 9.3 节中关于“schema bootstrap 异常被吞掉并继续启动”的观察属于旧代码状态，已由当前 fail-closed 启动逻辑修复；但 runner 与完整结构核验缺口仍是上线阻断项。
+
+PR #1 继续 Open / Draft；本轮不合并 main、不部署、不连接生产服务器、生产数据库、Redis、队列或真实第三方 API。凭据安全专项继续按用户要求暂缓。
