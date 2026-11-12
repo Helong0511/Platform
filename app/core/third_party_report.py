@@ -621,7 +621,7 @@ async def send_third_party_report(
                                 report_log_id, attempt + 1, hash_attempts, log_id,
                             )
                             
-                            await update_owned_report_log(
+                            success_persisted = await update_owned_report_log(
                                 report_log_id,
                                 status="success",
                                 response_status=response.status_code,
@@ -631,6 +631,17 @@ async def send_third_party_report(
                                 completed_at=report_success_time,
                                 clear_next_retry_time=True,
                             )
+                            if not success_persisted:
+                                logger.warning(
+                                    "[第三方上报] 第三方已接收事件，但当前 Worker 租约已失效：report_log_id=%s",
+                                    report_log_id,
+                                )
+                                return {
+                                    "success": False,
+                                    "retryable": True,
+                                    "reason": "report_lease_lost_after_send",
+                                    "report_log_id": report_log_id,
+                                }
                             
                             # 当Purchase事件上报成功时，发送Telegram通知
                             if fb_event_name == "Purchase":
@@ -807,7 +818,7 @@ async def send_third_party_report(
                                 report_log_id, hash_attempts + 1, hash_attempts + 1, log_id,
                             )
                             
-                            await update_owned_report_log(
+                            success_persisted = await update_owned_report_log(
                                 report_log_id,
                                 status="success",
                                 response_status=response.status_code,
@@ -817,6 +828,17 @@ async def send_third_party_report(
                                 completed_at=report_success_time,
                                 clear_next_retry_time=True,
                             )
+                            if not success_persisted:
+                                logger.warning(
+                                    "[第三方上报] 第三方已接收事件，但当前 Worker 租约已失效：report_log_id=%s",
+                                    report_log_id,
+                                )
+                                return {
+                                    "success": False,
+                                    "retryable": True,
+                                    "reason": "report_lease_lost_after_send",
+                                    "report_log_id": report_log_id,
+                                }
                             return
                         else:
                             error_msg = "第三方未确认接收事件"
@@ -875,7 +897,7 @@ async def send_third_party_report(
     if final_attempt_count < max_attempts_total:
         retry_delay_minutes = min(5 * (2 ** (base_attempt_count // 4)), 60)
         retry_at = get_app_now_naive() + timedelta(minutes=retry_delay_minutes)
-    await update_owned_report_log(
+    finalized = await update_owned_report_log(
         report_log_id,
         status="failed",
         attempt_count=final_attempt_count,
@@ -885,6 +907,17 @@ async def send_third_party_report(
         next_retry_time=retry_at,
         clear_next_retry_time=retry_at is None,
     )
+    if not finalized:
+        logger.warning(
+            "[第三方上报] 当前 Worker 租约已失效，跳过过期失败结果写入：report_log_id=%s",
+            report_log_id,
+        )
+        return {
+            "success": False,
+            "retryable": True,
+            "reason": "report_lease_lost",
+            "report_log_id": report_log_id,
+        }
 
     # 发送告警
     try:
