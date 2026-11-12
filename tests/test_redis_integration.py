@@ -66,6 +66,23 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("redis://127.0.0.1:6379/14", True),
+        ("redis://[::1]:6379/14", True),
+        ("redis://localhost:6379/14", True),
+        ("redis://127.0.0.1:6379/0", False),
+        ("redis://192.0.2.10:6379/14", False),
+        ("redis://redis.internal:6379/14", False),
+        ("http://127.0.0.1:6379/14", False),
+        (None, False),
+    ],
+)
+def test_redis_integration_guard_requires_loopback_db14(url, expected):
+    assert _is_isolated_redis_url(url) is expected
+
+
 @pytest.mark.asyncio
 async def test_real_redis_claim_pending_batch_and_decrement_acknowledged_counter():
     redis = Redis.from_url(REDIS_URL, decode_responses=True)
