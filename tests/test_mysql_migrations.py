@@ -43,7 +43,7 @@ _SAFE_MYSQL_CI = (
 
 # CI 若显式开启了测试模式却未满足隔离条件，直接失败而不是静默跳过，
 # 防止错误配置导致破坏性迁移测试连向非测试数据库。
-if os.getenv("UNIT_TEST") == "1" and (HOST or os.getenv("GITHUB_ACTIONS") == "true") and not _SAFE_MYSQL_CI:
+if (os.getenv("GITHUB_ACTIONS") == "true" or (os.getenv("UNIT_TEST") == "1" and HOST)) and not _SAFE_MYSQL_CI:
     raise RuntimeError(
         "拒绝执行破坏性 MySQL 迁移测试：必须使用 loopback 主机、platform_ci 数据库，"
         "并显式设置 MYSQL_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS=1"
