@@ -349,3 +349,33 @@ MySQL 官方文档确认：
 - 继续检查报表导出、产品权限变更、结算与统计 API 是否全部按当前账号的 Client 集合过滤，并验证历史产品归属切换时的租户隔离。
 - 隔离 MySQL 多客户真实数据端到端测试仍需补齐；当前新增测试验证 SQL 约束和接口选择行为。
 - PR #1 仍 Open / Draft；不合并 main、不部署、不访问生产环境。凭据安全专项继续暂缓。
+
+## 14. Cap Reservation 迁移同名错误表 fail-closed 校验（Run #1403）
+
+### 14.1 本轮发现与修复
+
+- `CREATE TABLE IF NOT EXISTS cap_reservations` 在目标库已经存在同名但结构错误的表时会静默跳过建表；仅执行后续 `SHOW CREATE TABLE` 的测试无法证明迁移会拒绝这种状态。
+- 在迁移末尾新增结构验收：精确核对 23 个字段的类型/NULL 属性、表排序规则、6 个 CHECK 约束、索引集合数量以及每个复合索引的列顺序。
+- 如果结构不符合预期，通过动态 SQL 执行指向故意不存在的哨兵表的查询，使迁移以明确 MySQL 1146 错误失败；迁移不删除、不重建、不覆盖原有同名表。
+- 新增隔离 MySQL 测试，预建仅含 `id` 和 `reservation_key` 的错误同名表，执行迁移后断言收到 1146，且原表结构仍保持不变。
+
+### 14.2 CI 失败与修复记录
+
+- Run #1402（SHA `4eefce50e832d2be433770251f08f963ca00316f`）出现 **1 failed、538 passed、1 skipped、1 warning**。失败是新测试对 MySQL 1146 错误类型的断言不准确：PyMySQL 将“表不存在”映射为 `ProgrammingError`，测试错误地期待 `OperationalError`；迁移实际按预期拒绝错误表。
+- 已将测试异常类型断言修正为 `pymysql.err.ProgrammingError`，并保留 1146 错误码断言。
+- Run #1403（SHA `77cd5a885bc0357c0ec163a5da9cb3da959ad109`）：Backend **539 passed、1 skipped、1 warning**；Python Compile、Frontend npm ci、依赖 Advisory 报告、Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- Run #1403：https://github.com/Helong0511/Platform/actions/runs/43178129007
+- 1 skipped 为未提交的本地核对脚本（CI 不依赖）；1 warning 为 passlib 在 Python 3.11 使用 `crypt` 的弃用提示。前端 Production High advisory 仍属用户明确暂缓的凭据安全专项，不宣称依赖零漏洞。
+
+### 14.3 仍未关闭的迁移阻断项
+
+- 仓库当前有 5 份 SQL 增量迁移，但完整文件树中未发现 Alembic 配置、统一 migration runner、revision ledger 或 manifest；应用启动仍调用 `Base.metadata.create_all`。
+- 当前 `_schema_metadata_drift` 仅核对 ORM 声明的表和列存在，不验证字段类型/长度/default/NULL、索引、唯一约束、CHECK、字符集/排序规则的完整一致性。
+- 迁移执行顺序、revision/checksum、执行状态、并发协调和失败恢复仍没有统一的应用内机制；SQL 脚本依赖人工按发布文档执行。
+- 不得仅凭本轮 23 字段结构检查就认定整个应用 schema 已完整验证；此校验只针对 `cap_reservations` 表。
+- 旧 schema + 代表性历史数据、逻辑备份恢复、MySQL server crash、worker pause/resume、应用兼容回滚、schema/data diff 和大规模升级性能仍未完成。
+
+### 14.4 发布决策
+
+- Run #1403 验证了本轮 SQL 迁移及错误同名表拒绝测试，不代表完整迁移机制或生产升级已验收。
+- PR #1 继续 Open / Draft；不合并 main、不部署、不访问生产环境。所有验证继续只使用 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API；凭据安全专项继续按用户要求暂缓。
