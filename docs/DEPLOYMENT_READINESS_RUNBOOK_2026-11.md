@@ -952,3 +952,17 @@ PR #1 继续 Open / Draft，不合并 main、不部署。所有验证继续仅�
 - 1 skipped 为本地核对脚本未提交（CI 不依赖）；1 warning 为 passlib/Python 3.11 crypt 弃用提示，仍待处理。
 
 验证仅限 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
+
+
+## 40. 广告主、转化、广告数据、Dashboard 与产品多客户范围复核（2026-11-12，Run #1340）
+
+- 定向检查发现 AdvertiserService 与 PublisherService 一样，原先只取一个 Client ID；现在按用户全部启用中的 Client ID 查询已分配 Offer 对应广告主，避免多客户账号看不到其它客户主体的合法广告主。
+- ConversionService 的转化汇总与按 Offer 汇总均只收集启用中的 Client ID；按 Offer 查询同时只使用启用中的 Publisher，停用主体/渠道不会继续进入客户可见统计范围。
+- 广告数据筛选条件、筛选项（客户/产品/日期范围）、汇总查询和 Dashboard 的当前/历史周期查询，客户角色统一追加 Client.is_active=true，避免停用客户主体通过历史分配或产品当前归属继续看到广告数据。
+- ProductService 的产品详情、列表和 count 查询均要求关联 Client 启用；ProductAssignmentService 的客户分配历史与无记录时的产品权限回查也要求 Client 启用。
+- 新增/增强测试覆盖 Advertiser 多客户授权范围及 Conversion 查询的 active Client / active Publisher SQL 条件。
+- Run #1340（SHA 9ab2f0ced70832677320187bb60f17e054624927）：Backend **520 passed、1 skipped、1 warning**；Python Compile、Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。Run：https://github.com/Helong0511/Platform/actions/runs/43155997068。
+- 本轮定向检查不等同于全仓租户隔离审计完成。ClientService 的自有客户记录读取、所有剩余业务服务及导入/导出/统计边界仍需继续核查；历史业务记录是否在 Client 停用后仍允许只读访问，需按业务策略明确，不得将数据保留/展示规则与实时授权混为一谈。
+- 1 skipped 为本地核对脚本未提交（CI 不依赖）；1 warning 为 passlib/Python 3.11 crypt 弃用提示，尚未处理。
+
+验证仅限 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
