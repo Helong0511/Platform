@@ -206,7 +206,7 @@ async def refresh_token(
             raise_auth_failure(exc)
     except Exception as e:
         await db.rollback()
-        logger.error(f"刷新令牌失败: {str(e)}", exc_info=True)
+        logger.error("刷新令牌失败: error_type=%s", type(e).__name__)
         try:
             raise_auth_error(
                 ErrorCode.TOKEN_INVALID,
