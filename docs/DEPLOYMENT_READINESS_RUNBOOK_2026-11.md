@@ -494,3 +494,31 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - PII 保留政策仍未获业务/合规批准，自动清理保持默认关闭。
 - 完整 migration/backup/restore/rollback 演练、Outbox 多 Worker 配置生命周期、Cap Reservation Redis/MySQL 故障组合、RBAC/租户隔离及统计/结算/API/队列/前端剩余模块全量复核仍是合并阻断项。
 - PR 保持 Open / Draft，不合并、不部署；只允许隔离 CI、合成数据和 Mock API。
+
+
+## 25. 仪表盘与转化报表异常信息脱敏（2026-11-12，Run #1148）
+
+### 发现的问题
+
+- Dashboard 的 stats、trends 异常处理原先将 str(exception) 同时写入日志并放入 API detail；数据库驱动异常可能包含 SQL 参数、邮箱、IP、click_id 等业务数据。
+- Dashboard recent-ads 的路由和服务层也曾将原始异常文本写入日志，尽管服务层会回退为空列表。
+- 转化总览与按 Offer 统计的异常处理同样把原始异常文本和 traceback 写入日志，并返回给 API 调用方。
+
+### 修复
+
+- Dashboard stats、trends 只记录异常类型，响应使用固定通用错误提示。
+- Dashboard recent-ads 路由与服务层只记录异常类型，保留既有空数据降级行为。
+- 转化总览、按 Offer 统计只记录异常类型，API 不再暴露底层异常原文。
+- 新增 6 项回归测试：Dashboard stats/trends 响应与日志脱敏；recent-ads 路由与服务层日志脱敏；转化总览和按 Offer 统计响应与日志脱敏。
+
+### CI 证据
+
+- Run #1148（SHA 90539d1ed09687b643a57f5863c6542ee6bdc601）：Backend **428 passed、1 skipped、1 warning**；Python compile、Frontend Lint/Build、Playwright Mock API Browser E2E 全部通过。
+- Skip 是本机核对脚本未提交（CI 不依赖）；warning 是 passlib 在 Python 3.11 使用 crypt 的弃用提示。
+- Run #1148：https://github.com/Helong0511/Platform/actions/runs/43134611858。
+
+### 剩余工作
+
+- 这轮只处理已定位的 Dashboard 和转化报表异常出口；还需继续扫描其它业务模块的异常日志、错误响应和第三方响应透传。
+- PII 保留政策、通知消息、原始 Postback 数据、未完成转发队列、备份与第三方接收方数据仍需单独治理。
+- PR 保持 Open / Draft；不合并、不部署。后续代码/文档更新仍需以最新 HEAD 的完整 CI 为准。
