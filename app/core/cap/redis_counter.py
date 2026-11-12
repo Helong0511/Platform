@@ -43,6 +43,10 @@ class _CapReservationStateLost(RuntimeError):
     """幂等令牌存在但计数状态丢失；必须 fail-closed，不能误判为成功或超限。"""
 
 
+class _CapReservationAlreadyRolledBack(RuntimeError):
+    """稳定 reservation 已进入回滚终态；重复预留必须 fail-closed。"""
+
+
 class RedisCapManager:
     """Redis Cap 管理器"""
 
@@ -69,7 +73,15 @@ class RedisCapManager:
     _RESERVE_LUA = """
     local counter_ttl = tonumber(ARGV[1]) or 0
     local token_ttl = tonumber(ARGV[4]) or counter_ttl
-    if redis.call('EXISTS', KEYS[2]) == 1 then
+    local existing_token = redis.call('GET', KEYS[2])
+    if existing_token then
+        -- 已回滚墓碑是终态证据，不能被同一 reservation 的重试当成有效预留。
+        if existing_token == 'ROLLED_BACK' then
+            return -3
+        end
+        if existing_token ~= '1' then
+            return -2
+        end
         -- token 仍在但 counter 已被独立淘汰/删除时，绝不能把缺失计数当作 0 放行。
         if redis.call('EXISTS', KEYS[1]) == 0 then
             return -2
@@ -227,12 +239,16 @@ class RedisCapManager:
                 0,  # token 生命周期由持久化账本终态控制，不使用固定 TTL。
             )
             current = int(current)
+            if current == -3:
+                raise _CapReservationAlreadyRolledBack(
+                    "Redis 日 Cap reservation 已回滚，拒绝同一 reservation 重复预留"
+                )
             if current == -2:
                 raise _CapReservationStateLost("Redis 日 Cap 计数 key 丢失或状态损坏，拒绝重试放行")
             if current < 0:
                 return False
             return True
-        except _CapReservationStateLost:
+        except (_CapReservationStateLost, _CapReservationAlreadyRolledBack):
             raise
         except Exception as e:
             logger.error("Redis 日 Cap 预留结果不确定，使用唯一令牌执行幂等补偿：%s", e, exc_info=True)
@@ -279,6 +295,10 @@ class RedisCapManager:
                 0,  # Total token 在账本终态前永久保留，防止恢复窗口过期。
             )
             current = int(current)
+            if current == -3:
+                raise _CapReservationAlreadyRolledBack(
+                    "Redis 总 Cap reservation 已回滚，拒绝同一 reservation 重复预留"
+                )
             if current == -2:
                 raise _CapReservationStateLost("Redis 总 Cap 计数 key 丢失或状态损坏，拒绝重试放行")
             if current < 0:
