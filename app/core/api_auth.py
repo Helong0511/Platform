@@ -138,10 +138,6 @@ def _is_client_ip_allowed(allowed_ips: str | None, client_ip: str | None) -> boo
     except ValueError:
         return False
 
-    # 管理端 Schema 明确约定回环地址始终允许，便于本机集成调用。
-    if remote_ip == ipaddress.ip_address("127.0.0.1"):
-        return True
-
     entries = [item.strip() for item in configured.split(",") if item.strip()]
     if not entries:
         # 非空但只包含分隔符的配置不是“未配置”，必须拒绝。
