@@ -7,6 +7,7 @@
 """
 import hashlib
 import hmac
+import ipaddress
 import logging
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -126,7 +127,148 @@ def verify_signature(
     return hmac.compare_digest(calculated_sign, provided)
 
 
+def _is_client_ip_allowed(allowed_ips: str | None, client_ip: str | None) -> bool:
+    """按客户配置校验来源 IP；空白配置不限制，配置错误时 fail-closed。"""
+    configured = (allowed_ips or "").strip()
+    if not configured:
+        return True
+
+    try:
+        remote_ip = ipaddress.ip_address((client_ip or "").strip())
+    except ValueError:
+        return False
+
+    # 管理端 Schema 明确约定回环地址始终允许，便于本机集成调用。
+    if remote_ip == ipaddress.ip_address("127.0.0.1"):
+        return True
+
+    entries = [item.strip() for item in configured.split(",") if item.strip()]
+    if not entries:
+        # 非空但只包含分隔符的配置不是“未配置”，必须拒绝。
+        return False
+
+    allowed = set()
+    for entry in entries:
+        try:
+            allowed.add(ipaddress.ip_address(entry))
+        except ValueError:
+            # 管理配置中只要存在非法条目就拒绝，避免错误配置意外扩大访问范围。
+            logger.error("客户 IP 白名单配置无效：拒绝 API 访问")
+            return False
+
+    # IPv4-mapped IPv6 地址按其 IPv4 地址匹配，避免双栈代理造成误拒绝。
+    if isinstance(remote_ip, ipaddress.IPv6Address) and remote_ip.ipv4_mapped:
+        remote_ip = remote_ip.ipv4_mapped
+    return remote_ip in allowed
+
+
 async def verify_client_request(
+    request: any,  # ClientAPIBaseRequest 类型
+    db: AsyncSession,
+    data_type: str | None = None,
+    dimension: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+    time_tolerance: int = CLIENT_API_TIME_TOLERANCE_SECONDS,
+    client_ip: str | None = None,
+) -> Client:
+    """
+    验证客户请求
+    1. 通过 client_id 查询客户（不暴露 secret_key）
+    2. 验证请求时间差异（默认正负 15 秒内）
+    3. 使用客户的 key 验证签名
+    
+    Args:
+        request: 客户 API 请求对象（包含 client_id, req_time, sign 等字段）
+        db: 数据库会话
+        data_type: 数据类型（可选，用于签名验证）
+        dimension: 统计维度（可选，用于签名验证）
+        start_date: 开始日期（可选，用于签名验证）
+        end_date: 结束日期（可选，用于签名验证）
+        page: 页码（可选，显式传入时参与签名验证）
+        page_size: 每页条数（可选，显式传入时参与签名验证）
+        time_tolerance: 时间容差（秒），默认 15 秒
+    
+    Returns:
+        Client: 验证通过的客户对象
+    
+    Raises:
+        HTTPException: 验证失败时抛出异常
+    """
+    # 1. 通过client_id查询客户（secret_key不通过请求传递，从数据库获取）
+    result = await db.execute(
+        select(Client).where(
+            Client.id == request.client_id,
+            Client.is_active == True
+        )
+    )
+    client = result.scalars().first()
+
+    if not client:
+        logger.warning(
+            f"客户验证失败: client_id={request.client_id} 不存在或未激活"
+        )
+        raise_api_exception(
+            ErrorCode.CLIENT_NOT_FOUND,
+            detail="客户不存在或未激活"
+        )
+    
+    # 检查API是否启用
+    if not client.api_enabled:
+        logger.warning(
+            f"客户API访问被禁用: client_id={request.client_id}"
+        )
+        raise_api_exception(
+            ErrorCode.CLIENT_API_VALIDATION_FAILED,
+            detail="客户API访问未启用，请联系管理员开启"
+        )
+
+    # IP 白名单必须使用经过可信代理边界解析的客户端 IP，不直接读取请求头。
+    if not _is_client_ip_allowed(client.allowed_ips, client_ip):
+        logger.warning("客户 API 来源 IP 不在允许列表中：client_id=%s", client.id)
+        raise_api_exception(
+            ErrorCode.FORBIDDEN,
+            detail="当前来源 IP 不在客户 API 允许列表中",
+        )
+
+    # 2. 验证请求时间差异（默认正负 15 秒内）
+    current_timestamp = int(datetime.now(timezone.utc).timestamp())
+    time_diff = abs(current_timestamp - request.req_time)
+
+    if time_diff > time_tolerance:
+        logger.warning(
+            f"请求时间验证失败: client_id={request.client_id}, "
+            f"req_time={request.req_time}, current_time={current_timestamp}, diff={time_diff}秒"
+        )
+        raise_api_exception(
+            ErrorCode.CLIENT_API_VALIDATION_FAILED,
+            detail=f"请求时间差异过大（{time_diff}秒），请检查系统时间"
+        )
+
+    # 3. 验证签名
+    if not verify_signature(
+        client_id=request.client_id,
+        secret_key=client.key,
+        req_time=request.req_time,
+        sign=request.sign,
+        data_type=data_type,
+        dimension=dimension,
+        start_date=start_date,
+        end_date=end_date,
+        page=page,
+        page_size=page_size,
+    ):
+        logger.warning(
+            f"签名验证失败: client_id={request.client_id}"
+        )
+        raise_api_exception(
+            ErrorCode.CLIENT_API_VALIDATION_FAILED,
+            detail="签名验证失败，请检查签名参数"
+        )
+
+    return client
     request: any,  # ClientAPIBaseRequest 类型
     db: AsyncSession,
     data_type: str | None = None,
