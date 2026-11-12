@@ -528,3 +528,28 @@ MySQL 官方文档确认：
 - 本次验证只覆盖 Outbox due 索引的前缀索引伪装场景，不代表所有迁移索引的每一种 MySQL 索引属性都已穷举。
 - 后续仍需评估事件幂等迁移的全表 `UPDATE ... WHERE event_key IS NULL` 在代表性大表规模下的执行时长、锁影响、复制延迟和中断恢复；当前 CI 合成数据测试不能替代规模化迁移演练。
 - PR #1 保持 Open / Draft，不合并 main、不部署；不连接生产环境。
+
+
+## 21. 事件幂等键回填大小写一致性与 Run #1424（2026-11-12）
+
+### 21.1 发现与修复
+
+- 复核 `sql/migrations/20261110_third_party_report_event_idempotency.sql` 的历史 `event_key` 回填表达式时发现：`event = 'ViewContent'` 等普通字符串比较受 MySQL collation 影响；在常见的 `*_ci` 不区分大小写排序规则下，小写 `viewcontent` 可能被误判为 `ViewContent`。
+- Python `build_event_idempotency_key` 按事件字符串原值生成键，大小写敏感。若 SQL 回填将不同大小写事件归一到同一分支，会导致历史数据回填结果与新写入路径不一致。
+- 已将 SQL 比较改为 `CAST(event AS BINARY) = CAST('ViewContent' AS BINARY)`，按字节比较，保持与 Python helper 的大小写语义一致。
+- 未使用 MySQL `BINARY` 运算符：官方文档说明该运算符自 MySQL 8.0.27 起弃用，推荐使用 `CAST(... AS BINARY)`。
+- 扩展隔离 MySQL 历史数据回填测试，增加事件值为小写 `viewcontent` 且带有非空 `conversion_id` 的合成历史行；迁移后断言其 `event_key` 与 Python `_event_key(*historical_case_variant)` 完全一致。该测试用于验证在默认大小写不敏感 collation 下，大小写变体不会错误进入大写事件分支。
+
+### 21.2 CI 验收
+
+- Run #1424：https://github.com/Helong0511/Platform/actions/runs/43184248205
+- 对应修复提交短 SHA：`87d0ee3`。
+- Backend：**546 passed、1 skipped、1 warning**；前端 Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- 该轮没有 CI 失败；1 skipped 为 CI 不依赖的本地核对脚本，1 warning 为 Passlib/Python 3.11 的 `crypt` 弃用提示。
+- 测试仅使用 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API；没有连接生产服务器、生产数据库、生产缓存、生产队列或真实第三方接口。
+
+### 21.3 结论边界与后续阻断项
+
+- 本轮证明了已覆盖的大小写变体历史回填路径与 Python 幂等键算法一致；不代表所有历史事件类型、所有数据异常及大表规模性能均已穷举。
+- 事件幂等迁移仍包含 `UPDATE third_party_report_logs ... WHERE event_key IS NULL` 全范围回填。必须先按第 20.3 节和部署 Runbook 第 9.2 节完成接近目标规模的隔离副本性能、锁、redo/undo、binlog、复制延迟和中断恢复评估；未完成前不得直接在生产执行。
+- PR #1 继续 Open / Draft；不合并 main、不部署。凭据安全专项继续按用户要求暂缓。
