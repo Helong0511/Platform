@@ -609,3 +609,24 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - RBAC、租户隔离、归因、统计、结算、API、队列及前端剩余业务模块仍需全量复核。
 
 PR 继续 Open / Draft；不合并 main、不部署。所有验证仅使用 GitHub Actions 隔离 MySQL/Redis、合成数据和 Mock API；严禁连接生产环境或真实第三方接口。
+
+
+## 29. 点击记录与扣减 API 异常脱敏（2026-11-12，Run #1177）
+
+### 修复
+
+- 点击访问记录列表/详情只记录异常类型；Facebook 像素手动补报日志移除原始异常文本、用户名和 traceback，只保留 click_record_id 与异常类型。
+- 扣减配置列表、扣减统计、扣减日志，以及扣减配置/统计/日志三类导出接口，不再向调用方返回底层异常原文；日志只记录异常类型。
+- 新增静态回归测试，确保点击记录与扣减 API 不重新引入 str(exception)、detail=str(exception) 或 exc_info traceback。
+
+### 失败记录与验收
+
+- Run #1171 曾因 Facebook 像素手动补报路径仍输出原始异常而失败（1 failed、440 passed、1 skipped、1 warning）；已定位并修复。
+- Run #1177 在包含上述修复的最新代码 SHA 上完整通过：Backend **443 passed、1 skipped、1 warning**；Frontend Lint、Build、Playwright Mock API E2E 均通过。
+- Run #1177：https://github.com/Helong0511/Platform/actions/runs/43136785298。
+- 不删除历史失败记录；Skip 与 warning 的原因沿用第 28 节说明。
+
+### 后续
+
+- 继续对结算、归因、导入导出、外部回调与其它业务 API 做相同检查；本轮只覆盖已确认的点击记录与扣减 API。
+- PR 继续 Open / Draft，不合并、不部署；不得连接生产服务器、数据库、Redis、队列或真实第三方接口。
