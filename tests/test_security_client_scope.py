@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.dialects import mysql
 
-from app.core.security import require_publisher_or_admin
+from app.core.security import require_admin_or_self, require_publisher_or_admin
 from app.models.models import UserRole
 
 
@@ -79,3 +79,33 @@ async def test_publisher_guard_denies_when_no_owned_client_has_active_publisher(
     assert exc.value.status_code == 403
     assert len(db.statements) == 2
     assert "publishers.client_id in" in db.statements[1]
+
+
+
+class _MissingClientResult:
+    def scalars(self):
+        return self
+
+    def first(self):
+        return None
+
+
+class _SingleQueryDB:
+    def __init__(self):
+        self.statements = []
+
+    async def execute(self, statement):
+        self.statements.append(str(statement.compile(dialect=mysql.dialect())).lower())
+        return _MissingClientResult()
+
+
+@pytest.mark.asyncio
+async def test_admin_or_self_guard_rejects_inactive_client_membership():
+    user = SimpleNamespace(id=909, role=UserRole.CLIENT)
+    db = _SingleQueryDB()
+
+    with pytest.raises(HTTPException) as exc:
+        await require_admin_or_self(client_id=505, current_user=user, db=db)
+
+    assert exc.value.status_code == 403
+    assert "clients.is_active is true" in db.statements[0]
