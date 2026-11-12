@@ -1389,7 +1389,7 @@ def test_pii_migration_rejects_automatic_default_on_retention_marker(wrong_table
                 "AND COLUMN_NAME = 'pii_scrubbed_at'",
                 (wrong_table,),
             )
-            assert cursor.fetchone() == ("CURRENT_TIMESTAMP", "")
+            assert cursor.fetchone() == ("CURRENT_TIMESTAMP", "DEFAULT_GENERATED")
     finally:
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS postback_forward_logs")
