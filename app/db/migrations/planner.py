@@ -19,7 +19,7 @@ def plan_migrations(
 ) -> tuple[Migration, ...]:
     """根据 ledger 中已应用 revision/checksum 计算待执行项。
 
-    已应用但未知的 revision、checksum 漂移、依赖未满足或 ledger 顺序倒置
+    已应用但未知的 revision、checksum 漂移、依赖未满足或 ledger 历史断档
     一律 fail closed。调用方必须从真实 ledger 读取 checksum，不得只传 revision。
     """
     ordered = validate_manifest(repository_root, migrations)
