@@ -78,3 +78,35 @@ def test_cap_reservation_check_constraints_are_portable_and_enforced_by_sqlite()
                 connection.execute(insert(CapReservation.__table__).values(**invalid_row))
     finally:
         engine.dispose()
+
+def test_cap_reservation_updated_at_ddl_matches_orm_and_both_sql_entrypoints():
+    """完整建库基线与增量迁移必须和 ORM 的更新时间语义一致。"""
+    from pathlib import Path
+    import re
+
+    model_column = CapReservation.__table__.c.updated_at
+    assert model_column.server_default is not None
+    assert str(model_column.server_default.arg).upper() == "CURRENT_TIMESTAMP"
+    assert model_column.onupdate is not None
+
+    root = Path(__file__).resolve().parents[1]
+    ddl_files = (
+        root / "sql" / "platform.sql",
+        root / "sql" / "migrations" / "20261111_cap_reservation_ledger.sql",
+    )
+    for ddl_file in ddl_files:
+        sql = ddl_file.read_text(encoding="utf-8")
+        match = re.search(
+            r"CREATE TABLE IF NOT EXISTS cap_reservations\s*\((.*?)\)\s*ENGINE=InnoDB",
+            sql,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        assert match is not None, f"cap_reservations DDL missing in {ddl_file}"
+        table_ddl = match.group(1)
+        assert re.search(
+            r"updated_at\s+DATETIME\s+NOT NULL\s+DEFAULT\s+CURRENT_TIMESTAMP\s+COMMENT",
+            table_ddl,
+            flags=re.IGNORECASE,
+        )
+        assert not re.search(r"ON\s+UPDATE\s+CURRENT_TIMESTAMP", table_ddl, flags=re.IGNORECASE)
+
