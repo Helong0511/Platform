@@ -71,7 +71,7 @@ def test_nginx_overwrites_cf_connecting_ip_with_realip_resolved_remote_addr():
 
     # 与 Cloudflare 官方 IP ranges 清单逐项比对，避免信任网段漏配或意外放宽。
     configured_ranges = {
-        line.split()[2]
+        line.split()[1].rstrip(";")
         for line in cloudflare_config.splitlines()
         if line.strip().startswith("set_real_ip_from ")
     }
