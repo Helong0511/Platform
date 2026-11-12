@@ -480,3 +480,27 @@ MySQL 官方文档确认：
 - `_schema_metadata_drift` 仍只检查 ORM 声明的表和列是否存在；全项目字段类型/长度/NULL/default/索引/唯一约束/CHECK/字符集/排序规则对比尚未实现。
 - 统一 Migration Runner、revision/checksum ledger、历史数据升级、备份恢复、DDL 中断恢复、应用兼容回滚与 schema/data diff 仍是独立发布阻断项。
 - PR #1 继续 Open / Draft；不合并 main、不部署、不访问生产环境。验证只使用 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。
+
+
+## 19. 第三方事件幂等迁移：删除旧唯一索引前核验定义（Run #1416）
+
+### 19.1 发现与修复
+
+- 审查 `sql/migrations/20261110_third_party_report_event_idempotency.sql` 时发现，迁移在创建新 `unique_event_key` 后，原先仅按旧索引名 `unique_source_adsid` 是否存在来决定是否删除。
+- 仅检查索引名不足以证明它仍是原有的 `UNIQUE(source, adsid)`。若历史库存在同名但列定义、唯一性或索引类型错误的索引，按名称删除可能破坏既有结构。
+- 现在删除前严格核验旧索引：恰好两列、顺序为 `source,adsid`、`NON_UNIQUE=0`、BTREE、无前缀且列顺序升序。发现同名但不符合的索引时，以 MySQL 1146 哨兵查询 fail-closed；不删除旧索引。
+- 新增隔离 MySQL 回归测试：预建 `unique_source_adsid` 普通索引且错误地指向 `event`，保留一条合成数据；执行迁移必须以 1146 失败，并断言旧索引定义和原数据仍在。
+
+### 19.2 CI 验证
+
+- SQL 修复提交：`d952ef5be5247fc49986ffa06644c95370ec061e`。
+- 回归测试提交：`ec9605fd6ab3ce74d4cb23ac4d917f98b3187ae8`。
+- Run #1416：https://github.com/Helong0511/Platform/actions/runs/43182970869
+- 后端：**545 passed、1 skipped、1 warning**；前端 Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- 1 skipped 为 CI 不依赖的本地核对脚本；1 warning 为 Passlib 在 Python 3.11 使用 `crypt` 的弃用提示。
+
+### 19.3 结论边界
+
+- 本次证明了该事件幂等迁移在“错误同名旧索引”这一场景下不会误删索引；并不代表历史数据库所有可能的旧索引变体均已穷举。
+- 仍需继续检查其它迁移中按索引名执行 DROP、字段/约束名存在即视为正确、DDL 部分执行后的重跑路径。
+- PR #1 保持 Open / Draft；不合并 main、不部署。测试继续使用隔离 CI 数据库、合成数据与 Mock API，不连接生产环境。
