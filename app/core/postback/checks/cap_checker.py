@@ -159,9 +159,11 @@ class CapChecker:
                         await CapReservationLedger.mark_needs_reconciliation(
                             ledger_key, f"Redis 回滚异常，error_type={type(exc).__name__}", lease_owner=lease_owner
                         )
-                    except Exception:
+                    except Exception as persist_exc:
                         logger.critical(
-                            "Cap Reservation 状态更新失败：%s", ledger_key, exc_info=True
+                            "Cap Reservation 状态更新失败：reservation_key=%s error_type=%s",
+                            ledger_key,
+                            type(persist_exc).__name__,
                         )
                 failures.append(
                     f"kind={kind}, offer_id={offer_id}, token={reservation_id}, error_type={type(exc).__name__}"
