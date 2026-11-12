@@ -127,17 +127,18 @@ def validate_manifest(
 
     # 防止未登记 SQL 被悄悄遗漏，也防止登记路径之外的脚本被误执行。
     migration_dir = (root / "sql" / "migrations").resolve()
-    if migration_dir.is_dir():
-        discovered = {
-            path.relative_to(root).as_posix()
-            for path in migration_dir.glob("*.sql")
-            if path.is_file()
-        }
-        if discovered != seen_paths:
-            missing = sorted(discovered - seen_paths)
-            stale = sorted(seen_paths - discovered)
-            raise MigrationManifestError(
-                f"migration file set mismatch: unregistered={missing}, missing={stale}"
-            )
+    if not migration_dir.is_dir():
+        raise MigrationManifestError("migration directory is missing: sql/migrations")
+    discovered = {
+        path.relative_to(root).as_posix()
+        for path in migration_dir.glob("*.sql")
+        if path.is_file()
+    }
+    if discovered != seen_paths:
+        missing = sorted(discovered - seen_paths)
+        stale = sorted(seen_paths - discovered)
+        raise MigrationManifestError(
+            f"migration file set mismatch: unregistered={missing}, missing={stale}"
+        )
 
     return entries
