@@ -78,6 +78,7 @@ SET @has_event_unique = (
         HAVING COUNT(*) = 1
            AND MAX(NON_UNIQUE) = 0
            AND MAX(SEQ_IN_INDEX) = 1
+           AND MAX(SUB_PART) IS NULL
            AND MAX(COLUMN_NAME) = 'event_key'
     ) AS valid_event_index
 );
