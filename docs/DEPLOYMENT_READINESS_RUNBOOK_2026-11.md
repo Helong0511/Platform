@@ -927,3 +927,16 @@ PR #1 继续 Open / Draft，不合并 main、不部署；验证只使用隔离 C
 - 前端 Production High 依赖 advisories 属于用户明确暂缓的凭据安全专项，不纳入本轮修复，不宣称依赖零漏洞。
 
 PR #1 继续 Open / Draft，不合并 main、不部署。所有验证继续仅限隔离 CI、合成数据和 Mock API。
+
+
+## 38. Publisher 多客户授权范围与停用客户访问控制（2026-11-12，Run #1328）
+
+- 全仓定向扫描发现 PublisherService 的客户数据范围仍只取 Client.user_id 关联集合的第一条记录，导致同一登录账号的其它客户主体无法读取其 Publisher；该查询也未过滤停用 Client。
+- PublisherService 已改为查询用户全部启用中的 Client ID；Publisher 详情校验与列表/总数查询统一使用完整 ID 集合，避免只取首项造成误拒绝或范围不一致。
+- require_admin_or_self 增加 Client.is_active=true 条件；客户详情接口对客户角色也增加启用状态过滤，不能通过自身 user_id 读取停用客户主体详情。
+- 新增测试覆盖：同一账号可读取任一启用客户主体下的 Publisher 详情与列表；列表 count 与 page 查询使用相同多客户范围；停用 Client 不满足 admin-or-self 客户访问依赖。
+- Run #1328（SHA b034979f257195e857718d79bf50fa3868d61429）：Backend **518 passed、1 skipped、1 warning**；Python Compile、Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。Run：https://github.com/Helong0511/Platform/actions/runs/43154685302。
+- 本轮全仓定向扫描仍未等同于所有租户隔离路径的最终审计；还需继续复核 ClientService 的用户范围读取、归因/统计/结算/API/导入导出等业务入口是否统一使用启用中的全部 Client IDs。
+- 1 skipped 与 1 warning 的含义同前：本地核对脚本未提交（CI 不依赖）；passlib/Python 3.11 crypt 弃用提示尚未处理。
+
+验证仅限 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
