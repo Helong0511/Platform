@@ -281,6 +281,42 @@ def test_pii_migration_rejects_wrong_same_name_retention_index():
             cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
         connection.close()
 
+def test_pii_migration_rejects_unique_same_name_forward_retention_index():
+    """下游转发日志的同名唯一索引不能冒充普通保留扫描索引。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+            cursor.execute("DROP TABLE IF EXISTS postback_forward_logs")
+            cursor.execute(
+                "CREATE TABLE third_party_report_logs ("
+                "id INT NOT NULL AUTO_INCREMENT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "completed_at DATETIME NULL, PRIMARY KEY (id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            cursor.execute(
+                "CREATE TABLE postback_forward_logs ("
+                "id INT NOT NULL AUTO_INCREMENT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "completed_at DATETIME NULL, pii_scrubbed_at DATETIME NULL, "
+                "PRIMARY KEY (id), UNIQUE KEY idx_forward_log_pii_retention "
+                "(pii_scrubbed_at, created_at, id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            with pytest.raises(pymysql.err.OperationalError) as migration_error:
+                _run_sql_file(cursor, "sql/migrations/20261112_third_party_report_pii_retention.sql")
+            assert migration_error.value.args[0] == 1061
+            cursor.execute("SHOW INDEX FROM postback_forward_logs")
+            rows = [row for row in cursor.fetchall() if row[2] == "idx_forward_log_pii_retention"]
+            assert len(rows) == 3
+            assert all(row[1] == 0 for row in rows)
+            assert [row[4] for row in sorted(rows, key=lambda row: row[3])] == [
+                "pii_scrubbed_at", "created_at", "id"
+            ]
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS postback_forward_logs")
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+        connection.close()
+
+
 def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
     baseline_schema = Path("sql/platform.sql").read_text(encoding="utf-8")
     connection = _connect()
