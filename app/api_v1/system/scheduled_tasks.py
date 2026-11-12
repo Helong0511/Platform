@@ -66,7 +66,7 @@ def _enrich_scheduled_task_dict(task: ScheduledTask, task_dict: dict) -> dict:
             task_dict["function_name"] = func_info["function_name"]
             task_dict["function_module"] = func_info["function_module"]
     except Exception as func_err:
-        logger.warning(f"获取任务 {task.task_name} 的函数信息失败: {func_err}")
+        logger.warning("获取任务函数信息失败: task_name=%s error_type=%s", task.task_name, type(func_err).__name__)
     return task_dict
 
 
