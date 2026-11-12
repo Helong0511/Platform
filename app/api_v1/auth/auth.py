@@ -213,18 +213,9 @@ async def login(
     except HTTPException:
         raise
     except Exception as e:
-        error_msg = str(e)
         error_type = type(e).__name__
-        logger.error(
-            f"登录过程中发生异常: {error_type}: {error_msg}, "
-            f"用户名={form_data.username if form_data else 'unknown'}, "
-            f"IP={client_ip}",
-            exc_info=True
-        )
-        if settings.is_development:
-            detail = f"登录失败: {error_type}: {error_msg}"
-        else:
-            detail = "登录服务暂时不可用，请稍后重试"
+        logger.error("登录过程中发生异常: error_type=%s", error_type)
+        detail = "登录服务暂时不可用，请稍后重试"
         raise_auth_error(
             ErrorCode.SERVICE_UNAVAILABLE,
             detail,
@@ -391,7 +382,7 @@ async def logout(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"退出登录失败: {e}", exc_info=True)
+        logger.error("退出登录失败: error_type=%s", type(e).__name__)
         clear_auth_cookies(response)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
