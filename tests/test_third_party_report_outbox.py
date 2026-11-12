@@ -352,6 +352,7 @@ async def test_outbox_missing_credentials_keeps_event_retryable(monkeypatch):
 
     async def update(report_id, **kwargs):
         captured.update(kwargs)
+        return True
 
     monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
     monkeypatch.setattr(outbox, "get_app_now_naive", lambda: datetime(2026, 11, 11, 12, 0, 0))
@@ -747,6 +748,7 @@ async def test_outbox_marks_deleted_short_link_terminal_without_retry(monkeypatc
 
     async def update(report_id, **kwargs):
         captured.update(kwargs)
+        return True
 
     monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
     monkeypatch.setattr(outbox, "get_app_now_naive", lambda: datetime(2026, 11, 11, 12, 0, 0))
@@ -936,6 +938,7 @@ async def test_outbox_missing_config_reference_is_finalized_not_rescanned(monkey
 
     async def update(report_id, **kwargs):
         captured.update(kwargs)
+        return True
 
     monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
     monkeypatch.setattr(
