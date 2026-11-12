@@ -8,11 +8,12 @@ import ipaddress
 import os
 import uuid
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from urllib.parse import quote_plus
 
 import pymysql
 import pytest
-from sqlalchemy import select, text, update
+from sqlalchemy import Column, Integer, MetaData, String, Table, select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core import third_party_report as report_module
@@ -20,6 +21,7 @@ from app.core.utils import get_app_now_naive
 from app.models.third_party import ThirdPartyReportLog
 from app.models.postback import PostbackForwardLog
 from app.services import third_party_report_pii_retention as retention_module
+from app.bootstrap import lifespan as lifespan_module
 
 
 MYSQL_HOST = os.getenv("MYSQL_INTEGRATION_HOST")
@@ -359,6 +361,90 @@ async def test_mysql_pii_retention_preserves_active_leases_and_exact_forward_tar
             assert by_conversion[702].request_params is not None
             assert by_conversion[703].pii_scrubbed_at is not None
             assert by_conversion[703].request_params is None
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_schema_bootstrap_serializes_workers_and_verifies_full_metadata(monkeypatch):
+    """真实 MySQL 验证启动建表锁可串行化多 worker，并核对所有 ORM 表/列。"""
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        monkeypatch.setattr(lifespan_module, "engine", engine)
+
+        # 两个 worker 同时启动：GET_LOCK 必须串行化 create_all 与结构核验。
+        await asyncio.gather(
+            lifespan_module._bootstrap_database_schema(),
+            lifespan_module._bootstrap_database_schema(),
+        )
+
+        async with engine.connect() as connection:
+            drift = await connection.run_sync(lifespan_module._schema_metadata_drift)
+        assert drift == {"missing_tables": [], "missing_columns": {}}
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_schema_bootstrap_fails_closed_on_missing_column_and_releases_lock(monkeypatch):
+    """create_all 不会修补既有表缺列；启动核验必须拒绝并在失败后释放 advisory lock。"""
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        metadata = MetaData()
+        Table(
+            "bootstrap_probe",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("required_value", String(40), nullable=False),
+        )
+        monkeypatch.setattr(lifespan_module, "engine", engine)
+        monkeypatch.setattr(lifespan_module, "Base", SimpleNamespace(metadata=metadata))
+
+        async with engine.begin() as connection:
+            await connection.execute(
+                text("CREATE TABLE bootstrap_probe (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB")
+            )
+
+        with pytest.raises(RuntimeError, match="required_value"):
+            await lifespan_module._bootstrap_database_schema()
+
+        # 修复缺列后再次启动成功，证明失败路径已释放 session advisory lock。
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "ALTER TABLE bootstrap_probe "
+                    "ADD COLUMN required_value VARCHAR(40) NOT NULL DEFAULT ''"
+                )
+            )
+        await lifespan_module._bootstrap_database_schema()
+
+        async with engine.connect() as connection:
+            drift = await connection.run_sync(
+                lambda sync_connection: lifespan_module._schema_metadata_drift(
+                    sync_connection, metadata
+                )
+            )
+        assert drift == {"missing_tables": [], "missing_columns": {}}
     finally:
         if engine is not None:
             await engine.dispose()
