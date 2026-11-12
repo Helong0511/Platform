@@ -309,6 +309,13 @@ async def test_completed_forward_log_payload_is_scrubbed_after_retention(monkeyp
     assert "postback_forward_logs.completed_at is not null" in sql
     assert "not (exists" in sql
     assert "postback_forward_queue" in sql
+    # 重试队列必须按完整目标二元组匹配，两个外键均支持 NULL-safe equality。
+    assert "postback_forward_queue.publisher_id = postback_forward_logs.publisher_id" in sql
+    assert "postback_forward_queue.product_id = postback_forward_logs.product_id" in sql
+    assert sql.count("postback_forward_queue.publisher_id is null") >= 1
+    assert sql.count("postback_forward_logs.publisher_id is null") >= 1
+    assert sql.count("postback_forward_queue.product_id is null") >= 1
+    assert sql.count("postback_forward_logs.product_id is null") >= 1
     assert "for update skip locked" in sql
 
 
