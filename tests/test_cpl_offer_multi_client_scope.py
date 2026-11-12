@@ -74,6 +74,7 @@ async def test_get_client_ids_for_user_returns_all_memberships():
 
     assert client_ids == [10, 20, 30]
     assert "clients.user_id = 77" in _sql(db.statements[0])
+    assert "clients.is_active = true" in _sql(db.statements[0])
 
 
 @pytest.mark.asyncio
