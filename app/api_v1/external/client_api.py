@@ -16,7 +16,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -125,21 +125,34 @@ async def _background_client_api_side_effects(
     summary="获取当前客户 API 密钥",
 )
 async def get_client_api_key(
+    client_id: int | None = Query(default=None, ge=1, description="多客户账号需指定要查看密钥的客户 ID"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """客户登录后按需获取 API 密钥，用于对接文档与签名示例。"""
+    """客户登录后按需获取指定客户的 API 密钥；单客户账号兼容旧调用。"""
     if current_user.role != UserRole.CLIENT:
         raise_api_exception(ErrorCode.FORBIDDEN, detail="仅客户账号可获取 API 密钥")
-    result = await db.execute(
-        select(Client).where(Client.user_id == current_user.id, Client.is_active == True)
+
+    query = select(Client).where(
+        Client.user_id == current_user.id,
+        Client.is_active == True,
     )
-    client = result.scalars().first()
-    if not client:
-        raise_api_exception(ErrorCode.CLIENT_NOT_FOUND, detail="客户信息不存在")
+    if client_id is not None:
+        query = query.where(Client.id == client_id)
+    result = await db.execute(query.order_by(Client.id.asc()))
+    clients = result.scalars().all()
+    if not clients:
+        raise_api_exception(ErrorCode.CLIENT_NOT_FOUND, detail="客户信息不存在或无权访问")
+    if client_id is None and len(clients) > 1:
+        raise_api_exception(
+            ErrorCode.INVALID_PARAMETER,
+            detail="当前账号关联多个客户，请通过 client_id 指定要获取密钥的客户",
+        )
+
+    client = clients[0]
     if not client.api_enabled:
         raise_api_exception(ErrorCode.FORBIDDEN, detail="API 访问未启用")
-    return ResponseBaseSchema.success(data={"key": client.key})
+    return ResponseBaseSchema.success(data={"client_id": client.id, "key": client.key})
 
 
 # ====== 请求模型 ======
