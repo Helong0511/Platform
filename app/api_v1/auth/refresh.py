@@ -21,7 +21,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
-from app.core.async_orm import get_first_loaded_collection_item
 from app.core.api_auth import _get_active_user_clients, _is_user_client_ip_allowed
 from app.core.utils import get_client_ip
 from app.core.auth_response import (
