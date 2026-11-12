@@ -460,7 +460,7 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 
 **发现的问题**
 
-- Client ORM 和管理 Schema 已提供 allowed_ips，字段文档约定逗号分隔多个 IP、空值不限制、127.0.0.1 始终允许。
+- Client ORM 和管理 Schema 已提供 allowed_ips，字段文档约定逗号分隔多个 IP、空值不限制、回环地址必须显式列入白名单。
 - 但原 verify_client_request() 只验证客户状态、API 开关、时间戳和签名，没有校验 allowed_ips；管理员配置的客户 API 来源限制实际上没有生效。
 
 **修复**
@@ -468,7 +468,7 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - 新增 _is_client_ip_allowed()，在客户 API 签名验证入口执行白名单判断。
 - IP 来源只接收 API 路由通过 get_client_ip() 解析后的结果；该函数沿用 TRUST_PROXY_HEADERS 与可信代理 peer 校验，不直接信任请求携带的 X-Forwarded-For / CF-Connecting-IP 原始值。
 - 客户产品列表、广告数据两个外部 API 均在认证前解析来源 IP 并传入 verify_client_request()。
-- allowed_ips 为空/空白时保持不限制；逗号分隔的精确 IP 地址可匹配；127.0.0.1 按现有 Schema 契约始终允许；来源 IP 无效或配置中存在非法条目时 fail-closed。
+- allowed_ips 为空/空白时保持不限制；逗号分隔的精确 IP 地址可匹配；回环地址不再隐式放行，必须显式列入 allowed_ips；来源 IP 无效或配置中存在非法条目时 fail-closed。
 - 新增测试覆盖白名单允许、非白名单拒绝、空配置兼容、非法配置拒绝、127.0.0.1 特例、unknown 来源拒绝，以及产品 API 路由确实传入解析后的客户端 IP。
 - 当前格式按 Schema 约定只支持逗号分隔的单个 IP，不支持 CIDR 网段；如需网段授权，应单独扩展 Schema、管理端校验和测试，不得把 CIDR 当作已支持能力。
 
