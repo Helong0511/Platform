@@ -50,7 +50,6 @@ from app.core.audit_log import log_login, log_logout, commit_audit_log
 from app.core.auth_response import build_token_json_response, clear_auth_cookies, raise_auth_error
 from app.core.api_auth import _get_active_user_clients, _is_user_client_ip_allowed
 from app.core.auth_user_payload import build_auth_user_payload
-from app.core.async_orm import get_first_loaded_collection_item
 from app.core.config import settings
 from app.core.csrf import issue_csrf_token_for_user
 from app.core.errors import ErrorCode
