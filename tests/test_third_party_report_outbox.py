@@ -264,12 +264,19 @@ async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
         assert report_log_id == 91
         return "success"
 
+    async def claim_before_snapshot(report_id):
+        assert report_id == 91
+        # 模拟管理端先完成载荷修正；Worker 认领后读取到的必须是新值。
+        row.email = "corrected-after-claim@example.invalid"
+        return datetime(2026, 11, 11, 12, 0, 0)
+
     monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
     monkeypatch.setattr(
         outbox,
         "get_app_now_naive",
         lambda: datetime(2026, 11, 11, 12, 0, 0),
     )
+    monkeypatch.setattr(outbox, "_claim_report_log", claim_before_snapshot)
     monkeypatch.setattr(outbox, "_resolve_pixel_credentials", resolve)
     monkeypatch.setattr(outbox, "send_third_party_report", send)
     monkeypatch.setattr(
@@ -288,6 +295,8 @@ async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
     assert captured["send"]["facebook_access_token"] == "token-current"
     assert captured["send"]["report_log_id"] == 91
     assert captured["send"]["event_key"] == "stable-event-key"
+    assert captured["send"]["email"] == "corrected-after-claim@example.invalid"
+    assert captured["send"]["report_lease_token"] == datetime(2026, 11, 11, 12, 0, 0)
 
 
 async def test_outbox_worker_rejects_invalid_batch_size():
@@ -570,12 +579,17 @@ async def test_remote_acceptance_with_lost_local_ack_retries_same_event_id(monke
         status_reads += 1
         return "pending" if status_reads == 1 else "success"
 
+    async def claim(report_id):
+        assert report_id == 119
+        return datetime(2026, 11, 11, 12, 0, 0)
+
     monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
     monkeypatch.setattr(
         outbox,
         "get_app_now_naive",
         lambda: datetime(2026, 11, 11, 12, 0, 0),
     )
+    monkeypatch.setattr(outbox, "_claim_report_log", claim)
     monkeypatch.setattr(outbox, "_resolve_pixel_credentials", resolve)
     monkeypatch.setattr(outbox, "send_third_party_report", send)
     monkeypatch.setattr(
@@ -809,37 +823,23 @@ async def test_manual_retry_sql_rejects_deleted_short_link_events(monkeypatch):
     assert "短链接已删除，无法解析像素配置" in params
 
 
-async def test_outbox_payload_scrubbed_after_read_cannot_reach_remote_sender(monkeypatch):
-    """Worker 先读取载荷、PII 清理随后提交时，最终发送认领必须失败。"""
+async def test_outbox_claims_before_reading_and_never_reads_scrubbed_payload(monkeypatch):
+    """已清理事件无法认领；Worker 不应先复制载荷再检查清理状态。"""
     from types import SimpleNamespace
     from app.core import third_party_report
 
     row = SimpleNamespace(
         id=301,
         outbox_enqueued=True,
-        pii_scrubbed_at=None,  # 首次读取时尚未清理
+        pii_scrubbed_at=datetime(2026, 11, 11, 12, 0, 0),
         status="pending",
         next_retry_time=datetime(2026, 11, 11, 11, 59, 0),
-        adsid="fbclid-before-scrub",
-        event="Purchase",
-        conversion_id="conversion-before-scrub",
-        email="private@example.invalid",
-        ip="203.0.113.31",
-        phone="",
-        ua="private-agent",
-        source="postback",
-        use_hash=True,
-        currency="USD",
-        amount=31.0,
-        click_time=None,
-        event_key="stable-event-before-scrub",
-        short_link_id=301,
-        cloak_name=None,
-        short_code=None,
     )
+    captured = {"read": False}
 
     class FakeDB:
         async def scalar(self, statement):
+            captured["read"] = True
             return row
 
     class SessionContext:
@@ -849,43 +849,33 @@ async def test_outbox_payload_scrubbed_after_read_cannot_reach_remote_sender(mon
         async def __aexit__(self, *args):
             return False
 
-    async def credentials(**kwargs):
-        # 模拟耗时配置解析期间，清理任务已提交 PII 清除。
-        row.pii_scrubbed_at = datetime(2026, 11, 11, 12, 0, 0)
-        row.adsid = ""
-        row.email = None
-        row.ip = None
-        row.phone = None
-        row.ua = None
-        row.conversion_id = None
-        return "pixel-ci", "token-ci", "v23.0"
-
-    async def claim_after_scrub(report_log_id):
+    async def claim(report_log_id):
         assert report_log_id == 301
-        # 与真实条件 UPDATE 等价：已清理的事件无法再获得发送租约。
-        return datetime(2026, 11, 11, 12, 0, 0) if row.pii_scrubbed_at is None else None
+        return None
 
     async def status_pending(report_log_id):
         return "pending"
 
-    class UnexpectedHTTPClient:
-        def __init__(self, *args, **kwargs):
-            raise AssertionError("已清理的 Outbox 载荷不得发送到第三方")
+    async def unexpected_resolve(**kwargs):
+        raise AssertionError("认领失败时不得解析配置或读取发送载荷")
+
+    async def unexpected_send(**kwargs):
+        raise AssertionError("认领失败时不得调用发送函数")
 
     monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
-    monkeypatch.setattr(
-        outbox, "get_app_now_naive", lambda: datetime(2026, 11, 11, 12, 0, 0)
-    )
-    monkeypatch.setattr(outbox, "_resolve_pixel_credentials", credentials)
-    monkeypatch.setattr(third_party_report, "_claim_report_log", claim_after_scrub)
+    monkeypatch.setattr(outbox, "_claim_report_log", claim)
+    monkeypatch.setattr(outbox, "_resolve_pixel_credentials", unexpected_resolve)
+    monkeypatch.setattr(outbox, "send_third_party_report", unexpected_send)
     monkeypatch.setattr(third_party_report, "_get_report_status", status_pending)
-    monkeypatch.setattr(third_party_report.httpx, "AsyncClient", UnexpectedHTTPClient)
 
     result = await outbox.process_postback_report_outbox_item(301)
 
-    assert result["success"] is False
-    assert result["retryable"] is True
-    assert result["reason"] == "report_in_progress"
+    assert result == {
+        "success": False,
+        "retryable": True,
+        "reason": "report_in_progress",
+    }
+    assert captured["read"] is False
 
 
 async def test_outbox_missing_config_reference_is_finalized_not_rescanned(monkeypatch):
@@ -1054,3 +1044,69 @@ async def test_outbox_retries_after_credentials_are_restored(monkeypatch):
 
     assert second == {"success": True, "report_log_id": 93}
     assert resolver_calls == 2
+
+
+async def test_outbox_payload_editor_uses_row_lock_and_rejects_active_lease(monkeypatch):
+    """编辑先锁定日志行，并在活动发送租约存在时拒绝修改载荷。"""
+    from types import SimpleNamespace
+    from sqlalchemy.dialects import mysql
+    from app.core import third_party_report as report_core
+
+    now = datetime(2026, 11, 11, 12, 0, 0)
+    row = SimpleNamespace(
+        id=302,
+        pii_scrubbed_at=None,
+        outbox_enqueued=True,
+        status="failed",
+        attempt_count=0,
+        report_start_time=now,
+        adsid="fbclid-302",
+        event="Purchase",
+        conversion_id="conversion-302",
+        source="postback",
+        email="old@example.invalid",
+        ip="",
+        phone="",
+        ua="",
+        currency="USD",
+        amount=2.0,
+        report_params=None,
+        use_hash=True,
+    )
+    captured = {}
+
+    class Scalars:
+        def first(self):
+            return row
+
+    class Result:
+        def scalars(self):
+            return Scalars()
+
+    class FakeDB:
+        async def execute(self, statement):
+            compiled = statement.compile(dialect=mysql.dialect())
+            captured["sql"] = str(compiled).lower()
+            return Result()
+
+        async def commit(self):
+            captured["committed"] = True
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(report_core, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(report_core, "get_app_now_naive", lambda: now)
+
+    updated = await report_core.update_report_log_params(
+        302, email="new@example.invalid"
+    )
+
+    assert updated is False
+    assert "for update" in captured["sql"]
+    assert "committed" not in captured
+    assert row.email == "old@example.invalid"
