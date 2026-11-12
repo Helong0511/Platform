@@ -22,7 +22,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
 from app.core.async_orm import get_first_loaded_collection_item
-from app.core.api_auth import _is_client_ip_allowed
+from app.core.api_auth import _is_user_client_ip_allowed
 from app.core.utils import get_client_ip
 from app.core.auth_response import (
     build_token_json_response,
@@ -131,7 +131,7 @@ async def refresh_token(
         if (
             user.role == UserRole.CLIENT
             and client_record
-            and not _is_client_ip_allowed(client_record.allowed_ips, get_client_ip(request))
+            and not _is_user_client_ip_allowed(getattr(user, "clients", None), get_client_ip(request))
         ):
             raise_auth_error(
                 ErrorCode.FORBIDDEN,
