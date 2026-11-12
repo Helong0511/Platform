@@ -438,15 +438,8 @@ async def update_client(
                 detail=f"指定的用户ID {client_in.user_id} 不存在，请确认用户是否存在"
             )
 
-        # 检查新用户是否已有客户关联
-        result = await db.execute(select(Client).where(Client.user_id == client_in.user_id))
-        existing_client = result.scalars().first()
-        # ---------- 条件分支 ----------
-        if existing_client and existing_client.id != client_id:
-            raise_api_exception(
-                ErrorCode.CLIENT_ALREADY_EXISTS,
-                detail=f"用户ID {client_in.user_id} 已关联客户：{existing_client.company_name}。每个用户只能关联一个客户，请选择其他用户"
-            )
+        # Client.user_id 是多对一关系：同一登录账号可以关联多个客户主体。
+        # 不在这里限制一对一；各业务查询必须按 user_id 的全部 Client 记录做范围过滤。
 
     # 更新客户信息
     update_data = client_in.model_dump(exclude_unset=True)
