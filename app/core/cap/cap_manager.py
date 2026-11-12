@@ -179,6 +179,15 @@ async def _rollback_reserved_redis(reserved: list[tuple]) -> None:
                     raise RuntimeError(f"Redis rollback unresolved: kind={kind}, offer_id={oid}, token={reservation_id}")
             if ledger_key:
                 await CapReservationLedger.finalize(ledger_key, "ROLLED_BACK", lease_owner=lease_owner)
+            elif redis_reserved and reservation_id:
+                # 兼容无事件账本的旧调用：不存在 DB 恢复记录，回滚后立即删除临时墓碑。
+                counter_key = (
+                    get_daily_cap_key(oid, reservation_date, pid)
+                    if kind == "daily" else get_total_cap_key(oid, pid)
+                )
+                await RedisCapManager.delete_reservation_token(
+                    f"{counter_key}:reservation:{reservation_id}"
+                )
         except Exception as exc:
             if ledger_key:
                 try:
