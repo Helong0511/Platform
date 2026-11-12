@@ -7,6 +7,7 @@ SET @has_col = (
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = 'third_party_report_logs'
       AND COLUMN_NAME = 'outbox_enqueued'
+      AND COLUMN_TYPE = 'tinyint(1)' AND IS_NULLABLE = 'NO' AND COLUMN_DEFAULT = '0'
 );
 SET @ddl = IF(
     @has_col = 0,
@@ -22,6 +23,7 @@ SET @has_col = (
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = 'third_party_report_logs'
       AND COLUMN_NAME = 'short_link_id'
+      AND COLUMN_TYPE = 'int' AND IS_NULLABLE = 'YES'
 );
 SET @ddl = IF(
     @has_col = 0,
@@ -37,6 +39,7 @@ SET @has_col = (
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = 'third_party_report_logs'
       AND COLUMN_NAME = 'cloak_name'
+      AND COLUMN_TYPE = 'varchar(100)' AND IS_NULLABLE = 'YES'
 );
 SET @ddl = IF(
     @has_col = 0,
@@ -52,6 +55,7 @@ SET @has_col = (
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = 'third_party_report_logs'
       AND COLUMN_NAME = 'short_code'
+      AND COLUMN_TYPE = 'varchar(100)' AND IS_NULLABLE = 'YES'
 );
 SET @ddl = IF(
     @has_col = 0,
@@ -67,6 +71,7 @@ SET @has_col = (
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = 'third_party_report_logs'
       AND COLUMN_NAME = 'click_time'
+      AND COLUMN_TYPE = 'datetime' AND IS_NULLABLE = 'YES'
 );
 SET @ddl = IF(
     @has_col = 0,
@@ -82,6 +87,7 @@ SET @has_col = (
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = 'third_party_report_logs'
       AND COLUMN_NAME = 'next_retry_time'
+      AND COLUMN_TYPE = 'datetime' AND IS_NULLABLE = 'YES'
 );
 SET @ddl = IF(
     @has_col = 0,
