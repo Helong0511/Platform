@@ -96,7 +96,7 @@ from sqlalchemy.future import select
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.utils import get_app_now_naive
-from app.models.models import User, UserRole
+from app.models.models import Client, User, UserRole
 from app.models.session import TokenBlacklist
 
 # 获取日志记录器
@@ -526,6 +526,23 @@ async def get_current_user(
             error_code=ErrorCode.FORBIDDEN,
             http_status=status.HTTP_403_FORBIDDEN,
         )
+
+    # 已签发的 access token 不能绕过客户主体停用：每次认证都确认至少存在一个启用中的 Client。
+    if user.role == UserRole.CLIENT:
+        active_client_row = await db.execute(
+            select(Client.id)
+            .where(
+                Client.user_id == user.id,
+                Client.is_active.is_(True),
+            )
+            .limit(1)
+        )
+        if active_client_row.scalar_one_or_none() is None:
+            _raise_auth(
+                "当前客户账号没有可用的客户主体，请联系管理员",
+                error_code=ErrorCode.FORBIDDEN,
+                http_status=status.HTTP_403_FORBIDDEN,
+            )
 
     return user
 
