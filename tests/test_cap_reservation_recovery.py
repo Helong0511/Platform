@@ -555,3 +555,32 @@ async def test_recovery_uses_rollback_tombstone_without_decrementing_again(monke
 
     assert stats["rolled_back"] == 1
     assert calls[0][0:2] == (row.reservation_key, "ROLLED_BACK")
+
+
+@pytest.mark.asyncio
+async def test_recovery_cleans_rolled_back_tombstone_after_terminal_commit(monkeypatch):
+    """DB 已提交 ROLLED_BACK 后，恢复任务负责删除墓碑并确认清理。"""
+    row = _reservation(state="ROLLED_BACK", redis_reserved=False)
+    row.redis_token_cleaned = False
+    sessions = [_Session(rows=[row])]
+    calls = []
+
+    def session_factory():
+        return sessions.pop(0)
+
+    async def delete_token(token_key):
+        calls.append(("delete", token_key))
+        return True
+
+    async def mark_cleaned(key, owner):
+        calls.append(("mark_cleaned", key, owner))
+
+    monkeypatch.setattr(recovery, "AsyncSessionLocal", session_factory)
+    monkeypatch.setattr(recovery.RedisCapManager, "delete_reservation_token", delete_token)
+    monkeypatch.setattr(recovery.CapReservationLedger, "mark_token_cleaned", mark_cleaned)
+
+    stats = await recovery.recover_cap_reservations()
+
+    assert stats["tokens_cleaned"] == 1
+    assert calls[0] == ("delete", row.redis_token_key)
+    assert calls[1][0:2] == ("mark_cleaned", row.reservation_key)
