@@ -517,3 +517,92 @@ async def test_mysql_schema_bootstrap_fails_closed_on_missing_column_and_release
         if engine is not None:
             await engine.dispose()
         _drop_isolated_database(database)
+
+@pytest.mark.asyncio
+async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover(monkeypatch):
+    """A Worker 暂停超过 TTL 后，B 接管；A 恢复不得续租或覆盖 B 的状态。"""
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(ThirdPartyReportLog.__table__.create)
+
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
+
+        # 使用 MySQL DATETIME 秒级精度的可控时钟模拟 A 暂停及 B 接管。
+        lease_clock = [get_app_now_naive().replace(microsecond=0)]
+        monkeypatch.setattr(report_module, "get_app_now_naive", lambda: lease_clock[0])
+        event_identity = uuid.uuid4().hex
+        async with session_factory() as session:
+            row = ThirdPartyReportLog(
+                source="ci",
+                adsid=f"ci-outbox-stale-worker-{event_identity}",
+                event="Purchase",
+                event_key=hashlib.sha256(event_identity.encode("utf-8")).hexdigest(),
+                conversion_id=event_identity,
+                status="pending",
+                outbox_enqueued=True,
+                attempt_count=0,
+                max_attempts=5,
+                next_retry_time=lease_clock[0] - timedelta(minutes=1),
+                report_start_time=None,
+            )
+            session.add(row)
+            await session.commit()
+            report_id = row.id
+
+        # Worker A 取得租约后暂停；暂停时间超过租约 TTL。
+        worker_a_token = await report_module._claim_report_log(report_id)
+        assert worker_a_token == lease_clock[0]
+        lease_clock[0] += timedelta(seconds=report_module.REPORT_LOG_LEASE_SECONDS + 1)
+
+        # Worker B 接管同一条记录，A 的令牌从此失效。
+        worker_b_token = await report_module._claim_report_log(report_id)
+        assert worker_b_token == lease_clock[0]
+        assert worker_b_token != worker_a_token
+
+        # A 恢复后，发送前续租检查必须失败；不能进入 HTTP 发送路径。
+        stale_worker_renewal = await report_module._renew_report_log_lease(
+            report_id, worker_a_token
+        )
+        assert stale_worker_renewal is None
+
+        # A 也不能把 B 正在处理的记录写成 failed/success。
+        stale_worker_finalize = await report_module.update_report_log(
+            report_id,
+            status="failed",
+            expected_report_start_time=worker_a_token,
+        )
+        assert stale_worker_finalize is False
+
+        # B 仍持有有效令牌，可以完成状态确认。
+        worker_b_finalize = await report_module.update_report_log(
+            report_id,
+            status="success",
+            expected_report_start_time=worker_b_token,
+        )
+        assert worker_b_finalize is True
+
+        async with session_factory() as session:
+            final_row = await session.scalar(
+                select(ThirdPartyReportLog).where(ThirdPartyReportLog.id == report_id)
+            )
+            assert final_row is not None
+            assert final_row.status == "success"
+            assert final_row.report_start_time == worker_b_token
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
