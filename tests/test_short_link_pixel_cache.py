@@ -218,3 +218,94 @@ async def test_pixel_mapping_database_exception_does_not_leak_pii_to_logs(monkey
     assert "buyer@example.invalid" not in caplog.text
     assert "203.0.113.44" not in caplog.text
     assert "secret-click" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_cloak_disable_delete_and_same_name_restore_resolves_current_credentials(monkeypatch):
+    """Outbox 重试应在斗篷停用/删除时停止发送，并在同名配置恢复后读取新凭据。"""
+    short_link = SimpleNamespace(
+        short_code="cloak-lifecycle-link",
+        is_active=True,
+        expires_at=None,
+        facebook_pixel_id=None,
+        facebook_access_token=None,
+        facebook_api_version="v23.0",
+        original_url="https://example.invalid",
+        title="cloak-lifecycle",
+        offer_id=None,
+        channel_id=None,
+    )
+    current_config = SimpleNamespace(
+        is_enabled=False,
+        pixel_id="123456789012345",
+        access_token="old-cloak-token",
+        backup_pixel_id=None,
+        backup_access_token=None,
+        report_event="Purchase",
+        report_value=1,
+        report_currency="USD",
+    )
+
+    class ScalarRows:
+        def __init__(self, value):
+            self.value = value
+
+        def first(self):
+            return self.value
+
+    class Result:
+        def __init__(self, value):
+            self.value = value
+
+        def scalars(self):
+            return ScalarRows(self.value)
+
+    class FakeDB:
+        async def execute(self, statement):
+            if "short_links" in str(statement).lower():
+                return Result(short_link)
+            return Result(
+                current_config
+                if current_config is not None and current_config.is_enabled
+                else None
+            )
+
+    monkeypatch.setattr(cloak_pixel_mapping, "bridge_html_exists", lambda dp: True)
+    monkeypatch.setattr(
+        cloak_pixel_mapping,
+        "get_app_now_naive",
+        lambda: datetime(2026, 11, 12, 12, 0, 0),
+    )
+    service = CloakPixelMappingService()
+    db = FakeDB()
+
+    # 停用配置不可用于发送。
+    assert await service.get_pixel_config_by_dp_param(
+        db=db, dp="restorable-cloak", short_code=short_link.short_code
+    ) is None
+
+    # 删除配置后仍不可发送，不会错误回退到旧进程缓存。
+    current_config = None
+    assert await service.get_pixel_config_by_dp_param(
+        db=db, dp="restorable-cloak", short_code=short_link.short_code
+    ) is None
+
+    # 管理员以相同 dp 名称恢复配置并轮换 Token，Outbox 后续重试读取新凭据。
+    current_config = SimpleNamespace(
+        is_enabled=True,
+        pixel_id="987654321098765",
+        access_token="restored-new-token",
+        backup_pixel_id=None,
+        backup_access_token=None,
+        report_event="Purchase",
+        report_value=2,
+        report_currency="USD",
+    )
+    restored = await service.get_pixel_config_by_dp_param(
+        db=db, dp="restorable-cloak", short_code=short_link.short_code
+    )
+
+    assert restored["facebook_pixel_id"] == "987654321098765"
+    assert restored["facebook_access_token"] == "restored-new-token"
+    assert restored["cloak_report_value"] == 2
+    assert service._cache == {}
