@@ -91,7 +91,7 @@ async def test_conversion_summary_collects_all_client_records_before_scoping_pub
     assert "clients.is_active is true" in db.sql[0]
     assert " limit " not in db.sql[0]
     assert "publishers.client_id in" in db.sql[1]
-    assert "publishers.is_active is true" in db.sql[1]
+    assert "publishers.is_active = true" in db.sql[1]
 
 
 @pytest.mark.asyncio
