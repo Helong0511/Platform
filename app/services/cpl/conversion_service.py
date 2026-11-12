@@ -629,8 +629,8 @@ class ConversionService:
         if start_date:
             start_datetime = parse_date_to_app_timezone(start_date)
         if end_date:
-            end_datetime = parse_date_to_app_timezone(end_date)
-            end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
+            # 使用次日零点作为排他上界，避免漏掉结束日最后一秒内的微秒记录。
+            end_datetime = parse_date_to_app_timezone(end_date, is_end_date=False) + timedelta(days=1)
 
         # --- 客户角色：限定可见渠道 ---
         client_publisher_ids = None
@@ -665,7 +665,7 @@ class ConversionService:
             )
         if end_datetime:
             conversion_offer_query = conversion_offer_query.where(
-                PostbackConversion.created_at <= end_datetime
+                PostbackConversion.created_at < end_datetime
             )
         if client_publisher_ids is not None:
             conversion_offer_query = conversion_offer_query.where(
@@ -705,7 +705,7 @@ class ConversionService:
             )
         if end_datetime:
             click_query = click_query.where(
-                Click.click_time <= end_datetime
+                Click.click_time < end_datetime
             )
         if client_publisher_ids is not None:
             click_query = click_query.where(
@@ -754,7 +754,7 @@ class ConversionService:
             )
         if end_datetime:
             conversion_query = conversion_query.where(
-                PostbackConversion.created_at <= end_datetime
+                PostbackConversion.created_at < end_datetime
             )
         if client_publisher_ids is not None:
             conversion_query = conversion_query.where(
