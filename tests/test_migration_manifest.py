@@ -1,6 +1,7 @@
 """迁移清单完整性测试；只操作临时文件，不连接数据库。"""
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
 from pathlib import Path
 
@@ -89,18 +90,16 @@ def test_manifest_is_explicit_and_contains_no_unreviewed_files():
     assert len(MIGRATION_MANIFEST) == 5
     assert all(item.path.startswith("sql/migrations/") for item in MIGRATION_MANIFEST)
 
-def test_manifest_rejects_revision_path_mismatch(tmp_path):
-    from dataclasses import replace
-
-    entries = _fixture(tmp_path)
-    mismatched = (replace(entries[0], path="sql/migrations/other_revision.sql"),)
-    other = tmp_path / "sql/migrations/other_revision.sql"
-    other.write_text("-- matching bytes not enough\\n", encoding="utf-8")
-    mismatched = (
-        replace(
-            mismatched[0],
-            sha256=hashlib.sha256(other.read_bytes()).hexdigest(),
-        ),
+def test_manifest_rejects_revision_path_mismatch(tmp_path: Path):
+    revision = "20261110_example"
+    expected_path = tmp_path / "sql/migrations" / f"{revision}.sql"
+    wrong_path = tmp_path / "sql/migrations" / "other_revision.sql"
+    wrong_path.parent.mkdir(parents=True)
+    wrong_path.write_text("-- matching bytes not enough\n", encoding="utf-8")
+    migration = Migration(
+        revision=revision,
+        path="sql/migrations/other_revision.sql",
+        sha256=hashlib.sha256(wrong_path.read_bytes()).hexdigest(),
     )
     with pytest.raises(MigrationManifestError, match="path does not match revision"):
-        validate_manifest(tmp_path, mismatched)
+        validate_manifest(tmp_path, (migration,))
