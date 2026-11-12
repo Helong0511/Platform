@@ -892,3 +892,16 @@ PR #1 保持 Open / Draft，不合并 main，不连接生产环境。凭据安�
 5. RBAC、租户隔离、归因、统计、结算、API、队列及前端剩余业务模块全量复核。
 
 PR #1 继续 Open / Draft，不合并 main、不部署；验证只使用隔离 CI、合成数据及 Mock API，禁止连接生产环境。凭据安全专项仍按用户要求暂缓。
+
+
+## 36. Migration schema 精确结构断言（2026-11-12，Run #1272）
+
+- 在 tests/test_mysql_migrations.py 增加隔离 MySQL 元数据断言，不再只凭字段名/索引名判断迁移成功。
+- event_key 必须为 VARCHAR(64) NOT NULL，unique_event_key 必须且仅包含 event_key。
+- Outbox 字段必须匹配预期类型；outbox_enqueued 必须为 TINYINT(1) NOT NULL DEFAULT 0；due index 必须按 (outbox_enqueued, status, next_retry_time, report_start_time, id) 顺序建立。
+- 两张 PII 日志表的 pii_scrubbed_at 必须为可空 DATETIME；两个保留扫描索引必须按 (pii_scrubbed_at, created_at, id) 顺序建立。
+- Run #1272（SHA 30543d5c26e5379c394d53667d6ee76059f26b43）：Backend 478 passed、1 skipped、1 warning；Python Compile、Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。Run：https://github.com/Helong0511/Platform/actions/runs/43146738201。
+- 本次测试证明当前迁移在全新旧版结构、已覆盖的部分 DDL 中断点和重复执行后，最终字段类型/NULL/default/index column order 符合预期；不证明任意错误的同名旧结构均能自动修复，也不等于全量备份恢复或生产代表性数据升级演练。
+- 尚未完成：每个 DDL 边界的逐点中断注入、真实逻辑备份导出/导入恢复、worker pause/resume、应用兼容回滚、旧/新 schema 与数据 diff、真实规模合成数据升级耗时/锁表评估。MySQL DDL 隐式提交，不能宣称迁移可事务回滚。
+- sql/platform.sql 是完整建库基线，含 DROP/重建表语句；只能用于空库初始化或明确的破坏性重建流程，绝不能作为现有库升级脚本。已有数据库只能按审批后的增量迁移顺序处理。
+- PR 继续 Open / Draft，不合并 main、不部署；所有验证仅限 GitHub Actions 临时 MySQL/Redis、合成数据和 Mock API。凭据安全专项仍按用户要求暂缓。
