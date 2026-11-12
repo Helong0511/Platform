@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import re
+
 
 class MigrationSQLParseError(ValueError):
     """迁移 SQL 超出受支持语法时拒绝执行。"""
@@ -125,4 +127,18 @@ def split_mysql_statements(
     if state in {"single", "double", "backtick", "block_comment", "executable_comment"}:
         raise MigrationSQLParseError(f"unterminated SQL {state.replace('_', ' ')}")
     finish_statement()
+
+    # 存储程序/触发器/事件需要客户端 DELIMITER 或专门的 body parser。
+    # 即使文件漏写 DELIMITER，也必须拒绝，不能把内部分号拆成多条独立 SQL。
+    routine_pattern = re.compile(
+        r"^\\s*CREATE\\s+(?:OR\\s+REPLACE\\s+)?"
+        r"(?:(?:DEFINER\\s*=\\s*(?:CURRENT_USER(?:\\s*\\(\\s*\\))?|[^\\s]+))\\s+)?"
+        r"(?:PROCEDURE|FUNCTION|TRIGGER|EVENT)\\b",
+        re.IGNORECASE,
+    )
+    for statement in statements:
+        if routine_pattern.match(statement):
+            raise MigrationSQLParseError(
+                "stored routines, triggers, and events are not supported"
+            )
     return tuple(statements)
