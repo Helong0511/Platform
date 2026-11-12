@@ -31,7 +31,9 @@ SET @has_index = (
         GROUP BY INDEX_NAME
         HAVING COUNT(*) = 3
            AND MAX(NON_UNIQUE) = 1
+           AND MAX(INDEX_TYPE) = 'BTREE'
            AND MAX(SUB_PART) IS NULL
+           AND SUM(CASE WHEN COLLATION = 'A' THEN 1 ELSE 0 END) = 3
            AND GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') = 'pii_scrubbed_at,created_at,id'
     ) AS valid_third_party_pii_index
 );
@@ -72,7 +74,9 @@ SET @has_index = (
         GROUP BY INDEX_NAME
         HAVING COUNT(*) = 3
            AND MAX(NON_UNIQUE) = 1
+           AND MAX(INDEX_TYPE) = 'BTREE'
            AND MAX(SUB_PART) IS NULL
+           AND SUM(CASE WHEN COLLATION = 'A' THEN 1 ELSE 0 END) = 3
            AND GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') = 'pii_scrubbed_at,created_at,id'
     ) AS valid_forward_pii_index
 );
