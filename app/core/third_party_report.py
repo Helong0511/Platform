@@ -294,6 +294,7 @@ async def send_third_party_report(
         facebook_api_version: Optional[str] = "v23.0",  # 可选参数，默认与全局 FACEBOOK_API_VERSION 对齐
         report_log_id: Optional[int] = None,
         event_key: Optional[str] = None,
+        report_lease_token: Optional[datetime] = None,
 ):
     """
     后台任务：发送第三方广告上报
@@ -338,7 +339,7 @@ async def send_third_party_report(
             "empty" if not pixel_id else pixel_id[:10],
         )
         if report_log_id:
-            lease_token = await _claim_report_log(report_log_id)
+            lease_token = report_lease_token or await _claim_report_log(report_log_id)
             if lease_token is None:
                 existing_status = await _get_report_status(report_log_id)
                 if existing_status == "success":
@@ -388,7 +389,7 @@ async def send_third_party_report(
 
     event_key = event_key or build_event_idempotency_key(source, adsid, event, conversion_id)
     try:
-        lease_token = await _claim_report_log(report_log_id)
+        lease_token = report_lease_token or await _claim_report_log(report_log_id)
         if lease_token is None:
             existing_status = await _get_report_status(report_log_id)
             if existing_status == "success":
@@ -1032,7 +1033,12 @@ async def update_report_log_params(
     """
     try:
         async with AsyncSessionLocal() as db:
-            result = await db.execute(select(ThirdPartyReportLog).where(ThirdPartyReportLog.id == log_id))
+            # 与发送租约认领使用同一行锁仲裁，防止活动 Worker 期间修改发送载荷。
+            result = await db.execute(
+                select(ThirdPartyReportLog)
+                .where(ThirdPartyReportLog.id == log_id)
+                .with_for_update()
+            )
             log_entry = result.scalars().first()
             
             if not log_entry:
