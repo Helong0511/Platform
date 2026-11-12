@@ -834,3 +834,26 @@ PR 继续 Open / Draft；不合并 main、不部署。所有验证仅使用 GitH
 
 - ConversionService 和 `require_publisher_or_admin` 已覆盖多 Client 账号；其它 API、导出、产品、结算、报表及密码策略仍需检查是否存在 first-loaded Client 造成的范围遗漏或策略不一致。
 - PR 继续 Open / Draft；不合并 main、不部署。
+
+
+
+## 30. 全量隔离回归复验（2026-11-12，Run #1228）
+
+- 最新 PR head：`a66a5e00a775de8aadac9e58f4a05e981788bcc7`。
+- GitHub Actions Run #1228：https://github.com/Helong0511/Platform/actions/runs/43142529211。
+- Backend：**470 passed、1 skipped、1 warning**；Python Compile 通过。
+- Frontend：依赖安装、依赖告警报告、Lint、Build、Playwright Mock API Browser E2E 全部通过。
+- 该次 CI 仍只连接 Workflow 声明的临时 MySQL 8.0 / Redis 7.4 服务，测试数据均为合成数据；没有连接生产服务。
+- 唯一 Skip：本地核对脚本未检出（该脚本在 `tests/*` 默认 gitignore 范围，CI 不依赖）。
+- 唯一 pytest warning：Passlib 1.7.4 导入 Python 3.11 的 `crypt` 模块产生弃用提示（该模块计划在 Python 3.13 移除）。这不是测试失败，也未在本轮更改密码哈希方案；密码凭据安全专项仍按本轮范围暂缓，后续应单独评估哈希方案兼容迁移，不应直接替换现有密码验证实现。
+- Redis/MySQL 容器启动日志另有基础镜像环境警告（Redis memory overcommit、MySQL 临时 CI 容器配置）；不代表应用测试失败，亦不应将这些 CI 容器警告误判为生产环境配置结论。
+
+### 仍未完成的验收项
+
+1. Outbox Worker 发送过程超过租约时长时的租约续期/失租保护与远端请求幂等验证。
+2. Outbox 多 Worker 争抢同一事件的真实 MySQL 并发测试（当前已有 Cap Reservation 多 Worker 争抢测试；Outbox 需补充同等级真实集成证据）。
+3. 数据库迁移的备份恢复、逐 DDL 中断恢复、迁移前后应用兼容性与可执行回滚演练。
+4. Cap Reservation 在 Redis 短暂不可用、重启、token 丢失、counter 保留/过期、MySQL commit ACK 丢失等组合故障下的真实隔离集成验证。
+5. 其余多租户隔离、归因幂等、PII 生命周期和业务流程仍需按清单逐项完成；当前全量测试通过不等同于全部上线风险已消除。
+
+PR #1 保持 Open / Draft，不合并 main，不连接生产环境。凭据安全专项继续暂缓。
