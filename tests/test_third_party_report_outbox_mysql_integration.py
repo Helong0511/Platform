@@ -180,6 +180,13 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
         assert new_token is not None
         assert new_token != first_token
 
+        # MySQL DATETIME 秒级精度：同一秒立即续租应确认当前租约仍有效，
+        # 不应因 UPDATE 未改变字段值而被 changed-rows rowcount 误判为失租。
+        same_second_renewal = await report_module._renew_report_log_lease(
+            report_id, new_token
+        )
+        assert same_second_renewal == new_token
+
         stale_update = await report_module.update_report_log(
             report_id,
             status="failed",
