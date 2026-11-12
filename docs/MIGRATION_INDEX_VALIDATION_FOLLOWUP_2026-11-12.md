@@ -433,3 +433,24 @@ MySQL 官方文档确认：
 
 - 本轮仅统一 Cap Reservation `updated_at` 的 ORM/SQL 建表语义；尚未证明全部 ORM 模型与全部增量迁移在所有字段、索引、CHECK、字符集/排序规则和默认值上完全一致。
 - `_schema_metadata_drift` 仍只检查表/列是否存在；统一 Migration Runner、revision/checksum ledger、历史数据升级与恢复演练仍未完成。
+
+## 17. 完整建库基线同步与双入口防回归（2026-11-12）
+
+### 17.1 发现与修复
+
+- Run #1408 后继续追踪 `cap_reservations` 的所有建表入口，发现 `sql/platform.sql` 完整建库基线仍保留 `updated_at ... ON UPDATE CURRENT_TIMESTAMP`，与已修正的增量迁移和 ORM 模型不一致。
+- 已同步修改 `sql/platform.sql`，移除额外数据库级 `ON UPDATE` 行为。现在 ORM 由应用层 `onupdate` 更新，完整建库基线和增量迁移均仅定义 `DEFAULT CURRENT_TIMESTAMP`。
+- 在 `tests/test_cap_reservation_model.py` 新增防回归检查：核对 ORM server default / onupdate，并读取完整建库基线与增量迁移两个 SQL 文件，验证两者的 `updated_at` 定义一致且不包含数据库级 `ON UPDATE`。
+
+### 17.2 CI 结果
+
+- 基线修复提交：`f618772e86816b8f50ad195b5f75a26c242484a1`。
+- 双入口回归测试提交：`386091a4ebf5f4b2ce909c40ba887a1c1263758c`。
+- Run #1410 全部成功：Backend **543 passed、1 skipped、1 warning**；Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- Run #1410：https://github.com/Helong0511/Platform/actions/runs/43180008354
+- 本轮测试仍只使用隔离 CI MySQL/Redis、合成数据和 Mock API；没有连接生产服务。
+
+### 17.3 结论边界
+
+- Cap Reservation 的 ORM、完整建库 SQL、增量迁移三条入口在 `updated_at` 更新语义上已对齐，并有静态防回归测试和隔离 MySQL 漂移拒绝测试。
+- 这不等于全表所有字段/索引/约束已经逐项比较，也不等于全项目所有模型和五份迁移脚本已经一致；仍需完整 schema diff 和统一迁移版本管理。
