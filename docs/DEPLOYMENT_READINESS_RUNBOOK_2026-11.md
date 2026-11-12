@@ -522,3 +522,38 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - 这轮只处理已定位的 Dashboard 和转化报表异常出口；还需继续扫描其它业务模块的异常日志、错误响应和第三方响应透传。
 - PII 保留政策、通知消息、原始 Postback 数据、未完成转发队列、备份与第三方接收方数据仍需单独治理。
 - PR 保持 Open / Draft；不合并、不部署。后续代码/文档更新仍需以最新 HEAD 的完整 CI 为准。
+
+
+## 26. 管理端、认证与调度 API 异常脱敏；客户转化空范围回归（2026-11-12，Run #1163）
+
+### API 异常与诊断信息治理
+
+本轮在前述客户 API、Dashboard、转化报表修复基础上，继续清理其它已定位的原始异常出口：
+
+- Client 创建、更新、开关更新失败时，响应改用固定通用错误提示，日志只记录异常类型；客户更新审计日志失败也不再输出异常原文。
+- Product 可用名称列表失败时不再把底层异常返回调用方；产品创建审计日志异常仅记录异常类型。
+- Short-link 诊断的 DB / Redis / 进程内计数器错误不再把原始异常放进诊断响应或日志；手动同步失败返回通用提示。
+- Audit log 列表、统计、详情、清理接口统一不返回数据库异常原文。
+- Scheduled task 列表、详情、状态、队列、GAM 配置、触发、重载、锁释放等错误响应和日志不再透传原始异常。
+- 登录和刷新令牌失败日志不再包含异常原文、用户名/IP拼接和 traceback；登录错误统一返回通用服务不可用提示。
+- Telegram 诊断不应暴露 webhook URL 或原始异常；短链接与后台 API 的诊断响应只提供可操作的通用信息。
+- 新增静态回归检查覆盖上述模块的异常字符串、traceback 和敏感 URL 泄露模式。
+
+### 客户转化范围保护
+
+- 核对 ConversionService 的 get_conversion_summary 与 get_conversions_by_offer：当前代码在客户用户找不到关联 Client 记录时，已提前返回全零结构/空列表，不会继续执行全局查询。
+- 新增 tests/test_conversion_client_scope.py，验证缺少 Client 记录时两个路径均返回空范围，且只执行 Client 查找，不会继续查询全局 Click/Conversion 数据。
+- 该边界目前不是已确认的线上漏洞；本轮增加回归测试以防未来重构删除现有保护。
+
+### CI 证据
+
+- Run #1163（SHA 91df3fd1d0519915c5307be6f57e6e8784addf6b）：Backend **438 passed、1 skipped、1 warning**；Python compile、Frontend Lint/Build、Playwright Mock API Browser E2E 全部通过。
+- Skip 是本机核对脚本未提交（CI 不依赖）；warning 是 passlib 在 Python 3.11 使用 crypt 的弃用提示。
+- Run #1163：https://github.com/Helong0511/Platform/actions/runs/43135437064。
+
+### 当前剩余项
+
+- 以上是本轮已扫描并修复的异常出口，不代表所有模块已完成全仓日志/响应脱敏；仍需继续审查结算、归因、队列、导入导出及外部回调边界。
+- IP 白名单实际效果依赖部署环境可信代理配置、Nginx realip 与源站防火墙；尚未验证生产网络（本轮严禁连接生产）。
+- PII 保留政策仍待批准，自动清理保持默认关闭；备份副本、第三方接收方、通知消息、原始 Postback 数据的全生命周期仍未闭环。
+- PR 保持 Open / Draft，不合并、不部署；所有测试继续仅使用隔离 CI、合成数据和 Mock API。
