@@ -790,3 +790,38 @@ MySQL 官方文档确认：
 ### 16.5 本轮结论
 
 本轮增加了定时任务同步这一启动期数据库写入路径，避免迁移改造只覆盖 DDL 而遗漏 Worker 启动时的业务数据写入。尚未修改应用运行代码；后续实现必须分别处理 schema provisioning、DDL migration、默认管理员 bootstrap、定时任务配置同步和只读 schema 验证。
+
+
+## 17. 离线迁移校验 CLI 与下一阶段 Runner 边界（2026-11-12）
+
+### 17.1 本轮新增能力
+
+- 新增 `python -m app.db.migrations validate`，作为迁移工具的第一个显式命令。
+- 命令先校验 manifest：revision 唯一、revision 与文件名对应、路径不越界、文件集合完整、依赖顺序有效、SHA-256 一致。
+- 随后逐个读取五份迁移 SQL 文件，使用受限解析器检查语句边界；不支持的 `DELIMITER`、未闭合引号/注释会失败退出。
+- 校验命令不导入应用 settings、不创建 SQLAlchemy Engine、不读取数据库 DSN、不打开网络连接、不执行 SQL。
+- 增加 CLI 测试，验证必须显式提供子命令，且成功输出明确声明未连接数据库、未执行 SQL。
+
+### 17.2 解析器支持边界
+
+- 解析器处理单引号、双引号、反引号、常见行注释、块注释和 MySQL 可执行注释。
+- `backslash_escapes` 参数允许调用方按当前 MySQL SQL_MODE 选择反斜杠转义行为。
+- 当前 CLI 使用默认反斜杠转义模式进行静态边界检查；它不是 MySQL 服务器语法校验器，也不能证明脚本在任意 SQL_MODE 下均可执行。
+- 正式 Runner 必须先从实际连接读取并固定 SQL_MODE，再按该模式解析；遇到无法证明安全的模式或语法必须拒绝执行。
+- 解析器不支持存储过程/触发器的 `DELIMITER` 脚本；不得把解析器通过误读为 SQL 迁移语义已验证。
+
+### 17.3 Runner 实现前必须确定的数据库状态模型
+
+- ledger 读取必须使用显式、稳定的执行顺序字段；不能依赖 SQL 默认返回顺序或 Python Mapping 插入顺序来代表数据库历史。
+- ledger 至少需要 revision 主键、checksum、状态、开始/结束时间、执行序号和脱敏失败摘要。
+- 已存在 `running` 或 `failed` revision 时必须停止自动迁移；先核验 DDL 部分完成状态，再由显式恢复流程处置。
+- MySQL DDL 隐式提交意味着“记录 failed”不代表已回滚 schema；不能自动把失败项改回 pending 并盲目重跑。
+- GET_LOCK/RELEASE_LOCK 必须在同一物理数据库 session 内完成；连接断开即视为锁丢失，执行器不得继续发出后续 DDL。
+- migration 连接应由独立 CLI 显式取得，不能导入 Web Worker 的默认 engine 或复用应用运行账号。
+- 目前尚未实现 ledger、数据库连接器、迁移锁、DDL 执行、恢复命令或只读启动 revision gate。
+
+### 17.4 本轮验证与状态
+
+- 最新已通过 CI：Run #1458，提交 `124677c7776fc0b650182177b78e5999dd43cafe`，Backend / Frontend 全部成功。
+- 上述 Run #1458 不包含本节之后新增的离线 CLI；CLI 必须等待其自身 HEAD 对应的 CI 完成后才能标记验收。
+- 未连接生产资源、未执行任何迁移 SQL；PR #1 继续 Open / Draft，不合并 main、不部署。
