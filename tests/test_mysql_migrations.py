@@ -903,7 +903,7 @@ def _run_sql_file_with_ddl_interruption(cursor, relative_path: str, ddl_boundary
     sql = Path(relative_path).read_text(encoding="utf-8")
     statements = [
         statement.strip()
-        for statement in "\\n".join(
+        for statement in "\n".join(
             line for line in sql.splitlines()
             if not line.lstrip().startswith("--")
         ).split(";")
