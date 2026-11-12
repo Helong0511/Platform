@@ -1177,3 +1177,12 @@ PR #1 仍保持 Open / Draft；不合并 main、不部署。凭据安全专项�
 - 第 9.3 节中关于“schema bootstrap 异常被吞掉并继续启动”的观察属于旧代码状态，已由当前 fail-closed 启动逻辑修复；但 runner 与完整结构核验缺口仍是上线阻断项。
 
 PR #1 继续 Open / Draft；本轮不合并 main、不部署、不连接生产服务器、生产数据库、Redis、队列或真实第三方 API。凭据安全专项继续按用户要求暂缓。
+
+### Schema Drift 单元测试 CI 结果补录
+
+- Run #1396：https://github.com/Helong0511/Platform/actions/runs/43175541209
+- SHA：`5bf102f36d364fafeb3cc1fe2b0531e43cbca3f9`
+- Backend：**534 passed、1 skipped、1 warning**。
+- `test_schema_metadata_drift_reports_missing_tables_and_columns` 与 `test_schema_metadata_drift_accepts_complete_existing_schema` 均逐条通过。
+- Frontend：Lint、Build、Playwright Mock API Browser E2E 全部通过。
+- 该测试只验证 schema drift helper 的缺表/缺列判断；不代表真实 MySQL migration runner、备份恢复、索引/约束核验或旧数据迁移演练已经完成。
