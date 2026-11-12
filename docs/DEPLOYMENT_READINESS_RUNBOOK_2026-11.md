@@ -808,3 +808,29 @@ PR 继续 Open / Draft；不合并 main、不部署。所有验证仅使用 GitH
 
 - 仓库 Nginx 配置监听所有接口；代码仓库无法证明服务器防火墙已阻止绕过 Cloudflare 直连源站。上线前必须核验 80/443 入站规则仅允许 Cloudflare 官方网段及明确批准的合作方/运维来源，其它来源拒绝；SSH 等管理端口另行配置。
 - 必须在目标环境执行 `nginx -V` / `nginx -t`，确认 `http_realip_module` 已编译或正确加载，且 include 路径存在。当前 CI 的文本断言不替代目标服务器 Nginx 实际配置验证。
+
+
+
+## 34. 多 Client 用户的 Publisher 权限守卫一致性（2026-11-12，Run #1221）
+
+### 发现的问题
+
+- ConversionService 已修复为读取用户全部 Client ID，但 `require_publisher_or_admin` 仍只取第一条 Client，再检查该 Client 是否有 active Publisher。
+- 当用户关联多个 Client、只有后续 Client 配置了渠道时，权限守卫会错误拒绝；当第一个 Client 有渠道时，守卫和服务层的租户范围也不一致。
+
+### 修复
+
+- 权限守卫现在查询该用户全部 Client ID，再通过 `Publisher.client_id IN (client_ids)` 检查是否至少存在一个 active Publisher。
+- 无 Client 记录或全部 Client 都没有 active Publisher 时继续 fail-closed。
+- 移除单 Client 的 UserService 检查路径，避免权限守卫与 ConversionService 多 Client 逻辑不一致。
+- 新增测试覆盖多 Client 中任意一个存在 active Publisher 时允许，以及无 Client / 无 active Publisher 时拒绝。
+
+### CI 证据
+
+- Run #1221（SHA `a4062099c56e940c70d68383e41b1bcd62a99c3b`）：Backend **469 passed、1 skipped、1 warning**；Python Compile、Frontend Lint/Build、Playwright Mock API Browser E2E 全部通过。
+- Run #1221：https://github.com/Helong0511/Platform/actions/runs/43142037373。
+
+### 仍需复核
+
+- ConversionService 和 `require_publisher_or_admin` 已覆盖多 Client 账号；其它 API、导出、产品、结算、报表及密码策略仍需检查是否存在 first-loaded Client 造成的范围遗漏或策略不一致。
+- PR 继续 Open / Draft；不合并 main、不部署。
