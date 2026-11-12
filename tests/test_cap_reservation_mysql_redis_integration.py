@@ -6,11 +6,12 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import os
 import uuid
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 
 import pymysql
 import pytest
@@ -29,10 +30,56 @@ from app.services.cap_reservation_ledger import CapReservationLedger
 
 
 MYSQL_HOST = os.getenv("MYSQL_INTEGRATION_HOST")
+MYSQL_DATABASE = os.getenv("MYSQL_INTEGRATION_DATABASE", "platform_ci")
 REDIS_URL = os.getenv("REDIS_INTEGRATION_URL")
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    if not host:
+        return False
+    if host.strip().lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip()).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_isolated_redis_url(url: str | None) -> bool:
+    if not url:
+        return False
+    try:
+        parsed = urlsplit(url)
+        return (
+            parsed.scheme in {"redis", "rediss"}
+            and _is_loopback_host(parsed.hostname)
+            and parsed.port in (None, 6379)
+            and parsed.path.strip("/") == "14"
+        )
+    except ValueError:
+        return False
+
+
+_SAFE_INTEGRATION_TARGETS = (
+    os.getenv("UNIT_TEST") == "1"
+    and os.getenv("MYSQL_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS") == "1"
+    and os.getenv("REDIS_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS") == "1"
+    and _is_loopback_host(MYSQL_HOST)
+    and MYSQL_DATABASE == "platform_ci"
+    and _is_isolated_redis_url(REDIS_URL)
+)
+
+# 该测试会 CREATE/DROP 数据库并写入/删除 Redis key。CI 环境若配置缺失或目标非本机，
+# 必须失败关闭；本地未显式启用时则跳过，绝不尝试连接外部服务。
+if os.getenv("UNIT_TEST") == "1" and (MYSQL_HOST or REDIS_URL or os.getenv("GITHUB_ACTIONS") == "true") and not _SAFE_INTEGRATION_TARGETS:
+    raise RuntimeError(
+        "拒绝执行 Cap Reservation 集成测试：必须使用 loopback MySQL platform_ci、"
+        "loopback Redis DB14，并显式启用两个隔离测试授权变量"
+    )
+
 pytestmark = pytest.mark.skipif(
-    not MYSQL_HOST or not REDIS_URL,
-    reason="仅在显式配置的隔离 MySQL + Redis 集成环境中运行",
+    not _SAFE_INTEGRATION_TARGETS,
+    reason="仅在显式授权的本机隔离 MySQL platform_ci + Redis DB14 中运行",
 )
 
 
