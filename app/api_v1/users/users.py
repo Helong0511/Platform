@@ -106,15 +106,17 @@ logger = logging.getLogger(__name__)
 
 def _active_client_records(user: User) -> list[Client]:
     """按 ID 稳定排序，返回当前账号全部启用中的客户主体。"""
+    # 只读取已预加载的关系，避免在异步 ORM 会话中触发隐式懒加载。
+    loaded_clients = getattr(user, "__dict__", {}).get("clients") or []
     return sorted(
-        _get_active_user_clients(getattr(user, "clients", None)),
+        _get_active_user_clients(loaded_clients),
         key=lambda client: int(getattr(client, "id", 0) or 0),
     )
 
 
 def _effective_password_change_enabled(user: User, active_clients: list[Client]) -> bool:
     """与 UserService.change_password 保持一致：所有关联客户均允许且至少有一个启用客户。"""
-    all_clients = getattr(user, "clients", None) or []
+    all_clients = getattr(user, "__dict__", {}).get("clients") or []
     return bool(active_clients) and bool(all_clients) and all(
         bool(getattr(client, "password_change_enabled", False))
         for client in all_clients
