@@ -31,7 +31,7 @@
 注意事项：
 1. 登录接口使用OAuth2PasswordRequestForm格式（username/password）
 2. 所有需要认证的接口都需要在请求头中携带Bearer令牌
-3. 客户角色的IP白名单验证：127.0.0.1始终允许
+3. 客户角色的 IP 白名单验证：包括回环地址在内，均须显式列入白名单
 4. 登录失败不会暴露具体原因（用户名不存在或密码错误都返回相同错误）。
 
 说明：用户认证，含登录、刷新令牌、登出及 JWT 校验。"""
@@ -48,6 +48,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.audit_log import log_login, log_logout, commit_audit_log
 from app.core.auth_response import build_token_json_response, clear_auth_cookies, raise_auth_error
+from app.core.api_auth import _is_client_ip_allowed
 from app.core.auth_user_payload import build_auth_user_payload
 from app.core.async_orm import get_first_loaded_collection_item
 from app.core.config import settings
@@ -122,7 +123,7 @@ async def login(
     - 密码验证使用安全的bcrypt算法
     - 登录失败不暴露具体原因（防止用户名枚举攻击）
     - 客户IP白名单验证（仅客户角色）
-    - 127.0.0.1始终允许（本地访问）
+    - 回环地址不再隐式放行，必须显式列入 allowed_ips
     - 所有登录尝试都记录到审计日志
     
     响应内容：
@@ -248,39 +249,26 @@ async def login(
             http_status=status.HTTP_403_FORBIDDEN,
         )
 
-    # ====== 客户IP白名单检查 ======
-    # 只有客户角色需要检查IP白名单，管理员不受限制
-    # 127.0.0.1和localhost始终允许（本地访问）
-    if user.role == UserRole.CLIENT:
-        # 127.0.0.1和localhost始终允许
-        local_ips = ["127.0.0.1", "localhost", "::1"]
-        if client_ip not in local_ips:
-            # 优化：客户信息已在查询用户时通过selectinload加载，直接使用
-            client = get_first_loaded_collection_item(user, "clients")
-
-            if client:
-                # 检查IP白名单
-                allowed_ips = client.allowed_ips
-                if allowed_ips and allowed_ips.strip():
-                    # 解析IP白名单（支持逗号分隔）
-                    allowed_ip_list = [ip.strip() for ip in allowed_ips.split(",") if ip.strip()]
-                    if allowed_ip_list and client_ip not in allowed_ip_list:
-                        logger.warning(
-                            f"客户登录失败: IP不在白名单中, "
-                            f"用户名={form_data.username}, IP={client_ip}, "
-                            f"白名单={allowed_ips}"
-                        )
-                        await _record_login_failure(
-                            db, request,
-                            user=user,
-                            error_message=f"IP地址 {client_ip} 不在允许列表中",
-                        )
-                        raise_auth_error(
-                            ErrorCode.FORBIDDEN,
-                            f"IP地址 {client_ip} 不在允许列表中，请联系管理员",
-                            http_status=status.HTTP_403_FORBIDDEN,
-                        )
-                # 如果allowed_ips为空或None，则不限制IP（向后兼容）
+    # ====== 客户 IP 白名单检查 ======
+    # 登录与外部客户 API 共用同一白名单规则；回环地址也必须显式列入。
+    client_record = get_first_loaded_collection_item(user, "clients")
+    if user.role == UserRole.CLIENT and client_record:
+        if not _is_client_ip_allowed(client_record.allowed_ips, client_ip):
+            logger.warning(
+                "客户登录失败：来源 IP 不在白名单中，user_id=%s",
+                user.id,
+            )
+            await _record_login_failure(
+                db,
+                request,
+                user=user,
+                error_message="来源 IP 不在客户允许列表中",
+            )
+            raise_auth_error(
+                ErrorCode.FORBIDDEN,
+                "当前来源 IP 不在客户允许列表中，请联系管理员",
+                http_status=status.HTTP_403_FORBIDDEN,
+            )
 
     # ====== 生成访问令牌和刷新令牌 ======
     # 创建JWT访问令牌，设置过期时间（从配置中读取）
