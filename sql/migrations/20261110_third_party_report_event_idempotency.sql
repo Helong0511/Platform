@@ -104,8 +104,35 @@ SET @has_old_unique = (
       AND TABLE_NAME = 'third_party_report_logs'
       AND INDEX_NAME = 'unique_source_adsid'
 );
+-- 旧索引必须确实是原始的 UNIQUE(source, adsid) BTREE；同名错误索引不得被误删。
+SET @has_old_unique_valid = (
+    SELECT COUNT(*)
+    FROM (
+        SELECT INDEX_NAME
+        FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'third_party_report_logs'
+          AND INDEX_NAME = 'unique_source_adsid'
+        GROUP BY INDEX_NAME
+        HAVING COUNT(*) = 2
+           AND MAX(NON_UNIQUE) = 0
+           AND MAX(INDEX_TYPE) = 'BTREE'
+           AND MAX(SUB_PART) IS NULL
+           AND SUM(CASE WHEN COLLATION = 'A' THEN 1 ELSE 0 END) = 2
+           AND GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') = 'source,adsid'
+    ) AS valid_legacy_unique_index
+);
 SET @ddl = IF(
-    @has_event_unique > 0 AND @has_old_unique > 0,
+    @has_old_unique > 0 AND @has_old_unique_valid = 0,
+    'SELECT * FROM __third_party_report_legacy_unique_schema_mismatch__',
+    'SELECT 1'
+);
+PREPARE migration_stmt FROM @ddl;
+EXECUTE migration_stmt;
+DEALLOCATE PREPARE migration_stmt;
+
+SET @ddl = IF(
+    @has_event_unique > 0 AND @has_old_unique_valid > 0,
     'ALTER TABLE third_party_report_logs DROP INDEX unique_source_adsid',
     'SELECT 1'
 );
