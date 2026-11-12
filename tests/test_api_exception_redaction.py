@@ -61,3 +61,12 @@ def test_telegram_diagnostics_do_not_expose_webhook_url_or_exception_text():
     assert "检测到 Webhook: {webhook_url}" not in source
     assert "检查 webhook 时出错: {e}" not in source
     assert "Bot 连接测试失败: {str(e)}" not in source
+
+def test_authentication_endpoints_do_not_log_or_return_raw_exceptions():
+    auth_source = _source("app/api_v1/auth/auth.py")
+    refresh_source = _source("app/api_v1/auth/refresh.py")
+    assert "error_msg = str(e)" not in auth_source
+    assert "exc_info=True" not in auth_source
+    assert "退出登录失败: {e}" not in auth_source
+    assert "str(e)" not in refresh_source
+    assert "exc_info=True" not in refresh_source
