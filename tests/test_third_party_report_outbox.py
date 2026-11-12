@@ -452,8 +452,12 @@ async def test_outbox_scan_is_bounded_and_filters_due_unexpired_attempts(monkeyp
 
         async def scalar(self, statement):
             compiled = statement.compile(dialect=mysql.dialect())
-            captured["exhausted_sql"] = str(compiled).lower()
-            return 4
+            sql = str(compiled).lower()
+            if "attempt_count >=" in sql:
+                captured["exhausted_sql"] = sql
+                return 4
+            captured["terminal_failed_sql"] = sql
+            return 6
 
     class SessionContext:
         async def __aenter__(self):
@@ -479,7 +483,7 @@ async def test_outbox_scan_is_bounded_and_filters_due_unexpired_attempts(monkeyp
     stats = await outbox.process_postback_report_outbox(batch_size=2)
 
     assert processed == [101, 102]
-    assert stats == {"selected": 2, "success": 2, "retryable": 0, "failed": 0, "exhausted": 4}
+    assert stats == {"selected": 2, "success": 2, "retryable": 0, "failed": 0, "exhausted": 4, "terminal_failed": 6}
     assert "third_party_report_logs.attempt_count >= third_party_report_logs.max_attempts" in captured["exhausted_sql"]
     assert "third_party_report_logs.pii_scrubbed_at is null" in captured["exhausted_sql"]
     assert captured["normalization_committed"] is True
@@ -493,6 +497,9 @@ async def test_outbox_scan_is_bounded_and_filters_due_unexpired_attempts(monkeyp
     assert "third_party_report_logs.next_retry_time is null" in captured["exhausted_update_sql"]
     assert "third_party_report_logs.next_retry_time <=" in captured["exhausted_update_sql"]
     assert "third_party_report_logs.next_retry_time is null" in captured["exhausted_sql"]
+    assert "third_party_report_logs.status = %s" in captured["terminal_failed_sql"]
+    assert "third_party_report_logs.next_retry_time is null" in captured["terminal_failed_sql"]
+    assert "third_party_report_logs.pii_scrubbed_at is null" in captured["terminal_failed_sql"]
     assert "third_party_report_logs.outbox_enqueued is true" in captured["sql"]
     assert "third_party_report_logs.next_retry_time <= %s" in captured["sql"]
     assert "third_party_report_logs.attempt_count < third_party_report_logs.max_attempts" in captured["sql"]
