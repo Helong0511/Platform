@@ -88,3 +88,19 @@ def test_manifest_rejects_unknown_or_forward_dependency(tmp_path: Path):
 def test_manifest_is_explicit_and_contains_no_unreviewed_files():
     assert len(MIGRATION_MANIFEST) == 5
     assert all(item.path.startswith("sql/migrations/") for item in MIGRATION_MANIFEST)
+
+def test_manifest_rejects_revision_path_mismatch(tmp_path):
+    from dataclasses import replace
+
+    entries = _fixture(tmp_path)
+    mismatched = (replace(entries[0], path="sql/migrations/other_revision.sql"),)
+    other = tmp_path / "sql/migrations/other_revision.sql"
+    other.write_text("-- matching bytes not enough\\n", encoding="utf-8")
+    mismatched = (
+        replace(
+            mismatched[0],
+            sha256=hashlib.sha256(other.read_bytes()).hexdigest(),
+        ),
+    )
+    with pytest.raises(MigrationManifestError, match="path does not match revision"):
+        validate_manifest(tmp_path, mismatched)
