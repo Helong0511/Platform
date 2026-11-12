@@ -8,7 +8,7 @@ from starlette.requests import Request
 from app.api_v1.auth import auth as auth_api
 from app.api_v1.auth import refresh as refresh_api
 from app.models.models import UserRole
-from app.core.api_auth import _is_user_client_ip_allowed
+from app.core.api_auth import _get_active_user_clients, _is_user_client_ip_allowed
 from app.schemas.auth import RefreshTokenRequest
 
 
@@ -169,3 +169,15 @@ async def test_refresh_rejects_account_without_active_client_membership(monkeypa
 
     assert exc.value.status_code == 403
     assert db.rollback_called is True
+
+
+def test_active_client_memberships_are_sorted_for_stable_login_payload():
+    clients = [
+        SimpleNamespace(id=30, is_active=True),
+        SimpleNamespace(id=10, is_active=False),
+        SimpleNamespace(id=20, is_active=True),
+    ]
+
+    active = _get_active_user_clients(clients)
+
+    assert [client.id for client in active] == [20, 30]
