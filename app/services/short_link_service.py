@@ -344,12 +344,12 @@ class ShortLinkService(BaseService[ShortLink]):
         except exc.IntegrityError as e:
             # 处理重复短码的错误
             if "Duplicate entry" in str(e) and "short_code" in str(e):
-                logger.error(f"短链接代码重复: {str(e)}")
+                logger.error("短链接代码重复: error_type=%s", type(e).__name__)
                 raise_api_exception(
                     ErrorCode.RESOURCE_ALREADY_EXISTS,
                     detail="短链接代码已存在，请使用其他代码"
                 )
-            logger.error(f"创建短链接失败: {str(e)}", exc_info=True)
+            logger.error("创建短链接失败: error_type=%s", type(e).__name__)
             # 抛出标准化的服务器错误异常
             raise_api_exception(
                 ErrorCode.INTERNAL_ERROR,
@@ -358,7 +358,7 @@ class ShortLinkService(BaseService[ShortLink]):
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"创建短链接失败: {str(e)}", exc_info=True)
+            logger.error("创建短链接失败: error_type=%s", type(e).__name__)
             # 抛出标准化的服务器错误异常
             raise_api_exception(
                 ErrorCode.INTERNAL_ERROR,
