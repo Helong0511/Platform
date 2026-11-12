@@ -361,3 +361,31 @@ async def test_daily_reservation_uses_captured_date_even_if_clock_crosses_midnig
     assert calls[0][0] == expected_key
     assert calls[0][1] == f"{expected_key}:reservation:midnight-boundary-token"
 
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method_name",
+    ["check_and_increment_daily", "check_and_increment_total"],
+)
+async def test_reservation_rejects_rolled_back_tombstone(monkeypatch, method_name):
+    class RolledBackTokenRedis:
+        async def eval(self, script, numkeys, *args):
+            assert script == redis_counter.RedisCapManager._RESERVE_LUA
+            return -3
+
+    async def fake_get_redis_client():
+        return RolledBackTokenRedis()
+
+    monkeypatch.setattr(redis_counter, "get_redis_client", fake_get_redis_client)
+    monkeypatch.setattr(redis_counter.settings, "CAP_FAIL_OPEN", True)
+
+    method = getattr(redis_counter.RedisCapManager, method_name)
+    with pytest.raises(RuntimeError, match="已回滚"):
+        await method(
+            offer_id=77,
+            limit=10,
+            publisher_id=12,
+            initial_value=0,
+            reservation_id="already-rolled-back",
+        )
