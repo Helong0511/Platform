@@ -30,6 +30,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def _exclusive_end_datetime(end_date: str) -> datetime:
+    """把包含式结束日期转换为次日零点的排他上界。"""
+    return _exclusive_end_datetime(end_date)
+
 # 客户不可见的上游金额与广告主字段（文档约定仅管理员可见）
 _CLIENT_HIDDEN_SUMMARY_TOTAL_KEYS = frozenset({"total_po", "total_profit"})
 _CLIENT_HIDDEN_STATS_KEYS = frozenset({
@@ -121,7 +126,7 @@ class ConversionService:
             start_datetime = parse_date_to_app_timezone(start_date, is_end_date=False)
         if end_date:  # 结束日期
             # 结束日期需要包含当天的所有时间，所以+1天并使用00:00:00作为上界（不包含）
-            end_datetime = parse_date_to_app_timezone(end_date, is_end_date=False) + timedelta(days=1)
+            end_datetime = _exclusive_end_datetime(end_date)
 
         # 如果没有指定日期，默认查询最近30天
         if not start_datetime:  # 开始日期默认30天前
@@ -630,7 +635,7 @@ class ConversionService:
             start_datetime = parse_date_to_app_timezone(start_date)
         if end_date:
             # 使用次日零点作为排他上界，避免漏掉结束日最后一秒内的微秒记录。
-            end_datetime = parse_date_to_app_timezone(end_date, is_end_date=False) + timedelta(days=1)
+            end_datetime = _exclusive_end_datetime(end_date)
 
         # --- 客户角色：限定可见渠道 ---
         client_publisher_ids = None
