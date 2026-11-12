@@ -675,3 +675,39 @@ MySQL 官方文档确认：
 - 本轮未连接生产服务器、数据库、Redis、队列或真实第三方接口；未合并 main、未部署。
 - PR #1 继续 Open / Draft；凭据安全专项继续按用户要求暂缓。
 
+## 14. 统一迁移执行机制专项复核（2026-11-12）
+
+### 14.1 已确认的现状
+
+- `app/bootstrap/lifespan.py::_bootstrap_database_schema` 在应用启动时通过 MySQL advisory lock 串行调用 `Base.metadata.create_all`，随后仅检查 ORM 表/列是否缺失。
+- `_schema_metadata_drift` 当前返回 `missing_tables` 和 `missing_columns`；不比较已存在列的类型/长度/NULL/默认值，也不比较唯一约束、普通索引、CHECK、表字符集和排序规则。
+- 仓库存在 5 个 `sql/migrations/*.sql` 文件。它们采用各自的 information_schema 条件判断和 DDL，部分脚本支持中断后重跑。
+- `tests/test_mysql_migrations.py::_run_sql_file` 是 CI 测试专用 SQL 执行辅助函数：移除整行注释后按分号拆分并逐句执行；它不是应用 Migration Runner。
+- 目前未发现统一 migration revision ledger、文件 checksum 校验、revision 顺序/依赖校验、应用启动前 pending migration 检查或统一迁移 CLI。
+- 现有 MySQL 迁移集成测试直接执行 SQL 文件，能证明部分 SQL 的幂等和特定结构校验，但不能证明应用级升级编排、并发迁移、失败续跑和恢复流程完整。
+
+### 14.2 具体迁移风险
+
+- `20261110_third_party_report_event_idempotency.sql` 第 36–47 行对所有 `event_key IS NULL` 的历史记录执行单次 UPDATE。
+- 该更新没有按主键分批、限速或进度检查；现有 CI 历史数据仅为少量合成记录，不能代表生产规模。
+- 脚本注释明确 MySQL DDL 会隐式提交，且不提供自动数据回滚。当前“可重跑”不能等同于“可回滚”。
+- 上线前必须在隔离环境用合成大数据集验证锁等待、执行时长、redo/undo 压力、复制延迟（如部署拓扑包含副本）和中断恢复；未验证前不得对生产执行。
+
+### 14.3 修复设计约束（尚未实现，不得标记关闭）
+
+1. 引入唯一 revision ID、迁移文件 SHA-256、执行状态、开始/结束时间和失败摘要的版本账本。
+2. 校验迁移目录中 revision 唯一、顺序确定、checksum 不漂移；已应用文件发生内容变化时 fail closed。
+3. 迁移 CLI 与 Web/API 启动解耦；默认应用启动只验证 schema revision，不自动执行 DDL。
+4. MySQL 使用独立迁移锁；记录 running/failed/applied 状态，支持安全重试，但不能把 MySQL DDL 隐式提交误判为事务回滚。
+5. 明确不可逆数据迁移的 forward-fix / restore 策略；不伪造通用 down migration。
+6. 对历史大表回填采用可恢复批处理设计，按主键游标推进并记录进度；先验证事件键算法与唯一性，再建立唯一索引。
+7. 完整 Schema Drift 检查至少覆盖字段类型/长度/NULL/默认值、主键/唯一约束/索引列顺序、CHECK、字符集和排序规则；不匹配时 fail closed。
+8. CI 必须覆盖空库安装、代表性旧 schema 升级、每个 DDL 边界中断续跑、并发 runner、checksum 变更拒绝、错误同名索引、重复数据阻断和隔离恢复。
+
+### 14.4 最新 CI
+
+- 文档提交前的代码 HEAD `e9ee0a64c8210ba31710f4cd4e3c235718fa9be0` 对应 Run #1440：https://github.com/Helong0511/Platform/actions/runs/43191003697
+- Backend：success；Frontend：success；Run conclusion：success。
+- 此次 CI 只验证该 HEAD；本节为审计文档补充，后续文档提交仍需单独等待 CI。
+- PR #1 继续 Open / Draft；没有合并 main，没有部署，没有连接任何生产资源。
+
