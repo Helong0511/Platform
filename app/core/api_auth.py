@@ -158,14 +158,23 @@ def _is_client_ip_allowed(allowed_ips: str | None, client_ip: str | None) -> boo
     return remote_ip in allowed
 
 
+def _get_active_user_clients(clients):
+    """仅返回仍启用的客户主体；兼容未提供 is_active 的轻量测试对象。"""
+    return [
+        client
+        for client in (clients or [])
+        if bool(getattr(client, "is_active", True))
+    ]
+
+
 def _is_user_client_ip_allowed(clients, client_ip: str | None) -> bool:
     """
-    对共享同一登录账号的多个 Client 采用交集策略：
-    每个已配置白名单的 Client 都必须允许当前来源 IP；空白配置不增加限制。
+    对共享同一登录账号的多个启用中 Client 采用交集策略：
+    每个已配置白名单的启用中 Client 都必须允许当前来源 IP；停用主体不再参与授权。
     """
     configured_policies = [
         getattr(client, "allowed_ips", None)
-        for client in (clients or [])
+        for client in _get_active_user_clients(clients)
         if (getattr(client, "allowed_ips", None) or "").strip()
     ]
     return all(_is_client_ip_allowed(policy, client_ip) for policy in configured_policies)
