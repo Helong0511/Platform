@@ -10,7 +10,7 @@ class MigrationSQLParseError(ValueError):
     """迁移 SQL 超出受支持语法时拒绝执行。"""
 
 
-def split_mysql_statements(sql: str) -> tuple[str, ...]:
+def split_mysql_statements(\n    sql: str, *, backslash_escapes: bool = True\n) -> tuple[str, ...]:
     """按 SQL 语法状态切分语句，绝不在字符串或注释中的分号处分割。"""
     if not isinstance(sql, str):
         raise TypeError("migration SQL must be text")
