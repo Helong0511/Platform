@@ -711,3 +711,37 @@ MySQL 官方文档确认：
 - 此次 CI 只验证该 HEAD；本节为审计文档补充，后续文档提交仍需单独等待 CI。
 - PR #1 继续 Open / Draft；没有合并 main，没有部署，没有连接任何生产资源。
 
+
+
+## 15. 应用启动期数据库写入路径补充核查（2026-11-12）
+
+### 15.1 已核实的实际调用路径
+
+- `app/bootstrap/lifespan.py::lifespan` 在应用启动时先导入并调用 `app.db.database.create_database()`，随后调用 `_bootstrap_database_schema()`。
+- `create_database()` 会解析配置中的 MySQL URI，建立不指定目标 schema 的临时连接，并执行 `CREATE DATABASE IF NOT EXISTS <quoted_database>`。这属于数据库实例/schema 容器创建权限，不是普通应用查询权限。
+- `_bootstrap_database_schema()` 随后在 MySQL advisory lock 下调用 `Base.metadata.create_all`。因此每个 API / scheduler 应用进程启动仍可能尝试执行 DDL；锁只串行化操作，不会把 DDL 变成版本化迁移。
+- `app/core/database.py::create_tables()` 另有一处 `Base.metadata.create_all` 封装。当前 lifespan 代码没有调用该函数，但它是可被其它入口调用的第二个 schema 创建入口，后续迁移改造必须全仓库搜索调用点并明确废弃/替换，不能只改 lifespan。
+- `app/core/database.py::init_db()` 不创建表；它在启动时查询管理员用户，若不存在则创建默认管理员。唯一键竞争时会回滚并重新查询管理员，属于应用初始化数据写入，不应混入 schema revision ledger。
+
+### 15.2 由此确认的职责与权限风险
+
+- 当前运行应用的数据库账号可能需要具备 `CREATE DATABASE`、`CREATE TABLE` 等 DDL 权限；这扩大了常驻 Web/API Worker 的数据库权限面，也使启动行为具有隐式 schema 写入副作用。
+- 多 Worker advisory lock 仅防止同一锁名下并发 bootstrap，不提供 migration revision、文件 checksum、DDL 部分成功后的执行状态或升级审批。
+- 单纯移除 `create_all` 会破坏空库首次安装；在独立安装/迁移命令和受控 schema revision 校验上线前，不得直接删除现有初始化路径。
+- 单纯移除 `create_database` 也会改变当前自动建库部署行为。目标数据库应由独立 provisioning / 安装流程预先创建，应用账号仅获得运行所需权限；此行为变化必须在部署文档、CI 和升级 Runbook 中同步说明。
+- 默认管理员创建属于数据初始化。迁移改造后应继续保持明确的幂等策略，但不得让每个 Worker 在 schema 不匹配时通过自动建表“自愈”。
+
+### 15.3 后续实施顺序（新增约束）
+
+1. 全仓库枚举 `create_database`、`create_tables`、`Base.metadata.create_all`、`init_db` 的所有调用点，建立启动副作用清单。
+2. 先实现独立、显式调用的 schema provisioning / migration 命令，并在隔离 MySQL 验证空库初始化、旧库升级、失败状态与重复执行；不得连接生产环境。
+3. 将 Web/API 启动改为只读 schema revision / drift 验证。验证失败必须拒绝启动，不得自动 CREATE DATABASE、CREATE TABLE 或 ALTER TABLE。
+4. 将默认管理员等应用初始化数据单独设计成可审计、幂等、可禁用的 bootstrap 阶段；不与 DDL migration 混为一谈。
+5. CI 增加权限边界回归：应用运行账号无 CREATE DATABASE / CREATE TABLE / ALTER 权限时，已升级 schema 仍可正常启动；schema 落后时启动明确 fail closed；独立迁移账号仅在专用 migration job 中使用。
+6. 迁移上线前提供显式安装流程，明确数据库创建、账号授权、迁移执行、schema 验证、应用部署的先后顺序和回滚边界。
+
+### 15.4 本节结论边界
+
+- 本节是对当前源码调用路径的审计记录，不代表启动期 DDL 已被移除，也不代表应用数据库账号权限已完成收敛。
+- 尚未修改运行代码；当前应用启动仍会执行数据库创建/建表流程。必须在独立迁移机制实现并通过隔离 CI 后，才可逐步切换启动行为。
+- PR #1 继续 Open / Draft；不合并 main、不部署、不连接生产服务器、数据库、Redis、队列或真实第三方接口。
