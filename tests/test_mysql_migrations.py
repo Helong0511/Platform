@@ -1279,3 +1279,55 @@ def test_incremental_migrations_resume_after_each_ddl_boundary(migration_path, d
                 cursor.execute("DROP TABLE IF EXISTS postback_forward_logs")
                 cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
         connection.close()
+
+
+def test_pii_migration_rejects_descending_same_name_retention_index():
+    """同名降序索引不能冒充 PII 清理任务要求的升序扫描索引。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS postback_forward_logs")
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+            cursor.execute(
+                "CREATE TABLE third_party_report_logs ("
+                "id INT NOT NULL AUTO_INCREMENT, "
+                "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "completed_at DATETIME NULL, pii_scrubbed_at DATETIME NULL, "
+                "PRIMARY KEY (id), "
+                "KEY idx_third_party_pii_retention "
+                "(pii_scrubbed_at DESC, created_at, id)) "
+                "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            cursor.execute(
+                "CREATE TABLE postback_forward_logs ("
+                "id INT NOT NULL AUTO_INCREMENT, "
+                "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "completed_at DATETIME NULL, PRIMARY KEY (id)) "
+                "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+
+            with pytest.raises(pymysql.err.OperationalError) as migration_error:
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261112_third_party_report_pii_retention.sql",
+                )
+            assert migration_error.value.args[0] == 1061
+
+            cursor.execute("SHOW INDEX FROM third_party_report_logs")
+            rows = [
+                row for row in cursor.fetchall()
+                if row[2] == "idx_third_party_pii_retention"
+            ]
+            assert len(rows) == 3
+            assert all(row[1] == 1 for row in rows)
+            assert [row[4] for row in sorted(rows, key=lambda row: row[3])] == [
+                "pii_scrubbed_at", "created_at", "id"
+            ]
+            assert [row[5] for row in sorted(rows, key=lambda row: row[3])] == [
+                "D", "A", "A"
+            ]
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS postback_forward_logs")
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+        connection.close()
