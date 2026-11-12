@@ -66,3 +66,17 @@ def test_all_repository_migrations_are_parseable_without_client_delimiter():
             migration_file.read_text(encoding="utf-8")
         )
         assert statements, migration_file.name
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "CREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END",
+        "CREATE DEFINER=CURRENT_USER FUNCTION f() RETURNS INT RETURN 1",
+        "CREATE TRIGGER t BEFORE INSERT ON items FOR EACH ROW SET @x = 1",
+        "CREATE EVENT e ON SCHEDULE EVERY 1 DAY DO SELECT 1",
+    ],
+)
+def test_rejects_routine_ddl_even_without_delimiter_directive(sql):
+    with pytest.raises(MigrationSQLParseError, match="stored routines"):
+        split_mysql_statements(sql)
