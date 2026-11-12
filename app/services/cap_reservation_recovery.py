@@ -216,23 +216,28 @@ async def recover_cap_reservations(
             stats["needs_reconciliation"] += 1
         except Exception as exc:
             stats["failed"] += 1
+            # Redis/数据库异常文本可能包含连接信息、SQL 参数或个人数据；
+            # 仅记录异常类型，禁止把原始异常写入日志或账本 last_error。
+            error_type = type(exc).__name__
             logger.error(
-                "Cap Reservation 恢复失败：reservation_key=%s",
+                "Cap Reservation 恢复失败：reservation_key=%s error_type=%s",
                 row.reservation_key,
-                exc_info=True,
+                error_type,
             )
             # COMMITTED token 清理失败不改变业务终态；保留/等待租约到期后重试清理。
             if row.state != "COMMITTED":
                 try:
                     await CapReservationLedger.mark_needs_reconciliation(
-                        row.reservation_key, str(exc), lease_owner=owner
+                        row.reservation_key,
+                        f"恢复异常，error_type={error_type}",
+                        lease_owner=owner,
                     )
                     stats["needs_reconciliation"] += 1
-                except Exception:
+                except Exception as persist_exc:
                     logger.critical(
-                        "Cap Reservation 恢复失败且无法保存对账状态：%s",
+                        "Cap Reservation 恢复失败且无法保存对账状态：reservation_key=%s error_type=%s",
                         row.reservation_key,
-                        exc_info=True,
+                        type(persist_exc).__name__,
                     )
 
     logger.info("Cap Reservation 恢复任务完成：%s", stats)
