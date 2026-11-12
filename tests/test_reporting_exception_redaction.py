@@ -144,3 +144,27 @@ async def test_recent_dashboard_route_logs_only_exception_type(monkeypatch, capl
 
     assert PRIVATE_ERROR not in caplog.text
     assert "RuntimeError" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_available_products_does_not_return_or_log_raw_exception(monkeypatch, caplog):
+    from app.api_v1.products import products as products_api
+
+    private_value = "product-owner@example.invalid raw_database_parameter"
+
+    class BrokenDB:
+        async def execute(self, statement):
+            raise RuntimeError(private_value)
+
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(HTTPException) as caught:
+            await products_api.get_available_product_names(
+                db=BrokenDB(),
+                current_user=SimpleNamespace(id=1, role=UserRole.ADMIN),
+                exclude_client_id=None,
+                search=None,
+            )
+
+    assert private_value not in str(caught.value.detail)
+    assert private_value not in caplog.text
+    assert "RuntimeError" in caplog.text
