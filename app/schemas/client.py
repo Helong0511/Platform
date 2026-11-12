@@ -18,7 +18,7 @@ class ClientBase(BaseModel):
     contact_person: str | None = None
     phone: str | None = None
     address: str | None = None
-    allowed_ips: str | None = Field(None, description="IP白名单，多个IP用逗号分隔，为空则不限制。127.0.0.1始终允许")
+    allowed_ips: str | None = Field(None, description="IP白名单，多个IP用逗号分隔；为空则不限制。启用白名单后仅允许明确列出的 IP（包括回环地址）")
     is_active: bool | None = True
     api_enabled: bool | None = Field(False,
                                      description="是否允许API访问（开启后允许客户通过API查询产品和广告数据，并显示API对接菜单）")
