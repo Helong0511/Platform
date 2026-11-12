@@ -39,8 +39,8 @@ SET event_key = SHA2(
         CHAR_LENGTH(source), ':', source,
         CHAR_LENGTH(adsid), ':', adsid,
         CHAR_LENGTH(event), ':', event,
-        CHAR_LENGTH(CASE WHEN BINARY event = BINARY 'ViewContent' THEN '' ELSE COALESCE(conversion_id, '') END), ':',
-        CASE WHEN BINARY event = BINARY 'ViewContent' THEN '' ELSE COALESCE(conversion_id, '') END
+        CHAR_LENGTH(CASE WHEN CAST(event AS BINARY) = CAST('ViewContent' AS BINARY) THEN '' ELSE COALESCE(conversion_id, '') END), ':',
+        CASE WHEN CAST(event AS BINARY) = CAST('ViewContent' AS BINARY) THEN '' ELSE COALESCE(conversion_id, '') END
     ),
     256
 )
