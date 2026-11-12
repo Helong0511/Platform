@@ -2,36 +2,60 @@
 数据库初始化模块
 提供数据库创建和初始化功能
 """
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
-from sqlalchemy import text
-from app.core.config import settings
 import logging
+
+from sqlalchemy import make_url
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-async def create_database(engine: AsyncEngine | None = None):
+def _get_database_bootstrap_target(database_uri: str):
+    """解析数据库引导连接，避免通过字符串替换破坏凭据或数据库名。"""
+    url = make_url(str(database_uri))
+    if url.get_backend_name() != "mysql":
+        # SQLite 等无需单独 CREATE DATABASE，交由 SQLAlchemy 创建文件/连接。
+        return None
+
+    database_name = url.database
+    if not database_name:
+        raise ValueError("MySQL 数据库 URI 必须指定目标数据库名")
+
+    # URL.set 保留用户名、密码、主机、端口及 query 参数，只移除默认数据库。
+    return url.set(database=None), database_name
+
+
+async def create_database():
     """
-    创建数据库（如果不存在）
-    
-    参数:
-        engine: 可选的数据库引擎（如果为None，会创建临时引擎）
-    
-    说明:
-        - 连接到MySQL服务器但不指定数据库
-        - 创建 platform 数据库（如果不存在）
-        - 使用临时引擎，完成后自动释放
+    创建配置指定的 MySQL 数据库（如果不存在）。
+
+    使用不指定默认数据库的临时连接，数据库标识符由方言安全引用。
+    非 MySQL 后端不需要执行 CREATE DATABASE。
     """
-    # 连接到MySQL服务器但不指定数据库
-    db_url = settings.SQLALCHEMY_DATABASE_URI.replace('/platform', '')
-    temp_engine = create_async_engine(db_url, echo=False)
+    target = _get_database_bootstrap_target(settings.SQLALCHEMY_DATABASE_URI)
+    if target is None:
+        logger.info("当前数据库后端无需单独创建数据库")
+        return
+
+    server_url, database_name = target
+    temp_engine = None
     try:
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        temp_engine = create_async_engine(server_url, echo=False)
         async with temp_engine.connect() as conn:
-            await conn.execute(text("CREATE DATABASE IF NOT EXISTS `platform`"))
+            # 数据库名是 SQL 标识符，不能作为普通绑定参数传递。
+            quoted_database = conn.dialect.identifier_preparer.quote(database_name)
+            await conn.exec_driver_sql(
+                f"CREATE DATABASE IF NOT EXISTS {quoted_database}"
+            )
             await conn.commit()
-        logger.info("数据库 platform 创建成功或已存在")
-    except Exception as e:
-        logger.error(f"创建数据库失败: {str(e)}")
+        logger.info("目标数据库已创建或已存在")
+    except Exception as exc:
+        # 不记录原始异常文本，避免驱动异常意外包含连接 URI/凭据。
+        logger.error("创建数据库失败：exception_type=%s", type(exc).__name__)
         raise
     finally:
-        await temp_engine.dispose()
+        if temp_engine is not None:
+            await temp_engine.dispose()
