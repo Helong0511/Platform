@@ -8,11 +8,11 @@ ABSENT / UNKNOWN 不执行 DECR，转入 NEEDS_RECONCILIATION。
 import logging
 import uuid
 
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, func, or_, select
 
 from app.core.cap.redis_counter import RedisCapManager
 from app.core.database import AsyncSessionLocal
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, get_app_now_sql_expression
 from app.models.cap_reservation import CapReservation
 from app.models.models import PostbackConversion
 from app.services.cap_reservation_ledger import CapReservationLedger
@@ -43,18 +43,16 @@ async def recover_cap_reservations(
                         or_(
                             CapReservation.lease_owner.is_(None),
                             CapReservation.lease_expires_at.is_(None),
-                            CapReservation.lease_expires_at <= func.now(),
+                            CapReservation.lease_expires_at <= get_app_now_sql_expression(),
                         ),
                     ),
                     and_(
                         CapReservation.state == "NEEDS_RECONCILIATION",
-                        CapReservation.updated_at <= func.timestampadd(
-                            text("SECOND"), -RECONCILIATION_RETRY_SECONDS, func.now()
-                        ),
+                        CapReservation.updated_at <= get_app_now_sql_expression(-RECONCILIATION_RETRY_SECONDS),
                         or_(
                             CapReservation.lease_owner.is_(None),
                             CapReservation.lease_expires_at.is_(None),
-                            CapReservation.lease_expires_at <= func.now(),
+                            CapReservation.lease_expires_at <= get_app_now_sql_expression(),
                         ),
                     ),
                     and_(
@@ -63,7 +61,7 @@ async def recover_cap_reservations(
                         or_(
                             CapReservation.lease_owner.is_(None),
                             CapReservation.lease_expires_at.is_(None),
-                            CapReservation.lease_expires_at <= func.now(),
+                            CapReservation.lease_expires_at <= get_app_now_sql_expression(),
                         ),
                     ),
                 )
@@ -75,11 +73,9 @@ async def recover_cap_reservations(
         rows = list(result.scalars().all())
         for row in rows:
             row.lease_owner = uuid.uuid4().hex
-            row.lease_expires_at = func.timestampadd(
-                text("SECOND"), RECOVERY_LEASE_SECONDS, func.now()
-            )
+            row.lease_expires_at = get_app_now_sql_expression(RECOVERY_LEASE_SECONDS)
             row.attempts = int(row.attempts or 0) + 1
-            row.updated_at = func.now()
+            row.updated_at = get_app_now_sql_expression()
         await session.commit()
 
     stats = {
