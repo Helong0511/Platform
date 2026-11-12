@@ -966,3 +966,13 @@ PR #1 继续 Open / Draft，不合并 main、不部署。所有验证继续仅�
 - 1 skipped 为本地核对脚本未提交（CI 不依赖）；1 warning 为 passlib/Python 3.11 crypt 弃用提示，尚未处理。
 
 验证仅限 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
+
+
+## 41. TB 搜索数据客户范围停用状态过滤（2026-11-12，待最新 CI 验收）
+
+- 继续定向扫描发现 TB 搜索数据列表、总数统计、客户筛选项、产品筛选项（分配历史与当前归属双路径）及国家筛选查询，客户角色原先只按 Client.user_id 过滤。
+- 上述客户可见查询现统一附加 Client.is_active=true，避免停用 Client 仍通过 TB 数据、count、filter options 或分配历史回退路径访问统计数据。
+- 管理员查询不增加该限制，保留管理员查看历史客户数据的能力。
+- 本次提交之后必须检查最新 HEAD 的完整 CI；当前不把旧 Run #1340 视为本次 TB 搜索变更的验证证据。
+
+验证仅限 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
