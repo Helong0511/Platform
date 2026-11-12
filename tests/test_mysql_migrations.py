@@ -54,6 +54,22 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        ("127.0.0.1", True),
+        ("::1", True),
+        ("localhost", True),
+        ("mysql", False),
+        ("192.0.2.10", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_destructive_mysql_guard_only_accepts_loopback_hosts(host, expected):
+    assert _is_loopback_host(host) is expected
+
+
 def _connect():
     return pymysql.connect(
         host=HOST,
