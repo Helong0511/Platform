@@ -1894,7 +1894,7 @@ CREATE TABLE IF NOT EXISTS cap_reservations (
     reserved_at DATETIME NULL COMMENT 'Redis 预留确认时间',
     finalized_at DATETIME NULL COMMENT '终态确认时间',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (id),
     UNIQUE KEY uq_cap_reservation_key (reservation_key),
     KEY idx_cap_reservation_state_updated (state, updated_at),
