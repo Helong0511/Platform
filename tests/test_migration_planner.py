@@ -67,7 +67,7 @@ def test_plan_rejects_unknown_ledger_revision(tmp_path: Path):
         )
 
 
-def test_plan_rejects_ledger_order_drift(tmp_path: Path):
+def test_plan_rejects_non_prefix_ledger_history(tmp_path: Path):
     entries = _fixture(tmp_path)
     with pytest.raises(MigrationManifestError, match="contiguous manifest prefix"):
         plan_migrations(
