@@ -452,3 +452,45 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - 当前清理查询按完整目标身份保护已存在的重试队列；生产发布前仍需在隔离副本验证转发任务创建/完成/重新入队与每日清理的并发时序。
 - 完整 migration/backup/restore/rollback 演练、Outbox 配置禁用/删除/轮换/恢复的多 Worker 故障组合，以及 RBAC/归因/统计/结算/API/队列/前端剩余模块全量复核仍未关闭。
 - PR 继续 Open / Draft，不合并、不部署；所有验证只使用隔离 CI、合成数据和 Mock API。
+
+
+## 24. 客户 API IP 白名单、异常日志脱敏与报表结束日期边界（2026-11-12，Run #1135 / #1145）
+
+### A. 客户 API IP 白名单实际执行
+
+**发现的问题**
+
+- Client ORM 和管理 Schema 已提供 allowed_ips，字段文档约定逗号分隔多个 IP、空值不限制、127.0.0.1 始终允许。
+- 但原 verify_client_request() 只验证客户状态、API 开关、时间戳和签名，没有校验 allowed_ips；管理员配置的客户 API 来源限制实际上没有生效。
+
+**修复**
+
+- 新增 _is_client_ip_allowed()，在客户 API 签名验证入口执行白名单判断。
+- IP 来源只接收 API 路由通过 get_client_ip() 解析后的结果；该函数沿用 TRUST_PROXY_HEADERS 与可信代理 peer 校验，不直接信任请求携带的 X-Forwarded-For / CF-Connecting-IP 原始值。
+- 客户产品列表、广告数据两个外部 API 均在认证前解析来源 IP 并传入 verify_client_request()。
+- allowed_ips 为空/空白时保持不限制；逗号分隔的精确 IP 地址可匹配；127.0.0.1 按现有 Schema 契约始终允许；来源 IP 无效或配置中存在非法条目时 fail-closed。
+- 新增测试覆盖白名单允许、非白名单拒绝、空配置兼容、非法配置拒绝、127.0.0.1 特例、unknown 来源拒绝，以及产品 API 路由确实传入解析后的客户端 IP。
+- 当前格式按 Schema 约定只支持逗号分隔的单个 IP，不支持 CIDR 网段；如需网段授权，应单独扩展 Schema、管理端校验和测试，不得把 CIDR 当作已支持能力。
+
+### B. 客户开放 API 异常信息脱敏
+
+- 客户产品列表异常不再把原始异常文本返回给调用方，统一返回通用错误提示；日志仅记录异常类型，不记录异常原文或 traceback。
+- 客户广告数据异常日志同样只记录异常类型。
+- 后台客户 API 审计写入及 Telegram 通知异常只记录异常类型，避免 SQLAlchemy 绑定参数或通知响应内容中的 PII 进入日志。
+- Run #1135（SHA f9541653d277302360be484cb1c631370403241a）：Backend **414 passed、1 skipped、1 warning**；Frontend Lint/Build/Playwright Mock API E2E 全通过。
+- 后续 IP 白名单与测试已合入最新 HEAD；未把 API 密钥或其它凭据安全专项纳入本轮范围。
+
+### C. 转化报表结束日期排他边界
+
+- 按日期筛选的结束日原先转换为当天 23:59:59，再使用 <=；数据库中结束日最后一秒内带微秒的记录可能被漏掉。
+- 现在统一通过 _exclusive_end_datetime() 将结束日期转换为次日 00:00:00，并使用 < 作为排他上界，覆盖结束日全部微秒精度记录。
+- 新增边界测试验证共享 helper 将 2026-11-11 转换为 2026-11-12 00:00:00。
+- 中间 Run #1139（SHA d2bb3c3eb42d75c31ab975532af819a0fcb6cd0e）因 API auth 文件更新时遗留重复函数尾部而在 Python compile 阶段失败（SyntaxError: unmatched ')'）；已删除重复片段。该失败记录保留。
+- Run #1145（SHA fb9aec043062a3d30f1e01a2afa0eff01d9829ce）：Backend **422 passed、1 skipped、1 warning**；Python compile、Frontend Lint/Build、Playwright Mock API Browser E2E 全部通过。Run #1145：https://github.com/Helong0511/Platform/actions/runs/43134250167。
+
+### 仍需继续验收
+
+- allowed_ips 的生产代理链路正确性仍依赖部署环境的 TRUST_PROXY_HEADERS、TRUSTED_PROXIES、Nginx realip 与源站防火墙配置；CI 只能验证代码与合成请求，不能证明生产网络配置。
+- PII 保留政策仍未获业务/合规批准，自动清理保持默认关闭。
+- 完整 migration/backup/restore/rollback 演练、Outbox 多 Worker 配置生命周期、Cap Reservation Redis/MySQL 故障组合、RBAC/租户隔离及统计/结算/API/队列/前端剩余模块全量复核仍是合并阻断项。
+- PR 保持 Open / Draft，不合并、不部署；只允许隔离 CI、合成数据和 Mock API。
