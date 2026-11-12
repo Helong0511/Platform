@@ -344,12 +344,12 @@ class CapReservationLedger:
                 try:
                     await RedisCapManager.delete_reservation_token(row.redis_token_key)
                     token_cleaned = True
-                except Exception:
+                except Exception as exc:
                     token_cleaned = False
                     logger.critical(
-                        "转化已提交，但 Redis Reservation token 尚未清理，将由恢复任务重试：%s",
+                        "转化已提交，但 Redis Reservation token 尚未清理，将由恢复任务重试：reservation_key=%s error_type=%s",
                         reservation_key,
-                        # 不输出 Redis 异常文本或 traceback，避免连接信息/业务数据进入日志。
+                        type(exc).__name__,
                     )
 
             if row.state == state:
