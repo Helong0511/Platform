@@ -82,7 +82,11 @@ async def test_fail_open_daily_failure_is_not_added_to_reservations(monkeypatch)
         total_reserved,
     )
 
-monkeypatch.setattr(cap_manager.CapReservationLedger, "count_uncommitted_for_scope", _no_pending_reservations)
+    monkeypatch.setattr(
+        cap_manager.CapReservationLedger,
+        "count_uncommitted_for_scope",
+        _no_pending_reservations,
+    )
     ok, status, reservations = await cap_manager.increment_cap_count(
         db=FakeDB(),
         offer_id=77,
