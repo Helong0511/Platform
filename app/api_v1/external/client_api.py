@@ -264,8 +264,13 @@ async def get_client_products(
     # ---------- 入口：参数与依赖准备 ----------
     # ---------- 异常处理 ----------
     try:
-        # 验证请求（产品接口不需要额外的参数）
-        client = await verify_client_request(api_request, db)
+        # 使用可信代理边界解析客户端 IP，并在认证入口执行客户白名单。
+        client_ip = get_client_ip(request)
+        client = await verify_client_request(
+            api_request,
+            db,
+            client_ip=client_ip,
+        )
 
         # 查询该客户的所有激活产品
         result = await db.execute(
@@ -365,9 +370,12 @@ async def get_client_data(
                 detail=str(exc),
             )
 
+        # 在签名认证前解析来源 IP，白名单不读取可伪造的原始请求头。
+        client_ip = get_client_ip(request)
         client = await verify_client_request(
             api_request,
             db,
+            client_ip=client_ip,
             data_type=api_request.data_type,
             # 签名须与请求体原文一致；country_ad_unit 等别名在查询前才规范化
             dimension=api_request.dimension,
@@ -458,7 +466,6 @@ async def get_client_data(
         )
 
         username, user_full_name = await _get_client_user_names(db, client.user_id)
-        client_ip = get_client_ip(request)
 
         telegram_msg = None
         if len(data_list) > 0:
