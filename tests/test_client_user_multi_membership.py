@@ -7,6 +7,7 @@ from sqlalchemy.dialects import mysql
 from app.api_v1.clients import clients as clients_api
 from app.models.models import Publisher, UserRole
 from app.services.cpl.publisher_service import PublisherService
+from app.services.user_service import UserService
 
 
 class _Scalars:
@@ -171,3 +172,17 @@ async def test_publisher_list_scopes_all_active_client_memberships():
     assert publisher.email is None
     assert "publishers.client_id IN (101, 202)" in _compiled_sql(db.statements[1])
     assert "publishers.client_id IN (101, 202)" in _compiled_sql(db.statements[2])
+
+
+
+@pytest.mark.asyncio
+async def test_user_service_publisher_flag_aggregates_multiple_client_ids():
+    db = _PublisherDB([1])
+    service = UserService(db)
+
+    has_publisher = await service.check_client_has_publisher([101, 202])
+
+    assert has_publisher is True
+    sql = _compiled_sql(db.statements[0])
+    assert "publishers.client_id IN (101, 202)" in sql
+    assert "publishers.is_active = true" in sql
