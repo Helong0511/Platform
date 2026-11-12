@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import os
 from pathlib import Path
 
@@ -16,9 +17,40 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 HOST = os.getenv("MYSQL_INTEGRATION_HOST")
+DATABASE = os.getenv("MYSQL_INTEGRATION_DATABASE", "platform_ci")
+_DESTRUCTIVE_TESTS_ENABLED = os.getenv("MYSQL_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS") == "1"
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    """只允许本机隔离 MySQL；禁止迁移测试误连远程/生产数据库。"""
+    if not host:
+        return False
+    if host.strip().lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip()).is_loopback
+    except ValueError:
+        return False
+
+
+_SAFE_MYSQL_CI = (
+    os.getenv("UNIT_TEST") == "1"
+    and _DESTRUCTIVE_TESTS_ENABLED
+    and _is_loopback_host(HOST)
+    and DATABASE == "platform_ci"
+)
+
+# CI 若显式开启了测试模式却未满足隔离条件，直接失败而不是静默跳过，
+# 防止错误配置导致破坏性迁移测试连向非测试数据库。
+if os.getenv("UNIT_TEST") == "1" and HOST and not _SAFE_MYSQL_CI:
+    raise RuntimeError(
+        "拒绝执行破坏性 MySQL 迁移测试：必须使用 loopback 主机、platform_ci 数据库，"
+        "并显式设置 MYSQL_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS=1"
+    )
+
 pytestmark = pytest.mark.skipif(
-    not HOST,
-    reason="仅在显式配置的隔离 MySQL 集成环境中运行",
+    not _SAFE_MYSQL_CI,
+    reason="仅在显式启用的本机隔离 MySQL CI 环境中运行破坏性迁移测试",
 )
 
 
