@@ -133,13 +133,21 @@ class RedisCapManager:
 
     # 仅当本次 token 仍存在时撤销一次；重复调用不会误减其他请求的计数。
     _ROLLBACK_RESERVATION_LUA = """
-    if redis.call('EXISTS', KEYS[2]) == 0 then
+    local token_value = redis.call('GET', KEYS[2])
+    if not token_value then
         -- token 缺失无法证明此前没有 INCR，也无法区分已回滚与 token 被淘汰。
-        -- 返回独立错误码，调用方必须结合持久化账本状态对账，不能假报回滚成功。
         return -3
     end
-    -- 计数器缺失可能是独立淘汰/重启；保留 token 作为恢复证据，
-    -- 不能先删 token 再返回，否则永久丢失本次预留的撤销依据。
+    if token_value == 'ROLLED_BACK' then
+        -- 上次 Lua 已完成回滚但 DB ACK 可能丢失；墓碑证明不得再次 DECR。
+        local current_after_rollback = tonumber(redis.call('GET', KEYS[1]) or '0')
+        if not current_after_rollback or current_after_rollback < 0
+            or current_after_rollback ~= math.floor(current_after_rollback) then
+            return -2
+        end
+        return current_after_rollback
+    end
+    -- 计数器缺失可能是独立淘汰/重启；保留 token 作为恢复证据。
     if redis.call('EXISTS', KEYS[1]) == 0 then
         return -2
     end
@@ -147,12 +155,12 @@ class RedisCapManager:
     if not current or current < 0 or current ~= math.floor(current) then
         return -2
     end
-    -- token 存在但计数已经为 0，说明计数状态被外部重置/破坏；
-    -- 保留 token 作为恢复证据，不能静默删除后假装回滚成功。
     if current <= 0 then
         return -2
     end
-    redis.call('DEL', KEYS[2])
+    -- 保留持久化墓碑，覆盖 Redis 回滚成功到 MySQL 终态提交之间的崩溃窗口。
+    redis.call('SET', KEYS[2], 'ROLLED_BACK')
+    redis.call('PERSIST', KEYS[2])
     return redis.call('DECR', KEYS[1])
     """
 
@@ -315,6 +323,9 @@ class RedisCapManager:
             token_value, counter_value = await redis.mget(token_key, counter_key)
             if token_value is None:
                 return "ABSENT"
+            if token_value in (b"ROLLED_BACK", "ROLLED_BACK"):
+                # 墓碑独立证明原子回滚已完成，即使 counter 后续自然过期也不再 DECR。
+                return "ROLLED_BACK"
             if counter_value is None:
                 return "UNKNOWN"
             int(counter_value)  # 校验计数值格式，损坏时不能冒险回滚。
