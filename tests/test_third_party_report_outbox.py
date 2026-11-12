@@ -956,3 +956,101 @@ async def test_outbox_missing_config_reference_is_finalized_not_rescanned(monkey
     assert captured["clear_next_retry_time"] is True
     assert captured["completed_at"] == datetime(2026, 11, 11, 12, 0, 0)
     assert captured["expected_report_start_time"] == lease_token
+
+
+
+async def test_outbox_retries_after_credentials_are_restored(monkeypatch):
+    """配置暂时停用后保持可重试；配置恢复且到达重试时间后继续发送同一事件。"""
+    from datetime import timedelta
+
+    now = [datetime(2026, 11, 11, 12, 0, 0)]
+    lease_token = now[0]
+    row = type(
+        "ReportRow",
+        (),
+        {
+            "id": 93,
+            "outbox_enqueued": True,
+            "pii_scrubbed_at": None,
+            "status": "pending",
+            "next_retry_time": now[0] - timedelta(minutes=1),
+            "attempt_count": 0,
+            "max_attempts": 5,
+            "adsid": "fbclid-config-recovery",
+            "event": "Purchase",
+            "conversion_id": "conversion-config-recovery",
+            "email": "",
+            "ip": "203.0.113.93",
+            "phone": "",
+            "ua": "recovery-test-agent",
+            "source": "postback",
+            "use_hash": True,
+            "currency": "USD",
+            "amount": 9.3,
+            "click_time": None,
+            "event_key": "stable-recovery-event-key",
+            "short_link_id": 13,
+            "cloak_name": "cloak-recovery",
+            "short_code": "short-recovery",
+            "report_start_time": None,
+        },
+    )()
+
+    class FakeDB:
+        async def scalar(self, statement):
+            return row
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    resolver_calls = 0
+    update_calls = []
+
+    async def resolve(**kwargs):
+        nonlocal resolver_calls
+        resolver_calls += 1
+        if resolver_calls == 1:
+            return None, None, None
+        return "pixel-restored", "token-restored", "v23.0"
+
+    async def claim(report_id):
+        assert report_id == 93
+        return lease_token
+
+    async def update(report_id, **kwargs):
+        assert report_id == 93
+        update_calls.append(kwargs)
+        row.status = kwargs["status"]
+        row.next_retry_time = kwargs["next_retry_time"]
+        row.report_start_time = kwargs["report_start_time"]
+        return True
+
+    async def send(**kwargs):
+        assert kwargs["facebook_pixel_id"] == "pixel-restored"
+        assert kwargs["facebook_access_token"] == "token-restored"
+        assert kwargs["event_key"] == "stable-recovery-event-key"
+        return {"success": True, "report_log_id": 93}
+
+    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(outbox, "get_app_now_naive", lambda: now[0])
+    monkeypatch.setattr(outbox, "_resolve_pixel_credentials", resolve)
+    monkeypatch.setattr(outbox, "_claim_report_log", claim)
+    monkeypatch.setattr(outbox, "update_report_log", update)
+    monkeypatch.setattr(outbox, "send_third_party_report", send)
+
+    first = await outbox.process_postback_report_outbox_item(93)
+
+    assert first["retryable"] is True
+    assert first["reason"] == "missing_pixel_credentials"
+    assert row.next_retry_time == datetime(2026, 11, 11, 12, 5, 0)
+    assert len(update_calls) == 1
+
+    now[0] = row.next_retry_time
+    second = await outbox.process_postback_report_outbox_item(93)
+
+    assert second == {"success": True, "report_log_id": 93}
+    assert resolver_calls == 2
