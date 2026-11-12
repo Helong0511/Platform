@@ -1051,3 +1051,22 @@ PR #1 继续 Open / Draft，不合并 main、不部署。所有验证继续仅�
 - 1 skipped 为本地核对脚本未提交提示；1 warning 为 passlib/Python 3.11 的 crypt 弃用提示。
 
 验证仅限 GitHub Actions 隔离 MySQL 8.0、Redis DB14、SQLite 单测、合成数据与 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
+
+
+## 47. Outbox 发送认领与载荷编辑原子化（2026-11-12，Run #1379）
+
+### 问题与修复
+
+- 复核发现 Outbox Worker 原先先读取载荷、再解析短链/斗篷配置，最后才由发送函数认领租约；管理员载荷修正可能与 Worker 的旧快照并发，导致数据库保存新载荷但 Worker 仍发送旧载荷。
+- Worker 现在先通过 `_claim_report_log()` 原子取得发送租约，再读取数据库中的最新 Outbox 载荷；发送函数接收已取得的租约令牌，不再二次认领。
+- 管理端 `update_report_log_params()` 改为 `SELECT ... FOR UPDATE`，与租约认领对同一行串行化；若 Worker 已持有活动租约，载荷编辑根据租约状态拒绝；若编辑先完成，Worker 后续读取的是已提交的新载荷。
+- 新增测试覆盖：认领后读取最新载荷、活动租约期间拒绝修改、认领失败时不读取/复制已清理载荷。
+- 该修复不宣称 exactly-once。远端接收后本地 ACK 丢失仍依赖稳定 event_key 去重；发送超出租约、Worker 崩溃、配置变更与网络故障组合仍需继续注入测试。
+
+### 失败记录与验收证据
+
+- Run #1378（SHA `58790d3186c8d7dcb0ee69dcf9578ee1898289c4`）失败：Backend **528 passed、1 failed、1 skipped、1 warning**。失败测试沿用旧时序，直接调用 Worker 时未模拟其现在必须先取得的租约，触发隔离 SQLite 缺表错误；不是业务逻辑断言失败。已更新测试为验证“认领失败时不得读取载荷”，保留该失败记录。
+- Run #1379（SHA `85a507e039ac5e505e78adc0183548287ac8f411`）：Backend **529 passed、1 skipped、1 warning**；Python compile 成功；Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。Run：https://github.com/Helong0511/Platform/actions/runs/43162873070。
+- 1 skipped 为本地核对脚本未提交（CI 不依赖）；1 warning 为 passlib/Python 3.11 `crypt` 弃用提示。
+
+验证仅限 GitHub Actions 隔离 MySQL 8.0、Redis DB14、SQLite 单测、合成数据与 Mock API；没有连接生产服务器、生产数据库、生产 Redis、生产队列或真实第三方接口。PR #1 继续 Open / Draft，不合并 main、不部署。
