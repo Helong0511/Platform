@@ -276,6 +276,30 @@ async def _claim_report_log(
         return now if (result.rowcount or 0) == 1 else None
 
 
+async def _renew_report_log_lease(
+    report_log_id: int,
+    lease_token: datetime,
+    lease_seconds: int = REPORT_LOG_LEASE_SECONDS,
+) -> Optional[datetime]:
+    """仅允许尚未过期的当前持有者续租；过期令牌不可复活。"""
+    now = get_app_now_naive().replace(microsecond=0)
+    valid_after = now - timedelta(seconds=max(30, lease_seconds))
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            update(ThirdPartyReportLog)
+            .where(
+                ThirdPartyReportLog.id == report_log_id,
+                ThirdPartyReportLog.report_start_time == lease_token,
+                ThirdPartyReportLog.report_start_time >= valid_after,
+                ThirdPartyReportLog.pii_scrubbed_at.is_(None),
+                ThirdPartyReportLog.status.in_(("pending", "failed")),
+            )
+            .values(report_start_time=now)
+        )
+        await db.commit()
+        return now if (result.rowcount or 0) == 1 else None
+
+
 async def send_third_party_report(
         adsid: str,
         event: str,
@@ -421,6 +445,15 @@ async def send_third_party_report(
             expected_report_start_time=lease_token,
             **kwargs,
         )
+
+    async def renew_owned_report_lease() -> bool:
+        """发送前续租并验证令牌；过期 Worker 必须 fail closed。"""
+        nonlocal lease_token
+        renewed_token = await _renew_report_log_lease(report_log_id, lease_token)
+        if renewed_token is None:
+            return False
+        lease_token = renewed_token
+        return True
 
     if using_existing_report_log:
         base_attempt_count, max_attempts_total = await _get_report_attempt_state(report_log_id)
@@ -606,6 +639,17 @@ async def send_third_party_report(
                 )
 
             # 增加超时时间，应对网络延迟
+            if not await renew_owned_report_lease():
+                logger.warning(
+                    "[第三方上报] 发送前租约校验失败，禁止发起外部请求：report_log_id=%s",
+                    report_log_id,
+                )
+                return {
+                    "success": False,
+                    "retryable": True,
+                    "reason": "report_lease_lost_before_send",
+                    "report_log_id": report_log_id,
+                }
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(url, json=send_data, params=params)
                 # 第三方响应可能回显 user_data；日志只记录状态，不记录响应正文。
@@ -803,6 +847,17 @@ async def send_third_party_report(
             )
 
             # 增加超时时间，应对网络延迟
+            if not await renew_owned_report_lease():
+                logger.warning(
+                    "[第三方上报] 发送前租约校验失败，禁止发起外部请求：report_log_id=%s",
+                    report_log_id,
+                )
+                return {
+                    "success": False,
+                    "retryable": True,
+                    "reason": "report_lease_lost_before_send",
+                    "report_log_id": report_log_id,
+                }
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(url, json=send_data, params=params)
                 # 第三方响应可能回显 user_data；日志只记录状态，不记录响应正文。
