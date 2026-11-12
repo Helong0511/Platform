@@ -666,18 +666,27 @@ async def require_publisher_or_admin(
             error_code=ErrorCode.FORBIDDEN,
             http_status=status.HTTP_403_FORBIDDEN,
         )
-    from app.models.models import Client
-    from app.services.user_service import UserService
+    from app.models.models import Client, Publisher
 
-    client_row = await db.execute(select(Client).where(Client.user_id == current_user.id))
-    client = client_row.scalars().first()
-    if not client:
+    # User 与 Client 是一对多关系；必须检查该用户全部 Client 的渠道归属。
+    client_row = await db.execute(select(Client.id).where(Client.user_id == current_user.id))
+    client_ids = [int(value) for value in client_row.scalars().all()]
+    if not client_ids:
         _raise_auth(
             "客户信息不存在",
             error_code=ErrorCode.CLIENT_NOT_FOUND,
             http_status=status.HTTP_403_FORBIDDEN,
         )
-    if not await UserService(db).check_client_has_publisher(client.id):
+
+    publisher_row = await db.execute(
+        select(Publisher.id)
+        .where(
+            Publisher.client_id.in_(client_ids),
+            Publisher.is_active.is_(True),
+        )
+        .limit(1)
+    )
+    if publisher_row.scalar_one_or_none() is None:
         _raise_auth(
             "需要关联渠道权限",
             error_code=ErrorCode.FORBIDDEN,
