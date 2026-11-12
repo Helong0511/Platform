@@ -35,6 +35,7 @@ def _is_loopback_host(host: str | None) -> bool:
 
 _SAFE_MYSQL_CI = (
     os.getenv("UNIT_TEST") == "1"
+    and os.getenv("GITHUB_ACTIONS") == "true"
     and _DESTRUCTIVE_TESTS_ENABLED
     and _is_loopback_host(HOST)
     and DATABASE == "platform_ci"
@@ -50,7 +51,7 @@ if os.getenv("UNIT_TEST") == "1" and HOST and not _SAFE_MYSQL_CI:
 
 pytestmark = pytest.mark.skipif(
     not _SAFE_MYSQL_CI,
-    reason="仅在显式启用的本机隔离 MySQL CI 环境中运行破坏性迁移测试",
+    reason="仅在 GitHub Actions 临时 MySQL 服务中运行破坏性迁移测试",
 )
 
 
