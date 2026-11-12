@@ -422,3 +422,33 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - 本修复只减少日志和上游响应的 PII 暴露，不代表持久化 PII 已全部治理。
 - `postback_conversions`、未完成 `postback_forward_queue`、`postback_notifications.notification_message`、备份副本及第三方接收方数据仍需要经批准的用途、保留期限、访问权限和删除流程。
 - PII 清理配置默认关闭；未经业务/合规负责人批准，不得擅自设置保留天数或删除仍需重试的队列载荷。
+
+
+## 23. 下游重试目标匹配与 Outbox 耗尽指标（2026-11-12，Run #1132）
+
+### 发现的问题
+
+- 综合 PII 清理任务是每日调度实际调用的入口。此前它检查 postback_forward_queue 时，只要产品 ID 或渠道 ID 任一匹配就认为存在活动队列，未按完整目标组合匹配；同时没有对两个外键均为 NULL 的目标执行 NULL-safe equality。
+- 这会导致同一转化下不同目标的重试队列互相阻塞日志清理；当日志和队列的目标外键都为 NULL 时，也可能漏掉仍在等待的队列，导致提前清理重试诊断载荷。
+- Outbox 的 exhausted 指标此前没有排除 pii_scrubbed_at 已设置的事件。已清理且不可能再次发送的历史失败事件可能持续计入人工处理积压，造成监控假阳性。
+
+### 修复
+
+- 活动转发队列现在按完整三元组关联：conversion_id + product_id + publisher_id。
+- product_id、publisher_id 均采用 NULL-safe equality；两个维度必须同时匹配，避免不同转发目标相互干扰。
+- Outbox exhausted 统计增加 pii_scrubbed_at IS NULL，已清理事件不再计入可操作的耗尽队列；耗尽状态归一化与正常发送扫描原有清理保护保持一致。
+- 新增 SQL 回归断言，验证两个外键的普通相等和双方 NULL 分支均存在；新增 exhausted 统计不包含已清理事件的断言。
+- 未改变 PII 保留期限、未启用自动清理、未改变事件幂等键和第三方发送语义。
+
+### CI 证据
+
+- Run #1132（SHA f254530c094eb4b090d18aaf809b3424f436920c）：Backend **412 passed、1 skipped、1 warning**；Python compile、Frontend Lint、Build、Playwright Mock API Browser E2E 全部通过。
+- Skip 是本机核对脚本未提交（CI 不依赖）；warning 是 passlib 在 Python 3.11 使用 crypt 的弃用提示。
+- Run #1132：https://github.com/Helong0511/Platform/actions/runs/43133126073。
+
+### 剩余限制
+
+- PII 清理配置仍默认关闭；通知消息、PostbackConversion 原始数据、未完成转发队列、备份副本及第三方接收方数据仍需经批准的保留策略和独立生命周期设计。
+- 当前清理查询按完整目标身份保护已存在的重试队列；生产发布前仍需在隔离副本验证转发任务创建/完成/重新入队与每日清理的并发时序。
+- 完整 migration/backup/restore/rollback 演练、Outbox 配置禁用/删除/轮换/恢复的多 Worker 故障组合，以及 RBAC/归因/统计/结算/API/队列/前端剩余模块全量复核仍未关闭。
+- PR 继续 Open / Draft，不合并、不部署；所有验证只使用隔离 CI、合成数据和 Mock API。
