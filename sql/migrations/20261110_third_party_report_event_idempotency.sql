@@ -55,28 +55,14 @@ FROM third_party_report_logs
 GROUP BY event_key
 HAVING COUNT(*) > 1;
 
--- 4. 删除旧的过宽唯一索引（若仍存在）。
-SET @has_old_unique = (
-    SELECT COUNT(*) FROM information_schema.STATISTICS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'third_party_report_logs'
-      AND INDEX_NAME = 'unique_source_adsid'
-);
-SET @ddl = IF(
-    @has_old_unique > 0,
-    'ALTER TABLE third_party_report_logs DROP INDEX unique_source_adsid',
-    'SELECT 1'
-);
-PREPARE migration_stmt FROM @ddl;
-EXECUTE migration_stmt;
-DEALLOCATE PREPARE migration_stmt;
-
--- 5. 可重复执行的 NOT NULL 收敛；若历史回填仍有 NULL，MySQL 会拒绝并保留可诊断状态。
+-- 4. 可重复执行的 NOT NULL 收敛；若历史回填仍有 NULL，MySQL 会拒绝并保留可诊断状态。
 ALTER TABLE third_party_report_logs
     MODIFY COLUMN event_key VARCHAR(64) NOT NULL
     COMMENT '事件幂等键：稳定事件身份字段的 SHA-256（ViewContent 不含后补 conversion_id）';
 
--- 6. 仅当新唯一索引不存在时添加；重复执行不会重复建索引。
+-- 5. 先建立新唯一索引，成功后才移除旧索引。
+-- 若 event_key 存在重复值，新索引创建会失败，但旧唯一索引仍保留，
+-- 避免迁移中断时第三方事件表暂时失去唯一性保护。
 SET @has_event_unique = (
     SELECT COUNT(*) FROM information_schema.STATISTICS
     WHERE TABLE_SCHEMA = DATABASE()
@@ -86,6 +72,28 @@ SET @has_event_unique = (
 SET @ddl = IF(
     @has_event_unique = 0,
     'ALTER TABLE third_party_report_logs ADD UNIQUE INDEX unique_event_key (event_key)',
+    'SELECT 1'
+);
+PREPARE migration_stmt FROM @ddl;
+EXECUTE migration_stmt;
+DEALLOCATE PREPARE migration_stmt;
+
+-- 6. 新唯一索引确认存在后，才删除旧的过宽唯一索引（若仍存在）。
+SET @has_event_unique = (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'third_party_report_logs'
+      AND INDEX_NAME = 'unique_event_key'
+);
+SET @has_old_unique = (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'third_party_report_logs'
+      AND INDEX_NAME = 'unique_source_adsid'
+);
+SET @ddl = IF(
+    @has_event_unique > 0 AND @has_old_unique > 0,
+    'ALTER TABLE third_party_report_logs DROP INDEX unique_source_adsid',
     'SELECT 1'
 );
 PREPARE migration_stmt FROM @ddl;
