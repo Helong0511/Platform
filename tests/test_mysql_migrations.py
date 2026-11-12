@@ -104,6 +104,28 @@ def _run_sql_file(cursor, relative_path: str) -> None:
             cursor.fetchall()
 
 
+def _index_columns(cursor, table_name: str, index_name: str) -> list[str]:
+    """读取隔离 MySQL 索引的真实列顺序，避免只检查索引名称而漏掉 schema drift。"""
+    allowed_tables = {"third_party_report_logs", "postback_forward_logs"}
+    if table_name not in allowed_tables:
+        raise ValueError("unexpected migration test table")
+    cursor.execute(f"SHOW INDEX FROM `{table_name}` WHERE Key_name = %s", (index_name,))
+    rows = cursor.fetchall()
+    return [
+        row[4]
+        for row in sorted(rows, key=lambda item: item[3])
+    ]
+
+
+def _column_metadata(cursor, table_name: str, column_name: str):
+    """读取字段类型、NULL 和默认值，核对迁移结果而不只核对字段名。"""
+    allowed_tables = {"third_party_report_logs", "postback_forward_logs"}
+    if table_name not in allowed_tables:
+        raise ValueError("unexpected migration test table")
+    cursor.execute(f"SHOW COLUMNS FROM `{table_name}` LIKE %s", (column_name,))
+    return cursor.fetchone()
+
+
 def _event_key(source: str, adsid: str, event: str, conversion_id: str | None) -> str:
     # 必须与应用和 SQL migration 的身份规则一致：ViewContent 的 conversion_id
     # 可能由后续 Purchase 补写，仅用于关联，不属于 ViewContent 的幂等身份。
@@ -306,6 +328,10 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
             index_names = {row[2] for row in cursor.fetchall()}
             assert "unique_event_key" in index_names
             assert "unique_source_adsid" not in index_names
+            event_key_column = _column_metadata(cursor, "third_party_report_logs", "event_key")
+            assert event_key_column[1].lower() == "varchar(64)"
+            assert event_key_column[2] == "NO"
+            assert _index_columns(cursor, "third_party_report_logs", "unique_event_key") == ["event_key"]
 
             # 模拟 Outbox 迁移在第一个字段已添加后中断；续跑应补齐其它字段和索引。
             cursor.execute(
@@ -354,6 +380,23 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
             cursor.execute("SHOW INDEX FROM third_party_report_logs")
             outbox_index_names = {row[2] for row in cursor.fetchall()}
             assert "idx_third_party_outbox_due" in outbox_index_names
+            for column_name, expected_type in (
+                ("outbox_enqueued", "tinyint(1)"),
+                ("short_link_id", "int"),
+                ("cloak_name", "varchar(100)"),
+                ("short_code", "varchar(100)"),
+                ("click_time", "datetime"),
+                ("next_retry_time", "datetime"),
+            ):
+                metadata = _column_metadata(cursor, "third_party_report_logs", column_name)
+                assert metadata is not None, column_name
+                assert metadata[1].lower() == expected_type, column_name
+            outbox_flag = _column_metadata(cursor, "third_party_report_logs", "outbox_enqueued")
+            assert outbox_flag[2] == "NO"
+            assert str(outbox_flag[4]) == "0"
+            assert _index_columns(cursor, "third_party_report_logs", "idx_third_party_outbox_due") == [
+                "outbox_enqueued", "status", "next_retry_time", "report_start_time", "id"
+            ]
 
             # PII 清理迁移仅增加标记/索引，不在迁移时删除历史数据。
             cursor.execute(
@@ -410,6 +453,17 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
             cursor.execute("SHOW INDEX FROM postback_forward_logs")
             forward_index_names = {row[2] for row in cursor.fetchall()}
             assert "idx_forward_log_pii_retention" in forward_index_names
+            for table_name in ("third_party_report_logs", "postback_forward_logs"):
+                pii_metadata = _column_metadata(cursor, table_name, "pii_scrubbed_at")
+                assert pii_metadata is not None
+                assert pii_metadata[1].lower() == "datetime"
+                assert pii_metadata[2] == "YES"
+            assert _index_columns(cursor, "third_party_report_logs", "idx_third_party_pii_retention") == [
+                "pii_scrubbed_at", "created_at", "id"
+            ]
+            assert _index_columns(cursor, "postback_forward_logs", "idx_forward_log_pii_retention") == [
+                "pii_scrubbed_at", "created_at", "id"
+            ]
 
             for column in (
                 "pii_scrubbed_at",
