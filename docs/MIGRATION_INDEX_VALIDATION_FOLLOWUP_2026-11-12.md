@@ -379,3 +379,35 @@ MySQL 官方文档确认：
 
 - Run #1403 验证了本轮 SQL 迁移及错误同名表拒绝测试，不代表完整迁移机制或生产升级已验收。
 - PR #1 继续 Open / Draft；不合并 main、不部署、不访问生产环境。所有验证继续只使用 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API；凭据安全专项继续按用户要求暂缓。
+
+## 15. Cap Reservation 索引唯一性校验与 Run #1405（2026-11-12）
+
+### 15.1 本轮补强
+
+- 对 `cap_reservations` 迁移结构验收继续复核，发现只核对索引名称、列顺序和统计行数仍不足以确认唯一性语义。
+- 新增约束：主键与 `uq_cap_reservation_key` 必须为唯一索引；其它业务索引必须为非唯一索引；所有索引必须为完整列索引（无 `SUB_PART` 前缀）及 BTREE；并要求索引总数与目标集合一致。
+- 新增隔离 MySQL 测试：先执行正常迁移，再将 `uq_cap_reservation_key` 替换成同名同列普通索引；重跑迁移必须以 MySQL 1146 fail-closed，且断言错误索引仍为非唯一、未被迁移覆盖。
+
+### 15.2 CI 结果
+
+- 修复提交：SQL `718e23e58817ee42d72453b90b4216fc8dc7a87a`；回归测试 `a33937a9571f65d9a5f54e0745fbc334a3309392`。
+- Run #1405（SHA `a33937a9571f65d9a5f54e0745fbc334a3309392`）全部成功：Backend **540 passed、1 skipped、1 warning**；Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- Run #1405：https://github.com/Helong0511/Platform/actions/runs/43178473822
+- 1 skipped 与 1 warning 的性质与前述轮次相同；不得据此宣称依赖零告警或凭据安全专项已完成。
+
+### 15.3 Drift 检查的实际覆盖边界
+
+复核 `app/bootstrap/lifespan.py` 与 `tests/test_schema_metadata_drift.py` 后确认：
+
+- `_schema_metadata_drift` 目前只检查 ORM 声明的表、列是否存在。
+- 测试只覆盖缺失表、缺失列和完整 schema 三种情况。
+- 当前检查没有比较字段类型/长度、NULL、server default、自动更新时间属性、索引列与唯一性、唯一约束、CHECK 表达式、字符集/排序规则。
+- 启动时先执行 `Base.metadata.create_all`，再运行上述有限 Drift 检查；`create_all` 不是增量 ALTER 迁移机制，不能修复已存在表的列定义漂移。
+- 因此启动检查目前只能发现部分缺失结构，不能作为完整 schema 兼容性证明。扩展前必须基于 MySQL 8.0 与 SQLite 测试 fixture 明确方言差异，并先以只读诊断模式报告，不应未经全模型验证就直接让启动流程因历史 schema 差异而拒绝服务。
+
+### 15.4 仍未关闭的发布阻断项
+
+- 未发现统一 Migration Runner、revision/checksum ledger 或迁移 manifest；现有 SQL 文件仍缺少应用统一执行/登记机制。
+- `_schema_metadata_drift` 完整结构比较尚未实现。
+- 旧 schema + 合成历史数据升级、逻辑备份恢复、worker pause/resume、应用兼容回滚、schema/data diff、MySQL server crash 与大规模数据升级性能尚未完成。
+- PR #1 继续 Open / Draft；不合并 main、不部署、不访问生产环境；凭据安全专项继续暂缓。
