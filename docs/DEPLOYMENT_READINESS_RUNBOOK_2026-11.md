@@ -1032,3 +1032,22 @@ PR #1 继续 Open / Draft，不合并 main、不部署。所有验证继续仅�
 - 1 skipped 仍为本地核对脚本未提交提示；1 warning 为 passlib/Python 3.11 的 crypt 弃用提示。
 
 验证仅限 GitHub Actions 隔离 MySQL 8.0、Redis DB14、SQLite 单测、合成数据与 Mock API。没有连接生产服务器、生产数据库、Redis、队列或真实第三方接口。PR #1 继续 Open / Draft，不合并 main、不部署。
+
+
+## 46. Cap 同步跳过未决 Reservation，防止临时预留固化（2026-11-12，Run #1374）
+
+### 修复内容
+
+- 复核 `CapSynchronizer.sync_all_active_caps()` 与 `sync_single_cap()` 发现：此前它们只读取 Redis counter 与 DB 当前值的较大者，没有检查同一 Offer/Publisher scope 是否仍存在 PREPARED、RESERVED 或 NEEDS_RECONCILIATION 账本。
+- 若同步发生在 Postback 预留后、正式转化事务最终提交前，临时 Redis 预留量可能被同步写入 DB 基线；随后 Postback 回滚 Redis 预留时，DB 可能仍保留这笔未确认计数。
+- 批量同步现在先读取所有未决 Reservation scope；同一 `(offer_id, publisher_id)` 只要存在任一未决账本，就跳过该 scope 的整条 OfferCap，不读取 Redis、不更新 DB 快照。
+- 单条同步在锁定 OfferCap 后检查同一 scope 的未决账本；发现未决记录立即 rollback 并返回 False，不读取 Redis、不写入 DB。
+- 终态 COMMITTED / ROLLED_BACK 不属于阻断状态：它们已完成业务计数决策，允许正常同步；终态 token 清理由恢复 Worker 单独处理。
+- 新增批量与单条同步测试，分别验证未决账本存在时不触碰 Redis、不修改 Cap 计数，批量统计为 skipped，单条返回 False 并回滚。
+
+### 验收证据
+
+- Run #1374（SHA `570da5f120e1420474fb0f7529511560306612a5`）：Backend **528 passed、1 skipped、1 warning**；Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。Run：https://github.com/Helong0511/Platform/actions/runs/43160751514。
+- 1 skipped 为本地核对脚本未提交提示；1 warning 为 passlib/Python 3.11 的 crypt 弃用提示。
+
+验证仅限 GitHub Actions 隔离 MySQL 8.0、Redis DB14、SQLite 单测、合成数据与 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
