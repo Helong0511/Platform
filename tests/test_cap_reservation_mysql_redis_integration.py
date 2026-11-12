@@ -72,7 +72,7 @@ _SAFE_INTEGRATION_TARGETS = (
 
 # 该测试会 CREATE/DROP 数据库并写入/删除 Redis key。CI 环境若配置缺失或目标非本机，
 # 必须失败关闭；本地未显式启用时则跳过，绝不尝试连接外部服务。
-if os.getenv("UNIT_TEST") == "1" and (MYSQL_HOST or REDIS_URL or os.getenv("GITHUB_ACTIONS") == "true") and not _SAFE_INTEGRATION_TARGETS:
+if (os.getenv("GITHUB_ACTIONS") == "true" or (os.getenv("UNIT_TEST") == "1" and (MYSQL_HOST or REDIS_URL))) and not _SAFE_INTEGRATION_TARGETS:
     raise RuntimeError(
         "拒绝执行 Cap Reservation 集成测试：必须使用 loopback MySQL platform_ci、"
         "loopback Redis DB14，并显式启用两个隔离测试授权变量"
