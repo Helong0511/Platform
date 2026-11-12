@@ -896,3 +896,136 @@ def test_mysql_outbox_commit_ack_loss_preserves_stable_event_identity():
                 cursor.execute(f"DROP TABLE IF EXISTS {table}")
         finally:
             cleanup.close()
+
+
+def _run_sql_file_with_ddl_interruption(cursor, relative_path: str, ddl_boundary: int) -> None:
+    """在指定 DDL 执行完成后模拟进程退出；DDL 本身已提交，后续语句不再执行。"""
+    sql = Path(relative_path).read_text(encoding="utf-8")
+    statements = [
+        statement.strip()
+        for statement in "\\n".join(
+            line for line in sql.splitlines()
+            if not line.lstrip().startswith("--")
+        ).split(";")
+        if statement.strip()
+    ]
+    ddl_count = 0
+    for statement in statements:
+        cursor.execute(statement)
+        is_ddl_boundary = (
+            statement.upper().startswith("ALTER TABLE ")
+            or statement.upper() == "EXECUTE MIGRATION_STMT"
+        )
+        if is_ddl_boundary:
+            ddl_count += 1
+            if ddl_count == ddl_boundary:
+                raise InterruptedError(
+                    f"injected process exit after DDL boundary {ddl_boundary}"
+                )
+    raise AssertionError(
+        f"DDL boundary {ddl_boundary} was not reached in {relative_path}; "
+        f"observed {ddl_count} DDL boundaries"
+    )
+
+
+@pytest.mark.parametrize(
+    ("migration_path", "ddl_boundary"),
+    [
+        ("sql/migrations/20261110_third_party_report_event_idempotency.sql", boundary)
+        for boundary in range(1, 5)
+    ] + [
+        ("sql/migrations/20261111_third_party_report_outbox.sql", boundary)
+        for boundary in range(1, 8)
+    ] + [
+        ("sql/migrations/20261112_third_party_report_pii_retention.sql", boundary)
+        for boundary in range(1, 5)
+    ],
+)
+def test_incremental_migrations_resume_after_each_ddl_boundary(migration_path, ddl_boundary):
+    """逐个 DDL 边界模拟进程退出，随后重跑迁移并核验最终结构。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS postback_forward_logs")
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+
+            if migration_path.endswith("event_idempotency.sql"):
+                cursor.execute(
+                    "CREATE TABLE third_party_report_logs ("
+                    "id INT NOT NULL AUTO_INCREMENT, source VARCHAR(50) NOT NULL, "
+                    "adsid VARCHAR(500) NOT NULL, event VARCHAR(50) NOT NULL, "
+                    "conversion_id VARCHAR(255) NULL, PRIMARY KEY (id), "
+                    "UNIQUE KEY unique_source_adsid (source, adsid)) "
+                    "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+                )
+                cursor.execute(
+                    "INSERT INTO third_party_report_logs "
+                    "(source, adsid, event, conversion_id) VALUES ('ci', 'ad-1', 'Purchase', 'conv-1')"
+                )
+            elif migration_path.endswith("outbox.sql"):
+                cursor.execute(
+                    "CREATE TABLE third_party_report_logs ("
+                    "id INT NOT NULL AUTO_INCREMENT, amount DECIMAL(12,2) NULL, "
+                    "status VARCHAR(20) NOT NULL DEFAULT 'pending', "
+                    "report_start_time DATETIME NULL, PRIMARY KEY (id)) "
+                    "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+                )
+            else:
+                cursor.execute(
+                    "CREATE TABLE third_party_report_logs ("
+                    "id INT NOT NULL AUTO_INCREMENT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    "completed_at DATETIME NULL, PRIMARY KEY (id)) "
+                    "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+                )
+                cursor.execute(
+                    "CREATE TABLE postback_forward_logs ("
+                    "id INT NOT NULL AUTO_INCREMENT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    "completed_at DATETIME NULL, PRIMARY KEY (id)) "
+                    "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+                )
+
+            with pytest.raises(InterruptedError, match="injected process exit"):
+                _run_sql_file_with_ddl_interruption(cursor, migration_path, ddl_boundary)
+
+            # 新连接模拟进程重启，避免依赖旧连接的 session 状态或预处理语句。
+        connection.close()
+        connection = _connect()
+        with connection.cursor() as cursor:
+            _run_sql_file(cursor, migration_path)
+            _run_sql_file(cursor, migration_path)
+
+            if migration_path.endswith("event_idempotency.sql"):
+                metadata = _column_metadata(cursor, "third_party_report_logs", "event_key")
+                assert metadata is not None and metadata[1].lower() == "varchar(64)"
+                assert metadata[2] == "NO"
+                assert _index_columns(cursor, "third_party_report_logs", "unique_event_key") == ["event_key"]
+                cursor.execute("SHOW INDEX FROM third_party_report_logs")
+                assert "unique_source_adsid" not in {row[2] for row in cursor.fetchall()}
+                cursor.execute("SELECT COUNT(*) FROM third_party_report_logs WHERE event_key IS NULL")
+                assert cursor.fetchone()[0] == 0
+            elif migration_path.endswith("outbox.sql"):
+                assert _index_columns(
+                    cursor, "third_party_report_logs", "idx_third_party_outbox_due"
+                ) == ["outbox_enqueued", "status", "next_retry_time", "report_start_time", "id"]
+                for column in (
+                    "outbox_enqueued", "short_link_id", "cloak_name",
+                    "short_code", "click_time", "next_retry_time",
+                ):
+                    assert _column_metadata(cursor, "third_party_report_logs", column) is not None
+            else:
+                for table_name, index_name in (
+                    ("third_party_report_logs", "idx_third_party_pii_retention"),
+                    ("postback_forward_logs", "idx_forward_log_pii_retention"),
+                ):
+                    metadata = _column_metadata(cursor, table_name, "pii_scrubbed_at")
+                    assert metadata is not None and metadata[1].lower() == "datetime"
+                    assert metadata[2] == "YES"
+                    assert _index_columns(cursor, table_name, index_name) == [
+                        "pii_scrubbed_at", "created_at", "id"
+                    ]
+    finally:
+        if connection.open:
+            with connection.cursor() as cursor:
+                cursor.execute("DROP TABLE IF EXISTS postback_forward_logs")
+                cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+        connection.close()
