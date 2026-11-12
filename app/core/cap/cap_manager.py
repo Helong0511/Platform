@@ -257,8 +257,13 @@ async def _refresh_offer_caps(db: AsyncSession, caps: list) -> None:
     for cap in caps:
         try:
             await db.refresh(cap)
-        except Exception as e:
-            logger.debug("刷新 OfferCap 失败（可忽略）: id=%s err=%s", getattr(cap, "id", None), e)
+        except Exception as exc:
+            # ORM/DB 异常文本可能包含 SQL 参数或个人数据，只记录异常类型。
+            logger.debug(
+                "刷新 OfferCap 失败（可忽略）: id=%s error_type=%s",
+                getattr(cap, "id", None),
+                type(exc).__name__,
+            )
 
 
 async def increment_cap_count(
