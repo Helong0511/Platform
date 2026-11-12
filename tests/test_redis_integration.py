@@ -331,3 +331,61 @@ async def test_real_redis_cap_reservation_token_lifetime_and_corrupt_counter_fai
             f"{corrupt_key}:limit", f"{corrupt_token}:limit",
         )
         await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_real_redis_rejects_reservation_reuse_after_rollback():
+    """回滚墓碑必须阻止同一 reservation 再次被当作有效预留。"""
+    from app.core.cap.redis_counter import (
+        RedisCapManager,
+        get_daily_cap_key,
+    )
+
+    redis = Redis.from_url(REDIS_URL, decode_responses=True)
+    offer_id = int(uuid.uuid4().int % 900_000_000) + 100_000_000
+    publisher_id = int(uuid.uuid4().int % 900_000_000) + 100_000_000
+    reservation_id = uuid.uuid4().hex
+    business_date = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    counter_key = get_daily_cap_key(offer_id, business_date, publisher_id)
+    token_key = f"{counter_key}:reservation:{reservation_id}"
+    try:
+        async def isolated_redis_client():
+            return redis
+
+        from app.core.cap import redis_counter as redis_counter_module
+        original_get_client = redis_counter_module.get_redis_client
+        redis_counter_module.get_redis_client = isolated_redis_client
+        try:
+            assert await RedisCapManager.check_and_increment_daily(
+                offer_id,
+                limit=10,
+                publisher_id=publisher_id,
+                initial_value=0,
+                reservation_id=reservation_id,
+                reservation_date=business_date,
+            ) is True
+            assert await RedisCapManager.decrement_daily(
+                offer_id,
+                publisher_id,
+                reservation_date=business_date,
+                reservation_id=reservation_id,
+            ) == 0
+            assert await redis.get(token_key) == "ROLLED_BACK"
+
+            with pytest.raises(RuntimeError, match="已回滚"):
+                await RedisCapManager.check_and_increment_daily(
+                    offer_id,
+                    limit=10,
+                    publisher_id=publisher_id,
+                    initial_value=0,
+                    reservation_id=reservation_id,
+                    reservation_date=business_date,
+                )
+
+            assert await redis.get(counter_key) == "0"
+            assert await redis.get(token_key) == "ROLLED_BACK"
+        finally:
+            redis_counter_module.get_redis_client = original_get_client
+    finally:
+        await redis.delete(counter_key, token_key)
+        await redis.aclose()
