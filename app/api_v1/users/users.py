@@ -232,10 +232,10 @@ async def get_user_stats(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取用户统计信息失败: {str(e)}", exc_info=True)
+        logger.error("获取用户统计信息失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取用户统计信息失败：{str(e)}。请稍后重试或联系管理员"
+            detail="获取用户统计信息失败，请稍后重试或联系管理员"
         )
 
 
@@ -411,10 +411,9 @@ async def get_current_user_info(
         user_data = UserResponse.model_validate(user_dict).model_dump()
     except Exception as exc:
         logger.error(
-            "当前用户信息序列化失败 user_id=%s: %s",
+            "当前用户信息序列化失败 user_id=%s error_type=%s",
             current_user.id,
-            exc,
-            exc_info=True,
+            type(exc).__name__,
         )
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
