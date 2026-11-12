@@ -140,13 +140,13 @@ async def check_cap(
                             )
                         # key 缺失时只读使用 DB 值，不在预检查阶段重建 Redis key。
                     except Exception as e:
-                        logger.warning(f"读取 Redis 总Cap失败，回退 DB 字段: {e}")
+                        logger.warning("读取 Redis 总Cap失败，回退 DB 字段：error_type=%s", type(e).__name__)
                 if actual_total_count >= cap.total_cap:
                      return False, f"已达到总Cap限制: {cap.total_cap} (当前: {actual_total_count})"
         
         return True, None
     except Exception as e:
-        logger.error(f"检查Cap失败: {str(e)}", exc_info=True)
+        logger.error("检查Cap失败：error_type=%s", type(e).__name__)
         if settings.CAP_FAIL_OPEN:
             logger.warning("Cap 检查异常，fail-open 放行")
             return True, None
@@ -183,12 +183,12 @@ async def _rollback_reserved_redis(reserved: list[tuple]) -> None:
             if ledger_key:
                 try:
                     await CapReservationLedger.mark_needs_reconciliation(
-                        ledger_key, str(exc), lease_owner=lease_owner
+                        ledger_key, f"Redis 回滚异常，error_type={type(exc).__name__}", lease_owner=lease_owner
                     )
                 except Exception:
                     logger.critical("无法更新 Cap Reservation 对账状态：%s", ledger_key, exc_info=True)
-            failures.append(f"kind={kind}, offer_id={oid}, token={reservation_id}, error={exc}")
-            logger.error("Cap reservation rollback failed; continue with remaining tokens", exc_info=True)
+            failures.append(f"kind={kind}, offer_id={oid}, token={reservation_id}, error_type={type(exc).__name__}")
+            logger.error("Cap reservation rollback failed; continue with remaining tokens：error_type=%s", type(exc).__name__)
     if failures:
         raise RuntimeError("Cap reservation rollback incomplete: " + "; ".join(failures))
 
@@ -241,12 +241,12 @@ async def _mark_ledger_redis_reserved(
                 )
             else:
                 await CapReservationLedger.mark_needs_reconciliation(
-                    ledger_key, f"RESERVED 标记失败且 Redis 补偿未知：{exc}",
+                    ledger_key, f"RESERVED 标记失败且 Redis 补偿未知：error_type={type(exc).__name__}",
                     lease_owner=lease_owner,
                 )
         except Exception as rollback_error:
             await CapReservationLedger.mark_needs_reconciliation(
-                ledger_key, f"RESERVED 标记失败：{exc}; Redis 补偿失败：{rollback_error}",
+                ledger_key, f"RESERVED 标记失败：error_type={type(exc).__name__}; Redis 补偿失败：error_type={type(rollback_error).__name__}",
                 lease_owner=lease_owner,
             )
         raise
@@ -368,9 +368,9 @@ async def increment_cap_count(
             except Exception as e:
                 if ledger_key:
                     await CapReservationLedger.mark_needs_reconciliation(
-                        ledger_key, str(e), lease_owner=lease_owner
+                        ledger_key, f"Redis 日计数预留异常，error_type={type(e).__name__}", lease_owner=lease_owner
                     )
-                logger.error("Cap 日计数预留/补偿状态不确定，拒绝本次转化：%s", e, exc_info=True)
+                logger.error("Cap 日计数预留/补偿状态不确定，拒绝本次转化：error_type=%s", type(e).__name__)
                 await _rollback_reserved_redis(reserved)
                 reserved.clear()
                 await _refresh_offer_caps(db, caps)
@@ -429,9 +429,9 @@ async def increment_cap_count(
             except Exception as e:
                 if ledger_key:
                     await CapReservationLedger.mark_needs_reconciliation(
-                        ledger_key, str(e), lease_owner=lease_owner
+                        ledger_key, f"Redis 日计数预留异常，error_type={type(e).__name__}", lease_owner=lease_owner
                     )
-                logger.error("Cap 总计数预留/补偿状态不确定，拒绝本次转化：%s", e, exc_info=True)
+                logger.error("Cap 总计数预留/补偿状态不确定，拒绝本次转化：error_type=%s", type(e).__name__)
                 await _rollback_reserved_redis(reserved)
                 reserved.clear()
                 await _refresh_offer_caps(db, caps)
