@@ -109,6 +109,8 @@ SET @has_index = (
           AND INDEX_NAME = 'idx_third_party_outbox_due'
         GROUP BY INDEX_NAME
         HAVING COUNT(*) = 5
+           AND MAX(NON_UNIQUE) = 1
+           AND MAX(SUB_PART) IS NULL
            AND GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') = 'outbox_enqueued,status,next_retry_time,report_start_time,id'
     ) AS valid_outbox_index
 );
