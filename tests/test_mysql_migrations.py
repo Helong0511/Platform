@@ -1331,3 +1331,67 @@ def test_pii_migration_rejects_descending_same_name_retention_index():
             cursor.execute("DROP TABLE IF EXISTS postback_forward_logs")
             cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
         connection.close()
+
+
+@pytest.mark.parametrize(
+    "wrong_table",
+    ["third_party_report_logs", "postback_forward_logs"],
+)
+def test_pii_migration_rejects_automatic_default_on_retention_marker(wrong_table):
+    """PII 清理标记不能带 CURRENT_TIMESTAMP 默认值，避免新记录被误标为已清理。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS postback_forward_logs")
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+
+            third_party_marker = (
+                "DATETIME NULL DEFAULT CURRENT_TIMESTAMP"
+                if wrong_table == "third_party_report_logs"
+                else "DATETIME NULL"
+            )
+            cursor.execute(
+                "CREATE TABLE third_party_report_logs ("
+                "id INT NOT NULL AUTO_INCREMENT, "
+                "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "completed_at DATETIME NULL, "
+                f"pii_scrubbed_at {third_party_marker}, "
+                "PRIMARY KEY (id), "
+                "KEY idx_third_party_pii_retention "
+                "(pii_scrubbed_at, created_at, id)) "
+                "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+
+            forward_marker = (
+                "DATETIME NULL DEFAULT CURRENT_TIMESTAMP"
+                if wrong_table == "postback_forward_logs"
+                else "DATETIME NULL"
+            )
+            cursor.execute(
+                "CREATE TABLE postback_forward_logs ("
+                "id INT NOT NULL AUTO_INCREMENT, "
+                "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "completed_at DATETIME NULL, "
+                f"pii_scrubbed_at {forward_marker}, "
+                "PRIMARY KEY (id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+
+            with pytest.raises(pymysql.err.OperationalError) as migration_error:
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261112_third_party_report_pii_retention.sql",
+                )
+            assert migration_error.value.args[0] == 1060
+
+            cursor.execute(
+                "SELECT COLUMN_DEFAULT, EXTRA FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s "
+                "AND COLUMN_NAME = 'pii_scrubbed_at'",
+                (wrong_table,),
+            )
+            assert cursor.fetchone() == ("CURRENT_TIMESTAMP", "")
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS postback_forward_logs")
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+        connection.close()
