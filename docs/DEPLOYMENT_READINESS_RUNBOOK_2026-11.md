@@ -1012,3 +1012,23 @@ PR #1 继续 Open / Draft，不合并 main、不部署。所有验证继续仅�
 - 仍需保留并继续完成组合故障验收：发送请求超出租约、进程在远端接收后/本地 ACK 前崩溃、多个恢复 Worker 同时接管、配置停用/删除/轮换与恢复交错、网络故障及数据库提交/ACK 丢失组合；当前单测与现有 MySQL 集成用例不能替代这些全组合演练。
 
 验证仅限 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
+
+
+## 45. Cap Reservation 租约统一数据库时钟与应用时区（2026-11-12，Run #1370）
+
+### 修复内容
+
+- 复核发现应用业务时间通过 `get_app_now_naive()` 使用配置时区（默认 Asia/Shanghai）的 naive datetime，而 MySQL `NOW()` / `UTC_TIMESTAMP()` 的时区语义可能不同；不能直接将数据库 `NOW()` 与应用本地时区 DATETIME 比较。
+- 新增 `get_app_now_sql_expression(offset_seconds=0)`：以 MySQL `UTC_TIMESTAMP()` 为统一时钟，再按 `APP_TIMEZONE` 当前 UTC offset 转换为应用本地 naive DATETIME；可附加租约/退避秒数。
+- Cap Reservation 的 PREPARED、RESERVED、租约续期、恢复 Worker 批量 claim、终态更新时间、NEEDS_RECONCILIATION 退避截止时间，统一使用同一数据库时钟表达式。
+- 恢复 Worker 的所有租约过期条件均按该表达式判断，不再使用各 Worker 的本机时钟决定是否接管租约。
+- 新增真实 MySQL 集成测试：先用 MySQL 时钟创建有效租约，再将恢复 Worker 的本机业务时钟模拟为比数据库超前 6 小时；必须仍然拒绝提前接管，账本保持 PREPARED 且 lease_owner 不变。
+
+### 故障修复过程与证据保留
+
+- Run #1364（SHA `4ef5e17a4bc3f8ea734bf64a05511c9cdb9989a3`）失败：清理导入时误删 `date` 类型导入，导致测试收集阶段 NameError；已补回并由后续 Run 验证。
+- Run #1365（SHA `c98e0389e3b846afb7187980a7cf085164f50491`）失败：4 个 MySQL/Redis 集成用例暴露应用 Asia/Shanghai 与 MySQL UTC 的租约时钟偏差；不是通过放宽断言处理，而是修正数据库时间表达式与时区转换。
+- Run #1370（SHA `0ffaa08c493c1d93c218db3261ed822323a3dda9`）：Backend **526 passed、1 skipped、1 warning**；Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。Run：https://github.com/Helong0511/Platform/actions/runs/43160294747。
+- 1 skipped 仍为本地核对脚本未提交提示；1 warning 为 passlib/Python 3.11 的 crypt 弃用提示。
+
+验证仅限 GitHub Actions 隔离 MySQL 8.0、Redis DB14、SQLite 单测、合成数据与 Mock API。没有连接生产服务器、生产数据库、Redis、队列或真实第三方接口。PR #1 继续 Open / Draft，不合并 main、不部署。
