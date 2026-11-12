@@ -22,8 +22,17 @@ def _get_database_bootstrap_target(database_uri: str):
     if not database_name:
         raise ValueError("MySQL 数据库 URI 必须指定目标数据库名")
 
-    # URL.set 保留用户名、密码、主机、端口及 query 参数，只移除默认数据库。
-    return url.set(database=None), database_name
+    # URL.set(database=None) 表示“保留原值”，并不会清除数据库名。
+    # 重新创建 URL，显式不传 database，避免连接阶段自动选择目标库。
+    server_url = type(url).create(
+        drivername=url.drivername,
+        username=url.username,
+        password=url.password,
+        host=url.host,
+        port=url.port,
+        query=url.query,
+    )
+    return server_url, database_name
 
 
 async def create_database():
