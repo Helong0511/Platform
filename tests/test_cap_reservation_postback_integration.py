@@ -392,11 +392,6 @@ async def test_pending_reservations_raise_redis_rebuild_baseline_not_db_snapshot
 
     monkeypatch.setattr(cap_manager.RedisCapManager, "check_and_increment_daily", daily)
 
-    monkeypatch.setattr(
-        cap_manager.CapReservationLedger,
-        "count_uncommitted_for_scope",
-        _no_pending_reservations,
-    )
     ok, status, reservations = await cap_manager.increment_cap_count(
         db=db,
         offer_id=77,
