@@ -173,3 +173,30 @@
 - MySQL server crash、逻辑备份导入恢复、应用 worker pause/resume、旧版本兼容回滚、schema/data diff、大规模数据升级性能仍未完成。
 - 启动时 schema bootstrap / migration runner / readiness 风险仍是发布阻断项。
 - PR #1 继续 Open / Draft；不合并 main、不部署、不访问生产环境；凭据安全专项继续暂缓。
+
+
+## 10. PII 清理真实 MySQL 集成验收（Run #1291）
+
+### 覆盖范围
+
+在 `tests/test_third_party_report_outbox_mysql_integration.py` 增加独立临时数据库测试，使用 CI loopback MySQL 和随机隔离数据库，不连接生产环境。
+
+- 终态第三方上报记录：应清除 PII 载荷，同时保留稳定 `event_key`，并将 `adsid` / `conversion_id` 按策略处理。
+- 活跃 Report Outbox 租约：`report_start_time` 在 300 秒租约内，必须跳过清理。
+- 待重试 Outbox：未耗尽次数且有后续重试时间/配置引用，必须保留载荷。
+- 下游转发日志：存在完全匹配的活动队列目标时必须保留；同一 conversion 但目标不同不得错误阻塞清理。
+- `publisher_id/product_id` 同时为 NULL 的目标必须通过 NULL-safe 相等匹配，防止误清理仍在排队的目标。
+- 使用真实 MySQL 执行 `FOR UPDATE SKIP LOCKED`、子查询 `NOT EXISTS` 和 ORM 更新/提交，断言最终数据库内容。
+
+### CI 证据
+
+- Run #1291：https://github.com/Helong0511/Platform/actions/runs/43149636500
+- Backend：**498 passed、1 skipped、1 warning**；Python Compile 成功。
+- Frontend：npm ci、依赖 Advisory、Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- 新测试在 CI 临时 MySQL 随机数据库内执行，测试结束删除隔离数据库。
+
+### 仍需明确
+
+- 自动 PII 清理默认配置仍为 `THIRD_PARTY_REPORT_PII_RETENTION_DAYS=0`，本轮没有启用任何真实数据清理。
+- 具体保留期限、业务审计需求和法律/合同要求仍需负责人审批；不能仅因技术测试通过就设置生产保留天数。
+- 当前 MySQL 集成测试证明目标匹配、活跃租约保护和基本清理结果，不替代真实备份恢复、长时间并发压力、跨 worker 故障注入。
