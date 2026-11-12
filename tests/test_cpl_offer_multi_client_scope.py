@@ -25,7 +25,7 @@ class _Result:
         return self
 
     def all(self):
-        return self.values if self.values is not None else self.rows or []
+        return self.values if self.values is not None else (self.rows if self.rows is not None else self.unique_rows or [])
 
     def scalar(self):
         return self.scalar_value
