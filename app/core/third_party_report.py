@@ -286,6 +286,22 @@ async def _renew_report_log_lease(
     now = get_app_now_naive().replace(microsecond=0)
     valid_after = now - timedelta(seconds=max(30, lease_seconds))
     async with AsyncSessionLocal() as db:
+        # MySQL DATETIME 默认秒级精度：认领后同一秒内续租会写入相同值，
+        # 某些驱动按 changed rows 返回 rowcount=0。此时只做所有权/有效期确认，
+        # 不把仍然有效的当前租约误判为丢失，也不伪造一次续租。
+        if now <= lease_token:
+            result = await db.execute(
+                select(ThirdPartyReportLog.report_start_time).where(
+                    ThirdPartyReportLog.id == report_log_id,
+                    ThirdPartyReportLog.report_start_time == lease_token,
+                    ThirdPartyReportLog.report_start_time >= valid_after,
+                    ThirdPartyReportLog.pii_scrubbed_at.is_(None),
+                    ThirdPartyReportLog.status.in_(("pending", "failed")),
+                )
+            )
+            current_token = result.scalar_one_or_none()
+            return lease_token if current_token == lease_token else None
+
         result = await db.execute(
             update(ThirdPartyReportLog)
             .where(
