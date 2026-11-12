@@ -343,7 +343,7 @@ def test_short_click_batch_migration_rejects_wrong_same_name_table():
             cursor.execute(
                 "SELECT batch_id, short_code FROM short_link_click_sync_batches"
             )
-            assert cursor.fetchall() == [("keep-this-row", "keep-code")]
+            assert cursor.fetchall() == (("keep-this-row", "keep-code"),)
             cursor.execute(
                 "SELECT COUNT(*) FROM information_schema.COLUMNS "
                 "WHERE TABLE_SCHEMA = DATABASE() "
