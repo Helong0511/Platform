@@ -64,7 +64,7 @@
 2. 密码使用bcrypt加密，无法解密
 3. 删除用户前必须检查关联数据
 4. 用户名和邮箱必须唯一
-5. 客户角色用户只能有一个关联的客户。
+5. 客户角色用户可关联多个客户主体；权限开关按启用状态和账号策略聚合。
 
 说明：REST API 端点，统一 ResponseBaseSchema 响应；鉴权由各端点 Depends 声明。"""
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, Path
@@ -82,12 +82,12 @@ import uuid
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
+from app.core.api_auth import _get_active_user_clients
 from app.core.audit_log import (
     log_create, log_update, log_delete, log_activate, log_deactivate,
     log_user_action, commit_audit_log,
 )
 from app.core.constants import MAX_PAGE_SIZE
-from app.core.async_orm import get_first_loaded_collection_item
 from app.core.utils import optimize_page_size_for_device, get_app_now_naive
 from app.core.dependencies import get_user_service
 from app.services.user_service import UserService
@@ -100,7 +100,25 @@ from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 # 创建路由实例
 router = APIRouter()
 # 获取日志记录器
+
 logger = logging.getLogger(__name__)
+
+
+def _active_client_records(user: User) -> list[Client]:
+    """按 ID 稳定排序，返回当前账号全部启用中的客户主体。"""
+    return sorted(
+        _get_active_user_clients(getattr(user, "clients", None)),
+        key=lambda client: int(getattr(client, "id", 0) or 0),
+    )
+
+
+def _effective_password_change_enabled(user: User, active_clients: list[Client]) -> bool:
+    """与 UserService.change_password 保持一致：所有关联客户均允许且至少有一个启用客户。"""
+    all_clients = getattr(user, "clients", None) or []
+    return bool(active_clients) and bool(all_clients) and all(
+        bool(getattr(client, "password_change_enabled", False))
+        for client in all_clients
+    )
 
 
 @router.get("/", response_model=PaginatedResponseBaseSchema[list[UserResponse]], summary="获取用户列表")
@@ -153,12 +171,11 @@ async def get_users(
         api_enabled = False
         password_change_enabled = False
         if user.role == UserRole.CLIENT:
-            # 客户信息已通过selectinload预加载，直接访问
-            client = get_first_loaded_collection_item(user, "clients")
+            active_clients = _active_client_records(user)
+            client = active_clients[0] if active_clients else None
+            api_enabled = any(bool(item.api_enabled) for item in active_clients)
+            password_change_enabled = _effective_password_change_enabled(user, active_clients)
             if client:
-                # 确保从数据库获取最新的开关状态（布尔值）
-                api_enabled = bool(client.api_enabled) if client.api_enabled is not None else False
-                password_change_enabled = bool(client.password_change_enabled) if client.password_change_enabled is not None else False
                 client_data = {
                     'id': client.id,
                     'has_api_key': bool(client.key),
@@ -167,8 +184,8 @@ async def get_users(
                     'phone': client.phone,
                     'address': client.address,
                     'is_active': client.is_active,
-                    'api_enabled': api_enabled,  # 包含API开关状态（确保是布尔值）
-                    'password_change_enabled': password_change_enabled  # 包含密码修改开关状态（确保是布尔值）
+                    'api_enabled': api_enabled,
+                    'password_change_enabled': password_change_enabled
                 }
 
         # 构建用户数据（包含客户信息）
@@ -295,8 +312,8 @@ async def export_users_excel(
     data = []
     # ---------- 循环处理 ----------
     for user in users:
-        # 客户信息已通过selectinload预加载，直接访问
-        client = get_first_loaded_collection_item(user, "clients") if user.role == UserRole.CLIENT else None
+        # 管理员导出时展示该账号全部启用中的客户主体。
+        clients = _active_client_records(user) if user.role == UserRole.CLIENT else []
 
         row = {
             "用户ID": user.id,
@@ -310,12 +327,12 @@ async def export_users_excel(
 
         # 如果是客户，添加客户信息
         # ---------- 条件分支 ----------
-        if client:
+        if clients:
             row.update({
-                "公司名称": client.company_name or "",
-                "联系人": client.contact_person or "",
-                "联系电话": client.phone or "",
-                "地址": client.address or "",
+                "公司名称": "、".join(filter(None, (item.company_name for item in clients))),
+                "联系人": "、".join(filter(None, (item.contact_person for item in clients))),
+                "联系电话": "、".join(filter(None, (item.phone for item in clients))),
+                "地址": "、".join(filter(None, (item.address for item in clients))),
             })
         else:
             row.update({
@@ -367,16 +384,16 @@ async def get_current_user_info(
     has_publisher = False
     # ---------- 条件分支 ----------
     if user.role == UserRole.CLIENT:
-        # 客户信息已通过selectinload预加载，直接访问
-        client = get_first_loaded_collection_item(user, "clients")
-        # ---------- 条件分支 ----------
+        active_clients = _active_client_records(user)
+        client = active_clients[0] if active_clients else None
+        api_enabled = any(bool(item.api_enabled) for item in active_clients)
+        password_change_enabled = _effective_password_change_enabled(user, active_clients)
+        if active_clients:
+            # 渠道能力按全部启用中的客户主体聚合，避免仅检查集合首项。
+            has_publisher = await user_service.check_client_has_publisher(
+                [item.id for item in active_clients]
+            )
         if client:
-            api_enabled = client.api_enabled  # 获取API开关状态
-            password_change_enabled = client.password_change_enabled  # 获取密码修改开关状态
-            
-            # 检查该客户是否有关联的渠道（只检查激活的渠道）- 使用服务层
-            has_publisher = await user_service.check_client_has_publisher(client.id)
-            
             client_data = {
                 'id': client.id,
                 'has_api_key': bool(client.key),
@@ -385,9 +402,9 @@ async def get_current_user_info(
                 'phone': client.phone,
                 'address': client.address,
                 'is_active': client.is_active,
-                'api_enabled': client.api_enabled,  # 包含API开关状态
-                'password_change_enabled': client.password_change_enabled,  # 包含密码修改开关状态
-                'has_publisher': has_publisher  # 是否有关联的渠道
+                'api_enabled': api_enabled,
+                'password_change_enabled': password_change_enabled,
+                'has_publisher': has_publisher
             }
 
     # 构建用户数据（包含客户信息）- 使用从数据库查询的user对象
@@ -476,12 +493,11 @@ async def get_user(
     password_change_enabled = False
     # ---------- 条件分支 ----------
     if user.role == UserRole.CLIENT:
-        # 客户信息已通过selectinload预加载，直接访问
-        client = get_first_loaded_collection_item(user, "clients")
-        # ---------- 条件分支 ----------
+        active_clients = _active_client_records(user)
+        client = active_clients[0] if active_clients else None
+        api_enabled = any(bool(item.api_enabled) for item in active_clients)
+        password_change_enabled = _effective_password_change_enabled(user, active_clients)
         if client:
-            api_enabled = client.api_enabled  # 获取API开关状态
-            password_change_enabled = client.password_change_enabled  # 获取密码修改开关状态
             client_data = {
                 'id': client.id,
                 'has_api_key': bool(client.key),
@@ -490,8 +506,8 @@ async def get_user(
                 'phone': client.phone,
                 'address': client.address,
                 'is_active': client.is_active,
-                'api_enabled': client.api_enabled,  # 包含API开关状态
-                'password_change_enabled': client.password_change_enabled  # 包含密码修改开关状态
+                'api_enabled': api_enabled,
+                'password_change_enabled': password_change_enabled
             }
 
     # 构建用户数据（包含客户信息）
@@ -582,7 +598,8 @@ async def create_user(
     }
     
     # 如果创建了客户，添加客户信息到响应中
-    client = get_first_loaded_collection_item(user, "clients")
+    active_clients = _active_client_records(user)
+    client = active_clients[0] if active_clients else None
     if client:
         user_dict['client'] = {
             'id': client.id,
