@@ -395,7 +395,7 @@ async def diagnostic_bot(
             if webhook_url:
                 recommendations.append("⚠️ 检测到 Webhook，这可能阻止 polling 工作；请在 Telegram 管理端确认并按需删除")
         except Exception as e:
-            logger.warning(f"检查 webhook 时出错: {e}")
+            logger.warning("检查 webhook 时出错: error_type=%s", type(e).__name__)
 
         # 6. 检查消息处理器（PTB Application.handlers）
         handlers_count = count_application_handlers(bot_state_mod.application)
