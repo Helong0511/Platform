@@ -755,3 +755,30 @@ PR 继续 Open / Draft；不合并 main、不部署。所有验证仅使用 GitH
 - Run #1212（SHA `d536a021eddddb0f24d5da005f32fad92a90d745`）：Backend **464 passed、1 skipped、1 warning**；Python Compile、Frontend Lint/Build、Playwright Mock API Browser E2E 全部通过。
 - Run #1212：https://github.com/Helong0511/Platform/actions/runs/43141328240。
 - 完整 Cloudflare CIDR 集合断言是其后新增的测试，必须以包含该测试的最新 CI 为准，不能把 Run #1212 当作该新增测试的验收证据。
+
+
+
+## 32. 多 Client 用户的转化统计租户范围修复（2026-11-12，Run #1217）
+
+### 发现的问题
+
+- `User.clients` 与 `Client.user` 是一对多关系，单个客户用户可以关联多个 Client。
+- 转化总览与按 Offer 汇总原先使用 `SELECT Client.id ... LIMIT 1` 任取一条 Client，再只查询该 Client 的 Publisher。
+- 对关联多个 Client 的用户，统计会因数据库返回顺序而只显示其中一部分客户渠道，导致同一用户不同统计接口范围不完整/不一致。
+
+### 修复
+
+- 两个转化统计入口均查询该用户的全部 Client ID。
+- Publisher 查询统一使用 `Publisher.client_id IN (client_ids)`；转化总览的 Cap 展示汇总也使用全部 Client ID。
+- 保留无 Client 记录或无可见 Publisher 时返回空统计/空列表的 fail-closed 行为，不会退化为全局查询。
+- 新增多 Client 用户回归测试，验证查询不再带 `LIMIT 1`，并且 Publisher 范围按全部归属 Client ID 过滤；更新无 Client 记录测试夹具。
+
+### CI 证据
+
+- Run #1217（SHA `67558d8659e99d949df7588a2560566a7aa17390`）：Backend **466 passed、1 skipped、1 warning**；Python Compile、Frontend Lint/Build、Playwright Mock API Browser E2E 全部通过。
+- Run #1217：https://github.com/Helong0511/Platform/actions/runs/43141592737。
+
+### 仍需复核
+
+- 当前修复覆盖 ConversionService 的转化总览与按 Offer 汇总；仍需全仓检查其它以 `Client.user_id` 取单条记录或以 first-loaded Client 作为唯一租户范围的查询，确认多 Client 账号的列表、产品、统计、结算与导出范围一致。
+- PR 继续 Open / Draft；不合并 main、不部署。
