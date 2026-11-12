@@ -630,3 +630,34 @@ PR 继续 Open / Draft；不合并 main、不部署。所有验证仅使用 GitH
 
 - 继续对结算、归因、导入导出、外部回调与其它业务 API 做相同检查；本轮只覆盖已确认的点击记录与扣减 API。
 - PR 继续 Open / Draft，不合并、不部署；不得连接生产服务器、数据库、Redis、队列或真实第三方接口。
+
+
+
+## 29. 破坏性集成测试的目标环境强制隔离（2026-11-12，Run #1190）
+
+### 发现与修复
+
+- 原 MySQL 迁移集成测试会 DROP/重建 `third_party_report_logs`、`postback_forward_logs` 和 `cap_reservations`；此前主要依赖 `MYSQL_INTEGRATION_HOST` 存在判断是否运行，没有从测试代码层强制限制 loopback 主机和隔离数据库名。
+- Cap Reservation MySQL + Redis 集成测试会动态 CREATE/DROP 测试数据库并写入/删除 Redis 测试键；此前仅检查两个连接环境变量是否存在。
+- Redis 集成测试会直接写入、删除 Redis key；此前没有验证 URL 指向本机 Redis DB 14。
+
+现已完成以下防护：
+
+1. MySQL 迁移测试必须同时满足 `UNIT_TEST=1`、明确的破坏性测试授权、MySQL host 为 loopback、数据库名严格等于 `platform_ci`；GitHub Actions 测试模式下若目标配置不安全，直接失败，不静默跳过。
+2. Cap Reservation 跨存储测试必须同时满足 MySQL loopback + `platform_ci`、Redis loopback + DB 14，以及 MySQL/Redis 两项明确授权；否则禁止执行。
+3. Redis 集成测试必须满足 loopback Redis DB 14、`UNIT_TEST=1` 和显式 Redis 授权；否则禁止执行。
+4. 新增地址白名单回归测试，覆盖 IPv4 loopback、IPv6 loopback、localhost、远程 IPv4、远程 hostname、错误 DB 编号、非 Redis URL 和缺失地址。
+5. GitHub Actions 只对临时服务设置授权变量：MySQL `127.0.0.1/platform_ci`，Redis `127.0.0.1:6379/14`。应用默认 Redis DB 15 与集成 DB 14 继续隔离。
+
+### CI 证据
+
+- Run #1186（SHA `e7017d3514c46a812196a4ee6c07b9a06a39d16b`）：Backend **444 passed、1 skipped、1 warning**；Frontend Lint/Build/Playwright Mock API E2E 全部通过。验证了 MySQL 迁移测试的 loopback / database / 显式授权防护。
+- Run #1190（SHA `4d633598fa576e7a212d3c480a4c565dc40bc41c`）：Backend **459 passed、1 skipped、1 warning**；Python Compile、Frontend Lint/Build、Playwright Mock API Browser E2E 全部通过。
+- Run #1190：https://github.com/Helong0511/Platform/actions/runs/43138500303。
+- 唯一 Skip 是本地核对脚本未提交（CI 不依赖）；warning 是 passlib 在 Python 3.11 使用 crypt 的弃用提示。
+
+### 当前边界
+
+- 该保护降低测试误连外部/生产资源的风险；CI 本身仍只验证代码、临时服务和合成数据，不能替代生产发布前的网络隔离、权限与基础设施审计。
+- 迁移全流程备份恢复、逐 DDL 中断、应用兼容回滚、Outbox 多 Worker 配置生命周期及 Cap Redis/MySQL 组合故障仍未全部验收。
+- PR 继续 Open / Draft；不合并 main、不部署；凭据安全专项继续按既定范围暂缓。
