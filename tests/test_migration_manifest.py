@@ -47,8 +47,6 @@ def test_manifest_rejects_unregistered_sql_file(tmp_path: Path):
     target.parent.mkdir(parents=True)
     target.write_text("-- synthetic migration\n", encoding="utf-8")
 
-    import hashlib
-
     migration = replace(
         migration,
         sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
@@ -62,8 +60,6 @@ def test_manifest_rejects_unregistered_sql_file(tmp_path: Path):
 
 
 def test_manifest_rejects_unknown_or_forward_dependency(tmp_path: Path):
-    import hashlib
-
     entries = []
     for revision in ("20261110_first", "20261111_second"):
         path = f"sql/migrations/{revision}.sql"
@@ -92,7 +88,6 @@ def test_manifest_is_explicit_and_contains_no_unreviewed_files():
 
 def test_manifest_rejects_revision_path_mismatch(tmp_path: Path):
     revision = "20261110_example"
-    expected_path = tmp_path / "sql/migrations" / f"{revision}.sql"
     wrong_path = tmp_path / "sql/migrations" / "other_revision.sql"
     wrong_path.parent.mkdir(parents=True)
     wrong_path.write_text("-- matching bytes not enough\n", encoding="utf-8")
