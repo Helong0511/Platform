@@ -304,7 +304,7 @@ class RedisCapManager:
             if current < 0:
                 return False
             return True
-        except _CapReservationStateLost:
+        except (_CapReservationStateLost, _CapReservationAlreadyRolledBack):
             raise
         except Exception as e:
             logger.error("Redis 总 Cap 预留结果不确定，使用唯一令牌执行幂等补偿：%s", e, exc_info=True)
