@@ -291,6 +291,39 @@ def test_outbox_migration_rejects_wrong_same_name_due_index():
         connection.close()
 
 
+def test_outbox_migration_rejects_prefix_same_name_due_index():
+    """列名正确但带前缀的同名 Outbox 索引不能冒充完整索引。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+            cursor.execute(
+                "CREATE TABLE third_party_report_logs ("
+                "id INT NOT NULL AUTO_INCREMENT, outbox_enqueued TINYINT(1) NOT NULL DEFAULT 0, "
+                "status VARCHAR(20) NOT NULL DEFAULT 'pending', next_retry_time DATETIME NULL, "
+                "report_start_time DATETIME NULL, PRIMARY KEY (id), "
+                "KEY idx_third_party_outbox_due "
+                "(outbox_enqueued, status(5), next_retry_time, report_start_time, id)) "
+                "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            with pytest.raises(pymysql.err.OperationalError) as migration_error:
+                _run_sql_file(cursor, "sql/migrations/20261111_third_party_report_outbox.sql")
+            assert migration_error.value.args[0] == 1061
+            cursor.execute("SHOW INDEX FROM third_party_report_logs")
+            indexes = [
+                row for row in cursor.fetchall()
+                if row[2] == "idx_third_party_outbox_due"
+            ]
+            assert len(indexes) == 5
+            status_index = next(row for row in indexes if row[4] == "status")
+            assert status_index[7] == 5
+            assert all(row[1] == 1 for row in indexes)
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+        connection.close()
+
+
 def test_pii_migration_rejects_wrong_same_name_retention_index():
     """错误的同名 PII 扫描索引必须阻断迁移，避免跳过必要索引。"""
     connection = _connect()
