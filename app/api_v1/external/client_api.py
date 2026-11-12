@@ -99,7 +99,10 @@ async def _background_client_api_side_effects(
             )
             await commit_audit_log(bg_db)
     except Exception as log_error:
-        logger.warning(f"后台记录客户API访问日志失败: {log_error}")
+        logger.warning(
+            "后台记录客户 API 访问日志失败：error_type=%s",
+            type(log_error).__name__,
+        )
 
     if telegram_msg:
         try:
@@ -110,7 +113,10 @@ async def _background_client_api_side_effects(
         except asyncio.TimeoutError:
             logger.warning("后台发送 Telegram 通知超时")
         except Exception as notify_error:
-            logger.warning(f"后台发送 Telegram 通知失败: {notify_error}")
+            logger.warning(
+                "后台发送 Telegram 通知失败：error_type=%s",
+                type(notify_error).__name__,
+            )
 
 
 @router.get(
@@ -309,10 +315,13 @@ async def get_client_products(
         # ---------- 条件分支 ----------
         if isinstance(e, HTTPException):
             raise e
-        logger.error(f"查询产品列表失败: {str(e)}", exc_info=True)
+        logger.error(
+            "查询产品列表失败：error_type=%s",
+            type(e).__name__,
+        )
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"查询产品列表失败：{str(e)}"
+            detail="查询产品列表失败，请稍后重试",
         )
 
 
@@ -516,7 +525,10 @@ async def get_client_data(
         # ---------- 条件分支 ----------
         if isinstance(e, HTTPException):
             raise e
-        logger.error(f"查询广告数据失败: {str(e)}", exc_info=True)
+        logger.error(
+            "查询广告数据失败：error_type=%s",
+            type(e).__name__,
+        )
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail="查询广告数据失败，请稍后重试"
