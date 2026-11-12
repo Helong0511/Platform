@@ -64,16 +64,21 @@ class AdvertiserService(BaseService[Advertiser]):
         """注入异步数据库会话。"""
         super().__init__(db, Advertiser)
 
-    async def _client_id_for_user(self, user: User) -> Optional[int]:
+    async def _client_ids_for_user(self, user: User) -> List[int]:
+        """返回客户账号全部启用中的 Client ID。"""
         if user.role != UserRole.CLIENT:
-            return None
+            return []
         result = await self.db.execute(
-            select(Client.id).where(Client.user_id == user.id).limit(1)
+            select(Client.id)
+            .where(Client.user_id == user.id, Client.is_active.is_(True))
+            .order_by(Client.id.asc())
         )
-        return result.scalar_one_or_none()
+        return [int(value) for value in result.scalars().all()]
 
-    async def _advertiser_ids_for_client(self, client_id: int) -> List[int]:
-        """客户渠道已分配 Offer 关联的广告主 ID。"""
+    async def _advertiser_ids_for_clients(self, client_ids: List[int]) -> List[int]:
+        """客户全部启用主体下已分配 Offer 关联的广告主 ID。"""
+        if not client_ids:
+            return []
         result = await self.db.execute(
             select(Offer.advertiser_id)
             .join(
@@ -83,7 +88,7 @@ class AdvertiserService(BaseService[Advertiser]):
             .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
             .where(
                 and_(
-                    Publisher.client_id == client_id,
+                    Publisher.client_id.in_(client_ids),
                     Publisher.is_active == True,  # noqa: E712
                     OfferPublisherAssignment.is_active == True,  # noqa: E712
                 )
@@ -119,8 +124,8 @@ class AdvertiserService(BaseService[Advertiser]):
             )
 
         if current_user.role == UserRole.CLIENT:
-            client_id = await self._client_id_for_user(current_user)
-            allowed = set(await self._advertiser_ids_for_client(client_id)) if client_id else set()
+            client_ids = await self._client_ids_for_user(current_user)
+            allowed = set(await self._advertiser_ids_for_clients(client_ids))
             if advertiser.id not in allowed:
                 raise_api_exception(
                     ErrorCode.RESOURCE_NOT_FOUND,
@@ -160,8 +165,8 @@ class AdvertiserService(BaseService[Advertiser]):
         conditions = []
 
         if current_user.role == UserRole.CLIENT:
-            client_id = await self._client_id_for_user(current_user)
-            allowed_ids = await self._advertiser_ids_for_client(client_id) if client_id else []
+            client_ids = await self._client_ids_for_user(current_user)
+            allowed_ids = await self._advertiser_ids_for_clients(client_ids)
             if not allowed_ids:
                 return [], 0
             conditions.append(Advertiser.id.in_(allowed_ids))
