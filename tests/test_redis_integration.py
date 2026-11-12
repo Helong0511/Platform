@@ -5,8 +5,10 @@
 """
 from __future__ import annotations
 
+import ipaddress
 import os
 import uuid
+from urllib.parse import urlsplit
 
 import pytest
 from redis.asyncio import Redis
@@ -17,9 +19,50 @@ from app.core.infrastructure.cache_advanced import DistributedLock
 
 
 REDIS_URL = os.getenv("REDIS_INTEGRATION_URL")
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    if not host:
+        return False
+    if host.strip().lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip()).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_isolated_redis_url(url: str | None) -> bool:
+    if not url:
+        return False
+    try:
+        parsed = urlsplit(url)
+        return (
+            parsed.scheme in {"redis", "rediss"}
+            and _is_loopback_host(parsed.hostname)
+            and parsed.port in (None, 6379)
+            and parsed.path.strip("/") == "14"
+        )
+    except ValueError:
+        return False
+
+
+_SAFE_REDIS_TARGET = (
+    os.getenv("UNIT_TEST") == "1"
+    and os.getenv("REDIS_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS") == "1"
+    and _is_isolated_redis_url(REDIS_URL)
+)
+
+# 这些测试会向 Redis 写入并删除 key；禁止因环境变量误配置而连接远程/生产 Redis。
+if os.getenv("UNIT_TEST") == "1" and (REDIS_URL or os.getenv("GITHUB_ACTIONS") == "true") and not _SAFE_REDIS_TARGET:
+    raise RuntimeError(
+        "拒绝执行 Redis 集成测试：必须使用 loopback Redis DB14，"
+        "并显式设置 REDIS_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS=1"
+    )
+
 pytestmark = pytest.mark.skipif(
-    not REDIS_URL,
-    reason="仅在显式配置的隔离 Redis 集成环境中运行",
+    not _SAFE_REDIS_TARGET,
+    reason="仅在显式授权的本机隔离 Redis DB14 中运行",
 )
 
 
