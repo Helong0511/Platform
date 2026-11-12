@@ -149,7 +149,7 @@ def _is_client_ip_allowed(allowed_ips: str | None, client_ip: str | None) -> boo
             allowed.add(ipaddress.ip_address(entry))
         except ValueError:
             # 管理配置中只要存在非法条目就拒绝，避免错误配置意外扩大访问范围。
-            logger.error("客户 IP 白名单配置无效：拒绝 API 访问")
+            logger.error("客户 IP 白名单配置无效：拒绝访问")
             return False
 
     # IPv4-mapped IPv6 地址按其 IPv4 地址匹配，避免双栈代理造成误拒绝。
