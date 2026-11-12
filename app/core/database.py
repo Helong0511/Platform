@@ -28,6 +28,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.dialects.mysql import aiomysql as sqlalchemy_aiomysql
 from sqlalchemy.future import select
+from sqlalchemy.exc import IntegrityError
 from app.core.config import settings
 from collections.abc import AsyncGenerator  # Python 3.10+ 推荐使用 collections.abc
 from fastapi import HTTPException
@@ -229,6 +230,16 @@ async def create_tables():
     logger.info("Database tables created successfully")
 
 
+def _is_duplicate_key_integrity_error(exc: IntegrityError) -> bool:
+    """仅识别唯一键竞争；其它完整性错误必须继续抛出。"""
+    original = getattr(exc, "orig", exc)
+    args = getattr(original, "args", ())
+    if args and args[0] == 1062:
+        return True
+    message = str(original).lower()
+    return "duplicate entry" in message or "unique constraint failed" in message
+
+
 async def init_db():
     """
     初始化数据库
@@ -270,8 +281,22 @@ async def init_db():
             # 设置密码（自动加密）
             admin.set_password(settings.FIRST_SUPERUSER_PASSWORD)
             session.add(admin)
-            await session.commit()
-            logger.info(f"默认管理员账户已创建: {settings.FIRST_SUPERUSER}")
+            try:
+                await session.commit()
+                logger.info(f"默认管理员账户已创建: {settings.FIRST_SUPERUSER}")
+            except IntegrityError as exc:
+                await session.rollback()
+                if not _is_duplicate_key_integrity_error(exc):
+                    raise
+                # 多个 Worker 同时启动时可能同时读到“无管理员”；
+                # 唯一键只允许一个 Worker 创建成功，其它 Worker 回滚后确认结果即可。
+                concurrent_result = await session.execute(
+                    select(User).where(User.role == UserRole.ADMIN)
+                )
+                concurrent_admin = concurrent_result.scalars().first()
+                if concurrent_admin is None:
+                    raise
+                logger.info("默认管理员账户已由其它 Worker 并发创建")
         else:
             logger.info("管理员账户已存在，跳过创建")
 
