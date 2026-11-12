@@ -49,6 +49,7 @@ def _is_isolated_redis_url(url: str | None) -> bool:
 
 _SAFE_REDIS_TARGET = (
     os.getenv("UNIT_TEST") == "1"
+    and os.getenv("GITHUB_ACTIONS") == "true"
     and os.getenv("REDIS_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS") == "1"
     and _is_isolated_redis_url(REDIS_URL)
 )
@@ -62,7 +63,7 @@ if os.getenv("UNIT_TEST") == "1" and (REDIS_URL or os.getenv("GITHUB_ACTIONS") =
 
 pytestmark = pytest.mark.skipif(
     not _SAFE_REDIS_TARGET,
-    reason="仅在显式授权的本机隔离 Redis DB14 中运行",
+    reason="仅在 GitHub Actions 临时 Redis DB14 服务中运行",
 )
 
 
