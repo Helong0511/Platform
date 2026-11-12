@@ -863,7 +863,7 @@ async def test_outbox_payload_scrubbed_after_read_cannot_reach_remote_sender(mon
     async def claim_after_scrub(report_log_id):
         assert report_log_id == 301
         # 与真实条件 UPDATE 等价：已清理的事件无法再获得发送租约。
-        return row.pii_scrubbed_at is None
+        return datetime(2026, 11, 11, 12, 0, 0) if row.pii_scrubbed_at is None else None
 
     async def status_pending(report_log_id):
         return "pending"
