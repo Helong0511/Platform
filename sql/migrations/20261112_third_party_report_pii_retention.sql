@@ -8,6 +8,7 @@ SET @has_col = (
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = 'third_party_report_logs'
       AND COLUMN_NAME = 'pii_scrubbed_at'
+      AND COLUMN_TYPE = 'datetime' AND IS_NULLABLE = 'YES'
 );
 SET @ddl = IF(
     @has_col = 0,
