@@ -114,6 +114,9 @@ async def test_scrub_clears_payload_but_preserves_event_identity(monkeypatch):
     assert "third_party_report_logs.created_at <" in sql
     assert "third_party_report_logs.status in" in sql
     assert "third_party_report_logs.attempt_count >= third_party_report_logs.max_attempts" in sql
+    # 发送 worker 的 300 秒租约尚未过期时，PII 清理不得抢先擦除其内存载荷。
+    assert "third_party_report_logs.report_start_time is null" in sql
+    assert "third_party_report_logs.report_start_time <" in sql
     assert "for update skip locked" in sql
 
 
