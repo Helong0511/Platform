@@ -8,6 +8,7 @@ from app.api_v1.clients import clients as clients_api
 from app.models.models import Publisher, UserRole
 from app.services.cpl.publisher_service import PublisherService
 from app.services.user_service import UserService
+from app.api_v1.users.users import _active_client_records, _effective_password_change_enabled
 
 
 class _Scalars:
@@ -186,3 +187,21 @@ async def test_user_service_publisher_flag_aggregates_multiple_client_ids():
     sql = _compiled_sql(db.statements[0])
     assert "publishers.client_id IN (101, 202)" in sql
     assert "publishers.is_active = true" in sql
+
+
+
+def test_user_response_helpers_use_all_active_clients_and_effective_password_policy():
+    user = SimpleNamespace(
+        clients=[
+            SimpleNamespace(id=30, is_active=True, api_enabled=True, password_change_enabled=True),
+            SimpleNamespace(id=10, is_active=False, api_enabled=True, password_change_enabled=False),
+            SimpleNamespace(id=20, is_active=True, api_enabled=False, password_change_enabled=True),
+        ]
+    )
+
+    active_clients = _active_client_records(user)
+
+    assert [client.id for client in active_clients] == [20, 30]
+    assert any(client.api_enabled for client in active_clients) is True
+    # 密码修改规则与 UserService.change_password 一致：所有关联客户均须允许。
+    assert _effective_password_change_enabled(user, active_clients) is False
