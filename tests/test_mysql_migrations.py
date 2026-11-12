@@ -780,6 +780,38 @@ def test_cap_reservation_migration_is_idempotent_and_matches_mysql_schema():
 
 
 
+
+def test_cap_reservation_migration_rejects_non_unique_same_name_unique_index():
+    """同名同列但唯一性错误的索引必须被拒绝，不能只比较索引名称与列顺序。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+            _run_sql_file(cursor, "sql/migrations/20261111_cap_reservation_ledger.sql")
+            cursor.execute("ALTER TABLE cap_reservations DROP INDEX uq_cap_reservation_key")
+            cursor.execute(
+                "ALTER TABLE cap_reservations ADD INDEX uq_cap_reservation_key (reservation_key)"
+            )
+            with pytest.raises(pymysql.err.ProgrammingError) as migration_error:
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261111_cap_reservation_ledger.sql",
+                )
+            assert migration_error.value.args[0] == 1146
+            cursor.execute(
+                "SHOW INDEX FROM cap_reservations WHERE Key_name = %s",
+                ("uq_cap_reservation_key",),
+            )
+            rows = cursor.fetchall()
+            assert len(rows) == 1
+            assert rows[0][1] == 1  # NON_UNIQUE：原错误索引仍存在且未被迁移改写
+            assert rows[0][4] == "reservation_key"
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+        connection.close()
+
+
 def test_cap_reservation_migration_rejects_wrong_same_name_table():
     """同名但结构错误的 Cap 账本表必须阻断迁移，不能被 IF NOT EXISTS 静默放过。"""
     connection = _connect()
