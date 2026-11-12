@@ -976,3 +976,14 @@ PR #1 继续 Open / Draft，不合并 main、不部署。所有验证继续仅�
 - Run #1341（SHA b2df034da4117f4d4651c475725b47a4e9f12972）：Backend **520 passed、1 skipped、1 warning**；Python Compile、Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。Run：https://github.com/Helong0511/Platform/actions/runs/43156414244。该 Run 覆盖本节 TB 搜索变更及此前同一 HEAD 的广告主/转化/广告数据/Dashboard/产品客户范围修复。
 
 验证仅限 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
+
+
+## 42. 广告数据详情对停用客户的实时授权检查（2026-11-12，Run #1344）
+
+- 复核发现广告数据详情按 ID 查询时，先校验数据/产品/客户关联存在，再仅检查 Client.user_id；当同一账号仍有其它启用客户时，可能读取其名下已停用 Client 的历史数据详情。
+- DetailQueryBuilder.fetch_and_authorize 现在对非管理员同时校验 Client.user_id 与 Client.is_active；停用客户数据仍保留在库中，但不再通过普通客户会话读取详情。管理员仍可查看历史记录。
+- 新增回归测试：用户仍是启用状态且拥有匹配 user_id，但详情关联 Client.is_active=false 时必须拒绝访问。
+- Run #1344（SHA 7dbea86a4434fbd0925c2ca2d4e6e11ff0afe5da）：Backend **521 passed、1 skipped、1 warning**；Python Compile、Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。Run：https://github.com/Helong0511/Platform/actions/runs/43156705774。
+- 1 skipped 为本地核对脚本未提交（CI 不依赖）；1 warning 为 passlib/Python 3.11 crypt 弃用提示。
+
+验证仅限 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
