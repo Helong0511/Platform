@@ -150,10 +150,10 @@ async def get_bot_status(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"查询 Telegram Bot 状态时发生错误: {e}", exc_info=True)
+        logger.error("查询 Telegram Bot 状态时发生错误: error_type=%s", type(e).__name__)
         raise_api_exception(
             error_code=ErrorCode.INTERNAL_ERROR,
-            message=f"查询状态失败: {str(e)}"
+            message="查询状态失败，请稍后重试"
         )
 
 
@@ -230,10 +230,10 @@ async def send_message(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"发送 Telegram 消息时发生错误: {e}", exc_info=True)
+        logger.error("发送 Telegram 消息时发生错误: error_type=%s", type(e).__name__)
         raise_api_exception(
             error_code=ErrorCode.INTERNAL_ERROR,
-            message=f"发送消息失败: {str(e)}"
+            message="发送消息失败，请稍后重试"
         )
 
 
@@ -303,10 +303,10 @@ async def test_bot_connection(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"测试 Telegram Bot 连接时发生错误: {e}", exc_info=True)
+        logger.error("测试 Telegram Bot 连接时发生错误: error_type=%s", type(e).__name__)
         raise_api_exception(
             error_code=ErrorCode.INTERNAL_ERROR,
-            message=f"测试连接失败: {str(e)}"
+            message="测试连接失败，请稍后重试"
         )
 
 
@@ -413,8 +413,8 @@ async def diagnostic_bot(
             bot_info = run_on_send_loop(send_bot.get_me(), timeout=15.0)
             connection_test = f"成功: @{bot_info.username} (ID: {bot_info.id})"
         except Exception as e:
-            connection_test = f"失败: {str(e)}"
-            recommendations.append(f"❌ Bot 连接测试失败: {str(e)}")
+            connection_test = "失败：请检查 Bot 配置和网络连接"
+            recommendations.append("❌ Bot 连接测试失败，请检查 Bot 配置和网络连接")
 
         # 8. 给出修复建议
         # ---------- 条件分支 ----------
@@ -442,10 +442,10 @@ async def diagnostic_bot(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"诊断 Telegram Bot 时发生错误: {e}", exc_info=True)
+        logger.error("诊断 Telegram Bot 时发生错误: error_type=%s", type(e).__name__)
         raise_api_exception(
             error_code=ErrorCode.INTERNAL_ERROR,
-            message=f"诊断失败: {str(e)}"
+            message="诊断失败，请稍后重试"
         )
 
 
@@ -521,10 +521,10 @@ async def reset_webhook(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"删除 Webhook 时发生错误: {e}", exc_info=True)
+        logger.error("删除 Webhook 时发生错误: error_type=%s", type(e).__name__)
         raise_api_exception(
             error_code=ErrorCode.INTERNAL_ERROR,
-            message=f"删除 Webhook 失败: {str(e)}"
+            message="删除 Webhook 失败，请稍后重试"
         )
 
 
@@ -625,10 +625,10 @@ async def send_alert(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"发送系统告警时发生错误: {e}", exc_info=True)
+        logger.error("发送系统告警时发生错误: error_type=%s", type(e).__name__)
         raise_api_exception(
             error_code=ErrorCode.INTERNAL_ERROR,
-            message=f"发送系统告警失败: {str(e)}"
+            message="发送系统告警失败，请稍后重试"
         )
 
 
@@ -724,8 +724,8 @@ async def send_batch_notifications(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"发送批量转化通知时发生错误: {e}", exc_info=True)
+        logger.error("发送批量转化通知时发生错误: error_type=%s", type(e).__name__)
         raise_api_exception(
             error_code=ErrorCode.INTERNAL_ERROR,
-            message=f"发送批量转化通知失败: {str(e)}"
+            message="发送批量转化通知失败，请稍后重试"
         )
