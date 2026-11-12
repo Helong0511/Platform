@@ -349,7 +349,7 @@ class CapReservationLedger:
                     logger.critical(
                         "转化已提交，但 Redis Reservation token 尚未清理，将由恢复任务重试：%s",
                         reservation_key,
-                        exc_info=True,
+                        # 不输出 Redis 异常文本或 traceback，避免连接信息/业务数据进入日志。
                     )
 
             if row.state == state:
