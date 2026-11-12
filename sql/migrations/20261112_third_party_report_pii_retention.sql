@@ -30,6 +30,8 @@ SET @has_index = (
           AND INDEX_NAME = 'idx_third_party_pii_retention'
         GROUP BY INDEX_NAME
         HAVING COUNT(*) = 3
+           AND MAX(NON_UNIQUE) = 1
+           AND MAX(SUB_PART) IS NULL
            AND GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') = 'pii_scrubbed_at,created_at,id'
     ) AS valid_third_party_pii_index
 );
