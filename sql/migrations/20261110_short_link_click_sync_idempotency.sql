@@ -23,3 +23,67 @@ CREATE TABLE IF NOT EXISTS short_link_click_sync_batches (
     KEY idx_short_click_batch_ack_created (acknowledged_at, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='短链接点击刷盘幂等账本';
+
+-- CREATE TABLE IF NOT EXISTS 不会修复同名错误表；验证字段、默认值、字符集与索引。
+-- 结构不匹配时 fail-closed，不自动 DROP/ALTER，避免误伤旧账本数据。
+SET @short_click_batch_schema_valid = (
+    SELECT
+        (SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches') = 5
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches'
+               AND COLUMN_NAME = 'batch_id' AND COLUMN_TYPE = 'varchar(64)' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches'
+               AND COLUMN_NAME = 'short_code' AND COLUMN_TYPE = 'varchar(20)' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches'
+               AND COLUMN_NAME = 'click_count' AND COLUMN_TYPE = 'int' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches'
+               AND COLUMN_NAME = 'created_at' AND COLUMN_TYPE = 'datetime' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches'
+               AND COLUMN_NAME = 'acknowledged_at' AND COLUMN_TYPE = 'datetime' AND IS_NULLABLE = 'YES') = 1
+        AND (SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches'
+               AND COLUMN_NAME = 'created_at') = 'CURRENT_TIMESTAMP'
+        AND (SELECT TABLE_COLLATION FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches') = 'utf8mb4_unicode_ci'
+        AND (SELECT COUNT(*) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches') = 5
+        AND (SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches') = 3
+        AND (SELECT COUNT(*) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches'
+               AND SUB_PART IS NOT NULL) = 0
+        AND (SELECT COUNT(*) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches'
+               AND INDEX_TYPE <> 'BTREE') = 0
+        AND (SELECT MAX(NON_UNIQUE) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches'
+               AND INDEX_NAME = 'PRIMARY') = 0
+        AND (SELECT COUNT(*) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches'
+               AND INDEX_NAME <> 'PRIMARY' AND NON_UNIQUE <> 1) = 0
+        AND (SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX)
+             FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches'
+               AND INDEX_NAME = 'PRIMARY') = 'batch_id'
+        AND (SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX)
+             FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches'
+               AND INDEX_NAME = 'idx_short_click_batch_code_created') = 'short_code,created_at'
+        AND (SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX)
+             FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_link_click_sync_batches'
+               AND INDEX_NAME = 'idx_short_click_batch_ack_created') = 'acknowledged_at,created_at'
+);
+SET @short_click_batch_validation_sql = IF(
+    @short_click_batch_schema_valid,
+    'SELECT 1',
+    'SELECT * FROM __short_link_click_sync_batches_schema_mismatch__'
+);
+PREPARE short_click_batch_schema_validation FROM @short_click_batch_validation_sql;
+EXECUTE short_click_batch_schema_validation;
+DEALLOCATE PREPARE short_click_batch_schema_validation;
