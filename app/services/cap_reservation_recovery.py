@@ -9,7 +9,7 @@ import logging
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, text
 
 from app.core.cap.redis_counter import RedisCapManager
 from app.core.database import AsyncSessionLocal
@@ -45,13 +45,13 @@ async def recover_cap_reservations(
                         or_(
                             CapReservation.lease_owner.is_(None),
                             CapReservation.lease_expires_at.is_(None),
-                            CapReservation.lease_expires_at <= now,
+                            CapReservation.lease_expires_at <= func.now(),
                         ),
                     ),
                     and_(
                         CapReservation.state == "NEEDS_RECONCILIATION",
-                        CapReservation.updated_at <= now - timedelta(
-                            seconds=RECONCILIATION_RETRY_SECONDS
+                        CapReservation.updated_at <= func.timestampadd(
+                            text("SECOND"), -RECONCILIATION_RETRY_SECONDS, func.now()
                         ),
                         or_(
                             CapReservation.lease_owner.is_(None),
@@ -77,9 +77,11 @@ async def recover_cap_reservations(
         rows = list(result.scalars().all())
         for row in rows:
             row.lease_owner = uuid.uuid4().hex
-            row.lease_expires_at = now + timedelta(seconds=RECOVERY_LEASE_SECONDS)
+            row.lease_expires_at = func.timestampadd(
+                text("SECOND"), RECOVERY_LEASE_SECONDS, func.now()
+            )
             row.attempts = int(row.attempts or 0) + 1
-            row.updated_at = now
+            row.updated_at = func.now()
         await session.commit()
 
     stats = {
