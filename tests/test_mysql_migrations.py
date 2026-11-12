@@ -779,6 +779,37 @@ def test_cap_reservation_migration_is_idempotent_and_matches_mysql_schema():
 
 
 
+
+def test_cap_reservation_migration_rejects_wrong_same_name_table():
+    """同名但结构错误的 Cap 账本表必须阻断迁移，不能被 IF NOT EXISTS 静默放过。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+            cursor.execute(
+                "CREATE TABLE cap_reservations ("
+                "id INT NOT NULL AUTO_INCREMENT, reservation_key VARCHAR(64) NOT NULL, "
+                "PRIMARY KEY (id), UNIQUE KEY uq_cap_reservation_key (reservation_key)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            )
+            with pytest.raises(pymysql.err.OperationalError) as migration_error:
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261111_cap_reservation_ledger.sql",
+                )
+            # 动态验证查询引用故意不存在的哨兵表，错误码 1146 表示 fail-closed。
+            assert migration_error.value.args[0] == 1146
+            cursor.execute(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'"
+            )
+            assert {row[0] for row in cursor.fetchall()} == {"id", "reservation_key"}
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+        connection.close()
+
+
 def test_mysql_outbox_commit_ack_loss_preserves_stable_event_identity():
     """在隔离 MySQL/InnoDB 上注入 COMMIT 响应丢失，验证两种提交结果都可安全恢复。
 
