@@ -175,7 +175,14 @@ async def _resolve_pixel_credentials(
 
 
 async def process_postback_report_outbox_item(report_log_id: int) -> dict:
-    """处理单条 Outbox；并发由 report_start_time 条件 UPDATE 仲裁。"""
+    """先原子认领发送租约，再读取载荷，避免管理端修正与 Worker 快照竞态。"""
+    lease_token = await _claim_report_log(report_log_id)
+    if lease_token is None:
+        from app.core.third_party_report import _get_report_status
+        existing_status = await _get_report_status(report_log_id)
+        if existing_status == "success":
+            return {"success": True, "deduplicated": True, "report_log_id": report_log_id}
+        return {"success": False, "retryable": True, "reason": "report_in_progress"}
     now = get_app_now_naive()
     async with AsyncSessionLocal() as db:
         row = await db.scalar(
@@ -216,9 +223,6 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
     if not (payload["short_link_id"] or (payload["cloak_name"] and payload["short_code"])):
         # 历史脏数据/手工写入可能绕过 enqueue 校验；必须认领并收敛为终态，
         # 否则 due scanner 会每轮重复选中同一条无法处理的记录。
-        lease_token = await _claim_report_log(report_log_id)
-        if lease_token is None:
-            return {"success": False, "retryable": True, "reason": "report_in_progress"}
         now = get_app_now_naive()
         updated = await update_report_log(
             report_log_id,
@@ -245,9 +249,6 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             short_code=payload["short_code"],
         )
     except OutboxConfigReferenceDeleted:
-        lease_token = await _claim_report_log(report_log_id)
-        if lease_token is None:
-            return {"success": False, "retryable": True, "reason": "report_in_progress"}
         now = get_app_now_naive()
         updated = await update_report_log(
             report_log_id,
@@ -275,9 +276,6 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
         pixel_id = access_token = api_version = None
 
     if not pixel_id or not access_token:
-        lease_token = await _claim_report_log(report_log_id)
-        if lease_token is None:
-            return {"success": False, "retryable": True, "reason": "report_in_progress"}
         retry_at = get_app_now_naive() + timedelta(minutes=5)
         updated = await update_report_log(
             report_log_id,
@@ -310,6 +308,7 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
         click_time=payload["click_time"],
         report_log_id=report_log_id,
         event_key=payload["event_key"],
+        report_lease_token=lease_token,
     )
     # 发送函数的成功路径历史上返回 None；读取持久化状态，避免把已成功发送误计为 worker 失败。
     if isinstance(send_result, dict):
