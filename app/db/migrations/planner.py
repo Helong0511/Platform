@@ -19,7 +19,7 @@ def plan_migrations(
     """根据 ledger 中已应用 revision/checksum 计算待执行项。
 
     已应用但未知的 revision、checksum 漂移、依赖未满足或 ledger 历史断档
-    一律 fail closed。调用方必须从真实 ledger 读取 checksum，不得只传 revision。
+    一律 fail closed。调用方必须按数据库分配的 execution_order 升序读取 ledger，并保留该顺序；不得只传 revision。
     """
     ordered = validate_manifest(repository_root, migrations)
     by_revision = {item.revision: item for item in ordered}
@@ -28,7 +28,7 @@ def plan_migrations(
     if unknown:
         raise MigrationManifestError(f"ledger contains unknown revisions: {unknown}")
 
-    # 调用方必须按 applied_at 顺序读取 ledger；历史必须与 manifest 前缀完全一致。
+    # 调用方必须按 ledger.execution_order 升序读取；不可依赖 applied_at（可能同值）或 SQL 默认返回顺序。历史必须与 manifest 前缀完全一致。
     # 同时检查映射插入顺序，避免只检查集合而漏掉乱序 ledger。
     applied_revisions = list(applied_checksums)
     expected_prefix = [item.revision for item in ordered[:len(applied_revisions)]]
