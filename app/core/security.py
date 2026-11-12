@@ -669,7 +669,10 @@ async def require_publisher_or_admin(
     from app.models.models import Client, Publisher
 
     # User 与 Client 是一对多关系；必须检查该用户全部 Client 的渠道归属。
-    client_row = await db.execute(select(Client.id).where(Client.user_id == current_user.id))
+    client_row = await db.execute(select(Client.id).where(
+        Client.user_id == current_user.id,
+        Client.is_active.is_(True),
+    ))
     client_ids = [int(value) for value in client_row.scalars().all()]
     if not client_ids:
         _raise_auth(
