@@ -116,3 +116,60 @@
 
 - 逐 DDL 中断故障注入、代表性旧 schema 与历史数据升级、逻辑备份导入恢复、worker pause/resume、应用兼容回滚及 schema/data diff 尚未完成。
 - PR #1 仍 Open / Draft；不合并 main、不部署；凭据安全专项仍按用户要求暂缓。
+
+
+## 9. 逐 DDL 中断恢复演练与启动迁移机制复核（Run #1288）
+
+### 9.1 逐 DDL 中断注入测试
+
+- 在 `tests/test_mysql_migrations.py` 增加 `_run_sql_file_with_ddl_interruption`，在指定 DDL 执行完成后模拟进程退出，并关闭旧连接。
+- 对三份增量迁移的全部 DDL 执行边界逐点注入：
+  - 事件幂等迁移：4 个边界（事件键列创建、NOT NULL 收敛、新唯一索引、删除旧唯一索引）。
+  - Outbox 迁移：7 个边界（6 个字段、due 索引）。
+  - PII 保留迁移：4 个边界（两张表的标记列及两个扫描索引）。
+- 每个用例都使用全新隔离 MySQL 表结构，在中断后建立新连接，完整重跑迁移两次，并检查最终字段、NULL 属性、索引列顺序及旧唯一约束状态。
+- 共新增 15 个中断恢复场景。此测试验证 DDL 边界之后的进程退出和安全续跑；不等同于 MySQL server crash、磁盘故障或备份恢复演练。
+
+### 9.2 CI 失败与修复
+
+- Run #1287 失败：新增 15 个测试辅助函数把换行分隔符写成字面量 `\\n`，导致 SQL 语句前出现反斜杠字符；原有 **482 passed**，新增 **15 failed**。这是测试辅助代码缺陷，不是迁移 SQL 被证明有问题。
+- 修复提交：`326ae1545eafba53d0afb550d7d005d670c06bba`，将行分隔恢复为真实换行。
+- Run #1288：Backend **497 passed、1 skipped、1 warning**；Python Compile 成功；Frontend npm ci、依赖 Advisory、Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- Run #1288：https://github.com/Helong0511/Platform/actions/runs/43149106367
+- Run #1287 保留为失败记录，不计入通过统计。
+
+### 9.3 新确认的发布阻断：应用启动时的 schema bootstrap 不能替代迁移
+
+检查文件：`app/bootstrap/lifespan.py`、`app/core/database.py`、`app/db/database.py`、`app/models/__init__.py`。
+
+观察到的代码行为：
+- 每个 API / scheduler worker 的 lifespan 启动都会调用 `create_database()`，然后执行 `Base.metadata.create_all`。
+- `create_all` 只负责创建 metadata 中尚不存在的表，不会把既有表自动 ALTER 到新增列或索引结构；因此它不能替代本目录的增量 SQL migrations。
+- lifespan 捕获 schema bootstrap 异常后继续启动；对 MySQL 错误码 1684 特别降级为信息日志并继续。随后 `init_db()` 失败也被记录后吞掉。
+- 当前仓库树中存在 `sql/migrations/*.sql` 和隔离测试，但没有发现 Alembic 配置、统一 migration runner、schema revision ledger 或 manifest。
+- 因而部署过程依赖人工按文档顺序执行 SQL；应用启动本身既不证明增量迁移已经执行，也不保证 schema 初始化失败后阻止服务对外提供流量。
+
+风险判断：
+- MySQL 官方将 1684 定义为 `ER_WARN_I_S_SKIPPED_TABLE`：information_schema 中的表因其定义正被并发 DDL 修改而被跳过。它不能单独证明所有表已创建完成；当前代码不在忽略后执行完整 schema 再核验。
+- 如果任一增量迁移未执行，`create_all` 不会补齐既有表的新增列；服务可能启动成功，但访问相关 ORM 字段时才失败。
+- 这属于发布流程/启动就绪性风险，不代表已观察到生产 schema 损坏；本轮没有访问生产数据库。
+
+下一步必须修复/验收：
+- [ ] 明确唯一 schema 变更入口：建立受控 migration runner 或确定等价的发布工具；为每个 migration 建立有序 revision、校验和、执行记录和并发锁。
+- [ ] migration runner 在执行前校验 MySQL 版本、目标 schema、表/索引前置条件；执行后验证精确结构并记录 revision；失败必须停止，不得登记成功。
+- [ ] 应用 readiness 在启动时校验所需 schema revision / 关键字段结构；缺失或结构不匹配时不得报告 ready。
+- [ ] 重新评估每个 worker 在 lifespan 内重复执行 `create_all` 的必要性；移除对生产 schema 的隐式 DDL，或至少串行化并在结束后做完整核验。
+- [ ] 不得把 1684 无条件当作“可安全忽略”；需要受控重试并验证目标表结构，无法确认时 fail closed。
+- [ ] 为启动失败、schema revision 缺失、并发 worker 启动和 DDL 正在执行等情况增加隔离集成测试。
+
+权威资料：
+- MySQL 8.0 Error Reference（1684 / ER_WARN_I_S_SKIPPED_TABLE）：https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html
+- SQLAlchemy 2.0 MetaData.create_all：只检查并创建不存在的表：https://docs.sqlalchemy.org/en/20/core/metadata.html
+- SQLAlchemy 2.1 Metadata 教程说明长期 schema 管理应采用 Alembic 等迁移工具：https://docs.sqlalchemy.org/en/21/tutorial/metadata.html
+
+### 9.4 当前发布决策
+
+- 15 个 DDL 边界中断后续跑测试已由 Run #1288 验收通过。
+- MySQL server crash、逻辑备份导入恢复、应用 worker pause/resume、旧版本兼容回滚、schema/data diff、大规模数据升级性能仍未完成。
+- 启动时 schema bootstrap / migration runner / readiness 风险仍是发布阻断项。
+- PR #1 继续 Open / Draft；不合并 main、不部署、不访问生产环境；凭据安全专项继续暂缓。
