@@ -190,7 +190,7 @@ async def create_short_link_for_offer(
         return short_link, False  # 新创建的，不是重复
 
     except Exception as e:
-        logger.error(f"为Offer创建主短链接失败: offer_id={offer_id}, error={str(e)}", exc_info=True)
+        logger.error("为 Offer 创建主短链接失败: offer_id=%s error_type=%s", offer_id, type(e).__name__)
         return None, False
 
 
@@ -388,7 +388,7 @@ async def check_and_create_downstream_tracklink_short_link(
                     raise  # 重新抛出异常，让外层处理
 
     except Exception as e:
-        logger.error(f"检查并创建下游Tracklink短链接失败: offer_id={offer_id}, error={str(e)}", exc_info=True)
+        logger.error("检查并创建下游 Tracklink 短链接失败: offer_id=%s error_type=%s", offer_id, type(e).__name__)
         return None, False
 
 
@@ -538,7 +538,7 @@ async def sync_short_links_for_offer(
         return result
 
     except Exception as e:
-        logger.error(f"同步Offer短链接失败: offer_id={offer_id}, error={str(e)}", exc_info=True)
+        logger.error("同步 Offer 短链接失败: offer_id=%s error_type=%s", offer_id, type(e).__name__)
         return result
 
 
