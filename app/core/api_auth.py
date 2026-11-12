@@ -159,12 +159,18 @@ def _is_client_ip_allowed(allowed_ips: str | None, client_ip: str | None) -> boo
 
 
 def _get_active_user_clients(clients):
-    """仅返回仍启用的客户主体；兼容未提供 is_active 的轻量测试对象。"""
-    return [
+    """按 ID 稳定排序，仅返回仍启用的客户主体。"""
+    # User.clients 是一对多关系且未声明 order_by；不能依赖数据库偶然返回顺序
+    # 决定登录响应中默认展示的 Client。与用户管理 API 使用相同的稳定排序。
+    active_clients = [
         client
         for client in (clients or [])
         if bool(getattr(client, "is_active", True))
     ]
+    return sorted(
+        active_clients,
+        key=lambda client: int(getattr(client, "id", 0) or 0),
+    )
 
 
 def _is_user_client_ip_allowed(clients, client_ip: str | None) -> bool:
