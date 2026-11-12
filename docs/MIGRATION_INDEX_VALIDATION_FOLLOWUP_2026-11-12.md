@@ -588,3 +588,31 @@ MySQL 官方文档确认：
 - 本轮补强只覆盖 PII 保留迁移的两个扫描索引方向/类型，以及两个清理标记列的默认值/自动属性；不能据此认定全部迁移的所有字段、索引和约束均已完整对齐。
 - PII 保留天数仍必须由业务/合规负责人审批；默认 0 继续表示禁用，迁移本身不清理历史 PII。
 - PR #1 继续 Open / Draft；不合并 main、不部署。凭据安全专项继续按用户要求暂缓。
+
+
+## 23. 短链接点击幂等账本迁移纳入发布顺序（Run #1432）
+
+### 23.1 发现
+
+- 对照 Git tree 中全部 5 份增量迁移、`sql/platform.sql` 完整建库基线与 `app/core/short_link_click_counter.py` 的真实使用路径时发现：`short_link_click_sync_batches` 已被短链接点击刷盘/Redis ACK 恢复逻辑实际使用，完整建库基线也已包含该表。
+- 但 `docs/DEPLOYMENT_READINESS_RUNBOOK_2026-11.md` 原来的增量升级步骤未列出 `sql/migrations/20261110_short_link_click_sync_idempotency.sql`。已有数据库若只按原手册执行迁移，可能在发布使用该账本的代码前漏建表。
+- 这是发布步骤文档不完整，不是迁移 SQL 本身缺少建表：该迁移已有五个字段、主键、两个复合索引、字符集/排序规则及索引属性的结构校验，并对错误同名表 fail-closed。
+
+### 23.2 修复
+
+- 在部署 Runbook 的部署包检查清单中明确列出短链接点击账本迁移文件。
+- 在 Cap Reservation 发布步骤中增加短链接点击账本迁移和只读结构核验，要求先于依赖该账本的应用代码发布。
+- 在第三方上报迁移顺序中补充该独立迁移，要求核验字段、主键、索引顺序/唯一性及字符集；并明确该表用于 Redis pending batch 与数据库入账之间的幂等确认。
+- 同步修正 Outbox/PII 迁移验收文字，明确 Outbox 六个字段以及 PII 标记列无默认值、保留索引 BTREE/完整列/升序/非唯一的核验要求。
+
+### 23.3 CI 验收
+
+- Run #1432：https://github.com/Helong0511/Platform/actions/runs/43186530238
+- Backend：**549 passed、1 skipped、1 warning**；Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- 本轮是发布文档变更；CI 仍在隔离 MySQL/Redis、合成数据和 Mock API 环境执行，没有连接生产环境。
+
+### 23.4 结论边界
+
+- Runbook 已补齐当前五份增量迁移的发布入口（Cap Reservation 独立步骤 + 短链接账本 + 第三方事件幂等/Outbox/PII），但这不代表已存在统一 migration runner 或 revision/checksum ledger。
+- 所有增量迁移仍需按审批流程执行；完整备份恢复、代表性旧 schema/历史数据升级、DDL 中断恢复、兼容回滚及大表回填性能评估仍未完成。
+- PR #1 继续 Open / Draft；不合并 main、不部署、不连接生产环境。
