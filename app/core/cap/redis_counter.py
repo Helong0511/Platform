@@ -313,8 +313,8 @@ class RedisCapManager:
     @staticmethod
     async def get_reservation_token_state(counter_key: str, token_key: str) -> str:
         """
-        返回 PRESENT / ABSENT / UNKNOWN。
-        Redis 不可用、token 存在但 counter 丢失、数据格式损坏均为 UNKNOWN。
+        返回 PRESENT / ROLLED_BACK / ABSENT / UNKNOWN。
+        ROLLED_BACK 是原子回滚墓碑；Redis 不可用、token 存在但 counter 丢失、数据格式损坏均为 UNKNOWN。
         """
         redis = await get_redis_client()
         if not redis:
