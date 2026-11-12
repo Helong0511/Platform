@@ -311,3 +311,41 @@ MySQL 官方文档确认：
 - 需要补充隔离 MySQL 数据库端到端多客户账号测试，当前新增测试主要验证 SQL 条件与响应过滤。
 - 完整 migration/backup/restore/rollback 演练、PII 保留政策审批和 Outbox/Cap 组合故障演练仍未关闭。
 - PR #1 仍 Open / Draft；不合并 main、不部署、不访问生产环境。凭据安全专项继续按用户要求暂缓。
+
+
+## 13. 多客户账号模型、客户 API 密钥与管理入口一致性修复（Run #1313）
+
+### 13.1 关联模型与管理入口冲突
+
+- `Client` ORM 模型明确声明 `clients.user_id` 为多对一关系：同一个客户登录用户可以关联多个客户主体。
+- 创建客户 API 允许管理员把新客户关联到已有用户，但更新客户关联用户时曾额外执行“一用户只能关联一个 Client”的检查。
+- 这造成 create/update 行为不一致，并与 Offer、Dashboard、产品分配历史等按 `Client.user_id` 汇总多客户主体的既有实现冲突。
+- 已删除更新入口的一对一限制；更新时仍验证目标 User 存在，客户归属范围由所有按 user_id 过滤的业务查询负责。
+- 新增 `tests/test_client_user_multi_membership.py`，验证一个已有客户账号可以再关联另一客户主体。
+
+### 13.2 客户开放 API 密钥选择
+
+- 原 `GET /client/api-key` 对当前用户查询所有激活 Client 后直接使用 `first()`，没有稳定的客户选择语义；多客户账号可能拿到任意一个客户主体的 API Key。
+- 现在支持可选查询参数 `client_id`，并始终同时限制 `Client.user_id == current_user.id` 与 `Client.is_active == True`：
+  - 单客户账号不传参数时保持兼容。
+  - 多客户账号不传参数时拒绝模糊选择，要求显式传入 `client_id`。
+  - 指定不属于当前账号的客户 ID 时返回不存在/无权访问，不泄露其它客户密钥。
+  - 成功响应包含 `client_id` 与对应 `key`。
+- 前端 `getClientApiKey(clientId)` 现在显式提交 `client_id`；API 文档示例页使用当前选中的客户主体 ID 请求密钥。
+- 新增 `tests/test_client_api_key_multi_client.py` 覆盖多客户缺少选择、明确选择、单客户旧调用兼容和越权客户 ID。
+
+### 13.3 CI 验收
+
+- Run #1313，HEAD SHA `b23af10e388a236deaf11e1022fe1b3583b47b1f)。
+- Backend：**512 passed、1 skipped、1 warning**，无失败。
+- Frontend：npm ci、依赖 advisory、Lint、Build、Playwright Chromium 与 Mock API Browser E2E 全部通过。
+- Browser E2E 覆盖登录校验、认证成功/失败、管理员导航、Outbox 重试资格/详情、退出登录、移动端抽屉和客户端 RBAC。
+- CI：https://github.com/Helong0511/Platform/actions/runs/43152934213
+- 前端 Production dependency advisories 仍按用户要求留在凭据安全专项范围之外，不宣称依赖零漏洞。
+
+### 13.4 仍需继续审计
+
+- API 文档页当前从登录态读取的 `client_id` 是当前上下文客户 ID；如果后续 UI 要支持在多个客户主体间切换，应提供明确的客户选择 UI，不能重新退回无序 `first()`。
+- 继续检查报表导出、产品权限变更、结算与统计 API 是否全部按当前账号的 Client 集合过滤，并验证历史产品归属切换时的租户隔离。
+- 隔离 MySQL 多客户真实数据端到端测试仍需补齐；当前新增测试验证 SQL 约束和接口选择行为。
+- PR #1 仍 Open / Draft；不合并 main、不部署、不访问生产环境。凭据安全专项继续暂缓。
