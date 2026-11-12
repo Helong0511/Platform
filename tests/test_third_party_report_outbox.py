@@ -481,6 +481,7 @@ async def test_outbox_scan_is_bounded_and_filters_due_unexpired_attempts(monkeyp
     assert processed == [101, 102]
     assert stats == {"selected": 2, "success": 2, "retryable": 0, "failed": 0, "exhausted": 4}
     assert "third_party_report_logs.attempt_count >= third_party_report_logs.max_attempts" in captured["exhausted_sql"]
+    assert "third_party_report_logs.pii_scrubbed_at is null" in captured["exhausted_sql"]
     assert captured["normalization_committed"] is True
     assert "update third_party_report_logs" in captured["exhausted_update_sql"]
     assert "third_party_report_logs.status in" in captured["exhausted_update_sql"]
