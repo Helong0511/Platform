@@ -20,6 +20,7 @@ SET @has_event_key = (
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = 'third_party_report_logs'
       AND COLUMN_NAME = 'event_key'
+      AND COLUMN_TYPE = 'varchar(64)'
 );
 SET @ddl = IF(
     @has_event_key = 0,
