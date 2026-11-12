@@ -66,6 +66,7 @@ jobs:
           MYSQL_INTEGRATION_USER: "root"
           MYSQL_INTEGRATION_PASSWORD: "ci-root-password"
           MYSQL_INTEGRATION_DATABASE: "platform_ci"
+          MYSQL_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS: "1"
           ASONE_API_BASE_URL: "http://127.0.0.1:9"
           ASONE_API_KEY: ""
           TEST_API_BASE: "http://127.0.0.1:9"
