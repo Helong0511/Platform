@@ -553,3 +553,38 @@ MySQL 官方文档确认：
 - 本轮证明了已覆盖的大小写变体历史回填路径与 Python 幂等键算法一致；不代表所有历史事件类型、所有数据异常及大表规模性能均已穷举。
 - 事件幂等迁移仍包含 `UPDATE third_party_report_logs ... WHERE event_key IS NULL` 全范围回填。必须先按第 20.3 节和部署 Runbook 第 9.2 节完成接近目标规模的隔离副本性能、锁、redo/undo、binlog、复制延迟和中断恢复评估；未完成前不得直接在生产执行。
 - PR #1 继续 Open / Draft；不合并 main、不部署。凭据安全专项继续按用户要求暂缓。
+
+
+## 22. PII 保留索引与清理标记元数据 fail-closed 校验（2026-11-12，Run #1427 / #1430）
+
+### 22.1 新发现的结构漂移风险
+
+- 继续审查 `sql/migrations/20261112_third_party_report_pii_retention.sql` 时发现，原 PII 扫描索引检查虽然核对索引名、列数、非唯一性、列顺序和无前缀属性，但未核验索引类型与列排序方向。
+- 若历史库存在同名、同列但降序的索引，原检查可能将其误判为已完成迁移并跳过目标升序索引。
+- 更重要的是，两个 `pii_scrubbed_at` 字段的原检查只核对 DATETIME 与可空属性，没有确认默认值和 EXTRA。若历史库同名字段为 `DATETIME NULL DEFAULT CURRENT_TIMESTAMP`，迁移可能跳过该列；新日志记录会自动获得清理时间，而 PII 清理任务按 `pii_scrubbed_at IS NULL` 选择待清理记录，可能因此将未清理记录错误排除。
+- ORM 模型中的两个 `pii_scrubbed_at` 字段均为可空 DATETIME，未声明 server default 或数据库自动更新时间；迁移必须拒绝自动默认值/自动更新属性。
+
+### 22.2 修复
+
+- 两个 PII 保留索引均要求 `INDEX_TYPE='BTREE'`、无前缀（`SUB_PART IS NULL`）且三列均升序（`COLLATION='A'`）。错误的同名降序索引不能被视为已完成；迁移尝试创建目标索引时会因同名冲突明确失败，不会删除或覆盖旧索引。
+- 两个 `pii_scrubbed_at` 列均增加 `COLUMN_DEFAULT IS NULL` 与 `EXTRA = ''` 检查。存在 `CURRENT_TIMESTAMP` 默认值、生成属性或自动更新属性时，不会被误判为目标结构；重复添加会明确失败，保留原结构供人工诊断。
+- 新增真实隔离 MySQL 测试：
+  - 同名降序 PII 索引必须被拒绝，且原索引列、方向及定义保持不变。
+  - 分别对 `third_party_report_logs` 与 `postback_forward_logs` 预置 `DATETIME NULL DEFAULT CURRENT_TIMESTAMP` 错误列，迁移必须以 MySQL 1060 失败，且 `COLUMN_DEFAULT` / `EXTRA` 元数据保持原样。
+- 测试过程中 Run #1429 曾出现 2 项失败（547 passed、1 skipped、1 warning）：迁移按预期以 1060 拒绝错误列，失败仅是测试误把 MySQL `EXTRA` 预期为空字符串；实际 MySQL 返回 `DEFAULT_GENERATED`。已按真实元数据修正断言，没有放宽迁移保护逻辑。
+
+### 22.3 CI 验收
+
+- Run #1427：https://github.com/Helong0511/Platform/actions/runs/43185238521
+  - 验证降序索引拒绝修复：Backend **547 passed、1 skipped、1 warning**；新增降序索引测试通过；Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- Run #1429：https://github.com/Helong0511/Platform/actions/runs/43185601508
+  - 首轮清理标记默认值测试出现上述 2 项断言失败，不计为通过。
+- Run #1430：https://github.com/Helong0511/Platform/actions/runs/43185860042
+  - 修正 MySQL `EXTRA=DEFAULT_GENERATED` 元数据断言后全部成功：Backend **549 passed、1 skipped、1 warning**；两个表的错误默认值拒绝测试逐条通过；Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- 所有测试只使用 GitHub Actions 隔离 MySQL/Redis、合成数据和 Mock API；未连接生产环境或真实第三方服务。
+
+### 22.4 结论边界
+
+- 本轮补强只覆盖 PII 保留迁移的两个扫描索引方向/类型，以及两个清理标记列的默认值/自动属性；不能据此认定全部迁移的所有字段、索引和约束均已完整对齐。
+- PII 保留天数仍必须由业务/合规负责人审批；默认 0 继续表示禁用，迁移本身不清理历史 PII。
+- PR #1 继续 Open / Draft；不合并 main、不部署。凭据安全专项继续按用户要求暂缓。
