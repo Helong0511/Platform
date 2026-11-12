@@ -47,3 +47,22 @@ def test_rejects_mysql_client_delimiter_directive():
 
 def test_empty_and_comment_only_files_have_no_statements():
     assert split_mysql_statements("-- only a comment;\n/* another */") == ()
+
+
+def test_backslash_handling_can_match_mysql_no_backslash_escapes_mode():
+    sql = "SELECT 'one\\\\'; SELECT 'two';"
+    # NO_BACKSLASH_ESCAPES 下，反斜杠不转义引号，两个语句必须正确切开。
+    statements = split_mysql_statements(sql, backslash_escapes=False)
+    assert len(statements) == 2
+
+
+def test_all_repository_migrations_are_parseable_without_client_delimiter():
+    from pathlib import Path
+
+    migration_files = sorted(Path("sql/migrations").glob("*.sql"))
+    assert migration_files
+    for migration_file in migration_files:
+        statements = split_mysql_statements(
+            migration_file.read_text(encoding="utf-8")
+        )
+        assert statements, migration_file.name
