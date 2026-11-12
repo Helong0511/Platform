@@ -7,6 +7,7 @@ from sqlalchemy.dialects import mysql
 
 from app.api_v1.cpl.offers import _sanitize_offer_response_for_client
 from app.models.models import UserRole
+from app.services.cpl.advertiser_service import AdvertiserService
 from app.services.cpl.offer.helpers import (
     assert_client_can_access_offer,
     get_client_ids_for_user,
@@ -167,3 +168,25 @@ def test_client_offer_response_sanitizer_keeps_all_owned_clients_only():
     assert sanitized.payout is None
     assert sanitized.advertiser_tracklink is None
     assert sanitized.postback_url is None
+
+
+
+@pytest.mark.asyncio
+async def test_advertiser_scope_uses_all_active_client_memberships():
+    db = _FakeDB([
+        _Result(values=[10, 20]),
+        _Result(rows=[(501,), (502,)]),
+    ])
+    service = AdvertiserService(db)
+
+    client_ids = await service._client_ids_for_user(_client_user())
+    advertiser_ids = await service._advertiser_ids_for_clients(client_ids)
+
+    assert client_ids == [10, 20]
+    assert advertiser_ids == [501, 502]
+    client_sql = _sql(db.statements[0])
+    advertiser_sql = _sql(db.statements[1])
+    assert "clients.is_active IS true" in client_sql
+    assert "publishers.client_id IN (10, 20)" in advertiser_sql
+    assert "publishers.is_active = true" in advertiser_sql
+    assert "offer_publisher_assignments.is_active = true" in advertiser_sql
