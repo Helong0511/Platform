@@ -165,7 +165,25 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
             )
             await session.commit()
 
-        assert await report_module._claim_report_log(report_id) is True
+        # 过期租约只能由新 Worker 接管；旧 Worker 的租约令牌不能再修改状态。
+        first_token = next(token for token in claims if token is not None)
+        new_token = await report_module._claim_report_log(report_id)
+        assert new_token is not None
+        assert new_token != first_token
+
+        stale_update = await report_module.update_report_log(
+            report_id,
+            status="failed",
+            expected_report_start_time=first_token,
+        )
+        assert stale_update is False
+
+        current_update = await report_module.update_report_log(
+            report_id,
+            status="failed",
+            expected_report_start_time=new_token,
+        )
+        assert current_update is True
     finally:
         if engine is not None:
             await engine.dispose()
