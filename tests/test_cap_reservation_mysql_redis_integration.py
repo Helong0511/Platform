@@ -1000,11 +1000,14 @@ async def test_mysql_recovery_lease_uses_database_clock_when_worker_clock_is_ahe
         assert claimed is True
         assert owner
 
-        # 模拟某个恢复 Worker 的本机时钟比 MySQL 超前 6 小时。
+        # 从 MySQL 读取基准时间，再模拟恢复 Worker 本机时钟超前 6 小时。
+        async with session_factory() as session:
+            database_now = await session.scalar(text("SELECT NOW()"))
+        worker_clock_ahead = database_now + timedelta(hours=6)
         monkeypatch.setattr(
             recovery_module,
             "get_app_now_naive",
-            lambda: datetime(2035, 1, 1, 0, 0, 0),
+            lambda: worker_clock_ahead,
         )
 
         stats = await recovery_module.recover_cap_reservations(batch_size=10)
