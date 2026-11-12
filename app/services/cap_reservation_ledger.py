@@ -12,10 +12,11 @@ import uuid
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import func, or_, select, text, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.core.database import AsyncSessionLocal
+from app.core.utils import get_app_now_sql_expression
 from app.core.cap.redis_counter import RedisCapManager, get_daily_cap_key, get_total_cap_key
 from app.models.cap_reservation import CapReservation
 
@@ -135,9 +136,9 @@ class CapReservationLedger:
                     redis_reserved=False,
                     state="PREPARED",
                     lease_owner=owner,
-                    lease_expires_at=func.timestampadd(text("SECOND"), lease_seconds, func.now()),
-                    prepared_at=func.now(),
-                    updated_at=func.now(),
+                    lease_expires_at=get_app_now_sql_expression(lease_seconds),
+                    prepared_at=get_app_now_sql_expression(),
+                    updated_at=get_app_now_sql_expression(),
                 )
                 session.add(row)
                 try:
@@ -191,14 +192,14 @@ class CapReservationLedger:
             row.state = "PREPARED"
             row.redis_reserved = False
             row.redis_token_cleaned = False
-            row.prepared_at = func.now()
+            row.prepared_at = get_app_now_sql_expression()
             row.reserved_at = None
             row.finalized_at = None
             row.last_error = None
         row.lease_owner = owner
-        row.lease_expires_at = func.timestampadd(text("SECOND"), lease_seconds, func.now())
+        row.lease_expires_at = get_app_now_sql_expression(lease_seconds)
         row.attempts = int(row.attempts or 0) + 1
-        row.updated_at = func.now()
+        row.updated_at = get_app_now_sql_expression()
         await session.commit()
         await session.refresh(row)
         return row, True, owner
@@ -217,9 +218,9 @@ class CapReservationLedger:
                 .values(
                     state="RESERVED",
                     redis_reserved=True,
-                    reserved_at=func.now(),
-                    lease_expires_at=func.timestampadd(text("SECOND"), DEFAULT_LEASE_SECONDS, func.now()),
-                    updated_at=func.now(),
+                    reserved_at=get_app_now_sql_expression(),
+                    lease_expires_at=get_app_now_sql_expression(DEFAULT_LEASE_SECONDS),
+                    updated_at=get_app_now_sql_expression(),
                     last_error=None,
                 )
             )
@@ -254,8 +255,8 @@ class CapReservationLedger:
                     CapReservation.lease_owner == lease_owner,
                 )
                 .values(
-                    lease_expires_at=func.timestampadd(text("SECOND"), lease_seconds, func.now()),
-                    updated_at=func.now(),
+                    lease_expires_at=get_app_now_sql_expression(lease_seconds),
+                    updated_at=get_app_now_sql_expression(),
                 )
             )
             await session.commit()
@@ -288,8 +289,8 @@ class CapReservationLedger:
                 .values(
                     # 至少推进 1 秒，避免 MySQL matched/changed rows 语义下，
                     # 与刚刚批量认领写入相同时间戳时 rowcount=0 被误判为租约丢失。
-                    lease_expires_at=func.timestampadd(text("SECOND"), lease_seconds + 1, func.now()),
-                    updated_at=func.now(),
+                    lease_expires_at=get_app_now_sql_expression(lease_seconds + 1),
+                    updated_at=get_app_now_sql_expression(),
                 )
             )
             await session.commit()
@@ -351,7 +352,7 @@ class CapReservationLedger:
                     row.redis_token_cleaned = True
                     row.lease_owner = None
                     row.lease_expires_at = None
-                    row.updated_at = func.now()
+                    row.updated_at = get_app_now_sql_expression()
                     await session.commit()
                 else:
                     await session.commit()
@@ -364,8 +365,8 @@ class CapReservationLedger:
                     state=state,
                     redis_reserved=(False if state == "ROLLED_BACK" else CapReservation.redis_reserved),
                     redis_token_cleaned=token_cleaned,
-                    finalized_at=func.now(),
-                    updated_at=func.now(),
+                    finalized_at=get_app_now_sql_expression(),
+                    updated_at=get_app_now_sql_expression(),
                     lease_owner=None,
                     lease_expires_at=None,
                     last_error=None if token_cleaned else "Redis token cleanup pending",
@@ -402,7 +403,7 @@ class CapReservationLedger:
                     redis_token_cleaned=True,
                     lease_owner=None,
                     lease_expires_at=None,
-                    updated_at=func.now(),
+                    updated_at=get_app_now_sql_expression(),
                     last_error=None,
                 )
             )
@@ -440,7 +441,7 @@ class CapReservationLedger:
                     state="NEEDS_RECONCILIATION",
                     attempts=CapReservation.attempts + 1,
                     last_error=(error or "unknown")[:8000],
-                    updated_at=func.now(),
+                    updated_at=get_app_now_sql_expression(),
                     lease_owner=None,
                     lease_expires_at=None,
                 )
