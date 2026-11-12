@@ -74,11 +74,6 @@ async def test_client_login_does_not_implicitly_allow_loopback(monkeypatch):
     db = _DB(user)
 
     monkeypatch.setattr(auth_api, "get_client_ip", lambda request: "127.0.0.1")
-    monkeypatch.setattr(
-        auth_api,
-        "get_first_loaded_collection_item",
-        lambda user, relationship: user.clients[0],
-    )
 
     async def record_failure(*args, **kwargs):
         return None
@@ -108,11 +103,6 @@ async def test_refresh_token_cannot_bypass_client_loopback_allowlist(monkeypatch
 
     monkeypatch.setattr(refresh_api.JWTUtils, "verify_token", valid_refresh_token)
     monkeypatch.setattr(refresh_api, "get_client_ip", lambda request: "127.0.0.1")
-    monkeypatch.setattr(
-        refresh_api,
-        "get_first_loaded_collection_item",
-        lambda user, relationship: user.clients[0],
-    )
     monkeypatch.setattr(refresh_api, "revoke_tokens_from_request", unexpected_revoke)
 
     with pytest.raises(HTTPException) as exc:
