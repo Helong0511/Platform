@@ -27,7 +27,7 @@ from app.core.short_link.generator import (
     generate_unique_short_code
 )
 from app.models.models import User, UserRole, Offer, ShortLink, Click, PostbackConversion, Publisher
-from app.services.cpl.offer.helpers import assert_client_can_access_offer, get_client_id_for_user
+from app.services.cpl.offer.helpers import assert_client_can_access_offer, get_client_ids_for_user
 from app.services.cpl.offer_stats import (
     offer_stats_period_start,
     offer_stats_previous_range,
@@ -45,7 +45,7 @@ def _sanitize_offer_response_for_client(
         offer_data: OfferResponse,
         current_user: User,
         *,
-        client_id: int | None = None,
+        client_ids: list[int] | None = None,
 ) -> OfferResponse:
     """客户响应不得暴露上游价格、Cap、广告主、他渠 PO/Cap、Tracklink 或内部 Postback。"""
     if current_user.role != UserRole.CLIENT:
@@ -61,10 +61,11 @@ def _sanitize_offer_response_for_client(
     offer_data.postback_url = None
     # 仅保留本客户关联渠道的分配明细（下游 PO/Cap）
     assignments = offer_data.assigned_publishers or []
-    if client_id is not None:
+    if client_ids is not None:
+        allowed_client_ids = set(client_ids)
         offer_data.assigned_publishers = [
             a for a in assignments
-            if isinstance(a, dict) and a.get("client_id") == client_id
+            if isinstance(a, dict) and a.get("client_id") in allowed_client_ids
         ]
     else:
         offer_data.assigned_publishers = []
@@ -650,7 +651,7 @@ async def get_offers(
     )
 
     # 构建响应数据（广告主信息已通过joinedload预加载，渠道分配已批量加载）
-    client_id = await get_client_id_for_user(db, current_user)
+    client_ids = await get_client_ids_for_user(db, current_user)
     offer_list = []
     # ---------- 循环处理 ----------
     for offer in offers:
@@ -660,7 +661,7 @@ async def get_offers(
         # 从批量查询的结果中获取渠道分配
         offer_data.assigned_publishers = assignments_map.get(offer.id, [])
         offer_data = _sanitize_offer_response_for_client(
-            offer_data, current_user, client_id=client_id
+            offer_data, current_user, client_ids=client_ids
         )
 
         offer_list.append(offer_data)
@@ -770,12 +771,12 @@ async def get_offer_stats(
     publisher_ids = None
     if current_user.role == UserRole.CLIENT:
         client_id = await get_client_id_for_user(db, current_user)
-        if not client_id:
+        if not client_ids:
             publisher_ids = []
         else:
             pub_result = await db.execute(
                 select(Publisher.id).where(
-                    Publisher.client_id == client_id,
+                    Publisher.client_id.in_(client_ids),
                 )
             )
             publisher_ids = list(pub_result.scalars().all())
