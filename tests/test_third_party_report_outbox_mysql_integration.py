@@ -48,10 +48,9 @@ _SAFE_MYSQL_TARGET = (
 
 # CI 显式启用集成测试却配置了非隔离目标时必须失败关闭。
 if (
-    os.getenv("UNIT_TEST") == "1"
-    and (MYSQL_HOST or os.getenv("GITHUB_ACTIONS") == "true")
-    and not _SAFE_MYSQL_TARGET
-):
+    os.getenv("GITHUB_ACTIONS") == "true"
+    or (os.getenv("UNIT_TEST") == "1" and MYSQL_HOST)
+) and not _SAFE_MYSQL_TARGET:
     raise RuntimeError(
         "拒绝执行 Outbox MySQL 集成测试：必须使用 loopback MySQL platform_ci，"
         "并显式设置 MYSQL_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS=1"
@@ -59,7 +58,7 @@ if (
 
 pytestmark = pytest.mark.skipif(
     not _SAFE_MYSQL_TARGET,
-    reason="仅在显式授权的本机隔离 MySQL platform_ci 中运行",
+    reason="仅在 GitHub Actions 临时 MySQL platform_ci 服务中运行",
 )
 
 
