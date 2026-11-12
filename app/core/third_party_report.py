@@ -338,15 +338,24 @@ async def send_third_party_report(
             "empty" if not pixel_id else pixel_id[:10],
         )
         if report_log_id:
+            lease_token = await _claim_report_log(report_log_id)
+            if lease_token is None:
+                existing_status = await _get_report_status(report_log_id)
+                if existing_status == "success":
+                    return {"success": True, "deduplicated": True, "report_log_id": report_log_id}
+                return {"success": False, "retryable": True, "reason": "report_in_progress"}
             now = get_app_now_naive()
-            await update_report_log(
+            updated = await update_report_log(
                 report_log_id,
                 status="failed",
                 error_message="像素凭证暂不可用，Outbox 将自动重试",
                 report_start_time=now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
                 completed_at=now,
                 next_retry_time=now + timedelta(minutes=5),
+                expected_report_start_time=lease_token,
             )
+            if not updated:
+                return {"success": False, "retryable": True, "reason": "report_lease_lost"}
             return {"success": False, "retryable": True, "reason": "missing_facebook_credentials"}
         return {
             "success": False,
