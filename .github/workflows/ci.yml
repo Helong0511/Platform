@@ -89,7 +89,8 @@ jobs:
             echo "::error::No tests/test_*.py found; refusing to skip pytest."
             exit 1
           fi
-          pytest "${TEST_FILES[@]}" -q -rs --tb=short
+          # 输出逐条测试节点，便于从 Actions 日志核对 MySQL/Redis 集成测试是否真实执行。
+          pytest "${TEST_FILES[@]}" -v -rs --tb=short
 
   frontend:
     timeout-minutes: 20
