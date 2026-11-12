@@ -379,8 +379,8 @@ async def send_third_party_report(
 
     event_key = event_key or build_event_idempotency_key(source, adsid, event, conversion_id)
     try:
-        claimed = await _claim_report_log(report_log_id)
-        if not claimed:
+        lease_token = await _claim_report_log(report_log_id)
+        if lease_token is None:
             existing_status = await _get_report_status(report_log_id)
             if existing_status == "success":
                 logger.info(
@@ -404,7 +404,13 @@ async def send_third_party_report(
         )
         return {"success": False, "retryable": True, "reason": "report_claim_unavailable"}
 
-
+    async def update_owned_report_log(*args, **kwargs):
+        """只允许当前租约持有者更新状态，阻止过期 Worker 覆盖新 Worker。"""
+        return await update_report_log(
+            *args,
+            expected_report_start_time=lease_token,
+            **kwargs,
+        )
 
     if using_existing_report_log:
         base_attempt_count, max_attempts_total = await _get_report_attempt_state(report_log_id)
@@ -413,7 +419,7 @@ async def send_third_party_report(
         max_attempts_total = max_retries + (1 if use_hash else 0)
     if base_attempt_count >= max_attempts_total:
         # 不留住刚取得的租约；该事件已耗尽预算，不得继续发起外部请求。
-        await update_report_log(
+        await update_owned_report_log(
             report_log_id,
             status="failed",
             report_start_time=get_app_now_naive() - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
@@ -434,7 +440,7 @@ async def send_third_party_report(
     async def _mark_failed_and_raise(error_msg: str):
         """将上报日志标为 failed 后抛出 ValueError，供上层中断流程。"""
         logger.error(f"[第三方上报] {error_msg}")
-        await update_report_log(
+        await update_owned_report_log(
             report_log_id,
             status="failed",
             error_message=error_msg,
@@ -560,7 +566,7 @@ async def send_third_party_report(
 
             # 存储完整上报参数
             report_params_json = json.dumps(send_data, ensure_ascii=False)
-            attempt_persisted = await update_report_log(
+            attempt_persisted = await update_owned_report_log(
                 report_log_id,
                 report_params=report_params_json,
                 attempt_count=base_attempt_count + attempt + 1,
@@ -606,7 +612,7 @@ async def send_third_party_report(
                                 report_log_id, attempt + 1, hash_attempts, log_id,
                             )
                             
-                            await update_report_log(
+                            await update_owned_report_log(
                                 report_log_id,
                                 status="success",
                                 response_status=response.status_code,
@@ -649,7 +655,7 @@ async def send_third_party_report(
                             failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
                             logger.warning(
                                 f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{hash_attempts}): {error_msg}")
-                            await update_report_log(
+                            await update_owned_report_log(
                                 report_log_id,
                                 response_status=response.status_code,
                                 response_body=None
@@ -659,7 +665,7 @@ async def send_third_party_report(
                         failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
                         logger.warning(
                             f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{hash_attempts}): {error_msg}")
-                        await update_report_log(
+                        await update_owned_report_log(
                             report_log_id,
                             response_status=response.status_code,
                             response_body=None
@@ -669,7 +675,7 @@ async def send_third_party_report(
                     failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
                     logger.warning(
                         f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{hash_attempts}): {error_msg}")
-                    await update_report_log(
+                    await update_owned_report_log(
                         report_log_id,
                         response_status=response.status_code,
                         response_body=None
@@ -753,7 +759,7 @@ async def send_third_party_report(
 
             # 存储完整上报参数
             report_params_json = json.dumps(send_data, ensure_ascii=False)
-            attempt_persisted = await update_report_log(
+            attempt_persisted = await update_owned_report_log(
                 report_log_id,
                 report_params=report_params_json,
                 attempt_count=base_attempt_count + hash_attempts + 1,
@@ -792,7 +798,7 @@ async def send_third_party_report(
                                 report_log_id, hash_attempts + 1, hash_attempts + 1, log_id,
                             )
                             
-                            await update_report_log(
+                            await update_owned_report_log(
                                 report_log_id,
                                 status="success",
                                 response_status=response.status_code,
@@ -808,7 +814,7 @@ async def send_third_party_report(
                             failure_reasons.append(f"尝试 {hash_attempts + 1} (不使用哈希): {error_msg}")
                             logger.warning(
                                 f"[第三方上报] ✗ 失败 (尝试 {hash_attempts + 1}/{hash_attempts + 1} - 不使用哈希): {error_msg}")
-                            await update_report_log(
+                            await update_owned_report_log(
                                 report_log_id,
                                 response_status=response.status_code,
                                 response_body=None
@@ -818,7 +824,7 @@ async def send_third_party_report(
                         failure_reasons.append(f"尝试 {hash_attempts + 1} (不使用哈希): {error_msg}")
                         logger.warning(
                             f"[第三方上报] ✗ 失败 (尝试 {hash_attempts + 1}/{hash_attempts + 1} - 不使用哈希): {error_msg}")
-                        await update_report_log(
+                        await update_owned_report_log(
                             report_log_id,
                             response_status=response.status_code,
                             response_body=None
@@ -828,7 +834,7 @@ async def send_third_party_report(
                     failure_reasons.append(f"尝试 {hash_attempts + 1} (不使用哈希): {error_msg}")
                     logger.warning(
                         f"[第三方上报] ✗ 失败 (尝试 {hash_attempts + 1}/{hash_attempts + 1} - 不使用哈希): {error_msg}")
-                    await update_report_log(
+                    await update_owned_report_log(
                         report_log_id,
                         response_status=response.status_code,
                         response_body=None
@@ -860,7 +866,7 @@ async def send_third_party_report(
     if final_attempt_count < max_attempts_total:
         retry_delay_minutes = min(5 * (2 ** (base_attempt_count // 4)), 60)
         retry_at = get_app_now_naive() + timedelta(minutes=retry_delay_minutes)
-    await update_report_log(
+    await update_owned_report_log(
         report_log_id,
         status="failed",
         attempt_count=final_attempt_count,
