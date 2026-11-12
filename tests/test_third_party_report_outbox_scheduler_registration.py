@@ -171,3 +171,36 @@ async def test_pii_retention_scheduler_handles_disabled_policy_without_key_error
     assert result["postback_forward_logs_scrubbed"] == 0
     assert captured["name"] == THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME
     assert "enabled=False" in captured["message"]
+
+
+@pytest.mark.asyncio
+async def test_outbox_scheduler_warns_on_terminal_failed_backlog(monkeypatch, caplog):
+    from app.scheduler_module.tasks import third_party_report_tasks as tasks
+
+    captured = {}
+
+    async def report_backlog(**kwargs):
+        assert kwargs == {"batch_size": 20}
+        return {
+            "selected": 0,
+            "success": 0,
+            "retryable": 0,
+            "failed": 0,
+            "exhausted": 0,
+            "terminal_failed": 3,
+        }
+
+    monkeypatch.setattr(tasks, "process_postback_report_outbox", report_backlog)
+    monkeypatch.setattr(
+        tasks,
+        "set_task_result",
+        lambda name, message: captured.update(name=name, message=message),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = await tasks.process_third_party_report_outbox_task()
+
+    assert result["terminal_failed"] == 3
+    assert captured["name"] == THIRD_PARTY_REPORT_OUTBOX_TASK_NAME
+    assert "terminal_failed=3" in captured["message"]
+    assert "存在待重试/失败事件" in caplog.text
