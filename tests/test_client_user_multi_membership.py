@@ -9,6 +9,7 @@ from app.models.models import Publisher, UserRole
 from app.services.cpl.publisher_service import PublisherService
 from app.services.user_service import UserService
 from app.api_v1.users.users import _active_client_records, _effective_password_change_enabled
+from app.core.auth_user_payload import build_auth_user_payload
 
 
 class _Scalars:
@@ -205,3 +206,36 @@ def test_user_response_helpers_use_all_active_clients_and_effective_password_pol
     assert any(client.api_enabled for client in active_clients) is True
     # 密码修改规则与 UserService.change_password 一致：所有关联客户均须允许。
     assert _effective_password_change_enabled(user, active_clients) is False
+
+
+
+def test_auth_payload_exposes_aggregated_client_capabilities():
+    user = SimpleNamespace(
+        id=88,
+        username="multi-client-user",
+        full_name="Multi Client",
+        email=None,
+        role=UserRole.CLIENT,
+    )
+    first_active_client = SimpleNamespace(
+        id=101,
+        company_name="First",
+        api_enabled=False,
+        password_change_enabled=True,
+        key="synthetic-key",
+    )
+
+    payload = build_auth_user_payload(
+        user,
+        api_enabled=True,
+        has_publisher=True,
+        password_change_enabled=False,
+        client=first_active_client,
+    )
+
+    assert payload["api_enabled"] is True
+    assert payload["has_publisher"] is True
+    assert payload["password_change_enabled"] is False
+    assert payload["client"]["api_enabled"] is True
+    assert payload["client"]["has_publisher"] is True
+    assert payload["client"]["password_change_enabled"] is False
