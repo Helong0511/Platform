@@ -161,7 +161,7 @@ class DashboardService:
                 query = join_resolved_client(query)
             else:
                 query = query.join(Client, Product.client_id == Client.id)
-            query = query.where(Client.user_id == current_user.id)
+            query = query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
 
         # 执行查询
         result = await self.db.execute(query)
@@ -237,7 +237,7 @@ class DashboardService:
                 query_prev = join_resolved_client(query_prev)
             else:
                 query_prev = query_prev.join(Client, Product.client_id == Client.id)
-            query_prev = query_prev.where(Client.user_id == current_user.id)
+            query_prev = query_prev.where(Client.user_id == current_user.id, Client.is_active.is_(True))
 
         result_prev = await self.db.execute(query_prev)
         result_prev = result_prev.first()
@@ -421,7 +421,7 @@ class DashboardService:
                     query = join_resolved_client(query)
                 else:
                     query = query.join(Client, Product.client_id == Client.id)
-                query = query.where(Client.user_id == current_user.id)
+                query = query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
 
             # 分组和排序
             query = query.group_by(Product.id, Product.name).order_by(
@@ -556,7 +556,7 @@ class DashboardService:
                 query = join_resolved_client(query)
             else:
                 query = query.join(Client, Product.client_id == Client.id)
-            query = query.where(Client.user_id == current_user.id)
+            query = query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
 
         query = query.group_by(date_trunc).order_by(date_trunc)
 
