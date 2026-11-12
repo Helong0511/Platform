@@ -961,3 +961,66 @@ async def test_redis_rollback_tombstone_makes_retry_idempotent(monkeypatch):
     finally:
         await client.delete(counter_key, token_key)
         await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_mysql_recovery_lease_uses_database_clock_when_worker_clock_is_ahead(monkeypatch):
+    """Worker 本机时钟超前时，不得提前接管另一请求尚未到期的租约。"""
+    from datetime import datetime
+
+    database = _create_isolated_mysql_database()
+    engine = None
+    try:
+        _initialize_isolated_schema(database)
+        password = quote_plus(os.getenv("MYSQL_INTEGRATION_PASSWORD", ""))
+        user = quote_plus(os.getenv("MYSQL_INTEGRATION_USER", "root"))
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:"
+            f"{int(os.getenv('MYSQL_INTEGRATION_PORT', '3306'))}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(ledger_module, "AsyncSessionLocal", session_factory)
+        monkeypatch.setattr(recovery_module, "AsyncSessionLocal", session_factory)
+
+        row, claimed, owner = await CapReservationLedger.prepare_and_claim(
+            platform="ci-clock-skew",
+            conversion_id=f"clock-skew-{uuid.uuid4().hex}",
+            event_name="purchase",
+            offer_id=int(uuid.uuid4().int % 900_000_000) + 100_000_000,
+            publisher_id=None,
+            cap_kind="total",
+            business_date=None,
+        )
+        assert claimed is True
+        assert owner
+
+        # 模拟某个恢复 Worker 的本机时钟比 MySQL 超前 6 小时。
+        monkeypatch.setattr(
+            recovery_module,
+            "get_app_now_naive",
+            lambda: datetime(2035, 1, 1, 0, 0, 0),
+        )
+
+        stats = await recovery_module.recover_cap_reservations(batch_size=10)
+
+        async with session_factory() as session:
+            persisted = await session.scalar(
+                select(CapReservation).where(
+                    CapReservation.reservation_key == row.reservation_key
+                )
+            )
+
+        assert stats["claimed"] == 0
+        assert stats["rolled_back"] == 0
+        assert persisted.state == "PREPARED"
+        assert persisted.lease_owner == owner
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_mysql_database(database)
