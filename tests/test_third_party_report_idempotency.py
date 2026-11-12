@@ -87,7 +87,7 @@ async def test_successful_existing_event_is_not_sent_again(monkeypatch):
         return 41
 
     async def not_claimed(report_log_id):
-        return False
+        return None
 
     async def existing_status(report_log_id):
         return "success"
@@ -157,7 +157,8 @@ async def test_report_log_claim_is_atomic_for_concurrent_senders(monkeypatch):
         third_party_report._claim_report_log(41),
     )
 
-    assert sorted(results) == [False, True]
+    assert sum(result is not None for result in results) == 1
+    assert all(result is None or isinstance(result, datetime) for result in results)
     assert state["commits"] == 2
 
 
@@ -166,7 +167,7 @@ async def test_report_in_progress_does_not_send_duplicate_request(monkeypatch):
         return 41
 
     async def not_claimed(report_log_id):
-        return False
+        return None
 
     async def pending_status(report_log_id):
         return "pending"
@@ -227,7 +228,7 @@ async def test_report_claim_query_limits_failed_retries_to_expired_leases(monkey
         lambda: SessionContext(),
     )
 
-    assert await third_party_report._claim_report_log(41) is True
+    assert isinstance(await third_party_report._claim_report_log(41), datetime)
     sql = captured["sql"]
     assert "status in" in sql
     assert "third_party_report_logs.pii_scrubbed_at is null" in sql
@@ -645,18 +646,18 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
 
     async def claim(report_log_id):
         state["claim"] += 1
-        return True
+        return datetime(2026, 11, 11, 12, 0, 0)
 
     async def attempt_state(report_log_id):
         return state["ack_attempts"], 12
 
     async def persist_update(report_log_id, **kwargs):
-        # 模拟 update_report_log 内部吞掉 DB commit 异常：
-        # attempt_count 可落库，但 status=success 的 ACK 未落库。
+        # 模拟 attempt_count 可落库，但远端成功 ACK 的本地提交失败。
         if kwargs.get("status") == "success":
-            return
+            return False
         if kwargs.get("attempt_count") is not None:
             state["ack_attempts"] = kwargs["attempt_count"]
+        return True
 
     async def read_status(report_log_id):
         return state["status"]
@@ -689,12 +690,15 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
     }
 
     first = await third_party_report.send_third_party_report(**common)
-    assert first is None
+    assert first["success"] is False
+    assert first["retryable"] is True
+    assert first["reason"] == "report_lease_lost_after_send"
     assert state["status"] == "pending"
 
     # 模拟租约到期后 worker 恢复；数据库仍未确认第一次发送成功。
     second = await third_party_report.send_third_party_report(**common)
-    assert second is None
+    assert second["success"] is False
+    assert second["retryable"] is True
     assert state["http_event_ids"] == [
         "stable-event-id-ack-loss",
         "stable-event-id-ack-loss",
