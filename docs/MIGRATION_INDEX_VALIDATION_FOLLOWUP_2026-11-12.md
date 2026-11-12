@@ -85,3 +85,34 @@
 - Run #1283 不替代上述迁移演练，也不代表生产数据库已升级。
 - PR #1 继续保持 Open / Draft；不合并 main、不部署。
 - 本轮仍不访问生产环境；凭据安全专项仍按用户要求暂缓。
+
+
+## 8. PII 下游转发索引结构校验补强（Run #1285）
+
+### 复核发现
+
+- 二次逐行检查发现，`idx_forward_log_pii_retention` 的结构断言此前只检查列数与列顺序，遗漏 `NON_UNIQUE` 和 `SUB_PART`。
+- 因此一个列顺序正确但实际为唯一索引的同名索引，可能被误判为已满足普通扫描索引要求。
+- 这是结构校验遗漏，不代表已经证明生产数据库存在该错误索引。
+
+### 修复与测试
+
+- 在 `sql/migrations/20261112_third_party_report_pii_retention.sql` 的下游转发日志索引检查中补齐：
+  - `MAX(NON_UNIQUE) = 1`：必须是非唯一索引。
+  - `MAX(SUB_PART) IS NULL`：不允许前缀索引。
+  - 保留恰好三列及列顺序 `pii_scrubbed_at,created_at,id` 的检查。
+- 新增真实隔离 MySQL 测试：预建列顺序正确但唯一的同名 `idx_forward_log_pii_retention`，迁移必须以 MySQL 1061 明确失败，且原错误索引保持不变。
+- 事件幂等和 Outbox 索引检查保持原有精确结构断言。
+
+### CI 证据
+
+- 修复提交：SQL `5e5d63b86e7c538a2dccdb79b9dae0759fa8d852`；测试 `3bf643a6f119b38b30037bf7c37f8b4ea422da21`。
+- Run #1284 因后续 PR 提交触发 concurrency 取消，未作为验收依据。
+- Run #1285（SHA `3bf643a6f119b38b30037bf7c37f8b4ea422da21`）：Backend **482 passed、1 skipped、1 warning**；Python Compile 成功；Frontend npm ci、依赖 Advisory 报告、Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- Run #1285：https://github.com/Helong0511/Platform/actions/runs/43148171446
+- 测试使用 GitHub Actions 临时 MySQL 8.0.46 / Redis 7.4、合成数据及 Mock API；没有访问生产资源。
+
+### 仍未关闭
+
+- 逐 DDL 中断故障注入、代表性旧 schema 与历史数据升级、逻辑备份导入恢复、worker pause/resume、应用兼容回滚及 schema/data diff 尚未完成。
+- PR #1 仍 Open / Draft；不合并 main、不部署；凭据安全专项仍按用户要求暂缓。
