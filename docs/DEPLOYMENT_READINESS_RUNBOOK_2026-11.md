@@ -732,3 +732,26 @@ PR 继续 Open / Draft；不合并 main、不部署。所有验证仅使用 GitH
 - PII 保留期限与删除政策审批；PostbackConversion 原始数据、通知消息、备份副本和第三方接收方数据仍需独立治理。
 - RBAC/租户隔离、归因、统计、结算、API、队列和前端其它业务模块的最终全量回归。
 - PR 继续 Open / Draft；不合并 main、不部署；凭据安全专项仍按既定范围暂缓。
+
+
+
+## 32. Cloudflare 可信代理网段完整性回归（2026-11-12）
+
+### 核查结论
+
+- `nginx/btfrx.online/cloudflare_real_ip.conf` 当前配置包含 Cloudflare 官方 IPv4 15 段、IPv6 7 段，逐项与官方清单核对一致。
+- 配置使用 `real_ip_header CF-Connecting-IP` 和 `real_ip_recursive on`；Nginx 转发给后端的是经过 realip 模块解析后的 `$remote_addr`，不直接透传客户端提交的 `CF-Connecting-IP`。
+- `tests/test_proxy_header_trust.py` 新增完整 CIDR 集合相等断言：不仅检查代表性网段，也会在遗漏、增加或错误放宽可信网段时失败；同时断言启用 `real_ip_recursive on`。
+- 未修改生产 Nginx 配置、未 reload Nginx、未连接任何生产服务器。
+
+### 权威资料
+
+- Cloudflare 官方说明（页面标注 2026-04-21 更新）：https://developers.cloudflare.com/fundamentals/concepts/cloudflare-ip-addresses/
+- Cloudflare 官方当前 IP 范围清单：https://www.cloudflare.com/ips/
+- Nginx 官方 realip 模块文档：https://nginx.org/en/docs/http/ngx_http_realip_module.html
+
+### CI 证据
+
+- Run #1212（SHA `d536a021eddddb0f24d5da005f32fad92a90d745`）：Backend **464 passed、1 skipped、1 warning**；Python Compile、Frontend Lint/Build、Playwright Mock API Browser E2E 全部通过。
+- Run #1212：https://github.com/Helong0511/Platform/actions/runs/43141328240。
+- 完整 Cloudflare CIDR 集合断言是其后新增的测试，必须以包含该测试的最新 CI 为准，不能把 Run #1212 当作该新增测试的验收证据。
