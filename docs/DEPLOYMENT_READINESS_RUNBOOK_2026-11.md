@@ -1001,3 +1001,14 @@ PR #1 继续 Open / Draft，不合并 main、不部署。所有验证继续仅�
 - 1 skipped 为本地核对脚本未提交（CI 不依赖）；1 warning 为 passlib/Python 3.11 crypt 弃用提示。
 
 验证仅限 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
+
+
+## 44. Outbox 凭据恢复后的自动重试闭环（2026-11-12，Run #1356）
+
+- 在既有 Outbox 测试基础上补充配置恢复场景：首次 Worker 读取到短链/斗篷凭据暂不可用时，事件保持 failed + next_retry_time，返回 retryable；到达重试时间后重新读取当前配置，凭据恢复即可继续发送同一 event_key。
+- 测试验证恢复后的发送使用当前 pixel/token，而非首次失败时缓存的旧凭据；稳定 event_key 保持不变，避免恢复过程生成重复业务事件身份。
+- 现有覆盖仍包括：多 Worker MySQL 原子认领、过期租约接管、旧租约令牌无法写状态、短链停用/过期/物理删除、配置缺失重试、远端接受但本地 ACK 丢失时复用 event_key、PII 清理与发送认领互斥。
+- Run #1356（SHA 891797142f93ebb52874a27b8eca653eb696b111）：Backend **525 passed、1 skipped、1 warning**；Python Compile、Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。Run：https://github.com/Helong0511/Platform/actions/runs/43158088005。
+- 仍需保留并继续完成组合故障验收：发送请求超出租约、进程在远端接收后/本地 ACK 前崩溃、多个恢复 Worker 同时接管、配置停用/删除/轮换与恢复交错、网络故障及数据库提交/ACK 丢失组合；当前单测与现有 MySQL 集成用例不能替代这些全组合演练。
+
+验证仅限 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。PR #1 继续 Open / Draft，不合并 main、不部署。
