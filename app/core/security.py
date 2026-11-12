@@ -610,7 +610,7 @@ async def require_admin_or_self(
     # 检查当前客户是否有权限访问自己的数据
     # 注意：Client 需要在函数内导入以避免循环导入
     from app.models.models import Client
-    result = await db.execute(select(Client).where(Client.user_id == current_user.id, Client.id == client_id))
+    result = await db.execute(select(Client).where(Client.user_id == current_user.id, Client.id == client_id, Client.is_active.is_(True)))
     client = result.scalars().first()
 
     if not client:
