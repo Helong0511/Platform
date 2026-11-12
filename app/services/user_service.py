@@ -472,11 +472,15 @@ class UserService(BaseService[User]):
 
             # 如果是客户角色，检查是否允许修改密码
             if user.role == UserRole.CLIENT:
-                client = get_first_loaded_collection_item(user, "clients")
-                if client and not client.password_change_enabled:
+                # 同一登录账号可能关联多个 Client；任一关联客户禁用改密时均拒绝，
+                # 避免只检查第一条记录而绕过其它客户的管理策略。
+                client_records = getattr(user, "clients", None) or []
+                if client_records and any(
+                    not client.password_change_enabled for client in client_records
+                ):
                     raise_api_exception(
                         ErrorCode.FORBIDDEN,
-                        detail="客户密码修改功能已被管理员禁用，请联系管理员修改密码"
+                        detail="至少一个关联客户已禁用密码修改，请联系管理员"
                     )
 
         # 验证旧密码（管理员修改他人密码时不需要验证旧密码）
