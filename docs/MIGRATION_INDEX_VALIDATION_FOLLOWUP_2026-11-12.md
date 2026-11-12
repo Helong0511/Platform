@@ -616,3 +616,34 @@ MySQL 官方文档确认：
 - Runbook 已补齐当前五份增量迁移的发布入口（Cap Reservation 独立步骤 + 短链接账本 + 第三方事件幂等/Outbox/PII），但这不代表已存在统一 migration runner 或 revision/checksum ledger。
 - 所有增量迁移仍需按审批流程执行；完整备份恢复、代表性旧 schema/历史数据升级、DDL 中断恢复、兼容回滚及大表回填性能评估仍未完成。
 - PR #1 继续 Open / Draft；不合并 main、不部署、不连接生产环境。
+
+
+## 24. Outbox 第三方 HTTP 请求总时限与租约安全（Run #1434）
+
+### 24.1 发现
+
+- 复核 `app/core/third_party_report.py` 的 Outbox 发送路径时发现，代码虽配置了 HTTPX `timeout=5`，但 HTTPX 的 read timeout 是等待相邻响应数据块的最长时间，并非整个 HTTP 响应的墙钟总时限。
+- 远端若持续以小于 read timeout 的间隔发送数据，单个请求仍可能长时间不结束；Outbox 租约为 300 秒，若请求越过租约有效期，另一个 Worker 可能接管同一事件，而旧 Worker 仍在等待远端响应。
+- HTTPX 官方文档明确区分 connect/read/write/pool timeout，并说明默认超时针对网络 inactivity，而非整个业务请求的总时长。
+
+### 24.2 修复
+
+- 新增 `REPORT_HTTP_REQUEST_DEADLINE_SECONDS=60`，并由 `_report_http_request_deadline_seconds()` 将有效总时限限制为配置值与租约时长一半中的较小值；租约/总时限非正数时 fail-fast。
+- 新增 `_post_with_total_deadline()`，使用 `asyncio.wait_for` 包裹整个 `client.post()`；哈希上报与非哈希兜底两条 HTTP 请求路径均统一使用该 helper。
+- 将总时限触发的 `asyncio.TimeoutError` 纳入现有网络超时重试/失败处理；不记录响应正文或敏感载荷。
+- 新增慢速持续回包模拟测试：Mock Client 每 10ms 产生一次异步进展，证明即使持续有数据活动，整个请求仍会在总时限到达时被取消；另验证总时限始终短于 Outbox 租约。
+- 超时/取消不代表远端一定未接收事件。远端可能已接收但本地未确认时，重试仍必须复用稳定 `event_key`；本修复不宣称 exactly-once。
+
+### 24.3 CI 验收
+
+- Run #1434：https://github.com/Helong0511/Platform/actions/runs/43187446765
+- Backend：**551 passed、1 skipped、1 warning**；两个新增 HTTP 总时限测试逐条通过。
+- Frontend：Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- 验证使用慢响应 Mock Client 和 GitHub Actions 隔离环境，没有连接真实第三方 API 或生产环境。
+
+### 24.4 结论边界
+
+- 本轮限制了单次 HTTP 请求的总墙钟时长，降低慢速响应跨越租约 TTL 的风险；尚未替代真实进程 SIGKILL、TCP 半开、代理长连接、远端已接收后本地 ACK 丢失等组合故障注入。
+- Outbox 仍采用 at-least-once + 稳定事件键去重语义，不承诺端到端 exactly-once。
+- 官方资料：HTTPX Timeouts（https://www.python-httpx.org/advanced/timeouts/）；Python asyncio.wait_for（https://docs.python.org/3/library/asyncio-task.html#asyncio.wait_for）。
+- PR #1 继续 Open / Draft；不合并 main、不部署、不连接生产环境。
