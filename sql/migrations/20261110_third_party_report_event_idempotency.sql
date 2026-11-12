@@ -63,11 +63,22 @@ ALTER TABLE third_party_report_logs
 -- 5. 先建立新唯一索引，成功后才移除旧索引。
 -- 若 event_key 存在重复值，新索引创建会失败，但旧唯一索引仍保留，
 -- 避免迁移中断时第三方事件表暂时失去唯一性保护。
+-- 必须核对唯一性、列数和列顺序。若同名索引结构错误，按“缺失”处理，
+-- 后续 ADD UNIQUE INDEX 会因同名索引冲突而明确失败；绝不能因此删除旧唯一索引。
 SET @has_event_unique = (
-    SELECT COUNT(*) FROM information_schema.STATISTICS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'third_party_report_logs'
-      AND INDEX_NAME = 'unique_event_key'
+    SELECT COUNT(*)
+    FROM (
+        SELECT INDEX_NAME
+        FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'third_party_report_logs'
+          AND INDEX_NAME = 'unique_event_key'
+        GROUP BY INDEX_NAME
+        HAVING COUNT(*) = 1
+           AND MAX(NON_UNIQUE) = 0
+           AND MAX(SEQ_IN_INDEX) = 1
+           AND MAX(COLUMN_NAME) = 'event_key'
+    ) AS valid_event_index
 );
 SET @ddl = IF(
     @has_event_unique = 0,
