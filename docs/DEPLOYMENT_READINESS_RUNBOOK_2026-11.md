@@ -557,3 +557,24 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 - IP 白名单实际效果依赖部署环境可信代理配置、Nginx realip 与源站防火墙；尚未验证生产网络（本轮严禁连接生产）。
 - PII 保留政策仍待批准，自动清理保持默认关闭；备份副本、第三方接收方、通知消息、原始 Postback 数据的全生命周期仍未闭环。
 - PR 保持 Open / Draft，不合并、不部署；所有测试继续仅使用隔离 CI、合成数据和 Mock API。
+
+
+## 27. Offer 短链接操作日志与 Pixel 映射异常脱敏（2026-11-12，Run #1167）
+
+### 修复
+
+- Offer 创建主短链接、检查/创建下游 Tracklink 短链接、同步 Offer 短链接的异常日志不再记录 str(exception) 或 traceback，仅记录 Offer ID 与异常类型。
+- 新增 tests/test_api_exception_redaction.py 回归断言，防止上述 Offer 短链接操作重新写入原始异常文本。
+- Pixel Mapping 数据库异常路径增加 PII 日志回归测试：合成异常包含邮箱、IP、click_id 时，日志只保留异常类型和安全的短链接标识，不出现异常中的邮箱/IP/click_id。
+- 保留既有 Pixel 配置缓存失效行为；本轮新增的是异常日志隐私保护测试，不改变 Pixel 读取、缓存 TTL 或凭据解析语义。
+
+### CI 证据
+
+- Run #1167（SHA aff6b3b316f3e93813f2c3e2514240b938d46c33）：Backend **440 passed、1 skipped、1 warning**；Python compile、Frontend Lint/Build、Playwright Mock API Browser E2E 全部通过。
+- Skip 是本机核对脚本未提交（CI 不依赖）；warning 是 passlib 在 Python 3.11 使用 crypt 的弃用提示。
+- Run #1167：https://github.com/Helong0511/Platform/actions/runs/43135837802。
+
+### 注意
+
+- 日志只记录异常类型能降低 PII 暴露，但不替代受控的内部诊断平台；若未来需要 traceback，应使用脱敏后的结构化上下文、受限访问和保留期限，不得直接重新启用原始异常文本。
+- 继续保持 PR Open / Draft，不合并、不部署；生产环境仍完全隔离。
