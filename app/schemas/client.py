@@ -18,11 +18,11 @@ class ClientBase(BaseModel):
     contact_person: str | None = None
     phone: str | None = None
     address: str | None = None
-    allowed_ips: str | None = Field(None, description="IP白名单，多个IP用逗号分隔；为空则不限制。启用白名单后仅允许明确列出的 IP（包括回环地址）")
+    allowed_ips: str | None = Field(None, description="IP白名单，多个IP用逗号分隔；为空则该 Client 不增加限制。一个用户关联多个 Client 时，所有非空白名单均须允许来源 IP（包括回环地址）")
     is_active: bool | None = True
     api_enabled: bool | None = Field(False,
                                      description="是否允许API访问（开启后允许客户通过API查询产品和广告数据，并显示API对接菜单）")
-    password_change_enabled: bool | None = Field(True, description="是否允许客户修改密码（开启后客户可以修改自己的密码）")
+    password_change_enabled: bool | None = Field(True, description="是否允许客户修改密码；一个用户关联多个 Client 时，所有关联 Client 均开启后才允许修改共享账号密码")
     user_id: int | None = None
 
 
