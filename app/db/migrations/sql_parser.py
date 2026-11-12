@@ -84,7 +84,7 @@ def split_mysql_statements(
         if state in {"single", "double", "backtick"}:
             quote = {"single": "'", "double": '"', "backtick": chr(96)}[state]
             buffer.append(char)
-            if backslash_escapes and char == "\\\\" and state != "backtick" and index + 1 < length:
+            if backslash_escapes and char == "\\" and state != "backtick" and index + 1 < length:
                 buffer.append(sql[index + 1])
                 index += 2
                 continue
