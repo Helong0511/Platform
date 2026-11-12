@@ -647,3 +647,31 @@ MySQL 官方文档确认：
 - Outbox 仍采用 at-least-once + 稳定事件键去重语义，不承诺端到端 exactly-once。
 - 官方资料：HTTPX Timeouts（https://www.python-httpx.org/advanced/timeouts/）；Python asyncio.wait_for（https://docs.python.org/3/library/asyncio-task.html#asyncio.wait_for）。
 - PR #1 继续 Open / Draft；不合并 main、不部署、不连接生产环境。
+
+## 13. Cap Reservation pending baseline 测试修复与回归验收（Run #1439）
+
+### 13.1 失败原因与修复
+
+- 前一轮 Backend 曾出现 1 个失败：`test_pending_reservations_raise_redis_rebuild_baseline_not_db_snapshot`。
+- 测试先将 `count_uncommitted_for_scope` Mock 为返回 2，随后又在同一测试内重复 Mock 为返回 0，覆盖了前一个有效设置，导致 Redis 重建基线预期与实际不一致。
+- 修复仅删除重复的第二次 Mock，保留返回 2 的 pending reservation 夹具；未修改生产 Cap 业务逻辑。
+- 修复提交：`9f49698429e6062a07b384c5c71f462946fdfcda`。
+
+### 13.2 CI 验收证据
+
+- Run #1439：https://github.com/Helong0511/Platform/actions/runs/43190705028
+- Backend：**553 passed、1 skipped、1 warning**；Python 编译成功。
+- Backend 临时服务：GitHub Actions loopback MySQL 8.0.46、Redis 7.4；迁移集成测试、Outbox MySQL 集成测试、Schema bootstrap 并发/失败关闭测试均通过。
+- Frontend：npm ci、依赖 Advisory 报告、Lint、Build、Playwright Chromium 安装、Mock API Browser E2E 全部通过。
+- Browser E2E 覆盖登录校验、认证失败/成功、管理员导航、Outbox 重试资格/详情、退出登录、移动端抽屉和 Client RBAC。
+- 唯一 skip：`tests/test_client_reconciliation_db_scope.py` 的本地核对脚本未检出；该脚本不属于 CI 必需文件。
+- 唯一 pytest warning：Passlib 1.7.4 导入 Python 3.11 `crypt` 模块的弃用提示；该提示记录为依赖兼容待办，不属于测试失败。
+- CI 运行完成，Backend 与 Frontend jobs 均为 success。失败历史 Run #1438 保留，不计入本轮通过统计。
+
+### 13.3 当前发布判断
+
+- 本次测试夹具问题已修复，PR #1 当前 HEAD 的 Run #1439 通过。
+- Migration Runner / revision ledger、代表性旧 schema + 历史数据升级、备份恢复、旧版本兼容回滚、大规模数据锁等待评估仍未完成。
+- 本轮未连接生产服务器、数据库、Redis、队列或真实第三方接口；未合并 main、未部署。
+- PR #1 继续 Open / Draft；凭据安全专项继续按用户要求暂缓。
+
