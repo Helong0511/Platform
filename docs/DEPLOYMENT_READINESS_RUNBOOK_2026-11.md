@@ -1070,3 +1070,32 @@ PR #1 继续 Open / Draft，不合并 main、不部署。所有验证继续仅�
 - 1 skipped 为本地核对脚本未提交（CI 不依赖）；1 warning 为 passlib/Python 3.11 `crypt` 弃用提示。
 
 验证仅限 GitHub Actions 隔离 MySQL 8.0、Redis DB14、SQLite 单测、合成数据与 Mock API；没有连接生产服务器、生产数据库、生产 Redis、生产队列或真实第三方接口。PR #1 继续 Open / Draft，不合并 main、不部署。
+
+
+## 48. Outbox 同秒续租与续租失败前置阻断（2026-11-12，Run #1388）
+
+### 修复与测试
+
+- `_renew_report_log_lease()` 在 MySQL DATETIME 秒级精度下处理同秒续租：当应用当前时间不晚于租约令牌时，不执行可能产生 changed-rows=0 的相同值 UPDATE，而是查询并确认 ID、令牌、未过期状态、PII 清理标记及 pending/failed 状态仍匹配；确认后返回原令牌，否则 fail-closed。
+- 当应用时间晚于当前令牌时，仍通过带原令牌及未过期条件的 UPDATE 推进租约；旧 Worker 不能续租已被新 Worker 接管的令牌。
+- 每条第三方 HTTP 请求前均执行租约续期/有效性检查；检查失败返回 `report_lease_lost_before_send`，不构造 HTTP Client、不发起外部请求。
+- 新增 MySQL 集成用例覆盖两个 Worker 竞争认领、过期租约接管、同秒立即续租、旧令牌更新失败、新令牌更新成功、旧令牌续租失败及租约过期后不能复活。
+- 新增负向单元测试：模拟续租失败，并将 HTTP Client 构造设为立即失败；断言代码返回租约丢失且不调用 HTTP。
+- 修复重试等待路径缺少 `asyncio` 导入的问题，并更新已有 Mock，使其模拟新增加的续租检查。
+
+### 验收证据
+
+- 最新 SHA：`c544b15146e67cfe309de8f50c34eb5ed400cdca`。
+- Run #1388：https://github.com/Helong0511/Platform/actions/runs/43172714973，Backend 与 Frontend Job 均成功。
+- Backend：**530 passed、1 skipped、1 warning**；MySQL 8.0.46 与 Redis 7.4 临时服务容器成功启动，MySQL 集成环境变量指向 loopback `platform_ci`，破坏性测试开关仅在 CI 显式启用。
+- Frontend：Lint、Build、Playwright Mock API Browser E2E 全部通过。
+- 唯一 skip 是未提交的本机核对脚本；warning 是 passlib 在 Python 3.11 对 `crypt` 的弃用提示。
+- 该次 pytest 使用 `-q`，成功日志只展示汇总，未逐条显示集成测试节点。为便于后续审计，已将 CI pytest 输出改为逐条详细模式；此工作流变更必须由后续最新 SHA 的完整 CI 再次验证，不能追溯性地声称 Run #1388 已展示具体测试节点。
+
+### 边界与剩余限制
+
+- 验证只使用 GitHub Actions 临时 MySQL/Redis、SQLite、合成数据和 Mock API；未连接生产服务器、生产数据库、生产缓存、生产队列或真实第三方 API。
+- 同秒 MySQL 测试的执行环境已配置且该模块未出现在 skip 汇总中，但 Run #1388 的 quiet 日志没有逐条节点证据；后续 verbose CI 必须确认 `test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable` 实际执行通过。
+- 仍需增加 A/B Worker 故障注入：A 取得租约后暂停超过 TTL，B 接管并完成发送，A 恢复后不得发送 HTTP 或更新 B 的状态；并覆盖长 HTTP、Worker 崩溃及远端接收后 ACK 丢失。
+- 不宣称 exactly-once；远端已接收但本地 ACK 丢失仍可能按稳定 event_key 重试。
+- PR #1 继续 Open / Draft；不合并 main、不部署。
