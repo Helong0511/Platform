@@ -504,3 +504,27 @@ MySQL 官方文档确认：
 - 本次证明了该事件幂等迁移在“错误同名旧索引”这一场景下不会误删索引；并不代表历史数据库所有可能的旧索引变体均已穷举。
 - 仍需继续检查其它迁移中按索引名执行 DROP、字段/约束名存在即视为正确、DDL 部分执行后的重跑路径。
 - PR #1 保持 Open / Draft；不合并 main、不部署。测试继续使用隔离 CI 数据库、合成数据与 Mock API，不连接生产环境。
+
+
+## 20. Outbox 到期扫描索引拒绝前缀索引伪装（Run #1418 / #1419）
+
+### 20.1 发现与修复
+
+- 复核 `sql/migrations/20261111_third_party_report_outbox.sql` 的 `idx_third_party_outbox_due` 结构判定时发现，原检查虽核对了索引名、列数、非唯一性、列顺序和无 NULL 前缀标记，但没有明确要求 BTREE、完整列（无前缀）及升序列序。
+- 该复合索引包含 `status VARCHAR(20)`，MySQL 允许对该列建立前缀索引。若历史库存在同名、列名顺序相同但 `status(5)` 的前缀索引，原检查可能将其当作完整索引。
+- 现增加 `INDEX_TYPE='BTREE'`、每列 `SUB_PART IS NULL` 和所有列 `COLLATION='A'` 的核验；同名错误索引不被视为有效索引，迁移添加完整索引时明确失败，不会静默跳过或删除错误索引。
+- 新增隔离 MySQL 测试：预建列顺序正确但 `status` 使用前缀长度 5 的同名索引，执行迁移必须报索引名冲突，并断言错误索引的五个索引行及前缀长度仍存在。
+
+### 20.2 CI 验证
+
+- SQL 修复提交：`07a5ef4b61e11c9eb301df89e27c882fa0621499`。
+- 回归测试提交：`d37d6b2e91545d2812771c432b5a032af5d78a0f`。
+- Run #1419：https://github.com/Helong0511/Platform/actions/runs/43183605181
+- 后端：**546 passed、1 skipped、1 warning**；前端 Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- 1 skipped 为 CI 不依赖的本地核对脚本；1 warning 为 Passlib/Python 3.11 的 `crypt` 弃用提示。
+
+### 20.3 结论边界
+
+- 本次验证只覆盖 Outbox due 索引的前缀索引伪装场景，不代表所有迁移索引的每一种 MySQL 索引属性都已穷举。
+- 后续仍需评估事件幂等迁移的全表 `UPDATE ... WHERE event_key IS NULL` 在代表性大表规模下的执行时长、锁影响、复制延迟和中断恢复；当前 CI 合成数据测试不能替代规模化迁移演练。
+- PR #1 保持 Open / Draft，不合并 main、不部署；不连接生产环境。
