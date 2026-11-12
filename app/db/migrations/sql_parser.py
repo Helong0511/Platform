@@ -131,9 +131,9 @@ def split_mysql_statements(
     # 存储程序/触发器/事件需要客户端 DELIMITER 或专门的 body parser。
     # 即使文件漏写 DELIMITER，也必须拒绝，不能把内部分号拆成多条独立 SQL。
     routine_pattern = re.compile(
-        r"^\\s*CREATE\\s+(?:OR\\s+REPLACE\\s+)?"
-        r"(?:(?:DEFINER\\s*=\\s*(?:CURRENT_USER(?:\\s*\\(\\s*\\))?|[^\\s]+))\\s+)?"
-        r"(?:PROCEDURE|FUNCTION|TRIGGER|EVENT)\\b",
+        r"^\s*CREATE\s+(?:OR\s+REPLACE\s+)?"
+        r"(?:(?:DEFINER\s*=\s*(?:CURRENT_USER(?:\s*\(\s*\))?|[^\s]+))\s+)?"
+        r"(?:PROCEDURE|FUNCTION|TRIGGER|EVENT)\b",
         re.IGNORECASE,
     )
     for statement in statements:
