@@ -70,3 +70,10 @@ def test_authentication_endpoints_do_not_log_or_return_raw_exceptions():
     assert "退出登录失败: {e}" not in auth_source
     assert "str(e)" not in refresh_source
     assert "exc_info=True" not in refresh_source
+
+
+def test_offer_link_operations_do_not_log_raw_exceptions():
+    source = _source("app/api_v1/cpl/offers.py")
+    assert "error={str(e)}" not in source
+    assert "exc_info=True" not in source
+    assert "error_type=%s" in source
