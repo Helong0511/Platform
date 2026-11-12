@@ -51,6 +51,7 @@ async def test_publisher_guard_accepts_active_publisher_on_any_owned_client():
     assert result is user
     assert len(db.statements) == 2
     assert "clients.user_id = %s" in db.statements[0]
+    assert "clients.is_active = true" in db.statements[0]
     assert "publishers.client_id in" in db.statements[1]
     assert "publishers.is_active" in db.statements[1]
 
