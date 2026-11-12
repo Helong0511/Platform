@@ -145,6 +145,33 @@ SET @cap_reservation_schema_valid = (
         AND (SELECT COUNT(*) FROM information_schema.COLUMNS
              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
                AND COLUMN_NAME = 'updated_at' AND COLUMN_TYPE = 'datetime' AND IS_NULLABLE = 'NO') = 1
+        AND (SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'event_name') = 'default'
+        AND (SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'redis_reserved') = '0'
+        AND (SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'redis_token_cleaned') = '0'
+        AND (SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'state') = 'PREPARED'
+        AND (SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'attempts') = '0'
+        AND (SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'prepared_at') = 'CURRENT_TIMESTAMP'
+        AND (SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'created_at') = 'CURRENT_TIMESTAMP'
+        AND (SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'updated_at') = 'CURRENT_TIMESTAMP'
+        AND (SELECT EXTRA FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND COLUMN_NAME = 'id') LIKE '%auto_increment%'
         AND (SELECT TABLE_COLLATION FROM information_schema.TABLES
              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations') = 'utf8mb4_unicode_ci'
         AND (SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
