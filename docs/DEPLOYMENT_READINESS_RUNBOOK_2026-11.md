@@ -857,3 +857,38 @@ PR 继续 Open / Draft；不合并 main、不部署。所有验证仅使用 GitH
 5. 其余多租户隔离、归因幂等、PII 生命周期和业务流程仍需按清单逐项完成；当前全量测试通过不等同于全部上线风险已消除。
 
 PR #1 保持 Open / Draft，不合并 main，不连接生产环境。凭据安全专项继续暂缓。
+
+
+## 35. Cap Reservation 墓碑重试保护与 Outbox 斗篷生命周期回归（2026-11-12，Run #1270）
+
+### Cap Reservation
+
+- Run #1268 曾因真实 Redis 集成测试缺少 `datetime` 导入而失败；保留历史失败记录，未将失败 Run 伪装为成功。
+- 修复测试导入后，Run #1269（SHA `e1d8664931886ae5d4a262dc299fb8b9fb3c419c`）Backend **477 passed、1 skipped、1 warning**；Frontend Lint、Build、Playwright Mock API Browser E2E 全部通过。
+- 对同一 reservation_id 在 Redis 中留下 `ROLLED_BACK` 墓碑后再次预留的路径，Lua 必须拒绝把墓碑当成有效 reservation；Daily / Total Cap 均 fail-closed，不能落入 CAP_FAIL_OPEN。
+- 真实隔离 Redis 回归测试覆盖 rollback 后复用同一 reservation_id：抛出已回滚异常，counter 不增加，墓碑保留。
+
+### Outbox 斗篷配置生命周期
+
+- 新增测试覆盖斗篷停用、删除、同名恢复和 Pixel/Token 轮换。
+- 配置停用或删除时不允许继续使用旧凭据；同名配置恢复后，后续 Outbox 重试必须重新解析数据库中的当前配置。
+- 当前 Pixel 凭据读取仍以数据库为权威来源，进程内旧凭据缓存不参与运行时读取；共享缓存版本化失效协议尚未实现，不得提前恢复本地缓存。
+- Run #1270（SHA `4f42b4ca09b88d71f0be47d0aa5f37c1a740ec9f`）Backend **478 passed、1 skipped、1 warning**；Python Compile、Frontend Lint/Build、Playwright Mock API Browser E2E 全部成功。
+- Run #1270：https://github.com/Helong0511/Platform/actions/runs/43145988558。
+
+### Outbox 多 Worker / 租约证据边界
+
+- 隔离 MySQL 集成测试已覆盖两个 Worker 并发认领同一事件只能有一个成功、租约过期后新 Worker 接管，以及旧 Worker 的 fencing token 不能覆盖新 Worker 状态。
+- Outbox 批次扫描不提前修改待发送事件状态；最终发送由条件 UPDATE 认领，失败/崩溃后通过过期租约重新进入扫描。
+- PII 清理与发送认领均检查 `pii_scrubbed_at IS NULL`，并使用数据库行锁/条件 UPDATE 仲裁；清理先提交时，旧 Worker 内存中的载荷也不能取得发送租约。
+- 本轮新增斗篷生命周期测试属于隔离单元测试，不等同于完整第三方端到端投递；没有调用真实 Meta / Facebook API。
+
+### 仍需完成
+
+1. Outbox 长时间 HTTP 阻塞超过租约、网络分区、Worker 进程强杀、数据库重启与远端 ACK 丢失的组合故障测试。
+2. Outbox 斗篷生命周期的真实隔离 MySQL + Redis 多 Worker 端到端组合测试。
+3. 完整 Migration 备份恢复、逐 DDL 中断重跑、worker pause/resume、兼容回滚及 schema/data diff。
+4. PII 保留政策审批及未纳入自动清理的数据类别治理。
+5. RBAC、租户隔离、归因、统计、结算、API、队列及前端剩余业务模块全量复核。
+
+PR #1 继续 Open / Draft，不合并 main、不部署；验证只使用隔离 CI、合成数据及 Mock API，禁止连接生产环境。凭据安全专项仍按用户要求暂缓。
