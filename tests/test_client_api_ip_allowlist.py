@@ -131,3 +131,54 @@ async def test_client_api_unknown_ip_is_rejected_when_allowlist_is_configured(mo
         )
 
     assert caught.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_client_products_route_passes_trusted_resolved_ip_to_auth(monkeypatch):
+    client = SimpleNamespace(id=17, user_id=None, company_name="CI client")
+    captured = {}
+
+    async def verify(request, db, **kwargs):
+        captured["client_ip"] = kwargs.get("client_ip")
+        return client
+
+    class EmptyRows:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+        def first(self):
+            return None
+
+    class EmptyDB:
+        async def execute(self, statement):
+            return EmptyRows()
+
+    class BackgroundTasks:
+        def add_task(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr(api_auth, "verify_signature", lambda **kwargs: True)
+    from app.api_v1.external import client_api
+    monkeypatch.setattr(client_api, "verify_client_request", verify)
+    monkeypatch.setattr(client_api, "get_client_ip", lambda request: "198.51.100.44")
+
+    request = SimpleNamespace(
+        method="POST",
+        url=SimpleNamespace(path="/client_products"),
+        headers={"user-agent": "isolated-test-agent"},
+    )
+    await client_api.get_client_products(
+        request=request,
+        background_tasks=BackgroundTasks(),
+        api_request=client_api.ClientProductsRequest(
+            client_id=17,
+            req_time=int(datetime.now(timezone.utc).timestamp()),
+            sign="isolated-signature",
+        ),
+        db=EmptyDB(),
+    )
+
+    assert captured["client_ip"] == "198.51.100.44"
