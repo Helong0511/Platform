@@ -203,7 +203,7 @@ async def test_real_redis_cap_rollback_preserves_token_when_counter_is_zero():
         assert await redis.get(counter_key) == "0"
         assert await redis.get(token_key) == "1"
 
-        # 正常正数计数器仍然只扣减一次，并在同一 Lua 中删除 token。
+        # 正常正数计数器只扣减一次，并留下持久化墓碑供 MySQL ACK 恢复。
         await redis.set(counter_key, 2)
         normal_result = await redis.eval(
             RedisCapManager._ROLLBACK_RESERVATION_LUA,
@@ -213,7 +213,8 @@ async def test_real_redis_cap_rollback_preserves_token_when_counter_is_zero():
         )
         assert normal_result == 1
         assert await redis.get(counter_key) == "1"
-        assert await redis.get(token_key) is None
+        assert await redis.get(token_key) == "ROLLED_BACK"
+        assert await redis.ttl(token_key) == -1
     finally:
         await redis.delete(counter_key, token_key)
         await redis.aclose()
@@ -308,7 +309,7 @@ async def test_real_redis_cap_reservation_token_lifetime_and_corrupt_counter_fai
         assert await redis.get(fraction_key) == "1.5"
         assert await redis.get(fraction_token) == "1"
 
-        # 正常 rollback 只撤销一次，并清理 token；重复 rollback 不会误减。
+        # 正常 rollback 只撤销一次并留下墓碑；重复 rollback 读取原结果，绝不二次 DECR。
         rollback = await redis.eval(
             RedisCapManager._ROLLBACK_RESERVATION_LUA, 2,
             daily_key, daily_token,
@@ -318,8 +319,10 @@ async def test_real_redis_cap_reservation_token_lifetime_and_corrupt_counter_fai
             RedisCapManager._ROLLBACK_RESERVATION_LUA, 2,
             daily_key, daily_token,
         )
-        assert duplicate_rollback == -3  # token 缺失必须进入对账，不能假报成功
+        assert duplicate_rollback == 3
         assert await redis.get(daily_key) == "3"
+        assert await redis.get(daily_token) == "ROLLED_BACK"
+        assert await redis.ttl(daily_token) == -1
     finally:
         await redis.delete(
             daily_key, daily_token, total_key, total_token,
