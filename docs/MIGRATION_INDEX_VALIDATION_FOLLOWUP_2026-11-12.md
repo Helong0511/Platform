@@ -454,3 +454,29 @@ MySQL 官方文档确认：
 
 - Cap Reservation 的 ORM、完整建库 SQL、增量迁移三条入口在 `updated_at` 更新语义上已对齐，并有静态防回归测试和隔离 MySQL 漂移拒绝测试。
 - 这不等于全表所有字段/索引/约束已经逐项比较，也不等于全项目所有模型和五份迁移脚本已经一致；仍需完整 schema diff 和统一迁移版本管理。
+
+
+## 18. 短链接点击同步账本同名错误表保护（Run #1412 / #1413）
+
+### 18.1 发现与修复
+
+- 复核 `sql/migrations/20261110_short_link_click_sync_idempotency.sql` 时发现：该迁移使用 `CREATE TABLE IF NOT EXISTS short_link_click_sync_batches`；若目标库已有同名但结构错误的表，MySQL 会跳过建表，不能仅凭后续迁移语句判断结构正确。
+- 在迁移末尾新增只读结构核验：字段类型与 NULL 属性、`created_at` 默认值、表排序规则、主键与两个复合索引的列顺序、索引唯一性/类型/前缀属性及索引数量。
+- 结构不匹配时执行不存在的哨兵表查询，让迁移以 MySQL 1146 明确失败；不删除、不覆盖、不重建已有错误表。
+- 新增隔离 MySQL 测试：预建只有 `batch_id`、`short_code` 两列的错误同名表，插入合成记录后执行迁移；断言迁移失败且原记录、原表结构均保留。
+
+### 18.2 CI 失败与修复
+
+- Run #1412（SHA `69596f3390ca3c6aacaffc7f5b4571346c1f37e1`）出现 **1 failed、543 passed、1 skipped、1 warning**。迁移拒绝错误表的行为符合预期；失败是测试将 PyMySQL `fetchall()` 返回的元组序列与列表比较，属于测试断言容器类型错误。
+- 已将断言改为与驱动实际返回类型一致的元组序列；未放宽迁移异常码、原表数据保留或结构保护断言。
+- 修复提交：`cba2f4be50a6121c0c0da4454187be65ba016a02`。
+- Run #1413：Backend **544 passed、1 skipped、1 warning**；Python Compile 成功；Frontend npm ci、依赖 advisory 报告、Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- Run #1413：https://github.com/Helong0511/Platform/actions/runs/43182248386
+- 1 skipped 为本地核对脚本未检出（CI 不依赖）；1 warning 为 Passlib 在 Python 3.11 使用 `crypt` 的弃用提示。前端 Production High advisory 仍属于用户要求暂缓的凭据安全专项。
+
+### 18.3 结论边界
+
+- 本轮仅证明短链接点击同步账本迁移能拒绝特定错误同名表，并保留原数据；不能据此推断五份迁移均已具备等价的完整字段/索引/约束校验。
+- `_schema_metadata_drift` 仍只检查 ORM 声明的表和列是否存在；全项目字段类型/长度/NULL/default/索引/唯一约束/CHECK/字符集/排序规则对比尚未实现。
+- 统一 Migration Runner、revision/checksum ledger、历史数据升级、备份恢复、DDL 中断恢复、应用兼容回滚与 schema/data diff 仍是独立发布阻断项。
+- PR #1 继续 Open / Draft；不合并 main、不部署、不访问生产环境。验证只使用 GitHub Actions 隔离 MySQL/Redis、合成数据及 Mock API。
