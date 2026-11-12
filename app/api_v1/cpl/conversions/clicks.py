@@ -149,10 +149,8 @@ async def resend_click_facebook_report(
         )
     except Exception as e:
         logger.error(
-            "Facebook 像素补报失败: click_record_id=%s user=%s error=%s",
+            "Facebook 像素补报失败: click_record_id=%s error_type=%s",
             click_record_id,
-            current_user.username,
-            str(e),
-            exc_info=True
+            type(e).__name__,
         )
         raise
