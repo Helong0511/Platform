@@ -48,7 +48,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.audit_log import log_login, log_logout, commit_audit_log
 from app.core.auth_response import build_token_json_response, clear_auth_cookies, raise_auth_error
-from app.core.api_auth import _is_client_ip_allowed
+from app.core.api_auth import _is_user_client_ip_allowed
 from app.core.auth_user_payload import build_auth_user_payload
 from app.core.async_orm import get_first_loaded_collection_item
 from app.core.config import settings
@@ -253,7 +253,7 @@ async def login(
     # 登录与外部客户 API 共用同一白名单规则；回环地址也必须显式列入。
     client_record = get_first_loaded_collection_item(user, "clients")
     if user.role == UserRole.CLIENT and client_record:
-        if not _is_client_ip_allowed(client_record.allowed_ips, client_ip):
+        if not _is_user_client_ip_allowed(getattr(user, "clients", None), client_ip):
             logger.warning(
                 "客户登录失败：来源 IP 不在白名单中，user_id=%s",
                 user.id,
