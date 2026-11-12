@@ -592,22 +592,27 @@ class UserService(BaseService[User]):
             "with_client_info": client_users_count
         }
 
-    async def check_client_has_publisher(self, client_id: int) -> bool:
+    async def check_client_has_publisher(self, client_id: int | List[int]) -> bool:
         """
-        判断客户是否至少有一个激活中的渠道（Publisher）。
-
-        用于业务侧「客户是否已配置下游渠道」类校验。
+        判断一个或多个客户主体是否至少有一个启用中的渠道（Publisher）。
 
         Args:
-            client_id: 客户 ID
+            client_id: 单个客户 ID 或客户 ID 列表
 
         Returns:
-            True 表示存在 is_active 的 Publisher
+            True 表示至少存在一个 is_active 的 Publisher
         """
+        client_ids = (
+            [int(client_id)]
+            if isinstance(client_id, int)
+            else [int(value) for value in client_id if value is not None]
+        )
+        if not client_ids:
+            return False
         publisher_result = await self.db.execute(
             select(func.count(Publisher.id)).where(
                 and_(
-                    Publisher.client_id == client_id,
+                    Publisher.client_id.in_(client_ids),
                     Publisher.is_active == True
                 )
             )
