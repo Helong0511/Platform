@@ -458,7 +458,7 @@ class DashboardService:
                 }
             }
         except Exception as e:
-            logger.error(f"获取最近广告数据失败: {str(e)}", exc_info=True)
+            logger.error("获取最近广告数据失败：error_type=%s", type(e).__name__)
             # 返回空数据而不是抛出异常，保持健壮性
             return {
                 "ads": [],
