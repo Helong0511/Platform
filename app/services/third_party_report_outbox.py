@@ -216,18 +216,21 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
     if not (payload["short_link_id"] or (payload["cloak_name"] and payload["short_code"])):
         # 历史脏数据/手工写入可能绕过 enqueue 校验；必须认领并收敛为终态，
         # 否则 due scanner 会每轮重复选中同一条无法处理的记录。
-        claimed = await _claim_report_log(report_log_id)
-        if not claimed:
+        lease_token = await _claim_report_log(report_log_id)
+        if lease_token is None:
             return {"success": False, "retryable": True, "reason": "report_in_progress"}
         now = get_app_now_naive()
-        await update_report_log(
+        updated = await update_report_log(
             report_log_id,
             status="failed",
             error_message="缺少短链接/斗篷配置引用，无法解析像素凭据",
             report_start_time=now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
             completed_at=now,
             clear_next_retry_time=True,
+            expected_report_start_time=lease_token,
         )
+        if not updated:
+            return {"success": False, "retryable": True, "reason": "report_lease_lost"}
         return {
             "success": False,
             "retryable": False,
@@ -242,18 +245,21 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             short_code=payload["short_code"],
         )
     except OutboxConfigReferenceDeleted:
-        claimed = await _claim_report_log(report_log_id)
-        if not claimed:
+        lease_token = await _claim_report_log(report_log_id)
+        if lease_token is None:
             return {"success": False, "retryable": True, "reason": "report_in_progress"}
         now = get_app_now_naive()
-        await update_report_log(
+        updated = await update_report_log(
             report_log_id,
             status="failed",
             error_message="短链接已删除，无法解析像素配置",
             report_start_time=now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
             completed_at=now,
             clear_next_retry_time=True,
+            expected_report_start_time=lease_token,
         )
+        if not updated:
+            return {"success": False, "retryable": True, "reason": "report_lease_lost"}
         return {
             "success": False,
             "retryable": False,
@@ -269,18 +275,21 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
         pixel_id = access_token = api_version = None
 
     if not pixel_id or not access_token:
-        claimed = await _claim_report_log(report_log_id)
-        if not claimed:
+        lease_token = await _claim_report_log(report_log_id)
+        if lease_token is None:
             return {"success": False, "retryable": True, "reason": "report_in_progress"}
         retry_at = get_app_now_naive() + timedelta(minutes=5)
-        await update_report_log(
+        updated = await update_report_log(
             report_log_id,
             status="failed",
             error_message="像素凭据暂不可用；Outbox 保留并将在配置恢复后重试",
             report_start_time=get_app_now_naive() - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
             completed_at=get_app_now_naive(),
             next_retry_time=retry_at,
+            expected_report_start_time=lease_token,
         )
+        if not updated:
+            return {"success": False, "retryable": True, "reason": "report_lease_lost"}
         return {"success": False, "retryable": True, "reason": "missing_pixel_credentials"}
 
     send_result = await send_third_party_report(
