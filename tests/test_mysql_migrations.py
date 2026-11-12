@@ -781,6 +781,35 @@ def test_cap_reservation_migration_is_idempotent_and_matches_mysql_schema():
 
 
 
+
+def test_cap_reservation_migration_rejects_wrong_column_default():
+    """关键状态列的默认值漂移必须阻断迁移，不能只核对字段类型与 NULL 属性。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+            _run_sql_file(cursor, "sql/migrations/20261111_cap_reservation_ledger.sql")
+            cursor.execute(
+                "ALTER TABLE cap_reservations ALTER COLUMN attempts SET DEFAULT 5"
+            )
+            with pytest.raises(pymysql.err.ProgrammingError) as migration_error:
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261111_cap_reservation_ledger.sql",
+                )
+            assert migration_error.value.args[0] == 1146
+            cursor.execute(
+                "SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations' "
+                "AND COLUMN_NAME = 'attempts'"
+            )
+            assert cursor.fetchone()[0] == "5"
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+        connection.close()
+
+
 def test_cap_reservation_migration_rejects_non_unique_same_name_unique_index():
     """同名同列但唯一性错误的索引必须被拒绝，不能只比较索引名称与列顺序。"""
     connection = _connect()
