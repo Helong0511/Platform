@@ -4,7 +4,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from app.db.migrations.manifest import (
-    MIGRATION_MANIFEST,
     Migration,
     MigrationManifestError,
     validate_manifest,
@@ -29,12 +28,11 @@ def plan_migrations(
     if unknown:
         raise MigrationManifestError(f"ledger contains unknown revisions: {unknown}")
 
-    applied_positions = [
-        index for index, item in enumerate(ordered)
-        if item.revision in applied_checksums
-    ]
-    # 迁移按序执行，ledger 已应用项必须构成清单前缀；不能跳过旧 revision。
-    if applied_positions != list(range(len(applied_positions))):
+    # 调用方必须按 applied_at 顺序读取 ledger；历史必须与 manifest 前缀完全一致。
+    # 同时检查映射插入顺序，避免只检查集合而漏掉乱序 ledger。
+    applied_revisions = list(applied_checksums)
+    expected_prefix = [item.revision for item in ordered[:len(applied_revisions)]]
+    if applied_revisions != expected_prefix:
         raise MigrationManifestError("ledger revisions are not a contiguous manifest prefix")
 
     for revision, stored_checksum in applied_checksums.items():
