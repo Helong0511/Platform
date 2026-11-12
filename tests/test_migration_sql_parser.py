@@ -50,7 +50,7 @@ def test_empty_and_comment_only_files_have_no_statements():
 
 
 def test_backslash_handling_can_match_mysql_no_backslash_escapes_mode():
-    sql = "SELECT 'one\\\\'; SELECT 'two';"
+    sql = "SELECT 'one\\'; SELECT 'two';"
     # NO_BACKSLASH_ESCAPES 下，反斜杠不转义引号，两个语句必须正确切开。
     statements = split_mysql_statements(sql, backslash_escapes=False)
     assert len(statements) == 2
