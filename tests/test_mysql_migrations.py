@@ -317,6 +317,45 @@ def test_pii_migration_rejects_unique_same_name_forward_retention_index():
         connection.close()
 
 
+
+def test_short_click_batch_migration_rejects_wrong_same_name_table():
+    """短链接点击账本的错误同名表必须 fail-closed，且原表数据/结构不被覆盖。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS short_link_click_sync_batches")
+            cursor.execute(
+                "CREATE TABLE short_link_click_sync_batches ("
+                "batch_id VARCHAR(64) NOT NULL PRIMARY KEY, "
+                "short_code VARCHAR(20) NOT NULL"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            )
+            cursor.execute(
+                "INSERT INTO short_link_click_sync_batches (batch_id, short_code) "
+                "VALUES ('keep-this-row', 'keep-code')"
+            )
+            with pytest.raises(pymysql.err.ProgrammingError) as migration_error:
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261110_short_link_click_sync_idempotency.sql",
+                )
+            assert migration_error.value.args[0] == 1146
+            cursor.execute(
+                "SELECT batch_id, short_code FROM short_link_click_sync_batches"
+            )
+            assert cursor.fetchall() == [("keep-this-row", "keep-code")]
+            cursor.execute(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() "
+                "AND TABLE_NAME = 'short_link_click_sync_batches'"
+            )
+            assert cursor.fetchone()[0] == 2
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS short_link_click_sync_batches")
+        connection.close()
+
+
 def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
     baseline_schema = Path("sql/platform.sql").read_text(encoding="utf-8")
     connection = _connect()
