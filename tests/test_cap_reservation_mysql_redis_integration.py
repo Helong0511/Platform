@@ -263,6 +263,11 @@ async def _run_recovery_scenario(monkeypatch, *, conversion_committed: bool, wor
                 for _ in range(workers)
             ))
 
+        # ROLLED_BACK 先提交 MySQL 终态并保留 Redis 墓碑；下一轮恢复再清理墓碑。
+        cleanup_stats = None
+        if not conversion_committed:
+            cleanup_stats = await recovery_module.recover_cap_reservations(batch_size=10)
+
         async with session_factory() as session:
             recovered = await session.scalar(
                 select(CapReservation).where(
@@ -274,6 +279,7 @@ async def _run_recovery_scenario(monkeypatch, *, conversion_committed: bool, wor
         token_value = await redis.get(row.redis_token_key)
         return {
             "stats": stats,
+            "cleanup_stats": cleanup_stats,
             "state": recovered.state,
             "redis_reserved": recovered.redis_reserved,
             "redis_token_cleaned": recovered.redis_token_cleaned,
@@ -302,6 +308,7 @@ async def test_mysql_redis_recovery_rolls_back_orphan_reservation_after_worker_c
     assert result["counter_value"] == "0"
     assert result["token_value"] is None
     assert result["stats"]["rolled_back"] == 1
+    assert result["cleanup_stats"]["tokens_cleaned"] == 1
 
 
 @pytest.mark.asyncio
@@ -491,10 +498,22 @@ async def test_mysql_redis_recovery_retries_needs_reconciliation_after_backoff(m
 
         assert recovered.state == "ROLLED_BACK"
         assert await redis.get(row.redis_counter_key) == "0"
-        assert await redis.get(row.redis_token_key) is None
+        assert await redis.get(row.redis_token_key) == "ROLLED_BACK"
         assert stats["claimed"] == 1
         assert stats["rolled_back"] == 1
         assert stats["needs_reconciliation"] == 0
+
+        # 终态提交后由下一轮恢复 Worker 清理墓碑。
+        cleanup_stats = await recovery_module.recover_cap_reservations(batch_size=10)
+        async with session_factory() as session:
+            recovered = await session.scalar(
+                select(CapReservation).where(
+                    CapReservation.reservation_key == row.reservation_key
+                )
+            )
+        assert recovered.redis_token_cleaned is True
+        assert await redis.get(row.redis_token_key) is None
+        assert cleanup_stats["tokens_cleaned"] == 1
     finally:
         if redis_keys:
             await redis.delete(*redis_keys)
