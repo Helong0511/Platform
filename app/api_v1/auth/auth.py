@@ -312,6 +312,11 @@ async def login(
     # 如果是客户角色，获取客户的api_enabled和has_publisher信息
     api_enabled = False
     has_publisher = False
+    all_client_records = getattr(user, "clients", None) or []
+    password_change_enabled = bool(active_client_records) and bool(all_client_records) and all(
+        bool(getattr(client, "password_change_enabled", False))
+        for client in all_client_records
+    )
     if user.role == UserRole.CLIENT and active_client_records:
         active_client_ids = [client.id for client in active_client_records]
         api_enabled = any(bool(client.api_enabled) for client in active_client_records)
@@ -329,6 +334,7 @@ async def login(
         user,
         api_enabled=api_enabled,
         has_publisher=has_publisher,
+        password_change_enabled=password_change_enabled,
         client=client_record,
     )
 
