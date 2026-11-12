@@ -143,6 +143,7 @@ async def update_report_log(
         report_params: Optional[str] = None,
         next_retry_time: Optional[datetime] = None,
         clear_next_retry_time: bool = False,
+        expected_report_start_time: Optional[datetime] = None,
 ):
     """
     更新第三方上报日志记录
@@ -151,11 +152,14 @@ async def update_report_log(
         return False
     try:
         async with AsyncSessionLocal() as db:
-            result = await db.execute(
-                select(ThirdPartyReportLog)
-                .where(ThirdPartyReportLog.id == log_id)
-                .with_for_update()
-            )
+            query = select(ThirdPartyReportLog).where(ThirdPartyReportLog.id == log_id)
+            if expected_report_start_time is not None:
+                # 只有当前租约持有者可以修改发送状态；过期 Worker 不得覆盖新 Worker 的结果。
+                query = query.where(
+                    ThirdPartyReportLog.report_start_time == expected_report_start_time,
+                    ThirdPartyReportLog.pii_scrubbed_at.is_(None),
+                )
+            result = await db.execute(query.with_for_update())
             log_entry = result.scalars().first()
             if log_entry:
                 if status is not None:
@@ -234,13 +238,17 @@ def _calculate_report_attempt_budget(
     return hash_attempts, fallback_allowed
 
 
-async def _claim_report_log(report_log_id: int, lease_seconds: int = REPORT_LOG_LEASE_SECONDS) -> bool:
-    """原子认领一条待上报事件，避免并发请求同时发送同一事件。
+async def _claim_report_log(
+    report_log_id: int,
+    lease_seconds: int = REPORT_LOG_LEASE_SECONDS,
+) -> Optional[datetime]:
+    """原子认领事件并返回秒级租约令牌；失败返回 None。
 
     失败状态允许立即重试；pending 状态仅允许首次认领或租约过期后恢复。
-    发送进程异常退出时，租约到期后可由后续请求接管。
+    发送进程异常退出时，租约到期后可由后续请求接管；旧 Worker 的令牌随即失效。
     """
-    now = get_app_now_naive()
+    # MySQL DATETIME 默认精度为秒，令牌必须先截断微秒，保证回读/比较一致。
+    now = get_app_now_naive().replace(microsecond=0)
     stale_before = now - timedelta(seconds=max(30, lease_seconds))
     async with AsyncSessionLocal() as db:
         result = await db.execute(
@@ -265,7 +273,7 @@ async def _claim_report_log(report_log_id: int, lease_seconds: int = REPORT_LOG_
             .values(report_start_time=now)
         )
         await db.commit()
-        return (result.rowcount or 0) == 1
+        return now if (result.rowcount or 0) == 1 else None
 
 
 async def send_third_party_report(
