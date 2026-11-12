@@ -90,6 +90,11 @@ def validate_manifest(
             raise MigrationManifestError(f"invalid SHA-256 for revision: {entry.revision}")
         if entry.path in seen_paths:
             raise MigrationManifestError(f"duplicate migration path: {entry.path}")
+        expected_path = f"sql/migrations/{entry.revision}.sql"
+        if entry.path != expected_path:
+            raise MigrationManifestError(
+                f"migration path does not match revision {entry.revision}: {entry.path}"
+            )
         candidate = (root / entry.path).resolve()
         try:
             candidate.relative_to(root)
