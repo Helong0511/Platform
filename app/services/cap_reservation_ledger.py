@@ -12,13 +12,14 @@ import uuid
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_sql_expression
 from app.core.cap.redis_counter import RedisCapManager, get_daily_cap_key, get_total_cap_key
 from app.models.cap_reservation import CapReservation
+from app.models.postback import PostbackConversion
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +173,56 @@ class CapReservationLedger:
             return await CapReservationLedger._claim_existing(
                 session, row, owner, lease_seconds
             )
+
+    @staticmethod
+    async def count_uncommitted_for_scope(
+        *,
+        offer_id: int,
+        publisher_id: Optional[int],
+        cap_kind: str,
+        business_date: Optional[date],
+        exclude_reservation_key: Optional[str] = None,
+    ) -> int:
+        """统计尚无正式转化记录的活动预留，用于 Redis 计数器丢失后的安全重建。
+
+        已存在 PostbackConversion 的活动账本，其 Cap 快照与转化在同一事务提交，
+        已计入 DB baseline，不得重复计数。PREPARED/RESERVED/NEEDS_RECONCILIATION
+        且正式转化尚不可见的记录按潜在预留保守计入，避免 Redis key 淘汰后漏算。
+        """
+        conditions = [
+            CapReservation.offer_id == offer_id,
+            CapReservation.cap_kind == cap_kind,
+            CapReservation.state.in_(ACTIVE_STATES),
+        ]
+        conditions.append(
+            CapReservation.publisher_id.is_(None)
+            if publisher_id is None
+            else CapReservation.publisher_id == publisher_id
+        )
+        conditions.append(
+            CapReservation.business_date.is_(None)
+            if business_date is None
+            else CapReservation.business_date == business_date
+        )
+        if exclude_reservation_key:
+            conditions.append(CapReservation.reservation_key != exclude_reservation_key)
+
+        committed_conversion_exists = (
+            select(PostbackConversion.id)
+            .where(
+                PostbackConversion.platform == CapReservation.platform,
+                PostbackConversion.conversion_id == CapReservation.conversion_id,
+                PostbackConversion.event_name == CapReservation.event_name,
+            )
+            .exists()
+        )
+        conditions.append(~committed_conversion_exists)
+
+        async with AsyncSessionLocal() as session:
+            count = await session.scalar(
+                select(func.count(CapReservation.id)).where(*conditions)
+            )
+        return int(count or 0)
 
     @staticmethod
     async def _claim_existing(session, row, owner, lease_seconds):

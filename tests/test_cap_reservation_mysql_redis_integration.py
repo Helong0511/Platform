@@ -19,7 +19,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.core.cap.redis_counter import RedisCapManager
+from app.core.cap.redis_counter import RedisCapManager, get_daily_cap_key
 from app.core.utils import get_app_now_naive, get_app_now_sql_expression
 from app.core.postback.processor import PostbackProcessor
 from app.core.postback.checks.cap_checker import CapChecker
@@ -1024,6 +1024,151 @@ async def test_mysql_recovery_lease_uses_database_clock_when_worker_clock_is_ahe
         assert persisted.state == "PREPARED"
         assert persisted.lease_owner == owner
     finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_mysql_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_redis_rebuild_counts_uncommitted_reservations_but_not_committed_rows(monkeypatch):
+    """Redis counter 丢失时，重建值包含未提交账本，不重复计入已提交转化。"""
+    database = _create_isolated_mysql_database()
+    engine = None
+    redis = Redis.from_url(REDIS_URL, decode_responses=True)
+    redis_keys = []
+    try:
+        _initialize_isolated_schema(database)
+        password = quote_plus(os.getenv("MYSQL_INTEGRATION_PASSWORD", ""))
+        user = quote_plus(os.getenv("MYSQL_INTEGRATION_USER", "root"))
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:"
+            f"{int(os.getenv('MYSQL_INTEGRATION_PORT', '3306'))}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(ledger_module, "AsyncSessionLocal", session_factory)
+
+        from app.core.cap import redis_counter
+
+        async def isolated_redis_client():
+            return redis
+
+        monkeypatch.setattr(redis_counter, "get_redis_client", isolated_redis_client)
+        assert await redis.ping() is True
+
+        offer_id = int(uuid.uuid4().int % 900_000_000) + 100_000_000
+        publisher_id = int(uuid.uuid4().int % 900_000_000) + 100_000_000
+        other_offer_id = offer_id + 1
+        business_date = get_app_now_naive().date()
+        reservation_date = datetime.combine(business_date, time.min)
+        counter_key = get_daily_cap_key(offer_id, reservation_date, publisher_id)
+        other_counter_key = get_daily_cap_key(other_offer_id, reservation_date, publisher_id)
+
+        def _reservation(*, conversion_id, scope_offer_id, scope_key, state="RESERVED"):
+            reservation_key = uuid.uuid4().hex + uuid.uuid4().hex
+            return CapReservation(
+                reservation_key=reservation_key,
+                platform="ci",
+                conversion_id=conversion_id,
+                event_name="Purchase",
+                offer_id=scope_offer_id,
+                publisher_id=publisher_id,
+                cap_kind="daily",
+                business_date=business_date,
+                redis_counter_key=scope_key,
+                redis_token_key=f"{scope_key}:reservation:{reservation_key}",
+                redis_reserved=True,
+                redis_token_cleaned=False,
+                state=state,
+            )
+
+        pending_one = _reservation(
+            conversion_id=f"pending-{uuid.uuid4().hex}",
+            scope_offer_id=offer_id,
+            scope_key=counter_key,
+        )
+        pending_two = _reservation(
+            conversion_id=f"unknown-{uuid.uuid4().hex}",
+            scope_offer_id=offer_id,
+            scope_key=counter_key,
+            state="NEEDS_RECONCILIATION",
+        )
+        committed_but_not_finalized = _reservation(
+            conversion_id=f"committed-{uuid.uuid4().hex}",
+            scope_offer_id=offer_id,
+            scope_key=counter_key,
+        )
+        other_scope = _reservation(
+            conversion_id=f"other-{uuid.uuid4().hex}",
+            scope_offer_id=other_offer_id,
+            scope_key=other_counter_key,
+        )
+        current_reservation = _reservation(
+            conversion_id=f"current-{uuid.uuid4().hex}",
+            scope_offer_id=offer_id,
+            scope_key=counter_key,
+            state="PREPARED",
+        )
+
+        async with session_factory() as session:
+            session.add_all([
+                pending_one,
+                pending_two,
+                committed_but_not_finalized,
+                other_scope,
+                current_reservation,
+            ])
+            await session.flush()
+            await session.execute(
+                text(
+                    "INSERT INTO postback_conversions (platform, conversion_id, event_name) "
+                    "VALUES (:platform, :conversion_id, :event_name)"
+                ),
+                {
+                    "platform": "ci",
+                    "conversion_id": committed_but_not_finalized.conversion_id,
+                    "event_name": "Purchase",
+                },
+            )
+            await session.commit()
+
+        for row in (pending_one, pending_two, committed_but_not_finalized):
+            await redis.set(row.redis_token_key, "1")
+            redis_keys.append(row.redis_token_key)
+
+        pending_count = await CapReservationLedger.count_uncommitted_for_scope(
+            offer_id=offer_id,
+            publisher_id=publisher_id,
+            cap_kind="daily",
+            business_date=business_date,
+            exclude_reservation_key=current_reservation.reservation_key,
+        )
+        assert pending_count == 2
+
+        # counter key 已丢失但旧 token 仍在；用 DB baseline 4 + 两笔未提交预留重建。
+        await redis.delete(counter_key)
+        redis_keys.append(counter_key)
+        result = await RedisCapManager.check_and_increment_daily(
+            offer_id,
+            20,
+            publisher_id,
+            initial_value=4 + pending_count,
+            reservation_id=uuid.uuid4().hex,
+            reservation_date=reservation_date,
+        )
+        assert result is True
+        assert await redis.get(counter_key) == "7"
+        assert await redis.get(pending_one.redis_token_key) == "1"
+        assert await redis.get(pending_two.redis_token_key) == "1"
+    finally:
+        if redis_keys:
+            await redis.delete(*redis_keys)
+        await redis.aclose()
         if engine is not None:
             await engine.dispose()
         _drop_isolated_mysql_database(database)

@@ -343,3 +343,61 @@ async def test_missing_redis_token_does_not_finalize_active_ledger_as_rolled_bac
     assert "回滚异常" in marked[0][1]
     assert "error_type=RuntimeError" in marked[0][1]
     assert finalized == []
+
+
+@pytest.mark.asyncio
+async def test_pending_reservations_raise_redis_rebuild_baseline_not_db_snapshot(monkeypatch):
+    """Redis 重建基线计入其它未提交预留，但 DB 快照只记录本次转化。"""
+    cap = _daily_cap()
+    now = datetime(2026, 11, 11, 12, 0, 0)
+    cap.cap_start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    cap.current_daily_count = 4
+    db = _DB([cap])
+    stable_key = "d" * 64
+    pending_calls = []
+    redis_calls = []
+
+    async def prepare(**kwargs):
+        return SimpleNamespace(reservation_key=stable_key, state="PREPARED"), True, "owner-pending"
+
+    async def count_pending(**kwargs):
+        pending_calls.append(kwargs)
+        return 2
+
+    async def daily(*args, **kwargs):
+        redis_calls.append(kwargs)
+        return True
+
+    async def mark_reserved(*args):
+        return None
+
+    monkeypatch.setattr(cap_manager, "get_app_now_naive", lambda: now)
+    monkeypatch.setattr(cap_manager.CapReservationLedger, "prepare_and_claim", prepare)
+    monkeypatch.setattr(cap_manager.CapReservationLedger, "count_uncommitted_for_scope", count_pending)
+    monkeypatch.setattr(cap_manager.CapReservationLedger, "mark_reserved", mark_reserved)
+
+    monkeypatch.setattr(cap_manager.RedisCapManager, "check_and_increment_daily", daily)
+
+    ok, status, reservations = await cap_manager.increment_cap_count(
+        db=db,
+        offer_id=77,
+        publisher_id=12,
+        include_reservations=True,
+        reservation_context={
+            "platform": "isolated",
+            "conversion_id": "conversion-pending-baseline",
+            "event_name": "purchase",
+        },
+    )
+
+    assert (ok, status) == (True, "cap_ok")
+    assert redis_calls[0]["initial_value"] == 6
+    assert pending_calls == [{
+        "offer_id": 77,
+        "publisher_id": 12,
+        "cap_kind": "daily",
+        "business_date": now.date(),
+        "exclude_reservation_key": stable_key,
+    }]
+    assert cap.current_daily_count == 5
+    assert reservations[0][4] == stable_key

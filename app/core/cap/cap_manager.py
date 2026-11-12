@@ -366,7 +366,7 @@ async def increment_cap_count(
                 else 0
                 for cap in group_caps
             ]
-            redis_init_val = max(db_daily_counts, default=0)
+            db_daily_count = max(db_daily_counts, default=0)
             effective_limit = min(int(cap.daily_cap) for cap in group_caps)
             reservation_id, ledger_key, lease_owner = await _prepare_cap_ledger_reservation(
                 reservation_context, offer_id=group_offer_id,
@@ -374,6 +374,16 @@ async def increment_cap_count(
                 business_date=today_start.date(),
             )
             try:
+                pending_reservations = await CapReservationLedger.count_uncommitted_for_scope(
+                    offer_id=group_offer_id,
+                    publisher_id=group_publisher_id,
+                    cap_kind="daily",
+                    business_date=today_start.date(),
+                    exclude_reservation_key=ledger_key,
+                )
+                # Redis key 丢失/淘汰时，DB baseline 之外仍可能有未提交的活动预留。
+                # Redis 计数重建需包含它们；DB 快照只增加本次转化，不能固化其它预留。
+                redis_init_val = db_daily_count + pending_reservations
                 passed = await RedisCapManager.check_and_increment_daily(
                     group_offer_id, effective_limit, group_publisher_id,
                     initial_value=redis_init_val, reservation_id=reservation_id,
@@ -421,11 +431,11 @@ async def increment_cap_count(
             # 多个配置共享同一实际计数，保持 DB 快照一致；fail-open 时也只增加一次。
             for cap in group_caps:
                 cap.cap_start_date = today_start
-                cap.current_daily_count = redis_init_val + 1
+                cap.current_daily_count = db_daily_count + 1
 
         # 3. 每个 Total Redis key 只原子预留一次；多个约束取最严格上限。
         for (group_offer_id, group_publisher_id), group_caps in total_groups.items():
-            redis_init_val = max(
+            db_total_count = max(
                 (int(cap.current_total_count or 0) for cap in group_caps),
                 default=0,
             )
@@ -436,6 +446,14 @@ async def increment_cap_count(
                 business_date=None,
             )
             try:
+                pending_reservations = await CapReservationLedger.count_uncommitted_for_scope(
+                    offer_id=group_offer_id,
+                    publisher_id=group_publisher_id,
+                    cap_kind="total",
+                    business_date=None,
+                    exclude_reservation_key=ledger_key,
+                )
+                redis_init_val = db_total_count + pending_reservations
                 passed = await RedisCapManager.check_and_increment_total(
                     group_offer_id, effective_limit, group_publisher_id,
                     initial_value=redis_init_val, reservation_id=reservation_id,
@@ -482,7 +500,7 @@ async def increment_cap_count(
             for cap in group_caps:
                 if not cap.cap_start_date:
                     cap.cap_start_date = now
-                cap.current_total_count = redis_init_val + 1
+                cap.current_total_count = db_total_count + 1
 
         # 由调用方控制外层事务时可选跳过 flush，与转化入库同一 commit
         if session_flush:
