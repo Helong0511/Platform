@@ -902,3 +902,43 @@ async def test_mysql_tcp_proxy_drops_real_commit_ack_and_preserves_cap_reservati
         if direct_engine is not None:
             await direct_engine.dispose()
         _drop_isolated_mysql_database(database)
+
+
+@pytest.mark.asyncio
+async def test_redis_rollback_tombstone_makes_retry_idempotent(monkeypatch):
+    """真实隔离 Redis 验证：Lua 回滚后保留墓碑，重试绝不二次 DECR。"""
+    from app.core.cap import redis_counter as redis_counter_module
+
+    client = Redis.from_url(REDIS_URL, decode_responses=True)
+    suffix = uuid.uuid4().hex
+    counter_key = f"ci:cap:rollback:{suffix}"
+    token_key = f"{counter_key}:reservation:{suffix}"
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(redis_counter_module, "get_redis_client", get_client)
+    try:
+        await client.set(counter_key, 1)
+        await client.set(token_key, "1")
+
+        first = await client.eval(
+            RedisCapManager._ROLLBACK_RESERVATION_LUA,
+            2,
+            counter_key,
+            token_key,
+        )
+        assert first == 0
+        assert await client.get(counter_key) == "0"
+        assert await client.get(token_key) == "ROLLED_BACK"
+
+        # 模拟 Redis 已完成回滚、MySQL 尚未 ACK 时进程崩溃后再次执行。
+        second = await RedisCapManager.rollback_reservation_keys(counter_key, token_key)
+        assert second == 0
+        assert await client.get(counter_key) == "0"
+        assert await RedisCapManager.get_reservation_token_state(
+            counter_key, token_key
+        ) == "ROLLED_BACK"
+    finally:
+        await client.delete(counter_key, token_key)
+        await client.aclose()
