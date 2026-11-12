@@ -20,7 +20,7 @@ from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.cap.redis_counter import RedisCapManager
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, get_app_now_sql_expression
 from app.core.postback.processor import PostbackProcessor
 from app.core.postback.checks.cap_checker import CapChecker
 from app.models.cap_reservation import CapReservation
@@ -1002,7 +1002,7 @@ async def test_mysql_recovery_lease_uses_database_clock_when_worker_clock_is_ahe
 
         # 从 MySQL 读取基准时间，再模拟恢复 Worker 本机时钟超前 6 小时。
         async with session_factory() as session:
-            database_now = await session.scalar(text("SELECT NOW()"))
+            database_now = await session.scalar(select(get_app_now_sql_expression()))
         worker_clock_ahead = database_now + timedelta(hours=6)
         monkeypatch.setattr(
             recovery_module,
