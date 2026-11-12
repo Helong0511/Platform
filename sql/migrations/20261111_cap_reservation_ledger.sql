@@ -165,6 +165,24 @@ SET @cap_reservation_schema_valid = (
                    'idx_cap_reservation_state_updated', 'idx_cap_reservation_lease',
                    'idx_cap_reservation_event', 'idx_cap_reservation_scope'
                )) = 13
+        AND (SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations') = 6
+        AND (SELECT COUNT(*) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND SUB_PART IS NOT NULL) = 0
+        AND (SELECT COUNT(*) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND INDEX_TYPE <> 'BTREE') = 0
+        AND (SELECT MAX(NON_UNIQUE) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND INDEX_NAME = 'PRIMARY') = 0
+        AND (SELECT MAX(NON_UNIQUE) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND INDEX_NAME = 'uq_cap_reservation_key') = 0
+        AND (SELECT COUNT(*) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
+               AND INDEX_NAME NOT IN ('PRIMARY', 'uq_cap_reservation_key')
+               AND NON_UNIQUE <> 1) = 0
         AND (SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX)
              FROM information_schema.STATISTICS
              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'
