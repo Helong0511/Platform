@@ -782,6 +782,37 @@ def test_cap_reservation_migration_is_idempotent_and_matches_mysql_schema():
 
 
 
+
+def test_cap_reservation_migration_rejects_database_side_updated_at_trigger():
+    """迁移表不能额外引入 ORM 模型未声明的数据库级 ON UPDATE 行为。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+            _run_sql_file(cursor, "sql/migrations/20261111_cap_reservation_ledger.sql")
+            cursor.execute(
+                "ALTER TABLE cap_reservations MODIFY updated_at "
+                "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP "
+                "ON UPDATE CURRENT_TIMESTAMP"
+            )
+            with pytest.raises(pymysql.err.ProgrammingError) as migration_error:
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261111_cap_reservation_ledger.sql",
+                )
+            assert migration_error.value.args[0] == 1146
+            cursor.execute(
+                "SELECT LOWER(EXTRA) FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations' "
+                "AND COLUMN_NAME = 'updated_at'"
+            )
+            assert "on update" in cursor.fetchone()[0]
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+        connection.close()
+
+
 def test_cap_reservation_migration_rejects_wrong_column_default():
     """关键状态列的默认值漂移必须阻断迁移，不能只核对字段类型与 NULL 属性。"""
     connection = _connect()
