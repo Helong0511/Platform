@@ -194,3 +194,27 @@ async def test_multiple_worker_instances_never_serve_stale_pixel_credentials(mon
     assert third["facebook_access_token"] == "new-token"
     assert worker_a._cache == {}
     assert worker_b._cache == {}
+
+
+@pytest.mark.asyncio
+async def test_pixel_mapping_database_exception_does_not_leak_pii_to_logs(monkeypatch, caplog):
+    service = CloakPixelMappingService()
+
+    class FakeDB:
+        async def execute(self, statement):
+            raise RuntimeError("email=buyer@example.invalid ip=203.0.113.44 click_id=secret-click")
+
+    with caplog.at_level("WARNING", logger=cloak_pixel_mapping.__name__):
+        result = await service.get_pixel_config_by_dp_param(
+            db=FakeDB(),
+            dp="master",
+            short_code="safe-short-code",
+            use_cache=False,
+        )
+
+    assert result is None
+    assert "RuntimeError" in caplog.text
+    assert "safe-short-code" in caplog.text
+    assert "buyer@example.invalid" not in caplog.text
+    assert "203.0.113.44" not in caplog.text
+    assert "secret-click" not in caplog.text
