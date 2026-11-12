@@ -391,6 +391,15 @@ async def process_postback_report_outbox(
                 ThirdPartyReportLog.attempt_count >= ThirdPartyReportLog.max_attempts,
             )
         )
+        # 除自动重试耗尽外，缺少配置引用等终态失败也必须持续暴露给调度告警。
+        terminal_failed_count = await db.scalar(
+            select(func.count(ThirdPartyReportLog.id)).where(
+                ThirdPartyReportLog.outbox_enqueued.is_(True),
+                ThirdPartyReportLog.pii_scrubbed_at.is_(None),
+                ThirdPartyReportLog.status == "failed",
+                ThirdPartyReportLog.next_retry_time.is_(None),
+            )
+        )
 
     stats = {
         "selected": len(report_ids),
@@ -398,6 +407,7 @@ async def process_postback_report_outbox(
         "retryable": 0,
         "failed": 0,
         "exhausted": int(exhausted_count or 0),
+        "terminal_failed": int(terminal_failed_count or 0),
     }
     for report_id in report_ids:
         try:
