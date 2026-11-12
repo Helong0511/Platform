@@ -148,7 +148,8 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
             report_module._claim_report_log(report_id),
             report_module._claim_report_log(report_id),
         )
-        assert sum(claims) == 1
+        assert sum(token is not None for token in claims) == 1
+        assert all(token is None or isinstance(token, datetime) for token in claims)
 
         async with session_factory() as session:
             claimed_row = await session.scalar(
