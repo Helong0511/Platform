@@ -717,6 +717,60 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
 
 
 @pytest.mark.asyncio
+async def test_report_lease_renewal_failure_prevents_external_request(monkeypatch):
+    """发送前续租失败必须 fail-closed，不能创建任何外部 HTTP 请求。"""
+    lease_token = datetime(2026, 11, 12, 12, 0, 0)
+
+    async def existing_log(**kwargs):
+        return 911
+
+    async def claimed(report_log_id):
+        return lease_token
+
+    async def attempt_state(report_log_id):
+        return 0, 4
+
+    async def persist_update(report_log_id, **kwargs):
+        return True
+
+    async def expired_lease(report_log_id, token, lease_seconds=300):
+        assert token == lease_token
+        return None
+
+    class UnexpectedHTTPClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("租约续期失败时不得调用第三方 HTTP API")
+
+    monkeypatch.setattr(third_party_report, "create_report_log", existing_log)
+    monkeypatch.setattr(third_party_report, "_claim_report_log", claimed)
+    monkeypatch.setattr(third_party_report, "_get_report_attempt_state", attempt_state)
+    monkeypatch.setattr(third_party_report, "update_report_log", persist_update)
+    monkeypatch.setattr(third_party_report, "_renew_report_log_lease", expired_lease)
+    monkeypatch.setattr(third_party_report.httpx, "AsyncClient", UnexpectedHTTPClient)
+
+    result = await third_party_report.send_third_party_report(
+        adsid="synthetic-lease-expired",
+        event="Purchase",
+        email="buyer@example.invalid",
+        ip="203.0.113.21",
+        phone="",
+        ua="synthetic-agent",
+        facebook_pixel_id="isolated-pixel",
+        facebook_access_token="isolated-token",
+        source="postback",
+        conversion_id="synthetic-lease-expired",
+        currency="USD",
+        amount=18.0,
+        report_log_id=911,
+        event_key="stable-lease-expired-event",
+    )
+
+    assert result["success"] is False
+    assert result["retryable"] is True
+    assert result["reason"] == "report_lease_lost_before_send"
+
+
+@pytest.mark.asyncio
 async def test_report_claim_exception_does_not_leak_exception_text(monkeypatch, caplog):
     async def create_log(**kwargs):
         return 909
