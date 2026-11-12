@@ -214,6 +214,52 @@ def test_event_migration_rejects_wrong_same_name_index_without_dropping_legacy_u
             cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
         connection.close()
 
+def test_event_migration_rejects_wrong_legacy_unique_index_without_dropping_it():
+    """同名但定义错误的旧索引必须阻断迁移，不能被迁移误删。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+            cursor.execute(
+                "CREATE TABLE third_party_report_logs ("
+                "id INT NOT NULL AUTO_INCREMENT, source VARCHAR(50) NOT NULL, "
+                "adsid VARCHAR(500) NOT NULL, event VARCHAR(50) NOT NULL, "
+                "conversion_id VARCHAR(255) NULL, PRIMARY KEY (id), "
+                "KEY unique_source_adsid (event)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            cursor.execute(
+                "INSERT INTO third_party_report_logs "
+                "(source, adsid, event, conversion_id) "
+                "VALUES ('synthetic-source', 'synthetic-adsid', 'Purchase', 'synthetic-conversion')"
+            )
+            with pytest.raises(pymysql.err.ProgrammingError) as migration_error:
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261110_third_party_report_event_idempotency.sql",
+                )
+            assert migration_error.value.args[0] == 1146
+            cursor.execute("SHOW INDEX FROM third_party_report_logs")
+            indexes = cursor.fetchall()
+            index_names = {row[2] for row in indexes}
+            assert "unique_source_adsid" in index_names
+            assert "unique_event_key" in index_names
+            legacy_rows = [row for row in indexes if row[2] == "unique_source_adsid"]
+            assert len(legacy_rows) == 1
+            assert legacy_rows[0][1] == 1
+            assert legacy_rows[0][4] == "event"
+            cursor.execute(
+                "SELECT source, adsid, event, conversion_id "
+                "FROM third_party_report_logs WHERE id = 1"
+            )
+            assert cursor.fetchone() == (
+                "synthetic-source", "synthetic-adsid", "Purchase", "synthetic-conversion"
+            )
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+        connection.close()
+
+
 def test_outbox_migration_rejects_wrong_same_name_due_index():
     """错误的同名 Outbox 索引必须阻断迁移，不能被静默视为已存在。"""
     connection = _connect()
