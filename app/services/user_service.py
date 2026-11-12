@@ -59,7 +59,7 @@ class UserService(BaseService[User]):
             cache = await get_cache_backend()
             await cache.delete("user_stats")
         except Exception as e:
-            logger.warning(f"清除 user_stats 缓存失败: {e}")
+            logger.warning("清除 user_stats 缓存失败: error_type=%s", type(e).__name__)
 
     async def _revoke_sessions_on_disable(
             self,
@@ -80,10 +80,9 @@ class UserService(BaseService[User]):
             )
         except Exception as e:
             logger.error(
-                "禁用用户时撤销会话失败: user_id=%s, err=%s",
+                "禁用用户时撤销会话失败: user_id=%s error_type=%s",
                 user_id,
-                e,
-                exc_info=True,
+                type(e).__name__,
             )
 
     async def get_user_by_id(
@@ -277,7 +276,7 @@ class UserService(BaseService[User]):
         try:
             await invalidate_user_permission_cache(user.id)
         except Exception as e:
-            logger.warning(f"清除权限缓存失败: {e}")
+            logger.warning("清除权限缓存失败: error_type=%s", type(e).__name__)
 
         await self.invalidate_user_stats_cache()
 
@@ -389,7 +388,7 @@ class UserService(BaseService[User]):
         try:
             await invalidate_user_permission_cache(user_id)
         except Exception as e:
-            logger.warning(f"清除权限缓存失败: {e}")
+            logger.warning("清除权限缓存失败: error_type=%s", type(e).__name__)
 
         await self.invalidate_user_stats_cache()
 
@@ -432,7 +431,7 @@ class UserService(BaseService[User]):
         try:
             await invalidate_user_permission_cache(user_id)
         except Exception as e:
-            logger.warning(f"清除权限缓存失败: {e}")
+            logger.warning("清除权限缓存失败: error_type=%s", type(e).__name__)
 
         await self.invalidate_user_stats_cache()
 
@@ -519,7 +518,7 @@ class UserService(BaseService[User]):
                 revoked,
             )
         except Exception as revoke_exc:
-            logger.warning("改密后吊销会话失败（密码已更新）: %s", revoke_exc)
+            logger.warning("改密后吊销会话失败（密码已更新）: error_type=%s", type(revoke_exc).__name__)
 
         # 记录审计日志
         await log_user_action(
