@@ -1,7 +1,5 @@
 """数据库引导 URI 解析的纯单元测试，不建立真实数据库连接。"""
 
-from sqlalchemy.engine import make_url
-
 from app.db.database import _get_database_bootstrap_target
 
 
