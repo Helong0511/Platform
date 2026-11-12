@@ -88,8 +88,10 @@ async def test_conversion_summary_collects_all_client_records_before_scoping_pub
     assert result["stats_list"] == []
     assert db.execute_count == 2
     assert "clients.user_id = %s" in db.sql[0]
+    assert "clients.is_active is true" in db.sql[0]
     assert " limit " not in db.sql[0]
     assert "publishers.client_id in" in db.sql[1]
+    assert "publishers.is_active is true" in db.sql[1]
 
 
 @pytest.mark.asyncio
@@ -103,5 +105,7 @@ async def test_conversion_by_offer_collects_all_client_records_before_scoping_pu
     assert result == []
     assert db.execute_count == 2
     assert "clients.user_id = %s" in db.sql[0]
+    assert "clients.is_active is true" in db.sql[0]
     assert " limit " not in db.sql[0]
     assert "publishers.client_id in" in db.sql[1]
+    assert "publishers.is_active is true" in db.sql[1]
