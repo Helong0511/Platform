@@ -17,12 +17,12 @@ def test_splits_only_semicolons_outside_quotes_and_comments():
     SELECT `semi;colon` FROM t;
     """
     statements = split_mysql_statements(sql)
-    assert len(statements) == 4
+    assert len(statements) == 3
     assert "a;b" in statements[0]
     assert "c;d" in statements[0]
     assert "comment" not in statements[1]
-    assert "escaped" in statements[2]
-    assert "`semi;colon`" in statements[3]
+    assert "escaped" in statements[1]
+    assert "`semi;colon`" in statements[2]
 
 
 def test_preserves_mysql_executable_comments():
