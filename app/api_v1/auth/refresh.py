@@ -22,6 +22,8 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
 from app.core.async_orm import get_first_loaded_collection_item
+from app.core.api_auth import _is_client_ip_allowed
+from app.core.utils import get_client_ip
 from app.core.auth_response import (
     build_token_json_response,
     raise_auth_error,
@@ -124,6 +126,19 @@ async def refresh_token(
                 http_status=status.HTTP_403_FORBIDDEN,
             )
 
+        # 刷新令牌同样受客户 IP 白名单约束，避免从非授权来源续期会话。
+        client_record = get_first_loaded_collection_item(user, "clients")
+        if (
+            user.role == UserRole.CLIENT
+            and client_record
+            and not _is_client_ip_allowed(client_record.allowed_ips, get_client_ip(request))
+        ):
+            raise_auth_error(
+                ErrorCode.FORBIDDEN,
+                "当前来源 IP 不在客户允许列表中，请联系管理员",
+                http_status=status.HTTP_403_FORBIDDEN,
+            )
+
         await revoke_tokens_from_request(
             db=db,
             request=request,
@@ -151,7 +166,6 @@ async def refresh_token(
 
         api_enabled = False
         has_publisher = False
-        client_record = get_first_loaded_collection_item(user, "clients")
         if user.role == UserRole.CLIENT and client_record:
             api_enabled = bool(client_record.api_enabled)
             publisher_check = await db.execute(
