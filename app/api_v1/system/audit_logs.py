@@ -356,7 +356,7 @@ async def log_client_error(
 
     except Exception as e:
         # 记录错误日志失败不应该影响前端，静默处理
-        logger.warning(f"记录客户端错误日志失败: {e}")
+        logger.warning("记录客户端错误日志失败: error_type=%s", type(e).__name__)
         return ResponseBaseSchema.success(
             data={"message": "错误日志记录失败"},
             message="错误日志记录失败"
