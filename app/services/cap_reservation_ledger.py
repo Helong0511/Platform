@@ -286,7 +286,7 @@ class CapReservationLedger:
                 .where(
                     CapReservation.reservation_key == reservation_key,
                     CapReservation.lease_owner == lease_owner,
-                    CapReservation.state.in_(ACTIVE_STATES + ("COMMITTED",)),
+                    CapReservation.state.in_(ACTIVE_STATES + ("COMMITTED", "ROLLED_BACK")),
                     or_(
                         CapReservation.state != "COMMITTED",
                         CapReservation.redis_token_cleaned.is_(False),
@@ -338,7 +338,8 @@ class CapReservationLedger:
                         f"Cap Reservation lease owner 不匹配，拒绝终态更新：{reservation_key}"
                     )
 
-            token_cleaned = state == "ROLLED_BACK"
+            # 回滚后保留 Redis 墓碑，直到恢复 Worker 确认 DB 终态后再清理。
+            token_cleaned = False
             if state == "COMMITTED":
                 # token 即使在 RESERVED 标记前也可能已由 Lua 创建；终态清理必须覆盖此窗口。
                 try:
@@ -396,14 +397,14 @@ class CapReservationLedger:
         reservation_key: str,
         lease_owner: str,
     ) -> None:
-        """恢复任务成功删除已提交 token 后，确认清理完成并释放租约。"""
+        """恢复任务删除 COMMITTED token 或 ROLLED_BACK 墓碑后，确认清理完成。"""
         now = get_app_now_naive()
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 update(CapReservation)
                 .where(
                     CapReservation.reservation_key == reservation_key,
-                    CapReservation.state == "COMMITTED",
+                    CapReservation.state.in_(("COMMITTED", "ROLLED_BACK")),
                     CapReservation.lease_owner == lease_owner,
                 )
                 .values(
@@ -421,7 +422,7 @@ class CapReservationLedger:
                         CapReservation.reservation_key == reservation_key
                     )
                 )
-                if row is None or row.state != "COMMITTED" or not row.redis_token_cleaned:
+                if row is None or row.state not in ("COMMITTED", "ROLLED_BACK") or not row.redis_token_cleaned:
                     raise RuntimeError(
                         f"Cap Reservation token 清理状态更新失败：{reservation_key}"
                     )
