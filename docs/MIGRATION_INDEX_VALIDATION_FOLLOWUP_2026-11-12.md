@@ -745,3 +745,48 @@ MySQL 官方文档确认：
 - 本节是对当前源码调用路径的审计记录，不代表启动期 DDL 已被移除，也不代表应用数据库账号权限已完成收敛。
 - 尚未修改运行代码；当前应用启动仍会执行数据库创建/建表流程。必须在独立迁移机制实现并通过隔离 CI 后，才可逐步切换启动行为。
 - PR #1 继续 Open / Draft；不合并 main、不部署、不连接生产服务器、数据库、Redis、队列或真实第三方接口。
+
+
+## 16. 启动期非 DDL 数据库写入与迁移脚本执行边界补充（2026-11-12）
+
+### 16.1 定时任务配置同步也是每 Worker 启动写入
+
+进一步读取 `app/scheduler_module/task_init.py` 和 lifespan 调用点，确认：
+
+- `lifespan()` 在完成 schema bootstrap 和 `init_db()` 后，每次应用启动都会调用 `init_scheduled_tasks_in_db()`；该调用不受 `ENABLE_SCHEDULER` 限制。
+- `init_scheduled_tasks_in_db()` 将 `TASK_CONFIGS` 与 `scheduled_tasks` 表逐条对账：不存在时 INSERT，已存在但函数路径/Cron/描述变化时 UPDATE。
+- 该函数对每条任务独立提交，遇到单条插入/更新异常时回滚并记录日志；外层异常也被捕获且不再抛出。因此应用可能在任务配置只同步一部分的情况下继续启动。
+- 多 Worker 启动时可能同时执行同步。现有实现通过行锁、唯一键冲突后重查等方式处理部分并发竞争，但它仍是应用启动期业务数据同步，不是 Schema migration。
+- 这项同步不应写入 schema revision ledger；应归类为可审计的应用配置初始化/协调任务，并明确唯一执行者、并发锁、失败告警和重试策略。
+
+### 16.2 迁移脚本执行器的实际语法边界
+
+现有 `tests/test_mysql_migrations.py::_run_sql_file()`：
+
+- 使用 UTF-8 读取脚本，移除整行 `--` 注释，再按分号拆分语句；逐条执行并消费结果集。
+- 测试注释明确当前迁移不包含存储过程；但该实现不是通用 SQL parser，不处理字符串/注释内分号、DELIMITER、存储过程或复杂脚本语法。
+- 当前脚本确实使用 MySQL session user variables（`SET @...`）和 prepared statements（`PREPARE/EXECUTE/DEALLOCATE PREPARE`），因此执行器必须保持同一数据库 session；不能按语句重新建连接。
+- 现有测试 helper 没有正式 Runner 所需的 revision ledger、checksum 校验、锁生命周期、失败状态、权限隔离和恢复协调。
+
+因此实现正式 Runner 时，不应把当前 helper 原样复制到生产模块。可选路线必须明确其支持语法：采用经过严格测试的受限 SQL 文件格式/解析器，或把动态条件 DDL 逐步迁移为 Python migration operations；不支持的语法必须在执行前 fail closed。
+
+### 16.3 启动写入职责矩阵（本轮核查）
+
+| 路径 | 当前行为 | 目标职责 |
+|---|---|---|
+| `create_database()` | Worker 启动时尝试创建 MySQL database | 安装/基础设施 provisioning，一次性显式执行 |
+| `Base.metadata.create_all()` | Worker 启动时自动补建表 | 独立版本化 Schema migration |
+| `init_db()` | 启动时确保默认管理员存在 | 单独的幂等应用 bootstrap，明确启用条件与审计 |
+| `init_scheduled_tasks_in_db()` | 每 Worker 启动同步任务配置，逐条提交 | 独立的配置同步协调流程，明确 leader/锁、失败告警和重试 |
+| Schema revision check | 当前尚未发现正式 revision ledger 校验 | Worker 启动只读校验，版本不足或 drift 时 fail closed |
+
+### 16.4 当前 CI 证据
+
+- 文档提交 `23d3631cc346af0678c6deae4246de76972d404a` 对应 Run #1442 已完成。
+- Backend：success。
+- Frontend：success。
+- 该 Run 仅验证本次文档提交和仓库既有 CI；不代表 Migration Runner 已实现，也不代表启动期写入路径已经改造。
+
+### 16.5 本轮结论
+
+本轮增加了定时任务同步这一启动期数据库写入路径，避免迁移改造只覆盖 DDL 而遗漏 Worker 启动时的业务数据写入。尚未修改应用运行代码；后续实现必须分别处理 schema provisioning、DDL migration、默认管理员 bootstrap、定时任务配置同步和只读 schema 验证。
