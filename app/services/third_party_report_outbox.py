@@ -214,7 +214,26 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
         }
 
     if not (payload["short_link_id"] or (payload["cloak_name"] and payload["short_code"])):
-        return {"success": False, "retryable": False, "reason": "missing_config_reference"}
+        # 历史脏数据/手工写入可能绕过 enqueue 校验；必须认领并收敛为终态，
+        # 否则 due scanner 会每轮重复选中同一条无法处理的记录。
+        claimed = await _claim_report_log(report_log_id)
+        if not claimed:
+            return {"success": False, "retryable": True, "reason": "report_in_progress"}
+        now = get_app_now_naive()
+        await update_report_log(
+            report_log_id,
+            status="failed",
+            error_message="缺少短链接/斗篷配置引用，无法解析像素凭据",
+            report_start_time=now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
+            completed_at=now,
+            clear_next_retry_time=True,
+        )
+        return {
+            "success": False,
+            "retryable": False,
+            "reason": "missing_config_reference",
+            "report_log_id": report_log_id,
+        }
 
     try:
         pixel_id, access_token, api_version = await _resolve_pixel_credentials(
