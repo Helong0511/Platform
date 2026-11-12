@@ -282,10 +282,13 @@ async def get_cap_reservation_recovery_status() -> dict:
         max(0, int((now - oldest_pending).total_seconds()))
         if oldest_pending is not None else 0
     )
+    terminal_cleanup_pending = int(cleanup_pending or 0)
     return {
         "pending_prepared": counts.get("PREPARED", 0),
         "pending_reserved": counts.get("RESERVED", 0),
         "needs_reconciliation": counts.get("NEEDS_RECONCILIATION", 0),
-        "committed_token_cleanup_pending": int(cleanup_pending or 0),
+        "terminal_token_cleanup_pending": terminal_cleanup_pending,
+        # 兼容既有监控字段；当前统计包含 COMMITTED 与 ROLLED_BACK 两类终态墓碑。
+        "committed_token_cleanup_pending": terminal_cleanup_pending,
         "oldest_pending_seconds": oldest_age_seconds,
     }
