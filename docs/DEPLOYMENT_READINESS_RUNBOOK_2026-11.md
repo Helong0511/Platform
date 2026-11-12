@@ -578,3 +578,34 @@ CI 的前端 `npm audit --omit=dev` 仍报告 2 个 High 项，均由直接依�
 
 - 日志只记录异常类型能降低 PII 暴露，但不替代受控的内部诊断平台；若未来需要 traceback，应使用脱敏后的结构化上下文、受限访问和保留期限，不得直接重新启用原始异常文本。
 - 继续保持 PR Open / Draft，不合并、不部署；生产环境仍完全隔离。
+
+
+
+## 28. Cap Reservation / Outbox 异常脱敏与无效任务收敛（2026-11-12，Run #1177）
+
+### 修复与回归验证
+
+- Cap Reservation 恢复 Worker 的异常处理只记录异常类型；账本 `last_error` 不再持久化 Redis/数据库异常原文，避免邮箱、IP、click_id、连接信息或 SQL 参数进入长期记录。
+- Cap Manager / Cap Checker 的 Redis 回滚失败记录改为受控错误描述；回滚失败聚合日志仅保留异常类型，不包含异常原文。
+- 新增恢复异常回归测试：注入包含合成邮箱、IP、click_id 的异常，验证日志与账本均不包含这些原始值。
+- 第三方 Report Outbox 对缺少短链接/斗篷配置引用的历史脏记录，先原子争抢发送租约，再终结为 failed，清除 next_retry_time 并写入 completed_at；争抢失败则返回可重试的 report_in_progress，避免多个 Worker 重复终结或 due scanner 无限重扫。
+- 新增 Outbox 回归测试验证缺少配置引用的记录被终态收敛，不再保留下一次重试时间。
+- 修复 Cap Reservation 集成测试的过时断言：测试现在验证账本记录受控的“回滚异常 / error_type=RuntimeError”，同时仍验证不会误报 ROLLED_BACK。该修改没有放宽业务断言或恢复原始异常文本。
+
+### CI 证据
+
+- Run #1176（SHA `bd853198f0d5ac8f5cc93432b01213398f0899a5`）曾因旧测试仍断言原始错误描述而失败：Backend 1 failed、442 passed、1 skipped、1 warning；Frontend Lint/Build/Playwright Mock API E2E 成功。保留历史失败记录。
+- Run #1175（较早 SHA）后续被取消，不作为通过证据。
+- Run #1177（SHA `46d3907d0ebe2f288e7576b0d68e2a2bd5cead61`）完整成功：Backend **443 passed、1 skipped、1 warning**；Python compile 成功；Frontend npm ci、依赖 advisory 报告、Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- Run #1177：https://github.com/Helong0511/Platform/actions/runs/43136785298。
+- Skip 仍是本地核对脚本未提交（CI 不依赖）；warning 仍是 passlib 在 Python 3.11 使用 crypt 的弃用提示。前端 Production High advisories 仍属于按用户要求暂缓的凭据安全专项，不宣称依赖零漏洞。
+
+### 尚未关闭的阻断项
+
+- Outbox 多 Worker 争抢、发送中租约过期、Worker 崩溃、配置禁用/删除/轮换/恢复及长时间网络故障的组合验收仍需补齐；不能宣称第三方 exactly-once。
+- Cap Reservation 仍需覆盖 Redis failover/淘汰、DB commit 阻塞/ACK 丢失、时钟偏差、多恢复 Worker 竞争与进程重启的组合故障注入。
+- 完整旧 schema + 代表性历史数据 migration、全量备份恢复、逐 DDL 中断续跑、应用兼容回滚及 schema/data diff 尚未完成。
+- PII 保留政策仍待业务/合规审批；PostbackConversion 原始数据、待处理转发队列、通知消息、备份副本及第三方接收方数据仍需独立治理。
+- RBAC、租户隔离、归因、统计、结算、API、队列及前端剩余业务模块仍需全量复核。
+
+PR 继续 Open / Draft；不合并 main、不部署。所有验证仅使用 GitHub Actions 隔离 MySQL/Redis、合成数据和 Mock API；严禁连接生产环境或真实第三方接口。
