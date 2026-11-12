@@ -115,14 +115,20 @@ async def scrub_expired_third_party_report_pii(
         active_forward_queue = exists(
             select(PostbackForwardQueue.id).where(
                 PostbackForwardQueue.conversion_id == PostbackForwardLog.conversion_id,
+                # 以完整的目标二元组匹配，避免同一转化的其它目标队列误阻塞；
+                # NULL 也必须参与相等判断，兼容产品级/渠道级目标及关联对象删除。
                 or_(
+                    PostbackForwardQueue.publisher_id == PostbackForwardLog.publisher_id,
                     and_(
-                        PostbackForwardLog.publisher_id.is_not(None),
-                        PostbackForwardQueue.publisher_id == PostbackForwardLog.publisher_id,
+                        PostbackForwardQueue.publisher_id.is_(None),
+                        PostbackForwardLog.publisher_id.is_(None),
                     ),
+                ),
+                or_(
+                    PostbackForwardQueue.product_id == PostbackForwardLog.product_id,
                     and_(
-                        PostbackForwardLog.product_id.is_not(None),
-                        PostbackForwardQueue.product_id == PostbackForwardLog.product_id,
+                        PostbackForwardQueue.product_id.is_(None),
+                        PostbackForwardLog.product_id.is_(None),
                     ),
                 ),
             )
