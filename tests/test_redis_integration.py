@@ -55,7 +55,7 @@ _SAFE_REDIS_TARGET = (
 )
 
 # 这些测试会向 Redis 写入并删除 key；禁止因环境变量误配置而连接远程/生产 Redis。
-if os.getenv("UNIT_TEST") == "1" and (REDIS_URL or os.getenv("GITHUB_ACTIONS") == "true") and not _SAFE_REDIS_TARGET:
+if (os.getenv("GITHUB_ACTIONS") == "true" or (os.getenv("UNIT_TEST") == "1" and REDIS_URL)) and not _SAFE_REDIS_TARGET:
     raise RuntimeError(
         "拒绝执行 Redis 集成测试：必须使用 loopback Redis DB14，"
         "并显式设置 REDIS_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS=1"
