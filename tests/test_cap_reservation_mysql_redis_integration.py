@@ -62,6 +62,7 @@ def _is_isolated_redis_url(url: str | None) -> bool:
 
 _SAFE_INTEGRATION_TARGETS = (
     os.getenv("UNIT_TEST") == "1"
+    and os.getenv("GITHUB_ACTIONS") == "true"
     and os.getenv("MYSQL_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS") == "1"
     and os.getenv("REDIS_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS") == "1"
     and _is_loopback_host(MYSQL_HOST)
@@ -79,7 +80,7 @@ if os.getenv("UNIT_TEST") == "1" and (MYSQL_HOST or REDIS_URL or os.getenv("GITH
 
 pytestmark = pytest.mark.skipif(
     not _SAFE_INTEGRATION_TARGETS,
-    reason="仅在显式授权的本机隔离 MySQL platform_ci + Redis DB14 中运行",
+    reason="仅在 GitHub Actions 临时 MySQL platform_ci + Redis DB14 服务中运行",
 )
 
 
