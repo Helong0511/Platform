@@ -491,10 +491,13 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
                 """
             )
             historical = ("短链", "广告|标识", "ViewContent", "转化:一")
-            cursor.execute(
+            historical_case_variant = (
+                "short-link", "case-variant-ad", "viewcontent", "case-sensitive-conversion"
+            )
+            cursor.executemany(
                 "INSERT INTO third_party_report_logs "
                 "(source, adsid, event, conversion_id) VALUES (%s, %s, %s, %s)",
-                historical,
+                [historical, historical_case_variant],
             )
 
             # 构造历史下游转发日志，验证 PII 迁移同时覆盖该表且不改写历史内容。
@@ -553,6 +556,12 @@ def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
                 "SELECT event_key FROM third_party_report_logs WHERE id = 1"
             )
             assert cursor.fetchone()[0] == _event_key(*historical)
+            cursor.execute(
+                "SELECT event_key FROM third_party_report_logs WHERE id = 2"
+            )
+            # MySQL 默认 *_ci 排序规则不应让 SQL 将小写 viewcontent 当作 ViewContent；
+            # 必须与 Python 的大小写敏感事件身份算法一致。
+            assert cursor.fetchone()[0] == _event_key(*historical_case_variant)
 
             # 新索引允许同一 source/adsid 的不同事件分别入账。
             source, adsid = "short_link", "same-ad-id"
