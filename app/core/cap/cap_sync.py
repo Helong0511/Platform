@@ -66,7 +66,10 @@ class CapSynchronizer:
             .where(CapReservation.state.in_(ACTIVE_RESERVATION_STATES))
             .distinct()
         )
-        pending_scopes = set(pending_result.all())
+        pending_scopes = {
+            (offer_id, publisher_id)
+            for offer_id, publisher_id in pending_result.all()
+        }
 
         stats = {"success": 0, "failed": 0, "skipped": 0}
         now = get_app_now_naive()
