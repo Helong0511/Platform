@@ -295,12 +295,14 @@ async def test_existing_token_with_evicted_counter_fails_closed(monkeypatch, met
 
 
 def test_rollback_lua_preserves_token_when_counter_is_missing():
-    # 脚本必须先确认计数 key 存在，再删除 reservation token。
+    # 脚本必须先确认计数 key 存在；正常回滚写入持久化墓碑，而不是提前删除 token。
     script = redis_counter.RedisCapManager._ROLLBACK_RESERVATION_LUA
     counter_check = script.index("if redis.call('EXISTS', KEYS[1]) == 0 then")
-    token_delete = script.index("redis.call('DEL', KEYS[2])")
-    assert counter_check < token_delete
+    tombstone_write = script.index("redis.call('SET', KEYS[2], 'ROLLED_BACK')")
+    persist_tombstone = script.index("redis.call('PERSIST', KEYS[2])")
+    assert counter_check < tombstone_write < persist_tombstone
     assert "return -2" in script
+    assert "redis.call('DEL', KEYS[2])" not in script
 
 
 
