@@ -9,7 +9,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cap import check_cap, increment_cap_count, rollback_cap_redis_counts
-from app.core.cap.redis_counter import RedisCapManager
+from app.core.cap.redis_counter import RedisCapManager, get_daily_cap_key, get_total_cap_key
 from app.core.config import settings
 from app.services.cap_reservation_ledger import CapReservationLedger
 
@@ -152,6 +152,16 @@ class CapChecker:
                 if ledger_key:
                     await CapReservationLedger.finalize(
                         ledger_key, "ROLLED_BACK", lease_owner=lease_owner
+                    )
+                elif redis_reserved and reservation_id:
+                    # 兼容没有持久化账本的旧调用，回滚完成后清理临时墓碑。
+                    counter_key = (
+                        get_daily_cap_key(offer_id, reservation_date, publisher_id)
+                        if kind == "daily"
+                        else get_total_cap_key(offer_id, publisher_id)
+                    )
+                    await RedisCapManager.delete_reservation_token(
+                        f"{counter_key}:reservation:{reservation_id}"
                     )
             except Exception as exc:
                 if ledger_key:
