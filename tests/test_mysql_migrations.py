@@ -113,6 +113,53 @@ def _event_key(source: str, adsid: str, event: str, conversion_id: str | None) -
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
+def test_event_key_migration_preserves_legacy_unique_index_when_new_key_collides():
+    """新事件键碰撞时迁移失败，但旧唯一约束必须继续保护在线数据。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+            cursor.execute(
+                """
+                CREATE TABLE third_party_report_logs (
+                    id INT NOT NULL AUTO_INCREMENT,
+                    source VARCHAR(50) NOT NULL,
+                    adsid VARCHAR(500) NOT NULL,
+                    event VARCHAR(50) NOT NULL,
+                    conversion_id VARCHAR(255) NULL,
+                    event_key VARCHAR(64) NULL,
+                    PRIMARY KEY (id),
+                    UNIQUE KEY unique_source_adsid (source, adsid)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            collision_key = hashlib.sha256(b"synthetic-event-key-collision").hexdigest()
+            cursor.executemany(
+                "INSERT INTO third_party_report_logs "
+                "(source, adsid, event, conversion_id, event_key) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                [
+                    ("source-a", "ad-a", "Purchase", "conv-a", collision_key),
+                    ("source-b", "ad-b", "Purchase", "conv-b", collision_key),
+                ],
+            )
+
+            with pytest.raises(pymysql.err.IntegrityError):
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261110_third_party_report_event_idempotency.sql",
+                )
+
+            cursor.execute("SHOW INDEX FROM third_party_report_logs")
+            index_names = {row[2] for row in cursor.fetchall()}
+            assert "unique_source_adsid" in index_names
+            assert "unique_event_key" not in index_names
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+        connection.close()
+
+
 def test_mysql_migrations_create_idempotency_schema_and_backfill_event_keys():
     baseline_schema = Path("sql/platform.sql").read_text(encoding="utf-8")
     connection = _connect()
