@@ -126,10 +126,10 @@ async def get_audit_logs(
         raise
 
     except Exception as e:
-        logger.error(f"获取用户操作日志列表失败: {e}", exc_info=True)
+        logger.error("获取用户操作日志列表失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取日志列表失败：{str(e)}"
+            detail="获取日志列表失败，请稍后重试"
         )
 
 
@@ -179,10 +179,10 @@ async def get_audit_log_stats(
         raise
 
     except Exception as e:
-        logger.error(f"获取日志统计信息失败: {e}", exc_info=True)
+        logger.error("获取日志统计信息失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取统计信息失败：{str(e)}"
+            detail="获取统计信息失败，请稍后重试"
         )
 
 
@@ -224,10 +224,10 @@ async def clear_all_audit_logs(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"清除全部操作日志失败: {e}", exc_info=True)
+        logger.error("清除全部操作日志失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"清除全部操作日志失败：{str(e)}",
+            detail="清除全部操作日志失败，请稍后重试",
         )
 
 
@@ -269,10 +269,10 @@ async def get_audit_log(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取用户操作日志详情失败: {e}", exc_info=True)
+        logger.error("获取用户操作日志详情失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取日志详情失败: {str(e)}"
+            detail="获取日志详情失败，请稍后重试"
         )
 
 
