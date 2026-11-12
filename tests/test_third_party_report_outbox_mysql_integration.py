@@ -124,8 +124,8 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
         )
         monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
 
-        now = get_app_now_naive()
-        # 使用可控时钟推进租约令牌，避免依赖真实 sleep 或调度精度。
+        now = get_app_now_naive().replace(microsecond=0)
+        # MySQL DATETIME 使用秒级精度；可控时钟也统一截断微秒，避免测试精度不一致。
         lease_clock = [now]
         monkeypatch.setattr(report_module, "get_app_now_naive", lambda: lease_clock[0])
         event_identity = uuid.uuid4().hex
