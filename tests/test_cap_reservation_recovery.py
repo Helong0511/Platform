@@ -525,3 +525,33 @@ async def test_recovery_exception_does_not_persist_or_log_raw_error(monkeypatch,
     assert "buyer@example.invalid" not in caplog.text
     assert "203.0.113.88" not in caplog.text
     assert "private-click" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_recovery_uses_rollback_tombstone_without_decrementing_again(monkeypatch):
+    """Redis 墓碑证明之前已 DECR；恢复只能补记账本终态。"""
+    row = _reservation(state="RESERVED", redis_reserved=True)
+    sessions = [_Session(rows=[row]), _Session(event_id=None)]
+    calls = []
+
+    def session_factory():
+        return sessions.pop(0)
+
+    async def token_state(counter_key, token_key):
+        return "ROLLED_BACK"
+
+    async def forbidden_rollback(*args):
+        raise AssertionError("ROLLED_BACK 墓碑存在时绝不能再次 DECR")
+
+    async def finalize(key, state, **kwargs):
+        calls.append((key, state, kwargs))
+
+    monkeypatch.setattr(recovery, "AsyncSessionLocal", session_factory)
+    monkeypatch.setattr(recovery.RedisCapManager, "get_reservation_token_state", token_state)
+    monkeypatch.setattr(recovery.RedisCapManager, "rollback_reservation_keys", forbidden_rollback)
+    monkeypatch.setattr(recovery.CapReservationLedger, "finalize", finalize)
+
+    stats = await recovery.recover_cap_reservations()
+
+    assert stats["rolled_back"] == 1
+    assert calls[0][0:2] == (row.reservation_key, "ROLLED_BACK")
