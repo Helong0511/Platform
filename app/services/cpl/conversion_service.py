@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 def _exclusive_end_datetime(end_date: str) -> datetime:
     """把包含式结束日期转换为次日零点的排他上界。"""
-    return _exclusive_end_datetime(end_date)
+    return parse_date_to_app_timezone(end_date, is_end_date=False) + timedelta(days=1)
 
 # 客户不可见的上游金额与广告主字段（文档约定仅管理员可见）
 _CLIENT_HIDDEN_SUMMARY_TOTAL_KEYS = frozenset({"total_po", "total_profit"})
