@@ -382,14 +382,54 @@ async def test_mysql_schema_bootstrap_serializes_workers_and_verifies_full_metad
         )
         monkeypatch.setattr(lifespan_module, "engine", engine)
 
-        # 两个 worker 同时启动：GET_LOCK 必须串行化 create_all 与结构核验。
-        await asyncio.gather(
-            lifespan_module._bootstrap_database_schema(),
-            lifespan_module._bootstrap_database_schema(),
-        )
+        # 完整 ORM metadata 的首次建表与逐表核验。
+        await lifespan_module._bootstrap_database_schema()
 
         async with engine.connect() as connection:
             drift = await connection.run_sync(lifespan_module._schema_metadata_drift)
+        assert drift == {"missing_tables": [], "missing_columns": {}}
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_schema_bootstrap_serializes_concurrent_workers(monkeypatch):
+    """小型真实 MySQL schema 上验证两个 worker 的 advisory lock 不会死锁。"""
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        metadata = MetaData()
+        Table(
+            "bootstrap_concurrency_probe",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("required_value", String(40), nullable=False),
+        )
+        monkeypatch.setattr(lifespan_module, "engine", engine)
+        monkeypatch.setattr(lifespan_module, "Base", SimpleNamespace(metadata=metadata))
+
+        await asyncio.wait_for(
+            asyncio.gather(
+                lifespan_module._bootstrap_database_schema(),
+                lifespan_module._bootstrap_database_schema(),
+            ),
+            timeout=20,
+        )
+        async with engine.connect() as connection:
+            drift = await connection.run_sync(
+                lambda sync_connection: lifespan_module._schema_metadata_drift(
+                    sync_connection, metadata
+                )
+            )
         assert drift == {"missing_tables": [], "missing_columns": {}}
     finally:
         if engine is not None:
