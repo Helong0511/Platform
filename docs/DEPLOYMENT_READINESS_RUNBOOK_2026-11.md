@@ -905,3 +905,25 @@ PR #1 继续 Open / Draft，不合并 main、不部署；验证只使用隔离 C
 - 尚未完成：每个 DDL 边界的逐点中断注入、真实逻辑备份导出/导入恢复、worker pause/resume、应用兼容回滚、旧/新 schema 与数据 diff、真实规模合成数据升级耗时/锁表评估。MySQL DDL 隐式提交，不能宣称迁移可事务回滚。
 - sql/platform.sql 是完整建库基线，含 DROP/重建表语句；只能用于空库初始化或明确的破坏性重建流程，绝不能作为现有库升级脚本。已有数据库只能按审批后的增量迁移顺序处理。
 - PR 继续 Open / Draft，不合并 main、不部署；所有验证仅限 GitHub Actions 临时 MySQL/Redis、合成数据和 Mock API。凭据安全专项仍按用户要求暂缓。
+
+
+## 37. 多客户账号停用成员与登录/刷新权限聚合（2026-11-12，Run #1324）
+
+- 登录与刷新令牌不再使用 User.clients 集合的任意首项判断权限；统一先筛选 is_active=true 的客户主体。
+- 已停用 Client 不再参与共享登录账号的 IP 白名单交集判断，避免停用主体遗留白名单继续限制用户。
+- 客户账号没有任何启用中的 Client 时，登录和刷新令牌均 fail-closed 返回 403；刷新路径在拒绝前不会轮换或撤销现有令牌。
+- api_enabled 按启用中 Client 聚合（任一启用客户开启则为 true）；has_publisher 查询所有启用中 Client 的有效 Publisher，避免只看集合首项导致菜单/权限标记不一致。
+- 新增回归测试覆盖：停用客户白名单不参与判断、仅关联停用客户的账号不能登录/刷新；保留多个启用客户白名单交集策略。
+- Run #1324（SHA 3986503958f9ecc5c0e1212dfbd71670c8be69e1）：Backend **515 passed、1 skipped、1 warning**；Python Compile、Frontend Lint、Build、Playwright Mock API Browser E2E 全部成功。Run：https://github.com/Helong0511/Platform/actions/runs/43154280517。
+- Run #1317（SHA 8fa167b10d0a3093bc487e8ee3a891a5a83b5508）曾因两条测试将 SQLAlchemy 的 IS true 错写为 = true 而失败；断言已修正，历史失败记录保留，不删除或伪装为通过。
+- 1 skipped 为本地核对脚本未提交（CI 不依赖）；1 warning 为 passlib 在 Python 3.11 使用 crypt 的弃用提示。该 warning 尚未处理。
+- 本轮仅使用 GitHub Actions 隔离 MySQL/Redis、合成数据与 Mock API；未连接生产服务器、数据库、缓存、队列或真实第三方接口。
+
+### 仍需完成
+
+- 对其它直接查询 Client 的权限范围进行全仓扫描，确认没有绕过启用状态过滤的用户关联查询。
+- 继续完成 Outbox/Cap Reservation 多 Worker 故障组合、Migration 备份恢复及兼容回滚、PII 保留政策审批、RBAC/归因/统计/结算/API/队列/前端剩余模块全量复核。
+- 生产代理信任边界和源站防火墙配置仍须由运维在生产外部核实；CI 不连接生产环境。
+- 前端 Production High 依赖 advisories 属于用户明确暂缓的凭据安全专项，不纳入本轮修复，不宣称依赖零漏洞。
+
+PR #1 继续 Open / Draft，不合并 main、不部署。所有验证继续仅限隔离 CI、合成数据和 Mock API。
