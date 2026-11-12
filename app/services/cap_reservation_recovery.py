@@ -7,7 +7,6 @@ ABSENT / UNKNOWN 不执行 DECR，转入 NEEDS_RECONCILIATION。
 """
 import logging
 import uuid
-from datetime import timedelta
 
 from sqlalchemy import and_, func, or_, select, text
 
@@ -33,7 +32,6 @@ async def recover_cap_reservations(
     if batch_size < 1 or batch_size > 1000:
         raise ValueError("batch_size 必须在 1 到 1000 之间")
 
-    now = get_app_now_naive()
     rows = []
     async with AsyncSessionLocal() as session:
         result = await session.execute(
