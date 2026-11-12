@@ -39,7 +39,7 @@ def build_auth_user_payload(
         payload["client"] = {
             "id": client.id,
             "company_name": client.company_name,
-            "api_enabled": bool(client.api_enabled) if client.api_enabled is not None else False,
+            "api_enabled": api_enabled,
             "password_change_enabled": password_change_enabled,
             "has_publisher": has_publisher,
             "has_api_key": bool(client.key),
