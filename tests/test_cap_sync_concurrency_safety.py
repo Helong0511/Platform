@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.cap import cap_sync, consistency_checker
+from app.models.cap_reservation import CapReservation
 
 
 class _ScalarResult:
@@ -21,15 +22,31 @@ class _ScalarResult:
         return self.rows[0] if self.rows else None
 
 
-class _FakeDB:
+class _RowsResult:
     def __init__(self, rows):
         self.rows = rows
+
+    def all(self):
+        return self.rows
+
+
+class _FakeDB:
+    def __init__(self, rows, *, pending_scopes=(), pending_ids=()):
+        self.rows = rows
+        self.pending_scopes = list(pending_scopes)
+        self.pending_ids = list(pending_ids)
         self.query = None
         self.committed = False
         self.rolled_back = False
 
     async def execute(self, query):
-        self.query = query
+        selected = list(query.selected_columns)
+        if any(getattr(column, "table", None) is CapReservation.__table__ for column in selected):
+            if len(selected) == 2:
+                return _RowsResult(self.pending_scopes)
+            return _ScalarResult(self.pending_ids)
+        if self.query is None:
+            self.query = query
         return _ScalarResult(self.rows)
 
     async def commit(self):
@@ -43,8 +60,10 @@ class _FakeRedis:
     def __init__(self, values):
         self.values = values
         self.writes = []
+        self.reads = []
 
     async def get(self, key):
+        self.reads.append(key)
         return self.values.get(key)
 
     async def setex(self, *args):
@@ -400,3 +419,73 @@ async def test_sync_single_cap_returns_false_and_rolls_back_when_counter_key_mis
     assert result is False
     assert db.rolled_back is True
     assert db.committed is False
+
+
+@pytest.mark.asyncio
+async def test_sync_all_skips_scope_with_unresolved_reservation(monkeypatch):
+    """PREPARED/RESERVED/NEEDS_RECONCILIATION 不得把临时 Redis 计数固化到 DB。"""
+    now = datetime(2026, 11, 12, 12, 0, 0)
+    cap = SimpleNamespace(
+        id=31,
+        offer_id=131,
+        publisher_id=41,
+        daily_cap=10,
+        total_cap=100,
+        cap_start_date=now,
+        current_daily_count=2,
+        current_total_count=3,
+        is_active=True,
+    )
+    redis = _FakeRedis({
+        cap_sync.get_daily_cap_key(131, now, 41): "8",
+        cap_sync.get_total_cap_key(131, 41): "9",
+    })
+    db = _FakeDB([cap], pending_scopes=[(131, 41)])
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(cap_sync, "get_redis_client", fake_redis)
+    monkeypatch.setattr(cap_sync, "get_app_now_naive", lambda: now)
+
+    stats = await cap_sync.CapSynchronizer(db).sync_all_active_caps()
+
+    assert stats == {"success": 0, "failed": 0, "skipped": 1}
+    assert cap.current_daily_count == 2
+    assert cap.current_total_count == 3
+    assert redis.reads == []
+    assert db.committed is True
+
+
+@pytest.mark.asyncio
+async def test_sync_single_cap_skips_scope_with_unresolved_reservation(monkeypatch):
+    now = datetime(2026, 11, 12, 12, 0, 0)
+    cap = SimpleNamespace(
+        id=32,
+        offer_id=132,
+        publisher_id=None,
+        daily_cap=10,
+        total_cap=100,
+        cap_start_date=now,
+        current_daily_count=4,
+        current_total_count=5,
+    )
+    redis = _FakeRedis({
+        cap_sync.get_daily_cap_key(132, now, None): "8",
+        cap_sync.get_total_cap_key(132, None): "9",
+    })
+    db = _FakeDB([cap], pending_ids=[999])
+
+    async def fake_redis():
+        return redis
+
+    monkeypatch.setattr(cap_sync, "get_redis_client", fake_redis)
+    monkeypatch.setattr(cap_sync, "get_app_now_naive", lambda: now)
+
+    result = await cap_sync.CapSynchronizer(db).sync_single_cap(32)
+
+    assert result is False
+    assert cap.current_daily_count == 4
+    assert cap.current_total_count == 5
+    assert redis.reads == []
+    assert db.rolled_back is True
