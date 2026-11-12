@@ -271,3 +271,43 @@ MySQL 官方文档确认：
 - [ ] Worker pause/resume、旧版本应用兼容回滚、schema/data diff、大规模数据升级耗时/锁等待评估。
 - [ ] PII 保留期限业务/合规审批仍未完成，默认仍为 0（禁用）。
 - [ ] PR #1 继续 Open / Draft；不合并 main、不部署、不访问生产环境；凭据安全专项仍按用户要求暂缓。
+
+
+## 12. CPL Offer 多客户账号范围修复（Run #1306）
+
+### 12.1 发现的问题
+
+`Client` 模型允许同一用户关联多个 Client 记录，但 Offer 查询路径曾使用 `get_client_id_for_user()` 并通过 `LIMIT 1` 只取一个客户 ID。该行为会造成同一账号下其它客户关联的 Offer、渠道分配和统计数据遗漏；更危险的是，若不同路径采用不同的单一 ID 取值顺序，列表、详情和统计可能产生不一致的数据范围。
+
+### 12.2 修复范围
+
+- 新增 `get_client_ids_for_user()`，按稳定 ID 顺序返回用户全部 Client ID；非 CLIENT 角色返回 `None`，CLIENT 但没有关联记录返回空列表。
+- `assert_client_can_access_offer()` 使用全部客户 ID 检查激活渠道分配；空关联列表 fail-closed。
+- Offer 列表计数与分页查询统一使用 `Publisher.client_id IN (...)`。
+- Offer 单条分配和批量分配查询均使用完整客户 ID 集合；空集合返回空结果。
+- Offer 详情响应仅保留属于当前账号全部 Client ID 的分配数据，同时继续剔除上游价格、Cap、广告主、Tracklink 和内部 Postback。
+- Offer 统计查询的 Publisher 范围也改为当前账号全部 Client ID，避免共享 Offer 的其它客户点击/转化指标泄露。
+- 旧 `get_client_id_for_user()` 暂时保留为兼容包装，但新权限判断路径不得继续调用它。
+
+### 12.3 回归测试
+
+新增 `tests/test_cpl_offer_multi_client_scope.py`，覆盖：
+- 一个账号返回多个 Client ID；
+- Offer 访问授权按全部 Client ID 判断；
+- Offer 列表计数、分页与分配批量查询 SQL 均包含完整 ID 集合；
+- 详情响应保留所有自有客户分配、过滤第三方客户，并隐藏上游敏感业务字段。
+
+### 12.4 CI 证据
+
+- Run #1306，SHA `95e445fed1698e3dbe28c6f0266f058f6a3a5b7a`。
+- Backend：**507 passed、1 skipped、1 warning**。
+- Frontend：npm ci、依赖 advisory、Lint、Build、Playwright Chromium 安装及 Mock API Browser E2E 全部通过。
+- E2E 日志明确报告登录校验、认证失败/成功、管理员导航、Outbox 重试资格/详情、退出登录、移动端抽屉及客户端 RBAC 通过。
+- CI：https://github.com/Helong0511/Platform/actions/runs/43152004569
+
+### 12.5 尚未完成
+
+- 继续检查 Client 多记录关联在产品分配、报表、结算、API Key、导出和 Dashboard 等其它模块中的范围一致性。
+- 需要补充隔离 MySQL 数据库端到端多客户账号测试，当前新增测试主要验证 SQL 条件与响应过滤。
+- 完整 migration/backup/restore/rollback 演练、PII 保留政策审批和 Outbox/Cap 组合故障演练仍未关闭。
+- PR #1 仍 Open / Draft；不合并 main、不部署、不访问生产环境。凭据安全专项继续按用户要求暂缓。
