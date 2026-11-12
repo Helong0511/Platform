@@ -782,3 +782,29 @@ PR 继续 Open / Draft；不合并 main、不部署。所有验证仅使用 GitH
 
 - 当前修复覆盖 ConversionService 的转化总览与按 Offer 汇总；仍需全仓检查其它以 `Client.user_id` 取单条记录或以 first-loaded Client 作为唯一租户范围的查询，确认多 Client 账号的列表、产品、统计、结算与导出范围一致。
 - PR 继续 Open / Draft；不合并 main、不部署。
+
+
+
+## 33. 多 Client 归属范围与 Cloudflare CIDR 全量回归（2026-11-12，Run #1217）
+
+### 多 Client 归属范围
+
+- 进一步核对发现，单个 CLIENT 用户可能关联多条 Client 记录；只取第一条会漏掉其它 Client 关联的 Publisher，造成客户统计数据不完整。
+- `ConversionService.get_conversion_summary` 与 `get_conversions_by_offer` 现在读取该用户全部 Client ID，再通过 `Publisher.client_id.in_(client_ids)` 限定可见渠道。
+- 没有 Client 记录或没有关联 Publisher 时继续 fail-closed，返回空结果；不会退化为全局查询。
+- 新增两项多 Client 记录范围测试，并保留无 Client 记录时返回空范围的回归测试。
+
+### Cloudflare 可信代理范围
+
+- 新增测试将 Nginx 可信代理 CIDR 配置与 Cloudflare 官方清单做完整集合比较，当前要求 IPv4 15 段 + IPv6 7 段精确匹配，并要求 `real_ip_recursive on`。
+- 测试只验证仓库配置，不触碰线上 Nginx 或防火墙。
+
+### CI 证据
+
+- Run #1217（SHA `67558d8659e99d949df7588a2560566a7aa17390`）：Backend **466 passed、1 skipped、1 warning**；Python Compile、Frontend Lint/Build、Playwright Mock API Browser E2E 全部通过。
+- Run #1217：https://github.com/Helong0511/Platform/actions/runs/43141592737。
+
+### 仍需在部署环境单独确认的代理边界
+
+- 仓库 Nginx 配置监听所有接口；代码仓库无法证明服务器防火墙已阻止绕过 Cloudflare 直连源站。上线前必须核验 80/443 入站规则仅允许 Cloudflare 官方网段及明确批准的合作方/运维来源，其它来源拒绝；SSH 等管理端口另行配置。
+- 必须在目标环境执行 `nginx -V` / `nginx -t`，确认 `http_realip_module` 已编译或正确加载，且 include 路径存在。当前 CI 的文本断言不替代目标服务器 Nginx 实际配置验证。
