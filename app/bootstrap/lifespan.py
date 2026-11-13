@@ -173,7 +173,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
 
         expected_fks = sorted(
             (
-                tuple(constraint.column.name for constraint in fk.columns),
+                tuple(element.parent.name for element in fk.elements),
                 fk.elements[0].column.table.name,
                 tuple(element.column.name for element in fk.elements),
                 (fk.ondelete or "").upper(),
