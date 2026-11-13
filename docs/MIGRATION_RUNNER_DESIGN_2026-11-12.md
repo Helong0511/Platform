@@ -406,3 +406,37 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - 纯 API Worker 仍允许在任务配置同步失败时降级启动；目前只有日志，管理端缺少可查询的同步状态。后续应设计持久化同步状态和告警，而不是让 API Worker 因非核心调度配置短暂故障全部拒绝服务。
 - 数据库 schema bootstrap 仍由每个 API/Scheduler Worker 启动触发，尚未拆分为 provisioning、独立 migration job 与只读 schema gate。
 - 不连接生产环境，不部署，不合并 PR；凭据安全专项继续暂缓。
+
+
+## 2026-11-13 数据库权限边界与最新 CI 复核（Run #1492）
+
+### 最新分支状态
+
+- PR #1 HEAD：`9a9b5030641e48c5278292de2333011923a17110`；PR 仍为 Open / Draft，未合并。
+- HEAD 对应 Run #1492：https://github.com/Helong0511/Platform/actions/runs/43349636448；Backend 与 Frontend jobs 均为 success。
+- Run #1492 仅证明该 HEAD 的 CI workflow jobs 成功，不代表数据库职责拆分、迁移 Runner、备份恢复或上线演练已完成。
+
+### 本轮重新确认的权限边界
+
+1. `app/core/config.py` 当前仅定义应用主数据库配置 `SQLALCHEMY_DATABASE_URI`（环境变量别名 `DATABASE_URL`）；没有独立 migration DSN、provisioning DSN 或运行账号/迁移账号角色配置。
+2. `app/db/database.py::create_database()` 使用同一个 `settings.SQLALCHEMY_DATABASE_URI` 派生不指定 schema 的 server URL，并执行 `CREATE DATABASE IF NOT EXISTS`。这意味着启动应用的数据库身份必须具备建库权限（或该步骤在部署中被人为绕开；当前 systemd unit 未配置绕过开关）。
+3. `app/bootstrap/lifespan.py::lifespan()` 在每个 Worker 启动时调用 `create_database()`，随后调用 `_bootstrap_database_schema()`。后者通过应用主 engine 执行 `Base.metadata.create_all()`，因此同一应用数据库身份还需要相应 schema DDL 权限。
+4. Backend 与 Scheduler 的 systemd unit 均加载同一 `/data/Platform/.env`，并使用同一 `app.main:app` 入口；它们仅覆盖 `GUNICORN_ROLE`、调度相关环境变量，没有为迁移或 schema provisioning 指定独立数据库身份。
+5. Gunicorn 每个 Worker 都运行 FastAPI lifespan，因此上述启动期建库/建表检查不是每个 systemd 服务仅执行一次。MySQL advisory lock 只保护 `_bootstrap_database_schema()` 内的 `create_all()` 临界区；`create_database()` 在锁外执行，且该锁不提供数据库权限隔离。
+6. CI workflow 中的 `DATABASE_URL` 使用内存 SQLite；MySQL 集成测试通过独立的 `MYSQL_INTEGRATION_*` 测试参数连接 GitHub Actions loopback 临时 MySQL。测试身份/辅助执行器不构成应用运行时 migration 身份，也不能据此认定生产账号已经最小权限化。
+7. `app/core/database.py::create_tables()` 仍是另一个可调用的 `Base.metadata.create_all()` 包装函数。本轮尚未获得可靠的全仓库代码搜索结果，不能断言其没有其它调用者；必须在完整工作区执行 `git grep` 并检查动态导入、CLI、脚本、测试夹具和部署入口后，才可关闭调用点审计。
+
+### 当前风险与处理顺序
+
+- 当前运行身份同时承担运行期 DML、建库和 schema DDL 权限，违反应用运行账号最小权限的目标；但不能在 Runner / provisioning 替代路径完成前直接撤权，否则会破坏现有启动和空库安装流程。
+- 下一步应先新增显式 provisioning 命令和独立 migration Runner/ledger，并在隔离 MySQL 验证空库初始化、旧库升级、并发锁、checksum drift、DDL 中断恢复和备份恢复。
+- 随后增加 Worker 启动时只读 schema revision/drift gate，并在 systemd 部署流程中明确执行 migration job 后再启动 API/Scheduler。
+- 最后将运行身份限制为业务所需 DML 权限，迁移身份才拥有 CREATE/ALTER/DROP 等 schema 权限；必须在隔离环境用运行身份无 DDL 权限的测试证明应用可正常启动。
+- 不得仅通过新增环境变量开关跳过建库/建表而宣称完成职责拆分；空库安装、旧库升级、失败恢复和权限边界都必须形成可执行、可验证的发布流程。
+
+### 本轮审计边界
+
+- GitHub Tree 返回完整文件树（未截断），当前分支 Python 文件数为 537；但 GitHub code search 对 `create_database` / `create_tables` 返回空且标记 incomplete，不能视为完整搜索。
+- 已读取当前分支的 `app/db/database.py`、`app/core/database.py`、`app/bootstrap/lifespan.py`、`app/core/config.py`、两个 systemd unit、`.github/workflows/ci.yml` 及相关测试。
+- 未连接生产服务器、数据库、Redis、队列或真实第三方接口；本轮仅读取 GitHub 文件与 CI 元数据。
+- PR #1 继续 Open / Draft；不合并 main、不部署；凭据安全专项继续暂缓。
