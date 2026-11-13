@@ -389,6 +389,59 @@ async def _apply_with_locked_connection(
             )
 
 
+async def read_migration_status(
+    database_url: str,
+    *,
+    application_database_url: str,
+) -> tuple[dict, ...]:
+    """只读返回 migration ledger；不创建表、不取得 DDL 锁、不修改状态。"""
+    if not isinstance(database_url, str) or not database_url.strip():
+        raise ValueError("必须显式提供 MIGRATION_DATABASE_URL")
+    if not isinstance(application_database_url, str) or not application_database_url.strip():
+        raise ValueError("必须提供应用数据库 DSN，以验证迁移账号与运行账号分离")
+    url = make_url(database_url)
+    if url.get_backend_name() != "mysql" or url.drivername != "mysql+aiomysql":
+        raise MigrationRunnerError("Runner 仅接受 mysql+aiomysql 独立迁移 DSN")
+    if not url.database:
+        raise MigrationRunnerError("迁移 DSN 必须明确指定数据库名")
+    _ensure_distinct_database_account(url, application_database_url)
+
+    engine = create_async_engine(url, echo=False, pool_pre_ping=False)
+    try:
+        async with engine.connect() as connection:
+            database_name = await connection.scalar(text("SELECT DATABASE()"))
+            if database_name != url.database:
+                raise MigrationRunnerError("连接实际数据库与迁移 DSN 指定数据库不一致")
+            exists = await connection.scalar(
+                text(
+                    "SELECT COUNT(*) FROM information_schema.TABLES "
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name"
+                ),
+                {"table_name": _LEDGER_TABLE},
+            )
+            if not exists:
+                return ()
+            rows = (
+                await connection.execute(
+                    text(
+                        "SELECT revision, checksum, status, execution_order, "
+                        "started_at, applied_at, error_type "
+                        "FROM platform_schema_migrations ORDER BY execution_order"
+                    )
+                )
+            ).mappings().all()
+            return tuple(dict(row) for row in rows)
+    except MigrationRunnerError:
+        raise
+    except Exception as exc:
+        logger.error("Migration ledger status 查询失败：exception_type=%s", type(exc).__name__)
+        raise MigrationRunnerError(
+            f"Migration ledger status 查询失败：exception_type={type(exc).__name__}"
+        ) from exc
+    finally:
+        await engine.dispose()
+
+
 async def apply_migrations(
     database_url: str,
     *,

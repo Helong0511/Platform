@@ -36,6 +36,7 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("validate", help="validate manifest and SQL statement boundaries (offline)")
     subparsers.add_parser("apply", help="apply pending migrations using MIGRATION_DATABASE_URL")
+    subparsers.add_parser("status", help="read migration ledger status without changing schema")
     args = parser.parse_args(argv)
 
     if args.command == "validate":
@@ -43,6 +44,42 @@ def main(argv: list[str] | None = None) -> int:
             return _validate()
         except (MigrationManifestError, MigrationSQLParseError, OSError) as exc:
             print(f"Migration validation failed: {exc}", file=sys.stderr)
+            return 1
+
+    if args.command == "status":
+        database_url = os.getenv("MIGRATION_DATABASE_URL", "").strip()
+        if not database_url:
+            print("Migration status failed: MIGRATION_DATABASE_URL is required.", file=sys.stderr)
+            return 2
+        try:
+            from app.core.config import settings
+            from app.db.migrations.runner import read_migration_status
+
+            rows = asyncio.run(
+                read_migration_status(
+                    database_url,
+                    application_database_url=str(settings.SQLALCHEMY_DATABASE_URI),
+                )
+            )
+            if not rows:
+                print("No migration ledger rows found; schema is not verified.")
+                return 3
+            print("revision | status | execution_order | started_at | applied_at | error_type")
+            for row in rows:
+                print(
+                    f"{row['revision']} | {row['status']} | {row['execution_order']} | "
+                    f"{row['started_at']} | {row['applied_at']} | {row['error_type'] or '-'}"
+                )
+            blocked = [row for row in rows if row["status"] != "applied"]
+            if blocked:
+                print(
+                    f"BLOCKED: {len(blocked)} migration record(s) require manual DDL reconciliation.",
+                    file=sys.stderr,
+                )
+                return 3
+            return 0
+        except (RuntimeError, ValueError, OSError) as exc:
+            print(f"Migration status failed: {type(exc).__name__}", file=sys.stderr)
             return 1
 
     if args.command == "apply":
