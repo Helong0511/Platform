@@ -24,45 +24,77 @@ from app.scheduler_module.task_config import TASK_CONFIGS
 logger = logging.getLogger(__name__)
 
 
+def _is_duplicate_task_name_error(exc: Exception) -> bool:
+    """仅识别 scheduled_tasks.task_name 唯一键竞争，避免吞掉其它完整性错误。"""
+    original = getattr(exc, "orig", exc)
+    args = getattr(original, "args", ())
+    if args and args[0] == 1062:
+        return True
+    message = str(original).lower()
+    return (
+        "duplicate entry" in message
+        or "unique constraint failed" in message
+        or "duplicate key value violates unique constraint" in message
+    )
+
+
 async def init_scheduled_tasks_in_db() -> None:
     """
-    初始化定时任务到数据库
-    检查 task_config.py 中定义的所有任务，如果数据库中不存在则自动添加
-    
-    这个函数应该在应用启动时调用，确保所有配置的任务都在数据库中有记录
-    
-    注意：在多进程环境下，多个进程可能同时执行此函数，因此需要处理并发插入冲突
+    将 TASK_CONFIGS 原子同步到 scheduled_tasks。
+
+    多 Worker 同时启动时，唯一键竞争会回滚整个批次并重新读取数据库；
+    任意非重复键错误都会向上传播，禁止把部分同步伪装成成功。
     """
     logger.info("开始检查并初始化定时任务到数据库...")
 
+    # 配置本身有重复 task_name 时，数据库唯一键无法表达预期来源，启动前直接拒绝。
+    configured_names = [
+        config.get("task_name")
+        for config in TASK_CONFIGS.values()
+    ]
+    if any(not isinstance(name, str) or not name.strip() for name in configured_names):
+        raise ValueError("定时任务配置包含空 task_name")
+    if len(configured_names) != len(set(configured_names)):
+        raise ValueError("定时任务配置包含重复 task_name")
+
+    max_attempts = 3
     async with AsyncSessionLocal() as db:
-        try:
+        for attempt in range(1, max_attempts + 1):
             added_count = 0
             existing_count = 0
             updated_count = 0
+            try:
+                for config in TASK_CONFIGS.values():
+                    task_name = config["task_name"]
+                    function_path = f"{config['task_module']}.{config['task_function']}"
+                    cron_expression = config.get("cron_expression", "0 * * * *")
+                    description = config.get("description", f"自动创建的任务: {task_name}")
 
-            for config_key, config in TASK_CONFIGS.items():
-                task_name = config["task_name"]
-                task_module = config["task_module"]
-                task_function = config["task_function"]
+                    # 不使用 SKIP LOCKED：被其它 Worker 锁定的任务不能被误判为不存在。
+                    result = await db.execute(
+                        select(ScheduledTask)
+                        .where(ScheduledTask.task_name == task_name)
+                        .with_for_update()
+                    )
+                    existing_task = result.scalar_one_or_none()
 
-                # 构建函数路径
-                function_path = f"{task_module}.{task_function}"
+                    if existing_task is None:
+                        db.add(
+                            ScheduledTask(
+                                task_name=task_name,
+                                cron_expression=cron_expression,
+                                description=description,
+                                function_path=function_path,
+                                is_active=True,
+                                is_running=False,
+                                run_count=0,
+                                success_count=0,
+                                error_count=0,
+                            )
+                        )
+                        added_count += 1
+                        continue
 
-                # 从配置中获取 cron_expression 和 description（如果配置了）
-                cron_expression = config.get("cron_expression", "0 * * * *")  # 默认每小时
-                description = config.get("description", f"自动创建的任务: {task_name}")
-
-                # 检查任务是否已存在（使用行锁防止并发问题）
-                result = await db.execute(
-                    select(ScheduledTask)
-                    .where(ScheduledTask.task_name == task_name)
-                    .with_for_update(skip_locked=True)  # 跳过被其他事务锁定的记录
-                )
-                existing_task = result.scalar_one_or_none()
-
-                if existing_task:
-                    # 任务已存在，更新配置（如果不同）
                     updated = False
                     if existing_task.function_path != function_path:
                         existing_task.function_path = function_path
@@ -76,97 +108,36 @@ async def init_scheduled_tasks_in_db() -> None:
 
                     if updated:
                         updated_count += 1
-                        logger.info(f"更新任务 '{task_name}' 的配置")
                     else:
                         existing_count += 1
-                        logger.debug(f"任务 '{task_name}' 已存在，跳过")
 
-                    # 立即提交这个任务的更新（避免长时间锁定）
-                    try:
-                        await db.commit()
-                    except Exception as e:
-                        await db.rollback()
-                        logger.warning(f"更新任务 '{task_name}' 失败: {e}")
-                else:
-                    # 任务不存在，尝试创建新任务
-                    try:
-                        new_task = ScheduledTask(
-                            task_name=task_name,
-                            cron_expression=cron_expression,
-                            description=description,
-                            function_path=function_path,
-                            is_active=True,  # 默认启用
-                            is_running=False,
-                            run_count=0,
-                            success_count=0,
-                            error_count=0,
-                        )
+                # 一个事务提交整批配置，避免前半批成功、后半批失败的隐式部分状态。
+                await db.commit()
+                logger.info(
+                    "定时任务数据库同步完成: 新增 %s 个、更新 %s 个、未变化 %s 个、总计 %s 个",
+                    added_count,
+                    updated_count,
+                    existing_count,
+                    len(TASK_CONFIGS),
+                )
+                return
+            except Exception as exc:
+                await db.rollback()
+                if _is_duplicate_task_name_error(exc) and attempt < max_attempts:
+                    logger.info(
+                        "定时任务同步遇到并发唯一键竞争，将重新读取后重试（第 %s/%s 次）",
+                        attempt,
+                        max_attempts,
+                    )
+                    continue
+                logger.error(
+                    "定时任务数据库同步失败：exception_type=%s attempt=%s",
+                    type(exc).__name__,
+                    attempt,
+                )
+                raise
 
-                        db.add(new_task)
-                        # 立即提交（避免批量提交时的并发冲突）
-                        await db.commit()
-                        added_count += 1
-                        logger.info(
-                            f"添加新任务到数据库: '{task_name}' "
-                            f"(Cron: {cron_expression}, 描述: {description})"
-                        )
-                    except Exception as e:
-                        # 如果是因为唯一约束冲突（并发插入），尝试更新
-                        await db.rollback()
-                        if "Duplicate entry" in str(e) or "1062" in str(e):
-                            # 并发插入冲突，重新查询并更新
-                            logger.debug(
-                                f"任务 '{task_name}' 并发插入冲突，尝试更新: {e}"
-                            )
-                            result = await db.execute(
-                                select(ScheduledTask).where(ScheduledTask.task_name == task_name)
-                            )
-                            existing_task = result.scalar_one_or_none()
-                            if existing_task:
-                                # 更新配置
-                                updated = False
-                                if existing_task.function_path != function_path:
-                                    existing_task.function_path = function_path
-                                    updated = True
-                                if existing_task.cron_expression != cron_expression:
-                                    existing_task.cron_expression = cron_expression
-                                    updated = True
-                                if existing_task.description != description:
-                                    existing_task.description = description
-                                    updated = True
-
-                                if updated:
-                                    await db.commit()
-                                    updated_count += 1
-                                    logger.info(f"更新任务 '{task_name}' 的配置（并发冲突后）")
-                                else:
-                                    existing_count += 1
-                                    logger.debug(f"任务 '{task_name}' 已存在（并发冲突后）")
-                            else:
-                                # 如果还是找不到，记录错误但不抛出异常
-                                logger.warning(
-                                    f"任务 '{task_name}' 插入失败且查询不到: {e}"
-                                )
-                        else:
-                            # 其他错误，记录但不中断整个初始化过程
-                            logger.error(
-                                f"添加任务 '{task_name}' 失败: {e}",
-                                exc_info=True
-                            )
-
-            logger.info(
-                f"定时任务数据库初始化完成: "
-                f"新增 {added_count} 个任务, "
-                f"更新 {updated_count} 个任务, "
-                f"已存在 {existing_count} 个任务, "
-                f"总计 {len(TASK_CONFIGS)} 个任务"
-            )
-
-        except Exception as e:
-            await db.rollback()
-            logger.error(f"初始化定时任务到数据库失败: {e}", exc_info=True)
-            # 不抛出异常，允许应用继续启动（任务可能已经存在）
-            logger.warning("任务初始化失败，但允许应用继续启动...")
+    raise RuntimeError("定时任务配置同步在重试后仍未完成")
 
 
 async def sync_task_configs_to_db() -> None:
