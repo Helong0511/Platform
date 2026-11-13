@@ -1185,3 +1185,226 @@ async def test_mysql_redis_rebuild_counts_uncommitted_reservations_but_not_commi
         if engine is not None:
             await engine.dispose()
         _drop_isolated_mysql_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_postback_commit_lock_prevents_recovery_claim_until_commit(monkeypatch):
+    """Postback 先锁定并暂存 COMMITTED 时，恢复 Worker 必须跳过该行。"""
+    database = _create_isolated_mysql_database()
+    engine = None
+    redis = Redis.from_url(REDIS_URL, decode_responses=True)
+    redis_keys = []
+    try:
+        _initialize_isolated_schema(database)
+        password = quote_plus(os.getenv("MYSQL_INTEGRATION_PASSWORD", ""))
+        user = quote_plus(os.getenv("MYSQL_INTEGRATION_USER", "root"))
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:"
+            f"{int(os.getenv('MYSQL_INTEGRATION_PORT', '3306'))}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        session_factory = async_sessionmaker(
+            bind=engine, expire_on_commit=False, autoflush=False
+        )
+        monkeypatch.setattr(ledger_module, "AsyncSessionLocal", session_factory)
+        monkeypatch.setattr(recovery_module, "AsyncSessionLocal", session_factory)
+
+        from app.core.cap import redis_counter
+
+        async def isolated_redis_client():
+            return redis
+
+        monkeypatch.setattr(redis_counter, "get_redis_client", isolated_redis_client)
+        assert await redis.ping() is True
+
+        offer_id = int(uuid.uuid4().int % 900_000_000) + 100_000_000
+        publisher_id = int(uuid.uuid4().int % 900_000_000) + 100_000_000
+        business_date = get_app_now_naive().date()
+        row, claimed, owner = await CapReservationLedger.prepare_and_claim(
+            platform="ci",
+            conversion_id=f"postback-lock-{uuid.uuid4().hex}",
+            event_name="purchase",
+            offer_id=offer_id,
+            publisher_id=publisher_id,
+            cap_kind="daily",
+            business_date=business_date,
+        )
+        assert claimed is True
+        redis_keys.extend([row.redis_counter_key, row.redis_token_key])
+        assert await RedisCapManager.check_and_increment_daily(
+            offer_id,
+            limit=10,
+            publisher_id=publisher_id,
+            initial_value=0,
+            reservation_id=row.reservation_key,
+            reservation_date=datetime.combine(business_date, time.min),
+        ) is True
+        await CapReservationLedger.mark_reserved(row.reservation_key, owner)
+
+        # 模拟 Postback 主事务：账本 COMMITTED 尚未提交，行锁必须一直持有。
+        postback_session = session_factory()
+        await CapReservationLedger.stage_commit_in_transaction(
+            postback_session, row.reservation_key, owner
+        )
+        stats = await recovery_module.recover_cap_reservations(batch_size=10)
+        assert stats["claimed"] == 0
+        assert stats["rolled_back"] == 0
+
+        await postback_session.commit()
+        await postback_session.close()
+
+        # 提交后，恢复任务只能清理 token，不能撤销已经提交的计数。
+        cleanup_stats = await recovery_module.recover_cap_reservations(batch_size=10)
+        async with session_factory() as session:
+            persisted = await session.scalar(
+                select(CapReservation).where(
+                    CapReservation.reservation_key == row.reservation_key
+                )
+            )
+        assert persisted.state == "COMMITTED"
+        assert persisted.redis_token_cleaned is True
+        assert await redis.get(row.redis_counter_key) == "1"
+        assert await redis.get(row.redis_token_key) is None
+        assert cleanup_stats["tokens_cleaned"] == 1
+    finally:
+        if redis_keys:
+            await redis.delete(*redis_keys)
+        await redis.aclose()
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_mysql_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_recovery_claim_fences_stale_postback_commit(monkeypatch):
+    """恢复 Worker 先接管时，旧 Postback 必须无法提交正式转化或重复操作 Redis。"""
+    database = _create_isolated_mysql_database()
+    engine = None
+    redis = Redis.from_url(REDIS_URL, decode_responses=True)
+    redis_keys = []
+    resume_recovery = asyncio.Event()
+    recovery_reached_token_check = asyncio.Event()
+    try:
+        _initialize_isolated_schema(database)
+        password = quote_plus(os.getenv("MYSQL_INTEGRATION_PASSWORD", ""))
+        user = quote_plus(os.getenv("MYSQL_INTEGRATION_USER", "root"))
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:"
+            f"{int(os.getenv('MYSQL_INTEGRATION_PORT', '3306'))}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        session_factory = async_sessionmaker(
+            bind=engine, expire_on_commit=False, autoflush=False
+        )
+        monkeypatch.setattr(ledger_module, "AsyncSessionLocal", session_factory)
+        monkeypatch.setattr(recovery_module, "AsyncSessionLocal", session_factory)
+
+        from app.core.cap import redis_counter
+
+        async def isolated_redis_client():
+            return redis
+
+        monkeypatch.setattr(redis_counter, "get_redis_client", isolated_redis_client)
+        assert await redis.ping() is True
+
+        offer_id = int(uuid.uuid4().int % 900_000_000) + 100_000_000
+        publisher_id = int(uuid.uuid4().int % 900_000_000) + 100_000_000
+        business_date = get_app_now_naive().date()
+        conversion_id = f"recovery-wins-{uuid.uuid4().hex}"
+        row, claimed, original_owner = await CapReservationLedger.prepare_and_claim(
+            platform="ci",
+            conversion_id=conversion_id,
+            event_name="purchase",
+            offer_id=offer_id,
+            publisher_id=publisher_id,
+            cap_kind="daily",
+            business_date=business_date,
+        )
+        assert claimed is True
+        redis_keys.extend([row.redis_counter_key, row.redis_token_key])
+        assert await RedisCapManager.check_and_increment_daily(
+            offer_id,
+            limit=10,
+            publisher_id=publisher_id,
+            initial_value=0,
+            reservation_id=row.reservation_key,
+            reservation_date=datetime.combine(business_date, time.min),
+        ) is True
+        await CapReservationLedger.mark_reserved(row.reservation_key, original_owner)
+
+        async with session_factory() as session:
+            await session.execute(
+                update(CapReservation)
+                .where(CapReservation.reservation_key == row.reservation_key)
+                .values(lease_expires_at=get_app_now_naive() - timedelta(seconds=1))
+            )
+            await session.commit()
+
+        original_token_state = RedisCapManager.get_reservation_token_state
+
+        async def pause_after_recovery_observes_token(counter_key, token_key):
+            token_state = await original_token_state(counter_key, token_key)
+            recovery_reached_token_check.set()
+            await resume_recovery.wait()
+            return token_state
+
+        monkeypatch.setattr(
+            recovery_module.RedisCapManager,
+            "get_reservation_token_state",
+            pause_after_recovery_observes_token,
+        )
+        recovery_task = asyncio.create_task(
+            recovery_module.recover_cap_reservations(batch_size=10)
+        )
+        await asyncio.wait_for(recovery_reached_token_check.wait(), timeout=10)
+
+        # 模拟旧 Postback 仍在其业务事务中，尝试写入正式事件并提交账本。
+        stale_postback_session = session_factory()
+        await stale_postback_session.execute(
+            text(
+                "INSERT INTO postback_conversions "
+                "(platform, conversion_id, event_name) "
+                "VALUES ('ci', :conversion_id, 'purchase')"
+            ),
+            {"conversion_id": conversion_id},
+        )
+        with pytest.raises(RuntimeError, match="提交栅栏失败"):
+            await CapReservationLedger.stage_commit_in_transaction(
+                stale_postback_session, row.reservation_key, original_owner
+            )
+        await stale_postback_session.rollback()
+        await stale_postback_session.close()
+
+        resume_recovery.set()
+        stats = await asyncio.wait_for(recovery_task, timeout=15)
+
+        async with session_factory() as session:
+            persisted = await session.scalar(
+                select(CapReservation).where(
+                    CapReservation.reservation_key == row.reservation_key
+                )
+            )
+            conversion_exists = await session.scalar(
+                select(PostbackConversion.id).where(
+                    PostbackConversion.platform == "ci",
+                    PostbackConversion.conversion_id == conversion_id,
+                    PostbackConversion.event_name == "purchase",
+                )
+            )
+
+        assert conversion_exists is None
+        assert persisted.state == "ROLLED_BACK"
+        assert await redis.get(row.redis_counter_key) == "0"
+        assert await redis.get(row.redis_token_key) == "ROLLED_BACK"
+        assert stats["rolled_back"] == 1
+    finally:
+        if not resume_recovery.is_set():
+            resume_recovery.set()
+        if redis_keys:
+            await redis.delete(*redis_keys)
+        await redis.aclose()
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_mysql_database(database)
