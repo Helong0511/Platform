@@ -11,7 +11,7 @@ import json
 from typing import Optional
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, update, or_, text
+from sqlalchemy import select, update, or_
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +25,6 @@ from app.core.log_utils import mask_email, mask_hash_prefix, mask_phone
 
 logger = logging.getLogger(__name__)
 
-REPORT_IDENTITY_LOCK_WAIT_SECONDS = 5
 
 REPORT_LOG_LEASE_SECONDS = 300
 # HTTPX 的 read timeout 限制相邻数据块之间的等待时间，不限制整个响应的墙钟时长。
@@ -107,33 +106,23 @@ async def _lock_report_base_identity(
     identity_value = _report_base_identity_value(source, adsid, event, conversion_id).encode("utf-8")
     identity_key = hashlib.sha256(identity_value).hexdigest()
     identity_fingerprint = hashlib.sha512(identity_value).digest()
-    # 锁等待超时只覆盖“取得身份锁”阶段，取得后立即恢复连接原值，避免业务事务长时间挂起。
-    timeout_result = await db.execute(text("SELECT @@SESSION.innodb_lock_wait_timeout"))
-    original_wait_timeout = max(1, int(timeout_result.scalar_one()))
-    wait_seconds = max(1, min(60, int(REPORT_IDENTITY_LOCK_WAIT_SECONDS)))
-    await db.execute(text(f"SET SESSION innodb_lock_wait_timeout = {wait_seconds}"))
-    try:
-        statement = mysql_insert(ThirdPartyReportIdentityLock).values(
-            identity_key=identity_key,
-            identity_fingerprint=identity_fingerprint,
-        )
-        statement = statement.on_duplicate_key_update(
-            identity_key=statement.inserted.identity_key
-        )
-        await db.execute(statement)
-        result = await db.execute(
-            select(ThirdPartyReportIdentityLock)
-            .where(ThirdPartyReportIdentityLock.identity_key == identity_key)
-            .with_for_update()
-        )
-        lock_row = result.scalars().first()
-        if lock_row is None or bytes(lock_row.identity_fingerprint) != identity_fingerprint:
-            raise RuntimeError("第三方事件身份锁缺失或检测到 SHA-256 碰撞")
-        return identity_key
-    finally:
-        await db.execute(
-            text(f"SET SESSION innodb_lock_wait_timeout = {original_wait_timeout}")
-        )
+    statement = mysql_insert(ThirdPartyReportIdentityLock).values(
+        identity_key=identity_key,
+        identity_fingerprint=identity_fingerprint,
+    )
+    statement = statement.on_duplicate_key_update(
+        identity_key=statement.inserted.identity_key
+    )
+    await db.execute(statement)
+    result = await db.execute(
+        select(ThirdPartyReportIdentityLock)
+        .where(ThirdPartyReportIdentityLock.identity_key == identity_key)
+        .with_for_update()
+    )
+    lock_row = result.scalars().first()
+    if lock_row is None or bytes(lock_row.identity_fingerprint) != identity_fingerprint:
+        raise RuntimeError("第三方事件身份锁缺失或检测到 SHA-256 碰撞")
+    return identity_key
 
 
 async def create_report_log(
