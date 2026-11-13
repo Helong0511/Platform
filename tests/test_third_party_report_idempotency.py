@@ -28,7 +28,10 @@ def test_event_idempotency_key_is_stable_and_event_scoped():
 
 async def test_create_report_log_persists_event_key(monkeypatch):
     class Result:
-        def scalar_one_or_none(self):
+        def scalars(self):
+            return self
+
+        def first(self):
             return None
 
     class FakeDB:
@@ -81,13 +84,15 @@ async def test_create_report_log_persists_event_key(monkeypatch):
     assert fake_db.added.event_key == third_party_report.build_event_idempotency_key(
         "postback", "ads-123", "Purchase", "conversion-456"
     )
+    assert fake_db.added.identity_scope == "unscoped"
+    assert fake_db.added.platform is None
 
 
 async def test_successful_existing_event_is_not_sent_again(monkeypatch):
     async def existing_log(**kwargs):
         return 41
 
-    async def not_claimed(report_log_id):
+    async def not_claimed(report_log_id, **kwargs):
         return None
 
     async def existing_status(report_log_id):
@@ -154,8 +159,8 @@ async def test_report_log_claim_is_atomic_for_concurrent_senders(monkeypatch):
     )
 
     results = await asyncio.gather(
-        third_party_report._claim_report_log(41),
-        third_party_report._claim_report_log(41),
+        third_party_report._claim_report_log(41, expected_scope="unscoped"),
+        third_party_report._claim_report_log(41, expected_scope="unscoped"),
     )
 
     assert sum(result is not None for result in results) == 1
@@ -229,8 +234,13 @@ async def test_report_claim_query_limits_failed_retries_to_expired_leases(monkey
         lambda: SessionContext(),
     )
 
-    assert isinstance(await third_party_report._claim_report_log(41), datetime)
+    assert isinstance(
+        await third_party_report._claim_report_log(41, expected_scope="unscoped"),
+        datetime,
+    )
     sql = captured["sql"]
+    assert "identity_scope = 'unscoped'" in sql
+    assert "platform is null" in sql
     assert "status in" in sql
     assert "third_party_report_logs.pii_scrubbed_at is null" in sql
     assert "third_party_report_logs.attempt_count < third_party_report_logs.max_attempts" in sql
