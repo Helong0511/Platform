@@ -133,17 +133,14 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             }
 
         expected_indexes = sorted(
-            (index.name, tuple(column.name for column in index.columns), bool(index.unique))
+            (index.name, tuple(column.name for column in index.columns))
             for index in table.indexes
+            if not index.unique
         )
         actual_indexes = sorted(
-            (
-                item.get("name"),
-                tuple(item.get("column_names") or ()),
-                bool(item.get("unique")),
-            )
+            (item.get("name"), tuple(item.get("column_names") or ()))
             for item in inspector.get_indexes(table.name, schema=table.schema)
-            if item.get("name")
+            if item.get("name") and not item.get("unique")
         )
         if expected_indexes != actual_indexes:
             index_mismatches[table.fullname] = {
@@ -151,15 +148,23 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                 "actual": actual_indexes,
             }
 
-        expected_unique = sorted(
+        expected_unique = sorted({
             tuple(column.name for column in constraint.columns)
             for constraint in table.constraints
             if constraint.__class__.__name__ == "UniqueConstraint"
-        )
-        actual_unique = sorted(
+        } | {
+            tuple(column.name for column in index.columns)
+            for index in table.indexes
+            if index.unique
+        })
+        actual_unique = sorted({
             tuple(item.get("column_names") or ())
             for item in inspector.get_unique_constraints(table.name, schema=table.schema)
-        )
+        } | {
+            tuple(item.get("column_names") or ())
+            for item in inspector.get_indexes(table.name, schema=table.schema)
+            if item.get("unique")
+        })
         if expected_unique != actual_unique:
             unique_constraint_mismatches[table.fullname] = {
                 "expected": expected_unique,
@@ -225,7 +230,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
 
 
 async def _verify_database_schema() -> str | None:
-    """只读核验 migration revision 与 ORM 表/列/类型/NULL/主键；应用 Worker 不执行 schema DDL。"""
+    """只读核验 migration revision 与 ORM 表/列/类型/NULL/主键/索引/外键/显式字符集；应用 Worker 不执行 schema DDL。"""
     async with engine.connect() as connection:
         current_revision = await verify_schema_revision(connection)
         drift = await connection.run_sync(_schema_metadata_drift)
@@ -236,7 +241,11 @@ async def _verify_database_schema() -> str | None:
                 f"missing_columns={drift['missing_columns']}; "
                 f"column_type_mismatches={drift['column_type_mismatches']}; "
                 f"nullable_mismatches={drift['nullable_mismatches']}; "
-                f"primary_key_mismatches={drift['primary_key_mismatches']}"
+                f"primary_key_mismatches={drift['primary_key_mismatches']}; "
+                f"index_mismatches={drift['index_mismatches']}; "
+                f"unique_constraint_mismatches={drift['unique_constraint_mismatches']}; "
+                f"foreign_key_mismatches={drift['foreign_key_mismatches']}; "
+                f"table_option_mismatches={drift['table_option_mismatches']}"
             )
     return current_revision
 
