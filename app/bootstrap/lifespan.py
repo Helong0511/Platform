@@ -96,7 +96,12 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                     "expected": str(column.type),
                     "actual": str(actual["type"]),
                 }
-            if bool(actual["nullable"]) != bool(column.nullable):
+            # 主键列的非空语义由 PK 约束保证；SQLite Inspector 对 INTEGER PRIMARY KEY
+            # 可能报告 nullable=True，不能据此误判为 schema drift。
+            if (
+                not column.primary_key
+                and bool(actual["nullable"]) != bool(column.nullable)
+            ):
                 nullable_mismatches.setdefault(table.fullname, {})[column.name] = {
                     "expected": bool(column.nullable),
                     "actual": bool(actual["nullable"]),
