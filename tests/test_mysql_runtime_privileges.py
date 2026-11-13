@@ -1,7 +1,7 @@
 """真实隔离 MySQL 运行账号权限边界测试。
 
 只允许 GitHub Actions 中的 loopback 临时 MySQL。测试使用独立 schema 和临时账号，
-验证管理员 bootstrap 所需 DML 权限，并确认运行账号不能执行 DDL。
+由测试管理员预置表结构，再验证应用运行账号仅凭 DML 权限即可执行管理员 bootstrap。
 这不代表当前 lifespan 已能使用低权限账号启动：create_database/create_all 仍需单独拆分。
 """
 from __future__ import annotations
@@ -76,7 +76,7 @@ async def test_mysql_runtime_account_can_bootstrap_admin_but_cannot_run_ddl(monk
     """真实 MySQL 验证 init_db 的 DML 能力与运行账号的 DDL 拒绝边界。"""
     username = "platform_ci_runtime"
     password = secrets.token_hex(24)
-    sync_engine = None
+    root_engine = None
     async_engine = None
     root = _root_connect()
 
@@ -92,6 +92,19 @@ async def test_mysql_runtime_account_can_bootstrap_admin_but_cannot_run_ddl(monk
                 f"GRANT SELECT, INSERT, UPDATE, DELETE ON `{DATABASE}`.* TO '{username}'@'%'"
             )
 
+        # 表结构由隔离测试管理员预置；运行账号从未获得 CREATE/ALTER/DROP 权限。
+        root_url = URL.create(
+            "mysql+pymysql",
+            username=ROOT_USER,
+            password=ROOT_PASSWORD,
+            host=HOST,
+            port=PORT,
+            database=DATABASE,
+            query={"charset": "utf8mb4"},
+        )
+        root_engine = create_engine(root_url, pool_pre_ping=True)
+        User.__table__.create(root_engine)
+
         runtime_url = URL.create(
             "mysql+pymysql",
             username=username,
@@ -101,9 +114,6 @@ async def test_mysql_runtime_account_can_bootstrap_admin_but_cannot_run_ddl(monk
             database=DATABASE,
             query={"charset": "utf8mb4"},
         )
-        sync_engine = create_engine(runtime_url, pool_pre_ping=True)
-        User.__table__.create(sync_engine)
-
         async_url = runtime_url.set(drivername="mysql+aiomysql")
         async_engine = create_async_engine(async_url, pool_pre_ping=True)
         monkeypatch.setattr(
@@ -160,8 +170,8 @@ async def test_mysql_runtime_account_can_bootstrap_admin_but_cannot_run_ddl(monk
     finally:
         if async_engine is not None:
             await async_engine.dispose()
-        if sync_engine is not None:
-            sync_engine.dispose()
+        if root_engine is not None:
+            root_engine.dispose()
         with root.cursor() as cursor:
             cursor.execute(f"DROP DATABASE IF EXISTS `{DATABASE}`")
             cursor.execute(f"DROP USER IF EXISTS '{username}'@'%'")
