@@ -679,8 +679,9 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
             state["http_event_ids"].append(json["data"][0]["event_id"])
             return Response()
 
-    async def claim(report_log_id):
+    async def claim(report_log_id, **kwargs):
         state["claim"] += 1
+        assert kwargs.get("expected_scope") == "unscoped"
         return datetime(2026, 11, 11, 12, 0, 0)
 
     async def attempt_state(report_log_id, **kwargs):
