@@ -1454,3 +1454,46 @@ def test_report_identity_scope_migration_keeps_all_legacy_rows_unresolved_and_is
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
         connection.close()
+
+
+def test_report_identity_lock_migration_creates_permanent_collision_checked_lock_table():
+    """隔离 MySQL 验证身份锁表 DDL 可重跑且锁键为唯一主键。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_identity_locks")
+            migration = "sql/migrations/20261113_third_party_report_identity_locks.sql"
+            _run_sql_file(cursor, migration)
+            _run_sql_file(cursor, migration)
+
+            cursor.execute("SHOW COLUMNS FROM third_party_report_identity_locks")
+            columns = {row[0]: row[1].lower() for row in cursor.fetchall()}
+            assert columns["identity_key"] == "char(64)"
+            assert columns["identity_value"] == "varbinary(4096)"
+            assert columns["created_at"] == "datetime"
+
+            cursor.execute("SHOW INDEX FROM third_party_report_identity_locks")
+            primary = [
+                row[4]
+                for row in cursor.fetchall()
+                if row[2] == "PRIMARY"
+            ]
+            assert primary == ["identity_key"]
+
+            identity_key = "a" * 64
+            identity_value = "4:meta10:click-1238:Purchase7:conv-01".encode("utf-8")
+            cursor.execute(
+                "INSERT INTO third_party_report_identity_locks "
+                "(identity_key, identity_value) VALUES (%s, %s)",
+                (identity_key, identity_value),
+            )
+            cursor.execute(
+                "SELECT identity_value FROM third_party_report_identity_locks "
+                "WHERE identity_key = %s",
+                (identity_key,),
+            )
+            assert cursor.fetchone()[0] == identity_value
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_identity_locks")
+        connection.close()
