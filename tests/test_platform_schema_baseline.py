@@ -23,3 +23,33 @@ def test_platform_baseline_cap_reservation_table_has_complete_hex_check():
     assert source.count("CREATE TABLE IF NOT EXISTS cap_reservations (") == 1
     assert source.count("chk_cap_reservation_key_hex") == 1
     assert source.count("SET FOREIGN_KEY_CHECKS = 1;") == 1
+
+
+def test_platform_baseline_and_incremental_migrations_cover_all_orm_tables():
+    import re
+
+    from app.db.migrations.manifest import validate_manifest
+    from app.models import Base
+
+    root = Path(__file__).resolve().parents[1]
+    sql_sources = [
+        (root / "sql" / "platform.sql").read_text(encoding="utf-8")
+    ]
+    for migration in validate_manifest(root):
+        sql_sources.append((root / migration.path).read_text(encoding="utf-8"))
+
+    declared_tables = set()
+    pattern = re.compile(
+        r"CREATE\\s+TABLE(?:\\s+IF\\s+NOT\\s+EXISTS)?\\s+"
+        r"`?([A-Za-z0-9_]+)`?\\s*\\(",
+        re.IGNORECASE,
+    )
+    for source in sql_sources:
+        declared_tables.update(match.group(1).lower() for match in pattern.finditer(source))
+
+    orm_tables = {table.name.lower() for table in Base.metadata.sorted_tables}
+    missing = sorted(orm_tables - declared_tables)
+    assert not missing, (
+        "完整基线与增量 migrations 未覆盖以下 ORM 表；这些表目前可能依赖应用启动时 "
+        f"Base.metadata.create_all() 隐式创建：{missing}"
+    )
