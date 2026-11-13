@@ -1128,8 +1128,6 @@ async def test_mysql_identity_lock_wait_timeout_fails_closed_and_can_retry(monke
         )
 
         async with session_factory() as first, session_factory() as second:
-            await second.execute(text("SET SESSION innodb_lock_wait_timeout = 1"))
-            await second.commit()
             async with first.begin():
                 await report_module._lock_report_base_identity(
                     first,
@@ -1138,15 +1136,17 @@ async def test_mysql_identity_lock_wait_timeout_fails_closed_and_can_retry(monke
                     event=identity[2],
                     conversion_id=identity[3],
                 )
+                # 在第二个 session 的同一物理连接/事务中设置 1 秒等待上限。
+                await second.execute(text("SET SESSION innodb_lock_wait_timeout = 1"))
                 with pytest.raises(OperationalError):
-                    async with second.begin():
-                        await report_module._lock_report_base_identity(
-                            second,
-                            source=identity[0],
-                            adsid=identity[1],
-                            event=identity[2],
-                            conversion_id=identity[3],
-                        )
+                    await report_module._lock_report_base_identity(
+                        second,
+                        source=identity[0],
+                        adsid=identity[1],
+                        event=identity[2],
+                        conversion_id=identity[3],
+                    )
+                await second.rollback()
 
             # 第一事务提交释放锁后，第二连接应能重新取得同一身份锁。
             async with second.begin():
