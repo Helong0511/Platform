@@ -1585,6 +1585,8 @@ def test_cap_reservation_key_hex_migration_enforces_lowercase_sha256():
             _run_sql_file(cursor, "sql/migrations/20261111_cap_reservation_ledger.sql")
             _run_sql_file(cursor, "sql/migrations/20261113_cap_reservation_schema_guard.sql")
             _run_sql_file(cursor, "sql/migrations/20261113_cap_reservation_key_hex.sql")
+            # 已有同名且定义正确的约束应通过后置核验，迁移可安全重复校验。
+            _run_sql_file(cursor, "sql/migrations/20261113_cap_reservation_key_hex.sql")
 
             common = {
                 "platform": "ci",
