@@ -383,6 +383,14 @@ async def test_mysql_redis_stale_recovery_worker_cannot_decrement_committed_conv
             reservation_date=datetime.combine(business_date, time(12, 0)),
         )
         await CapReservationLedger.mark_reserved(row.reservation_key, first_owner)
+        # 先使初始 reservation 可被恢复 Worker 认领；Worker A 随后会自行续租。
+        async with session_factory() as session:
+            await session.execute(
+                update(CapReservation)
+                .where(CapReservation.reservation_key == row.reservation_key)
+                .values(lease_expires_at=get_app_now_naive() - timedelta(seconds=1))
+            )
+            await session.commit()
 
         async def pause_stale_token_read(counter_key, token_key):
             stale_read_paused.set()
