@@ -50,6 +50,30 @@ class CapReservation(Base):
     __table_args__ = (
         # 在数据库层强制账本关键语义，避免绕过 Service 的写入破坏恢复依据。
         CheckConstraint("LENGTH(reservation_key) = 64", name="chk_cap_reservation_key_sha256"),
+        # MySQL 使用二进制 collation + case-sensitive regex；SQLite 不生成该方言约束。
+        CheckConstraint(
+            "REGEXP_LIKE(reservation_key COLLATE utf8mb4_bin, '^[0-9a-f]{64}
+        CheckConstraint("offer_id > 0", name="chk_cap_reservation_offer_positive"),
+        CheckConstraint("publisher_id IS NULL OR publisher_id > 0", name="chk_cap_reservation_publisher_positive"),
+        CheckConstraint("attempts >= 0", name="chk_cap_reservation_attempts_nonnegative"),
+        CheckConstraint(
+            "(cap_kind = 'daily' AND business_date IS NOT NULL) OR "
+            "(cap_kind = 'total' AND business_date IS NULL)",
+            name="chk_cap_reservation_kind_date",
+        ),
+        CheckConstraint(
+            "state IN ('PREPARED', 'RESERVED', 'COMMITTED', 'ROLLED_BACK', 'NEEDS_RECONCILIATION')",
+            name="chk_cap_reservation_state",
+        ),
+        UniqueConstraint("reservation_key", name="uq_cap_reservation_key"),
+        Index("idx_cap_reservation_state_updated", "state", "updated_at"),
+        Index("idx_cap_reservation_lease", "state", "lease_expires_at"),
+        Index("idx_cap_reservation_event", "platform", "conversion_id", "event_name"),
+        Index("idx_cap_reservation_scope", "offer_id", "publisher_id", "cap_kind", "business_date"),
+    )
+, 'c')",
+            name="chk_cap_reservation_key_hex",
+        ).ddl_if(dialect="mysql"),
         CheckConstraint("offer_id > 0", name="chk_cap_reservation_offer_positive"),
         CheckConstraint("publisher_id IS NULL OR publisher_id > 0", name="chk_cap_reservation_publisher_positive"),
         CheckConstraint("attempts >= 0", name="chk_cap_reservation_attempts_nonnegative"),
