@@ -192,6 +192,8 @@ async def update_report_log(
         next_retry_time: Optional[datetime] = None,
         clear_next_retry_time: bool = False,
         expected_report_start_time: Optional[datetime] = None,
+        expected_identity_scope: Optional[str] = None,
+        expected_platform: Optional[str] = None,
 ):
     """
     更新第三方上报日志记录
@@ -202,9 +204,21 @@ async def update_report_log(
         async with AsyncSessionLocal() as db:
             query = select(ThirdPartyReportLog).where(ThirdPartyReportLog.id == log_id)
             if expected_report_start_time is not None:
-                # 只有当前租约持有者可以修改发送状态；过期 Worker 不得覆盖新 Worker 的结果。
+                # 租约令牌与身份作用域必须同时匹配；过期/错平台 Worker 不得覆盖其它事件。
+                if expected_identity_scope not in {"unscoped", "platform_scoped"}:
+                    return False
+                if expected_identity_scope == "platform_scoped" and not (expected_platform or "").strip():
+                    return False
+                if expected_identity_scope == "unscoped" and expected_platform:
+                    return False
                 query = query.where(
                     ThirdPartyReportLog.report_start_time == expected_report_start_time,
+                    ThirdPartyReportLog.identity_scope == expected_identity_scope,
+                    (
+                        ThirdPartyReportLog.platform == expected_platform
+                        if expected_identity_scope == "platform_scoped"
+                        else ThirdPartyReportLog.platform.is_(None)
+                    ),
                     ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                 )
             result = await db.execute(query.with_for_update())
@@ -701,6 +715,8 @@ async def send_third_party_report(
         return await update_report_log(
             *args,
             expected_report_start_time=lease_token,
+            expected_identity_scope="platform_scoped" if using_existing_report_log else "unscoped",
+            expected_platform=platform,
             **kwargs,
         )
 
