@@ -2,7 +2,7 @@
 
 只允许 GitHub Actions 中的 loopback 临时 MySQL。测试使用独立 schema 和临时账号，
 由测试管理员预置表结构，再验证应用运行账号仅凭 DML 权限即可执行管理员 bootstrap。
-这不代表当前 lifespan 已能使用低权限账号启动：create_database/create_all 仍需单独拆分。
+当前 lifespan 已先执行只读 migration revision/ORM drift gate，再调用仅包含管理员账户 DML bootstrap 的 init_db；schema DDL 必须由独立 Migration Runner 和预置 provisioning 完成。本测试验证预置 users 表上的 DML 可用且运行账号没有 CREATE 权限，不等于覆盖所有业务表/所有 SQL 操作的最小权限清单。
 """
 from __future__ import annotations
 
