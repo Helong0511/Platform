@@ -889,6 +889,24 @@ async def test_mysql_tcp_proxy_drops_real_commit_ack_and_preserves_cap_reservati
         async with proxy_sessions() as session:
             await session.execute(
                 text(
+                    """
+                    INSERT INTO cap_reservations (
+                        reservation_key, platform, conversion_id, event_name,
+                        offer_id, publisher_id, cap_kind, business_date,
+                        redis_counter_key, redis_token_key, redis_reserved,
+                        state, lease_owner
+                    ) VALUES (
+                        :reservation_key, 'ci', 'tcp-proxy-commit-ack-lost', 'purchase',
+                        77, 12, 'daily', '2026-11-11',
+                        'ci:tcp-proxy:counter', 'ci:tcp-proxy:token', 1,
+                        'RESERVED', 'ci-lease-owner'
+                    )
+                    """
+                ),
+                {"reservation_key": "b" * 64},
+            )
+            await session.execute(
+                text(
                     "INSERT INTO postback_conversions "
                     "(id, platform, conversion_id, event_name) "
                     "VALUES (:id, :platform, :conversion_id, :event_name)"
@@ -1241,6 +1259,15 @@ async def test_mysql_postback_commit_lock_prevents_recovery_claim_until_commit(m
             reservation_date=datetime.combine(business_date, time.min),
         ) is True
         await CapReservationLedger.mark_reserved(row.reservation_key, owner)
+
+        # 租约已过期，但 Postback 先取得账本行锁；恢复 Worker 必须依靠 SKIP LOCKED 跳过。
+        async with session_factory() as session:
+            await session.execute(
+                update(CapReservation)
+                .where(CapReservation.reservation_key == row.reservation_key)
+                .values(lease_expires_at=get_app_now_naive() - timedelta(seconds=1))
+            )
+            await session.commit()
 
         # 模拟 Postback 主事务：账本 COMMITTED 尚未提交，行锁必须一直持有。
         postback_session = session_factory()
