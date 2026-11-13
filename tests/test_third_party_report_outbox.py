@@ -1100,6 +1100,7 @@ async def test_outbox_retries_after_credentials_are_restored(monkeypatch):
     monkeypatch.setattr(outbox, "get_app_now_naive", lambda: now[0])
     monkeypatch.setattr(outbox, "_resolve_pixel_credentials", resolve)
     monkeypatch.setattr(outbox, "_claim_report_log", claim)
+    monkeypatch.setattr(outbox, "_bind_outbox_destination", lambda *args, **kwargs: _async_true())
     monkeypatch.setattr(outbox, "update_report_log", update)
     monkeypatch.setattr(outbox, "send_third_party_report", send)
 
@@ -1198,8 +1199,6 @@ async def test_enqueue_refuses_existing_platform_scoped_event_owned_by_another_p
             "identity_scope": "platform_scoped",
             "platform": "other-platform",
             "outbox_enqueued": True,
-            "identity_scope": "platform_scoped",
-            "platform": "bft",
             "destination_pixel_id": None,
         },
     )()
