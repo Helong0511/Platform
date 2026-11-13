@@ -41,11 +41,11 @@ SET @has_valid_check = (
       AND tc.TABLE_NAME = 'third_party_report_logs'
       AND tc.CONSTRAINT_NAME = 'chk_third_party_identity_scope_v1'
       AND tc.CONSTRAINT_TYPE = 'CHECK'
-      AND LOWER(cc.CHECK_CLAUSE) LIKE '%identity_scope%'
-      AND LOWER(cc.CHECK_CLAUSE) LIKE '%platform%'
-      AND LOWER(cc.CHECK_CLAUSE) LIKE '%legacy_unresolved%'
-      AND LOWER(cc.CHECK_CLAUSE) LIKE '%platform_scoped%'
-      AND LOWER(cc.CHECK_CLAUSE) LIKE '%unscoped%'
+      AND LOWER(cc.CHECK_CLAUSE) LIKE '%%identity_scope%%'
+      AND LOWER(cc.CHECK_CLAUSE) LIKE '%%platform%%'
+      AND LOWER(cc.CHECK_CLAUSE) LIKE '%%legacy_unresolved%%'
+      AND LOWER(cc.CHECK_CLAUSE) LIKE '%%platform_scoped%%'
+      AND LOWER(cc.CHECK_CLAUSE) LIKE '%%unscoped%%'
 );
 SET @ddl = IF(
     @has_named_check > 0 AND @has_valid_check = 0,
