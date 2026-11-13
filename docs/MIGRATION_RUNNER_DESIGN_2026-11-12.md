@@ -783,3 +783,75 @@ GitHub Code Search 对目标分支没有提供可用的完整结果，且本轮�
 - 完成平台 A/B 同字段冲突、legacy success/pending/failed、直接短链无平台、管理员编辑与重试、并发写入和新旧 Worker 混跑的隔离 MySQL 测试。
 
 本轮仅补充代码级证据与实施门槛，没有修改业务代码、模型或 migration；历史兼容风险仍是 P1 阻断项。
+
+
+## 2026-11-13 事件身份状态机：迁移与运行时门禁实施决策（尚未实施）
+
+### 设计目标
+
+在不猜测历史 Postback 平台、不改变历史 event_key、不影响短链/斗篷无平台路径的前提下，让新事件身份可持久化、可审计，并使未知身份在所有自动/人工发送入口 fail-closed。
+
+### 持久化字段
+
+建议在 `third_party_report_logs` 新增：
+
+- `platform VARCHAR(50) NULL`：规范化平台标识。NULL 表示没有已证明的平台值，不代表默认平台。
+- `identity_scope VARCHAR(32) NOT NULL DEFAULT 'legacy_unresolved'`：身份作用域状态。
+
+状态仅允许：
+
+| 状态 | 含义 | 发送规则 |
+| --- | --- | --- |
+| `legacy_unresolved` | 迁移前记录，平台身份/旧算法归属尚未完成安全判定 | 禁止自动发送、人工重试和身份字段编辑 |
+| `unscoped` | 新建短链/斗篷直接发送记录，明确没有 Postback platform 维度 | 仅允许四字段 key 的直接发送/幂等复用 |
+| `platform_scoped` | 新建 Postback Outbox 记录，平台已规范化并持久化 | 仅允许 platform + 四个基础字段的五字段 key |
+
+禁止将 NULL platform 自动解释为任意平台。状态值应使用应用常量/校验约束；数据库约束能力需结合现有 MySQL 版本和迁移策略确认。
+
+### 历史行策略
+
+- 新 migration 只添加 nullable `platform` 和带默认值的 `identity_scope`；所有既有行默认成为 `legacy_unresolved`。
+- 不在该 DDL migration 中对大表执行无批次 UPDATE，也不修改历史 migration 文件或 checksum。
+- 旧四字段 event_key 保持原值；旧五字段 Outbox event_key 也保持原值。不得尝试从 hash 反推出 platform。
+- 历史成功记录保留为只读证据；历史 pending/failed Outbox 不得被自动 worker 或管理员 retry 发送。
+- 如未来需要恢复部分历史记录，必须有独立、可审计的人工 reconciliation 流程，提供可验证的原始 Postback platform 来源、候选唯一性证明、原 event_key 与目标 key 冲突检查、双人审批及不可变审计记录。没有可靠来源时永久保持 unresolved。
+
+### 新写入策略
+
+1. Postback Outbox 入口必须拒绝空白 platform；规范化规则与 key builder 完全一致（仅 trim，不擅自大小写折叠）。
+2. 新 Outbox 行同时写入 `platform=<规范化值>`、`identity_scope='platform_scoped'` 和五字段 event_key。
+3. 短链/斗篷直接发送不推断平台；新日志写入 `platform=NULL`、`identity_scope='unscoped'`，并以四字段 key 进行身份查询和创建。
+4. `create_report_log()` 查询到 `legacy_unresolved` 同 key 行时必须返回明确冲突/不可发送结果，不能把它当作已知 unscoped 日志复用；唯一键冲突后的并发回查也必须校验 identity_scope。
+5. 新 Postback 事件命中同 key 旧行时，只有现有记录已经是 `platform_scoped` 且 platform 完全相同，才允许幂等复用；命中 unresolved 或 scope 不一致时中止当前业务事务，不得静默复用。
+
+### 统一发送与管理门禁
+
+- Outbox due scanner 查询必须要求 `identity_scope='platform_scoped'` 且 `platform IS NOT NULL`。
+- Outbox item processor 在租约认领时必须带身份作用域条件；不能只在认领后检查，否则会产生无意义的租约占用。
+- 人工 retry 的 SQL UPDATE 条件必须与 due scanner 一样检查 `platform_scoped`、非 NULL platform、未清理 PII、有效配置引用和租约过期。
+- 直接发送路径只接受 `unscoped` 行；传入既有 `report_log_id` 的调用必须校验该行作用域，不能绕过检查。
+- 管理端编辑：`legacy_unresolved` 禁止所有身份字段修改；`platform_scoped` 身份字段继续冻结；`unscoped` 可编辑时只能按四字段重算，且必须保持 scope 不变。
+- 管理端列表/详情应展示 `identity_scope` 和 nullable `platform`；明确显示“历史身份待核实”，不显示默认平台。
+- 导出、报表统计和审计记录需保留 scope 语义；不得把 unresolved 统计为某个具体平台。
+
+### 必须覆盖的隔离 MySQL 测试
+
+- 迁移后旧记录 scope 全部为 unresolved，platform 均 NULL，event_key 原值不变。
+- 新短链/斗篷日志为 unscoped，platform NULL；正常重复请求复用同一日志。
+- 新 Postback Outbox 为 platform_scoped，平台字段和五字段 key 一致。
+- 平台 A/B 相同四字段事件可以并存；同平台重复事件唯一复用。
+- 空白 platform 被拒绝，不得退化成 unscoped Postback。
+- unresolved 的 success/pending/failed 行都不能发送、retry、编辑身份字段。
+- unresolved 同 key 冲突不能在直接发送创建函数或 Outbox enqueue 中被当作成功去重。
+- 直接发送 report_log_id 不能绕过 scope 检查。
+- due scanner、item processor、管理员 retry 三条路径分别验证 SQL/并发门禁。
+- 新旧 Worker 混跑时，旧 Worker 对新增 platform_scoped 行不得用四字段重新创建日志；发布顺序需先部署兼容代码，再允许写入新 schema。
+- 管理端 Schema 明确返回 nullable platform 和 scope；未知值保持 NULL。
+
+### 发布兼容与回滚
+
+- 旧 Worker 不认识新字段，可能继续按四字段 key 直接创建/复用日志；因此新 schema 与新写入逻辑必须作为有顺序的兼容发布，不允许先启用新 Postback 写入再运行旧 Worker。
+- 在新旧 Worker 共存期间，必须明确旧版本是否可能消费新 Outbox；若不能证明兼容，必须先停用旧 Worker 或设置发布门禁，不能仅靠数据库新增列解决。
+- migration DDL 与应用代码分阶段发布，需先完成旧版本行为审查、临时 MySQL 双版本混跑测试和回滚演练。
+- 回滚时不得删除新列或把新记录重写成四字段 key；应回滚应用写入开关并保留新增字段和身份数据。
+- 该状态机仍是实施设计，不代表代码、migration、Worker 门禁或历史 reconciliation 已完成。
