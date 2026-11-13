@@ -1,7 +1,7 @@
 """
 第三方上报日志 ORM 模型。
 """
-from sqlalchemy import Column, Integer, String, CHAR, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
+from sqlalchemy import Column, Integer, String, CHAR, Boolean, DateTime, ForeignKey, Enum, Text, Index, CheckConstraint, \
     UniqueConstraint, Date, Numeric, BINARY, text
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -91,6 +91,13 @@ class ThirdPartyReportLog(Base):
     pii_scrubbed_at = Column(DateTime, nullable=True, comment='PII 按保留策略清理时间；保留事件幂等键')
     
     __table_args__ = (
+        CheckConstraint(
+            "identity_scope IN ('legacy_unresolved', 'unscoped', 'platform_scoped') "
+            "AND ((identity_scope = 'platform_scoped' AND platform IS NOT NULL "
+            "AND CHAR_LENGTH(TRIM(platform)) > 0) "
+            "OR (identity_scope IN ('unscoped', 'legacy_unresolved') AND platform IS NULL))",
+            name="chk_third_party_identity_scope_v1",
+        ),
         Index("idx_third_party_source", "source"),
         Index("idx_third_party_adsid", "adsid"),
         Index("idx_third_party_event", "event"),
