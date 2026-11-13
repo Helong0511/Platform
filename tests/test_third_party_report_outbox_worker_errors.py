@@ -52,6 +52,7 @@ async def test_batch_worker_counts_item_exception_without_masking_it(monkeypatch
         "failed": 1,
         "exhausted": 0,
         "terminal_failed": 0,
+        "scope_blocked": 0,
     }
     assert "error_type=RuntimeError" in caplog.text
     assert "synthetic third-party failure" not in caplog.text
