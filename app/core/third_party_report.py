@@ -103,10 +103,10 @@ async def _lock_report_base_identity(
     锁行永久保留；INSERT ... ON DUPLICATE KEY UPDATE 与 SELECT FOR UPDATE
     在同一事务/连接上执行，确保首次建锁行和后续锁定都可被并发事务串行化。
     """
+    # 原始 adsid 等身份字段只在内存中参与编码；锁表仅保留独立 SHA-512 指纹。
     identity_value = _report_base_identity_value(source, adsid, event, conversion_id).encode("utf-8")
-    if len(identity_value) > 4096:
-        raise ValueError("第三方事件基础身份超出锁表字段上限")
     identity_key = hashlib.sha256(identity_value).hexdigest()
+    identity_fingerprint = hashlib.sha512(identity_value).digest()
     # 锁等待超时只覆盖“取得身份锁”阶段，取得后立即恢复连接原值，避免业务事务长时间挂起。
     timeout_result = await db.execute(text("SELECT @@SESSION.innodb_lock_wait_timeout"))
     original_wait_timeout = max(1, int(timeout_result.scalar_one()))
@@ -115,7 +115,7 @@ async def _lock_report_base_identity(
     try:
         statement = mysql_insert(ThirdPartyReportIdentityLock).values(
             identity_key=identity_key,
-            identity_value=identity_value,
+            identity_fingerprint=identity_fingerprint,
         )
         statement = statement.on_duplicate_key_update(
             identity_key=statement.inserted.identity_key
@@ -127,7 +127,7 @@ async def _lock_report_base_identity(
             .with_for_update()
         )
         lock_row = result.scalars().first()
-        if lock_row is None or bytes(lock_row.identity_value) != identity_value:
+        if lock_row is None or bytes(lock_row.identity_fingerprint) != identity_fingerprint:
             raise RuntimeError("第三方事件身份锁缺失或检测到 SHA-256 碰撞")
         return identity_key
     finally:
