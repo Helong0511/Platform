@@ -93,23 +93,38 @@ async def create_report_log(
         report_params: Optional[str] = None,
         conversion_id: Optional[str] = None,
         currency: Optional[str] = None,
-        amount: Optional[float] = None
+        amount: Optional[float] = None,
+        destination_pixel_id: Optional[str] = None,
 ) -> int:
-    """
-    按事件身份创建上报日志；相同事件重试复用同一日志，不同事件独立留痕。
-    """
-    # 此函数尚未接收外部 event_key；必须从稳定业务字段生成，避免引用未定义局部变量。
+    """创建明确标记为 unscoped 的直接发送日志；历史/平台作用域记录不得被误复用。"""
     event_key = build_event_idempotency_key(source, adsid, event, conversion_id)
+
+    def reusable_unscoped_row(row) -> bool:
+        return bool(
+            row
+            and getattr(row, "identity_scope", None) == "unscoped"
+            and getattr(row, "platform", None) is None
+            and (getattr(row, "destination_pixel_id", None) or None)
+            == (destination_pixel_id or None)
+        )
+
     try:
         async with AsyncSessionLocal() as db:
             result = await db.execute(
-                select(ThirdPartyReportLog.id)
+                select(ThirdPartyReportLog)
                 .where(ThirdPartyReportLog.event_key == event_key)
                 .limit(1)
             )
-            existing_id = result.scalar_one_or_none()
-            if existing_id:
-                return int(existing_id)
+            existing = result.scalars().first()
+            if existing is not None:
+                if not reusable_unscoped_row(existing):
+                    logger.warning(
+                        "[第三方上报] 事件身份已存在但作用域/Pixel 目的地不匹配，拒绝复用：source=%s event=%s",
+                        source,
+                        event,
+                    )
+                    return 0
+                return int(existing.id)
 
             log_entry = ThirdPartyReportLog(
                 source=source,
@@ -117,6 +132,9 @@ async def create_report_log(
                 event=event,
                 event_key=event_key,
                 conversion_id=conversion_id,
+                platform=None,
+                identity_scope="unscoped",
+                destination_pixel_id=destination_pixel_id or None,
                 email=email,
                 ip=ip,
                 phone=phone,
@@ -136,21 +154,27 @@ async def create_report_log(
             await db.refresh(log_entry)
             return log_entry.id
     except IntegrityError:
-        # 并发请求可能同时查询到不存在；唯一键负责仲裁，冲突方读取已创建记录。
+        # 唯一键竞争后必须重新验证 scope 和 Pixel 目的地，不能仅按 event_key 复用。
         try:
             async with AsyncSessionLocal() as db:
                 result = await db.execute(
-                    select(ThirdPartyReportLog.id)
+                    select(ThirdPartyReportLog)
                     .where(ThirdPartyReportLog.event_key == event_key)
                     .limit(1)
                 )
-                existing_id = result.scalar_one_or_none()
-                if existing_id:
-                    return int(existing_id)
+                existing = result.scalars().first()
+                if reusable_unscoped_row(existing):
+                    return int(existing.id)
+                logger.warning(
+                    "[第三方上报] 并发创建冲突后身份归属/目的地不匹配，拒绝复用"
+                )
         except Exception as lookup_exc:
-            logger.warning("[第三方上报] 并发创建冲突后读取事件日志失败：%s", type(lookup_exc).__name__)
-    except Exception as e:
-        logger.warning("[第三方上报] 创建日志记录失败：%s", type(e).__name__)
+            logger.warning(
+                "[第三方上报] 并发创建冲突后读取事件日志失败：%s",
+                type(lookup_exc).__name__,
+            )
+    except Exception as exc:
+        logger.warning("[第三方上报] 创建日志记录失败：%s", type(exc).__name__)
     return 0
 
 async def update_report_log(
