@@ -275,6 +275,9 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             .where(
                 ThirdPartyReportLog.id == report_log_id,
                 ThirdPartyReportLog.outbox_enqueued.is_(True),
+                ThirdPartyReportLog.identity_scope == "platform_scoped",
+                ThirdPartyReportLog.platform.is_not(None),
+                ThirdPartyReportLog.platform != "",
             )
             .limit(1)
         )
