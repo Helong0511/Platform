@@ -1101,6 +1101,7 @@ async def test_outbox_retries_after_credentials_are_restored(monkeypatch):
     monkeypatch.setattr(outbox, "_resolve_pixel_credentials", resolve)
     monkeypatch.setattr(outbox, "_claim_report_log", claim)
     monkeypatch.setattr(outbox, "_bind_outbox_destination", lambda *args, **kwargs: _async_true())
+    monkeypatch.setattr(outbox, "_bind_outbox_destination", lambda *args, **kwargs: _async_true())
     monkeypatch.setattr(outbox, "update_report_log", update)
     monkeypatch.setattr(outbox, "send_third_party_report", send)
 
@@ -1187,9 +1188,17 @@ async def test_outbox_payload_editor_uses_row_lock_and_rejects_active_lease(monk
     assert row.email == "old@example.invalid"
 
 
-async def test_enqueue_refuses_existing_platform_scoped_event_owned_by_another_platform():
-    import pytest
-    from app.services.third_party_report_outbox import LegacyEventIdentityConflict
+async def test_enqueue_allows_distinct_platform_scoped_events_for_same_base_identity():
+    """平台 A/B 使用不同五字段身份键时可并存，不能把 A 错当成 B。"""
+    from sqlalchemy.dialects import mysql
+
+    platform_a_key = outbox.build_event_idempotency_key(
+        "postback", "same-click", "Purchase", "same-conversion", platform="meta"
+    )
+    platform_b_key = outbox.build_event_idempotency_key(
+        "postback", "same-click", "Purchase", "same-conversion", platform="bft"
+    )
+    assert platform_a_key != platform_b_key
 
     existing = type(
         "Existing",
@@ -1197,34 +1206,50 @@ async def test_enqueue_refuses_existing_platform_scoped_event_owned_by_another_p
         {
             "id": 84,
             "identity_scope": "platform_scoped",
-            "platform": "other-platform",
+            "platform": "meta",
+            "event_key": platform_a_key,
             "outbox_enqueued": True,
-            "destination_pixel_id": None,
         },
     )()
 
     class FakeDB:
+        def __init__(self):
+            self.added = None
+
         async def scalar(self, statement):
-            return existing
+            params = statement.compile(
+                dialect=mysql.dialect()
+            ).params
+            if params.get("event_key_1") == platform_a_key:
+                return existing
+            return None
+
+        def add(self, row):
+            self.added = row
 
         async def flush(self):
-            raise AssertionError("平台不匹配时不得修改或复用事件")
+            self.added.id = 85
 
-    with pytest.raises(LegacyEventIdentityConflict):
-        await outbox.enqueue_postback_report(
-            FakeDB(),
-            platform="bft",
-            adsid="same-click",
-            event="Purchase",
-            conversion_id="same-conversion",
-            email=None,
-            ip=None,
-            phone=None,
-            ua=None,
-            currency="USD",
-            amount=1.0,
-            short_link_id=5,
-            cloak_name=None,
-            short_code=None,
-            click_time=None,
-        )
+    db = FakeDB()
+    row_id = await outbox.enqueue_postback_report(
+        db,
+        platform="bft",
+        adsid="same-click",
+        event="Purchase",
+        conversion_id="same-conversion",
+        email=None,
+        ip=None,
+        phone=None,
+        ua=None,
+        currency="USD",
+        amount=1.0,
+        short_link_id=5,
+        cloak_name=None,
+        short_code=None,
+        click_time=None,
+    )
+
+    assert row_id == 85
+    assert db.added.platform == "bft"
+    assert db.added.identity_scope == "platform_scoped"
+    assert db.added.event_key == platform_b_key
