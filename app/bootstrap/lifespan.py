@@ -31,6 +31,34 @@ from app.scheduler_module.task_init import init_scheduled_tasks_in_db
 logger = logging.getLogger(__name__)
 
 
+def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
+    """只读核验 ORM 声明的表/列是否存在；绝不创建或修改数据库对象。"""
+    target_metadata = metadata or Base.metadata
+    inspector = inspect(sync_connection)
+    missing_tables = []
+    missing_columns = {}
+
+    for table in target_metadata.sorted_tables:
+        if not inspector.has_table(table.name, schema=table.schema):
+            missing_tables.append(table.fullname)
+            continue
+        actual_columns = {
+            column["name"]
+            for column in inspector.get_columns(table.name, schema=table.schema)
+        }
+        absent = sorted(
+            column.name for column in table.columns
+            if column.name not in actual_columns
+        )
+        if absent:
+            missing_columns[table.fullname] = absent
+
+    return {
+        "missing_tables": sorted(missing_tables),
+        "missing_columns": missing_columns,
+    }
+
+
 async def _verify_database_schema() -> str | None:
     """只读核验 migration revision 与 ORM 表/列；应用 Worker 不执行 schema DDL。"""
     async with engine.connect() as connection:
