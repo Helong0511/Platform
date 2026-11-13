@@ -94,7 +94,7 @@ class ThirdPartyReportLog(Base):
         CheckConstraint(
             "identity_scope IN ('legacy_unresolved', 'unscoped', 'platform_scoped') "
             "AND ((identity_scope = 'platform_scoped' AND platform IS NOT NULL "
-            "AND CHAR_LENGTH(TRIM(platform)) > 0) "
+            "AND LENGTH(TRIM(platform)) > 0) "
             "OR (identity_scope IN ('unscoped', 'legacy_unresolved') AND platform IS NULL))",
             name="chk_third_party_identity_scope_v1",
         ),
