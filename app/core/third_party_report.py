@@ -385,6 +385,53 @@ async def _renew_report_log_lease(
         return now if (result.rowcount or 0) == 1 else None
 
 
+async def _link_purchase_to_view_content(
+    *,
+    source: str,
+    adsid: str,
+    conversion_id: str,
+    report_log_id: int,
+    allow_unscoped_match: bool,
+) -> bool:
+    """仅在明确无平台作用域的直接发送路径关联 ViewContent。"""
+    if not allow_unscoped_match:
+        logger.info(
+            "[第三方上报] 跳过 ViewContent 关联：Outbox 尚未持久化平台作用域，"
+            "不能证明与 Purchase 属于同一平台：report_log_id=%s",
+            report_log_id,
+        )
+        return False
+
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(ThirdPartyReportLog)
+                .where(ThirdPartyReportLog.source == source)
+                .where(ThirdPartyReportLog.adsid == adsid)
+                .where(ThirdPartyReportLog.event == "ViewContent")
+                .where(ThirdPartyReportLog.conversion_id.is_(None))
+            )
+            view_content_log = result.scalars().first()
+            if view_content_log:
+                view_content_log.conversion_id = conversion_id
+                await db.commit()
+                logger.info(
+                    "[第三方上报] 已关联 ViewContent 转化日志：report_log_id=%s",
+                    report_log_id,
+                )
+                return True
+            logger.info(
+                "[第三方上报] 未找到可关联的 ViewContent 事件：report_log_id=%s",
+                report_log_id,
+            )
+    except Exception as exc:
+        logger.warning(
+            "[第三方上报] 关联 ViewContent 事件失败：%s",
+            type(exc).__name__,
+        )
+    return False
+
+
 async def send_third_party_report(
         adsid: str,
         event: str,
@@ -630,29 +677,16 @@ async def send_third_party_report(
                 f"report_log_id={report_log_id}, missing_fields={missing_fields}"
             )
 
-    # 如果是 Purchase 事件，更新对应的 ViewContent 事件的 conversion_id
+    # Purchase 与 ViewContent 只有在作用域可证明时才允许关联。
     if event == "Purchase" and conversion_id:
-        try:
-            async with AsyncSessionLocal() as db:
-                # 查找相同 adsid 的 ViewContent 事件
-                result = await db.execute(
-                    select(ThirdPartyReportLog)
-                    .where(ThirdPartyReportLog.source == source)
-                    .where(ThirdPartyReportLog.adsid == adsid)
-                    .where(ThirdPartyReportLog.event == "ViewContent")
-                    .where(ThirdPartyReportLog.conversion_id.is_(None))  # 只更新未设置 conversion_id 的记录
-                )
-                view_content_log = result.scalars().first()
-                
-                if view_content_log:
-                    # 更新 ViewContent 事件的 conversion_id
-                    view_content_log.conversion_id = conversion_id
-                    await db.commit()
-                    logger.info("[第三方上报] 已关联 ViewContent 转化日志：report_log_id=%s", report_log_id)
-                else:
-                    logger.info("[第三方上报] 未找到可关联的 ViewContent 事件：report_log_id=%s", report_log_id)
-        except Exception as e:
-            logger.warning("[第三方上报] 关联 ViewContent 事件失败：%s", type(e).__name__)
+        await _link_purchase_to_view_content(
+            source=source,
+            adsid=adsid,
+            conversion_id=conversion_id,
+            report_log_id=report_log_id,
+            # report_log_id 路径是平台级 Outbox；当前模型未保存 platform，必须跳过关联。
+            allow_unscoped_match=not using_existing_report_log,
+        )
 
     logger.info("[第三方上报] 使用像素配置 - Pixel ID: %s, API 版本：%s", pixel_id, api_version)
     
