@@ -1070,3 +1070,72 @@ Run #1517 Backend / Frontend CI 通过，但上述锁表方案仍是设计评估
 - 在完整调用者审计和 Pixel 目的地语义确认之前，不新增锁表 migration，不改变 event_key 算法。
 - 当前 CI 的 603 passed / 1 skipped / 1 warning 仍不包含跨 source/平台完整身份矩阵并发验证；不可把现有 Outbox claim 并发测试误称为事件身份仲裁测试。
 
+
+
+## 2026-11-13 Run #1519：发送 ID 绑定与 Pixel 关联边界复核
+
+### CI 证据
+
+Run #1519（SHA b1f78472b1fea6501ea6405e4aede06592eeb105）Backend / Frontend 均 success。
+- Backend：603 passed、1 skipped、1 warning；隔离 MySQL 覆盖 Outbox claim exclusive、过期租约恢复、PII retention、schema bootstrap 并发、stale worker takeover 和 UTF-8 event-key golden vectors。
+- Skip：tests/test_client_reconciliation_db_scope.py 的本地核对脚本未检出（CI 不依赖该本地文件）。
+- Warning：Python 3.11 passlib 通过 crypt 模块产生弃用警告。
+- Redis / MySQL 容器日志中的 overcommit、空密码初始化、自签名 CA、skip-host-cache 弃用等均来自一次性 CI 容器配置；不能作为生产环境配置结论。
+- Frontend npm audit 仍报告 2 项 High（axios 直接依赖及 follow-redirects 传递依赖，production dependency audit 也报告相同项）。本轮按既定边界暂不处理凭据安全专项；该报告必须保留为已知风险，不得描述为无漏洞。
+
+### 已读取代码确认的入口
+
+1. 直接发送：
+   - app/routes/short_link/cloak_report_service.py 的 schedule_cloak_facebook_report() 将 send_third_party_report 加入 BackgroundTasks。
+   - 调用参数包括 source、adsid、event、Purchase 的 conversion_id 和解析得到的 facebook_pixel_id / access token。
+   - source 由短链/斗篷阶段参数解析，常见为 short_link 或 short_link_*。
+2. Postback Outbox：
+   - app/services/third_party_report_outbox.py 的 enqueue_postback_report() 固定 source="postback"，将平台维度放入 event_key，但 ThirdPartyReportLog 模型没有 platform / identity_scope 列。
+   - Outbox worker 从持久化行读取 source、adsid、event、conversion_id、event_key，再以 report_log_id 调用 send_third_party_report()。
+3. 日志创建：
+   - app/core/third_party_report.py 的 create_report_log() 生成四字段 event_key，先按 key SELECT，再 INSERT；IntegrityError 后仍按 key 回查。没有统一身份锁，但目前已知短链直接发送 source 与 Outbox 的 postback 不同，不能把这两个入口的 source 跨路径竞态当成已证实事实。
+4. 管理入口：
+   - app/api_v1/system/third_party_reports.py 提供列表、详情、编辑和 retry。
+   - retry_report_log() 按 ID、Outbox 标志、failed 状态、PII 状态、配置引用和租约条件更新；未检查 platform / identity_scope。
+   - update_report_log_params() 对 Outbox 行拒绝身份字段修改；对非 Outbox 历史行允许修改 source/adsid/event/conversion_id 中可编辑字段，并按四字段 event_key 重算。当前没有 legacy identity scope 可供判断该行是否已归属某个平台。
+
+### 新确认的发送 ID 绑定风险
+
+send_third_party_report() 接受可选 report_log_id。若传入该 ID，则跳过 create_report_log()，后续使用该 ID 认领租约；当前在发送前没有完整核对被认领的 ThirdPartyReportLog 行的 source、adsid、event、conversion_id、event_key 是否与函数入参和预期作用域一致。
+
+已知 Outbox worker 会从同一行读取 payload 并传入 report_log_id、event_key，因此正常内部路径的数据来源相互关联；但函数本身没有强制绑定约束，未来其它调用者或错误调用可传入不匹配的 ID / 参数组合。应在发送前使用单条原子/一致性读取验证：
+- report_log_id 存在且仍属于预期发送路径；
+- 持久化 source、adsid、event、conversion_id 与调用参数一致；
+- 持久化 event_key 与按持久化字段、明确 platform scope 重新计算的 key 一致；
+- Outbox 标志、配置引用和 lease token 均匹配预期路径；
+- 任何字段缺失、不匹配或无法证明身份时 fail-closed，不发 HTTP 请求。
+不能只校验调用方传来的 event_key，因为该值本身也可能与日志 ID 不匹配。
+
+### Claim / retry / edit 的作用域边界
+
+- _claim_report_log() 当前是 report_log_id + 状态 + 租约条件的单行 claim；没有 scope 条件。若将来增加持久化 scope，必须将 expected scope 纳入 UPDATE 原子条件，不能先读取后在 Python 层检查。
+- retry_report_log() 也应要求调用方声明预期 scope，UPDATE 原子条件同时匹配 identity_scope、platform、Outbox 类型和租约状态。
+- Worker due scanner、attempt exhaustion terminalizer、payload SELECT、lease renew、attempt state、最终发送 preflight 都必须采用相同 scope 条件。
+- 管理员详情 / 列表 schema 应暴露经过验证的 scope 状态（包括 legacy_unresolved），避免把未归属历史行展示成确定的平台事件。
+- 管理员编辑未归属 legacy 行的身份字段前，必须要求独立、可审计的 reconciliation；不得自动将历史四字段 key 升级为当前请求平台的五字段 key。
+
+### 新确认的 Pixel 关联语义问题
+
+app/core/third_party_report.py 在 Purchase 发送前关联 ViewContent 时，按 source + adsid + event=ViewContent + conversion_id IS NULL 选取第一条记录，没有 Pixel ID / 目的地维度，也没有显式稳定排序。
+- build_event_idempotency_key() 明确规定 ViewContent 的 conversion_id 是后补关联元数据，不进入 ViewContent event_key；这是当前设计，不应误报为 key 漏更新。
+- 但如果相同 source + adsid 对应多条 ViewContent 记录或多个 Pixel 目的地，当前 first() 可能选择非预期记录；需要确认是否应按 Pixel/目的地关联、是否允许多 Pixel 记录，以及关联应是严格唯一还是一对多。
+- 直接发送入口在创建日志时尚未把 Pixel ID 存入 ThirdPartyReportLog；Outbox 在发送阶段解析配置引用获得 Pixel ID。要实现目的地级审计，需明确目的地标识的持久化时机和配置变更语义。
+- 产品语义确认前，不把 Pixel ID 直接拼入现有 event_key，不改变历史去重算法。
+
+### 下一轮实现顺序调整
+
+1. 先建立所有 send_third_party_report / create_report_log / enqueue_postback_report 调用点的可核验清单；当前 GitHub Code Search 未返回有效结果，不能声称已穷尽全仓库调用者。
+2. 先实现 report_log_id 与 payload 的发送前一致性绑定，以及内部调用显式 expected path/scope 参数；不要给 scope 参数提供“默认允许”的兼容行为。
+3. 为直接发送与 Outbox worker 分别建立明确路径标识；在数据库平台字段和历史行状态未迁移前，先阻止函数 ID 与 payload 不一致的请求。
+4. 再根据产品确认的 Pixel 语义决定是否增加 destination identity；随后设计 nullable platform / identity_scope / destination 字段和 legacy unresolved 迁移。
+5. 对 claim、renew、scanner、terminalizer、retry、edit、API Schema 一次性加入 scope gate。
+6. 隔离 MySQL 多连接测试不匹配 report_log_id、错误 source、错误 event_key、平台错配、旧 Worker 混跑和事务竞争；Mock/FakeDB 测试仅作为单元层补充。
+
+### 当前结论
+
+Run #1519 的 CI 通过，但发送 ID 与 payload 的一致性绑定、平台持久化、scope gate、Pixel 目的地关联语义仍未修复。事件身份及发送作用域问题继续阻断合并上线。凭据安全专项仍按用户指示暂缓；未连接生产资源。
