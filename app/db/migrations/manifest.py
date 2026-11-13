@@ -72,6 +72,12 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         ),
     ),
     Migration(
+        revision="20261113_third_party_report_identity_scope_constraints",
+        path="sql/migrations/20261113_third_party_report_identity_scope_constraints.sql",
+        sha256="4b209f2e1689b0aaae2a23a6b2a7fc79a11b76b23ab7e88dfa09fce50f7ff871",
+        depends_on=("20261113_third_party_report_identity_scope",),
+    ),
+    Migration(
         revision="20261113_third_party_report_identity_scope_locks",
         path="sql/migrations/20261113_third_party_report_identity_scope_locks.sql",
         sha256="ee2ff49f0afd71727c0d00c03bd7a99f0c25592b4d27351ccb8f357b8596ebc4",
