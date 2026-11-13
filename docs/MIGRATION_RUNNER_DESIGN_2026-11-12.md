@@ -940,3 +940,43 @@ GitHub Code Search 对目标分支没有提供可用的完整结果，且本轮�
 - 当前新增测试是 FakeDB 级单元测试；Run #1515 的既有 MySQL 集成测试通过，但**没有**覆盖上述两条业务路径的真实并发竞态。
 - 仍需完整工作区 `git grep` 核实所有直接发送及身份写入调用点；GitHub 文件读取不是全仓库穷尽性扫描。
 - 历史 migration SQL 和 manifest checksum 保持不变。
+
+
+## 2026-11-13 直接发送入口与人工编辑路径补充复核（Run #1516 后）
+
+### 已核实的业务调用链
+
+本轮通过 PR HEAD 的递归 Git Tree 定位文件，并逐项读取调用点；以下为已核实路径：
+
+1. **短链/斗篷直接发送**
+   - `app/routes/short_link/cloak_report_service.py::schedule_cloak_facebook_report()` 解析像素配置后，将 `send_third_party_report` 加入 FastAPI `BackgroundTasks`。
+   - 该路径传入 `source`、`adsid`、`event` 和 Purchase 的 `conversion_id`，但没有 Postback 平台字段；`send_third_party_report()` 随后调用 `create_report_log()`，生成四字段 key。
+   - 直接发送使用 Facebook 像素配置，但当前 event identity 并未包含 Pixel ID。是否需要将 Pixel/广告账户纳入业务身份，需由产品语义决定；本轮不擅自改变既有 key。
+2. **Postback Outbox 创建**
+   - `app/core/postback/processor.py` 在转化处理阶段调用 `enqueue_postback_report(db, platform=...)`。
+   - 该函数写入五字段 key，但当前 `ThirdPartyReportLog` 没有持久化 platform 列。
+3. **Outbox Worker**
+   - `app/scheduler_module/tasks/third_party_report_tasks.py` 调用 `process_postback_report_outbox()`。
+   - scanner 查询到期行后进入 `process_postback_report_outbox_item()`；item 先调用共享 `_claim_report_log(report_log_id)`，再读取 payload，并把 `report_log_id`、五字段 `event_key` 和租约令牌传给 `send_third_party_report()`。
+   - `send_third_party_report(report_log_id=...)` 当前不会重新创建日志，但也没有验证该 ID 对应记录的平台身份作用域。
+4. **管理员入口**
+   - `app/api_v1/system/third_party_reports.py` 暴露日志详情、编辑和 retry。
+   - retry 最终调用 `retry_report_log()`；当前 UPDATE 条件只验证 Outbox、failed、PII、配置引用和租约，不验证平台归属。
+   - 编辑最终调用 `update_report_log_params()`。对非 Outbox 历史日志，身份字段改变后始终按四字段算法重算 event_key；对 Outbox 行虽然冻结身份字段，但没有 platform 列可以验证其五字段 key 的平台归属。
+   - 当前 list/detail Schema 也没有 platform / identity_scope。
+
+### 对原设计的必要补充
+
+- 直接发送的 `BackgroundTasks` 是另一条业务入口，不是持久化 Outbox。不能只保护 scheduler worker；必须在 `create_report_log()` 创建/复用阶段和 `send_third_party_report(report_log_id=...)` 既有 ID 路径分别验证 scope。
+- `_claim_report_log()` 是两条路径共享的发送租约原语。新增 scope 参数时必须要求调用方显式传入，不应提供默认“允许任意 scope”的兼容行为；同时检查 lease claim、renew、attempt-state read、状态更新及真正 HTTP 请求之前的门禁。
+- 直接发送函数在像素凭据缺失时会在创建普通日志之前返回 skipped；此行为与事件身份仲裁是不同问题，不应把该分支当作已创建但未发送的日志。
+- `update_report_log_params()` 的身份重算目前不使用 platform。新增 scope 字段后，必须拒绝 unresolved 行的身份修改；platform_scoped 行身份字段冻结；仅 unscoped 行可按四字段重算，并且要在基础身份锁下检查目标 key 与其它 scope 的冲突。
+- 仅给 ORM 增加字段不足以阻止旧 Worker 绕过门禁。应用发布必须证明旧版本已停止处理，或在数据库/部署层设置可验证的兼容门禁。
+
+### 当前审计覆盖边界
+
+本轮读取了上述主要调用链及管理端入口，但 GitHub Code Search 只检索默认分支，不能用于证明 PR 分支全仓库调用点完整。当前没有本地完整工作区，因此尚未执行 `git grep`；动态导入、临时脚本、其它后台任务及测试 fixture 仍待穷尽。不得将本清单描述为全仓库调用点审计关闭。
+
+### 本轮结论
+
+Run #1516 的 CI 通过；本轮补充了直接发送、Outbox、Worker、管理员编辑/retry 的实际入口证据。**没有修改业务代码或 schema，跨路径身份竞态 P1 仍未解决。** 历史 migration SQL 与 manifest checksum 未修改；未连接生产资源。
