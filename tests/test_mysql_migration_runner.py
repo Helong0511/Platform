@@ -500,7 +500,15 @@ async def test_identity_scope_check_constraint_is_enforced_and_migration_is_idem
             repository_root=tmp_path,
             migrations=migrations,
         )
-        # 已存在且定义匹配的约束必须允许重复执行。
+        # 直接重放 SQL，验证 migration 脚本本身可重复执行（不只是 ledger 跳过）。
+        from app.db.migrations.sql_parser import split_mysql_statements
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                for statement in split_mysql_statements(migration_sql):
+                    cursor.execute(statement)
+
+        # Runner 随后必须根据 ledger 返回空计划，不重复应用 revision。
         assert await apply_migrations(
             url,
             application_database_url=app_url,
