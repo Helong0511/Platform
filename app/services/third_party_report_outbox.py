@@ -265,7 +265,6 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
                 ThirdPartyReportLog.identity_scope == "platform_scoped",
                 ThirdPartyReportLog.platform.is_not(None),
                 ThirdPartyReportLog.platform != "",
-                ThirdPartyReportLog.pii_scrubbed_at.is_(None),
             ).limit(1)
         )
     if not platform:
