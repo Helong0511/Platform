@@ -3,7 +3,18 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import pytest
+
 from app.services import third_party_report_outbox as outbox
+
+
+
+@pytest.fixture(autouse=True)
+def _mock_identity_lock_for_outbox_unit_tests(monkeypatch):
+    async def no_database_lock(db, **kwargs):
+        return "unit-test-identity-lock"
+
+    monkeypatch.setattr(outbox, "_lock_report_base_identity", no_database_lock)
 
 
 async def _async_true():
