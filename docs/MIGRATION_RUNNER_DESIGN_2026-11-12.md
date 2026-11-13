@@ -1039,3 +1039,34 @@ Run #1516 的 CI 通过；本轮补充了直接发送、Outbox、Worker、管理
 ### 当前结论
 
 Run #1517 Backend / Frontend CI 通过，但上述锁表方案仍是设计评估，尚无锁表 migration、仲裁服务、scope 门禁或真实 MySQL 并发验收。事件身份 P1 继续阻断合并与上线。未连接生产资源，未执行生产 migration 或真实第三方发送。
+
+
+## 2026-11-13 重要更正：已知短链直发与 Postback 的 source 维度不同
+
+本节更正本文件较早章节中“短链/斗篷直接发送与 Postback Outbox 对同一四字段基础身份可能直接发生交叉竞态”的过度确定表述。该具体结论不能由当前已读取代码支持。
+
+### 当前代码证据
+
+- 短链/斗篷直接发送入口位于 app/routes/short_link/cloak_report_service.py 的 schedule_cloak_facebook_report()。
+- _resolve_fb_report_params() 为直接发送生成的 source 包括 short_link_load_dp_{dp_param}、short_link_dp_{resolved_dp}；默认值为 short_link。
+- Postback Outbox 在 app/services/third_party_report_outbox.py 的 enqueue_postback_report() 中创建记录时，明确写入 source="postback"。
+- build_event_idempotency_key() 将 source、adsid、event、conversion_id（ViewContent 忽略 conversion_id）纳入哈希输入；平台非空时才追加 platform。
+- 因此，上述已知直接发送入口与 Postback Outbox 的 source 值不同，其当前四字段基础 key 也不同。不能把它们描述为已证实的同一基础身份键竞争；此前“直接发送先插入四字段键、Postback 再插入同一身份五字段键”的具体时序，对这两个已知入口并不成立。
+
+### 更准确的剩余风险边界
+
+1. 当前尚未完成 PR HEAD 全仓库调用点穷尽，不能排除其它直接调用者以 source="postback" 或其它与平台入队相同的 source 调用 create_report_log()/send_third_party_report()。
+2. create_report_log() 对同一 event_key 的 SELECT / INSERT 没有统一基础身份互斥；IntegrityError 回查只按 event_key 读取，没有作用域核验。若未来或其它调用者确实以相同 source 生成无平台与平台 event_key，四字段/五字段交叉竞争仍可能出现。
+3. enqueue_postback_report() 的历史四字段冲突查询固定使用 source="postback"，因此它只检查该 source 的历史四字段身份；不能据此证明其它来源记录已被完整仲裁。
+4. ThirdPartyReportLog 仍未持久化 platform / identity_scope。Outbox Worker 以 report_log_id 发送时，没有基于持久化平台字段验证身份作用域；管理员 retry / edit 同样没有 platform scope 约束。这些是独立且已由代码证实的设计缺口。
+5. 当前 event_key 未包含 Facebook Pixel ID。短链/斗篷直接发送的 pixel_id 从配置解析；Postback Worker 也在发送阶段按配置引用解析 pixel_id。相同 source 和基础事件若因配置变化映射到不同 Pixel，是否应独立发送仍需产品语义确认。
+6. 不能仅因当前两条已知路径 source 不同，就删除共享身份仲裁设计；但实现前必须先建立完整调用者矩阵，证明哪些入口确实共享基础身份，避免把不同业务来源错误合并到同一个锁键。
+
+### 对此前方案的调整
+
+- 不再将“已知短链直发与 Postback 必然存在同一四字段基础身份竞态”作为已确认事实。
+- 共享基础身份锁仍可作为未来同一 source 的 scoped/unscoped 写入决策原语，但其锁键定义、调用范围和互斥必要性必须以穷尽调用点后的真实身份语义为准。
+- 不得因为 source 不同而强行去掉 source 维度；这会改变现有事件去重语义，可能错误合并不同业务来源。
+- 在完整调用者审计和 Pixel 目的地语义确认之前，不新增锁表 migration，不改变 event_key 算法。
+- 当前 CI 的 603 passed / 1 skipped / 1 warning 仍不包含跨 source/平台完整身份矩阵并发验证；不可把现有 Outbox claim 并发测试误称为事件身份仲裁测试。
+
