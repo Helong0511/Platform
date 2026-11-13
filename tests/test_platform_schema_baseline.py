@@ -23,8 +23,8 @@ def test_platform_baseline_cap_reservation_table_has_complete_hex_check():
     assert source.count("CREATE TABLE IF NOT EXISTS cap_reservations (") == 1
     assert source.count("chk_cap_reservation_key_hex") == 1
     assert source.count("SET FOREIGN_KEY_CHECKS = 1;") == 1
-    assert not re.search(r"^\\s*CREATE\\s+DATABASE\\b", source, re.IGNORECASE | re.MULTILINE)
-    assert not re.search(r"^\\s*USE\\s+", source, re.IGNORECASE | re.MULTILINE)
+    assert not re.search(r"^\s*CREATE\s+DATABASE\b", source, re.IGNORECASE | re.MULTILINE)
+    assert not re.search(r"^\s*USE\s+", source, re.IGNORECASE | re.MULTILINE)
 
 
 def test_platform_baseline_and_incremental_migrations_cover_all_orm_tables():
