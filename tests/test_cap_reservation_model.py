@@ -110,4 +110,7 @@ def test_cap_reservation_updated_at_ddl_matches_orm_and_both_sql_entrypoints():
             flags=re.IGNORECASE,
         )
         assert not re.search(r"ON\s+UPDATE\s+CURRENT_TIMESTAMP", table_ddl, flags=re.IGNORECASE)
+        if ddl_file.name == "platform.sql":
+            assert "chk_cap_reservation_key_hex" in table_ddl
+            assert "REGEXP_LIKE(reservation_key COLLATE utf8mb4_bin" in table_ddl
 
