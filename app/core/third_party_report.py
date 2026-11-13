@@ -172,7 +172,8 @@ async def create_report_log(
                 scoped_query = scoped_query.where(
                     ThirdPartyReportLog.conversion_id == conversion_id
                 )
-            scoped_conflict = await db.scalar(scoped_query.limit(1))
+            scoped_result = await db.execute(scoped_query.limit(1))
+            scoped_conflict = scoped_result.scalars().first()
             if scoped_conflict is not None:
                 logger.warning(
                     "[第三方上报] 相同基础身份已存在平台作用域事件，拒绝创建无平台事件"
