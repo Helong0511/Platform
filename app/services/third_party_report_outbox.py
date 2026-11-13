@@ -225,6 +225,9 @@ async def _bind_outbox_destination(
                 ThirdPartyReportLog.id == report_log_id,
                 ThirdPartyReportLog.outbox_enqueued.is_(True),
                 ThirdPartyReportLog.identity_scope == "platform_scoped",
+                ThirdPartyReportLog.platform.is_not(None),
+                ThirdPartyReportLog.platform != "",
+                ThirdPartyReportLog.identity_scope == "platform_scoped",
                 ThirdPartyReportLog.platform == platform,
                 ThirdPartyReportLog.report_start_time == lease_token,
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
@@ -255,7 +258,10 @@ async def _bind_outbox_destination(
 
 async def process_postback_report_outbox_item(report_log_id: int) -> dict:
     """先原子认领发送租约，再读取载荷，避免管理端修正与 Worker 快照竞态。"""
-    lease_token = await _claim_report_log(report_log_id)
+    lease_token = await _claim_report_log(
+        report_log_id,
+        expected_scope="platform_scoped",
+    )
     if lease_token is None:
         from app.core.third_party_report import _get_report_status
         existing_status = await _get_report_status(report_log_id)
@@ -427,6 +433,9 @@ async def process_postback_report_outbox(
     stale_before = now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS)
     conditions = [
         ThirdPartyReportLog.outbox_enqueued.is_(True),
+        ThirdPartyReportLog.identity_scope == "platform_scoped",
+        ThirdPartyReportLog.platform.is_not(None),
+        ThirdPartyReportLog.platform != "",
         ThirdPartyReportLog.pii_scrubbed_at.is_(None),
         ThirdPartyReportLog.status.in_(("pending", "failed")),
         ThirdPartyReportLog.next_retry_time.is_not(None),
@@ -447,6 +456,9 @@ async def process_postback_report_outbox(
             update(ThirdPartyReportLog)
             .where(
                 ThirdPartyReportLog.outbox_enqueued.is_(True),
+                ThirdPartyReportLog.identity_scope == "platform_scoped",
+                ThirdPartyReportLog.platform.is_not(None),
+                ThirdPartyReportLog.platform != "",
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                 ThirdPartyReportLog.status.in_(("pending", "failed")),
                 ThirdPartyReportLog.attempt_count >= ThirdPartyReportLog.max_attempts,
