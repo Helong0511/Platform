@@ -443,3 +443,18 @@ def test_runner_accepts_same_mysql_host_with_implicit_default_port():
 
     _ensure_distinct_database_account(migration_url, application_url)
 
+def test_runner_rejects_non_mysql_application_database():
+    from app.db.migrations.runner import (
+        MigrationRunnerError,
+        _ensure_distinct_database_account,
+    )
+    from sqlalchemy.engine import make_url
+
+    migration_url = make_url(
+        "mysql+aiomysql://migration_user:secret@127.0.0.1:3306/platform"
+    )
+    application_url = "sqlite+aiosqlite:///./platform.db"
+
+    with pytest.raises(MigrationRunnerError, match="应用数据库必须使用 MySQL"):
+        _ensure_distinct_database_account(migration_url, application_url)
+
