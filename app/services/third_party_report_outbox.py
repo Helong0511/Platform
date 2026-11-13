@@ -226,8 +226,6 @@ async def _bind_outbox_destination(
                 ThirdPartyReportLog.outbox_enqueued.is_(True),
                 ThirdPartyReportLog.identity_scope == "platform_scoped",
                 ThirdPartyReportLog.platform == platform,
-                ThirdPartyReportLog.identity_scope == "platform_scoped",
-                ThirdPartyReportLog.platform == platform,
                 ThirdPartyReportLog.report_start_time == lease_token,
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                 or_(
