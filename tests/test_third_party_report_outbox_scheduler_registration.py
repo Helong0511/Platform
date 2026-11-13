@@ -188,6 +188,7 @@ async def test_outbox_scheduler_warns_on_terminal_failed_backlog(monkeypatch, ca
             "failed": 0,
             "exhausted": 0,
             "terminal_failed": 3,
+        "scope_blocked": 2,
         }
 
     monkeypatch.setattr(tasks, "process_postback_report_outbox", report_backlog)
@@ -203,4 +204,5 @@ async def test_outbox_scheduler_warns_on_terminal_failed_backlog(monkeypatch, ca
     assert result["terminal_failed"] == 3
     assert captured["name"] == THIRD_PARTY_REPORT_OUTBOX_TASK_NAME
     assert "terminal_failed=3" in captured["message"]
+    assert "scope_blocked=2" in captured["message"]
     assert "存在待重试/失败事件" in caplog.text
