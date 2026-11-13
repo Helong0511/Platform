@@ -1387,11 +1387,12 @@ async def test_mysql_recovery_claim_fences_stale_postback_commit(monkeypatch):
                 )
             )
             conversion_exists = await session.scalar(
-                select(PostbackConversion.id).where(
-                    PostbackConversion.platform == "ci",
-                    PostbackConversion.conversion_id == conversion_id,
-                    PostbackConversion.event_name == "purchase",
-                )
+                text(
+                    "SELECT id FROM postback_conversions "
+                    "WHERE platform = 'ci' AND conversion_id = :conversion_id "
+                    "AND event_name = 'purchase' LIMIT 1"
+                ),
+                {"conversion_id": conversion_id},
             )
 
         assert conversion_exists is None
