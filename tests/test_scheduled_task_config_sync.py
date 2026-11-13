@@ -2,6 +2,7 @@
 
 import pytest
 from sqlalchemy import event, select
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
@@ -106,13 +107,15 @@ async def test_task_config_sync_rolls_back_entire_batch_on_commit_failure(monkey
 
 def test_task_sync_only_retries_duplicate_key_conflicts():
     """唯一键竞争可识别为可重试；其它数据库错误不能误判为并发。"""
-    from sqlalchemy.exc import IntegrityError
-
     duplicate = IntegrityError("INSERT", {}, Exception("UNIQUE constraint failed: scheduled_tasks.task_name"))
     other = IntegrityError("INSERT", {}, Exception("NOT NULL constraint failed: scheduled_tasks.task_name"))
+    deadlock = OperationalError("SELECT", {}, Exception(1213, "Deadlock found"))
+    timeout = OperationalError("SELECT", {}, Exception(1205, "Lock wait timeout exceeded"))
 
-    assert task_init._is_duplicate_task_name_error(duplicate)
-    assert not task_init._is_duplicate_task_name_error(other)
+    assert task_init._is_retryable_task_sync_conflict(duplicate)
+    assert task_init._is_retryable_task_sync_conflict(deadlock)
+    assert task_init._is_retryable_task_sync_conflict(timeout)
+    assert not task_init._is_retryable_task_sync_conflict(other)
 
 
 def test_task_config_sync_rejects_duplicate_task_names(monkeypatch):
