@@ -1,7 +1,7 @@
 """
 第三方上报日志 ORM 模型。
 """
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
+from sqlalchemy import Column, Integer, String, CHAR, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
     UniqueConstraint, Date, Numeric, LargeBinary, text
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -128,7 +128,7 @@ class ThirdPartyReportIdentityLock(Base):
     __tablename__ = "third_party_report_identity_locks"
 
     identity_key = Column(
-        String(64, collation="ascii_bin"),
+        CHAR(64, collation="ascii_bin"),
         primary_key=True,
         nullable=False,
         comment="四字段基础事件身份的 SHA-256",
