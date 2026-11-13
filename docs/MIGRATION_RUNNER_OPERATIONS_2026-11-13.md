@@ -50,7 +50,17 @@ python -m app.db.migrations apply
 - 绝不能把它用于已有数据库升级。
 - 不要把“ORM 表名覆盖测试通过”误认为所有列、索引、外键、CHECK 和字符集都已完成物理结构核验。
 
-## 5. 当前尚未达到生产使用条件
+## 5. MySQL DDL 在线变更风险
+
+当前 migration 中的部分 `ALTER TABLE ... ADD COLUMN ... AFTER ...` 未显式指定 `ALGORITHM`。MySQL 8.0 会优先使用受支持的 `INSTANT`，但当操作不满足 `INSTANT` 条件时，可能退回 `INPLACE` 或 `COPY`；后两者的表重建/并发访问特性不同。尤其当前 Runner 最低版本是 8.0.16，而 `INSTANT ADD COLUMN` 在 8.0.29 之前只允许追加到列尾，当前 migration 使用 `AFTER` 指定列位置，因此不能仅凭版本号推断会采用 INSTANT。
+
+上线前必须在与目标环境相同的 MySQL 小版本、表结构、行数和索引规模的隔离副本上演练每条 DDL，记录实际算法、耗时、metadata lock 等待、复制延迟和写入影响。未完成演练前，不得在大表上直接执行这些 migration。后续应根据正式支持的 MySQL 最低版本，决定是否统一要求 `ALGORITHM=INSTANT`（不支持时立即失败）或采用受控在线变更工具；不得让 MySQL 静默退回高影响算法。
+
+参考：
+- MySQL 8.0 `ALTER TABLE` 算法说明：https://dev.mysql.com/doc/refman/8.0/en/alter-table.html
+- MySQL 8.0 InnoDB Online DDL 限制：https://dev.mysql.com/doc/refman/8.0/en/innodb-online-ddl-operations.html
+
+## 6. 当前尚未达到生产使用条件
 
 - API/Scheduler lifespan 已移除 `create_database()` 与 `Base.metadata.create_all()`，启动时只读检查 migration revision 和 ORM 表/列是否存在。
 - 旧的 `create_tables()` / `create_database()` helper 尚待全仓调用点核查与禁用/迁移。
