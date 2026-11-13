@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
-    """只读核验 ORM 表、列、类型、NULL 属性和主键；绝不执行 DDL。"""
+    """只读核验 ORM 表、列、类型、NULL、主键、索引、外键及显式表字符集规则；绝不执行 DDL。"""
     from sqlalchemy import Boolean, Integer, Numeric, String
 
     target_metadata = metadata or Base.metadata
@@ -42,11 +42,14 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
     column_type_mismatches = {}
     nullable_mismatches = {}
     primary_key_mismatches = {}
+    index_mismatches = {}
+    unique_constraint_mismatches = {}
+    foreign_key_mismatches = {}
+    table_option_mismatches = {}
 
     def type_mismatch(expected_type, actual_type, dialect_name: str) -> bool:
         expected_affinity = expected_type._type_affinity
         actual_affinity = actual_type._type_affinity
-        # MySQL BOOLEAN 物理类型通常表现为 TINYINT(1)。
         if dialect_name == "mysql" and isinstance(expected_type, Boolean):
             is_mysql_boolean_storage = (
                 actual_type.__class__.__name__.upper() == "TINYINT"
@@ -68,7 +71,20 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                 expected_value = getattr(expected_type, attribute, None)
                 if expected_value is not None and getattr(actual_type, attribute, None) != expected_value:
                     return True
+        expected_collation = getattr(expected_type, "collation", None)
+        if expected_collation and getattr(actual_type, "collation", None) != expected_collation:
+            return True
         return False
+
+    def foreign_key_signature(item):
+        options = item.get("options") or {}
+        return (
+            tuple(item.get("constrained_columns") or ()),
+            item.get("referred_table"),
+            tuple(item.get("referred_columns") or ()),
+            (options.get("ondelete") or "").upper(),
+            (options.get("onupdate") or "").upper(),
+        )
 
     dialect_name = sync_connection.dialect.name
     for table in target_metadata.sorted_tables:
@@ -96,8 +112,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                     "expected": str(column.type),
                     "actual": str(actual["type"]),
                 }
-            # 主键列的非空语义由 PK 约束保证；SQLite Inspector 对 INTEGER PRIMARY KEY
-            # 可能报告 nullable=True，不能据此误判为 schema drift。
+            # 主键列的非空语义由 PK 约束保证；SQLite 反射可能报告 nullable=True。
             if (
                 not column.primary_key
                 and bool(actual["nullable"]) != bool(column.nullable)
@@ -117,12 +132,95 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                 "actual": actual_pk,
             }
 
+        expected_indexes = sorted(
+            (index.name, tuple(column.name for column in index.columns), bool(index.unique))
+            for index in table.indexes
+        )
+        actual_indexes = sorted(
+            (
+                item.get("name"),
+                tuple(item.get("column_names") or ()),
+                bool(item.get("unique")),
+            )
+            for item in inspector.get_indexes(table.name, schema=table.schema)
+            if item.get("name")
+        )
+        if expected_indexes != actual_indexes:
+            index_mismatches[table.fullname] = {
+                "expected": expected_indexes,
+                "actual": actual_indexes,
+            }
+
+        expected_unique = sorted(
+            tuple(column.name for column in constraint.columns)
+            for constraint in table.constraints
+            if constraint.__class__.__name__ == "UniqueConstraint"
+        )
+        actual_unique = sorted(
+            tuple(item.get("column_names") or ())
+            for item in inspector.get_unique_constraints(table.name, schema=table.schema)
+        )
+        if expected_unique != actual_unique:
+            unique_constraint_mismatches[table.fullname] = {
+                "expected": expected_unique,
+                "actual": actual_unique,
+            }
+
+        expected_fks = sorted(
+            (
+                tuple(constraint.column.name for constraint in fk.columns),
+                fk.elements[0].column.table.name,
+                tuple(element.column.name for element in fk.elements),
+                (fk.ondelete or "").upper(),
+                (fk.onupdate or "").upper(),
+            )
+            for fk in table.foreign_key_constraints
+        )
+        actual_fks = sorted(
+            foreign_key_signature(item)
+            for item in inspector.get_foreign_keys(table.name, schema=table.schema)
+        )
+        if expected_fks != actual_fks:
+            foreign_key_mismatches[table.fullname] = {
+                "expected": expected_fks,
+                "actual": actual_fks,
+            }
+
+        if dialect_name == "mysql":
+            expected_options = {}
+            mysql_options = table.dialect_options["mysql"]
+            for option, inspector_key in (
+                ("charset", "mysql_charset"),
+                ("collate", "mysql_collate"),
+            ):
+                expected_value = mysql_options.get(option)
+                if expected_value:
+                    expected_options[inspector_key] = expected_value
+            if expected_options:
+                actual_options = inspector.get_table_options(
+                    table.name, schema=table.schema
+                )
+                mismatches = {
+                    key: {
+                        "expected": value,
+                        "actual": actual_options.get(key),
+                    }
+                    for key, value in expected_options.items()
+                    if (actual_options.get(key) or "").lower() != value.lower()
+                }
+                if mismatches:
+                    table_option_mismatches[table.fullname] = mismatches
+
     return {
         "missing_tables": sorted(missing_tables),
         "missing_columns": missing_columns,
         "column_type_mismatches": column_type_mismatches,
         "nullable_mismatches": nullable_mismatches,
         "primary_key_mismatches": primary_key_mismatches,
+        "index_mismatches": index_mismatches,
+        "unique_constraint_mismatches": unique_constraint_mismatches,
+        "foreign_key_mismatches": foreign_key_mismatches,
+        "table_option_mismatches": table_option_mismatches,
     }
 
 
