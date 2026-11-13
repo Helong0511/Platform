@@ -12,6 +12,7 @@ from typing import Optional
 from datetime import datetime, timedelta
 
 from sqlalchemy import select, update, or_
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +20,7 @@ from app.core.telegram.message_sender import send_telegram_message_async as send
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive
-from app.models.models import ThirdPartyReportLog
+from app.models.models import ThirdPartyReportLog, ThirdPartyReportIdentityLock
 from app.core.log_utils import mask_email, mask_hash_prefix, mask_phone
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,19 @@ def sha256_hash(value: Optional[str]) -> str:
     return hashlib.sha256(normalized_value.encode('utf-8')).hexdigest()
 
 
+def _report_base_identity_value(
+    source: str,
+    adsid: str,
+    event: str,
+    conversion_id: Optional[str] = None,
+) -> str:
+    """构建四字段基础身份的无歧义编码，供事件键与跨入口锁共同使用。"""
+    # ViewContent 的 conversion_id 只是后补关联元数据，不属于基础身份。
+    identity_conversion_id = "" if event == "ViewContent" else (conversion_id or "")
+    parts = (source or "", adsid or "", event or "", identity_conversion_id)
+    return "".join(f"{len(part)}:{part}" for part in parts)
+
+
 def build_event_idempotency_key(
     source: str,
     adsid: str,
@@ -67,17 +81,47 @@ def build_event_idempotency_key(
     platform: Optional[str] = None,
 ) -> str:
     """构建稳定的事件身份键；同一事件的重试保持不变，不同事件互不覆盖。"""
-    # ViewContent 是点击/浏览事件；Purchase 到来后补写 conversion_id 只是关联元数据，
-    # 不得改变已创建 ViewContent 的幂等身份。Purchase 等转化事件仍使用 conversion_id。
-    identity_conversion_id = "" if event == "ViewContent" else (conversion_id or "")
-    parts = (source or "", adsid or "", event or "", identity_conversion_id)
-    # 空白平台名按“未提供平台”处理，避免仅空格意外增加第五个空字段。
+    identity = _report_base_identity_value(source, adsid, event, conversion_id)
     normalized_platform = (platform or "").strip()
     if normalized_platform:
-        parts = (*parts, normalized_platform)
-    # 长度前缀避免字段中出现分隔符时产生身份碰撞。
-    identity = "".join(f"{len(part)}:{part}" for part in parts)
+        identity += f"{len(normalized_platform)}:{normalized_platform}"
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+async def _lock_report_base_identity(
+    db,
+    *,
+    source: str,
+    adsid: str,
+    event: str,
+    conversion_id: Optional[str],
+) -> str:
+    """在当前业务事务内取得跨直接发送/Outbox 共用的基础身份行锁。
+
+    锁行永久保留；INSERT ... ON DUPLICATE KEY UPDATE 与 SELECT FOR UPDATE
+    在同一事务/连接上执行，确保首次建锁行和后续锁定都可被并发事务串行化。
+    """
+    identity_value = _report_base_identity_value(source, adsid, event, conversion_id).encode("utf-8")
+    if len(identity_value) > 4096:
+        raise ValueError("第三方事件基础身份超出锁表字段上限")
+    identity_key = hashlib.sha256(identity_value).hexdigest()
+    statement = mysql_insert(ThirdPartyReportIdentityLock).values(
+        identity_key=identity_key,
+        identity_value=identity_value,
+    )
+    statement = statement.on_duplicate_key_update(
+        identity_key=statement.inserted.identity_key
+    )
+    await db.execute(statement)
+    result = await db.execute(
+        select(ThirdPartyReportIdentityLock)
+        .where(ThirdPartyReportIdentityLock.identity_key == identity_key)
+        .with_for_update()
+    )
+    lock_row = result.scalars().first()
+    if lock_row is None or bytes(lock_row.identity_value) != identity_value:
+        raise RuntimeError("第三方事件身份锁缺失或检测到 SHA-256 碰撞")
+    return identity_key
 
 
 async def create_report_log(
@@ -110,6 +154,30 @@ async def create_report_log(
 
     try:
         async with AsyncSessionLocal() as db:
+            await _lock_report_base_identity(
+                db,
+                source=source,
+                adsid=adsid,
+                event=event,
+                conversion_id=conversion_id,
+            )
+            # 同一基础身份下，平台作用域事件与无平台直接发送事件不可并存。
+            scoped_query = select(ThirdPartyReportLog.id).where(
+                ThirdPartyReportLog.source == source,
+                ThirdPartyReportLog.adsid == adsid,
+                ThirdPartyReportLog.event == event,
+                ThirdPartyReportLog.identity_scope == "platform_scoped",
+            )
+            if event != "ViewContent":
+                scoped_query = scoped_query.where(
+                    ThirdPartyReportLog.conversion_id == conversion_id
+                )
+            scoped_conflict = await db.scalar(scoped_query.limit(1))
+            if scoped_conflict is not None:
+                logger.warning(
+                    "[第三方上报] 相同基础身份已存在平台作用域事件，拒绝创建无平台事件"
+                )
+                return 0
             result = await db.execute(
                 select(ThirdPartyReportLog)
                 .where(ThirdPartyReportLog.event_key == event_key)
