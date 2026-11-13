@@ -1358,7 +1358,7 @@ Run #1575 在上述部分修改尚未补齐测试夹具时失败：12 failed、6
 
 ### 基线与新库安装限制
 
-- `sql/platform.sql` 是完整基线快照，含 `DROP TABLE IF EXISTS`、`CREATE DATABASE/USE` 和客户端 DELIMITER / routine 定义；不是增量 migration，Runner 不会执行该文件。
+- `sql/platform.sql` 是完整基线快照，含 `DROP TABLE IF EXISTS`、客户端 DELIMITER / routine 定义；当前文件不包含 `CREATE DATABASE` 或 `USE`，目标数据库必须由 provisioning 预先创建并由客户端显式选择。它不是增量 migration，Runner 不会执行该文件。
 - 已修复 Cap Reservation HEX CHECK 截断及重复尾部，并在文件头标记破坏性边界。
 - 新增测试确认 ORM metadata 中的表名都能在基线或增量 migration 文本中找到；该测试只验证表名声明覆盖，不证明每张表的列、索引、外键、CHECK、默认值或字符集均与 ORM metadata 完全一致。
 - 尚未完成完整空库导入 `sql/platform.sql` + 全量增量 migration 的 MySQL 安装演练；不能把表名覆盖测试等同于新库安装通过。
@@ -1393,14 +1393,14 @@ Run #1575 在上述部分修改尚未补齐测试夹具时失败：12 failed、6
 - app/db/migrations/ledger.py / gate.py：校验 ledger 连续前缀与 checksum，并提供只读 revision gate。
 - app/bootstrap/lifespan.py：应用 Worker 启动时执行只读 revision gate 和 ORM schema drift 检查；不在该启动路径执行 schema DDL。
 - Runner 的 apply_migrations() 强制要求独立 MIGRATION_DATABASE_URL 与应用 DSN；两者必须指向相同 MySQL 数据库及服务器端点，且用户名不同。迁移 DSN 缺失、应用 DSN 缺失或目标不一致均拒绝执行。
-- 当前 manifest 已登记 9 份 migration；应以 manifest 实际内容为准，不再沿用早期“五份迁移脚本”的历史描述。
+- 当前 manifest 已登记 10 份 migration；其中 identity scope 字段、CHECK 约束、身份锁表分别独立版本化。应以 manifest 实际内容为准，不再沿用早期的 5/9 份历史描述。
 
 ### 最新隔离 CI 证据
 
-- PR HEAD：a665a639606b4caf1d55ed93ea6911871105cfd8。
-- Run #1703：https://github.com/Helong0511/Platform/actions/runs/43395487324。
-- Backend：**667 passed、1 skipped、1 warning**；MySQL Outbox 专项包含真实临时 MySQL A/B Worker 失租接管、旧令牌禁止续租/终结、身份锁竞争与目的地绑定测试。
-- Frontend：依赖安装、advisory 报告、Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- PR HEAD：`6394f63976a79ffdbfe414dc46060db4f7773b76`。
+- Run #43398657923：https://github.com/Helong0511/Platform/actions/runs/43398657923。
+- Backend：**669 passed、1 skipped、1 warning**；覆盖新增 identity scope CHECK 约束、完整 SQL 基线、Migration Runner 及既有 Outbox 测试。
+- Frontend：Run 完整通过；依赖安装、advisory 报告、Lint、Build、Playwright Mock API Browser E2E 均成功。
 - 唯一 skip 为未提交的本机核对脚本；warning 为 passlib 在 Python 3.11 下使用 crypt 的弃用提示。
 - 以上只证明该 SHA 的隔离 CI；不代表真实环境迁移、备份恢复、回滚或上线演练完成。
 
