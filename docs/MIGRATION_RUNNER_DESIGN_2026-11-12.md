@@ -330,3 +330,9 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - Run #1479：https://github.com/Helong0511/Platform/actions/runs/43347458101
 - 1 skipped 仍是本机核对脚本未提交（CI 不依赖）；1 warning 是 passlib/Python 3.11 `crypt` 弃用提示。不得将其描述为零 warning。
 - MySQL 集成测试只连接本次 GitHub Actions loopback 临时 MySQL，并创建/销毁独立 utf8mb4 临时数据库；未连接生产数据库或外部服务。
+
+### Schema drift 测试命名纠正
+
+- 复核发现既有 MySQL 测试名称包含 `verifies_full_metadata`，但实际断言只覆盖 ORM 表和列存在性，并不比较列类型、NULL/default、主键、索引、CHECK、字符集或排序规则。
+- 已将测试重命名为 `test_mysql_schema_bootstrap_creates_orm_tables_and_checks_table_column_presence`，并修正文档字符串，避免把有限检查误称为完整 metadata 验收。
+- 真实 schema drift 检查范围仍需后续设计和兼容性测试；不在本轮贸然扩展到类型/索引/字符集比较，以免对既有生产 schema 产生未经验证的误报或错误阻断。
