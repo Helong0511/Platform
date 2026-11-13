@@ -196,19 +196,22 @@ async def lifespan(app: FastAPI):
             "支持降级的组件使用内存存储，短链接/Offer缓存与预热已禁用"
         )
 
-    # 同步 task_config.py → scheduled_tasks 表（与是否启动 APScheduler 解耦）
-    # 本地 Windows 常见 ENABLE_SCHEDULER=false 仅跑 API，仍须写入新任务供管理端展示与后续启用调度
+    # 同步 task_config.py → scheduled_tasks 表；调度 Worker 必须依赖完整配置。
     try:
         await init_scheduled_tasks_in_db()
         logger.info(f"[Worker PID:{worker_pid}] 定时任务配置已同步到数据库")
     except Exception as db_init_error:
-        # 任务配置同步失败时明确记录降级状态；不输出数据库异常原文，避免泄露 SQL 参数。
+        # 不输出数据库异常原文，避免日志泄露 SQL 参数。
         logger.error(
-            "[Worker PID:%s] 定时任务配置同步失败：exception_type=%s；"
-            "当前 Worker 将继续启动，但任务配置可能尚未完整同步",
+            "[Worker PID:%s] 定时任务配置同步失败：exception_type=%s",
             worker_pid,
             type(db_init_error).__name__,
         )
+        # 纯 API Worker（未运行 APScheduler）可降级启动；调度 Worker 不能使用旧配置继续调度。
+        if settings.should_run_scheduler():
+            raise RuntimeError(
+                "定时任务配置同步失败，调度 Worker 拒绝启动"
+            ) from db_init_error
 
     # 定时任务调度器：仅调度 worker 启动（Gunicorn 多 worker 时由 SCHEDULER_WORKER=1 标识）
     if settings.should_run_scheduler():
