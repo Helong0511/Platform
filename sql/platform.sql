@@ -1905,7 +1905,8 @@ CREATE TABLE IF NOT EXISTS cap_reservations (
     KEY idx_cap_reservation_event (platform, conversion_id, event_name),
     KEY idx_cap_reservation_scope (offer_id, publisher_id, cap_kind, business_date),
     CONSTRAINT chk_cap_reservation_key_sha256 CHECK (LENGTH(reservation_key) = 64),
-    CONSTRAINT chk_cap_reservation_key_hex CHECK (REGEXP_LIKE(reservation_key COLLATE utf8mb4_bin, '^[0-9a-f]{64}    CONSTRAINT chk_cap_reservation_offer_positive CHECK (offer_id > 0),
+    CONSTRAINT chk_cap_reservation_key_hex CHECK (REGEXP_LIKE(reservation_key COLLATE utf8mb4_bin, '^[0-9a-f]{64}$', 'c')),
+    CONSTRAINT chk_cap_reservation_offer_positive CHECK (offer_id > 0),
     CONSTRAINT chk_cap_reservation_publisher_positive CHECK (publisher_id IS NULL OR publisher_id > 0),
     CONSTRAINT chk_cap_reservation_attempts_nonnegative CHECK (attempts >= 0),
     CONSTRAINT chk_cap_reservation_kind_date CHECK (
