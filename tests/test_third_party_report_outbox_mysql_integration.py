@@ -770,3 +770,82 @@ async def test_mysql_existing_outbox_report_binding_matches_persisted_payload_an
         if engine is not None:
             await engine.dispose()
         _drop_isolated_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_outbox_pixel_destination_is_bound_once_and_cannot_silently_change(monkeypatch):
+    """真实 MySQL 验证 Outbox 首次 Pixel 绑定可重复确认，但不可改投另一个 Pixel。"""
+    from app.services import third_party_report_outbox as outbox_module
+
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(ThirdPartyReportLog.__table__.create)
+
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(outbox_module, "AsyncSessionLocal", session_factory)
+        lease = get_app_now_naive().replace(microsecond=0)
+        identity = uuid.uuid4().hex
+        async with session_factory() as session:
+            row = ThirdPartyReportLog(
+                source="postback",
+                adsid=f"pixel-bind-{identity}",
+                event="Purchase",
+                event_key=hashlib.sha256(identity.encode("utf-8")).hexdigest(),
+                platform="meta",
+                identity_scope="platform_scoped",
+                destination_pixel_id=None,
+                conversion_id=f"conversion-{identity}",
+                status="pending",
+                outbox_enqueued=True,
+                attempt_count=0,
+                max_attempts=5,
+                next_retry_time=lease,
+                report_start_time=lease,
+            )
+            session.add(row)
+            await session.commit()
+            report_id = row.id
+
+        first_bind = await outbox_module._bind_outbox_destination(
+            report_id,
+            lease_token=lease,
+            platform="meta",
+            pixel_id="pixel-A",
+        )
+        same_pixel_retry = await outbox_module._bind_outbox_destination(
+            report_id,
+            lease_token=lease,
+            platform="meta",
+            pixel_id="pixel-A",
+        )
+        changed_pixel = await outbox_module._bind_outbox_destination(
+            report_id,
+            lease_token=lease,
+            platform="meta",
+            pixel_id="pixel-B",
+        )
+
+        assert first_bind is True
+        assert same_pixel_retry is True
+        assert changed_pixel is False
+
+        async with session_factory() as session:
+            persisted = await session.get(ThirdPartyReportLog, report_id)
+            assert persisted.destination_pixel_id == "pixel-A"
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
