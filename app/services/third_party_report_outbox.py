@@ -29,6 +29,10 @@ class OutboxConfigReferenceDeleted(Exception):
     """Outbox 引用的短链接已物理删除，事件无法再解析原配置。"""
 
 
+class LegacyEventIdentityConflict(Exception):
+    """历史四字段事件无法证明平台归属时，拒绝创建可能重复发送的新事件。"""
+
+
 async def enqueue_postback_report(
     db,
     *,
@@ -48,8 +52,12 @@ async def enqueue_postback_report(
     click_time,
 ) -> int:
     """只写入当前转化事务，不 commit；返回可恢复的持久化 Outbox 行 ID。"""
+    normalized_platform = (platform or "").strip()
+    if not normalized_platform:
+        raise ValueError("Postback platform 不能为空")
+
     event_key = build_event_idempotency_key(
-        "postback", adsid, event, conversion_id, platform=platform
+        "postback", adsid, event, conversion_id, platform=normalized_platform
     )
     now = get_app_now_naive()
     existing = await db.scalar(
@@ -57,6 +65,22 @@ async def enqueue_postback_report(
         .where(ThirdPartyReportLog.event_key == event_key)
         .with_for_update()
     )
+    if existing is None:
+        # 历史直接发送日志使用四字段身份键，没有平台归属证据。
+        # 不自动归属，也不允许绕过旧记录创建新的平台作用域事件。
+        legacy_event_key = build_event_idempotency_key(
+            "postback", adsid, event, conversion_id
+        )
+        legacy_id = await db.scalar(
+            select(ThirdPartyReportLog.id)
+            .where(ThirdPartyReportLog.event_key == legacy_event_key)
+            .limit(1)
+        )
+        if legacy_id is not None:
+            raise LegacyEventIdentityConflict(
+                "发现历史事件身份冲突，需人工核实平台归属后再处理"
+            )
+
     has_config_reference = bool(short_link_id or (cloak_name and short_code))
     if existing is not None:
         # 已进入 Outbox 的事件身份和发送载荷不可被重复 Postback 改写；
