@@ -266,3 +266,24 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - 旧 schema + 代表性历史数据、逐 DDL 中断恢复、备份恢复、应用兼容回滚、数据/结构 diff 尚未完成隔离演练。
 
 **结论：** 当前 CI 通过，但数据库发布架构仍未达到可上线验收条件。PR #1 继续 Open / Draft；不合并 main、不部署、不连接生产服务器、数据库、Redis、队列或真实第三方接口。凭据安全专项继续按用户要求暂缓。
+
+## 2026-11-13 Gunicorn Worker 级启动行为补充
+
+### 进一步核对 Gunicorn Worker 生命周期
+
+本轮继续读取 `gunicorn.conf.py`、`app/main.py`、两个 systemd unit 和 `app/bootstrap/lifespan.py`：
+
+1. Backend 未显式设置 `WORKERS` 时按 CPU/内存规则计算 Worker 数；配置注释明确 2 核 API 默认 3 Worker。Scheduler 的 `WORKERS=1` 且角色判断固定为 1 Worker。
+2. 两个 systemd unit 都以 `app.main:app` 作为 ASGI 应用入口；`app.main` 将 `app.bootstrap.lifespan.lifespan` 注册为 FastAPI lifespan。
+3. 每个 Worker 各自创建并运行应用生命周期，因此不能将数据库初始化的执行次数简单描述为“Backend 一次 + Scheduler 一次”。Backend 多 Worker 与 Scheduler Worker 都可能分别触发启动链路。
+4. 每个 Worker 的启动链路都执行 `create_database()`、`_bootstrap_database_schema()`、`init_db()`，随后还会调用 `init_scheduled_tasks_in_db()`。因此启动期数据库权限和并发写入影响面覆盖全部 Worker。
+5. `_bootstrap_database_schema()` 内部 MySQL advisory lock 只能协调它所保护的 schema bootstrap 临界区，不能替代独立迁移身份，也不能保护管理员初始化、任务配置同步或其他不在该临界区中的写入。
+6. 任务同步函数逐任务提交，单条失败可记录日志后继续处理后续任务；lifespan 对整个同步调用也采用 warning 后继续启动策略。结果可能是多个 Worker 同时尝试同步，或任务表处于部分同步状态而服务仍然启动。
+7. 因此未来拆分应将 schema provisioning / migration 作为独立、显式、单次运行的部署步骤；API 与 Scheduler Worker 启动时仅执行只读 schema revision/drift gate。管理员 bootstrap 与 scheduled task config sync 应分别设计唯一协调者、幂等、失败告警及恢复机制，不应借用 migration ledger 充当业务数据同步账本。
+
+### 当前结论的边界
+
+- 上述结论由实际入口和配置直接支持。
+- 尚未完成 540 个 Python/配置文件的全量调用点扫描；GitHub 搜索结果为空不能作为无调用者证明。
+- `app/core/database.py::create_tables()` 的其它调用者仍待穷尽核验。
+- 本补充不修改应用行为，不代表 Runner 已实现或已完成发布演练。
