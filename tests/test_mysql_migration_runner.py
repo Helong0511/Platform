@@ -519,11 +519,12 @@ async def test_identity_scope_check_constraint_is_enforced_and_migration_is_idem
                     ("legacy_unresolved", "meta"),
                 ]
                 for scope, platform in invalid_rows:
-                    with pytest.raises(pymysql.err.IntegrityError):
+                    with pytest.raises(pymysql.err.OperationalError) as error:
                         cursor.execute(
                             "INSERT INTO third_party_report_logs (identity_scope, platform) VALUES (%s, %s)",
                             (scope, platform),
                         )
+                    assert error.value.args[0] == 3819
                 cursor.execute(
                     "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS "
                     "WHERE CONSTRAINT_SCHEMA = %s AND TABLE_NAME = 'third_party_report_logs' "
