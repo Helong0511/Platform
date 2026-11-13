@@ -884,3 +884,59 @@ GitHub Code Search 对目标分支没有提供可用的完整结果，且本轮�
 - Frontend：Playwright Mock API Browser E2E 通过，日志覆盖登录校验、认证成功/失败、管理员导航、Outbox 重试资格/详情、登出、移动端抽屉及客户端 RBAC。
 - CI 使用隔离 MySQL / Redis 和 Mock API；没有生产连接或真实第三方发送。
 - 本轮仍未修改业务代码、模型、migration 或发送行为；以上是实施前的调用链门禁清单，不代表 P1 已修复。
+
+
+## 2026-11-13 历史四字段冲突保护：CI 验收与并发缺口复核（Run #1515）
+
+### CI 验收
+
+- HEAD：`c015bd99017e1d734300feb8ec43f96771ff647f`
+- Run #1515：`43361483180`，Backend / Frontend 均 success。
+- Backend：603 passed、1 skipped、1 warning。
+- 新增 `test_postback_enqueue_fails_closed_on_legacy_four_field_identity` 通过。
+- Frontend Playwright Browser E2E 通过。
+- 测试使用 GitHub Actions 临时 MySQL / Redis 和 Mock API；没有生产连接或真实第三方发送。
+
+### 本轮代码改动
+
+- `app/services/third_party_report_outbox.py` 新增 `LegacyEventIdentityConflict`。
+- `enqueue_postback_report()` 在当前平台五字段 key 未命中时，额外查询历史四字段 key；若命中则拒绝创建新的 Outbox 行。
+- Postback platform 先 trim，空白平台直接拒绝。
+- 新增回归测试，验证历史四字段 key 命中时不写入新 Outbox 行。
+
+该改动是入队阶段的**尽力 fail-closed 检查**，不能宣称已消除所有历史身份冲突。
+
+### 新发现：跨路径并发竞态仍未关闭（P1）
+
+重新读取 `app/core/third_party_report.py` 后，确认：
+
+1. `create_report_log()` 仍按四字段生成 key，先 SELECT event_key；若命中直接返回 ID，没有核验来源、scope 或平台。
+2. 其 IntegrityError 并发回查同样只按 event_key 读取 ID，不检查身份归属。
+3. `create_report_log()` 的查询与 INSERT 不持有一个跨路径共享的身份锁；数据库唯一键只能仲裁完全相同的 event_key，不能仲裁四字段 legacy key 与平台五字段 key 之间的逻辑冲突。
+4. `enqueue_postback_report()` 新增的 legacy SELECT 与五字段 INSERT 也没有共享互斥键。并发时可能发生如下顺序：
+   - Postback A 查询五字段 key 不存在；
+   - A 查询四字段 legacy key 不存在；
+   - 直接发送路径按四字段 key 插入并提交；
+   - A 插入五字段 key 并提交。
+   两条记录的 event_key 不同，现有唯一约束无法阻止它们同时存在。
+5. 反向顺序同样需要保护：平台作用域事件已经存在时，直接发送路径仍可能按四字段身份创建无平台记录。
+6. 因此，仅在 Outbox 入队函数增加一次 legacy SELECT，不能证明跨路径去重安全；本轮不应新增“并发竞态已解决”的结论。
+
+### 正式修复前的设计要求
+
+- 必须建立跨路径、跨 Worker、跨平台一致的身份仲裁原语；所有创建/复用路径在查重和写入期间都必须持有同一基础事件身份的互斥保护。
+- 仲裁键必须基于稳定的四字段基础身份（source、adsid、event、conversion_id 的规范化编码），不能直接使用五字段 event_key，否则平台 A/B 不会互斥。
+- 互斥只用于串行化身份决策；在临界区内仍须允许不同明确平台的五字段事件并存，但必须阻止无平台四字段事件与任意平台作用域事件在无法证明语义时同时被创建。
+- 需要确认部署使用的 MySQL 版本、隔离级别、连接池和所有写入入口后，再决定采用独立身份锁表（唯一基础身份键 + 行锁）、MySQL advisory lock（严格保证同一物理连接/事务边界），或其他可证明原子性的实现。不能在尚未核验连接生命周期时直接套用 GET_LOCK。
+- 若使用锁表，必须解决锁行首次并发创建、事务提交/回滚、死锁重试、锁记录生命周期、哈希碰撞防御、超时和跨 Worker 一致性。
+- 所有身份查询、插入、唯一键冲突回查必须在同一仲裁边界内执行，并验证 identity_scope / platform。
+- 需要真实隔离 MySQL 并发测试：直接发送与 Postback 同时首次写入；平台 A/B 同时写入；重复 Postback；锁获取超时；事务回滚后释放锁；多连接/多 Worker；不同字符集和空字段规范化。
+- 在仲裁原语与统一 scope 门禁实现前，保留当前入队历史冲突检查作为额外保护，但不得将其作为完整解决方案。
+
+### 当前范围与限制
+
+- 本轮没有修改 `create_report_log()`、共享租约认领、Outbox scanner、管理员 retry 或 schema；这些仍未实施 scope 门禁。
+- 尚无 `platform` / `identity_scope` 数据库列，也没有正式 migration。
+- 当前新增测试是 FakeDB 级单元测试；Run #1515 的既有 MySQL 集成测试通过，但**没有**覆盖上述两条业务路径的真实并发竞态。
+- 仍需完整工作区 `git grep` 核实所有直接发送及身份写入调用点；GitHub 文件读取不是全仓库穷尽性扫描。
+- 历史 migration SQL 和 manifest checksum 保持不变。
