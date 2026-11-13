@@ -722,3 +722,16 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - 因此上面的分批方案只是明确的实施规范，不能作为已经修复全表 UPDATE 风险的证据。
 - 历史四字段与平台五字段身份兼容问题独立存在；即使分批回填成功，也不能自动推断旧日志平台归属。
 - 在批次 Runner、历史身份歧义策略、隔离规模演练完成前，迁移仍阻断上线。
+
+
+## 2026-11-13 事件平台身份兼容：代码级调用链复核与安全决策
+
+### 本轮复核的代码事实
+
+- `PostbackProcessor.process(platform, ...)` 将平台传入 `_enqueue_third_party_report_if_needed(platform=...)`。
+- `enqueue_postback_report()` 用 `build_event_idempotency_key("postback", adsid, event, conversion_id, platform=platform)` 生成平台作用域 key，并按该 key 查询已有日志。
+- 新建 Outbox 行保存 `source/adsid/event/conversion_id/event_key` 和配置引用，但 `ThirdPartyReportLog` 当前没有独立 platform 字段。
+- `create_report_log()` 当前签名没有 platform 参数，始终按四字段构建 key；`send_third_party_report()` 的直接发送路径在无 report_log_id 时调用该函数，也按四字段生成 event_key。
+- `send_third_party_report()` 的事件 payload 使用传入 event_key；Outbox 调用传递五字段生成的 event_key，直接发送路径默认使用四字段 key。
+- 现有历史 migration 只按四字段回填 event_key。它没有平台来源列，也没有可靠来源可恢复历史平台归属。
+- 
