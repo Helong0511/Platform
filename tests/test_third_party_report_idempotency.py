@@ -943,3 +943,135 @@ async def test_postback_enqueue_fails_closed_on_legacy_four_field_identity():
         )
     assert db.scalar_calls == 2
     assert db.added == []
+
+
+async def test_existing_report_log_binding_requires_persisted_identity_and_lease(monkeypatch):
+    lease = datetime(2026, 11, 13, 12, 30, 0)
+
+    class Result:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return type(
+                "ReportRow",
+                (),
+                {
+                    "outbox_enqueued": True,
+                    "pii_scrubbed_at": None,
+                    "source": "postback",
+                    "adsid": "ads-123",
+                    "event": "Purchase",
+                    "conversion_id": "conv-456",
+                    "event_key": "persisted-key",
+                    "report_start_time": lease,
+                },
+            )()
+
+    class FakeDB:
+        async def execute(self, statement):
+            return Result()
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(third_party_report, "AsyncSessionLocal", lambda: SessionContext())
+
+    valid = await third_party_report._validate_existing_report_log_binding(
+        41,
+        source="postback",
+        adsid="ads-123",
+        event="Purchase",
+        conversion_id="conv-456",
+        event_key="persisted-key",
+        lease_token=lease,
+    )
+    wrong_payload = await third_party_report._validate_existing_report_log_binding(
+        41,
+        source="postback",
+        adsid="other-click",
+        event="Purchase",
+        conversion_id="conv-456",
+        event_key="persisted-key",
+        lease_token=lease,
+    )
+    wrong_lease = await third_party_report._validate_existing_report_log_binding(
+        41,
+        source="postback",
+        adsid="ads-123",
+        event="Purchase",
+        conversion_id="conv-456",
+        event_key="persisted-key",
+        lease_token=datetime(2026, 11, 13, 12, 29, 0),
+    )
+
+    assert valid is True
+    assert wrong_payload is False
+    assert wrong_lease is False
+
+
+async def test_send_rejects_mismatched_existing_report_log_before_claim_or_http(monkeypatch):
+    class Result:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return type(
+                "ReportRow",
+                (),
+                {
+                    "outbox_enqueued": True,
+                    "pii_scrubbed_at": None,
+                    "source": "postback",
+                    "adsid": "persisted-click",
+                    "event": "Purchase",
+                    "conversion_id": "conv-456",
+                    "event_key": "persisted-key",
+                    "report_start_time": datetime(2026, 11, 13, 12, 30, 0),
+                },
+            )()
+
+    class FakeDB:
+        async def execute(self, statement):
+            return Result()
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    async def unexpected_claim(*args, **kwargs):
+        raise AssertionError("身份不匹配时不得认领租约")
+
+    class UnexpectedHTTPClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("身份不匹配时不得调用第三方 HTTP")
+
+    monkeypatch.setattr(third_party_report, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(third_party_report, "_claim_report_log", unexpected_claim)
+    monkeypatch.setattr(third_party_report.httpx, "AsyncClient", UnexpectedHTTPClient)
+
+    result = await third_party_report.send_third_party_report(
+        adsid="attacker-controlled-click",
+        event="Purchase",
+        email=None,
+        ip=None,
+        phone=None,
+        ua=None,
+        facebook_pixel_id="isolated-pixel",
+        facebook_access_token="isolated-token",
+        source="postback",
+        conversion_id="conv-456",
+        report_log_id=41,
+        event_key="persisted-key",
+        report_lease_token=datetime(2026, 11, 13, 12, 30, 0),
+    )
+
+    assert result["success"] is False
+    assert result["reason"] == "report_identity_mismatch"
