@@ -320,3 +320,13 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - 同步重试分类现覆盖 MySQL 1062 / 1205 / 1213，以及 SQLite 的 locked 状态；每次重试前均先回滚整批事务。非冲突类完整性错误不重试。
 - 新增 `tests/test_mysql_scheduled_task_sync.py`：仅在 GitHub Actions loopback 临时 MySQL `platform_ci` 且显式开启 destructive-test flag 时运行；为每次测试创建独立 utf8mb4 临时数据库，两个并发 Worker 同步 8 条合成任务，断言最终无重复且任务齐全，结束后销毁临时库。
 - 该 MySQL 测试当前尚未取得通过证据；必须以最新 HEAD 对应 CI job 实际执行成功为准。若测试环境未满足安全条件，CI 应失败关闭而不是连接远程数据库。
+
+### 隔离 CI 验收（Run #1479）
+
+- 最新 PR HEAD `958cf3a9fde223be93bafc5973e66b60d340a1fe` 对应 Run #1479：Backend、Frontend 全部成功。
+- Backend：**587 passed、1 skipped、1 warning**；新增 `test_mysql_two_workers_sync_same_task_config_without_duplicates` 在 GitHub Actions 临时 MySQL 中真实执行并通过，两个并发 Worker 同步 8 条合成任务后无重复记录且任务齐全。
+- 四个新增单元测试全部通过：整批失败回滚、幂等同步及保留管理员停用状态/运行计数、冲突分类、重复 task_name 预检。
+- Frontend：npm ci、依赖 advisory 报告、Lint、Build、Playwright Mock API Browser E2E 全部通过。
+- Run #1479：https://github.com/Helong0511/Platform/actions/runs/43347458101
+- 1 skipped 仍是本机核对脚本未提交（CI 不依赖）；1 warning 是 passlib/Python 3.11 `crypt` 弃用提示。不得将其描述为零 warning。
+- MySQL 集成测试只连接本次 GitHub Actions loopback 临时 MySQL，并创建/销毁独立 utf8mb4 临时数据库；未连接生产数据库或外部服务。
