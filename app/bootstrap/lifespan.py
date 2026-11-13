@@ -116,6 +116,24 @@ async def _sync_scheduled_tasks_for_worker(worker_pid: int) -> None:
             ) from db_init_error
 
 
+async def _start_scheduler_for_worker(worker_pid: int) -> None:
+    """启动 APScheduler；任何初始化失败都必须阻止调度 Worker 就绪。"""
+    try:
+        logger.info("[Worker PID:%s] 开始初始化定时任务调度器...", worker_pid)
+        await init_scheduled_tasks()
+        logger.info("[Worker PID:%s] 定时任务初始化完成，正在启动调度器...", worker_pid)
+        await start_scheduler()
+        logger.info("[Worker PID:%s] 定时任务调度器已启动", worker_pid)
+    except Exception as scheduler_error:
+        # 调度器不可用时不能将 Worker 标记为健康；日志不输出异常原文。
+        logger.error(
+            "[Worker PID:%s] 定时任务调度器启动失败：exception_type=%s",
+            worker_pid,
+            type(scheduler_error).__name__,
+        )
+        raise RuntimeError("定时任务调度器启动失败，调度 Worker 拒绝就绪") from scheduler_error
+
+
 def _should_run_cache_warmup() -> bool:
     """仅在单进程或 Gunicorn 的首个 API worker 中执行预热。"""
     if os.getenv("GUNICORN_ROLE", "api").strip().lower() == "scheduler":
@@ -220,16 +238,7 @@ async def lifespan(app: FastAPI):
 
     # 定时任务调度器：仅调度 worker 启动（Gunicorn 多 worker 时由 SCHEDULER_WORKER=1 标识）
     if settings.should_run_scheduler():
-        try:
-            logger.info(f"[Worker PID:{worker_pid}] 开始初始化定时任务调度器...")
-
-            await init_scheduled_tasks()
-            logger.info(f"[Worker PID:{worker_pid}] 定时任务初始化完成，正在启动调度器...")
-            await start_scheduler()
-            logger.info(f"[Worker PID:{worker_pid}] 定时任务调度器已启动")
-        except Exception as e:
-            logger.error(f"[Worker PID:{worker_pid}] 定时任务初始化失败: {e}", exc_info=True)
-            logger.warning(f"[Worker PID:{worker_pid}] 应用将继续启动，但定时任务功能可能不可用")
+        await _start_scheduler_for_worker(worker_pid)
     else:
         logger.info(
             f"[Worker PID:{worker_pid}] 跳过定时任务调度器"
