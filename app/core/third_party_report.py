@@ -229,6 +229,51 @@ async def _get_report_status(report_log_id: int) -> Optional[str]:
         return result.scalar_one_or_none()
 
 
+async def _validate_existing_report_log_binding(
+    report_log_id: int,
+    *,
+    source: str,
+    adsid: str,
+    event: str,
+    conversion_id: Optional[str],
+    event_key: Optional[str],
+    lease_token: Optional[datetime] = None,
+) -> bool:
+    """发送前验证 Outbox 日志 ID 与载荷身份一致，失败时禁止外部请求。"""
+    if not report_log_id or not event_key:
+        return False
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(ThirdPartyReportLog)
+            .where(ThirdPartyReportLog.id == report_log_id)
+            .limit(1)
+        )
+        row = result.scalars().first()
+
+    if row is None:
+        return False
+    if not bool(getattr(row, "outbox_enqueued", False)):
+        return False
+    if getattr(row, "pii_scrubbed_at", None) is not None:
+        return False
+
+    # 严格比较持久化身份字段，不能让调用方把任意 payload 绑定到另一个日志 ID。
+    if (
+        row.source != source
+        or row.adsid != adsid
+        or row.event != event
+        or row.conversion_id != conversion_id
+        or row.event_key != event_key
+    ):
+        return False
+
+    # Outbox Worker 已认领时，必须仍持有同一个秒级租约；防止旧快照跨租约接管发送。
+    if lease_token is not None and row.report_start_time != lease_token:
+        return False
+    return True
+
+
 async def _get_report_attempt_state(report_log_id: int) -> tuple[int, int]:
     """读取累计尝试次数与总上限，供 Outbox 跨 worker 计算重试预算。"""
     async with AsyncSessionLocal() as db:
@@ -391,6 +436,32 @@ async def send_third_party_report(
     ip = (ip or "").strip()
     ua = (ua or "").strip()
     adsid = (adsid or "").strip()
+
+    # 既有日志 ID 只能发送其持久化 Outbox 载荷；校验必须先于凭证分支、租约认领和 HTTP。
+    if report_log_id is not None:
+        try:
+            binding_valid = await _validate_existing_report_log_binding(
+                report_log_id,
+                source=source,
+                adsid=adsid,
+                event=event,
+                conversion_id=conversion_id,
+                event_key=event_key,
+                lease_token=report_lease_token,
+            )
+        except Exception as binding_exc:
+            logger.warning(
+                "[第三方上报] 既有日志身份核验不可用，拒绝发送：id=%s error_type=%s",
+                report_log_id,
+                type(binding_exc).__name__,
+            )
+            return {"success": False, "retryable": True, "reason": "report_identity_check_unavailable"}
+        if not binding_valid:
+            logger.warning(
+                "[第三方上报] 既有日志与发送载荷不匹配，拒绝发送：id=%s",
+                report_log_id,
+            )
+            return {"success": False, "retryable": False, "reason": "report_identity_mismatch"}
 
     # 像素凭证须由调用方显式传入（短链 / 斗篷）；不再回退全局 FACEBOOK_*
     pixel_id = (facebook_pixel_id or "").strip()
