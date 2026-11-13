@@ -651,3 +651,28 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 6. 增加升级前后兼容测试，覆盖唯一键冲突、并发 Postback、重复请求、旧行已发送/未发送/正在租约中，以及 legacy fallback 发现多个候选时 fail-closed。
 
 在完成以上画像与兼容策略前，此项仍是迁移发布阻断，但风险结论应表述为“存在可证明的 key 不兼容路径，实际历史影响待离线确认”，而非“所有旧记录都会重复”。
+
+
+## 2026-11-13 幂等键算法边界修复与 MySQL Golden Vector 测试
+
+### 本轮代码改动
+
+- `app/core/third_party_report.py::build_event_idempotency_key()` 现在先执行 `normalized_platform = (platform or "").strip()`，只有规范化后非空才增加第五个平台字段。
+- 修复前：`platform="   "` 是 truthy 值，`.strip()` 后变成空字符串，却仍被追加为第五个长度前缀字段（`0:`）；这会使纯空白平台与真正未提供平台产生不同 event_key。
+- 修复后：`None`、`""`、纯空白平台统一按未提供平台处理；正常平台仍保留 trim 后的平台作用域，且不擅自 lower/casefold。
+- 新增单元测试覆盖 None、空字符串、纯空白和带首尾空格的平台名。
+- 新增隔离 MySQL 集成 Golden Vector：使用 utf8mb4 临时 schema，对 MySQL `CHAR_LENGTH + CONCAT + SHA2` 与 Python UTF-8 长度前缀算法逐项比对；覆盖 ASCII、中文、emoji、字段内冒号、ViewContent 后补 conversion_id、空 conversion_id、平台为空/空白/首尾空格。
+- 该测试仅在 GitHub Actions loopback 临时 MySQL `platform_ci` 安全门禁下运行，测试 schema 由 UUID 隔离，finally 清理；不连接生产数据库。
+
+### 证明范围与限制
+
+- 该改动消除纯空白平台产生“空第五字段”的边界不一致。
+- Golden Vector 可验证当前 utf8mb4 CI MySQL 上 Python 与 SQL 字符长度/哈希输入字节的一致性。
+- 这**没有**解决历史 legacy 四字段 key 与有效平台五字段 Outbox key 的兼容问题；旧行的平台归属仍不可从当前模型可靠恢复。
+- 这也**没有**证明历史迁移脚本在所有历史 schema charset/collation 下都与 utf8mb4 测试等价；发布前仍需核实真实目标表字符集，并在隔离副本做迁移级演练。
+- 仍需补充对历史来源/部署版本的证据盘点、legacy fallback 歧义检测、真实 MySQL 端到端 enqueue 命中/冲突测试，以及迁移批次回填设计。
+- 不修改已登记的 `20261110_third_party_report_event_idempotency.sql`，不改变 manifest checksum。
+
+### 当前状态
+
+本次代码提交会触发新的 CI；在新 HEAD 的 Backend / Frontend 全部成功前，不将改动视为已验收。PR #1 保持 Open / Draft，不合并、不部署；只使用隔离 CI 服务和合成数据。
