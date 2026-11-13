@@ -1446,72 +1446,137 @@ async def update_report_log_params(
         report_params: Optional[str] = None,
         use_hash: Optional[bool] = None
 ):
-    """
-    更新日志记录的参数
-    """
+    """更新日志参数；身份字段变更必须先取得旧/新基础身份锁并检查冲突。"""
     try:
         async with AsyncSessionLocal() as db:
-            # 与发送租约认领使用同一行锁仲裁，防止活动 Worker 期间修改发送载荷。
+            # 先读取快照但不持有行锁；身份锁必须先于日志行锁，避免与创建路径反向死锁。
+            snapshot_result = await db.execute(
+                select(ThirdPartyReportLog)
+                .where(ThirdPartyReportLog.id == log_id)
+                .limit(1)
+            )
+            snapshot = snapshot_result.scalars().first()
+            if snapshot is None:
+                logger.warning("[第三方上报] 日志记录不存在: id=%s", log_id)
+                return False
+            if getattr(snapshot, "pii_scrubbed_at", None) is not None:
+                logger.warning("[第三方上报] 已清理个人信息的日志不可重新写入载荷: id=%s", log_id)
+                return False
+
+            identity_changed = (
+                (adsid is not None and adsid != snapshot.adsid)
+                or (event is not None and event != snapshot.event)
+                or (conversion_id is not None and conversion_id != snapshot.conversion_id)
+            )
+            identity_scope = getattr(snapshot, "identity_scope", "legacy_unresolved")
+            if identity_scope not in {"unscoped", "platform_scoped", "legacy_unresolved"}:
+                return False
+            if identity_changed and identity_scope != "unscoped":
+                logger.warning(
+                    "[第三方上报] 仅允许未入队 unscoped 日志修正事件身份: id=%s",
+                    log_id,
+                )
+                return False
+            if identity_scope == "platform_scoped" and not getattr(snapshot, "platform", None):
+                logger.warning("[第三方上报] 平台作用域日志缺少平台标识: id=%s", log_id)
+                return False
+            if identity_scope == "unscoped" and (
+                getattr(snapshot, "platform", None) is not None
+                or getattr(snapshot, "outbox_enqueued", False)
+            ):
+                logger.warning("[第三方上报] unscoped 日志作用域字段不一致: id=%s", log_id)
+                return False
+            if getattr(snapshot, "outbox_enqueued", False) and identity_changed:
+                return False
+
+            if identity_changed:
+                old_identity = (
+                    snapshot.source,
+                    snapshot.adsid,
+                    snapshot.event,
+                    snapshot.conversion_id,
+                )
+                new_identity = (
+                    snapshot.source,
+                    adsid if adsid is not None else snapshot.adsid,
+                    event if event is not None else snapshot.event,
+                    conversion_id if conversion_id is not None else snapshot.conversion_id,
+                )
+                # 两把锁按稳定 hash 顺序获取，避免 A->B 与 B->A 管理编辑互相死锁。
+                ordered_identities = sorted(
+                    {old_identity, new_identity},
+                    key=lambda parts: hashlib.sha256(
+                        _report_base_identity_value(*parts).encode("utf-8")
+                    ).hexdigest(),
+                )
+                for source_value, adsid_value, event_value, conversion_value in ordered_identities:
+                    await _lock_report_base_identity(
+                        db,
+                        source=source_value,
+                        adsid=adsid_value,
+                        event=event_value,
+                        conversion_id=conversion_value,
+                    )
+
+            # 取得身份锁后再锁定目标行，并确认快照身份没有被并发管理员操作改写。
             result = await db.execute(
                 select(ThirdPartyReportLog)
                 .where(ThirdPartyReportLog.id == log_id)
                 .with_for_update()
             )
             log_entry = result.scalars().first()
-            
-            if not log_entry:
-                logger.warning(f"[第三方上报] 日志记录不存在: id={log_id}")
+            if log_entry is None:
+                return False
+            snapshot_identity = (
+                snapshot.source, snapshot.adsid, snapshot.event, snapshot.conversion_id
+            )
+            current_identity = (
+                log_entry.source, log_entry.adsid, log_entry.event, log_entry.conversion_id
+            )
+            if current_identity != snapshot_identity:
+                logger.warning("[第三方上报] 管理编辑期间事件身份已变化，请刷新后重试: id=%s", log_id)
                 return False
             if getattr(log_entry, "pii_scrubbed_at", None) is not None:
-                logger.warning("[第三方上报] 已按保留策略清理个人信息的日志不可重新写入载荷: id=%s", log_id)
-                return False
-            
-            # 事件身份必须与 event_key 保持一致。
-            identity_changed = (
-                (adsid is not None and adsid != log_entry.adsid)
-                or (event is not None and event != log_entry.event)
-                or (conversion_id is not None and conversion_id != log_entry.conversion_id)
-            )
-            # 作用域未知的历史行不得通过管理员修改身份字段被隐式归属。
-            identity_scope = getattr(log_entry, "identity_scope", "legacy_unresolved")
-            if identity_changed and identity_scope == "legacy_unresolved":
-                logger.warning(
-                    "[第三方上报] 拒绝修改未完成身份归属核对的历史日志: id=%s",
-                    log_id,
-                )
-                return False
-            if identity_scope == "platform_scoped" and not getattr(log_entry, "platform", None):
-                logger.warning(
-                    "[第三方上报] 平台作用域日志缺少平台标识，拒绝修改: id=%s",
-                    log_id,
-                )
-                return False
-            if identity_changed and identity_scope == "platform_scoped":
-                logger.warning(
-                    "[第三方上报] 平台作用域事件身份不可通过普通编辑接口修改: id=%s",
-                    log_id,
-                )
-                return False
-            if identity_scope == "unscoped" and getattr(log_entry, "outbox_enqueued", False):
-                logger.warning(
-                    "[第三方上报] unscoped 事件不能标记为 Outbox，拒绝修改: id=%s",
-                    log_id,
-                )
-                return False
-            if identity_scope == "unscoped" and getattr(log_entry, "platform", None) is not None:
-                logger.warning(
-                    "[第三方上报] unscoped 日志不应包含 platform，拒绝修改: id=%s",
-                    log_id,
-                )
                 return False
 
-            # 平台级 Outbox 身份包含 platform；已入队事件的身份字段不可由普通编辑接口修改。
-            if log_entry.outbox_enqueued and identity_changed:
-                logger.warning(
-                    "[第三方上报] 拒绝修改 Outbox 事件身份字段: id=%s",
-                    log_id,
+            if identity_changed:
+                new_adsid = adsid if adsid is not None else log_entry.adsid
+                new_event = event if event is not None else log_entry.event
+                new_conversion_id = (
+                    conversion_id if conversion_id is not None else log_entry.conversion_id
                 )
-                return False
+                target_event_key = build_event_idempotency_key(
+                    log_entry.source,
+                    new_adsid,
+                    new_event,
+                    new_conversion_id,
+                )
+                duplicate_result = await db.execute(
+                    select(ThirdPartyReportLog.id)
+                    .where(
+                        ThirdPartyReportLog.event_key == target_event_key,
+                        ThirdPartyReportLog.id != log_id,
+                    )
+                    .limit(1)
+                )
+                if duplicate_result.scalars().first() is not None:
+                    logger.warning("[第三方上报] 管理编辑目标事件键已被占用，拒绝修改: id=%s", log_id)
+                    return False
+
+                scoped_query = select(ThirdPartyReportLog.id).where(
+                    ThirdPartyReportLog.source == log_entry.source,
+                    ThirdPartyReportLog.adsid == new_adsid,
+                    ThirdPartyReportLog.event == new_event,
+                    ThirdPartyReportLog.identity_scope == "platform_scoped",
+                )
+                if new_event != "ViewContent":
+                    scoped_query = scoped_query.where(
+                        ThirdPartyReportLog.conversion_id == new_conversion_id
+                    )
+                scoped_result = await db.execute(scoped_query.limit(1))
+                if scoped_result.scalars().first() is not None:
+                    logger.warning("[第三方上报] 管理编辑目标身份已属于平台作用域事件，拒绝修改")
+                    return False
 
             payload_updates_requested = any(value is not None for value in (
                 email, ip, phone, ua, currency, amount, report_params, use_hash
@@ -1529,7 +1594,6 @@ async def update_report_log_params(
                 )
                 return False
 
-            # 普通历史日志允许修正身份字段，但必须同步重算唯一幂等键。
             if adsid is not None:
                 log_entry.adsid = adsid
             if event is not None:
@@ -1559,11 +1623,12 @@ async def update_report_log_params(
                 log_entry.report_params = report_params
             if use_hash is not None:
                 log_entry.use_hash = use_hash
-            
+
             await db.commit()
             logger.info("[第三方上报] 已更新日志参数: id=%s", log_id)
             return True
-            
-    except Exception as e:
-        logger.warning("[第三方上报] 更新日志参数失败：%s", type(e).__name__)
+
+    except Exception as exc:
+        logger.warning("[第三方上报] 更新日志参数失败：%s", type(exc).__name__)
         return False
+
