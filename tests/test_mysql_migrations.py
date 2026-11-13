@@ -1384,3 +1384,73 @@ def test_pii_migration_rejects_automatic_default_on_retention_marker(wrong_table
             cursor.execute("DROP TABLE IF EXISTS postback_forward_logs")
             cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
         connection.close()
+
+
+def test_report_identity_scope_migration_keeps_all_legacy_rows_unresolved_and_is_rerunnable():
+    """真实隔离 MySQL 验证新身份列、旧行默认 unresolved 与 migration 幂等。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+            cursor.execute(
+                """
+                CREATE TABLE third_party_report_logs (
+                    id INT NOT NULL AUTO_INCREMENT,
+                    event_key VARCHAR(64) NOT NULL,
+                    outbox_enqueued TINYINT(1) NOT NULL DEFAULT 0,
+                    status VARCHAR(20) NOT NULL,
+                    next_retry_time DATETIME NULL,
+                    report_start_time DATETIME NULL,
+                    PRIMARY KEY (id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            cursor.executemany(
+                "INSERT INTO third_party_report_logs "
+                "(event_key, outbox_enqueued, status) VALUES (%s, %s, %s)",
+                [
+                    ("legacy-direct-event-key", 0, "success"),
+                    ("legacy-outbox-event-key", 1, "pending"),
+                ],
+            )
+
+            migration = "sql/migrations/20261113_third_party_report_identity_scope.sql"
+            _run_sql_file(cursor, migration)
+            _run_sql_file(cursor, migration)
+
+            cursor.execute(
+                "SELECT identity_scope, platform, destination_pixel_id "
+                "FROM third_party_report_logs ORDER BY id"
+            )
+            rows = cursor.fetchall()
+            assert rows == [
+                ("legacy_unresolved", None, None),
+                ("legacy_unresolved", None, None),
+            ]
+
+            assert _column_metadata(cursor, "third_party_report_logs", "platform")[1] == "varchar(100)"
+            assert _column_metadata(cursor, "third_party_report_logs", "identity_scope")[1] == "varchar(32)"
+            assert _column_metadata(cursor, "third_party_report_logs", "destination_pixel_id")[1] == "varchar(100)"
+            assert _index_columns(
+                cursor,
+                "third_party_report_logs",
+                "idx_third_party_scope_due",
+            ) == [
+                "identity_scope",
+                "platform",
+                "outbox_enqueued",
+                "status",
+                "next_retry_time",
+                "report_start_time",
+                "id",
+            ]
+            cursor.execute(
+                "SELECT COUNT(*) FROM third_party_report_logs "
+                "WHERE identity_scope <> 'legacy_unresolved' "
+                "OR platform IS NOT NULL OR destination_pixel_id IS NOT NULL"
+            )
+            assert cursor.fetchone()[0] == 0
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+        connection.close()
