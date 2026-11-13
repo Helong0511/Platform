@@ -1296,6 +1296,9 @@ async def retry_report_log(log_id: int):
                 .where(
                     ThirdPartyReportLog.id == log_id,
                     ThirdPartyReportLog.outbox_enqueued.is_(True),
+                    ThirdPartyReportLog.identity_scope == "platform_scoped",
+                    ThirdPartyReportLog.platform.is_not(None),
+                    ThirdPartyReportLog.platform != "",
                     ThirdPartyReportLog.status == "failed",
                     ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                     or_(
@@ -1381,8 +1384,28 @@ async def update_report_log_params(
                 or (event is not None and event != log_entry.event)
                 or (conversion_id is not None and conversion_id != log_entry.conversion_id)
             )
-            # Outbox event_key 还包含平台维度，但日志表不保存平台字段；
-            # 因此不允许管理员修改已入队事件的身份字段，避免无法正确重算幂等键。
+            # 作用域未知的历史行不得通过管理员修改身份字段被隐式归属。
+            identity_scope = getattr(log_entry, "identity_scope", "legacy_unresolved")
+            if identity_changed and identity_scope == "legacy_unresolved":
+                logger.warning(
+                    "[第三方上报] 拒绝修改未完成身份归属核对的历史日志: id=%s",
+                    log_id,
+                )
+                return False
+            if identity_scope == "platform_scoped" and not getattr(log_entry, "platform", None):
+                logger.warning(
+                    "[第三方上报] 平台作用域日志缺少平台标识，拒绝修改: id=%s",
+                    log_id,
+                )
+                return False
+            if identity_scope == "unscoped" and getattr(log_entry, "platform", None) is not None:
+                logger.warning(
+                    "[第三方上报] unscoped 日志不应包含 platform，拒绝修改: id=%s",
+                    log_id,
+                )
+                return False
+
+            # 平台级 Outbox 身份包含 platform；已入队事件的身份字段不可由普通编辑接口修改。
             if log_entry.outbox_enqueued and identity_changed:
                 logger.warning(
                     "[第三方上报] 拒绝修改 Outbox 事件身份字段: id=%s",
