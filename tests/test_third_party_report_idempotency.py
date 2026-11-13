@@ -896,3 +896,50 @@ def test_blank_platform_is_treated_as_unscoped_identity():
     ) == third_party_report.build_event_idempotency_key(
         "postback", "ads-blank-platform", "Purchase", "conversion-blank", platform="bft"
     )
+
+
+
+async def test_postback_enqueue_fails_closed_on_legacy_four_field_identity():
+    """历史四字段事件无法证明平台归属时，禁止新建平台作用域事件造成重复发送。"""
+    from app.services.third_party_report_outbox import (
+        LegacyEventIdentityConflict,
+        enqueue_postback_report,
+    )
+
+    class FakeDB:
+        def __init__(self):
+            self.scalar_calls = 0
+            self.added = []
+
+        async def scalar(self, statement):
+            self.scalar_calls += 1
+            # 第一次查询当前平台五字段键不存在；第二次查询历史四字段键命中。
+            return None if self.scalar_calls == 1 else 901
+
+        def add(self, row):
+            self.added.append(row)
+
+        async def flush(self):
+            raise AssertionError("检测到历史身份冲突时不得写入新 Outbox 行")
+
+    db = FakeDB()
+    with pytest.raises(LegacyEventIdentityConflict):
+        await enqueue_postback_report(
+            db,
+            platform="meta",
+            adsid="legacy-click-901",
+            event="Purchase",
+            conversion_id="legacy-conversion-901",
+            email=None,
+            ip=None,
+            phone=None,
+            ua=None,
+            currency="USD",
+            amount=1.0,
+            short_link_id=12,
+            cloak_name=None,
+            short_code=None,
+            click_time=None,
+        )
+    assert db.scalar_calls == 2
+    assert db.added == []
