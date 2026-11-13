@@ -1417,6 +1417,18 @@ async def update_report_log_params(
                     log_id,
                 )
                 return False
+            if identity_changed and identity_scope == "platform_scoped":
+                logger.warning(
+                    "[第三方上报] 平台作用域事件身份不可通过普通编辑接口修改: id=%s",
+                    log_id,
+                )
+                return False
+            if identity_scope == "unscoped" and getattr(log_entry, "outbox_enqueued", False):
+                logger.warning(
+                    "[第三方上报] unscoped 事件不能标记为 Outbox，拒绝修改: id=%s",
+                    log_id,
+                )
+                return False
             if identity_scope == "unscoped" and getattr(log_entry, "platform", None) is not None:
                 logger.warning(
                     "[第三方上报] unscoped 日志不应包含 platform，拒绝修改: id=%s",
