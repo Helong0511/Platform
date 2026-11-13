@@ -1067,6 +1067,9 @@ async def test_send_rejects_mismatched_existing_report_log_before_claim_or_http(
                 (),
                 {
                     "outbox_enqueued": True,
+                    "identity_scope": "platform_scoped",
+                    "platform": "meta",
+                    "destination_pixel_id": "isolated-pixel",
                     "pii_scrubbed_at": None,
                     "source": "postback",
                     "adsid": "persisted-click",
@@ -1109,6 +1112,7 @@ async def test_send_rejects_mismatched_existing_report_log_before_claim_or_http(
         facebook_pixel_id="isolated-pixel",
         facebook_access_token="isolated-token",
         source="postback",
+        platform="meta",
         conversion_id="conv-456",
         report_log_id=41,
         event_key="persisted-key",
