@@ -56,3 +56,34 @@ def test_platform_baseline_and_incremental_migrations_cover_all_orm_tables():
         "完整基线与增量 migrations 未覆盖以下 ORM 表；这些表目前可能依赖应用启动时 "
         f"Base.metadata.create_all() 隐式创建：{missing}"
     )
+
+
+def test_platform_baseline_third_party_identity_scope_is_complete():
+    source = (
+        Path(__file__).resolve().parents[1] / "sql" / "platform.sql"
+    ).read_text(encoding="utf-8")
+
+    table_start = source.index("CREATE TABLE IF NOT EXISTS `third_party_report_logs`")
+    table_end_marker = "COMMENT = '第三方上报日志表' ROW_FORMAT = Dynamic;"
+    table_end = source.index(table_end_marker, table_start) + len(table_end_marker)
+    table_sql = source[table_start:table_end]
+    statements = split_mysql_statements(table_sql)
+    assert len(statements) == 1
+    for column in ("platform", "identity_scope", "destination_pixel_id"):
+        assert f"`{column}`" in statements[0]
+    assert "idx_third_party_scope_due" in statements[0]
+    assert "chk_third_party_identity_scope_v1" in statements[0]
+    assert "legacy_unresolved" in statements[0]
+    assert "platform_scoped" in statements[0]
+
+    lock_table_start = source.index(
+        "CREATE TABLE IF NOT EXISTS `third_party_report_identity_locks`"
+    )
+    lock_table_end = source.index(
+        "COMMENT = '第三方上报跨直接发送与 Postback 的基础身份仲裁锁';",
+        lock_table_start,
+    )
+    lock_table_sql = source[lock_table_start:lock_table_end]
+    assert len(split_mysql_statements(lock_table_sql)) == 1
+    assert "`identity_key` CHAR(64)" in lock_table_sql
+    assert "`identity_fingerprint` BINARY(64)" in lock_table_sql
