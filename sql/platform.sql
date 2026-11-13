@@ -1050,6 +1050,9 @@ CREATE TABLE IF NOT EXISTS `third_party_report_logs`  (
   `adsid` VARCHAR(500) NOT NULL COMMENT '广告事件ID',
   `event` VARCHAR(50) NOT NULL COMMENT '事件类型：ViewContent, Purchase',
   `event_key` VARCHAR(64) NOT NULL COMMENT '事件幂等键：稳定事件身份字段的 SHA-256（ViewContent 不含后补 conversion_id）',
+  `platform` VARCHAR(100) NULL DEFAULT NULL COMMENT 'Postback 平台标识；非平台事件为 NULL',
+  `identity_scope` VARCHAR(32) NOT NULL DEFAULT 'legacy_unresolved' COMMENT 'unscoped/platform_scoped/legacy_unresolved',
+  `destination_pixel_id` VARCHAR(100) NULL DEFAULT NULL COMMENT '非敏感 Meta Pixel 目的地 ID；不保存 access_token',
   `use_hash` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否对email、ip、phone进行哈希处理：True=哈希，False=不哈希',
   `email` VARCHAR(255) NULL DEFAULT NULL COMMENT '邮箱（原始值）',
   `ip` VARCHAR(50) NULL DEFAULT NULL COMMENT 'IP地址（原始值）',
@@ -1087,8 +1090,25 @@ CREATE TABLE IF NOT EXISTS `third_party_report_logs`  (
   INDEX `idx_third_party_pii_retention`(`pii_scrubbed_at` ASC, `created_at` ASC, `id` ASC) USING BTREE,
   INDEX `idx_third_party_status_created`(`status` ASC, `created_at` ASC) USING BTREE,
   INDEX `idx_conversion_id`(`conversion_id` ASC) USING BTREE,
-  INDEX `idx_third_party_outbox_due`(`outbox_enqueued` ASC, `status` ASC, `next_retry_time` ASC, `report_start_time` ASC, `id` ASC) USING BTREE
+  INDEX `idx_third_party_outbox_due`(`outbox_enqueued` ASC, `status` ASC, `next_retry_time` ASC, `report_start_time` ASC, `id` ASC) USING BTREE,
+  INDEX `idx_third_party_scope_due`(`identity_scope` ASC, `platform` ASC, `outbox_enqueued` ASC, `status` ASC, `next_retry_time` ASC, `report_start_time` ASC, `id` ASC) USING BTREE,
+  CONSTRAINT `chk_third_party_identity_scope_v1` CHECK (
+    (`identity_scope` IN ('legacy_unresolved', 'unscoped', 'platform_scoped')) AND
+    ((`identity_scope` = 'platform_scoped' AND `platform` IS NOT NULL AND LENGTH(TRIM(`platform`)) > 0) OR
+     (`identity_scope` IN ('unscoped', 'legacy_unresolved') AND `platform` IS NULL))
+  )
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '第三方上报日志表' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for third_party_report_identity_locks
+-- ----------------------------
+DROP TABLE IF EXISTS `third_party_report_identity_locks`;
+CREATE TABLE IF NOT EXISTS `third_party_report_identity_locks` (
+  `identity_key` CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '四字段基础事件身份 SHA-256',
+  `identity_fingerprint` BINARY(64) NOT NULL COMMENT '基础身份的独立 SHA-512 指纹；不保存原始点击标识',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '锁行首次创建时间；锁行永久保留',
+  PRIMARY KEY (`identity_key`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '第三方上报跨直接发送与 Postback 的基础身份仲裁锁';
 
 -- ----------------------------
 -- Table structure for cloak_configs
