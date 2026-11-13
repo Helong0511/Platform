@@ -368,3 +368,41 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - 该修复没有实现任务同步单一协调者、健康状态端点、告警投递或自动恢复；API Worker 的降级状态仍需后续可观测性方案。
 - 不改变生产数据库、不连接生产服务器/Redis/队列/第三方接口；仅在 CI 隔离环境验证。
 - PR #1 继续 Open / Draft，不合并 main、不部署；凭据安全专项仍按用户要求暂缓。
+
+
+## 2026-11-13 调度启动链路进一步失败关闭（最新验收）
+
+### 新发现
+
+- 在任务配置同步失败关闭修复之后，继续沿 lifespan 向下检查发现：即使 `init_scheduled_tasks_in_db()` 成功，原有 `init_scheduled_tasks()` 或 `start_scheduler()` 失败仍会被捕获，随后记录 warning 并让应用继续启动。
+- 这会导致 Scheduler Worker 进程存活但 APScheduler 不可用，形成“进程健康、调度失效”的假健康状态。
+- 原异常日志还会直接格式化异常对象；本轮改为记录异常类型，避免把驱动/任务异常详情写入通用启动日志。
+
+### 修复
+
+- 新增 `_start_scheduler_for_worker()`，将任务注册和调度器启动作为一个必须成功的启动步骤。
+- 任一阶段失败均抛出启动异常，Scheduler Worker 不再继续就绪。
+- 仅当任务注册完成后才调用 `start_scheduler()`。
+- 新增测试覆盖：
+  - 调度配置同步失败时，Scheduler Worker 拒绝启动；
+  - 同步失败时，纯 API Worker 保留降级策略；
+  - 调度任务注册失败时，不会继续调用启动；
+  - 任务注册成功后才启动 APScheduler；
+  - 成功日志调用及异常日志脱敏。
+
+### CI 验收
+
+- 修复测试断言方式后的完整最新 SHA：`9ab3f75524e618a09c7740a912cf14b280fcdc2d`。
+- Run #1490：https://github.com/Helong0511/Platform/actions/runs/43349369544。
+- Backend：592 passed、1 skipped、1 warning。
+- Frontend：npm ci、依赖风险报告、Lint、Build、Playwright Mock API E2E 全部成功。
+- 前一轮 Run #1488 的唯一失败是成功日志断言使用 caplog 时没有启用 INFO 捕获；已改为直接 mock logger 并验证调用，后续最新 CI 通过。
+- Run #1490 对应 SHA 与当时 PR HEAD 一致；后续文档更新会产生新 SHA，必须再以新 SHA 的 CI 验收。
+
+### 未解决边界
+
+- Scheduler fail-closed 仅解决启动阶段配置同步/任务注册/调度器启动失败后错误就绪的问题。
+- 尚无独立 scheduler heartbeat、任务最后成功时间/延迟指标、连续失败告警、单一任务同步协调者或自动恢复流程。
+- 纯 API Worker 仍允许在任务配置同步失败时降级启动；目前只有日志，管理端缺少可查询的同步状态。后续应设计持久化同步状态和告警，而不是让 API Worker 因非核心调度配置短暂故障全部拒绝服务。
+- 数据库 schema bootstrap 仍由每个 API/Scheduler Worker 启动触发，尚未拆分为 provisioning、独立 migration job 与只读 schema gate。
+- 不连接生产环境，不部署，不合并 PR；凭据安全专项继续暂缓。
