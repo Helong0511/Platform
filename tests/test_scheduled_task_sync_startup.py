@@ -1,6 +1,7 @@
 """启动阶段定时任务配置同步策略测试。"""
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -50,12 +51,14 @@ async def test_api_only_worker_can_degrade_when_task_sync_fails(monkeypatch, cap
 
 
 @pytest.mark.asyncio
-async def test_worker_logs_success_after_task_config_sync(monkeypatch, caplog):
+async def test_worker_logs_success_after_task_config_sync(monkeypatch):
     """同步成功时正常记录成功状态。"""
 
     async def successful_sync():
         return None
 
+    info = Mock()
+    monkeypatch.setattr(lifespan_module.logger, "info", info)
     monkeypatch.setattr(lifespan_module, "init_scheduled_tasks_in_db", successful_sync)
     monkeypatch.setattr(
         lifespan_module,
@@ -65,4 +68,6 @@ async def test_worker_logs_success_after_task_config_sync(monkeypatch, caplog):
 
     await lifespan_module._sync_scheduled_tasks_for_worker(789)
 
-    assert "定时任务配置已同步到数据库" in caplog.text
+    info.assert_called_once_with(
+        "[Worker PID:%s] 定时任务配置已同步到数据库", 789
+    )
