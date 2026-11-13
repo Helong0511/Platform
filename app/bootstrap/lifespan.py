@@ -202,8 +202,12 @@ async def lifespan(app: FastAPI):
         await init_scheduled_tasks_in_db()
         logger.info(f"[Worker PID:{worker_pid}] 定时任务配置已同步到数据库")
     except Exception as db_init_error:
-        logger.warning(
-            f"[Worker PID:{worker_pid}] 同步任务到数据库失败: {db_init_error}，继续启动..."
+        # 任务配置同步失败时明确记录降级状态；不输出数据库异常原文，避免泄露 SQL 参数。
+        logger.error(
+            "[Worker PID:%s] 定时任务配置同步失败：exception_type=%s；"
+            "当前 Worker 将继续启动，但任务配置可能尚未完整同步",
+            worker_pid,
+            type(db_init_error).__name__,
         )
 
     # 定时任务调度器：仅调度 worker 启动（Gunicorn 多 worker 时由 SCHEDULER_WORKER=1 标识）
