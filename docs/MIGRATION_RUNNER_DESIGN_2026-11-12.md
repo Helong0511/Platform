@@ -206,3 +206,22 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 6. 最后移除 lifespan 的自动建库/建表行为，并对两个 systemd unit 的启动顺序和失败恢复做隔离演练。
 
 以上结论不授权连接任何生产服务器、数据库、Redis、队列或真实第三方接口。PR 仍保持 Open / Draft，不合并、不部署；凭据安全专项继续暂缓。
+
+## 2026-11-13 MySQL 集成测试执行器一致性修复
+
+复核 `tests/test_mysql_migrations.py` 时发现，MySQL 集成测试原先使用：
+
+- 删除整行 `--` 注释；
+- 再用 Python `split(';')` 切分 SQL；
+- DDL 中断故障注入辅助函数也独立复制了同一套简单切分逻辑。
+
+这意味着离线 Migration SQL Parser 与真正执行迁移集成测试的执行路径并不一致。若未来迁移 SQL 在字符串中出现分号、块注释或更复杂的转义内容，CI 可能按错误边界执行，不能证明正式 Runner 将正确处理这些脚本。
+
+本次已修复提交 `133180239a2c8e79d00aa4975542d44204b1fece`：
+
+- 正常 MySQL 集成迁移测试改为调用 `app.db.migrations.sql_parser.split_mysql_statements()`。
+- DDL 边界中断/恢复测试也改为调用同一个解析器。
+- 移除两处重复的 `split(';')` 实现。
+- SQL 文件仍以 UTF-8 读取；CI 仍只连接 workflow 创建的 loopback 临时 MySQL，且破坏性测试继续要求显式隔离开关。
+
+这次修改让现有 MySQL 迁移集成测试与离线解析器共享语句边界逻辑，但不等于正式 Migration Runner 已实现。当前测试辅助执行器仍然只是测试代码，不得作为生产迁移入口使用。正式 Runner 仍须在同一物理 Session 中取得 advisory lock、读取 SQL_MODE、持久化 ledger 状态、执行语句并处理结果集。
