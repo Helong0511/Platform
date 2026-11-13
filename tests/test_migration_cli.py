@@ -5,7 +5,7 @@ from app.db.migrations.__main__ import main
 def test_validate_command_is_explicitly_offline(capsys):
     assert main(["validate"]) == 0
     output = capsys.readouterr().out
-    assert "Migration validation passed: 5 revision(s)" in output
+    assert "Migration validation passed: 6 revision(s)" in output
     assert "No database connection was opened" in output
 
 
