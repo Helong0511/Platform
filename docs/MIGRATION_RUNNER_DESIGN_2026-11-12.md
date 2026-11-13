@@ -735,3 +735,51 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - `send_third_party_report()` 的事件 payload 使用传入 event_key；Outbox 调用传递五字段生成的 event_key，直接发送路径默认使用四字段 key。
 - 现有历史 migration 只按四字段回填 event_key。它没有平台来源列，也没有可靠来源可恢复历史平台归属。
 - 
+
+## 2026-11-13 第三方事件身份调用入口与管理端编辑复核（Run #1510）
+
+### 本轮核验基线
+
+- PR 分支：`fix/non-credential-hardening-2026-11`
+- 核验 HEAD：`ebe8ba5846d00d878d91388a3d1ec2c97476dc35`
+- Run #1510：`43354830219`，Backend / Frontend 两个 Job 均成功。
+- PR #1 经 API 复核仍为 Open / Draft，`merged=false`。
+- 本轮只读取分支文件和 CI 日志；没有连接生产资源，没有执行迁移或发送真实第三方请求。
+
+### 已直接读取并核对的代码
+
+- `app/models/third_party.py`：`ThirdPartyReportLog` 当前没有 `platform` 或 legacy identity 状态字段；`event_key` 是唯一键。
+- `app/core/third_party_report.py`：`create_report_log()` 按四字段构建 key；`send_third_party_report()` 在无 `report_log_id` 时调用它；Outbox 路径可传入已有 `report_log_id` 与五字段 `event_key`。
+- `app/services/third_party_report_outbox.py`：Postback Outbox 按 `platform` 生成五字段 key，但当前行没有独立持久化平台字段；Worker 发送时将已持久化的 event_key 传回发送函数。
+- `app/core/postback/processor.py`：Postback Processor 将平台传入 Outbox。
+- `app/routes/short_link/cloak_report_service.py`：斗篷/短链的 `schedule_cloak_facebook_report()` 通过 FastAPI `BackgroundTasks` 直接调用 `send_third_party_report()`，不是 Postback Outbox 路径，也没有 Postback platform 参数。
+- `app/api_v1/system/third_party_reports.py`：管理员可以查询列表/详情、修改普通日志参数、对符合条件的失败 Outbox 执行重排队。
+- `app/schemas/third_party_report.py`：当前响应 Schema 没有平台字段。
+- `app/scheduler_module/tasks/third_party_report_tasks.py`：定时任务消费持久化 Outbox。
+- `app/db/migrations/manifest.py`：当前 manifest 显式登记 5 条 SQL migration；新增 migration 必须使用新 revision 并登记 checksum。
+
+### 新确认的身份一致性风险
+
+1. 直接短链/斗篷路径调用 `send_third_party_report()` 时不提供 platform，按无平台四字段身份工作。这是独立业务来源，不能擅自从 dp、short_code 或请求参数推断 Postback 平台。
+2. Postback Outbox 新记录使用平台作用域五字段 key；模型却不保存 platform。该平台身份目前只体现在 event_key 计算结果中，缺少可审计的独立身份列。
+3. 管理端 `update_report_log_params()` 对非 Outbox 日志允许修改 adsid/event/conversion_id，并重新按四字段算法计算 event_key。Outbox 日志有身份字段冻结保护，但普通历史日志没有 platform 证据；如果未来把历史 Postback 记录纳入平台作用域处理，不能继续按四字段静默重算。
+4. 管理端列表/详情 Schema 当前不暴露平台或身份归属状态。新增字段后，必须明确其可见性与脱敏要求；不能让管理端把 NULL 误显示成“默认平台”。
+5. 管理端重试仅对带有效配置引用的失败 Outbox 重新排队。若未来引入 legacy ambiguous 状态，必须让自动 worker 和人工 retry 两条路径都显式排除该状态；只增加一个展示字段不足以形成安全门禁。
+
+### 发送入口盘点的范围说明
+
+本轮从未截断的 Git Tree 中筛选了第三方报告、Postback、像素、斗篷和迁移相关文件，并分批读取核心发送入口及 API 文件。已确认上述两条发送路径及 Outbox Worker 调用链。
+
+GitHub Code Search 对目标分支没有提供可用的完整结果，且本轮没有在完整工作区运行 `git grep`。因此，这是一份**已核实入口清单，不是全仓库穷尽性调用点证明**。仍需在可执行工作区搜索所有动态导入、脚本、测试和后台任务入口后才能关闭全量调用点审计。
+
+### 后续实现要求（尚未实施）
+
+- 新增 nullable `platform` 列，采用独立的新 migration；不得修改已登记的 20261110 历史 migration SQL 或其 SHA-256。
+- Postback Outbox 创建新记录时持久化规范化 platform；短链/斗篷直接发送继续使用 NULL，除非业务模型明确提供独立平台来源。
+- 直接发送函数新增可选 platform 参数时，必须同时保持旧调用兼容；所有身份查询、创建、更新和发送 payload 使用同一规范化身份。
+- 历史行 platform 保持 NULL。四字段 legacy key 仅用于只读潜在冲突检测，不得按当前请求平台自动归属、复用或发送。
+- 对 legacy ambiguous 事件设计持久化 fail-closed 状态；自动 worker、管理员 retry、后台编辑、导出和审计必须统一遵守该状态。
+- 管理员修改身份字段时，必须按行的已证明身份维度重算 key；平台未知的历史 Postback 行不得通过四字段重算而伪装成已完成平台归属。
+- 完成平台 A/B 同字段冲突、legacy success/pending/failed、直接短链无平台、管理员编辑与重试、并发写入和新旧 Worker 混跑的隔离 MySQL 测试。
+
+本轮仅补充代码级证据与实施门槛，没有修改业务代码、模型或 migration；历史兼容风险仍是 P1 阻断项。
