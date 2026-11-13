@@ -105,6 +105,8 @@ def test_manual_requeue_eligibility_matches_backend_guards():
     now = datetime(2026, 11, 11, 12, 0, 0)
     base = {
         "outbox_enqueued": True,
+        "identity_scope": "platform_scoped",
+        "platform": "meta",
         "pii_scrubbed_at": None,
         "status": "failed",
         "short_link_id": 17,
