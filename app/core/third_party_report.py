@@ -342,12 +342,22 @@ def _calculate_report_attempt_budget(
 async def _claim_report_log(
     report_log_id: int,
     lease_seconds: int = REPORT_LOG_LEASE_SECONDS,
+    *,
+    expected_scope: Optional[str] = None,
+    platform: Optional[str] = None,
 ) -> Optional[datetime]:
     """原子认领事件并返回秒级租约令牌；失败返回 None。
 
     失败状态允许立即重试；pending 状态仅允许首次认领或租约过期后恢复。
     发送进程异常退出时，租约到期后可由后续请求接管；旧 Worker 的令牌随即失效。
     """
+    if expected_scope not in {"unscoped", "platform_scoped"}:
+        return None
+    if expected_scope == "platform_scoped" and not (platform or "").strip():
+        return None
+    if expected_scope == "unscoped" and platform:
+        return None
+
     # MySQL DATETIME 默认精度为秒，令牌必须先截断微秒，保证回读/比较一致。
     now = get_app_now_naive().replace(microsecond=0)
     stale_before = now - timedelta(seconds=max(30, lease_seconds))
@@ -356,6 +366,12 @@ async def _claim_report_log(
             update(ThirdPartyReportLog)
             .where(
                 ThirdPartyReportLog.id == report_log_id,
+                ThirdPartyReportLog.identity_scope == expected_scope,
+                (
+                    ThirdPartyReportLog.platform == platform
+                    if expected_scope == "platform_scoped"
+                    else ThirdPartyReportLog.platform.is_(None)
+                ),
                 ThirdPartyReportLog.status.in_(("pending", "failed")),
                 # PII 清理与发送认领必须在同一行锁/条件 UPDATE 上仲裁：
                 # 若清理先提交，已复制到 Worker 内存的旧载荷也不得再发送。
@@ -381,8 +397,17 @@ async def _renew_report_log_lease(
     report_log_id: int,
     lease_token: datetime,
     lease_seconds: int = REPORT_LOG_LEASE_SECONDS,
+    *,
+    expected_scope: Optional[str] = None,
+    platform: Optional[str] = None,
 ) -> Optional[datetime]:
     """仅允许尚未过期的当前持有者续租；过期令牌不可复活。"""
+    if expected_scope not in {"unscoped", "platform_scoped"}:
+        return None
+    if expected_scope == "platform_scoped" and not (platform or "").strip():
+        return None
+    if expected_scope == "unscoped" and platform:
+        return None
     now = get_app_now_naive().replace(microsecond=0)
     valid_after = now - timedelta(seconds=max(30, lease_seconds))
     async with AsyncSessionLocal() as db:
@@ -393,6 +418,12 @@ async def _renew_report_log_lease(
             result = await db.execute(
                 select(ThirdPartyReportLog.report_start_time).where(
                     ThirdPartyReportLog.id == report_log_id,
+                    ThirdPartyReportLog.identity_scope == expected_scope,
+                    (
+                        ThirdPartyReportLog.platform == platform
+                        if expected_scope == "platform_scoped"
+                        else ThirdPartyReportLog.platform.is_(None)
+                    ),
                     ThirdPartyReportLog.report_start_time == lease_token,
                     ThirdPartyReportLog.report_start_time >= valid_after,
                     ThirdPartyReportLog.pii_scrubbed_at.is_(None),
@@ -406,6 +437,12 @@ async def _renew_report_log_lease(
             update(ThirdPartyReportLog)
             .where(
                 ThirdPartyReportLog.id == report_log_id,
+                ThirdPartyReportLog.identity_scope == expected_scope,
+                (
+                    ThirdPartyReportLog.platform == platform
+                    if expected_scope == "platform_scoped"
+                    else ThirdPartyReportLog.platform.is_(None)
+                ),
                 ThirdPartyReportLog.report_start_time == lease_token,
                 ThirdPartyReportLog.report_start_time >= valid_after,
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
@@ -556,7 +593,11 @@ async def send_third_party_report(
             "empty" if not pixel_id else pixel_id[:10],
         )
         if report_log_id:
-            lease_token = report_lease_token or await _claim_report_log(report_log_id)
+            lease_token = report_lease_token or await _claim_report_log(
+                report_log_id,
+                expected_scope="platform_scoped",
+                platform=platform,
+            )
             if lease_token is None:
                 existing_status = await _get_report_status(report_log_id)
                 if existing_status == "success":
@@ -609,7 +650,11 @@ async def send_third_party_report(
         source, adsid, event, conversion_id, platform=platform
     )
     try:
-        lease_token = report_lease_token or await _claim_report_log(report_log_id)
+        lease_token = report_lease_token or await _claim_report_log(
+            report_log_id,
+            expected_scope="platform_scoped" if using_existing_report_log else "unscoped",
+            platform=platform,
+        )
         if lease_token is None:
             existing_status = await _get_report_status(report_log_id)
             if existing_status == "success":
@@ -645,7 +690,12 @@ async def send_third_party_report(
     async def renew_owned_report_lease() -> bool:
         """发送前续租并验证令牌；过期 Worker 必须 fail closed。"""
         nonlocal lease_token
-        renewed_token = await _renew_report_log_lease(report_log_id, lease_token)
+        renewed_token = await _renew_report_log_lease(
+            report_log_id,
+            lease_token,
+            expected_scope="platform_scoped" if using_existing_report_log else "unscoped",
+            platform=platform,
+        )
         if renewed_token is None:
             return False
         lease_token = renewed_token
