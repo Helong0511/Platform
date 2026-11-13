@@ -1100,7 +1100,7 @@ async def test_send_rejects_mismatched_existing_report_log_before_claim_or_http(
     assert result["reason"] == "report_identity_mismatch"
 
 
-async def test_outbox_purchase_does_not_link_viewcontent_without_platform_scope(monkeypatch):
+async def test_outbox_purchase_does_not_link_viewcontent_without_destination_identity(monkeypatch):
     """平台作用域未持久化时，Outbox Purchase 不得关联任意平台的 ViewContent。"""
 
     def unexpected_session():
@@ -1113,52 +1113,26 @@ async def test_outbox_purchase_does_not_link_viewcontent_without_platform_scope(
         adsid="shared-click",
         conversion_id="platform-a-conversion",
         report_log_id=71,
-        allow_unscoped_match=False,
+        allow_destination_match=False,
     )
 
     assert linked is False
 
 
-async def test_direct_purchase_can_link_unscoped_viewcontent(monkeypatch):
-    """无平台作用域的直接发送保留原有 ViewContent 关联行为。"""
-    view_content = type("ViewContentRow", (), {"conversion_id": None})()
-    state = {"committed": False}
+async def test_direct_purchase_does_not_link_without_pixel_destination_identity(monkeypatch):
+    """直接发送也未持久化 Pixel ID，不能证明 ViewContent 与 Purchase 目的地一致。"""
 
-    class Result:
-        def scalars(self):
-            return self
+    def unexpected_session():
+        raise AssertionError("未持久化 Pixel 目的地时不得关联 ViewContent")
 
-        def first(self):
-            return view_content
-
-    class FakeDB:
-        async def execute(self, statement):
-            return Result()
-
-        async def commit(self):
-            state["committed"] = True
-
-    class SessionContext:
-        async def __aenter__(self):
-            return FakeDB()
-
-        async def __aexit__(self, *args):
-            return False
-
-    monkeypatch.setattr(
-        third_party_report,
-        "AsyncSessionLocal",
-        lambda: SessionContext(),
-    )
+    monkeypatch.setattr(third_party_report, "AsyncSessionLocal", unexpected_session)
 
     linked = await third_party_report._link_purchase_to_view_content(
         source="short_link",
         adsid="direct-click",
         conversion_id="direct-conversion",
         report_log_id=72,
-        allow_unscoped_match=True,
+        allow_destination_match=False,
     )
 
-    assert linked is True
-    assert view_content.conversion_id == "direct-conversion"
-    assert state["committed"] is True
+    assert linked is False
