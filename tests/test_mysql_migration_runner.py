@@ -458,3 +458,79 @@ def test_runner_rejects_non_mysql_application_database():
     with pytest.raises(MigrationRunnerError, match="应用数据库必须使用 MySQL"):
         _ensure_distinct_database_account(migration_url, application_url)
 
+
+
+@pytest.mark.asyncio
+async def test_identity_scope_check_constraint_is_enforced_and_migration_is_idempotent(tmp_path: Path):
+    """真实 MySQL 验证身份作用域 CHECK 约束拒绝非法组合，并允许安全重跑。"""
+    database = _create_database()
+    try:
+        migration_path = (
+            Path(__file__).resolve().parents[1]
+            / "sql/migrations/20261113_third_party_report_identity_scope_constraints.sql"
+        )
+        migration_sql = migration_path.read_text(encoding="utf-8")
+        migrations = _write_migrations(
+            tmp_path,
+            [("20261113_identity_scope_constraints", migration_sql)],
+        )
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "CREATE TABLE third_party_report_logs ("
+                    "id INT NOT NULL PRIMARY KEY AUTO_INCREMENT, "
+                    "identity_scope VARCHAR(32) NOT NULL, "
+                    "platform VARCHAR(100) NULL"
+                    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+                )
+                cursor.executemany(
+                    "INSERT INTO third_party_report_logs (identity_scope, platform) VALUES (%s, %s)",
+                    [
+                        ("legacy_unresolved", None),
+                        ("unscoped", None),
+                        ("platform_scoped", "meta"),
+                    ],
+                )
+
+        url = _database_url(database)
+        app_url = _application_database_url(database)
+        await apply_migrations(
+            url,
+            application_database_url=app_url,
+            repository_root=tmp_path,
+            migrations=migrations,
+        )
+        # 已存在且定义匹配的约束必须允许重复执行。
+        assert await apply_migrations(
+            url,
+            application_database_url=app_url,
+            repository_root=tmp_path,
+            migrations=migrations,
+        ) == ()
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                invalid_rows = [
+                    ("unknown_scope", None),
+                    ("platform_scoped", None),
+                    ("platform_scoped", ""),
+                    ("platform_scoped", "   "),
+                    ("unscoped", "meta"),
+                    ("legacy_unresolved", "meta"),
+                ]
+                for scope, platform in invalid_rows:
+                    with pytest.raises(pymysql.err.IntegrityError):
+                        cursor.execute(
+                            "INSERT INTO third_party_report_logs (identity_scope, platform) VALUES (%s, %s)",
+                            (scope, platform),
+                        )
+                cursor.execute(
+                    "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS "
+                    "WHERE CONSTRAINT_SCHEMA = %s AND TABLE_NAME = 'third_party_report_logs' "
+                    "AND CONSTRAINT_NAME = 'chk_third_party_identity_scope_v1' "
+                    "AND CONSTRAINT_TYPE = 'CHECK'",
+                    (database,),
+                )
+                assert cursor.fetchone()[0] == 1
+    finally:
+        _drop_database(database)
