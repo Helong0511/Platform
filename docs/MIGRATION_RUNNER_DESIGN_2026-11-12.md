@@ -249,7 +249,7 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 6. `init_scheduled_tasks_in_db()` 在 schema bootstrap、管理员初始化后每个 API/Scheduler lifespan 都会执行，与 APScheduler 是否启动无关。当前版本已改为整批事务提交，移除 `SKIP LOCKED`，识别唯一键冲突、MySQL 死锁/锁等待超时后整批回滚并有限重试；其它错误回滚后向上传播。lifespan 仍允许 Worker 在记录明确错误后继续启动，因此任务同步失败必须进入监控告警，不能视为同步成功。该函数属于业务配置同步，不属于 schema migration。
 7. 当前 CI 使用 GitHub Actions 临时 MySQL 8.0 / Redis 7.4；MySQL 迁移测试要求 GitHub Actions、`UNIT_TEST=1`、显式 destructive flag、loopback host 和固定 `platform_ci` 数据库。迁移 SQL 测试辅助执行器与离线 parser 已统一，但这仍不是生产 Runner。
 
-### 最新 CI 证据
+### 历史 CI 证据（Run #1469）
 
 - Run #1469：https://github.com/Helong0511/Platform/actions/runs/43345544426
 - SHA：`006be5d2d39835a5c9ceccad19dd6f9ad66c9827`
