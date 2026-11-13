@@ -136,6 +136,9 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
                 adsid=f"ci-outbox-{event_identity}",
                 event="Purchase",
                 event_key=event_key,
+                platform="meta",
+                identity_scope="platform_scoped",
+                destination_pixel_id="pixel-ci",
                 conversion_id=event_identity,
                 status="pending",
                 outbox_enqueued=True,
@@ -149,8 +152,8 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
             report_id = row.id
 
         claims = await asyncio.gather(
-            report_module._claim_report_log(report_id),
-            report_module._claim_report_log(report_id),
+            report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta"),
+            report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta"),
         )
         assert sum(token is not None for token in claims) == 1
         assert all(token is None or isinstance(token, datetime) for token in claims)
@@ -176,14 +179,14 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
         # 过期租约只能由新 Worker 接管；旧 Worker 的租约令牌不能再修改状态。
         first_token = next(token for token in claims if token is not None)
         lease_clock[0] += timedelta(seconds=1)
-        new_token = await report_module._claim_report_log(report_id)
+        new_token = await report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta")
         assert new_token is not None
         assert new_token != first_token
 
         # MySQL DATETIME 秒级精度：同一秒立即续租应确认当前租约仍有效，
         # 不应因 UPDATE 未改变字段值而被 changed-rows rowcount 误判为失租。
         same_second_renewal = await report_module._renew_report_log_lease(
-            report_id, new_token
+            report_id, new_token, expected_scope="platform_scoped", platform="meta"
         )
         assert same_second_renewal == new_token
 
@@ -191,6 +194,8 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
             report_id,
             status="failed",
             expected_report_start_time=first_token,
+            expected_identity_scope="platform_scoped",
+            expected_platform="meta",
         )
         assert stale_update is False
 
@@ -198,27 +203,29 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
             report_id,
             status="failed",
             expected_report_start_time=new_token,
+            expected_identity_scope="platform_scoped",
+            expected_platform="meta",
         )
         assert current_update is True
 
         # 当前 Worker 只能在原租约仍有效时续租，续租后旧令牌立即失效。
         lease_clock[0] += timedelta(seconds=5)
         renewed_token = await report_module._renew_report_log_lease(
-            report_id, new_token
+            report_id, new_token, expected_scope="platform_scoped", platform="meta"
         )
         assert renewed_token == lease_clock[0]
         stale_renewal = await report_module._renew_report_log_lease(
-            report_id, new_token
+            report_id, new_token, expected_scope="platform_scoped", platform="meta"
         )
         assert stale_renewal is None
 
         # 超过 TTL 后，旧 Worker 不得复活租约；新 Worker 可以接管。
         lease_clock[0] += timedelta(seconds=report_module.REPORT_LOG_LEASE_SECONDS + 1)
         expired_renewal = await report_module._renew_report_log_lease(
-            report_id, renewed_token
+            report_id, renewed_token, expected_scope="platform_scoped", platform="meta"
         )
         assert expired_renewal is None
-        replacement_token = await report_module._claim_report_log(report_id)
+        replacement_token = await report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta")
         assert replacement_token == lease_clock[0]
         assert replacement_token != renewed_token
     finally:
@@ -564,18 +571,18 @@ async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover
             report_id = row.id
 
         # Worker A 取得租约后暂停；暂停时间超过租约 TTL。
-        worker_a_token = await report_module._claim_report_log(report_id)
+        worker_a_token = await report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta")
         assert worker_a_token == lease_clock[0]
         lease_clock[0] += timedelta(seconds=report_module.REPORT_LOG_LEASE_SECONDS + 1)
 
         # Worker B 接管同一条记录，A 的令牌从此失效。
-        worker_b_token = await report_module._claim_report_log(report_id)
+        worker_b_token = await report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta")
         assert worker_b_token == lease_clock[0]
         assert worker_b_token != worker_a_token
 
         # A 恢复后，发送前续租检查必须失败；不能进入 HTTP 发送路径。
         stale_worker_renewal = await report_module._renew_report_log_lease(
-            report_id, worker_a_token
+            report_id, worker_a_token, expected_scope="platform_scoped", platform="meta"
         )
         assert stale_worker_renewal is None
 
@@ -584,6 +591,8 @@ async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover
             report_id,
             status="failed",
             expected_report_start_time=worker_a_token,
+            expected_identity_scope="platform_scoped",
+            expected_platform="meta",
         )
         assert stale_worker_finalize is False
 
@@ -592,6 +601,8 @@ async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover
             report_id,
             status="success",
             expected_report_start_time=worker_b_token,
+            expected_identity_scope="platform_scoped",
+            expected_platform="meta",
         )
         assert worker_b_finalize is True
 
