@@ -1299,7 +1299,7 @@ async def test_create_report_log_reuses_only_same_unscoped_pixel_destination(mon
             self.row = row
 
         async def execute(self, statement):
-            if "third_party_report_logs.identity_scope" in str(statement).lower():
+            if "third_party_report_logs.identity_scope =" in str(statement).lower():
                 return Result(None)
             return Result(self.row)
 
