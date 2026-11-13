@@ -1378,3 +1378,57 @@ async def test_create_report_log_reuses_only_same_unscoped_pixel_destination(mon
     assert same_destination == 88
     assert different_destination == 0
     assert unresolved_legacy == 0
+
+async def test_purchase_viewcontent_link_locks_candidate_row(monkeypatch):
+    """Purchase 关联必须锁定并稳定选择尚未关联的 ViewContent 行。"""
+    from sqlalchemy.dialects import mysql
+
+    captured = {}
+    view_content = type("ViewContentRow", (), {"conversion_id": None})()
+
+    class Result:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return view_content
+
+    class FakeDB:
+        async def execute(self, statement):
+            captured["sql"] = str(
+                statement.compile(
+                    dialect=mysql.dialect(),
+                    compile_kwargs={"literal_binds": True},
+                )
+            ).upper()
+            return Result()
+
+        async def commit(self):
+            captured["committed"] = True
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(
+        third_party_report, "AsyncSessionLocal", lambda: SessionContext()
+    )
+
+    linked = await third_party_report._link_purchase_to_view_content(
+        source="postback",
+        adsid="ads-123",
+        conversion_id="conversion-456",
+        report_log_id=99,
+        destination_pixel_id="pixel-ci",
+        identity_scope="unscoped",
+        platform=None,
+    )
+
+    assert linked is True
+    assert view_content.conversion_id == "conversion-456"
+    assert captured["committed"] is True
+    assert "ORDER BY THIRD_PARTY_REPORT_LOGS.ID ASC" in captured["sql"]
+    assert "FOR UPDATE" in captured["sql"]
