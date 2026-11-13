@@ -239,6 +239,12 @@ class CapReservationLedger:
             await session.commit()
             raise RuntimeError(f"未知 Cap Reservation 状态，拒绝继续：{row.state}")
 
+        if row.state == "ROLLED_BACK" and not row.redis_token_cleaned:
+            # Redis 回滚墓碑尚未清理时，不得复用同一 token 发起新预留。
+            # 先让恢复 Worker 删除墓碑并确认 DB 清理状态，再允许业务重试。
+            await session.commit()
+            return row, False, None
+
         if row.state == "ROLLED_BACK":
             row.state = "PREPARED"
             row.redis_reserved = False
