@@ -1119,39 +1119,128 @@ async def test_send_rejects_mismatched_existing_report_log_before_claim_or_http(
     assert result["reason"] == "report_identity_mismatch"
 
 
-async def test_outbox_purchase_does_not_link_viewcontent_without_destination_identity(monkeypatch):
-    """平台作用域未持久化时，Outbox Purchase 不得关联任意平台的 ViewContent。"""
+async def test_purchase_viewcontent_link_requires_same_platform_and_pixel(monkeypatch):
+    """平台级 Purchase 只能关联相同 platform + Pixel 的 ViewContent。"""
+    from sqlalchemy.dialects import mysql
 
-    def unexpected_session():
-        raise AssertionError("无法证明平台一致时不得查询或修改 ViewContent")
+    view_content = type("ViewContentRow", (), {"conversion_id": None})()
+    captured = {"committed": False, "sql": ""}
 
-    monkeypatch.setattr(third_party_report, "AsyncSessionLocal", unexpected_session)
+    class Result:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return view_content
+
+    class FakeDB:
+        async def execute(self, statement):
+            captured["sql"] = str(
+                statement.compile(
+                    dialect=mysql.dialect(),
+                    compile_kwargs={"literal_binds": True},
+                )
+            ).lower()
+            return Result()
+
+        async def commit(self):
+            captured["committed"] = True
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(third_party_report, "AsyncSessionLocal", lambda: SessionContext())
 
     linked = await third_party_report._link_purchase_to_view_content(
         source="postback",
         adsid="shared-click",
         conversion_id="platform-a-conversion",
         report_log_id=71,
-        allow_destination_match=False,
+        destination_pixel_id="pixel-a",
+        identity_scope="platform_scoped",
+        platform="meta",
     )
 
-    assert linked is False
+    assert linked is True
+    assert view_content.conversion_id == "platform-a-conversion"
+    assert captured["committed"] is True
+    assert "identity_scope = 'platform_scoped'" in captured["sql"]
+    assert "platform = 'meta'" in captured["sql"]
+    assert "destination_pixel_id = 'pixel-a'" in captured["sql"]
 
 
-async def test_direct_purchase_does_not_link_without_pixel_destination_identity(monkeypatch):
-    """直接发送也未持久化 Pixel ID，不能证明 ViewContent 与 Purchase 目的地一致。"""
+async def test_unscoped_purchase_viewcontent_link_requires_same_pixel(monkeypatch):
+    """直接发送只能关联 unscoped 且 Pixel ID 完全相同的 ViewContent。"""
+    from sqlalchemy.dialects import mysql
 
-    def unexpected_session():
-        raise AssertionError("未持久化 Pixel 目的地时不得关联 ViewContent")
+    view_content = type("ViewContentRow", (), {"conversion_id": None})()
+    captured = {}
 
-    monkeypatch.setattr(third_party_report, "AsyncSessionLocal", unexpected_session)
+    class Result:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return view_content
+
+    class FakeDB:
+        async def execute(self, statement):
+            captured["sql"] = str(
+                statement.compile(
+                    dialect=mysql.dialect(),
+                    compile_kwargs={"literal_binds": True},
+                )
+            ).lower()
+            return Result()
+
+        async def commit(self):
+            return None
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(third_party_report, "AsyncSessionLocal", lambda: SessionContext())
 
     linked = await third_party_report._link_purchase_to_view_content(
         source="short_link",
         adsid="direct-click",
         conversion_id="direct-conversion",
         report_log_id=72,
-        allow_destination_match=False,
+        destination_pixel_id="pixel-direct",
+        identity_scope="unscoped",
+        platform=None,
+    )
+
+    assert linked is True
+    assert "identity_scope = 'unscoped'" in captured["sql"]
+    assert "platform is null" in captured["sql"]
+    assert "destination_pixel_id = 'pixel-direct'" in captured["sql"]
+
+
+async def test_purchase_viewcontent_link_skips_when_destination_missing(monkeypatch):
+    """目的地身份缺失时不得查询或修改 ViewContent。"""
+
+    def unexpected_session():
+        raise AssertionError("缺少 Pixel 目的地时不得关联 ViewContent")
+
+    monkeypatch.setattr(third_party_report, "AsyncSessionLocal", unexpected_session)
+
+    linked = await third_party_report._link_purchase_to_view_content(
+        source="postback",
+        adsid="shared-click",
+        conversion_id="conversion",
+        report_log_id=73,
+        destination_pixel_id=None,
+        identity_scope="platform_scoped",
+        platform="meta",
     )
 
     assert linked is False
