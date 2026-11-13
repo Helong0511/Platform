@@ -548,3 +548,45 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - 继续完成 Migration Runner / provisioning / read-only schema gate 的实现设计与隔离测试；再验证完整 lifespan 和 Telegram 同步连接都使用 DML-only 身份。
 - 继续全仓库调用点清单、schema drift 完整度、迁移恢复与备份演练。
 - PR #1 继续 Open / Draft，不合并 main、不部署；生产服务器、生产数据库、Redis、队列及真实第三方接口均未连接；凭据安全专项继续暂缓。
+
+
+## 2026-11-13 最新 HEAD / Run #1500 与复核补充
+
+### 最新 CI 证据
+
+- 当前 PR HEAD：`0e8ac683a793e095405be12ba6cbb1be4ba0cc24`。
+- Run #1500：https://github.com/Helong0511/Platform/actions/runs/43352023944；该 SHA 的 Backend / Frontend jobs 均为 success。
+- Backend：**593 passed、1 skipped、1 warning**；Python compile 成功。
+- Frontend：`npm ci`、依赖 advisory 报告、Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- Skip 是本地核对脚本未纳入 CI；warning 是 passlib 在 Python 3.11 使用 `crypt` 的弃用提示。
+- 本次仅使用 GitHub Actions 隔离 MySQL 8.0 / Redis 7.4、合成数据与 Mock API；未连接生产服务或真实第三方接口。
+
+### 对当前实际代码的再次确认
+
+本轮在当前分支重新读取了 `app/db/database.py`、`app/core/database.py`、`app/bootstrap/lifespan.py`、`app/core/telegram/sync_db.py`、迁移 CLI / manifest / planner / parser、两个 systemd unit，以及真实 MySQL 运行账号测试：
+
+1. `lifespan()` 的当前启动路径仍为 `create_database()` → `_bootstrap_database_schema()` → `init_db()`。前两步仍由应用主数据库连接执行建库 / ORM DDL。
+2. `create_tables()` 仍保留为第二个 `Base.metadata.create_all()` 包装入口；没有完整分支级全仓库搜索结果，不能断言它没有调用者。
+3. Telegram 同步 Engine 仍由 `get_sync_session_factory()` 从主 `SQLALCHEMY_DATABASE_URI` 派生同步 DSN；尚未切换到独立运行身份。
+4. `python -m app.db.migrations validate` 仍是纯离线校验命令。正式 Runner、Ledger、独立 migration DSN、恢复 CLI 和只读 schema gate 均未实现。
+5. `_schema_metadata_drift()` 仍只核对缺表 / 缺列，不检查类型、长度、NULL/default、约束、索引和字符集/collation。
+6. `20261110_third_party_report_event_idempotency.sql` 的 `UPDATE ... WHERE event_key IS NULL` 仍为单条无批次全表回填。不得在没有代表性规模锁等待、redo/undo、执行时长和复制延迟测试前，将其视为可安全用于大表的迁移。
+7. 两个 systemd unit 仍加载同一应用环境文件并启动同一个 FastAPI lifespan；没有独立 provisioning / migration service。
+
+### 当前可证明的权限边界
+
+`tests/test_mysql_runtime_privileges.py` 证明的是：管理员预置 `users` 表后，DML-only 账号可在真实隔离 MySQL 中完成 `init_db()`，两个独立 Session 并发初始化可收敛为一条管理员记录，且该账号执行 CREATE TABLE 被 MySQL 拒绝。
+
+它**不证明**完整 FastAPI lifespan 可用 DML-only 账号启动，也不证明 Telegram 同步 Engine、全部业务写路径或迁移发布流程已完成权限隔离。不得据此修改 systemd 账号或撤销当前 DDL 权限。
+
+### 全仓库调用点审计状态
+
+仍未关闭。GitHub Tree 可以列出文件，但当前连接未提供可验证完整的分支级代码搜索；先前批量读取全部 Python 文件也未成功。只有在完整工作区执行并保存 `git grep` 结果，再检查动态导入、脚本、测试夹具和部署入口后，才能关闭调用点清单。
+
+### 后续实施门槛（保持不变）
+
+- 先完成调用点清单；再实现独立 provisioning、Migration Runner / Ledger、恢复命令和只读 schema gate。
+- 对无 DDL 权限的应用账号验证完整 lifespan、Telegram 同步 Engine 和业务 DML；空库初始化则由独立 provisioning / migration 身份执行。
+- 对 event_key 回填建立可恢复、限速、按主键分批方案，并在隔离 MySQL 代表性数据量上进行性能与锁影响测试。
+- 在上述流程和完整隔离备份恢复 / 兼容回滚验收通过前，不改 systemd 数据库身份、不删除现有自动 bootstrap、不合并、不部署。
+- PR #1 继续 Open / Draft；凭据安全专项按用户要求暂缓。
