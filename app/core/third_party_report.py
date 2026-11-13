@@ -261,10 +261,12 @@ async def _validate_existing_report_log_binding(
     event: str,
     conversion_id: Optional[str],
     event_key: Optional[str],
+    platform: Optional[str],
+    destination_pixel_id: Optional[str],
     lease_token: Optional[datetime] = None,
 ) -> bool:
-    """发送前验证 Outbox 日志 ID 与载荷身份一致，失败时禁止外部请求。"""
-    if not report_log_id or not event_key:
+    """发送前验证 Outbox 日志、平台作用域、目的地与载荷身份一致。"""
+    if not report_log_id or not event_key or not platform or not destination_pixel_id:
         return False
 
     async with AsyncSessionLocal() as db:
@@ -278,6 +280,12 @@ async def _validate_existing_report_log_binding(
     if row is None:
         return False
     if not bool(getattr(row, "outbox_enqueued", False)):
+        return False
+    if getattr(row, "identity_scope", None) != "platform_scoped":
+        return False
+    if getattr(row, "platform", None) != platform:
+        return False
+    if getattr(row, "destination_pixel_id", None) != destination_pixel_id:
         return False
     if getattr(row, "pii_scrubbed_at", None) is not None:
         return False
@@ -472,6 +480,7 @@ async def send_third_party_report(
         amount: Optional[float] = None,
         click_time: Optional[datetime] = None,
         facebook_api_version: Optional[str] = "v23.0",  # 可选参数，默认与全局 FACEBOOK_API_VERSION 对齐
+        platform: Optional[str] = None,
         report_log_id: Optional[int] = None,
         event_key: Optional[str] = None,
         report_lease_token: Optional[datetime] = None,
@@ -518,6 +527,8 @@ async def send_third_party_report(
                 event=event,
                 conversion_id=conversion_id,
                 event_key=event_key,
+                platform=platform,
+                destination_pixel_id=facebook_pixel_id,
                 lease_token=report_lease_token,
             )
         except Exception as binding_exc:
@@ -584,6 +595,7 @@ async def send_third_party_report(
             max_attempts=max_retries,
             use_hash=use_hash,
             conversion_id=conversion_id,
+            destination_pixel_id=pixel_id,
             currency=currency,
             amount=amount,
         )
@@ -593,7 +605,9 @@ async def send_third_party_report(
         logger.error(f"[第三方上报] {error_msg}")
         raise ValueError(error_msg)
 
-    event_key = event_key or build_event_idempotency_key(source, adsid, event, conversion_id)
+    event_key = event_key or build_event_idempotency_key(
+        source, adsid, event, conversion_id, platform=platform
+    )
     try:
         lease_token = report_lease_token or await _claim_report_log(report_log_id)
         if lease_token is None:
