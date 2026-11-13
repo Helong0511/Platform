@@ -288,6 +288,7 @@ async def _verify_database_schema() -> str | None:
                 f"index_mismatches={drift['index_mismatches']}; "
                 f"unique_constraint_mismatches={drift['unique_constraint_mismatches']}; "
                 f"foreign_key_mismatches={drift['foreign_key_mismatches']}; "
+                f"check_constraint_mismatches={drift['check_constraint_mismatches']}; "
                 f"table_option_mismatches={drift['table_option_mismatches']}"
             )
     return current_revision
