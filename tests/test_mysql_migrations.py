@@ -1575,3 +1575,69 @@ def test_cap_reservation_schema_guard_rejects_composite_primary_key():
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS cap_reservations")
         connection.close()
+
+def test_cap_reservation_key_hex_migration_enforces_lowercase_sha256():
+    """MySQL 必须拒绝非十六进制和大写 key，同时接受真实 SHA-256。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+            _run_sql_file(cursor, "sql/migrations/20261111_cap_reservation_ledger.sql")
+            _run_sql_file(cursor, "sql/migrations/20261113_cap_reservation_schema_guard.sql")
+            _run_sql_file(cursor, "sql/migrations/20261113_cap_reservation_key_hex.sql")
+
+            common = {
+                "platform": "ci",
+                "conversion_id": "synthetic-conversion",
+                "event_name": "purchase",
+                "offer_id": 77,
+                "publisher_id": None,
+                "cap_kind": "total",
+                "business_date": None,
+                "redis_counter_key": "counter:key",
+                "redis_token_key": "counter:key:reservation",
+                "redis_reserved": 0,
+                "redis_token_cleaned": 0,
+                "state": "PREPARED",
+                "attempts": 0,
+            }
+            insert_sql = (
+                "INSERT INTO cap_reservations "
+                "(reservation_key, platform, conversion_id, event_name, offer_id, publisher_id, "
+                "cap_kind, business_date, redis_counter_key, redis_token_key, redis_reserved, "
+                "redis_token_cleaned, state, attempts) "
+                "VALUES (%(reservation_key)s, %(platform)s, %(conversion_id)s, %(event_name)s, "
+                "%(offer_id)s, %(publisher_id)s, %(cap_kind)s, %(business_date)s, "
+                "%(redis_counter_key)s, %(redis_token_key)s, %(redis_reserved)s, "
+                "%(redis_token_cleaned)s, %(state)s, %(attempts)s)"
+            )
+            valid_key = hashlib.sha256(b"synthetic-cap-reservation").hexdigest()
+            cursor.execute(insert_sql, {**common, "reservation_key": valid_key})
+
+            for invalid_key in ("g" * 64, "A" * 64, "a" * 63 + "G"):
+                with pytest.raises(pymysql.err.IntegrityError):
+                    cursor.execute(insert_sql, {**common, "reservation_key": invalid_key})
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+        connection.close()
+
+
+def test_cap_reservation_key_hex_migration_rejects_wrong_named_constraint():
+    """同名 CHECK 若定义不正确，迁移必须失败关闭而非跳过。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+            _run_sql_file(cursor, "sql/migrations/20261111_cap_reservation_ledger.sql")
+            cursor.execute(
+                "ALTER TABLE cap_reservations ADD CONSTRAINT chk_cap_reservation_key_hex "
+                "CHECK (LENGTH(reservation_key) = 64)"
+            )
+            with pytest.raises(pymysql.err.ProgrammingError) as migration_error:
+                _run_sql_file(cursor, "sql/migrations/20261113_cap_reservation_key_hex.sql")
+            assert migration_error.value.args[0] == 1146
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+        connection.close()
