@@ -10,7 +10,7 @@ SET @invalid_identity_scope_rows = (
     FROM third_party_report_logs
     WHERE identity_scope NOT IN ('legacy_unresolved', 'unscoped', 'platform_scoped')
        OR (identity_scope = 'platform_scoped' AND
-           (platform IS NULL OR CHAR_LENGTH(TRIM(platform)) = 0))
+           (platform IS NULL OR LENGTH(TRIM(platform)) = 0))
        OR (identity_scope IN ('unscoped', 'legacy_unresolved') AND platform IS NOT NULL)
 );
 SET @ddl = IF(
@@ -58,7 +58,7 @@ DEALLOCATE PREPARE migration_stmt;
 
 SET @ddl = IF(
     @has_valid_check = 0,
-    'ALTER TABLE third_party_report_logs ADD CONSTRAINT chk_third_party_identity_scope_v1 CHECK ((identity_scope IN (''legacy_unresolved'', ''unscoped'', ''platform_scoped'')) AND ((identity_scope = ''platform_scoped'' AND platform IS NOT NULL AND CHAR_LENGTH(TRIM(platform)) > 0) OR (identity_scope IN (''unscoped'', ''legacy_unresolved'') AND platform IS NULL)))',
+    'ALTER TABLE third_party_report_logs ADD CONSTRAINT chk_third_party_identity_scope_v1 CHECK ((identity_scope IN (''legacy_unresolved'', ''unscoped'', ''platform_scoped'')) AND ((identity_scope = ''platform_scoped'' AND platform IS NOT NULL AND LENGTH(TRIM(platform)) > 0) OR (identity_scope IN (''unscoped'', ''legacy_unresolved'') AND platform IS NULL)))',
     'SELECT 1'
 );
 PREPARE migration_stmt FROM @ddl;
@@ -70,5 +70,5 @@ SELECT COUNT(*) AS invalid_identity_scope_rows
 FROM third_party_report_logs
 WHERE identity_scope NOT IN ('legacy_unresolved', 'unscoped', 'platform_scoped')
    OR (identity_scope = 'platform_scoped' AND
-       (platform IS NULL OR CHAR_LENGTH(TRIM(platform)) = 0))
+       (platform IS NULL OR LENGTH(TRIM(platform)) = 0))
    OR (identity_scope IN ('unscoped', 'legacy_unresolved') AND platform IS NOT NULL);
