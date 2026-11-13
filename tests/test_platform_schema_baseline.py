@@ -1,4 +1,5 @@
 """平台完整基线 SQL 的关键结构完整性测试；不连接数据库。"""
+import re
 from pathlib import Path
 
 from app.db.migrations.sql_parser import split_mysql_statements
