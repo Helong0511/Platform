@@ -347,6 +347,24 @@ async def test_mysql_commit_response_lost_after_commit_preserves_cap_reservation
         async with session_factory() as session:
             await session.execute(
                 text(
+                    """
+                    INSERT INTO cap_reservations (
+                        reservation_key, platform, conversion_id, event_name,
+                        offer_id, publisher_id, cap_kind, business_date,
+                        redis_counter_key, redis_token_key, redis_reserved,
+                        state, lease_owner
+                    ) VALUES (
+                        :reservation_key, 'ci', 'commit-response-lost', 'purchase',
+                        77, 12, 'daily', '2026-11-11',
+                        'ci:cap:counter', 'ci:cap:token', 1,
+                        'RESERVED', 'ci-lease-owner'
+                    )
+                    """
+                ),
+                {"reservation_key": "b" * 64},
+            )
+            await session.execute(
+                text(
                     "INSERT INTO postback_conversions "
                     "(id, platform, conversion_id, event_name) "
                     "VALUES (:id, :platform, :conversion_id, :event_name)"

@@ -295,6 +295,39 @@ class CapReservationLedger:
                     )
 
     @staticmethod
+    async def stage_commit_in_transaction(db, reservation_key: str, lease_owner: str) -> None:
+        """在 Postback 主事务内锁定并提交账本终态，与正式转化原子提交。
+
+        这是 Postback 与恢复 Worker 之间的线性化点：
+        - Postback 先更新账本时，行锁阻止恢复 Worker 领取该记录；
+        - 恢复 Worker 先接管时，owner/state 条件阻止旧 Postback 提交转化。
+        Redis token 清理留到主事务提交后，由 finalize/恢复任务幂等完成。
+        """
+        if not reservation_key or not lease_owner:
+            raise ValueError("Reservation key 和 lease_owner 不能为空")
+        result = await db.execute(
+            update(CapReservation)
+            .where(
+                CapReservation.reservation_key == reservation_key,
+                CapReservation.state.in_(ACTIVE_STATES),
+                CapReservation.lease_owner == lease_owner,
+            )
+            .values(
+                state="COMMITTED",
+                redis_token_cleaned=False,
+                finalized_at=get_app_now_sql_expression(),
+                updated_at=get_app_now_sql_expression(),
+                lease_owner=None,
+                lease_expires_at=None,
+                last_error="Redis token cleanup pending",
+            )
+        )
+        if (result.rowcount or 0) != 1:
+            raise RuntimeError(
+                f"Cap Reservation 提交栅栏失败，拒绝提交 Postback：{reservation_key}"
+            )
+
+    @staticmethod
     async def renew_lease(
         reservation_key: str,
         lease_owner: str,

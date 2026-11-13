@@ -473,20 +473,29 @@ class PostbackProcessor:
         cap_reservations: list[tuple],
     ) -> None:
         """
-        提交转化与队列事务；遇到提交异常时先查询提交结果，再决定是否回退 Redis。
+        在同一 MySQL 事务内提交正式转化与 Cap Reservation COMMITTED 状态。
 
-        数据库连接在 COMMIT 响应期间断开时，提交结果可能未知。只有确认转化不存在才回退
-        本次 Redis reservation，避免「DB 已提交但 Redis 被回退」导致 Cap 超卖。
+        账本状态更新是 Postback 与恢复 Worker 的线性化点。Redis token 清理在
+        MySQL 提交后执行；清理失败由恢复 Worker 重试，不得影响已提交的业务事实。
         """
+        commit_attempted = False
         try:
-            # 在 DB COMMIT 前续租，避免恢复 Worker 抢占仍在执行中的 Postback reservation。
+            # 必须使用当前 Postback Session：账本行锁与转化记录由同一事务提交。
+            # 不能用独立 Session 续租后再提交，否则恢复 Worker 仍可在两步之间接管。
             for reservation in cap_reservations or []:
                 ledger_key = reservation[5] if len(reservation) > 5 else None
                 lease_owner = reservation[6] if len(reservation) > 6 else None
-                if ledger_key and lease_owner:
-                    await CapReservationLedger.renew_lease(ledger_key, lease_owner)
+                if ledger_key:
+                    await CapReservationLedger.stage_commit_in_transaction(
+                        db, ledger_key, lease_owner
+                    )
+
+            # stage_commit 的 UPDATE 已锁定账本行；恢复 Worker 使用 SKIP LOCKED，
+            # 因而不能在此事务提交前领取同一条记录。
+            commit_attempted = True
             await db.commit()
-            # DB 转化事务已提交后再独立确认账本；失败时保留活动状态，由恢复 Worker 按正式事件键修复。
+
+            # 正式转化与账本 COMMITTED 已原子提交；现在只做可重试的 Redis token 清理。
             for reservation in cap_reservations or []:
                 ledger_key = reservation[5] if len(reservation) > 5 else None
                 lease_owner = reservation[6] if len(reservation) > 6 else None
@@ -497,7 +506,7 @@ class PostbackProcessor:
                         )
                     except Exception as ledger_error:
                         logger.critical(
-                            "转化已提交但 Cap Reservation 账本终态更新失败，等待恢复：error_type=%s",
+                            "转化与 Cap Reservation 已提交，但 Redis token 清理未完成，将由恢复任务重试：error_type=%s",
                             type(ledger_error).__name__,
                         )
             return
@@ -509,6 +518,11 @@ class PostbackProcessor:
                     "Postback COMMIT 异常后 DB rollback 也失败；保留 Redis Cap reservation：error_type=%s",
                     type(rollback_error).__name__,
                 )
+                raise commit_error
+
+            # 提交栅栏失败意味着账本已被恢复 Worker 接管或进入终态。
+            # 此时不能由旧 Postback 再碰 Redis；由当前账本 owner 完成恢复。
+            if not commit_attempted:
                 raise commit_error
 
             try:
@@ -534,7 +548,8 @@ class PostbackProcessor:
                         type(rollback_error).__name__,
                     )
             elif committed:
-                # COMMIT 响应丢失但正式转化已存在：保留 Redis 计数并补记账本终态。
+                # COMMIT 响应丢失但正式转化已存在：账本状态应随同一事务已提交；
+                # finalize 只负责幂等清理 token，不再承担跨库状态决策。
                 for reservation in cap_reservations or []:
                     ledger_key = reservation[5] if len(reservation) > 5 else None
                     lease_owner = reservation[6] if len(reservation) > 6 else None
@@ -545,7 +560,7 @@ class PostbackProcessor:
                             )
                         except Exception as ledger_error:
                             logger.critical(
-                                "正式转化已存在但 Reservation 账本无法标记 COMMITTED：error_type=%s",
+                                "正式转化已存在但 Reservation token 清理失败：error_type=%s",
                                 type(ledger_error).__name__,
                             )
                 logger.critical(

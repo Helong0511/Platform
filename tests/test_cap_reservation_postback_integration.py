@@ -220,37 +220,45 @@ async def test_fail_open_rollback_finalizes_ledger_without_redis_decrement(monke
 
 
 @pytest.mark.asyncio
-async def test_postback_commit_finalizes_ledger_after_database_commit(monkeypatch):
+async def test_postback_stages_ledger_commit_in_business_transaction_before_database_commit(monkeypatch):
     calls = []
 
     class FakeDB:
         async def commit(self):
             calls.append("db_commit")
 
+        async def rollback(self):
+            calls.append("db_rollback")
+
+    async def stage_commit(db, *args):
+        assert db is fake_db
+        calls.append(("stage_commit", args))
+
     async def finalize(*args, **kwargs):
         calls.append(("ledger_finalize", args, kwargs))
 
-    async def renew_lease(*args, **kwargs):
-        return None
-
     from app.core.postback import processor as processor_module
+    fake_db = FakeDB()
+    monkeypatch.setattr(
+        processor_module.CapReservationLedger,
+        "stage_commit_in_transaction",
+        stage_commit,
+    )
     monkeypatch.setattr(processor_module.CapReservationLedger, "finalize", finalize)
-    monkeypatch.setattr(processor_module.CapReservationLedger, "renew_lease", renew_lease)
 
     await PostbackProcessor._commit_conversion_with_cap_reconciliation(
-        db=FakeDB(),
+        db=fake_db,
         conversion_id=9001,
         cap_reservations=[
             ("daily", 77, 12, datetime(2026, 11, 11), "e" * 64, "e" * 64, "owner", True)
         ],
     )
 
-    assert calls[0] == "db_commit"
-    assert calls[1] == (
-        "ledger_finalize",
-        ("e" * 64, "COMMITTED"),
-        {"lease_owner": "owner"},
-    )
+    assert calls == [
+        ("stage_commit", ("e" * 64, "owner")),
+        "db_commit",
+        ("ledger_finalize", ("e" * 64, "COMMITTED"), {"lease_owner": "owner"}),
+    ]
 
 
 
