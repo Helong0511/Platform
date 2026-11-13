@@ -1377,3 +1377,41 @@ Run #1575 在上述部分修改尚未补齐测试夹具时失败：12 failed、6
 - Runner 首版代码和隔离测试已通过 CI，但还没有被应用启动链路采用。
 - PR #1 继续 Open / Draft；不合并 main、不部署。
 - 凭据安全专项仍按用户要求暂缓。
+
+
+---
+
+## 2026-11-13 实施状态更正（以当前代码为准）
+
+> 本节更新早期设计基线的实施状态。上文第 1、8、10 节中“尚未实现 Runner / ledger / 只读 gate”等表述是 2026-11-12 的历史快照，不再代表当前分支状态；历史审计记录保留，不追溯改写。
+
+### 已落地的实现
+
+- app/db/migrations/manifest.py：显式 migration revision、文件路径、SHA-256、依赖关系及文件集合校验。
+- app/db/migrations/sql_parser.py：按 MySQL SQL_MODE 切分受支持 SQL；拒绝不支持的客户端语法。
+- app/db/migrations/runner.py：提供 validate、status、apply 所依赖的 Runner 能力；使用单一物理 MySQL connection、数据库级 GET_LOCK、持久化 migration ledger、逐语句执行/结果集消费、失败状态 fail-closed。
+- app/db/migrations/ledger.py / gate.py：校验 ledger 连续前缀与 checksum，并提供只读 revision gate。
+- app/bootstrap/lifespan.py：应用 Worker 启动时执行只读 revision gate 和 ORM schema drift 检查；不在该启动路径执行 schema DDL。
+- Runner 的 apply_migrations() 强制要求独立 MIGRATION_DATABASE_URL 与应用 DSN；两者必须指向相同 MySQL 数据库及服务器端点，且用户名不同。迁移 DSN 缺失、应用 DSN 缺失或目标不一致均拒绝执行。
+- 当前 manifest 已登记 9 份 migration；应以 manifest 实际内容为准，不再沿用早期“五份迁移脚本”的历史描述。
+
+### 最新隔离 CI 证据
+
+- PR HEAD：a665a639606b4caf1d55ed93ea6911871105cfd8。
+- Run #1703：https://github.com/Helong0511/Platform/actions/runs/43395487324。
+- Backend：**667 passed、1 skipped、1 warning**；MySQL Outbox 专项包含真实临时 MySQL A/B Worker 失租接管、旧令牌禁止续租/终结、身份锁竞争与目的地绑定测试。
+- Frontend：依赖安装、advisory 报告、Lint、Build、Playwright Mock API Browser E2E 全部成功。
+- 唯一 skip 为未提交的本机核对脚本；warning 为 passlib 在 Python 3.11 下使用 crypt 的弃用提示。
+- 以上只证明该 SHA 的隔离 CI；不代表真实环境迁移、备份恢复、回滚或上线演练完成。
+
+### 仍未完成的迁移与部署工作
+
+1. 20261110_third_party_report_event_idempotency.sql 仍包含历史数据全表回填；尚未实现带 checkpoint/ledger 的可恢复 Keyset Backfill Runner。必须先完成批量回填工具和大数据量隔离演练，不能直接对生产大表执行。
+2. MySQL migration 中使用 ADD COLUMN ... AFTER ... 的 DDL 尚未通过目标 MySQL 小版本、真实表规模的 Online DDL 算法/metadata lock/复制延迟演练。Runner 最低版本 8.0.16；不能据此推断这些 DDL 一定走 INSTANT。
+3. 新库 provisioning、旧库升级、每个 DDL 边界中断后的人工恢复、备份恢复、应用兼容回滚和最终 schema/data diff 尚未完成。
+4. 全仓库 create_database、create_tables、Base.metadata.create_all、init_db 等入口的穷尽调用点审计及应用账号最小权限验收仍需完成；不要把 lifespan 的只读 gate 等同于所有旧 helper 已移除。
+5. init_db() 的默认管理员业务初始化和定时任务配置同步仍是启动期数据写入；需要单独核对多 Worker 并发、权限边界和部署职责，不属于 schema migration 的已完成范围。
+
+### 合并/上线结论
+
+PR #1 继续 Open / Draft，不合并 main、不部署。只使用 GitHub Actions 临时 MySQL/Redis、合成数据和 Mock API；禁止连接生产服务器、数据库、Redis、队列或真实第三方接口。凭据安全专项按用户要求暂缓。
