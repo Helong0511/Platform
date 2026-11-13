@@ -610,7 +610,7 @@ async def send_third_party_report(
                 conversion_id=conversion_id,
                 event_key=event_key,
                 platform=platform,
-                destination_pixel_id=facebook_pixel_id,
+                destination_pixel_id=(facebook_pixel_id or "").strip(),
                 lease_token=report_lease_token,
             )
         except Exception as binding_exc:
