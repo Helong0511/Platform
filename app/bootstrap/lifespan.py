@@ -32,18 +32,45 @@ logger = logging.getLogger(__name__)
 
 
 def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
-    """只读核验 ORM 声明的表/列是否存在；绝不创建或修改数据库对象。"""
+    """只读核验 ORM 表、列、类型、NULL 属性和主键；绝不执行 DDL。"""
+    from sqlalchemy import Boolean, Integer, Numeric, String
+
     target_metadata = metadata or Base.metadata
     inspector = inspect(sync_connection)
     missing_tables = []
     missing_columns = {}
+    column_type_mismatches = {}
+    nullable_mismatches = {}
+    primary_key_mismatches = {}
 
+    def type_mismatch(expected_type, actual_type, dialect_name: str) -> bool:
+        expected_affinity = expected_type._type_affinity
+        actual_affinity = actual_type._type_affinity
+        # MySQL BOOLEAN 物理类型通常表现为 TINYINT(1)。
+        if dialect_name == "mysql" and isinstance(expected_type, Boolean):
+            affinity_matches = actual_affinity in (Boolean, Integer)
+        else:
+            affinity_matches = expected_affinity is actual_affinity
+        if not affinity_matches:
+            return True
+        if isinstance(expected_type, String) and expected_type.length is not None:
+            if getattr(actual_type, "length", None) != expected_type.length:
+                return True
+        if isinstance(expected_type, Numeric):
+            for attribute in ("precision", "scale"):
+                expected_value = getattr(expected_type, attribute, None)
+                if expected_value is not None and getattr(actual_type, attribute, None) != expected_value:
+                    return True
+        return False
+
+    dialect_name = sync_connection.dialect.name
     for table in target_metadata.sorted_tables:
         if not inspector.has_table(table.name, schema=table.schema):
             missing_tables.append(table.fullname)
             continue
+
         actual_columns = {
-            column["name"]
+            column["name"]: column
             for column in inspector.get_columns(table.name, schema=table.schema)
         }
         absent = sorted(
@@ -53,9 +80,37 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         if absent:
             missing_columns[table.fullname] = absent
 
+        for column in table.columns:
+            actual = actual_columns.get(column.name)
+            if actual is None:
+                continue
+            if type_mismatch(column.type, actual["type"], dialect_name):
+                column_type_mismatches.setdefault(table.fullname, {})[column.name] = {
+                    "expected": str(column.type),
+                    "actual": str(actual["type"]),
+                }
+            if bool(actual["nullable"]) != bool(column.nullable):
+                nullable_mismatches.setdefault(table.fullname, {})[column.name] = {
+                    "expected": bool(column.nullable),
+                    "actual": bool(actual["nullable"]),
+                }
+
+        expected_pk = sorted(column.name for column in table.primary_key.columns)
+        actual_pk = sorted(
+            inspector.get_pk_constraint(table.name, schema=table.schema).get("constrained_columns") or []
+        )
+        if expected_pk != actual_pk:
+            primary_key_mismatches[table.fullname] = {
+                "expected": expected_pk,
+                "actual": actual_pk,
+            }
+
     return {
         "missing_tables": sorted(missing_tables),
         "missing_columns": missing_columns,
+        "column_type_mismatches": column_type_mismatches,
+        "nullable_mismatches": nullable_mismatches,
+        "primary_key_mismatches": primary_key_mismatches,
     }
 
 
@@ -64,11 +119,14 @@ async def _verify_database_schema() -> str | None:
     async with engine.connect() as connection:
         current_revision = await verify_schema_revision(connection)
         drift = await connection.run_sync(_schema_metadata_drift)
-        if drift["missing_tables"] or drift["missing_columns"]:
+        if any(drift.values()):
             raise RuntimeError(
                 "数据库 schema 与 ORM 不一致："
                 f"missing_tables={drift['missing_tables']}; "
-                f"missing_columns={drift['missing_columns']}"
+                f"missing_columns={drift['missing_columns']}; "
+                f"column_type_mismatches={drift['column_type_mismatches']}; "
+                f"nullable_mismatches={drift['nullable_mismatches']}; "
+                f"primary_key_mismatches={drift['primary_key_mismatches']}"
             )
     return current_revision
 
