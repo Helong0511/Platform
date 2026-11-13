@@ -122,7 +122,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
 
 
 async def _verify_database_schema() -> str | None:
-    """只读核验 migration revision 与 ORM 表/列；应用 Worker 不执行 schema DDL。"""
+    """只读核验 migration revision 与 ORM 表/列/类型/NULL/主键；应用 Worker 不执行 schema DDL。"""
     async with engine.connect() as connection:
         current_revision = await verify_schema_revision(connection)
         drift = await connection.run_sync(_schema_metadata_drift)
@@ -222,12 +222,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.debug("点击落库策略日志跳过: %s", e)
 
-    # 只读核验数据库 migration revision 与 ORM 表/列；API/Scheduler Worker 不创建数据库或执行 DDL。
+    # 只读核验数据库 migration revision 与 ORM 结构；API/Scheduler Worker 不创建数据库或执行 DDL。
     # 新库必须先由 provisioning 导入基线并运行独立 Migration Runner。
     try:
         current_revision = await _verify_database_schema()
         logger.info(
-            "[Worker PID:%s] 数据库 schema revision 与 ORM 表/列核验通过：revision=%s",
+            "[Worker PID:%s] 数据库 schema revision 与 ORM 结构核验通过：revision=%s",
             worker_pid,
             current_revision,
         )
