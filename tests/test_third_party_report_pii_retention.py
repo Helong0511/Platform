@@ -211,6 +211,9 @@ async def test_outbox_worker_does_not_read_payload_when_claim_fails(monkeypatch)
 
     class FakeDB:
         async def scalar(self, statement):
+            # 允许在认领前只读平台作用域；不得读取完整 Outbox payload。
+            if "select third_party_report_logs.platform" in str(statement).lower():
+                return "meta"
             captured["read"] += 1
             raise AssertionError("认领失败后不得读取 Outbox 载荷")
 
@@ -221,8 +224,10 @@ async def test_outbox_worker_does_not_read_payload_when_claim_fails(monkeypatch)
         async def __aexit__(self, *args):
             return False
 
-    async def claim(report_log_id):
+    async def claim(report_log_id, **kwargs):
         assert report_log_id == 11
+        assert kwargs.get("expected_scope") == "platform_scoped"
+        assert kwargs.get("platform") == "meta"
         captured["claim"] += 1
         return None
 
