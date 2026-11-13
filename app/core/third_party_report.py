@@ -594,7 +594,11 @@ async def _link_purchase_to_view_content(
                 query = query.where(ThirdPartyReportLog.platform == platform)
             else:
                 query = query.where(ThirdPartyReportLog.platform.is_(None))
-            result = await db.execute(query.limit(1))
+            # 同一个 ViewContent 只能被一个 Purchase 认领；锁定候选行并稳定排序，
+            # 避免两个不同 conversion_id 并发读取同一条 NULL 记录后互相覆盖。
+            result = await db.execute(
+                query.order_by(ThirdPartyReportLog.id.asc()).limit(1).with_for_update()
+            )
             view_content_log = result.scalars().first()
             if view_content_log:
                 view_content_log.conversion_id = conversion_id
