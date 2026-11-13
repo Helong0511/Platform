@@ -13,7 +13,7 @@ from app.models.cpl import Advertiser, Publisher, Offer, OfferPublisherAssignmen
 from app.models.cap_reservation import CapReservation
 from app.models.deduction import ConversionDeductionConfig, ConversionDeductionLog
 from app.models.security import SensitivePathProbeLog, SensitiveBlockedIP, PostbackIpWhitelist
-from app.models.third_party import ThirdPartyReportLog
+from app.models.third_party import ThirdPartyReportLog, ThirdPartyReportIdentityLock
 
 __all__ = [
     "Base", "pwd_context", "UserRole",
@@ -54,4 +54,5 @@ __all__ = [
     "SensitiveBlockedIP",
     "PostbackIpWhitelist",
     "ThirdPartyReportLog",
+    "ThirdPartyReportIdentityLock",
 ]
