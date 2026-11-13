@@ -643,6 +643,8 @@ async def send_third_party_report(
                 completed_at=now,
                 next_retry_time=now + timedelta(minutes=5),
                 expected_report_start_time=lease_token,
+                expected_identity_scope="platform_scoped",
+                expected_platform=platform,
             )
             if not updated:
                 return {"success": False, "retryable": True, "reason": "report_lease_lost"}
