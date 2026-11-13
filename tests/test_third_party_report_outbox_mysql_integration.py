@@ -18,9 +18,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core import third_party_report as report_module
 from app.core.utils import get_app_now_naive
-from app.models.third_party import ThirdPartyReportLog
+from app.models.third_party import ThirdPartyReportLog, ThirdPartyReportIdentityLock
 from app.models.postback import PostbackForwardLog
 from app.services import third_party_report_pii_retention as retention_module
+from app.services import third_party_report_outbox as outbox_module
 from app.bootstrap import lifespan as lifespan_module
 
 
@@ -845,6 +846,162 @@ async def test_mysql_outbox_pixel_destination_is_bound_once_and_cannot_silently_
         async with session_factory() as session:
             persisted = await session.get(ThirdPartyReportLog, report_id)
             assert persisted.destination_pixel_id == "pixel-A"
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_direct_and_postback_creation_share_one_base_identity_lock(monkeypatch):
+    """真实 MySQL 并发验证直接发送与 Postback 首次创建只能有一个身份所有者。"""
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(ThirdPartyReportLog.__table__.create)
+            await connection.run_sync(ThirdPartyReportIdentityLock.__table__.create)
+
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
+        monkeypatch.setattr(outbox_module, "AsyncSessionLocal", session_factory)
+
+        identity = uuid.uuid4().hex
+        adsid = f"cross-path-{identity}"
+        conversion_id = f"conversion-{identity}"
+
+        async def direct_create():
+            return await report_module.create_report_log(
+                source="postback",
+                adsid=adsid,
+                event="Purchase",
+                email="",
+                ip="",
+                phone="",
+                ua="",
+                conversion_id=conversion_id,
+                destination_pixel_id="pixel-direct",
+            )
+
+        async def postback_create(platform="meta"):
+            async with session_factory() as session:
+                async with session.begin():
+                    return await outbox_module.enqueue_postback_report(
+                        session,
+                        platform=platform,
+                        adsid=adsid,
+                        event="Purchase",
+                        conversion_id=conversion_id,
+                        email=None,
+                        ip=None,
+                        phone=None,
+                        ua=None,
+                        currency="USD",
+                        amount=12.0,
+                        short_link_id=7,
+                        cloak_name=None,
+                        short_code=None,
+                        click_time=None,
+                    )
+
+        outcomes = await asyncio.gather(
+            direct_create(),
+            postback_create(),
+            return_exceptions=True,
+        )
+        successful_ids = [
+            value for value in outcomes
+            if isinstance(value, int) and value > 0
+        ]
+        conflicts = [
+            value for value in outcomes
+            if isinstance(value, outbox_module.LegacyEventIdentityConflict)
+        ]
+        assert len(successful_ids) == 1
+        assert len(conflicts) + sum(value == 0 for value in outcomes) == 1
+
+        async with session_factory() as session:
+            rows = list(
+                (
+                    await session.execute(
+                        select(ThirdPartyReportLog).where(
+                            ThirdPartyReportLog.adsid == adsid
+                        )
+                    )
+                ).scalars().all()
+            )
+            locks = list(
+                (
+                    await session.execute(
+                        select(ThirdPartyReportIdentityLock).where(
+                            ThirdPartyReportIdentityLock.identity_key
+                            == report_module.build_event_idempotency_key(
+                                "postback", adsid, "Purchase", conversion_id
+                            )
+                        )
+                    )
+                ).scalars().all()
+            )
+            assert len(rows) == 1
+            assert len(locks) == 1
+            assert rows[0].identity_scope in {"unscoped", "platform_scoped"}
+
+        # 同一基础身份下明确平台 A/B 可以并存；同平台重复 Postback 复用原行。
+        multi_adsid = f"multi-platform-{uuid.uuid4().hex}"
+        multi_conversion = f"multi-conversion-{uuid.uuid4().hex}"
+
+        async def create_platform(platform):
+            async with session_factory() as session:
+                async with session.begin():
+                    return await outbox_module.enqueue_postback_report(
+                        session,
+                        platform=platform,
+                        adsid=multi_adsid,
+                        event="Purchase",
+                        conversion_id=multi_conversion,
+                        email=None,
+                        ip=None,
+                        phone=None,
+                        ua=None,
+                        currency="USD",
+                        amount=2.0,
+                        short_link_id=8,
+                        cloak_name=None,
+                        short_code=None,
+                        click_time=None,
+                    )
+
+        platform_ids = await asyncio.gather(
+            create_platform("meta"),
+            create_platform("bft"),
+        )
+        repeated_meta = await create_platform("meta")
+        assert len(set(platform_ids)) == 2
+        assert repeated_meta == platform_ids[0]
+
+        async with session_factory() as session:
+            scoped_rows = list(
+                (
+                    await session.execute(
+                        select(ThirdPartyReportLog).where(
+                            ThirdPartyReportLog.adsid == multi_adsid
+                        )
+                    )
+                ).scalars().all()
+            )
+            assert {row.platform for row in scoped_rows} == {"meta", "bft"}
+            assert {row.identity_scope for row in scoped_rows} == {"platform_scoped"}
     finally:
         if engine is not None:
             await engine.dispose()
