@@ -1053,6 +1053,8 @@ async def test_mysql_identity_lock_rollback_releases_row_and_hash_collision_fail
         async with session_factory() as session:
             missing = await session.get(ThirdPartyReportIdentityLock, rollback_key)
             assert missing is None
+
+        async with session_factory() as session:
             async with session.begin():
                 reacquired = await report_module._lock_report_base_identity(
                     session,
