@@ -497,3 +497,54 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - 对空库路径另用 provisioning/migration 身份执行初始化；验证失败中断、重复运行、checksum drift、并发锁和人工恢复。
 - 在上述测试通过前，systemd 不得改为低权限账号，也不得删除现有自动 bootstrap 代码。
 - PR #1 保持 Open / Draft，不合并、不部署；不连接生产服务器、数据库、Redis、队列或真实第三方接口；凭据安全专项继续暂缓。
+
+
+## 2026-11-13 运行账号 DML-only 与真实 MySQL 并发管理员初始化验收（Run #1498 / #1499）
+
+### 最新 CI 证据
+
+- Run #1498 对应 HEAD：`9f3ab8bb687ea8bc2a47d0296c36a2b5775db72c`，CI 全部成功。
+  - Backend：**593 passed、1 skipped、1 warning**。
+  - Frontend：依赖安装、advisory 报告、Lint、Build、Playwright Mock API Browser E2E 全部成功。
+  - 详情：https://github.com/Helong0511/Platform/actions/runs/43351458980
+- Run #1499 对应 HEAD：`80d8375339b3e3c8dead4f852ba7972a2a3694c4`，CI 全部成功。
+  - Backend：**593 passed、1 skipped、1 warning**。
+  - Frontend：Lint、Build、Playwright Mock API Browser E2E 全部成功。
+  - 新增真实 MySQL 权限/并发测试节点 `tests/test_mysql_runtime_privileges.py::test_mysql_runtime_account_can_bootstrap_admin_but_cannot_run_ddl` 明确为 PASSED。
+  - 详情：https://github.com/Helong0511/Platform/actions/runs/43351749183
+- 1 skipped 仍是本地核对脚本未纳入 CI；1 warning 仍是 passlib/Python 3.11 `crypt` 弃用提示。不能描述为零 skip / 零 warning。
+- Run #1497 的一次失败已保留：当时测试错误地使用 DML-only 用户创建测试表，MySQL 按预期返回 1142。修正为测试管理员预置表结构后，Run #1498 通过。该失败是测试准备身份错误，不是放宽权限后绕过失败。
+
+### 新增真实 MySQL 验证内容
+
+新增 `tests/test_mysql_runtime_privileges.py`，仅在 GitHub Actions loopback 临时 MySQL 中运行，并使用独立测试 schema `platform_ci_runtime_privileges` 与临时测试用户：
+
+1. 安全门禁要求 `UNIT_TEST=1`、`GITHUB_ACTIONS=true`、显式 destructive-test flag、loopback host 和固定 CI 数据库名；其它环境拒绝执行破坏性操作。
+2. 由隔离测试管理员创建专用 schema、临时用户并授予仅 `SELECT/INSERT/UPDATE/DELETE` 权限。
+3. 测试管理员预置 ORM 的 `users` 表；运行账号没有 CREATE/ALTER/DROP 权限。
+4. 通过真实 MySQL + SQLAlchemy AsyncSession 执行 `app.core.database.init_db()`。
+5. 用两个独立 AsyncSession 和两方屏障，强制两个初始化 Worker 都先查询到“没有管理员”，再并发插入；验证唯一键竞争的一方回滚后能重新查询到胜出 Worker 创建的管理员。
+6. 再次执行初始化，确认幂等；查询数据库确认管理员记录只有一条。
+7. 使用同一运行账号执行 `CREATE TABLE`，断言 MySQL 错误码 1142，确认 DDL 被拒绝。
+8. finally 清理临时数据库、临时用户并释放 Engine/连接。
+
+### 结果能证明什么、不能证明什么
+
+**已证明：**
+- `init_db()` 的管理员检查、创建、唯一键竞争回查及重复初始化，在真实 MySQL、独立连接、DML-only 用户下可以成功。
+- MySQL 唯一键竞争路径在强制同时读到“无管理员”的真实并发场景下通过。
+- 运行账号执行 CREATE TABLE 被数据库拒绝；测试没有通过授予 DDL 权限来绕过错误。
+
+**尚未证明 / 仍是阻断项：**
+- 当前 FastAPI lifespan 仍会执行 `create_database()` 和 `Base.metadata.create_all()`；本测试刻意由测试管理员预置表结构，不能证明低权限账号可以启动完整应用。
+- 尚无独立 provisioning DSN、正式 Migration Runner / ledger、只读 schema revision gate。
+- 尚未覆盖 Telegram 同步 Engine 在专用运行身份下的连接配置；目前仍使用主 `SQLALCHEMY_DATABASE_URI`。
+- 尚未验证所有业务表/索引/约束均由迁移身份正确创建，也未完成旧 schema 升级、备份恢复、DDL 中断恢复、checksum drift 和应用兼容回滚。
+- 尚未完成全仓库 `create_database/create_tables/create_all/init_db` 调用点清单；537 个 Python 文件的完整调用点审计仍待可执行工作区 `git grep` 与动态入口核查。
+
+### 下一步
+
+- 不因这两次 CI 通过就更改 systemd 数据库账号或撤销现有 DDL 权限。
+- 继续完成 Migration Runner / provisioning / read-only schema gate 的实现设计与隔离测试；再验证完整 lifespan 和 Telegram 同步连接都使用 DML-only 身份。
+- 继续全仓库调用点清单、schema drift 完整度、迁移恢复与备份演练。
+- PR #1 继续 Open / Draft，不合并 main、不部署；生产服务器、生产数据库、Redis、队列及真实第三方接口均未连接；凭据安全专项继续暂缓。
