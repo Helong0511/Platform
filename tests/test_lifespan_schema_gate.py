@@ -43,6 +43,10 @@ async def test_lifespan_schema_verification_uses_read_only_gate(monkeypatch):
             "column_type_mismatches": {},
             "nullable_mismatches": {},
             "primary_key_mismatches": {},
+            "index_mismatches": {},
+            "unique_constraint_mismatches": {},
+            "foreign_key_mismatches": {},
+            "table_option_mismatches": {},
         }
     )
     engine = _FakeEngine(connection)
@@ -71,6 +75,10 @@ async def test_lifespan_schema_verification_fails_on_missing_orm_objects(monkeyp
             "column_type_mismatches": {},
             "nullable_mismatches": {},
             "primary_key_mismatches": {},
+            "index_mismatches": {},
+            "unique_constraint_mismatches": {},
+            "foreign_key_mismatches": {},
+            "table_option_mismatches": {},
         }
     )
 
