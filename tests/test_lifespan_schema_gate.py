@@ -46,6 +46,7 @@ async def test_lifespan_schema_verification_uses_read_only_gate(monkeypatch):
             "index_mismatches": {},
             "unique_constraint_mismatches": {},
             "foreign_key_mismatches": {},
+            "check_constraint_mismatches": {},
             "table_option_mismatches": {},
         }
     )
@@ -78,6 +79,7 @@ async def test_lifespan_schema_verification_fails_on_missing_orm_objects(monkeyp
             "index_mismatches": {},
             "unique_constraint_mismatches": {},
             "foreign_key_mismatches": {},
+            "check_constraint_mismatches": {},
             "table_option_mismatches": {},
         }
     )
