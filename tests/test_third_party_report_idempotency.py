@@ -172,7 +172,7 @@ async def test_report_in_progress_does_not_send_duplicate_request(monkeypatch):
     async def existing_log(**kwargs):
         return 41
 
-    async def not_claimed(report_log_id):
+    async def not_claimed(report_log_id, **kwargs):
         return None
 
     async def pending_status(report_log_id):
@@ -351,7 +351,7 @@ async def test_telegram_failure_does_not_retry_successful_purchase_report(monkey
     async def existing_log(**kwargs):
         return 41
 
-    async def claimed(report_log_id):
+    async def claimed(report_log_id, **kwargs):
         return True
 
     async def capture_update(report_log_id, **kwargs):
@@ -365,7 +365,7 @@ async def test_telegram_failure_does_not_retry_successful_purchase_report(monkey
 
     monkeypatch.setattr(third_party_report, "create_report_log", existing_log)
     monkeypatch.setattr(third_party_report, "_claim_report_log", claimed)
-    async def renew_claimed_lease(report_log_id, lease_token, lease_seconds=300):
+    async def renew_claimed_lease(report_log_id, lease_token, lease_seconds=300, **kwargs):
         return lease_token
 
     monkeypatch.setattr(third_party_report, "_renew_report_log_lease", renew_claimed_lease)
@@ -671,7 +671,7 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
         state["claim"] += 1
         return datetime(2026, 11, 11, 12, 0, 0)
 
-    async def attempt_state(report_log_id):
+    async def attempt_state(report_log_id, **kwargs):
         return state["ack_attempts"], 12
 
     async def persist_update(report_log_id, **kwargs):
@@ -686,7 +686,7 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
         return state["status"]
 
     monkeypatch.setattr(third_party_report, "_claim_report_log", claim)
-    async def renew_claimed_lease(report_log_id, lease_token, lease_seconds=300):
+    async def renew_claimed_lease(report_log_id, lease_token, lease_seconds=300, **kwargs):
         return lease_token
 
     monkeypatch.setattr(third_party_report, "_renew_report_log_lease", renew_claimed_lease)
@@ -750,16 +750,16 @@ async def test_report_lease_renewal_failure_prevents_external_request(monkeypatc
     async def existing_log(**kwargs):
         return 911
 
-    async def claimed(report_log_id):
+    async def claimed(report_log_id, **kwargs):
         return lease_token
 
-    async def attempt_state(report_log_id):
+    async def attempt_state(report_log_id, **kwargs):
         return 0, 4
 
     async def persist_update(report_log_id, **kwargs):
         return True
 
-    async def expired_lease(report_log_id, token, lease_seconds=300):
+    async def expired_lease(report_log_id, token, lease_seconds=300, **kwargs):
         assert token == lease_token
         return None
 
@@ -872,10 +872,10 @@ async def test_failed_attempt_persistence_prevents_external_request(monkeypatch)
     async def existing_log(**kwargs):
         return 910
 
-    async def claimed(report_log_id):
+    async def claimed(report_log_id, **kwargs):
         return True
 
-    async def attempt_state(report_log_id):
+    async def attempt_state(report_log_id, **kwargs):
         return 0, 4
 
     async def failed_persist(report_log_id, **kwargs):
