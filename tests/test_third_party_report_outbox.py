@@ -1220,7 +1220,7 @@ async def test_enqueue_allows_distinct_platform_scoped_events_for_same_base_iden
             params = statement.compile(
                 dialect=mysql.dialect()
             ).params
-            if params.get("event_key_1") == platform_a_key:
+            if platform_a_key in params.values():
                 return existing
             return None
 
