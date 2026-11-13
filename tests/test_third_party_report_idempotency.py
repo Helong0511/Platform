@@ -991,6 +991,9 @@ async def test_existing_report_log_binding_requires_persisted_identity_and_lease
                 (),
                 {
                     "outbox_enqueued": True,
+                    "identity_scope": "platform_scoped",
+                    "platform": "meta",
+                    "destination_pixel_id": "pixel-123",
                     "pii_scrubbed_at": None,
                     "source": "postback",
                     "adsid": "ads-123",
@@ -1021,6 +1024,8 @@ async def test_existing_report_log_binding_requires_persisted_identity_and_lease
         event="Purchase",
         conversion_id="conv-456",
         event_key="persisted-key",
+        platform="meta",
+        destination_pixel_id="pixel-123",
         lease_token=lease,
     )
     wrong_payload = await third_party_report._validate_existing_report_log_binding(
@@ -1030,6 +1035,8 @@ async def test_existing_report_log_binding_requires_persisted_identity_and_lease
         event="Purchase",
         conversion_id="conv-456",
         event_key="persisted-key",
+        platform="meta",
+        destination_pixel_id="pixel-123",
         lease_token=lease,
     )
     wrong_lease = await third_party_report._validate_existing_report_log_binding(
@@ -1039,6 +1046,8 @@ async def test_existing_report_log_binding_requires_persisted_identity_and_lease
         event="Purchase",
         conversion_id="conv-456",
         event_key="persisted-key",
+        platform="meta",
+        destination_pixel_id="pixel-123",
         lease_token=datetime(2026, 11, 13, 12, 29, 0),
     )
 
