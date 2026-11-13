@@ -1162,3 +1162,91 @@ async def test_mysql_identity_lock_wait_timeout_fails_closed_and_can_retry(monke
         if engine is not None:
             await engine.dispose()
         _drop_isolated_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_direct_first_and_postback_first_both_reject_cross_scope_duplicates(monkeypatch):
+    """真实 MySQL 覆盖两种创建先后顺序，证明无平台与平台事件不能并存。"""
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(ThirdPartyReportLog.__table__.create)
+            await connection.run_sync(ThirdPartyReportIdentityLock.__table__.create)
+
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
+        monkeypatch.setattr(outbox_module, "AsyncSessionLocal", session_factory)
+
+        async def direct(adsid, conversion_id):
+            return await report_module.create_report_log(
+                source="postback",
+                adsid=adsid,
+                event="Purchase",
+                email="",
+                ip="",
+                phone="",
+                ua="",
+                conversion_id=conversion_id,
+                destination_pixel_id="pixel-direct",
+            )
+
+        async def postback(adsid, conversion_id):
+            async with session_factory() as session:
+                async with session.begin():
+                    return await outbox_module.enqueue_postback_report(
+                        session,
+                        platform="meta",
+                        adsid=adsid,
+                        event="Purchase",
+                        conversion_id=conversion_id,
+                        email=None,
+                        ip=None,
+                        phone=None,
+                        ua=None,
+                        currency="USD",
+                        amount=3.0,
+                        short_link_id=9,
+                        cloak_name=None,
+                        short_code=None,
+                        click_time=None,
+                    )
+
+        direct_first_adsid = f"direct-first-{uuid.uuid4().hex}"
+        direct_first_conversion = f"conversion-{uuid.uuid4().hex}"
+        assert await direct(direct_first_adsid, direct_first_conversion) > 0
+        with pytest.raises(outbox_module.LegacyEventIdentityConflict):
+            await postback(direct_first_adsid, direct_first_conversion)
+
+        postback_first_adsid = f"postback-first-{uuid.uuid4().hex}"
+        postback_first_conversion = f"conversion-{uuid.uuid4().hex}"
+        assert await postback(postback_first_adsid, postback_first_conversion) > 0
+        assert await direct(postback_first_adsid, postback_first_conversion) == 0
+
+        async with session_factory() as session:
+            for adsid in (direct_first_adsid, postback_first_adsid):
+                rows = list(
+                    (
+                        await session.execute(
+                            select(ThirdPartyReportLog).where(
+                                ThirdPartyReportLog.adsid == adsid
+                            )
+                        )
+                    ).scalars().all()
+                )
+                assert len(rows) == 1
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
