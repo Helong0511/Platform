@@ -323,6 +323,40 @@ def test_runner_rejects_reusing_application_database_account():
         _ensure_distinct_database_account(make_url(url), url)
 
 
+def test_runner_rejects_migration_target_database_different_from_application():
+    from app.db.migrations.runner import (
+        MigrationRunnerError,
+        _ensure_distinct_database_account,
+    )
+    from sqlalchemy.engine import make_url
+
+    migration_url = make_url(
+        "mysql+aiomysql://migration_user:secret@127.0.0.1:3306/platform_migrations"
+    )
+    application_url = (
+        "mysql+aiomysql://application_user:secret@127.0.0.1:3306/platform"
+    )
+
+    with pytest.raises(MigrationRunnerError, match="同一个数据库名"):
+        _ensure_distinct_database_account(migration_url, application_url)
+
+
+def test_runner_rejects_application_mysql_url_without_database_name():
+    from app.db.migrations.runner import (
+        MigrationRunnerError,
+        _ensure_distinct_database_account,
+    )
+    from sqlalchemy.engine import make_url
+
+    migration_url = make_url(
+        "mysql+aiomysql://migration_user:secret@127.0.0.1:3306/platform"
+    )
+    application_url = "mysql+aiomysql://application_user:secret@127.0.0.1:3306/"
+
+    with pytest.raises(MigrationRunnerError, match="应用数据库 DSN"):
+        _ensure_distinct_database_account(migration_url, application_url)
+
+
 @pytest.mark.asyncio
 async def test_status_is_read_only_for_empty_database_and_reports_ledger_rows(tmp_path: Path):
     database = _create_database()
