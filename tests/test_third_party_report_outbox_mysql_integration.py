@@ -617,6 +617,9 @@ async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover
         ("postback", "emoji-😀-click", "Purchase", "订单-😀", "bft"),
         ("postback", "含冒号:和长度", "ViewContent", "后补-转化ID", "平台-甲"),
         ("短链", "空字段边界", "Purchase", "", "platform-x"),
+        ("postback", "blank-platform", "Purchase", "conv-blank", ""),
+        ("postback", "whitespace-platform", "Purchase", "conv-space", "   "),
+        ("postback", "trim-platform", "Purchase", "conv-trim", " bft "),
     ],
 )
 async def test_mysql_event_idempotency_golden_vectors_match_python_utf8(
@@ -643,7 +646,7 @@ async def test_mysql_event_idempotency_golden_vectors_match_python_utf8(
             ),
         ]
         normalized_platform = (platform or "").strip()
-        if platform:
+        if normalized_platform:
             parts.append(("platform", normalized_platform))
 
         concat_args = []
