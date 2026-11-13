@@ -1287,3 +1287,41 @@ Run #1530（SHA 99468dedab4632dfa71f6ab432349d984b14307d）Backend / Frontend su
 - npm audit 仍有 axios / follow-redirects 两项 High；Python 3.11 crypt 弃用 warning 仍存在。
 
 当前 HEAD 的文档提交后续另有 CI；本节仅记录 Run #1530 所覆盖的应用与测试 SHA。platform / identity_scope / destination Pixel 持久化、Worker 和管理员 scope gate、Migration Runner 与 backfill 仍未完成。
+
+
+## 2026-11-13 身份作用域字段与发送门禁阶段性实施（CI 待复验）
+
+本节记录 PR #1 Draft 分支当前实现状态。此处只记录已提交代码和设计边界，不代表跨路径并发身份竞态已关闭，也不构成合并或部署批准。
+
+### 已落入分支的实现
+
+- 新增 '20261113_third_party_report_identity_scope.sql'，manifest 新增第 6 条 revision；未修改任何既有 migration SQL 或既有 checksum。
+- 'ThirdPartyReportLog' 新增 nullable 'platform'、非空 'identity_scope'（默认 'legacy_unresolved'）和 nullable 'destination_pixel_id'。
+- 旧记录迁移后保持 'legacy_unresolved'，不推断平台归属；新直接发送记录为 'unscoped'，新 Postback Outbox 记录为 'platform_scoped'。
+- Outbox worker 先仅读取非敏感 platform 标识，再按明确 'platform_scoped + platform' 认领租约，之后才读取 payload；读取 payload 时再次约束相同 platform。
+- Outbox 发送将持久化 platform 传入既有日志发送校验；发送前验证记录 ID、来源、广告标识、事件、conversion_id、event_key、platform、Pixel ID 和租约。
+- Pixel 目的地通过租约绑定；已绑定 Pixel 不允许静默改投其它 Pixel。目的地不一致会终止当前尝试并写入可见失败状态。
+- 直接发送不接受调用方伪造 platform；直接日志只允许 'unscoped'，复用时核验 Pixel 目的地一致。
+- ViewContent / Purchase 关联增加身份作用域、platform 和 Pixel 目的地匹配，避免跨平台或跨 Pixel 关联。
+- 管理端 retry 可执行条件增加 'platform_scoped' 与非空 platform；普通编辑拒绝修改平台作用域事件的身份字段；unscoped 事件不能被编辑成 Outbox。
+- Outbox 统计新增 'scope_blocked'，调度任务将未解决历史身份积压纳入告警信息。
+- 增加隔离 MySQL migration 和 Pixel 绑定集成测试；单元测试同步明确 scope 语义。
+
+### 必须保持为未关闭的风险
+
+1. **跨入口首次创建的共享身份仲裁仍未实现。** 目前直接发送四字段身份与 Postback 五字段身份之间，仍没有基于规范化四字段基础身份的共同锁表/互斥原语。即使有 scope 列、legacy 检查和各自唯一 event_key，也不能证明并发首次写入时不会出现两条逻辑冲突事件。
+2. **管理员身份修改仍需完整核查。** 平台作用域身份字段现已冻结，但 unscoped 的身份变更仍需在统一身份锁内做目标 key 冲突检查；当前不能把它视为完整安全实现。
+3. **Retry、Worker 与旧版本混跑门禁仍未完成端到端证明。** 新 Worker 的 scope 检查不能阻止旧 Worker 使用旧查询继续处理记录。任何上线发布必须先证明旧 Worker 已停止消费，或建立数据库/部署层可验证的兼容门禁。
+4. **历史 'legacy_unresolved' 行没有自动迁移归属。** 'scope_blocked' 仅用于暴露积压；必须人工/有证据的离线对账，不得自动将旧事件归为任意平台。
+5. **MySQL 并发竞态集成测试尚未覆盖共享锁原语**，因为原语尚未实现。FakeDB 单元测试不等于并发验证。
+6. **Meta Pixel 业务身份仍需产品语义确认。** 目前 Pixel ID 被作为目的地一致性绑定，不擅自纳入既有 event_key；必须评估同一基础事件跨 Pixel 是否应该允许独立上报，以及转换/回滚语义。
+
+### 当前 CI 复验说明
+
+Run #1575 在上述部分修改尚未补齐测试夹具时失败：12 failed、601 passed、1 skipped、1 warning。已据日志修正迁移 revision 数量断言、MySQL 返回行容器、管理端 retry 夹具、直接发送租约 mock、Worker scope fixtures、Scheduler scope 统计和 PII Worker pre-read 测试。后续 Run #1581（SHA 'df5797acf38047276ca3c8333c927b06a7e8886a'）正在执行，最终结果必须以该 run 及更新 HEAD 对应的最新 CI 为准。
+
+### 本阶段验收边界
+
+- PR #1 必须继续保持 Open / Draft。
+- 不合并 'main'，不部署，不连接生产服务器、生产数据库、Redis、队列或真实第三方接口。
+- 当前新增字段/发送门禁是分阶段收敛，不代表可以上线。
