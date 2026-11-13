@@ -491,37 +491,51 @@ async def _link_purchase_to_view_content(
     adsid: str,
     conversion_id: str,
     report_log_id: int,
-    allow_destination_match: bool,
+    destination_pixel_id: Optional[str],
+    identity_scope: str,
+    platform: Optional[str],
 ) -> bool:
-    """仅在目的地身份已持久化且可验证时关联 ViewContent。"""
-    if not allow_destination_match:
+    """只关联同一身份作用域、同一 Pixel 目的地的 ViewContent。"""
+    if not destination_pixel_id:
         logger.info(
-            "[第三方上报] 跳过 ViewContent 关联：日志未持久化可验证的 Pixel 目的地身份，"
-            "不能证明与 Purchase 发往同一目的地：report_log_id=%s",
+            "[第三方上报] 跳过 ViewContent 关联：缺少可验证的 Pixel 目的地：report_log_id=%s",
             report_log_id,
         )
+        return False
+    if identity_scope not in {"unscoped", "platform_scoped"}:
+        return False
+    if identity_scope == "platform_scoped" and not (platform or "").strip():
+        return False
+    if identity_scope == "unscoped" and platform:
         return False
 
     try:
         async with AsyncSessionLocal() as db:
-            result = await db.execute(
+            query = (
                 select(ThirdPartyReportLog)
                 .where(ThirdPartyReportLog.source == source)
                 .where(ThirdPartyReportLog.adsid == adsid)
                 .where(ThirdPartyReportLog.event == "ViewContent")
                 .where(ThirdPartyReportLog.conversion_id.is_(None))
+                .where(ThirdPartyReportLog.identity_scope == identity_scope)
+                .where(ThirdPartyReportLog.destination_pixel_id == destination_pixel_id)
             )
+            if identity_scope == "platform_scoped":
+                query = query.where(ThirdPartyReportLog.platform == platform)
+            else:
+                query = query.where(ThirdPartyReportLog.platform.is_(None))
+            result = await db.execute(query.limit(1))
             view_content_log = result.scalars().first()
             if view_content_log:
                 view_content_log.conversion_id = conversion_id
                 await db.commit()
                 logger.info(
-                    "[第三方上报] 已关联 ViewContent 转化日志：report_log_id=%s",
+                    "[第三方上报] 已关联同作用域/同 Pixel 的 ViewContent：report_log_id=%s",
                     report_log_id,
                 )
                 return True
             logger.info(
-                "[第三方上报] 未找到可关联的 ViewContent 事件：report_log_id=%s",
+                "[第三方上报] 未找到同作用域/同 Pixel 的 ViewContent：report_log_id=%s",
                 report_log_id,
             )
     except Exception as exc:
@@ -811,8 +825,9 @@ async def send_third_party_report(
             adsid=adsid,
             conversion_id=conversion_id,
             report_log_id=report_log_id,
-            # 直接发送和 Outbox 均未持久化 Pixel 目的地身份，当前一律跳过关联。
-            allow_destination_match=False,
+            destination_pixel_id=pixel_id,
+            identity_scope="platform_scoped" if using_existing_report_log else "unscoped",
+            platform=platform,
         )
 
     logger.info("[第三方上报] 使用像素配置 - Pixel ID: %s, API 版本：%s", pixel_id, api_version)
