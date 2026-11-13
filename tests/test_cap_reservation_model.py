@@ -32,6 +32,7 @@ def test_cap_reservation_has_stable_key_and_recovery_indexes():
     }.issubset(index_names)
     assert {
         "chk_cap_reservation_key_sha256",
+        "chk_cap_reservation_key_hex",
         "chk_cap_reservation_offer_positive",
         "chk_cap_reservation_publisher_positive",
         "chk_cap_reservation_attempts_nonnegative",
