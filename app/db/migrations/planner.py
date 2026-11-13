@@ -58,3 +58,25 @@ def plan_migrations(
         applied.add(item.revision)
 
     return tuple(pending)
+
+
+
+def plan_migrations_from_ledger_rows(
+    rows,
+    *,
+    repository_root=None,
+    migrations: tuple[Migration, ...] | None = None,
+) -> tuple[Migration, ...]:
+    """先验证 ledger 原始行的唯一性/执行顺序/状态，再生成迁移计划。"""
+    from app.db.migrations.ledger import validate_ledger_rows
+
+    applied_checksums = validate_ledger_rows(
+        rows,
+        repository_root=repository_root,
+        migrations=migrations,
+    )
+    return plan_migrations(
+        applied_checksums,
+        repository_root=repository_root,
+        migrations=migrations,
+    )
