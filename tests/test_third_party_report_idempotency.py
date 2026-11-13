@@ -431,17 +431,25 @@ async def test_admin_identity_edit_recomputes_non_outbox_event_key(monkeypatch):
     )()
 
     class Result:
+        def __init__(self, row):
+            self.row = row
+
         def scalars(self):
             return self
 
         def first(self):
-            return log_entry
+            return self.row
 
     class FakeDB:
         committed = False
 
         async def execute(self, statement):
-            return Result()
+            sql = str(statement).lower()
+            if "third_party_report_logs.event_key =" in sql:
+                return Result(None)
+            if "third_party_report_logs.identity_scope =" in sql:
+                return Result(None)
+            return Result(log_entry)
 
         async def commit(self):
             self.committed = True
