@@ -55,6 +55,9 @@ async def test_enqueue_postback_report_uses_current_transaction_without_commit(m
     assert db.flushed is True
     assert db.committed is False
     assert db.added.outbox_enqueued is True
+    assert db.added.identity_scope == "platform_scoped"
+    assert db.added.platform == "bft"
+    assert db.added.destination_pixel_id is None
     assert db.added.status == "pending"
     assert db.added.short_link_id == 9
     assert db.added.cloak_name == "campaign-a"
@@ -74,6 +77,9 @@ async def test_enqueue_postback_report_reuses_existing_event(monkeypatch):
             "status": "failed",
             "next_retry_time": None,
             "outbox_enqueued": False,
+            "identity_scope": "platform_scoped",
+            "platform": "bft",
+            "destination_pixel_id": None,
             "max_attempts": 3,
         },
     )()
@@ -125,6 +131,9 @@ async def test_enqueue_does_not_reopen_or_mutate_attempted_outbox_payload(monkey
         "status": "failed",
         "next_retry_time": None,
         "outbox_enqueued": True,
+        "identity_scope": "platform_scoped",
+        "platform": "bft",
+        "destination_pixel_id": "pixel-existing",
         "max_attempts": 12,
         "attempt_count": 2,
         "report_start_time": None,
@@ -166,7 +175,10 @@ async def test_enqueue_does_not_reopen_or_mutate_attempted_outbox_payload(monkey
         assert getattr(existing, key) == value
 
 
-async def test_enqueue_does_not_reopen_successful_legacy_report(monkeypatch):
+async def test_enqueue_refuses_to_auto_scope_successful_legacy_report(monkeypatch):
+    import pytest
+    from app.services.third_party_report_outbox import LegacyEventIdentityConflict
+
     existing = type(
         "Existing",
         (),
@@ -175,6 +187,9 @@ async def test_enqueue_does_not_reopen_successful_legacy_report(monkeypatch):
             "status": "success",
             "next_retry_time": None,
             "outbox_enqueued": False,
+            "identity_scope": "legacy_unresolved",
+            "platform": None,
+            "destination_pixel_id": None,
             "max_attempts": 3,
             "attempt_count": 1,
             "report_start_time": None,
@@ -186,27 +201,27 @@ async def test_enqueue_does_not_reopen_successful_legacy_report(monkeypatch):
             return existing
 
         async def flush(self):
-            raise AssertionError("successful legacy report must not be reopened")
+            raise AssertionError("legacy identity must not be auto-reconciled")
 
-    row_id = await outbox.enqueue_postback_report(
-        FakeDB(),
-        platform="bft",
-        adsid="fbclid-success-legacy",
-        event="Purchase",
-        conversion_id="conversion-success-legacy",
-        email=None,
-        ip=None,
-        phone=None,
-        ua=None,
-        currency="USD",
-        amount=1.0,
-        short_link_id=5,
-        cloak_name=None,
-        short_code=None,
-        click_time=None,
-    )
+    with pytest.raises(LegacyEventIdentityConflict):
+        await outbox.enqueue_postback_report(
+            FakeDB(),
+            platform="bft",
+            adsid="fbclid-success-legacy",
+            event="Purchase",
+            conversion_id="conversion-success-legacy",
+            email=None,
+            ip=None,
+            phone=None,
+            ua=None,
+            currency="USD",
+            amount=1.0,
+            short_link_id=5,
+            cloak_name=None,
+            short_code=None,
+            click_time=None,
+        )
 
-    assert row_id == 83
     assert existing.outbox_enqueued is False
     assert existing.status == "success"
 
