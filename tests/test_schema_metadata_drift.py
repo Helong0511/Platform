@@ -39,6 +39,10 @@ def test_schema_metadata_drift_reports_missing_tables_and_columns():
         assert drift["column_type_mismatches"] == {}
         assert drift["nullable_mismatches"] == {}
         assert drift["primary_key_mismatches"] == {}
+        assert drift["index_mismatches"] == {}
+        assert drift["unique_constraint_mismatches"] == {}
+        assert drift["foreign_key_mismatches"] == {}
+        assert drift["table_option_mismatches"] == {}
     finally:
         engine.dispose()
 
@@ -64,6 +68,10 @@ def test_schema_metadata_drift_accepts_complete_existing_schema():
             "column_type_mismatches": {},
             "nullable_mismatches": {},
             "primary_key_mismatches": {},
+            "index_mismatches": {},
+            "unique_constraint_mismatches": {},
+            "foreign_key_mismatches": {},
+            "table_option_mismatches": {},
         }
     finally:
         engine.dispose()
