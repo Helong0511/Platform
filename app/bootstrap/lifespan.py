@@ -7,7 +7,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 
 from app.core.cache_manager import CacheManager
 from app.core.config import settings
@@ -202,9 +202,33 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                 if expected_value:
                     expected_options[inspector_key] = expected_value
             if expected_options:
-                actual_options = inspector.get_table_options(
-                    table.name, schema=table.schema
-                )
+                # MySQL Inspector.get_table_options() 在部分驱动版本中不返回 charset/collation；
+                # 从 information_schema 读取服务器实际记录，不能把 None 当作真实值。
+                schema_name = table.schema or sync_connection.execute(
+                    text("SELECT DATABASE()")
+                ).scalar_one_or_none()
+                actual_collation = None
+                actual_charset = None
+                if schema_name:
+                    actual_collation = sync_connection.execute(
+                        text(
+                            "SELECT TABLE_COLLATION FROM information_schema.TABLES "
+                            "WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME = :table_name"
+                        ),
+                        {"schema_name": schema_name, "table_name": table.name},
+                    ).scalar_one_or_none()
+                    if actual_collation:
+                        actual_charset = sync_connection.execute(
+                            text(
+                                "SELECT CHARACTER_SET_NAME FROM information_schema.COLLATIONS "
+                                "WHERE COLLATION_NAME = :collation_name"
+                            ),
+                            {"collation_name": actual_collation},
+                        ).scalar_one_or_none()
+                actual_options = {
+                    "mysql_charset": actual_charset,
+                    "mysql_collate": actual_collation,
+                }
                 mismatches = {
                     key: {
                         "expected": value,
