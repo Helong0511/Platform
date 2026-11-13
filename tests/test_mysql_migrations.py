@@ -1617,8 +1617,11 @@ def test_cap_reservation_key_hex_migration_enforces_lowercase_sha256():
             cursor.execute(insert_sql, {**common, "reservation_key": valid_key})
 
             for invalid_key in ("g" * 64, "A" * 64, "a" * 63 + "G"):
-                with pytest.raises(pymysql.err.IntegrityError):
+                # MySQL 8.0 对 CHECK 约束违规返回 ER_CHECK_CONSTRAINT_VIOLATED (3819)，
+                # PyMySQL 将该服务端错误映射为 OperationalError，而不是 IntegrityError。
+                with pytest.raises(pymysql.err.OperationalError) as constraint_error:
                     cursor.execute(insert_sql, {**common, "reservation_key": invalid_key})
+                assert constraint_error.value.args[0] == 3819
     finally:
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS cap_reservations")
