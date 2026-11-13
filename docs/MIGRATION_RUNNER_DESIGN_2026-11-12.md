@@ -343,3 +343,28 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - 对应 Run #1482：https://github.com/Helong0511/Platform/actions/runs/43347718738，Backend / Frontend 均成功。
 - Run #1482 是 schema drift 测试命名与文档修订后的验证；任务同步 MySQL 并发测试的实际执行证据仍以 Run #1479 为准（587 passed、1 skipped、1 warning）。
 - PR #1 仍为 Open / Draft，未合并；mergeable 不代表上线验收完成。
+
+
+## 2026-11-13 调度 Worker 任务配置同步失败关闭
+
+### 复核发现
+
+- 先前的任务同步修复将所有 Worker 的同步失败都按“记录错误后继续启动”处理。
+- 该降级策略对纯 API Worker 可以接受，但对负责运行 APScheduler 的 Worker 不安全：同步失败后仍会继续初始化并启动调度器，可能按数据库中的旧任务配置运行，漏掉新增任务或未应用 Cron/函数路径变更。
+- 独立 Scheduler systemd unit 设置 `GUNICORN_ROLE=scheduler`；`settings.should_run_scheduler()` 对该角色始终返回 true，因此可以在启动阶段明确区分必须依赖任务配置的 Worker。
+
+### 本轮修复
+
+- 将启动同步策略提取为 `_sync_scheduled_tasks_for_worker()`，便于独立验证。
+- 任务配置同步成功：记录成功状态并继续启动。
+- 任务配置同步失败且当前 Worker 将运行 APScheduler：抛出启动异常，拒绝启动调度器，避免以旧配置继续调度。
+- 任务配置同步失败且当前 Worker 是纯 API（`should_run_scheduler() == false`）：保留降级启动策略，记录异常类型，不记录数据库原始异常文本。
+- 新增 `tests/test_scheduled_task_sync_startup.py`，覆盖 Scheduler fail-closed、纯 API 降级和同步成功三条路径。
+
+### 验收状态与边界
+
+- 代码提交：`c277075`、`df41f91`、`119840a`（完整 SHA 以 GitHub commit 记录为准）。
+- 本文档提交后仍须以最新 HEAD 的 GitHub Actions Backend / Frontend 完整 CI 结果作为验收证据；在 CI 完成前不宣称测试通过。
+- 该修复没有实现任务同步单一协调者、健康状态端点、告警投递或自动恢复；API Worker 的降级状态仍需后续可观测性方案。
+- 不改变生产数据库、不连接生产服务器/Redis/队列/第三方接口；仅在 CI 隔离环境验证。
+- PR #1 继续 Open / Draft，不合并 main、不部署；凭据安全专项仍按用户要求暂缓。
