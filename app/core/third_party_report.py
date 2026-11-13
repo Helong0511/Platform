@@ -71,8 +71,10 @@ def build_event_idempotency_key(
     # 不得改变已创建 ViewContent 的幂等身份。Purchase 等转化事件仍使用 conversion_id。
     identity_conversion_id = "" if event == "ViewContent" else (conversion_id or "")
     parts = (source or "", adsid or "", event or "", identity_conversion_id)
-    if platform:
-        parts = (*parts, platform.strip())
+    # 空白平台名按“未提供平台”处理，避免仅空格意外增加第五个空字段。
+    normalized_platform = (platform or "").strip()
+    if normalized_platform:
+        parts = (*parts, normalized_platform)
     # 长度前缀避免字段中出现分隔符时产生身份碰撞。
     identity = "".join(f"{len(part)}:{part}" for part in parts)
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
