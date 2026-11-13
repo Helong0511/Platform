@@ -100,7 +100,9 @@ def _ensure_distinct_database_account(migration_url, application_database_url: s
         return
     app_url = make_url(application_database_url)
     if app_url.get_backend_name() != "mysql":
-        return
+        raise MigrationRunnerError(
+            "应用数据库必须使用 MySQL；拒绝跨数据库类型执行 MySQL migration"
+        )
     if not app_url.database:
         raise MigrationRunnerError("应用数据库 DSN 必须明确指定数据库名")
     if migration_url.database != app_url.database:
