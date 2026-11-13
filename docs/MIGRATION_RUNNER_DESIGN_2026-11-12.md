@@ -1365,8 +1365,8 @@ Run #1575 在上述部分修改尚未补齐测试夹具时失败：12 failed、6
 
 ### 仍然是 P1 发布阻断
 
-1. `app/bootstrap/lifespan.py` 仍会调用 `create_database()` 和 `Base.metadata.create_all()`；Runner 尚未接入唯一部署流程，应用启动也尚无只读 schema revision gate。
-2. 应用运行账号仍可能需要建库/DDL 权限；必须先完成 baseline 空库安装、旧库升级、schema gate 和 systemd 顺序演练，再移除启动期隐式 DDL。
+1. 已从 `app/bootstrap/lifespan.py` 移除 `create_database()` 与 `Base.metadata.create_all()`；API/Scheduler Worker 现在只执行只读 revision gate 和 ORM 表/列存在性检查。`app/core/database.py::create_tables()` 与 `app/db/database.py::create_database()` 旧 helper 仍需完成全仓调用点审计并明确禁用/迁移。
+2. 应用启动链路已不再主动创建数据库或执行 `create_all`；仍需完成 baseline 空库安装、旧库升级、只读账号权限及 systemd 顺序演练，确认实际应用账号只需 DML/必要 SELECT 权限。
 3. `status` 只验证 ledger 历史、manifest 前缀和 checksum，不是完整物理业务 schema drift 检查，也不代替应用 readiness gate。
 4. 没有通用 running/failed 自动恢复命令；不能手动删除 ledger 行后直接重跑。
 5. 代表性旧 schema + 合成历史数据升级、逻辑备份导入恢复、MySQL server crash / 磁盘故障、应用 worker pause/resume、旧应用兼容回滚、大规模数据回填与锁影响评估尚未完成。

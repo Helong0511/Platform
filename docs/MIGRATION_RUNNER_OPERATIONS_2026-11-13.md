@@ -52,9 +52,9 @@ python -m app.db.migrations apply
 
 ## 5. 当前尚未达到生产使用条件
 
-- API/Scheduler lifespan 仍调用 `create_database()` 与 `Base.metadata.create_all()`。
-- 应用尚未接入只读 schema revision gate。
-- Runner 尚未成为 systemd 部署的唯一 schema 变更入口。
+- API/Scheduler lifespan 已移除 `create_database()` 与 `Base.metadata.create_all()`，启动时只读检查 migration revision 和 ORM 表/列是否存在。
+- 旧的 `create_tables()` / `create_database()` helper 尚待全仓调用点核查与禁用/迁移。
+- Runner 尚未成为 systemd 部署的唯一 schema 变更入口；仍需演练 migration job 先于 API/Scheduler 启动。
 - 新库基线导入、旧库升级、备份恢复、worker pause/resume 和失败人工恢复演练仍未完成。
 
-因此：当前命令和 CI 仅证明隔离测试环境中的 Runner 行为；不能据此在生产执行，也不能据此宣称上线就绪。
+因此：当前命令和 CI 仅证明隔离测试环境中的 Runner 与只读启动 gate 行为；未完成真实新库/旧库部署演练前，不能在生产执行，也不能宣称上线就绪。

@@ -7,7 +7,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect
 
 from app.core.cache_manager import CacheManager
 from app.core.config import settings
@@ -23,78 +23,26 @@ from app.core.telegram.service_notify import (
 )
 from app.core.telegram.shared_state import cleanup_stale_shared_state
 from app.core.timezone_utils import check_and_validate_timezone, log_timezone_info
+from app.db.migrations.gate import verify_schema_revision
 from app.models import Base
 from app.scheduler_module import init_scheduled_tasks, shutdown_scheduler, start_scheduler
 from app.scheduler_module.task_init import init_scheduled_tasks_in_db
 
 logger = logging.getLogger(__name__)
 
-_SCHEMA_BOOTSTRAP_LOCK_NAME = "platform_schema_bootstrap"
 
-
-def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
-    """核验 ORM 声明的表/列均存在；create_all 不会 ALTER 已存在的表。"""
-    target_metadata = metadata or Base.metadata
-    inspector = inspect(sync_connection)
-    missing_tables = []
-    missing_columns = {}
-
-    for table in target_metadata.sorted_tables:
-        if not inspector.has_table(table.name, schema=table.schema):
-            missing_tables.append(table.fullname)
-            continue
-        actual_columns = {
-            column["name"]
-            for column in inspector.get_columns(table.name, schema=table.schema)
-        }
-        absent = sorted(column.name for column in table.columns if column.name not in actual_columns)
-        if absent:
-            missing_columns[table.fullname] = absent
-
-    return {
-        "missing_tables": sorted(missing_tables),
-        "missing_columns": missing_columns,
-    }
-
-
-async def _bootstrap_database_schema() -> None:
-    """串行执行 create_all，并验证既有表没有缺少 ORM 所需列。"""
+async def _verify_database_schema() -> str | None:
+    """只读核验 migration revision 与 ORM 表/列；应用 Worker 不执行 schema DDL。"""
     async with engine.connect() as connection:
-        lock_acquired = False
-        if engine.dialect.name == "mysql":
-            lock_result = await connection.execute(
-                text("SELECT GET_LOCK(:lock_name, :timeout_seconds)"),
-                {"lock_name": _SCHEMA_BOOTSTRAP_LOCK_NAME, "timeout_seconds": 60},
+        current_revision = await verify_schema_revision(connection)
+        drift = await connection.run_sync(_schema_metadata_drift)
+        if drift["missing_tables"] or drift["missing_columns"]:
+            raise RuntimeError(
+                "数据库 schema 与 ORM 不一致："
+                f"missing_tables={drift['missing_tables']}; "
+                f"missing_columns={drift['missing_columns']}"
             )
-            lock_acquired = lock_result.scalar_one_or_none() == 1
-            await connection.commit()
-            if not lock_acquired:
-                raise RuntimeError("未能在 60 秒内取得数据库 schema bootstrap 锁")
-
-        try:
-            async with connection.begin():
-                await connection.run_sync(Base.metadata.create_all)
-                drift = await connection.run_sync(_schema_metadata_drift)
-                if drift["missing_tables"] or drift["missing_columns"]:
-                    raise RuntimeError(
-                        "数据库 schema 与 ORM 不一致："
-                        f"missing_tables={drift['missing_tables']}; "
-                        f"missing_columns={drift['missing_columns']}"
-                    )
-        finally:
-            if lock_acquired:
-                try:
-                    await connection.execute(
-                        text("SELECT RELEASE_LOCK(:lock_name)"),
-                        {"lock_name": _SCHEMA_BOOTSTRAP_LOCK_NAME},
-                    )
-                    await connection.commit()
-                except Exception as exc:
-                    # 关闭连接也会释放 MySQL session advisory lock。
-                    logger.warning(
-                        "释放 schema bootstrap 锁失败：exception_type=%s",
-                        type(exc).__name__,
-                    )
+    return current_revision
 
 
 async def _sync_scheduled_tasks_for_worker(worker_pid: int) -> None:
@@ -152,7 +100,7 @@ async def lifespan(app: FastAPI):
     """
     应用生命周期管理（启动 / 关闭）。
 
-    启动：时区校验 → 建表 → init_db → 缓存预热 → 调度器与 Telegram Bot → Redis
+    启动：时区校验 → 只读 schema revision/drift gate → init_db → 缓存预热 → 调度器与 Telegram Bot → Redis
     关闭：停止调度器、释放 Bot 锁、关闭 Redis、通知服务下线
     """
     # ====== 启动时执行 ======
@@ -181,14 +129,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.debug("点击落库策略日志跳过: %s", e)
 
-    # 确保数据库 schema 就绪：MySQL advisory lock 串行化多 worker DDL，
-    # create_all 只补建缺失表；随后逐表核验 ORM 所需列，增量迁移缺失时拒绝启动。
+    # 只读核验数据库 migration revision 与 ORM 表/列；API/Scheduler Worker 不创建数据库或执行 DDL。
+    # 新库必须先由 provisioning 导入基线并运行独立 Migration Runner。
     try:
-        from app.db.database import create_database
-
-        await create_database()
-        await _bootstrap_database_schema()
-        logger.info(f"[Worker PID:{worker_pid}] 数据库 schema 创建及结构核验完成")
+        current_revision = await _verify_database_schema()
+        logger.info(
+            "[Worker PID:%s] 数据库 schema revision 与 ORM 表/列核验通过：revision=%s",
+            worker_pid,
+            current_revision,
+        )
     except Exception as exc:
         logger.error(
             "[Worker PID:%s] 数据库 schema 初始化/核验失败，拒绝启动：exception_type=%s",
