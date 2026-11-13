@@ -722,6 +722,7 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
         "facebook_pixel_id": "isolated-pixel",
         "facebook_access_token": "isolated-token",
         "source": "postback",
+        "platform": "meta",
         "conversion_id": "conversion-ack-loss",
         "currency": "USD",
         "amount": 21.0,
