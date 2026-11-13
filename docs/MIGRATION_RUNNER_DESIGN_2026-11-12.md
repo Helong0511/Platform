@@ -1186,3 +1186,44 @@ Run #1519 的 CI 通过，但发送 ID 与 payload 的一致性绑定、平台�
 Run #1520（SHA 1ea5c72f4098d984483f23e30f1db7091dddc4d6）成功，但不包含本次应用代码变更。
 Run #1521（SHA feb4be130b2a5298b004c8650bc0cc967df4d614）被后续提交取消，不能作为通过证据。
 Run #1522（SHA 8d00c3df2c519c8e64dce38e090bbfa1e96c8d82）已触发，等待 Backend / Frontend 完成后再验收。
+
+
+## 2026-11-13 补充修复：阻止 Outbox Purchase 跨平台关联 ViewContent
+
+### 代码证据与问题
+
+- build_event_idempotency_key() 对 ViewContent 忽略后补 conversion_id，但 Postback Outbox 会将 platform 纳入事件 key。
+- ThirdPartyReportLog 当前没有持久化 platform / identity_scope。
+- Purchase 发送阶段原先仅按 source + adsid + event=ViewContent + conversion_id IS NULL 读取第一条记录。
+- 对 source="postback" 的不同平台事件，可能存在不同 event_key 的 ViewContent 行；由于平台字段未持久化，Purchase Worker 无法证明候选 ViewContent 与当前 Purchase 属于同一平台。
+- 原来的 first() 因而存在跨平台关联风险；这属于平台维度未持久化导致的作用域缺口，不应简单通过排序选择某条记录。
+
+### 修复
+
+提交：
+- 40744f5e2d74eb5bd728d2617bc4837594a69e66：提取 _link_purchase_to_view_content()，只允许作用域明确为 unscoped 的直接发送路径执行关联。
+- 03f354516e6583cbb91870f9bc3a38674ad8aec9：新增测试。
+
+当前行为：
+- Outbox 发送路径带有 report_log_id，且其平台字段尚未持久化；Purchase 不再查询/修改任意 ViewContent 记录，而是记录安全跳过原因。
+- 直接发送路径没有 platform scope，保留原有 source + adsid 关联行为。
+- 未来新增 platform / destination identity 持久化后，再实现严格同平台/同目的地的 ViewContent 关联。
+
+### 验证
+
+Run #1527（SHA 03f354516e6583cbb91870f9bc3a38674ad8aec9）Backend / Frontend 均 success。
+- Backend：608 passed、1 skipped、1 warning。
+- 新增 test_outbox_purchase_does_not_link_viewcontent_without_platform_scope：证明 Outbox 作用域不明确时不会打开数据库执行错误关联。
+- 新增 test_direct_purchase_can_link_unscoped_viewcontent：确认直接发送的既有行为仍保留。
+- 真实隔离 MySQL 的 test_mysql_existing_outbox_report_binding_matches_persisted_payload_and_lease 通过。
+- Frontend Lint / Build / Playwright Mock API E2E 通过。
+- Frontend audit 仍报告 axios / follow-redirects 两项 High；按既定范围暂缓凭据安全专项。
+- Python 3.11 crypt 弃用 warning 仍存在；本次不将 CI 容器自身的 Redis / MySQL 初始化警告误判为生产环境问题。
+
+### 尚未完成
+
+- 当前 Outbox 仍未持久化 platform / identity_scope / destination Pixel。
+- Outbox Purchase 暂停 ViewContent 关联是保守安全降级，不是完整功能实现。
+- 管理员编辑、retry、Worker claim / renew / scanner / terminalizer 尚未统一使用 scope 原子条件。
+- 未完成 Pixel ID 是否属于事件目的地身份的产品语义确认。
+- 事件身份 P1 仍未关闭；不合并、不部署。
