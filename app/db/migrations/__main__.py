@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
                 return 3
-            print("Schema migration ledger is valid and current.")
+            print("Migration history is valid and current; physical application schema is not verified by this command.")
             return 0
         except (RuntimeError, ValueError, OSError) as exc:
             print(f"Migration status failed: {type(exc).__name__}", file=sys.stderr)

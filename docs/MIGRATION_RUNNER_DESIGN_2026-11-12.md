@@ -1325,3 +1325,55 @@ Run #1575 在上述部分修改尚未补齐测试夹具时失败：12 failed、6
 - PR #1 必须继续保持 Open / Draft。
 - 不合并 'main'，不部署，不连接生产服务器、生产数据库、Redis、队列或真实第三方接口。
 - 当前新增字段/发送门禁是分阶段收敛，不代表可以上线。
+
+
+## 2026-11-13 Runner 首版实现与当前边界（HEAD 3fc1fe1）
+
+> 本节覆盖并更新本文前文“尚未实现 Runner”的历史状态描述。旧结论保留作为设计演进记录；以下才是当前分支实际代码状态。
+
+### 已实现
+
+- `app/db/migrations/ledger.py`：在构造 revision→checksum 映射前校验原始 ledger 行；拒绝重复 revision、重复/不连续 execution_order、未知 revision、非 applied 状态、checksum 格式/内容漂移及非 manifest 连续前缀。
+- `app/db/migrations/runner.py`：提供 MySQL 增量 migration Runner。
+- `python -m app.db.migrations validate`：离线 manifest / checksum / SQL 边界校验。
+- `python -m app.db.migrations apply`：只接受显式 `MIGRATION_DATABASE_URL`；要求与应用运行账号使用不同 MySQL 用户；要求 MySQL 8.0.16+、utf8mb4；同一 AsyncConnection 持有 GET_LOCK、执行全部 migration 并 RELEASE_LOCK。
+- `python -m app.db.migrations status`：只读查询 ledger，不创建 ledger 表、不执行 DDL；running/failed/空 ledger/仍有 pending revision 均返回阻断状态。
+- Ledger 表：`platform_schema_migrations`，revision 为主键，checksum 使用 ASCII binary，execution_order 唯一，状态限制为 running/applied/failed，并校验物理字段、索引及 CHECK 约束。
+- 每条 migration 先持久化 running；逐条执行并消费结果集；成功后写 applied；明确失败写 failed；连接断开时允许保留 running。
+- Runner 遇到 running/failed 时拒绝自动重跑。当前没有通用自动修复或 mark-applied 命令；必须人工检查 DDL 部分完成情况，再通过单独审计过的 forward-fix 处理。
+
+### 当前隔离 CI 证据
+
+- Run #1656：https://github.com/Helong0511/Platform/actions/runs/43383347450
+  - HEAD `3bbe202f8be101ba0b8ec858b21a412645e3e807`
+  - Backend 648 passed、1 skipped、1 warning；真实 MySQL 覆盖正常执行、重复执行、GET_LOCK 冲突、DDL 部分失败、错误同名 ledger 表和应用账号隔离。
+- Run #1659：https://github.com/Helong0511/Platform/actions/runs/43383950152
+  - HEAD `0a7d88dc26060c85629c9a02b57fcc912fa93313`
+  - Backend 649 passed、1 skipped、1 warning；增加基线表名覆盖检查。
+- Run #1661：https://github.com/Helong0511/Platform/actions/runs/43384250959
+  - HEAD `3fc1fe1403e59e091baa2309e76695664bb86f42`
+  - Backend 651 passed、1 skipped、1 warning；新增只读 status 命令和真实 MySQL status 查询测试。
+- Run #1658 曾因测试扫描器正则表达式转义错误失败；该错误已修复，Run #1659 对修复后的 HEAD 重新完整通过。失败轮次不计为通过。
+- 前端 lint/build/Playwright Mock API E2E 在 Run #1656、#1659、#1661 均通过。
+
+### 基线与新库安装限制
+
+- `sql/platform.sql` 是完整基线快照，含 `DROP TABLE IF EXISTS`、`CREATE DATABASE/USE` 和客户端 DELIMITER / routine 定义；不是增量 migration，Runner 不会执行该文件。
+- 已修复 Cap Reservation HEX CHECK 截断及重复尾部，并在文件头标记破坏性边界。
+- 新增测试确认 ORM metadata 中的表名都能在基线或增量 migration 文本中找到；该测试只验证表名声明覆盖，不证明每张表的列、索引、外键、CHECK、默认值或字符集均与 ORM metadata 完全一致。
+- 尚未完成完整空库导入 `sql/platform.sql` + 全量增量 migration 的 MySQL 安装演练；不能把表名覆盖测试等同于新库安装通过。
+
+### 仍然是 P1 发布阻断
+
+1. `app/bootstrap/lifespan.py` 仍会调用 `create_database()` 和 `Base.metadata.create_all()`；Runner 尚未接入唯一部署流程，应用启动也尚无只读 schema revision gate。
+2. 应用运行账号仍可能需要建库/DDL 权限；必须先完成 baseline 空库安装、旧库升级、schema gate 和 systemd 顺序演练，再移除启动期隐式 DDL。
+3. `status` 只验证 ledger 历史、manifest 前缀和 checksum，不是完整物理业务 schema drift 检查，也不代替应用 readiness gate。
+4. 没有通用 running/failed 自动恢复命令；不能手动删除 ledger 行后直接重跑。
+5. 代表性旧 schema + 合成历史数据升级、逻辑备份导入恢复、MySQL server crash / 磁盘故障、应用 worker pause/resume、旧应用兼容回滚、大规模数据回填与锁影响评估尚未完成。
+6. 仍未访问生产服务器、生产数据库、Redis、队列或真实第三方 API；所有 CI 使用临时 MySQL/Redis 和合成数据。
+
+### 当前发布决策
+
+- Runner 首版代码和隔离测试已通过 CI，但还没有被应用启动链路采用。
+- PR #1 继续 Open / Draft；不合并 main、不部署。
+- 凭据安全专项仍按用户要求暂缓。
