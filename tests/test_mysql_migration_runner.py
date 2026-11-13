@@ -113,6 +113,18 @@ def _database_url(database: str) -> str:
     ).render_as_string(hide_password=False)
 
 
+def _application_database_url(database: str) -> str:
+    return URL.create(
+        "mysql+aiomysql",
+        username="platform_application_runtime",
+        password="runtime-only",
+        host=HOST,
+        port=PORT,
+        database=database,
+        query={"charset": "utf8mb4"},
+    ).render_as_string(hide_password=False)
+
+
 def _write_migrations(tmp_path: Path, definitions):
     migrations = []
     for revision, sql in definitions:
@@ -153,13 +165,13 @@ async def test_runner_applies_in_order_and_is_idempotent(tmp_path: Path):
         url = _database_url(database)
 
         applied = await apply_migrations(
-            url, repository_root=tmp_path, migrations=migrations
+            url, application_database_url=_application_database_url(database), repository_root=tmp_path, migrations=migrations
         )
         assert applied == tuple(item.revision for item in migrations)
 
         # 第二次执行必须只读 ledger 并返回空计划，不重复执行 DDL。
         assert await apply_migrations(
-            url, repository_root=tmp_path, migrations=migrations
+            url, application_database_url=_application_database_url(database), repository_root=tmp_path, migrations=migrations
         ) == ()
 
         with _root_connect(database) as connection:
@@ -197,6 +209,7 @@ async def test_runner_requires_exclusive_same_database_get_lock(tmp_path: Path):
         with pytest.raises(MigrationLockUnavailable):
             await apply_migrations(
                 _database_url(database),
+                application_database_url=_application_database_url(database),
                 repository_root=tmp_path,
                 migrations=migrations,
                 lock_timeout=0,
@@ -235,7 +248,7 @@ async def test_runner_records_partial_ddl_failure_and_refuses_automatic_retry(tm
         url = _database_url(database)
         with pytest.raises(MigrationExecutionError):
             await apply_migrations(
-                url, repository_root=tmp_path, migrations=migrations
+                url, application_database_url=_application_database_url(database), repository_root=tmp_path, migrations=migrations
             )
 
         with _root_connect(database) as connection:
@@ -258,7 +271,7 @@ async def test_runner_records_partial_ddl_failure_and_refuses_automatic_retry(tm
         # MySQL DDL 已部分提交；Runner 不得猜测性重跑。
         with pytest.raises(MigrationLedgerError, match="manual DDL recovery is required"):
             await apply_migrations(
-                url, repository_root=tmp_path, migrations=migrations
+                url, application_database_url=_application_database_url(database), repository_root=tmp_path, migrations=migrations
             )
     finally:
         _drop_database(database)
@@ -283,6 +296,7 @@ async def test_runner_rejects_wrong_same_name_ledger_table(tmp_path: Path):
         with pytest.raises(MigrationRunnerError, match="ledger"):
             await apply_migrations(
                 _database_url(database),
+                application_database_url=_application_database_url(database),
                 repository_root=tmp_path,
                 migrations=migrations,
             )

@@ -87,12 +87,11 @@ def _ensure_distinct_database_account(migration_url, application_database_url: s
     app_url = make_url(application_database_url)
     if app_url.get_backend_name() != "mysql":
         return
-    same_target = (
+    same_server = (
         migration_url.host == app_url.host
         and (migration_url.port or 3306) == (app_url.port or 3306)
-        and migration_url.database == app_url.database
     )
-    if same_target and migration_url.username == app_url.username:
+    if same_server and migration_url.username == app_url.username:
         raise MigrationRunnerError(
             "迁移 DSN 必须使用独立于应用运行账号的 MySQL 用户"
         )
@@ -232,11 +231,12 @@ async def _ensure_ledger_schema(connection) -> None:
 async def _apply_with_locked_connection(
     connection,
     *,
+    database_name: str,
     root: Path,
     manifest: tuple[Migration, ...],
     lock_timeout: int,
 ) -> tuple[str, ...]:
-    lock_name = _migration_lock_name(str((await connection.execute(text("SELECT DATABASE()"))).scalar_one()))
+    lock_name = _migration_lock_name(database_name)
     lock_result = await connection.execute(
         text("SELECT GET_LOCK(:lock_name, :timeout)"),
         {"lock_name": lock_name, "timeout": lock_timeout},
@@ -255,6 +255,8 @@ async def _apply_with_locked_connection(
                 )
             )
         ).mappings().one()
+        if session_info["database_name"] != database_name:
+            raise MigrationRunnerError("连接实际数据库与迁移 DSN 指定数据库不一致")
         if _parse_mysql_version(session_info["server_version"]) < _MIN_MYSQL_VERSION:
             raise MigrationRunnerError("Runner 要求 MySQL 8.0.16 或更高版本")
         if session_info["connection_charset"].lower() != "utf8mb4":
@@ -394,7 +396,7 @@ async def _apply_with_locked_connection(
 async def apply_migrations(
     database_url: str,
     *,
-    application_database_url: str | None = None,
+    application_database_url: str,
     repository_root: str | Path | None = None,
     migrations: tuple[Migration, ...] | None = None,
     lock_timeout: int = 60,
@@ -406,6 +408,8 @@ async def apply_migrations(
     """
     if not isinstance(database_url, str) or not database_url.strip():
         raise ValueError("必须显式提供 MIGRATION_DATABASE_URL")
+    if not isinstance(application_database_url, str) or not application_database_url.strip():
+        raise ValueError("必须提供应用数据库 DSN，以验证迁移账号与运行账号分离")
     if not isinstance(lock_timeout, int) or not 0 <= lock_timeout <= 600:
         raise ValueError("lock_timeout 必须在 0 到 600 秒之间")
 
@@ -426,6 +430,7 @@ async def apply_migrations(
             await connection.commit()
             return await _apply_with_locked_connection(
                 connection,
+                database_name=url.database,
                 root=root,
                 manifest=manifest,
                 lock_timeout=lock_timeout,
