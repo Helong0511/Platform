@@ -878,3 +878,21 @@ async def test_failed_attempt_persistence_prevents_external_request(monkeypatch)
     assert result["success"] is False
     assert result["retryable"] is True
     assert result["reason"] == "attempt_state_persist_failed"
+
+
+def test_blank_platform_is_treated_as_unscoped_identity():
+    """空字符串和纯空白不是有效平台标识，不应意外引入第五个空字段。"""
+    legacy_key = third_party_report.build_event_idempotency_key(
+        "postback", "ads-blank-platform", "Purchase", "conversion-blank"
+    )
+    assert third_party_report.build_event_idempotency_key(
+        "postback", "ads-blank-platform", "Purchase", "conversion-blank", platform=""
+    ) == legacy_key
+    assert third_party_report.build_event_idempotency_key(
+        "postback", "ads-blank-platform", "Purchase", "conversion-blank", platform="   "
+    ) == legacy_key
+    assert third_party_report.build_event_idempotency_key(
+        "postback", "ads-blank-platform", "Purchase", "conversion-blank", platform=" bft "
+    ) == third_party_report.build_event_idempotency_key(
+        "postback", "ads-blank-platform", "Purchase", "conversion-blank", platform="bft"
+    )
