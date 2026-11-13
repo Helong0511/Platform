@@ -1494,6 +1494,19 @@ def test_report_identity_lock_migration_creates_permanent_collision_checked_lock
                 (identity_key,),
             )
             assert cursor.fetchone()[0] == fingerprint
+
+            # 同名但物理结构错误的表不能被 IF NOT EXISTS 静默接受。
+            cursor.execute("DROP TABLE third_party_report_identity_locks")
+            cursor.execute(
+                "CREATE TABLE third_party_report_identity_locks ("
+                "identity_key CHAR(64) NOT NULL PRIMARY KEY"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            with pytest.raises(pymysql.err.ProgrammingError) as migration_error:
+                _run_sql_file(cursor, migration)
+            assert migration_error.value.args[0] == 1146
+            cursor.execute("SHOW COLUMNS FROM third_party_report_identity_locks")
+            assert [row[0] for row in cursor.fetchall()] == ["identity_key"]
     finally:
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS third_party_report_identity_locks")
