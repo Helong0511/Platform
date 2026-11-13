@@ -109,6 +109,8 @@ def _can_requeue_report(log, now: Optional[datetime] = None) -> bool:
     """与 retry_report_log 使用同一配置引用及租约条件，避免前端误显示不可执行操作。"""
     if (
         not getattr(log, "outbox_enqueued", False)
+        or getattr(log, "identity_scope", None) != "platform_scoped"
+        or not getattr(log, "platform", None)
         or getattr(log, "status", None) != "failed"
         or getattr(log, "pii_scrubbed_at", None) is not None
         or getattr(log, "error_message", None) == "短链接已删除，无法解析像素配置"
