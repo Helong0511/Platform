@@ -440,3 +440,60 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - 已读取当前分支的 `app/db/database.py`、`app/core/database.py`、`app/bootstrap/lifespan.py`、`app/core/config.py`、两个 systemd unit、`.github/workflows/ci.yml` 及相关测试。
 - 未连接生产服务器、数据库、Redis、队列或真实第三方接口；本轮仅读取 GitHub 文件与 CI 元数据。
 - PR #1 继续 Open / Draft；不合并 main、不部署；凭据安全专项继续暂缓。
+
+
+## 2026-11-13 数据库入口与运行身份二次核查（Run #1493）
+
+### 最新 CI 验收证据
+
+- 当前 HEAD：`acbf915eaaff5c5a78babd71138b8360072ae6f7`。
+- Run #1493：https://github.com/Helong0511/Platform/actions/runs/43350109994。
+- Backend：**592 passed、1 skipped、1 warning**。
+- Frontend：Job 成功，Mock API Playwright E2E 通过（登录校验、认证成功/失败、管理端导航、Outbox 重试详情、退出登录、移动端菜单、客户端 RBAC）。
+- 本次 MySQL 临时服务实际执行并通过了 `tests/test_mysql_migrations.py` 中迁移结构、索引冲突拒绝、事件键回填、DDL 边界中断/恢复等用例；`test_mysql_two_workers_sync_same_task_config_without_duplicates` 也通过。
+- MySQL 迁移测试使用 GitHub Actions loopback 临时 MySQL，测试辅助连接账号为 CI 注入的 root；因此这些用例不构成“应用运行账号无 DDL 权限仍可启动”的证据。
+- 1 skipped：本地核对脚本未纳入 CI；1 warning：passlib/Python 3.11 `crypt` 弃用警告。CI 不能描述为零跳过或零警告。
+
+### 本轮实际代码复核
+
+重新读取当前分支以下文件及相关区段：
+
+- `app/db/database.py`
+- `app/core/database.py`
+- `app/bootstrap/lifespan.py`
+- `app/main.py`
+- `app/core/telegram/sync_db.py`
+- `tests/test_database_init.py`
+- `tests/test_schema_metadata_drift.py`
+- `tests/test_database_bootstrap_url.py`
+- `systemd/Platform-backend.service`
+- `systemd/Platform-scheduler.service`
+
+直接确认：
+
+1. `app/db/database.py::create_database()` 从应用主 `settings.SQLALCHEMY_DATABASE_URI` 派生无默认 schema 的 server URL，并执行 `CREATE DATABASE IF NOT EXISTS`；当前没有单独 provisioning DSN。
+2. `app/bootstrap/lifespan.py::lifespan()` 在每个 Worker 启动时显式导入并调用 `create_database()`，之后调用 `_bootstrap_database_schema()`；失败即拒绝启动。
+3. `_bootstrap_database_schema()` 使用主 `engine` 执行 `Base.metadata.create_all()`。因此应用运行身份仍需 schema DDL 权限；advisory lock 不会改变 SQL 权限需求。
+4. `app/core/database.py::create_tables()` 是第二个 `Base.metadata.create_all()` 包装函数。本轮在该函数定义及其直接文件中确认存在，但全仓库调用点尚未穷尽；不能断言无调用者。
+5. `app/core/database.py::init_db()` 每个 Worker 启动时都会查询管理员；不存在时尝试创建默认管理员。当前 `tests/test_database_init.py` 通过 mock session 测试唯一键竞争后的回查及非重复完整性错误传播，不是 MySQL 多 Worker 实际并发集成测试。
+6. `app/core/telegram/sync_db.py::get_sync_session_factory()` 也从同一个 `settings.SQLALCHEMY_DATABASE_URI` 构建同步 SQLAlchemy Engine，供 Telegram 独立线程使用；当前没有运行期只读身份或专用身份切换。
+7. 两个 systemd unit 都读取同一个 `/data/Platform/.env`，均以 `app.main:app` 启动；没有独立 migration/provisioning service 或执行步骤。
+8. `_schema_metadata_drift()` 目前只比对 ORM 所需表和列名。既有测试仅验证缺表/缺列及完整存在两种情况，不能覆盖类型、长度、NULL/default、PK/唯一约束、普通索引、外键、CHECK、charset/collation。
+9. `tests/test_mysql_migrations.py` 的危险操作保护要求 GitHub Actions、UNIT_TEST、显式 destructive flag、loopback host 和固定 `platform_ci` 数据库；这项保护有价值，但它隔离的是测试执行目标，不是生产应用账号权限。
+
+### 全仓库调用点审计状态（未关闭）
+
+- 当前 Tree 未截断，仓库 Python 文件数为 537。
+- 本轮逐文件复核了上述核心入口、部署文件和数据库测试；尝试通过 GitHub Code Search 查找 `create_database`、`create_tables`、`init_db`、`Base.metadata.create_all` 和 `_bootstrap_database_schema`，返回结果为空且该搜索接口对目标分支未提供可验证的完整性保证。
+- 曾尝试通过单次批量读取全部 Python 文件进行调用点扫描，但 GitHub 工具调用次数限制阻止了该批量操作；因此不能把这次失败的批量尝试当作扫描结果。
+- 目前已知直接调用点：lifespan 调用 `create_database()`、`_bootstrap_database_schema()`、`init_db()`；`create_tables()` 仅确认定义；`Base.metadata.create_all()` 在 lifespan bootstrap 与 `create_tables()` 中确认。
+- 仍需在可执行的完整仓库工作区运行 `git grep -nE 'create_database|create_tables|create_all|init_db|_bootstrap_database_schema|init_scheduled_tasks_in_db' -- '*.py'`，再检查动态导入、脚本、测试夹具和部署入口。未取得该结果前，不关闭全仓库调用点审计。
+
+### 下一步实施门槛
+
+- 不直接在当前启动流程中撤销 DDL 权限。
+- 先实现独立 provisioning 和 Migration Runner / ledger；迁移任务与应用运行身份使用独立 DSN/数据库账号。
+- 对已完成迁移的临时 MySQL schema，以专用低权限用户验证：只读 schema gate 成功、业务所需 DML 成功、CREATE DATABASE / CREATE TABLE / ALTER / DROP 明确失败。
+- 对空库路径另用 provisioning/migration 身份执行初始化；验证失败中断、重复运行、checksum drift、并发锁和人工恢复。
+- 在上述测试通过前，systemd 不得改为低权限账号，也不得删除现有自动 bootstrap 代码。
+- PR #1 保持 Open / Draft，不合并、不部署；不连接生产服务器、数据库、Redis、队列或真实第三方接口；凭据安全专项继续暂缓。
