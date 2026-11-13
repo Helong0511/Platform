@@ -71,3 +71,41 @@ async def test_worker_logs_success_after_task_config_sync(monkeypatch):
     info.assert_called_once_with(
         "[Worker PID:%s] 定时任务配置已同步到数据库", 789
     )
+
+
+
+@pytest.mark.asyncio
+async def test_scheduler_initialization_failure_prevents_worker_readiness(monkeypatch):
+    """APScheduler 初始化失败时，调度 Worker 必须启动失败。"""
+    from unittest.mock import AsyncMock
+
+    init_scheduler = AsyncMock(side_effect=RuntimeError("synthetic scheduler detail"))
+    start_scheduler = AsyncMock()
+    error = Mock()
+    monkeypatch.setattr(lifespan_module, "init_scheduled_tasks", init_scheduler)
+    monkeypatch.setattr(lifespan_module, "start_scheduler", start_scheduler)
+    monkeypatch.setattr(lifespan_module.logger, "error", error)
+
+    with pytest.raises(RuntimeError, match="调度 Worker 拒绝就绪") as raised:
+        await lifespan_module._start_scheduler_for_worker(321)
+
+    assert isinstance(raised.value.__cause__, RuntimeError)
+    init_scheduler.assert_awaited_once_with()
+    start_scheduler.assert_not_awaited()
+    assert "synthetic scheduler detail" not in str(error.call_args)
+
+
+@pytest.mark.asyncio
+async def test_scheduler_starts_only_after_successful_initialization(monkeypatch):
+    """调度器初始化成功后才执行启动调用。"""
+    from unittest.mock import AsyncMock
+
+    init_scheduler = AsyncMock()
+    start_scheduler = AsyncMock()
+    monkeypatch.setattr(lifespan_module, "init_scheduled_tasks", init_scheduler)
+    monkeypatch.setattr(lifespan_module, "start_scheduler", start_scheduler)
+
+    await lifespan_module._start_scheduler_for_worker(654)
+
+    init_scheduler.assert_awaited_once_with()
+    start_scheduler.assert_awaited_once_with()
