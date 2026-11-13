@@ -14,6 +14,7 @@ from urllib.parse import quote_plus
 import pymysql
 import pytest
 from sqlalchemy import Column, Integer, MetaData, String, Table, select, text, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core import third_party_report as report_module
@@ -1091,6 +1092,71 @@ async def test_mysql_identity_lock_rollback_releases_row_and_hash_collision_fail
                         event=collision_identity[2],
                         conversion_id=collision_identity[3],
                     )
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_identity_lock_wait_timeout_fails_closed_and_can_retry(monkeypatch):
+    """真实 MySQL 验证身份锁等待有上限，超时失败后释放事务可安全重试。"""
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(ThirdPartyReportIdentityLock.__table__.create)
+
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
+        monkeypatch.setattr(report_module, "REPORT_IDENTITY_LOCK_WAIT_SECONDS", 1)
+        identity = (
+            "postback",
+            f"lock-timeout-{uuid.uuid4().hex}",
+            "Purchase",
+            f"conversion-{uuid.uuid4().hex}",
+        )
+
+        async with session_factory() as first, session_factory() as second:
+            async with first.begin():
+                await report_module._lock_report_base_identity(
+                    first,
+                    source=identity[0],
+                    adsid=identity[1],
+                    event=identity[2],
+                    conversion_id=identity[3],
+                )
+                with pytest.raises(OperationalError):
+                    async with second.begin():
+                        await report_module._lock_report_base_identity(
+                            second,
+                            source=identity[0],
+                            adsid=identity[1],
+                            event=identity[2],
+                            conversion_id=identity[3],
+                        )
+
+            # 第一事务提交释放锁后，第二连接应能重新取得同一身份锁。
+            async with second.begin():
+                key = await report_module._lock_report_base_identity(
+                    second,
+                    source=identity[0],
+                    adsid=identity[1],
+                    event=identity[2],
+                    conversion_id=identity[3],
+                )
+                assert key == report_module.build_event_idempotency_key(*identity)
     finally:
         if engine is not None:
             await engine.dispose()
