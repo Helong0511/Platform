@@ -7,6 +7,7 @@ import asyncio
 from datetime import datetime
 
 from app.core import third_party_report
+from app.services import third_party_report_outbox as report_outbox
 
 
 def test_event_idempotency_key_is_stable_and_event_scoped():
@@ -33,6 +34,7 @@ def _mock_identity_lock_for_report_unit_tests(monkeypatch):
         return "unit-test-identity-lock"
 
     monkeypatch.setattr(third_party_report, "_lock_report_base_identity", no_database_lock)
+    monkeypatch.setattr(report_outbox, "_lock_report_base_identity", no_database_lock)
 
 
 async def test_create_report_log_persists_event_key(monkeypatch):
@@ -1297,6 +1299,8 @@ async def test_create_report_log_reuses_only_same_unscoped_pixel_destination(mon
             self.row = row
 
         async def execute(self, statement):
+            if "third_party_report_logs.identity_scope" in str(statement).lower():
+                return Result(None)
             return Result(self.row)
 
     class SessionContext:
