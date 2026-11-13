@@ -980,3 +980,62 @@ GitHub Code Search 对目标分支没有提供可用的完整结果，且本轮�
 ### 本轮结论
 
 Run #1516 的 CI 通过；本轮补充了直接发送、Outbox、Worker、管理员编辑/retry 的实际入口证据。**没有修改业务代码或 schema，跨路径身份竞态 P1 仍未解决。** 历史 migration SQL 与 manifest checksum 未修改；未连接生产资源。
+
+## 2026-11-13 共享基础事件身份锁表方案评估（Run #1517 后）
+
+### 代码与事务边界复核
+
+- ThirdPartyReportLog 当前唯一约束只有 event_key，模型没有 platform 或 identity_scope；Outbox 行也没有可供 Worker 验证平台归属的持久字段。
+- enqueue_postback_report(db, ...) 使用 PostbackProcessor 当前转化事务传入的同一个 AsyncSession，只 flush，由上层将转化、下游队列和 Report Outbox 一起提交。因此，若采用事务型身份锁表，锁必须在该会话/事务中取得并持有到整个业务事务提交或回滚，不能在独立 Session 中短暂加锁后释放。
+- 直接发送 create_report_log() 自行创建 AsyncSessionLocal，可在其 INSERT / 复用决策及 COMMIT 期间持有同一锁表行；它与 Postback 必须使用完全一致的基础身份编码和锁表。
+- 现有 enqueue_postback_report() 的 SELECT ... FOR UPDATE 只锁已存在的五字段记录；不存在行时没有可锁记录。后续四字段 legacy SELECT 也不是互斥原语，不能阻止直接发送并发插入不同 event_key。
+- process_postback_report_outbox_item() 当前先按 ID 认领租约，再读取行；claim 和读取均未检查 scope。due scanner、attempt exhaustion 收敛、积压统计、lease renew、attempt-state、send preflight、retry/edit 都必须一并加入作用域条件。
+
+### 推荐评估方向：永久保留的基础身份锁行
+
+在隔离 MySQL 版本、隔离级别、连接池与事务行为验证后，优先实现 InnoDB 锁表，而不是未经验证地使用 MySQL GET_LOCK：
+
+1. 新表以 identity_hash BINARY(32) 为主键，值为当前四字段基础身份（source、adsid、event、conversion_id；ViewContent 继续忽略后补 conversion_id）的 SHA-256。该哈希不包含平台，因此不同平台的创建决策会在同一行上串行化。
+2. 所有身份创建/复用操作在业务事务内执行 INSERT IGNORE 建立锁行，再对该行 SELECT ... FOR UPDATE。首次插入竞争、等待、事务提交/回滚行为必须通过多连接真实 MySQL 测试确认；不可用 SQLite 或 FakeDB 代替。
+3. 锁内先查询 unresolved legacy、unscoped 和 platform_scoped 身份，再按明确策略决定复用、允许并存或拒绝；最终事件行写入必须在同一事务、同一锁持有期内完成。唯一键冲突回查也必须留在身份仲裁边界内。
+4. 锁行不应在普通清理任务中删除。删除锁行可能让并发请求分别创建新的互斥对象，重新打开竞态。首版建议永久保留仅含不可逆身份摘要的锁行，并监控增长；若未来需要清理，必须先设计可证明无并发持有者、无历史事件引用的安全协议。
+5. 只存 SHA-256 锁键意味着需明确哈希碰撞处理策略。可在锁表同时保存独立的第二摘要（例如对相同规范化字节计算 SHA-512）用于防御性核对；不建议为了碰撞防御在锁表长期保存原始 adsid / conversion_id。
+6. 获取锁必须设置明确超时；死锁只能在确认事务整体回滚后有限次数重试；任何锁获取、身份查询或写入结果不确定时都 fail-closed，不允许退化为无锁创建。
+7. 事务持锁期间不得调用第三方 HTTP、Redis 或其它慢网络操作。锁只覆盖身份决策与数据库写入，提交后再由现有发送流程处理。
+
+### 作用域仲裁矩阵（待产品确认后固化）
+
+| 已存在身份 | 新请求 unscoped（短链/斗篷直接发送） | 新请求 platform_scoped（Postback） |
+|---|---|---|
+| legacy_unresolved | 拒绝自动复用/创建，进入人工核对 | 拒绝自动复用/创建，进入人工核对 |
+| unscoped | 复用同一 unscoped 事件 | 拒绝，避免无平台与平台事件并存 |
+| 相同 platform_scoped 平台 | 拒绝，避免无平台路径覆盖平台身份 | 复用同平台事件 |
+| 不同 platform_scoped 平台 | 拒绝，避免无平台路径覆盖平台身份 | 允许不同平台事件并存 |
+
+- 旧行迁移后必须默认为 legacy_unresolved，不能因 source='postback' 或当前请求 platform 而推断历史归属。
+- 只有新直接发送入口显式创建的记录才标记 unscoped；只有 Postback 入队入口显式传入并持久化 platform 的记录才标记 platform_scoped。
+- 管理员 reconciliation 必须是独立、可审计的显式操作；未完成归属核实的行不能被 Worker 发送或管理员 retry。
+- 上表是建议的 fail-closed 默认策略，不替代产品对“同一基础事件是否允许跨平台多目的地发送”的确认。
+
+### 仍需产品确认：Facebook Pixel / 目的地身份
+
+短链/斗篷直接发送会解析 facebook_pixel_id，但当前四字段事件键不含 Pixel ID；Postback Outbox 也会在 Worker 阶段从短链/斗篷配置引用解析 Pixel ID。需要明确：
+- 同一 source + adsid + event + conversion_id，若配置映射到不同 Facebook Pixel，业务上是同一事件只允许一次，还是每个 Pixel 都应独立发送并独立留痕？
+- 若应独立发送，身份维度应是目的地 Pixel（以及必要时广告账户/业务租户），而不能仅把 Postback 来源 platform 当作目的地标识。
+- 若不应独立发送，则必须规定不同 Pixel 配置之间的冲突处理，不能由先到请求隐式决定最终目标。
+
+在该语义确认前，不修改现有 event_key 算法，也不将 Pixel ID 临时拼入身份键。
+
+### 实施与验证顺序
+
+1. 先完成 PR 分支完整调用点清单与 Pixel 目的地身份语义确认。
+2. 新增 schema revision：锁表、nullable platform、identity_scope（legacy 行默认 unresolved）及必要索引；不修改已登记历史 SQL migration 或 manifest checksum。
+3. 实现唯一共享仲裁服务，并让直接发送与 Postback 入队在同一事务持锁；覆盖查询命中、未命中、IntegrityError 回查和身份变更。
+4. 将 scope 条件加入 scanner、claim UPDATE、payload SELECT、lease renew、attempt-state、发送前校验、retry、编辑及 API list/detail Schema。
+5. 使用隔离 MySQL 多连接测试首次锁行创建 race、直接发送/Postback 双向并发、平台 A/B 并发、同平台重复、事务回滚、锁超时、死锁重试、连接池复用、Unicode/空值规范化及旧 Worker 混跑。
+6. 先部署只读诊断/兼容门禁，再按明确顺序停止旧 Worker、迁移 schema、启用新写入；不能让不识别 scope 的旧 Worker 消费新记录。
+7. 只有所有旧 Worker 已被证明停止消费，且回滚策略不会把 platform_scoped 行降级成四字段身份后，才可进入后续发布验收。
+
+### 当前结论
+
+Run #1517 Backend / Frontend CI 通过，但上述锁表方案仍是设计评估，尚无锁表 migration、仲裁服务、scope 门禁或真实 MySQL 并发验收。事件身份 P1 继续阻断合并与上线。未连接生产资源，未执行生产 migration 或真实第三方发送。
