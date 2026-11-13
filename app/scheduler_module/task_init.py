@@ -24,17 +24,19 @@ from app.scheduler_module.task_config import TASK_CONFIGS
 logger = logging.getLogger(__name__)
 
 
-def _is_duplicate_task_name_error(exc: Exception) -> bool:
-    """仅识别 scheduled_tasks.task_name 唯一键竞争，避免吞掉其它完整性错误。"""
+def _is_retryable_task_sync_conflict(exc: Exception) -> bool:
+    """识别唯一键竞争、MySQL 死锁/锁等待超时等可安全整批重试的冲突。"""
     original = getattr(exc, "orig", exc)
     args = getattr(original, "args", ())
-    if args and args[0] == 1062:
+    if args and args[0] in (1062, 1205, 1213):
+        # 1062 duplicate key；1205 lock wait timeout；1213 deadlock victim。
         return True
     message = str(original).lower()
     return (
         "duplicate entry" in message
         or "unique constraint failed" in message
         or "duplicate key value violates unique constraint" in message
+        or "database is locked" in message
     )
 
 
@@ -123,9 +125,9 @@ async def init_scheduled_tasks_in_db() -> None:
                 return
             except Exception as exc:
                 await db.rollback()
-                if _is_duplicate_task_name_error(exc) and attempt < max_attempts:
+                if _is_retryable_task_sync_conflict(exc) and attempt < max_attempts:
                     logger.info(
-                        "定时任务同步遇到并发唯一键竞争，将重新读取后重试（第 %s/%s 次）",
+                        "定时任务同步遇到唯一键/锁竞争，将回滚整批并重新读取（第 %s/%s 次）",
                         attempt,
                         max_attempts,
                     )
