@@ -87,11 +87,7 @@ def _ensure_distinct_database_account(migration_url, application_database_url: s
     app_url = make_url(application_database_url)
     if app_url.get_backend_name() != "mysql":
         return
-    same_server = (
-        migration_url.host == app_url.host
-        and (migration_url.port or 3306) == (app_url.port or 3306)
-    )
-    if same_server and migration_url.username == app_url.username:
+    if migration_url.username == app_url.username:
         raise MigrationRunnerError(
             "迁移 DSN 必须使用独立于应用运行账号的 MySQL 用户"
         )
