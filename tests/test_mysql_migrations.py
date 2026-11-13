@@ -1422,7 +1422,7 @@ def test_report_identity_scope_migration_keeps_all_legacy_rows_unresolved_and_is
                 "SELECT identity_scope, platform, destination_pixel_id "
                 "FROM third_party_report_logs ORDER BY id"
             )
-            rows = cursor.fetchall()
+            rows = list(cursor.fetchall())
             assert rows == [
                 ("legacy_unresolved", None, None),
                 ("legacy_unresolved", None, None),
