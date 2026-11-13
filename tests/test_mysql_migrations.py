@@ -1469,7 +1469,7 @@ def test_report_identity_lock_migration_creates_permanent_collision_checked_lock
             cursor.execute("SHOW COLUMNS FROM third_party_report_identity_locks")
             columns = {row[0]: row[1].lower() for row in cursor.fetchall()}
             assert columns["identity_key"] == "char(64)"
-            assert columns["identity_value"] == "varbinary(4096)"
+            assert columns["identity_fingerprint"] == "binary(64)"
             assert columns["created_at"] == "datetime"
 
             cursor.execute("SHOW INDEX FROM third_party_report_identity_locks")
@@ -1482,17 +1482,18 @@ def test_report_identity_lock_migration_creates_permanent_collision_checked_lock
 
             identity_key = "a" * 64
             identity_value = "4:meta10:click-1238:Purchase7:conv-01".encode("utf-8")
+            fingerprint = hashlib.sha512(identity_value).digest()
             cursor.execute(
                 "INSERT INTO third_party_report_identity_locks "
-                "(identity_key, identity_value) VALUES (%s, %s)",
-                (identity_key, identity_value),
+                "(identity_key, identity_fingerprint) VALUES (%s, %s)",
+                (identity_key, fingerprint),
             )
             cursor.execute(
-                "SELECT identity_value FROM third_party_report_identity_locks "
+                "SELECT identity_fingerprint FROM third_party_report_identity_locks "
                 "WHERE identity_key = %s",
                 (identity_key,),
             )
-            assert cursor.fetchone()[0] == identity_value
+            assert cursor.fetchone()[0] == fingerprint
     finally:
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS third_party_report_identity_locks")
