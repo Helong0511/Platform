@@ -558,6 +558,9 @@ async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover
                 adsid=f"ci-outbox-stale-worker-{event_identity}",
                 event="Purchase",
                 event_key=hashlib.sha256(event_identity.encode("utf-8")).hexdigest(),
+                platform="meta",
+                identity_scope="platform_scoped",
+                destination_pixel_id="pixel-ci",
                 conversion_id=event_identity,
                 status="pending",
                 outbox_enqueued=True,
@@ -711,6 +714,9 @@ async def test_mysql_existing_outbox_report_binding_matches_persisted_payload_an
                 adsid=f"ci-binding-{event_identity}",
                 event="Purchase",
                 event_key=event_key,
+                platform="meta",
+                identity_scope="platform_scoped",
+                destination_pixel_id="pixel-ci",
                 conversion_id=f"conversion-{event_identity}",
                 status="pending",
                 outbox_enqueued=True,
@@ -730,6 +736,8 @@ async def test_mysql_existing_outbox_report_binding_matches_persisted_payload_an
             event="Purchase",
             conversion_id=f"conversion-{event_identity}",
             event_key=event_key,
+            platform="meta",
+            destination_pixel_id="pixel-ci",
             lease_token=now,
         )
         wrong_adsid = await report_module._validate_existing_report_log_binding(
@@ -739,6 +747,8 @@ async def test_mysql_existing_outbox_report_binding_matches_persisted_payload_an
             event="Purchase",
             conversion_id=f"conversion-{event_identity}",
             event_key=event_key,
+            platform="meta",
+            destination_pixel_id="pixel-ci",
             lease_token=now,
         )
         stale_lease = await report_module._validate_existing_report_log_binding(
@@ -748,6 +758,8 @@ async def test_mysql_existing_outbox_report_binding_matches_persisted_payload_an
             event="Purchase",
             conversion_id=f"conversion-{event_identity}",
             event_key=event_key,
+            platform="meta",
+            destination_pixel_id="pixel-ci",
             lease_token=now - timedelta(seconds=1),
         )
 
