@@ -1526,13 +1526,16 @@ def test_cap_reservation_schema_guard_accepts_innodb_single_id_primary_key():
 
 
 def test_cap_reservation_schema_guard_rejects_myisam_table():
-    """同名表即使字段/索引正确，只要不是 InnoDB 就必须失败关闭。"""
+    """同名表即使使用 id 主键，只要不是 InnoDB 就必须失败关闭。"""
     connection = _connect()
     try:
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS cap_reservations")
-            _run_sql_file(cursor, "sql/migrations/20261111_cap_reservation_ledger.sql")
-            cursor.execute("ALTER TABLE cap_reservations ENGINE=MyISAM")
+            # 使用最小 MyISAM 表，避免 MyISAM 的 1000-byte 索引上限干扰引擎校验本身。
+            cursor.execute(
+                "CREATE TABLE cap_reservations (id INT NOT NULL, PRIMARY KEY (id)) "
+                "ENGINE=MyISAM DEFAULT CHARSET=utf8mb4"
+            )
             with pytest.raises(pymysql.err.ProgrammingError) as migration_error:
                 _run_sql_file(cursor, "sql/migrations/20261113_cap_reservation_schema_guard.sql")
             assert migration_error.value.args[0] == 1146
