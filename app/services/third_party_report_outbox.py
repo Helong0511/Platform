@@ -550,6 +550,17 @@ async def process_postback_report_outbox(
                 ThirdPartyReportLog.next_retry_time.is_(None),
             )
         )
+        # 迁移前的历史 Outbox / 非法作用域记录不会进入发送扫描，必须单独暴露数量。
+        scope_blocked_count = await db.scalar(
+            select(func.count(ThirdPartyReportLog.id)).where(
+                ThirdPartyReportLog.outbox_enqueued.is_(True),
+                or_(
+                    ThirdPartyReportLog.identity_scope != "platform_scoped",
+                    ThirdPartyReportLog.platform.is_(None),
+                    ThirdPartyReportLog.platform == "",
+                ),
+            )
+        )
 
     stats = {
         "selected": len(report_ids),
@@ -558,6 +569,7 @@ async def process_postback_report_outbox(
         "failed": 0,
         "exhausted": int(exhausted_count or 0),
         "terminal_failed": int(terminal_failed_count or 0),
+        "scope_blocked": int(scope_blocked_count or 0),
     }
     for report_id in report_ids:
         try:
