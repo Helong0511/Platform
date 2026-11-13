@@ -15,6 +15,8 @@ import pymysql
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
+from app.db.migrations.sql_parser import split_mysql_statements
+
 
 HOST = os.getenv("MYSQL_INTEGRATION_HOST")
 DATABASE = os.getenv("MYSQL_INTEGRATION_DATABASE", "platform_ci")
@@ -88,16 +90,9 @@ def _connect():
 
 def _run_sql_file(cursor, relative_path: str) -> None:
     sql = Path(relative_path).read_text(encoding="utf-8")
-    # 当前迁移不包含存储过程；移除整行 SQL 注释后按语句执行，
-    # 并对 SELECT 验证语句读取结果，确保连接可继续执行后续语句。
-    statements = [
-        statement.strip()
-        for statement in "\n".join(
-            line for line in sql.splitlines()
-            if not line.lstrip().startswith("--")
-        ).split(";")
-        if statement.strip()
-    ]
+    # 集成测试与离线校验共用同一 SQL 解析器，避免测试使用简单 split(';')
+    # 而掩盖字符串分号、块注释或 SQL_MODE 转义规则导致的生产执行差异。
+    statements = split_mysql_statements(sql)
     for statement in statements:
         cursor.execute(statement)
         if cursor.description:
@@ -1151,14 +1146,8 @@ def test_mysql_outbox_commit_ack_loss_preserves_stable_event_identity():
 def _run_sql_file_with_ddl_interruption(cursor, relative_path: str, ddl_boundary: int) -> None:
     """在指定 DDL 执行完成后模拟进程退出；DDL 本身已提交，后续语句不再执行。"""
     sql = Path(relative_path).read_text(encoding="utf-8")
-    statements = [
-        statement.strip()
-        for statement in "\n".join(
-            line for line in sql.splitlines()
-            if not line.lstrip().startswith("--")
-        ).split(";")
-        if statement.strip()
-    ]
+    # 故障注入必须使用与正常迁移相同的语句边界解析器。
+    statements = split_mysql_statements(sql)
     ddl_count = 0
     for statement in statements:
         cursor.execute(statement)
