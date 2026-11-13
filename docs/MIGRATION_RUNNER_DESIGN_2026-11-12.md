@@ -590,3 +590,42 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - 对 event_key 回填建立可恢复、限速、按主键分批方案，并在隔离 MySQL 代表性数据量上进行性能与锁影响测试。
 - 在上述流程和完整隔离备份恢复 / 兼容回滚验收通过前，不改 systemd 数据库身份、不删除现有自动 bootstrap、不合并、不部署。
 - PR #1 继续 Open / Draft；凭据安全专项按用户要求暂缓。
+
+
+## 2026-11-13 新发现：第三方事件幂等键回填与运行时算法不一致（阻断项）
+
+### 代码证据
+
+本轮交叉核对以下当前分支文件：
+
+- `sql/migrations/20261110_third_party_report_event_idempotency.sql`
+- `app/core/third_party_report.py::build_event_idempotency_key()`
+- `app/services/third_party_report_outbox.py::enqueue_postback_report()`
+- `app/models/third_party.py::ThirdPartyReportLog`
+- `tests/test_third_party_report_outbox.py`
+- `tests/test_third_party_report_idempotency.py`
+
+确认：
+
+1. SQL 历史回填只使用四个字段：`source, adsid, event, conversion_id`（ViewContent 的 conversion_id 被置空）。
+2. `build_event_idempotency_key()` 在传入非空 `platform` 时，会把 `platform.strip()` 作为第五个长度前缀字段纳入 SHA-256。
+3. `enqueue_postback_report()` 明确以 `source="postback"` 和调用方传入的 `platform` 构造事件键。
+4. `ThirdPartyReportLog` 当前没有独立的 `platform` 列；Outbox 新行写入 event_key，但没有把 platform 持久化为可供历史迁移重建的字段。
+5. 现有单元测试验证了 Outbox 新行的 key 包含 platform，却没有覆盖“历史 SQL 回填 key 与运行时 platform-scoped key 必须一致”的跨迁移契约。
+
+### 影响
+
+历史行经 SQL 回填得到四字段 key；同一逻辑事件在新 Outbox 入口中按五字段 key 查询。两者不相等。对升级前已存在的 postback 事件，后续同平台重放可能无法命中旧日志，从而插入第二条日志，破坏跨版本幂等；而简单移除 platform 又可能把不同平台的事件错误合并。
+
+由于历史表没有可靠持久化 platform，不能安全猜测旧行属于哪个平台。此问题不能靠改测试期望或直接删掉 platform 维度来处理。
+
+### 修复前置条件与建议方案
+
+- 将此项列为迁移/事件幂等 P1 阻断，不得在没有解决方案前发布该 migration 到已有数据表。
+- 先盘点旧版 postback 日志的真实来源与可用关联证据（例如历史配置引用、短链接、斗篷、历史 payload）；只接受可确定的一对一映射，不用模糊推断。
+- 设计显式的历史平台归属映射/人工核对流程；对无法确定平台的历史行，制定隔离状态与重复发送风险的业务决策，并要求发布审批。
+- 在 schema 中持久化平台身份，并统一应用运行时、SQL/Runner 回填算法的版本化契约；不要再让 migration 与应用分别手写不一致的身份算法。
+- 增加跨层契约测试：四字段 legacy key、五字段 platform key、ViewContent conversion_id 补写、Unicode/空字符串/空白平台、同一事件跨平台隔离，以及旧日志升级路径；必须在真实隔离 MySQL 验证。
+- 新增修复 migration，不得修改已登记的 `20261110_third_party_report_event_idempotency.sql` 历史文件或其 manifest checksum。
+- 在完成历史数据分类、回填策略、唯一键冲突演练和回滚/前向修复预案前，不得合并或上线。
+
