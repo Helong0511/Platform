@@ -192,7 +192,7 @@ async def update_report_log(
         next_retry_time: Optional[datetime] = None,
         clear_next_retry_time: bool = False,
         expected_report_start_time: Optional[datetime] = None,
-        expected_identity_scope: Optional[str] = None,
+        expected_identity_scope: Optional[str] = "unscoped",
         expected_platform: Optional[str] = None,
 ):
     """
@@ -374,7 +374,7 @@ async def _claim_report_log(
     report_log_id: int,
     lease_seconds: int = REPORT_LOG_LEASE_SECONDS,
     *,
-    expected_scope: Optional[str] = None,
+    expected_scope: Optional[str] = "unscoped",
     platform: Optional[str] = None,
 ) -> Optional[datetime]:
     """原子认领事件并返回秒级租约令牌；失败返回 None。
@@ -429,7 +429,7 @@ async def _renew_report_log_lease(
     lease_token: datetime,
     lease_seconds: int = REPORT_LOG_LEASE_SECONDS,
     *,
-    expected_scope: Optional[str] = None,
+    expected_scope: Optional[str] = "unscoped",
     platform: Optional[str] = None,
 ) -> Optional[datetime]:
     """仅允许尚未过期的当前持有者续租；过期令牌不可复活。"""
