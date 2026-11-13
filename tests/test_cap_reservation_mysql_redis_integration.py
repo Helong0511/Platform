@@ -23,6 +23,7 @@ from app.core.cap.redis_counter import RedisCapManager, get_daily_cap_key
 from app.core.utils import get_app_now_naive, get_app_now_sql_expression
 from app.core.postback.processor import PostbackProcessor
 from app.core.postback.checks.cap_checker import CapChecker
+from app.db.migrations.sql_parser import split_mysql_statements
 from app.models.cap_reservation import CapReservation
 from app.services import cap_reservation_ledger as ledger_module
 from app.services import cap_reservation_recovery as recovery_module
@@ -140,14 +141,8 @@ def _initialize_isolated_schema(database: str) -> None:
         migration = Path(
             "sql/migrations/20261111_cap_reservation_ledger.sql"
         ).read_text(encoding="utf-8")
-        statements = [
-            item.strip()
-            for item in "\n".join(
-                line for line in migration.splitlines()
-                if not line.lstrip().startswith("--")
-            ).split(";")
-            if item.strip()
-        ]
+        # 与正式迁移校验及其它 MySQL 集成测试共用语法感知解析器，避免按分号误拆 SQL。
+        statements = split_mysql_statements(migration)
         with connection.cursor() as cursor:
             for statement in statements:
                 cursor.execute(statement)
