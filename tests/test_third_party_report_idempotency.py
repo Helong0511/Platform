@@ -26,6 +26,15 @@ def test_event_idempotency_key_is_stable_and_event_scoped():
     assert view_key != purchase_key
 
 
+
+@pytest.fixture(autouse=True)
+def _mock_identity_lock_for_report_unit_tests(monkeypatch):
+    async def no_database_lock(db, **kwargs):
+        return "unit-test-identity-lock"
+
+    monkeypatch.setattr(third_party_report, "_lock_report_base_identity", no_database_lock)
+
+
 async def test_create_report_log_persists_event_key(monkeypatch):
     class Result:
         def scalars(self):
