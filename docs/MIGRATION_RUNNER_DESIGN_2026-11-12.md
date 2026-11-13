@@ -1139,3 +1139,50 @@ app/core/third_party_report.py 在 Purchase 发送前关联 ViewContent 时，�
 ### 当前结论
 
 Run #1519 的 CI 通过，但发送 ID 与 payload 的一致性绑定、平台持久化、scope gate、Pixel 目的地关联语义仍未修复。事件身份及发送作用域问题继续阻断合并上线。凭据安全专项仍按用户指示暂缓；未连接生产资源。
+
+
+## 2026-11-13 实际代码修复：Outbox report_log_id 与持久化载荷绑定
+
+### 变更
+
+提交：
+- feb4be130b2a5298b004c8650bc0cc967df4d614：实现发送前身份绑定校验。
+- 8d00c3df2c519c8e64dce38e090bbfa1e96c8d82：新增绑定与拒绝发送回归测试。
+
+文件：
+- app/core/third_party_report.py
+- tests/test_third_party_report_idempotency.py
+
+新增 _validate_existing_report_log_binding()，当 send_third_party_report() 收到 report_log_id 时，在凭据缺失分支、租约认领及 HTTP 请求之前读取持久化日志，并验证：
+- 日志存在；
+- 必须是 outbox_enqueued 记录；
+- PII 尚未清理；
+- source、adsid、event、conversion_id 与调用载荷逐字段相同；
+- 数据库 event_key 与调用方携带的 event_key 完全相同；
+- 若调用方携带 report_lease_token，必须与数据库当前 report_start_time 相同。
+
+核验数据库异常时 fail-closed，返回 report_identity_check_unavailable；身份不匹配时返回 report_identity_mismatch；两种情况都不会继续租约认领或第三方 HTTP 请求。
+
+### 新增测试
+
+- 正确 payload + 正确 lease 通过。
+- adsid 不匹配拒绝。
+- lease token 不匹配拒绝。
+- send_third_party_report() 传入错误 payload 时，断言不会认领租约，也不会构造 HTTP Client。
+
+### 当前实现边界 / 尚未解决事项
+
+- 该检查是发送前的一致性绑定保护，不是完整 platform / identity_scope 方案。
+- 当前模型没有持久化 platform / identity_scope；该校验只能证明传入 payload 与该 Outbox 行一致，不能独立证明平台归属，也不能验证平台维度 event_key 的构造语义。
+- Outbox payload 仍由同一行读取并传递；发送函数再次读取该行作一致性核验。租约 token 同时检查，防止过期 Worker 用旧快照继续发送。
+- 仍需进一步检查凭据解析之后到真正 HTTP 前的配置目的地变更语义；Pixel ID 未持久化，配置引用当前可解析到新的 Pixel 凭据。
+- 直接发送路径不传 report_log_id，仍走 create_report_log()；本次不改变直接发送幂等算法。
+- 还未把 expected scope 纳入 _claim_report_log()、_renew_report_log_lease()、retry_report_log()、due scanner、terminalizer 和管理员编辑原子条件。
+- 单元测试目前是 FakeDB 级别；还需隔离 MySQL 集成测试证明持久化读取和租约变化时的实际行为。
+- 未修改历史 migration、manifest checksum、生产配置或生产数据。
+
+### CI 状态
+
+Run #1520（SHA 1ea5c72f4098d984483f23e30f1db7091dddc4d6）成功，但不包含本次应用代码变更。
+Run #1521（SHA feb4be130b2a5298b004c8650bc0cc967df4d614）被后续提交取消，不能作为通过证据。
+Run #1522（SHA 8d00c3df2c519c8e64dce38e090bbfa1e96c8d82）已触发，等待 Backend / Frontend 完成后再验收。
