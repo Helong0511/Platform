@@ -313,3 +313,10 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - 当前 lifespan 对同步失败采取“记录明确错误后继续启动”的降级策略；因此部署监控必须能识别该错误，且 Scheduler Worker 启动后应检查数据库中的任务配置完整性。此处尚未实现独立任务同步协调者/健康状态端点。
 - 该修复仅处理业务配置同步，不是 schema migration，也不应写入 migration ledger。
 - 未连接生产服务器、数据库、Redis、队列或真实第三方接口；PR 仍保持 Open / Draft，不合并、不部署。
+
+### MySQL 并发冲突补充
+
+- InnoDB 在多个 Worker 对尚不存在的唯一键执行 `SELECT ... FOR UPDATE` 时，可能出现 gap/insert-intention 锁竞争；失败不一定表现为 1062 Duplicate entry，也可能是 1213 deadlock 或 1205 lock wait timeout。
+- 同步重试分类现覆盖 MySQL 1062 / 1205 / 1213，以及 SQLite 的 locked 状态；每次重试前均先回滚整批事务。非冲突类完整性错误不重试。
+- 新增 `tests/test_mysql_scheduled_task_sync.py`：仅在 GitHub Actions loopback 临时 MySQL `platform_ci` 且显式开启 destructive-test flag 时运行；为每次测试创建独立 utf8mb4 临时数据库，两个并发 Worker 同步 8 条合成任务，断言最终无重复且任务齐全，结束后销毁临时库。
+- 该 MySQL 测试当前尚未取得通过证据；必须以最新 HEAD 对应 CI job 实际执行成功为准。若测试环境未满足安全条件，CI 应失败关闭而不是连接远程数据库。
