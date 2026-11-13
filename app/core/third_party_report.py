@@ -391,13 +391,13 @@ async def _link_purchase_to_view_content(
     adsid: str,
     conversion_id: str,
     report_log_id: int,
-    allow_unscoped_match: bool,
+    allow_destination_match: bool,
 ) -> bool:
-    """仅在明确无平台作用域的直接发送路径关联 ViewContent。"""
-    if not allow_unscoped_match:
+    """仅在目的地身份已持久化且可验证时关联 ViewContent。"""
+    if not allow_destination_match:
         logger.info(
-            "[第三方上报] 跳过 ViewContent 关联：Outbox 尚未持久化平台作用域，"
-            "不能证明与 Purchase 属于同一平台：report_log_id=%s",
+            "[第三方上报] 跳过 ViewContent 关联：日志未持久化可验证的 Pixel 目的地身份，"
+            "不能证明与 Purchase 发往同一目的地：report_log_id=%s",
             report_log_id,
         )
         return False
@@ -684,8 +684,8 @@ async def send_third_party_report(
             adsid=adsid,
             conversion_id=conversion_id,
             report_log_id=report_log_id,
-            # report_log_id 路径是平台级 Outbox；当前模型未保存 platform，必须跳过关联。
-            allow_unscoped_match=not using_existing_report_log,
+            # 直接发送和 Outbox 均未持久化 Pixel 目的地身份，当前一律跳过关联。
+            allow_destination_match=False,
         )
 
     logger.info("[第三方上报] 使用像素配置 - Pixel ID: %s, API 版本：%s", pixel_id, api_version)
