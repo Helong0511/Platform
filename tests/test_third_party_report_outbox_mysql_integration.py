@@ -606,3 +606,60 @@ async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover
         if engine is not None:
             await engine.dispose()
         _drop_isolated_database(database)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "adsid", "event", "conversion_id", "platform"),
+    [
+        ("postback", "ascii-click:001", "Purchase", "conv-001", None),
+        ("postback", "中文点击-001", "Purchase", "转化-甲", None),
+        ("postback", "emoji-😀-click", "Purchase", "订单-😀", "bft"),
+        ("postback", "含冒号:和长度", "ViewContent", "后补-转化ID", "平台-甲"),
+        ("短链", "空字段边界", "Purchase", "", "platform-x"),
+    ],
+)
+async def test_mysql_event_idempotency_golden_vectors_match_python_utf8(
+    source, adsid, event, conversion_id, platform
+):
+    """MySQL SHA2/CHAR_LENGTH 与 Python UTF-8 长度前缀算法对 Unicode 字节级一致。"""
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        parts = [
+            ("source", source),
+            ("adsid", adsid),
+            ("event", event),
+            (
+                "conversion_id",
+                "" if event == "ViewContent" else (conversion_id or ""),
+            ),
+        ]
+        normalized_platform = (platform or "").strip()
+        if platform:
+            parts.append(("platform", normalized_platform))
+
+        concat_args = []
+        params = {}
+        for name, value in parts:
+            params[name] = value
+            concat_args.extend([f"CHAR_LENGTH(:{name})", "':'", f":{name}"])
+        sql = "SELECT SHA2(CONCAT(" + ", ".join(concat_args) + "), 256)"
+        async with engine.connect() as connection:
+            mysql_key = await connection.scalar(text(sql), params)
+
+        python_key = report_module.build_event_idempotency_key(
+            source, adsid, event, conversion_id, platform=platform
+        )
+        assert mysql_key == python_key
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
