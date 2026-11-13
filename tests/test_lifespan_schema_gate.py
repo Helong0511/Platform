@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.bootstrap import lifespan
+from app.core.database import create_tables
 
 
 class _FakeConnection:
@@ -87,3 +88,11 @@ def test_lifespan_module_has_no_implicit_schema_ddl_calls():
         elif isinstance(func, ast.Attribute) and func.attr == "create_all":
             forbidden.append("Base.metadata.create_all")
     assert forbidden == []
+
+
+
+@pytest.mark.asyncio
+async def test_legacy_create_tables_helper_fails_closed_without_ddl():
+    """旧入口保留兼容名称，但不得再绕过 Migration Runner 创建表。"""
+    with pytest.raises(RuntimeError, match="独立 MIGRATION_DATABASE_URL"):
+        await create_tables()
