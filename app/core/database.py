@@ -4,7 +4,7 @@
 功能说明：
 - 创建和管理SQLAlchemy异步数据库引擎
 - 提供数据库会话依赖项（FastAPI Depends）
-- 处理数据库初始化和表创建
+- 管理数据库连接与会话；schema 仅由独立 Migration Runner 管理
 - 修复SQLAlchemy 2.0与aiomysql的兼容性问题
 
 数据库配置：
@@ -217,17 +217,12 @@ async def get_db_readonly() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-# 创建数据库表
 async def create_tables():
-    """
-    创建数据库表
-    
-    注意：生产环境建议使用迁移工具如Alembic
-    这里为了演示简单，直接创建表
-    """
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables created successfully")
+    """兼容旧调用名，但禁止应用进程绕过 Migration Runner 执行 DDL。"""
+    raise RuntimeError(
+        "禁止在应用运行进程中调用 create_tables；"
+        "请使用独立 MIGRATION_DATABASE_URL 执行 python -m app.db.migrations apply"
+    )
 
 
 def _is_duplicate_key_integrity_error(exc: IntegrityError) -> bool:
