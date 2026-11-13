@@ -57,6 +57,12 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         depends_on=("20261111_cap_reservation_ledger",),
     ),
     Migration(
+        revision="20261113_cap_reservation_key_hex",
+        path="sql/migrations/20261113_cap_reservation_key_hex.sql",
+        sha256="de3f58bb39269eb0d0694334e9044ba9b78c23a9d6e5cc14156fe4afe5ff7171",
+        depends_on=("20261113_cap_reservation_schema_guard",),
+    ),
+    Migration(
         revision="20261113_third_party_report_identity_scope",
         path="sql/migrations/20261113_third_party_report_identity_scope.sql",
         sha256="1c9971602ac456cb35552a11f21cce935bcda754d766a292fcf563d26e28c66a",
