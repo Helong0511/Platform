@@ -306,17 +306,34 @@ async def _validate_existing_report_log_binding(
     return True
 
 
-async def _get_report_attempt_state(report_log_id: int) -> tuple[int, int]:
-    """读取累计尝试次数与总上限，供 Outbox 跨 worker 计算重试预算。"""
+async def _get_report_attempt_state(
+    report_log_id: int,
+    *,
+    expected_scope: str,
+    platform: Optional[str] = None,
+) -> tuple[int, int]:
+    """按预期身份作用域读取累计尝试次数，避免仅凭 ID 读取其它作用域事件。"""
+    if expected_scope not in {"unscoped", "platform_scoped"}:
+        raise RuntimeError("第三方上报身份作用域无效")
+    if expected_scope == "platform_scoped" and not (platform or "").strip():
+        raise RuntimeError("第三方上报平台作用域缺少平台标识")
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(ThirdPartyReportLog.attempt_count, ThirdPartyReportLog.max_attempts)
-            .where(ThirdPartyReportLog.id == report_log_id)
+            .where(
+                ThirdPartyReportLog.id == report_log_id,
+                ThirdPartyReportLog.identity_scope == expected_scope,
+                (
+                    ThirdPartyReportLog.platform == platform
+                    if expected_scope == "platform_scoped"
+                    else ThirdPartyReportLog.platform.is_(None)
+                ),
+            )
             .limit(1)
         )
         row = result.one_or_none()
         if row is None:
-            raise RuntimeError(f"第三方上报日志不存在：{report_log_id}")
+            raise RuntimeError("第三方上报日志不存在或身份作用域不匹配")
         return max(0, int(row[0] or 0)), max(1, int(row[1] or 1))
 
 
@@ -702,7 +719,11 @@ async def send_third_party_report(
         return True
 
     if using_existing_report_log:
-        base_attempt_count, max_attempts_total = await _get_report_attempt_state(report_log_id)
+        base_attempt_count, max_attempts_total = await _get_report_attempt_state(
+            report_log_id,
+            expected_scope="platform_scoped",
+            platform=platform,
+        )
     else:
         base_attempt_count = 0
         max_attempts_total = max_retries + (1 if use_hash else 0)
