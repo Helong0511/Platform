@@ -1498,3 +1498,77 @@ def test_report_identity_lock_migration_creates_permanent_collision_checked_lock
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS third_party_report_identity_locks")
         connection.close()
+
+def test_cap_reservation_schema_guard_accepts_innodb_single_id_primary_key():
+    """Cap 账本物理结构正确时，独立版本化后置核验必须通过。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+            _run_sql_file(cursor, "sql/migrations/20261111_cap_reservation_ledger.sql")
+            _run_sql_file(cursor, "sql/migrations/20261113_cap_reservation_schema_guard.sql")
+            cursor.execute(
+                "SELECT ENGINE FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'"
+            )
+            assert cursor.fetchone()[0] == "InnoDB"
+            cursor.execute(
+                "SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) "
+                "FROM information_schema.STATISTICS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations' "
+                "AND INDEX_NAME = 'PRIMARY'"
+            )
+            assert cursor.fetchone()[0] == "id"
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+        connection.close()
+
+
+def test_cap_reservation_schema_guard_rejects_myisam_table():
+    """同名表即使字段/索引正确，只要不是 InnoDB 就必须失败关闭。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+            _run_sql_file(cursor, "sql/migrations/20261111_cap_reservation_ledger.sql")
+            cursor.execute("ALTER TABLE cap_reservations ENGINE=MyISAM")
+            with pytest.raises(pymysql.err.ProgrammingError) as migration_error:
+                _run_sql_file(cursor, "sql/migrations/20261113_cap_reservation_schema_guard.sql")
+            assert migration_error.value.args[0] == 1146
+            cursor.execute(
+                "SELECT ENGINE FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations'"
+            )
+            assert cursor.fetchone()[0] == "MyISAM"
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+        connection.close()
+
+
+def test_cap_reservation_schema_guard_rejects_composite_primary_key():
+    """主键唯一但列定义错误（id, offer_id）时不能通过物理结构核验。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+            _run_sql_file(cursor, "sql/migrations/20261111_cap_reservation_ledger.sql")
+            cursor.execute(
+                "ALTER TABLE cap_reservations DROP PRIMARY KEY, "
+                "ADD PRIMARY KEY (id, offer_id)"
+            )
+            with pytest.raises(pymysql.err.ProgrammingError) as migration_error:
+                _run_sql_file(cursor, "sql/migrations/20261113_cap_reservation_schema_guard.sql")
+            assert migration_error.value.args[0] == 1146
+            cursor.execute(
+                "SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) "
+                "FROM information_schema.STATISTICS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cap_reservations' "
+                "AND INDEX_NAME = 'PRIMARY'"
+            )
+            assert cursor.fetchone()[0] == "id,offer_id"
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cap_reservations")
+        connection.close()
