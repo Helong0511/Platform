@@ -119,7 +119,7 @@ def test_schema_metadata_drift_detects_type_nullability_and_primary_key_changes(
     try:
         with engine.begin() as connection:
             connection.exec_driver_sql(
-                "CREATE TABLE required_table (id TEXT, required_value VARCHAR(32))"
+                "CREATE TABLE required_table (id TEXT NOT NULL, required_value VARCHAR(32))"
             )
         with engine.connect() as connection:
             drift = _schema_metadata_drift(connection, metadata)
