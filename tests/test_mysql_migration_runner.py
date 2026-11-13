@@ -393,3 +393,53 @@ async def test_status_is_read_only_for_empty_database_and_reports_ledger_rows(tm
         assert rows[0]["execution_order"] == 1
     finally:
         _drop_database(database)
+
+def test_runner_rejects_migration_target_on_different_mysql_host():
+    from app.db.migrations.runner import (
+        MigrationRunnerError,
+        _ensure_distinct_database_account,
+    )
+    from sqlalchemy.engine import make_url
+
+    migration_url = make_url(
+        "mysql+aiomysql://migration_user:secret@migration-db.internal:3306/platform"
+    )
+    application_url = (
+        "mysql+aiomysql://application_user:secret@app-db.internal:3306/platform"
+    )
+
+    with pytest.raises(MigrationRunnerError, match="同一个 MySQL 服务器端点"):
+        _ensure_distinct_database_account(migration_url, application_url)
+
+
+def test_runner_rejects_migration_target_on_different_mysql_port():
+    from app.db.migrations.runner import (
+        MigrationRunnerError,
+        _ensure_distinct_database_account,
+    )
+    from sqlalchemy.engine import make_url
+
+    migration_url = make_url(
+        "mysql+aiomysql://migration_user:secret@127.0.0.1:3307/platform"
+    )
+    application_url = (
+        "mysql+aiomysql://application_user:secret@127.0.0.1:3306/platform"
+    )
+
+    with pytest.raises(MigrationRunnerError, match="同一个 MySQL 服务器端点"):
+        _ensure_distinct_database_account(migration_url, application_url)
+
+
+def test_runner_accepts_same_mysql_host_with_implicit_default_port():
+    from app.db.migrations.runner import _ensure_distinct_database_account
+    from sqlalchemy.engine import make_url
+
+    migration_url = make_url(
+        "mysql+aiomysql://migration_user:secret@DB.INTERNAL/platform"
+    )
+    application_url = (
+        "mysql+aiomysql://application_user:secret@db.internal:3306/platform"
+    )
+
+    _ensure_distinct_database_account(migration_url, application_url)
+
