@@ -855,3 +855,32 @@ GitHub Code Search 对目标分支没有提供可用的完整结果，且本轮�
 - migration DDL 与应用代码分阶段发布，需先完成旧版本行为审查、临时 MySQL 双版本混跑测试和回滚演练。
 - 回滚时不得删除新列或把新记录重写成四字段 key；应回滚应用写入开关并保留新增字段和身份数据。
 - 该状态机仍是实施设计，不代表代码、migration、Worker 门禁或历史 reconciliation 已完成。
+
+
+## 2026-11-13 事件身份状态机：运行时门禁落点复核（Run #1512）
+
+### 本轮新增直接证据
+
+- `create_report_log()` 当前只查询 `event_key` 并选择 ID；命中后不核验记录来源、平台或身份归属状态，直接返回既有 ID。并发唯一键冲突后的回查也只读取 ID。这意味着仅新增 `identity_scope` 字段而不修改两处查询，会让新短链直接发送误复用 legacy unresolved 记录。
+- `_claim_report_log()` 当前是共享发送租约入口，只按 ID、状态、PII 清理、尝试预算、租约和重试时间认领，不校验发送路径的身份作用域。直接发送和 Outbox Worker 都可能触发该认领。
+- `process_postback_report_outbox_item()` 当前先调用 `_claim_report_log(report_log_id)`，再查询 Outbox 行和检查配置引用。身份状态门禁若只放在认领后的 SELECT，会先为不允许发送的历史行占用租约；正确实现必须把 scope/platform 条件下推到原子 claim UPDATE，并在读取 payload 时再次验证。
+- `process_postback_report_outbox()` 的 due scanner 当前仅检查 `outbox_enqueued/status/PII/next_retry_time/attempt_count/lease`，没有身份状态条件。必须在扫描条件中加入 `identity_scope='platform_scoped'` 和 `platform IS NOT NULL`，并让耗尽预算收敛查询、积压统计同样区分 unresolved，避免把历史歧义记录误计入可发送队列。
+- `retry_report_log()` 当前只检查 Outbox、失败状态、PII、配置引用和租约，没有平台身份条件。新增状态字段后必须在 UPDATE 的 WHERE 子句中直接约束作用域，不能只在 API 层做前置 SELECT。
+- `update_report_log_params()` 当前允许非 Outbox 历史日志修改 adsid/event/conversion_id，并始终按四字段重算 event_key。若新增 unresolved 状态，该函数必须先拒绝 unresolved 的身份字段修改；对 platform_scoped 记录必须保持平台维度（建议身份字段继续冻结）；只有 unscoped 才能按四字段算法重算。
+- 当前管理员列表/详情 Schema 没有 platform / identity_scope 字段。新增后需同时更新 list 和 detail 模型，并确保 NULL 仍然是 NULL，不能默认映射为任何平台。
+
+### 实施边界修正
+
+1. `_claim_report_log` 应要求调用者显式指定预期身份作用域，不提供可默认为任意状态的宽松默认值。短链/斗篷直接发送使用 `unscoped`；Postback Outbox 使用 `platform_scoped`。
+2. `send_third_party_report(report_log_id=...)` 的现有 Outbox 调用路径已传入预先取得的 lease token；但必须审计所有其他 report_log_id 调用者，确保不会绕过预期 scope。新增参数应显式向上传递，不能只依赖“调用方通常是 Outbox”。
+3. `_renew_report_log_lease`、发送前尝试次数读取、状态读取与状态更新都应验证身份作用域或沿用不可伪造的 claim token；不能允许无 scope 证明的旧调用继续持有租约并发出请求。
+4. due scanner、claim UPDATE、payload SELECT、管理员 retry、手动编辑和发送函数都需要覆盖测试；只在其中一个入口加过滤不构成 fail-closed。
+5. 新 schema 部署前，必须确认所有旧 Worker 都停止消费新写入的 platform_scoped 行。旧 Worker 不识别 identity_scope，可能用四字段路径绕过新模型；不能以“新增 nullable 列”声称向后兼容。
+
+### CI 记录
+
+- Run #1512：`43356690016`，HEAD `cd9e8588ba5ebc1e77bdbe8c4f197b91b341bf82`，Backend / Frontend 均 success。
+- Backend：602 passed、1 skipped、1 warning（Python 3.11 `crypt` DeprecationWarning）。
+- Frontend：Playwright Mock API Browser E2E 通过，日志覆盖登录校验、认证成功/失败、管理员导航、Outbox 重试资格/详情、登出、移动端抽屉及客户端 RBAC。
+- CI 使用隔离 MySQL / Redis 和 Mock API；没有生产连接或真实第三方发送。
+- 本轮仍未修改业务代码、模型、migration 或发送行为；以上是实施前的调用链门禁清单，不代表 P1 已修复。
