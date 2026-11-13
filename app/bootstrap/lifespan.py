@@ -48,7 +48,14 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         actual_affinity = actual_type._type_affinity
         # MySQL BOOLEAN 物理类型通常表现为 TINYINT(1)。
         if dialect_name == "mysql" and isinstance(expected_type, Boolean):
-            affinity_matches = actual_affinity in (Boolean, Integer)
+            is_mysql_boolean_storage = (
+                actual_type.__class__.__name__.upper() == "TINYINT"
+                and (
+                    getattr(actual_type, "display_width", None) == 1
+                    or getattr(actual_type, "length", None) == 1
+                )
+            )
+            affinity_matches = actual_affinity is Boolean or is_mysql_boolean_storage
         else:
             affinity_matches = expected_affinity is actual_affinity
         if not affinity_matches:
