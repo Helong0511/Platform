@@ -20,7 +20,7 @@ python -m app.db.migrations apply
 2. 连接字符集为 utf8mb4。
 3. `MIGRATION_DATABASE_URL` 必须显式设置为 `mysql+aiomysql` DSN。
 4. 迁移账号用户名必须不同于应用运行账号；CLI 会从应用设置读取 `SQLALCHEMY_DATABASE_URI` 并拒绝相同用户名。
-5. 目标数据库的基础表结构必须已经由受控 provisioning 流程准备好。Runner 只执行 `app/db/migrations/manifest.py` 登记的增量 migration，不会导入 `sql/platform.sql`。
+5. 目标数据库必须由受控 provisioning 预先创建并选定。完整基线导入时使用 MySQL 客户端显式指定目标库，例如 `mysql --default-character-set=utf8mb4 --database=<目标库> < sql/platform.sql`；基线文件不再自行 CREATE DATABASE 或 USE。Runner 只执行 `app/db/migrations/manifest.py` 登记的增量 migration，不会导入 `sql/platform.sql`。
 
 示例仅展示变量形式，不要把真实密码提交到仓库或写入命令历史：
 

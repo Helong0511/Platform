@@ -19,13 +19,7 @@
 
 SET NAMES utf8mb4;
 
--- 若数据库不存在则创建，并切换到该库
-CREATE DATABASE IF NOT EXISTS `platform`
-  DEFAULT CHARACTER SET utf8mb4
-  DEFAULT COLLATE utf8mb4_0900_ai_ci;
-
-USE `platform`;
-
+-- 请由受控 provisioning 预先创建目标数据库，并通过 mysql --database=<目标库> 选择它。
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- ----------------------------
