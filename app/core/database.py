@@ -36,7 +36,7 @@ from fastapi.exceptions import RequestValidationError
 import logging
 import aiomysql as aiomysql_lib
 
-from app.models.models import Base, User, UserRole
+from app.models.models import User, UserRole
 
 # ====== 日志记录器 ======
 logger = logging.getLogger(__name__)
