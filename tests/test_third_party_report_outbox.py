@@ -135,6 +135,9 @@ async def test_enqueue_does_not_reopen_or_mutate_attempted_outbox_payload(monkey
         "status": "failed",
         "next_retry_time": None,
         "outbox_enqueued": True,
+            "identity_scope": "platform_scoped",
+            "platform": "bft",
+            "destination_pixel_id": None,
         "identity_scope": "platform_scoped",
         "platform": "bft",
         "destination_pixel_id": "pixel-existing",
@@ -237,6 +240,9 @@ async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
         {
             "id": 91,
             "outbox_enqueued": True,
+            "identity_scope": "platform_scoped",
+            "platform": "bft",
+            "destination_pixel_id": None,
             "status": "pending",
             "next_retry_time": datetime(2026, 11, 11, 11, 59, 0),
             "adsid": "fbclid-worker",
@@ -340,6 +346,9 @@ async def test_outbox_missing_credentials_keeps_event_retryable(monkeypatch):
         {
             "id": 92,
             "outbox_enqueued": True,
+            "identity_scope": "platform_scoped",
+            "platform": "bft",
+            "destination_pixel_id": None,
             "status": "pending",
             "next_retry_time": datetime(2026, 11, 11, 11, 59, 0),
             "adsid": "fbclid-no-credentials",
@@ -557,6 +566,9 @@ async def test_remote_acceptance_with_lost_local_ack_retries_same_event_id(monke
         {
             "id": 119,
             "outbox_enqueued": True,
+            "identity_scope": "platform_scoped",
+            "platform": "bft",
+            "destination_pixel_id": None,
             "status": "pending",
             "next_retry_time": datetime(2026, 11, 11, 11, 59, 0),
             "adsid": "fbclid-ack-lost",
@@ -934,6 +946,9 @@ async def test_outbox_missing_config_reference_is_finalized_not_rescanned(monkey
         {
             "id": 96,
             "outbox_enqueued": True,
+            "identity_scope": "platform_scoped",
+            "platform": "bft",
+            "destination_pixel_id": None,
             "status": "pending",
             "next_retry_time": datetime(2026, 11, 11, 11, 59, 0),
             "adsid": "fbclid-no-config",
@@ -1011,6 +1026,9 @@ async def test_outbox_retries_after_credentials_are_restored(monkeypatch):
         {
             "id": 93,
             "outbox_enqueued": True,
+            "identity_scope": "platform_scoped",
+            "platform": "bft",
+            "destination_pixel_id": None,
             "pii_scrubbed_at": None,
             "status": "pending",
             "next_retry_time": now[0] - timedelta(minutes=1),
@@ -1180,6 +1198,9 @@ async def test_enqueue_refuses_existing_platform_scoped_event_owned_by_another_p
             "identity_scope": "platform_scoped",
             "platform": "other-platform",
             "outbox_enqueued": True,
+            "identity_scope": "platform_scoped",
+            "platform": "bft",
+            "destination_pixel_id": None,
         },
     )()
 
