@@ -37,7 +37,13 @@ class _FakeEngine:
 @pytest.mark.asyncio
 async def test_lifespan_schema_verification_uses_read_only_gate(monkeypatch):
     connection = _FakeConnection(
-        {"missing_tables": [], "missing_columns": {}}
+        {
+            "missing_tables": [],
+            "missing_columns": {},
+            "column_type_mismatches": {},
+            "nullable_mismatches": {},
+            "primary_key_mismatches": {},
+        }
     )
     engine = _FakeEngine(connection)
     gate_calls = []
@@ -62,6 +68,9 @@ async def test_lifespan_schema_verification_fails_on_missing_orm_objects(monkeyp
         {
             "missing_tables": ["required_table"],
             "missing_columns": {"another_table": ["required_column"]},
+            "column_type_mismatches": {},
+            "nullable_mismatches": {},
+            "primary_key_mismatches": {},
         }
     )
 
