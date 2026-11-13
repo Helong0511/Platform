@@ -666,3 +666,84 @@ async def test_mysql_event_idempotency_golden_vectors_match_python_utf8(
         if engine is not None:
             await engine.dispose()
         _drop_isolated_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_existing_outbox_report_binding_matches_persisted_payload_and_lease(monkeypatch):
+    """真实 MySQL 验证 report_log_id 只能绑定同一持久化载荷和当前租约。"""
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(ThirdPartyReportLog.__table__.create)
+
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
+
+        now = get_app_now_naive().replace(microsecond=0)
+        event_identity = uuid.uuid4().hex
+        event_key = hashlib.sha256(event_identity.encode("utf-8")).hexdigest()
+        async with session_factory() as session:
+            row = ThirdPartyReportLog(
+                source="postback",
+                adsid=f"ci-binding-{event_identity}",
+                event="Purchase",
+                event_key=event_key,
+                conversion_id=f"conversion-{event_identity}",
+                status="pending",
+                outbox_enqueued=True,
+                attempt_count=0,
+                max_attempts=5,
+                next_retry_time=now,
+                report_start_time=now,
+            )
+            session.add(row)
+            await session.commit()
+            report_id = row.id
+
+        valid = await report_module._validate_existing_report_log_binding(
+            report_id,
+            source="postback",
+            adsid=f"ci-binding-{event_identity}",
+            event="Purchase",
+            conversion_id=f"conversion-{event_identity}",
+            event_key=event_key,
+            lease_token=now,
+        )
+        wrong_adsid = await report_module._validate_existing_report_log_binding(
+            report_id,
+            source="postback",
+            adsid="different-click-id",
+            event="Purchase",
+            conversion_id=f"conversion-{event_identity}",
+            event_key=event_key,
+            lease_token=now,
+        )
+        stale_lease = await report_module._validate_existing_report_log_binding(
+            report_id,
+            source="postback",
+            adsid=f"ci-binding-{event_identity}",
+            event="Purchase",
+            conversion_id=f"conversion-{event_identity}",
+            event_key=event_key,
+            lease_token=now - timedelta(seconds=1),
+        )
+
+        assert valid is True
+        assert wrong_adsid is False
+        assert stale_lease is False
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
