@@ -225,3 +225,44 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - SQL 文件仍以 UTF-8 读取；CI 仍只连接 workflow 创建的 loopback 临时 MySQL，且破坏性测试继续要求显式隔离开关。
 
 这次修改让现有 MySQL 迁移集成测试与离线解析器共享语句边界逻辑，但不等于正式 Migration Runner 已实现。当前测试辅助执行器仍然只是测试代码，不得作为生产迁移入口使用。正式 Runner 仍须在同一物理 Session 中取得 advisory lock、读取 SQL_MODE、持久化 ledger 状态、执行语句并处理结果集。
+
+## 2026-11-13 迁移启动链路复核与 CI 证据
+
+### 本轮核验范围
+
+复核分支 `fix/non-credential-hardening-2026-11` 当前 HEAD（`006be5d2d39835a5c9ceccad19dd6f9ad66c9827`）中的：
+
+- `app/bootstrap/lifespan.py`：启动调用顺序、schema bootstrap、任务配置同步。
+- `app/db/database.py`：MySQL provisioning 连接与 `CREATE DATABASE IF NOT EXISTS`。
+- `app/core/database.py`：`create_tables()`、`init_db()`。
+- `app/scheduler_module/task_init.py`：任务配置同步的锁、提交、并发冲突与失败策略。
+- `systemd/Platform-backend.service`、`systemd/Platform-scheduler.service`：实际启动入口和环境变量覆盖。
+- `.github/workflows/ci.yml`、`tests/test_mysql_migrations.py`、`tests/test_schema_metadata_drift.py`：隔离测试边界及验证范围。
+
+### 已确认的启动行为
+
+1. Backend 与 Scheduler systemd unit 都运行 `gunicorn ... app.main:app`，都会进入同一 FastAPI lifespan。
+2. 两个 unit 都加载 `/data/Platform/.env`；随后分别覆盖 `GUNICORN_ROLE=api` 与 `GUNICORN_ROLE=scheduler`。Scheduler 额外设置 `ENABLE_SCHEDULER=true`、`SCHEDULER_WORKER=1`、`WORKERS=1`。
+3. 每个进入 lifespan 的服务实例都会执行 `create_database()`、`_bootstrap_database_schema()` 和 `init_db()`。因此当前应用运行身份仍需要数据库创建权限及 schema DDL 权限；advisory lock 仅串行化 create_all，不构成独立 migration job 或权限隔离。
+4. `_schema_metadata_drift()` 当前只比较 ORM 表是否存在、ORM 列名是否存在。它不核对列类型/长度/NULL/default、主键、唯一键、普通索引、CHECK、字符集或排序规则；测试也只覆盖缺表/缺列与完全存在两类情况。
+5. `app/core/database.py::create_tables()` 是第二个 `Base.metadata.create_all()` 封装。当前已确认其定义，但本轮未取得可证明全仓库调用点穷尽的检索结果；不得据此声称它没有调用者。
+6. `init_scheduled_tasks_in_db()` 在 schema bootstrap、管理员初始化后每个 API/Scheduler lifespan 都会执行，与 APScheduler 是否启动无关。该函数逐任务提交；部分错误会记录日志并继续，因此可出现部分配置同步成功。其并发插入恢复逻辑依赖唯一键冲突识别和二次查询，不属于 schema migration。
+7. 当前 CI 使用 GitHub Actions 临时 MySQL 8.0 / Redis 7.4；MySQL 迁移测试要求 GitHub Actions、`UNIT_TEST=1`、显式 destructive flag、loopback host 和固定 `platform_ci` 数据库。迁移 SQL 测试辅助执行器与离线 parser 已统一，但这仍不是生产 Runner。
+
+### 最新 CI 证据
+
+- Run #1469：https://github.com/Helong0511/Platform/actions/runs/43345544426
+- SHA：`006be5d2d39835a5c9ceccad19dd6f9ad66c9827`
+- Backend 与 Frontend jobs 均成功；前端包含 Lint、Build 和 Mock API Playwright E2E。
+- 该结果只证明该 SHA 的 CI 工作流通过，不证明生产 Migration Runner、最小权限迁移账号、历史数据发布演练或备份恢复能力已经实现。
+
+### 尚未关闭的工程阻断
+
+- 未实现独立 provisioning、Migration Runner、ledger、专用迁移 DSN/账号及应用启动只读 revision gate。
+- 尚未完成 `create_tables()`、`create_database()`、`Base.metadata.create_all()`、`init_db()` 等入口的全仓库调用点穷尽检索；当前 GitHub code-search 返回空且标记 incomplete，不能作为“无调用者”的证据。
+- 尚未完成 schema drift 对类型、约束、索引、字符集/排序规则的完整检查。
+- 定时任务配置同步仍由每个 API/Scheduler 实例启动时触发，且错误允许部分同步后继续启动；需要单一协调者、幂等状态、告警和恢复策略。
+- `20261110_third_party_report_event_idempotency.sql` 的全表回填仍未改造成可恢复、按主键分批和限速的流程。不得直接修改已登记 migration 内容或 checksum 来掩盖该风险。
+- 旧 schema + 代表性历史数据、逐 DDL 中断恢复、备份恢复、应用兼容回滚、数据/结构 diff 尚未完成隔离演练。
+
+**结论：** 当前 CI 通过，但数据库发布架构仍未达到可上线验收条件。PR #1 继续 Open / Draft；不合并 main、不部署、不连接生产服务器、数据库、Redis、队列或真实第三方接口。凭据安全专项继续按用户要求暂缓。
