@@ -65,6 +65,14 @@ async def enqueue_postback_report(
         .where(ThirdPartyReportLog.event_key == event_key)
         .with_for_update()
     )
+    if existing is not None and (
+        getattr(existing, "identity_scope", None) != "platform_scoped"
+        or getattr(existing, "platform", None) != normalized_platform
+    ):
+        raise LegacyEventIdentityConflict(
+            "已有事件未标记为当前平台作用域，需人工核实后才能复用"
+        )
+
     if existing is None:
         # 历史直接发送日志使用四字段身份键，没有平台归属证据。
         # 不自动归属，也不允许绕过旧记录创建新的平台作用域事件。
@@ -121,6 +129,8 @@ async def enqueue_postback_report(
         adsid=adsid,
         event=event,
         event_key=event_key,
+        platform=normalized_platform,
+        identity_scope="platform_scoped",
         conversion_id=conversion_id,
         email=email or "",
         ip=ip or "",
@@ -198,6 +208,51 @@ async def _resolve_pixel_credentials(
     return pixel_id, access_token, api_version
 
 
+async def _bind_outbox_destination(
+    report_log_id: int,
+    *,
+    lease_token,
+    platform: str,
+    pixel_id: str,
+) -> bool:
+    """在当前有效租约内绑定首次解析的 Pixel；后续配置变更不得改投目的地。"""
+    if not platform or not pixel_id:
+        return False
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            update(ThirdPartyReportLog)
+            .where(
+                ThirdPartyReportLog.id == report_log_id,
+                ThirdPartyReportLog.outbox_enqueued.is_(True),
+                ThirdPartyReportLog.identity_scope == "platform_scoped",
+                ThirdPartyReportLog.platform == platform,
+                ThirdPartyReportLog.report_start_time == lease_token,
+                ThirdPartyReportLog.pii_scrubbed_at.is_(None),
+                or_(
+                    ThirdPartyReportLog.destination_pixel_id.is_(None),
+                    ThirdPartyReportLog.destination_pixel_id == pixel_id,
+                ),
+            )
+            .values(destination_pixel_id=pixel_id)
+        )
+        await db.commit()
+        if (result.rowcount or 0) == 1:
+            return True
+        # MySQL changed-rows 模式下相同 Pixel 更新可能返回 0；回读确认当前租约与目的地。
+        current = await db.scalar(
+            select(ThirdPartyReportLog.id).where(
+                ThirdPartyReportLog.id == report_log_id,
+                ThirdPartyReportLog.outbox_enqueued.is_(True),
+                ThirdPartyReportLog.identity_scope == "platform_scoped",
+                ThirdPartyReportLog.platform == platform,
+                ThirdPartyReportLog.destination_pixel_id == pixel_id,
+                ThirdPartyReportLog.report_start_time == lease_token,
+                ThirdPartyReportLog.pii_scrubbed_at.is_(None),
+            )
+        )
+        return current is not None
+
+
 async def process_postback_report_outbox_item(report_log_id: int) -> dict:
     """先原子认领发送租约，再读取载荷，避免管理端修正与 Worker 快照竞态。"""
     lease_token = await _claim_report_log(report_log_id)
@@ -239,6 +294,8 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             "amount": float(row.amount) if row.amount is not None else None,
             "click_time": row.click_time,
             "event_key": row.event_key,
+            "platform": row.platform,
+            "destination_pixel_id": row.destination_pixel_id,
             "short_link_id": row.short_link_id,
             "cloak_name": row.cloak_name,
             "short_code": row.short_code,
@@ -314,7 +371,17 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             return {"success": False, "retryable": True, "reason": "report_lease_lost"}
         return {"success": False, "retryable": True, "reason": "missing_pixel_credentials"}
 
+    # Pixel ID 是非敏感目的地标识；首次解析后固定绑定，后续配置变更不得悄悄改投其它 Pixel。
+    if not await _bind_outbox_destination(
+        report_log_id,
+        lease_token=lease_token,
+        platform=payload["platform"],
+        pixel_id=pixel_id,
+    ):
+        return {"success": False, "retryable": False, "reason": "pixel_destination_mismatch"}
+
     send_result = await send_third_party_report(
+        platform=payload["platform"],
         adsid=payload["adsid"],
         event=payload["event"],
         email=payload["email"],
