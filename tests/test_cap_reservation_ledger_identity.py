@@ -1,5 +1,6 @@
 """Cap Reservation stable identity regression tests."""
 from datetime import date
+import re
 
 import pytest
 
@@ -25,7 +26,7 @@ def test_same_postback_and_scope_produce_same_stable_reservation_key():
     second = _identity(event_name="purchase")
 
     assert first["reservation_key"] == second["reservation_key"]
-    assert len(first["reservation_key"]) == 64
+    assert re.fullmatch(r"[0-9a-f]{64}", first["reservation_key"])
 
 
 def test_global_publisher_scope_is_distinct_from_publisher_id():
