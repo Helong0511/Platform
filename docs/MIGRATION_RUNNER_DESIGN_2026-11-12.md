@@ -1227,3 +1227,43 @@ Run #1527（SHA 03f354516e6583cbb91870f9bc3a38674ad8aec9）Backend / Frontend �
 - 管理员编辑、retry、Worker claim / renew / scanner / terminalizer 尚未统一使用 scope 原子条件。
 - 未完成 Pixel ID 是否属于事件目的地身份的产品语义确认。
 - 事件身份 P1 仍未关闭；不合并、不部署。
+
+
+## 2026-11-13 再次收紧：Pixel 目的地未持久化时，所有 Purchase / ViewContent 关联均跳过
+
+### 对上一节的更正
+
+上一节曾暂时保留“直接发送路径允许按 source + adsid 关联 ViewContent”的策略。继续核查 app/routes/short_link/cloak_report_service.py 后发现，这一假设也不充分：
+- source 的 short_link_load_dp_* / short_link_dp_* 取自 report phase 和 dp 参数，不是 Pixel ID，也不是稳定的 Pixel 配置主键。
+- 同一个 source + adsid 仍可能映射不同 Pixel 配置。
+- ThirdPartyReportLog 没有保存 facebook_pixel_id / destination identity。
+因此直接发送路径同样无法证明候选 ViewContent 与当前 Purchase 发往同一个 Pixel。上一节保留直接发送关联的描述已由当前实现取代。
+
+### 当前实现
+
+提交：
+- b5a0dc8f98c8894510745f6e44be44bf1ba43732：将关联前置条件改为必须具备可验证的目的地身份；当前发送函数明确传入 false。
+- 99468dedab4632dfa71f6ab432349d984b14307d：更新回归测试，Outbox 和直接发送均验证安全跳过。
+
+当前 Purchase -> ViewContent 关联在两种路径中均暂停：
+- Outbox：没有持久化 platform / destination Pixel。
+- 直接发送：虽然调用时有 facebook_pixel_id，但历史 ViewContent 行没有持久化该 Pixel ID，无法进行同目的地比较。
+- 此行为只影响 ViewContent 的 conversion_id 后补关联元数据；不改变 event_key，不改变 Purchase 事件本身的发送参数或事件去重键。
+- 恢复关联的正确前置条件是持久化稳定 destination identity，并在查询中精确匹配同一 Pixel / destination；不能仅用 source + adsid 或排序选择候选行。
+
+### Run #1530 验证
+
+Run #1530（SHA 99468dedab4632dfa71f6ab432349d984b14307d）Backend / Frontend 均 success：
+- Backend：608 passed、1 skipped、1 warning。
+- 新增/更新测试：
+  - test_outbox_purchase_does_not_link_viewcontent_without_destination_identity
+  - test_direct_purchase_does_not_link_without_pixel_destination_identity
+  - test_existing_report_log_binding_requires_persisted_identity_and_lease
+  - 隔离 MySQL report_log_id / payload / lease 持久化一致性测试通过。
+- Frontend Lint、Build、Playwright Mock API Browser E2E 通过。
+- npm audit 仍报告 axios（direct）及 follow-redirects（transitive）两项 High；凭据安全专项仍按既定边界暂缓。
+- Python 3.11 crypt 弃用 warning 仍存在。
+
+### 剩余阻断
+
+platform / identity_scope / destination Pixel 尚未加入模型与 migration；Worker claim / renew / scanner / terminalizer 和管理员 retry/edit 尚未使用统一 scope gate。Purchase / ViewContent 关联当前为安全降级，等待目的地字段及迁移完成后恢复。事件身份 P1 仍未关闭。
