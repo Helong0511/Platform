@@ -1077,7 +1077,7 @@ async def test_mysql_identity_lock_rollback_releases_row_and_hash_collision_fail
             session.add(
                 ThirdPartyReportIdentityLock(
                     identity_key=collision_key,
-                    identity_value=b"not-the-canonical-identity",
+                    identity_fingerprint=b"x" * 64,
                 )
             )
             await session.commit()
