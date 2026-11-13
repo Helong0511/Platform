@@ -256,6 +256,8 @@ async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
 
     class FakeDB:
         async def scalar(self, statement):
+            if "select third_party_report_logs.platform" in str(statement).lower():
+                return row.platform
             return row
 
     class SessionContext:
@@ -279,8 +281,9 @@ async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
         assert report_log_id == 91
         return "success"
 
-    async def claim_before_snapshot(report_id):
+    async def claim_before_snapshot(report_id, **kwargs):
         assert report_id == 91
+        assert kwargs.get("expected_scope") == "platform_scoped"
         # 模拟管理端先完成载荷修正；Worker 认领后读取到的必须是新值。
         row.email = "corrected-after-claim@example.invalid"
         return datetime(2026, 11, 11, 12, 0, 0)
@@ -355,6 +358,8 @@ async def test_outbox_missing_credentials_keeps_event_retryable(monkeypatch):
 
     class FakeDB:
         async def scalar(self, statement):
+            if "select third_party_report_logs.platform" in str(statement).lower():
+                return row.platform
             return row
 
     class SessionContext:
@@ -370,8 +375,9 @@ async def test_outbox_missing_credentials_keeps_event_retryable(monkeypatch):
     async def resolve(**kwargs):
         return None, None, None
 
-    async def claim(report_id):
+    async def claim(report_id, **kwargs):
         assert report_id == 92
+        assert kwargs.get("expected_scope") == "platform_scoped"
         return lease_token
 
     async def update(report_id, **kwargs):
@@ -564,6 +570,8 @@ async def test_remote_acceptance_with_lost_local_ack_retries_same_event_id(monke
 
     class FakeDB:
         async def scalar(self, statement):
+            if "select third_party_report_logs.platform" in str(statement).lower():
+                return row.platform
             return row
 
     class SessionContext:
@@ -733,6 +741,9 @@ async def test_outbox_marks_deleted_short_link_terminal_without_retry(monkeypatc
     row = SimpleNamespace(
         id=93,
         outbox_enqueued=True,
+        identity_scope="platform_scoped",
+        platform="bft",
+        destination_pixel_id=None,
         pii_scrubbed_at=None,
         status="pending",
         next_retry_time=datetime(2026, 11, 11, 11, 59, 0),
@@ -756,6 +767,8 @@ async def test_outbox_marks_deleted_short_link_terminal_without_retry(monkeypatc
 
     class FakeDB:
         async def scalar(self, statement):
+            if "select third_party_report_logs.platform" in str(statement).lower():
+                return row.platform
             return row
 
     class SessionContext:
@@ -771,8 +784,9 @@ async def test_outbox_marks_deleted_short_link_terminal_without_retry(monkeypatc
     async def deleted(**kwargs):
         raise outbox.OutboxConfigReferenceDeleted()
 
-    async def claim(report_id):
+    async def claim(report_id, **kwargs):
         assert report_id == 93
+        assert kwargs.get("expected_scope") == "platform_scoped"
         return lease_token
 
     async def update(report_id, **kwargs):
@@ -846,6 +860,9 @@ async def test_outbox_claims_before_reading_and_never_reads_scrubbed_payload(mon
     row = SimpleNamespace(
         id=301,
         outbox_enqueued=True,
+        identity_scope="platform_scoped",
+        platform="bft",
+        destination_pixel_id=None,
         pii_scrubbed_at=datetime(2026, 11, 11, 12, 0, 0),
         status="pending",
         next_retry_time=datetime(2026, 11, 11, 11, 59, 0),
@@ -925,6 +942,8 @@ async def test_outbox_missing_config_reference_is_finalized_not_rescanned(monkey
 
     class FakeDB:
         async def scalar(self, statement):
+            if "select third_party_report_logs.platform" in str(statement).lower():
+                return row.platform
             return row
 
     class SessionContext:
@@ -937,8 +956,9 @@ async def test_outbox_missing_config_reference_is_finalized_not_rescanned(monkey
     captured = {}
     lease_token = datetime(2026, 11, 11, 12, 0, 0)
 
-    async def claim(report_id):
+    async def claim(report_id, **kwargs):
         assert report_id == 96
+        assert kwargs.get("expected_scope") == "platform_scoped"
         return lease_token
 
     async def update(report_id, **kwargs):
@@ -1003,6 +1023,8 @@ async def test_outbox_retries_after_credentials_are_restored(monkeypatch):
 
     class FakeDB:
         async def scalar(self, statement):
+            if "select third_party_report_logs.platform" in str(statement).lower():
+                return row.platform
             return row
 
     class SessionContext:
@@ -1022,8 +1044,9 @@ async def test_outbox_retries_after_credentials_are_restored(monkeypatch):
             return None, None, None
         return "pixel-restored", "token-restored", "v23.0"
 
-    async def claim(report_id):
+    async def claim(report_id, **kwargs):
         assert report_id == 93
+        assert kwargs.get("expected_scope") == "platform_scoped"
         return lease_token
 
     async def update(report_id, **kwargs):
@@ -1072,6 +1095,9 @@ async def test_outbox_payload_editor_uses_row_lock_and_rejects_active_lease(monk
         id=302,
         pii_scrubbed_at=None,
         outbox_enqueued=True,
+        identity_scope="platform_scoped",
+        platform="bft",
+        destination_pixel_id=None,
         status="failed",
         attempt_count=0,
         report_start_time=now,
