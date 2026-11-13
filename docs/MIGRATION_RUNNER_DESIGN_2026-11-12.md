@@ -246,7 +246,7 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 3. 每个进入 lifespan 的服务实例都会执行 `create_database()`、`_bootstrap_database_schema()` 和 `init_db()`。因此当前应用运行身份仍需要数据库创建权限及 schema DDL 权限；advisory lock 仅串行化 create_all，不构成独立 migration job 或权限隔离。
 4. `_schema_metadata_drift()` 当前只比较 ORM 表是否存在、ORM 列名是否存在。它不核对列类型/长度/NULL/default、主键、唯一键、普通索引、CHECK、字符集或排序规则；测试也只覆盖缺表/缺列与完全存在两类情况。
 5. `app/core/database.py::create_tables()` 是第二个 `Base.metadata.create_all()` 封装。当前已确认其定义，但本轮未取得可证明全仓库调用点穷尽的检索结果；不得据此声称它没有调用者。
-6. `init_scheduled_tasks_in_db()` 在 schema bootstrap、管理员初始化后每个 API/Scheduler lifespan 都会执行，与 APScheduler 是否启动无关。该函数逐任务提交；部分错误会记录日志并继续，因此可出现部分配置同步成功。其并发插入恢复逻辑依赖唯一键冲突识别和二次查询，不属于 schema migration。
+6. `init_scheduled_tasks_in_db()` 在 schema bootstrap、管理员初始化后每个 API/Scheduler lifespan 都会执行，与 APScheduler 是否启动无关。当前版本已改为整批事务提交，移除 `SKIP LOCKED`，识别唯一键冲突、MySQL 死锁/锁等待超时后整批回滚并有限重试；其它错误回滚后向上传播。lifespan 仍允许 Worker 在记录明确错误后继续启动，因此任务同步失败必须进入监控告警，不能视为同步成功。该函数属于业务配置同步，不属于 schema migration。
 7. 当前 CI 使用 GitHub Actions 临时 MySQL 8.0 / Redis 7.4；MySQL 迁移测试要求 GitHub Actions、`UNIT_TEST=1`、显式 destructive flag、loopback host 和固定 `platform_ci` 数据库。迁移 SQL 测试辅助执行器与离线 parser 已统一，但这仍不是生产 Runner。
 
 ### 最新 CI 证据
@@ -259,9 +259,9 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 ### 尚未关闭的工程阻断
 
 - 未实现独立 provisioning、Migration Runner、ledger、专用迁移 DSN/账号及应用启动只读 revision gate。
-- 尚未完成 `create_tables()`、`create_database()`、`Base.metadata.create_all()`、`init_db()` 等入口的全仓库调用点穷尽检索；当前 GitHub code-search 返回空且标记 incomplete，不能作为“无调用者”的证据。
+- 尚未完成 `create_tables()`、`create_database()`、`Base.metadata.create_all()`、`init_db()` 等入口的全仓库调用点穷尽检索；当前 GitHub code-search 对目标分支未提供可用结果，不能作为“无调用者”的证据。
 - 尚未完成 schema drift 对类型、约束、索引、字符集/排序规则的完整检查。
-- 定时任务配置同步仍由每个 API/Scheduler 实例启动时触发，且错误允许部分同步后继续启动；需要单一协调者、幂等状态、告警和恢复策略。
+- 定时任务配置同步仍由每个 API/Scheduler 实例启动时触发；虽然批次原子性和并发冲突重试已有修复，但仍缺少单一协调者、可查询的同步健康状态、失败告警和恢复策略。
 - `20261110_third_party_report_event_idempotency.sql` 的全表回填仍未改造成可恢复、按主键分批和限速的流程。不得直接修改已登记 migration 内容或 checksum 来掩盖该风险。
 - 旧 schema + 代表性历史数据、逐 DDL 中断恢复、备份恢复、应用兼容回滚、数据/结构 diff 尚未完成隔离演练。
 
@@ -278,13 +278,13 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 3. 每个 Worker 各自创建并运行应用生命周期，因此不能将数据库初始化的执行次数简单描述为“Backend 一次 + Scheduler 一次”。Backend 多 Worker 与 Scheduler Worker 都可能分别触发启动链路。
 4. 每个 Worker 的启动链路都执行 `create_database()`、`_bootstrap_database_schema()`、`init_db()`，随后还会调用 `init_scheduled_tasks_in_db()`。因此启动期数据库权限和并发写入影响面覆盖全部 Worker。
 5. `_bootstrap_database_schema()` 内部 MySQL advisory lock 只能协调它所保护的 schema bootstrap 临界区，不能替代独立迁移身份，也不能保护管理员初始化、任务配置同步或其他不在该临界区中的写入。
-6. 任务同步函数逐任务提交，单条失败可记录日志后继续处理后续任务；lifespan 对整个同步调用也采用 warning 后继续启动策略。结果可能是多个 Worker 同时尝试同步，或任务表处于部分同步状态而服务仍然启动。
+6. 任务同步函数现为整批事务；唯一键/死锁/锁等待超时冲突会整批回滚并有限重试，其它异常向上传播。lifespan 仍采用记录明确错误后继续启动的降级策略，因此失败状态需监控告警，不能把服务启动等同于任务配置同步成功。
 7. 因此未来拆分应将 schema provisioning / migration 作为独立、显式、单次运行的部署步骤；API 与 Scheduler Worker 启动时仅执行只读 schema revision/drift gate。管理员 bootstrap 与 scheduled task config sync 应分别设计唯一协调者、幂等、失败告警及恢复机制，不应借用 migration ledger 充当业务数据同步账本。
 
 ### 当前结论的边界
 
 - 上述结论由实际入口和配置直接支持。
-- 尚未完成 540 个 Python/配置文件的全量调用点扫描；GitHub 搜索结果为空不能作为无调用者证明。
+- 当前分支 Git tree 中有 536 个 Python 文件（app 433、tests 102、其它 1）；尚未完成全量调用点扫描，GitHub 搜索结果为空不能作为无调用者证明。
 - `app/core/database.py::create_tables()` 的其它调用者仍待穷尽核验。
 - 本补充不修改应用行为，不代表 Runner 已实现或已完成发布演练。
 
@@ -309,7 +309,7 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 
 ### 仍需验证 / 限制
 
-- 新增单元测试尚不能替代 MySQL 多 Worker 并发启动集成测试；下一步需在 GitHub Actions 临时 MySQL 中验证两个 Worker 同时同步相同配置、唯一键竞争后重试成功，以及一个 Worker 在批次提交失败时不留下部分记录。
+- MySQL 多 Worker 并发同步集成测试已在 Run #1479 的 GitHub Actions 临时 MySQL 中真实执行并通过；仍需补充并发批次失败/回滚故障注入测试。
 - 当前 lifespan 对同步失败采取“记录明确错误后继续启动”的降级策略；因此部署监控必须能识别该错误，且 Scheduler Worker 启动后应检查数据库中的任务配置完整性。此处尚未实现独立任务同步协调者/健康状态端点。
 - 该修复仅处理业务配置同步，不是 schema migration，也不应写入 migration ledger。
 - 未连接生产服务器、数据库、Redis、队列或真实第三方接口；PR 仍保持 Open / Draft，不合并、不部署。
@@ -319,7 +319,7 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - InnoDB 在多个 Worker 对尚不存在的唯一键执行 `SELECT ... FOR UPDATE` 时，可能出现 gap/insert-intention 锁竞争；失败不一定表现为 1062 Duplicate entry，也可能是 1213 deadlock 或 1205 lock wait timeout。
 - 同步重试分类现覆盖 MySQL 1062 / 1205 / 1213，以及 SQLite 的 locked 状态；每次重试前均先回滚整批事务。非冲突类完整性错误不重试。
 - 新增 `tests/test_mysql_scheduled_task_sync.py`：仅在 GitHub Actions loopback 临时 MySQL `platform_ci` 且显式开启 destructive-test flag 时运行；为每次测试创建独立 utf8mb4 临时数据库，两个并发 Worker 同步 8 条合成任务，断言最终无重复且任务齐全，结束后销毁临时库。
-- 该 MySQL 测试当前尚未取得通过证据；必须以最新 HEAD 对应 CI job 实际执行成功为准。若测试环境未满足安全条件，CI 应失败关闭而不是连接远程数据库。
+- 该 MySQL 测试已在 Run #1479 通过；运行环境仅为 GitHub Actions loopback 临时 MySQL，测试创建并销毁独立 utf8mb4 临时数据库。若测试环境未满足安全条件，CI 应失败关闭而不是连接远程数据库。
 
 ### 隔离 CI 验收（Run #1479）
 
@@ -336,3 +336,10 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - 复核发现既有 MySQL 测试名称包含 `verifies_full_metadata`，但实际断言只覆盖 ORM 表和列存在性，并不比较列类型、NULL/default、主键、索引、CHECK、字符集或排序规则。
 - 已将测试重命名为 `test_mysql_schema_bootstrap_creates_orm_tables_and_checks_table_column_presence`，并修正文档字符串，避免把有限检查误称为完整 metadata 验收。
 - 真实 schema drift 检查范围仍需后续设计和兼容性测试；不在本轮贸然扩展到类型/索引/字符集比较，以免对既有生产 schema 产生未经验证的误报或错误阻断。
+
+### 最新 HEAD / CI 状态更新（2026-11-13）
+
+- 当前 PR HEAD：`3ca7e8d5d8a6f5131445bf596bafa1f13529c662`。
+- 对应 Run #1482：https://github.com/Helong0511/Platform/actions/runs/43347718738，Backend / Frontend 均成功。
+- Run #1482 是 schema drift 测试命名与文档修订后的验证；任务同步 MySQL 并发测试的实际执行证据仍以 Run #1479 为准（587 passed、1 skipped、1 warning）。
+- PR #1 仍为 Open / Draft，未合并；mergeable 不代表上线验收完成。
