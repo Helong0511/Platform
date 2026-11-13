@@ -1120,7 +1120,6 @@ async def test_mysql_identity_lock_wait_timeout_fails_closed_and_can_retry(monke
             autoflush=False,
         )
         monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
-        monkeypatch.setattr(report_module, "REPORT_IDENTITY_LOCK_WAIT_SECONDS", 1)
         identity = (
             "postback",
             f"lock-timeout-{uuid.uuid4().hex}",
@@ -1129,6 +1128,8 @@ async def test_mysql_identity_lock_wait_timeout_fails_closed_and_can_retry(monke
         )
 
         async with session_factory() as first, session_factory() as second:
+            await second.execute(text("SET SESSION innodb_lock_wait_timeout = 1"))
+            await second.commit()
             async with first.begin():
                 await report_module._lock_report_base_identity(
                     first,
