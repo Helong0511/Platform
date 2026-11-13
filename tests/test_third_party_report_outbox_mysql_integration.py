@@ -396,8 +396,8 @@ async def test_mysql_pii_retention_preserves_active_leases_and_exact_forward_tar
 
 
 @pytest.mark.asyncio
-async def test_mysql_schema_bootstrap_serializes_workers_and_verifies_full_metadata(monkeypatch):
-    """真实 MySQL 验证启动建表锁可串行化多 worker，并核对所有 ORM 表/列。"""
+async def test_mysql_schema_bootstrap_creates_orm_tables_and_checks_table_column_presence(monkeypatch):
+    """真实 MySQL 验证启动建表锁及 ORM 表/列存在性（不代表完整元数据比对）。"""
     database = _create_isolated_database()
     engine = None
     try:
