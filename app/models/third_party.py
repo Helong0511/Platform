@@ -36,6 +36,21 @@ class ThirdPartyReportLog(Base):
         comment='事件幂等键：稳定事件身份字段的 SHA-256（ViewContent 不含后补 conversion_id）',
     )
     conversion_id = Column(String(255), nullable=True, index=True, comment='转化ID')
+    # 新事件显式标记身份作用域；历史数据迁移后保持 legacy_unresolved，禁止推断归属。
+    platform = Column(String(100), nullable=True, comment='Postback 平台标识；非平台事件为 NULL')
+    identity_scope = Column(
+        String(32),
+        nullable=False,
+        default="legacy_unresolved",
+        server_default=text("'legacy_unresolved'"),
+        comment="unscoped/platform_scoped/legacy_unresolved",
+    )
+    # Pixel ID 是非敏感目的地标识；绝不保存 access_token。
+    destination_pixel_id = Column(
+        String(100),
+        nullable=True,
+        comment="Meta Pixel 目的地 ID，用于同目的地事件关联与配置变更核验",
+    )
     use_hash = Column(Boolean, default=True, nullable=False, comment='是否对email、ip、phone进行哈希处理：True=哈希，False=不哈希')
     email = Column(String(255), nullable=True, comment='邮箱（原始值）')
     ip = Column(String(50), nullable=True, comment='IP地址（原始值）')
@@ -83,6 +98,16 @@ class ThirdPartyReportLog(Base):
         Index("idx_third_party_created_at", "created_at"),
         Index("idx_third_party_pii_retention", "pii_scrubbed_at", "created_at", "id"),
         Index("idx_third_party_status_created", "status", "created_at"),
+        Index(
+            "idx_third_party_scope_due",
+            "identity_scope",
+            "platform",
+            "outbox_enqueued",
+            "status",
+            "next_retry_time",
+            "report_start_time",
+            "id",
+        ),
         UniqueConstraint('event_key', name='unique_event_key'),
         Index(
             "idx_third_party_outbox_due",
