@@ -44,9 +44,10 @@ python -m app.db.migrations apply
 
 ## 4. 基线文件安全边界
 
-`sql/platform.sql` 是完整 schema 快照，含 `DROP TABLE IF EXISTS`、硬编码数据库选择及客户端 DELIMITER / routine 定义。它不是增量 migration，也不是 Runner 的输入。
+`sql/platform.sql` 是完整 schema 快照，含 `DROP TABLE IF EXISTS` 和客户端 DELIMITER / routine 定义；当前快照不包含 `CREATE DATABASE` 或 `USE`，由 provisioning 预先创建目标库，并通过 MySQL 客户端 `--database=<目标库>` 显式选择。它不是增量 migration，也不是 Runner 的输入。
 
 - 只允许在全新或可丢弃数据库上使用经过审核的初始化流程。
+- 当前 manifest 共 10 条 revision；执行前必须先运行 `validate`，并核对 `status` 与目标环境基线版本。
 - 绝不能把它用于已有数据库升级。
 - 不要把“ORM 表名覆盖测试通过”误认为所有列、索引、外键、CHECK 和字符集都已完成物理结构核验。
 
@@ -68,3 +69,11 @@ python -m app.db.migrations apply
 - 新库基线导入、旧库升级、备份恢复、worker pause/resume 和失败人工恢复演练仍未完成。
 
 因此：当前命令和 CI 仅证明隔离测试环境中的 Runner 与只读启动 gate 行为；未完成真实新库/旧库部署演练前，不能在生产执行，也不能宣称上线就绪。
+
+
+## 7. 当前隔离验收记录
+
+- PR HEAD：`6394f63976a79ffdbfe414dc46060db4f7773b76`。
+- GitHub Actions Run #43398657923：Backend 669 passed、1 skipped、1 warning；Frontend 依赖审计、Lint、Build、Playwright Mock API E2E 全部通过。
+- 该结果只覆盖 GitHub Actions 临时 MySQL/Redis 与合成数据；不代表空库完整导入、旧库真实规模升级、备份恢复或生产 DDL 风险演练已经完成。
+- PR #1 仍为 Open / Draft；不合并、不部署。
