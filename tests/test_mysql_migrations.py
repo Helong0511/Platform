@@ -1462,7 +1462,7 @@ def test_report_identity_lock_migration_creates_permanent_collision_checked_lock
     try:
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS third_party_report_identity_locks")
-            migration = "sql/migrations/20261113_third_party_report_identity_locks.sql"
+            migration = "sql/migrations/20261113_third_party_report_identity_scope_locks.sql"
             _run_sql_file(cursor, migration)
             _run_sql_file(cursor, migration)
 
