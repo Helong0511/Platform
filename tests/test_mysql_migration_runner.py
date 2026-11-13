@@ -22,6 +22,7 @@ from app.db.migrations.runner import (
     MigrationRunnerError,
     _migration_lock_name,
     apply_migrations,
+    read_migration_status,
 )
 
 
@@ -320,3 +321,41 @@ def test_runner_rejects_reusing_application_database_account():
         from sqlalchemy.engine import make_url
 
         _ensure_distinct_database_account(make_url(url), url)
+
+
+@pytest.mark.asyncio
+async def test_status_is_read_only_for_empty_database_and_reports_ledger_rows(tmp_path: Path):
+    database = _create_database()
+    try:
+        url = _database_url(database)
+        app_url = _application_database_url(database)
+        assert await read_migration_status(
+            url, application_database_url=app_url
+        ) == ()
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM information_schema.TABLES "
+                    "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'platform_schema_migrations'",
+                    (database,),
+                )
+                assert cursor.fetchone()[0] == 0
+
+        migrations = _write_migrations(
+            tmp_path,
+            [("20261110_runner_status", "CREATE TABLE status_probe (id INT PRIMARY KEY);")],
+        )
+        await apply_migrations(
+            url,
+            application_database_url=app_url,
+            repository_root=tmp_path,
+            migrations=migrations,
+        )
+        rows = await read_migration_status(url, application_database_url=app_url)
+        assert len(rows) == 1
+        assert rows[0]["revision"] == migrations[0].revision
+        assert rows[0]["status"] == "applied"
+        assert rows[0]["execution_order"] == 1
+    finally:
+        _drop_database(database)

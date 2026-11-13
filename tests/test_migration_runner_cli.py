@@ -13,3 +13,9 @@ def test_validate_remains_offline(capsys):
     assert main(["validate"]) == 0
     output = capsys.readouterr().out
     assert "No database connection was opened" in output
+
+
+def test_status_requires_explicit_migration_dsn(monkeypatch, capsys):
+    monkeypatch.delenv("MIGRATION_DATABASE_URL", raising=False)
+    assert main(["status"]) == 2
+    assert "MIGRATION_DATABASE_URL is required" in capsys.readouterr().err

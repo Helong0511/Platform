@@ -77,6 +77,28 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
                 return 3
+
+            from pathlib import Path
+
+            from app.db.migrations.ledger import validate_ledger_rows
+            from app.db.migrations.manifest import validate_manifest
+            from app.db.migrations.planner import plan_migrations
+
+            root = Path(__file__).resolve().parents[3]
+            manifest = validate_manifest(root)
+            applied = validate_ledger_rows(
+                rows, repository_root=root, migrations=manifest
+            )
+            pending = plan_migrations(
+                applied, repository_root=root, migrations=manifest
+            )
+            if pending:
+                print(
+                    "PENDING: " + ", ".join(item.revision for item in pending),
+                    file=sys.stderr,
+                )
+                return 3
+            print("Schema migration ledger is valid and current.")
             return 0
         except (RuntimeError, ValueError, OSError) as exc:
             print(f"Migration status failed: {type(exc).__name__}", file=sys.stderr)
