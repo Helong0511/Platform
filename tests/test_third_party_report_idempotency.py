@@ -627,6 +627,14 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
     """实际执行发送函数：远端接收后本地成功状态提交失败，重试仍使用相同 event_id。"""
     state = {"status": "pending", "http_event_ids": [], "ack_attempts": 0, "claim": 0}
 
+    async def valid_existing_binding(*args, **kwargs):
+        return True
+
+    # 本测试聚焦远端 ACK 丢失后的重试语义；身份绑定由专门测试覆盖。
+    monkeypatch.setattr(
+        third_party_report, "_validate_existing_report_log_binding", valid_existing_binding
+    )
+
     class Response:
         status_code = 200
         text = '{"events_received":1,"fbtrace_id":"isolated-trace"}'
@@ -720,6 +728,14 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
 async def test_report_lease_renewal_failure_prevents_external_request(monkeypatch):
     """发送前续租失败必须 fail-closed，不能创建任何外部 HTTP 请求。"""
     lease_token = datetime(2026, 11, 12, 12, 0, 0)
+
+    async def valid_existing_binding(*args, **kwargs):
+        return True
+
+    # 本测试单独验证租约续期失败路径。
+    monkeypatch.setattr(
+        third_party_report, "_validate_existing_report_log_binding", valid_existing_binding
+    )
 
     async def existing_log(**kwargs):
         return 911
@@ -836,6 +852,13 @@ def test_report_attempt_budget_never_exceeds_cumulative_limit():
 @pytest.mark.asyncio
 async def test_failed_attempt_persistence_prevents_external_request(monkeypatch):
     """累计尝试次数无法持久化时，必须 fail-closed，不得调用第三方。"""
+    async def valid_existing_binding(*args, **kwargs):
+        return True
+
+    # 本测试单独验证 attempt_count 持久化失败路径。
+    monkeypatch.setattr(
+        third_party_report, "_validate_existing_report_log_binding", valid_existing_binding
+    )
     async def existing_log(**kwargs):
         return 910
 
