@@ -324,18 +324,16 @@ async def test_mysql_redis_recovery_keeps_committed_conversion_and_cleans_token(
 
 
 @pytest.mark.asyncio
-async def test_mysql_redis_stale_recovery_worker_cannot_decrement_committed_conversion(monkeypatch):
-    """旧 Worker 在事件查询后暂停；新 Worker 接管并确认转化后，旧 Worker 不得 DECR。"""
+async def test_mysql_redis_stale_recovery_worker_cannot_double_decrement_after_takeover(monkeypatch):
+    """旧 Worker 持有过期的 PRESENT 观察结果时，新 Worker 回滚也只能 DECR 一次。"""
     database = _create_isolated_mysql_database()
     engine = None
     redis = Redis.from_url(REDIS_URL, decode_responses=True)
     redis_keys = []
     stale_read_paused = asyncio.Event()
     release_stale_read = asyncio.Event()
-    committed_finalize_paused = asyncio.Event()
-    release_committed_finalize = asyncio.Event()
     original_token_state = RedisCapManager.get_reservation_token_state
-    original_finalize = CapReservationLedger.finalize
+    read_count = 0
     try:
         _initialize_isolated_schema(database)
         password = quote_plus(os.getenv("MYSQL_INTEGRATION_PASSWORD", ""))
@@ -361,18 +359,17 @@ async def test_mysql_redis_stale_recovery_worker_cannot_decrement_committed_conv
 
         offer_id = int(uuid.uuid4().int % 900_000_000) + 100_000_000
         publisher_id = int(uuid.uuid4().int % 900_000_000) + 100_000_000
-        conversion_id = f"ci-stale-worker-{uuid.uuid4().hex}"
         business_date = get_app_now_naive().date()
-        row, claimed, first_owner = await CapReservationLedger.prepare_and_claim(
+        row, claimed, owner = await CapReservationLedger.prepare_and_claim(
             platform="ci",
-            conversion_id=conversion_id,
+            conversion_id=f"ci-stale-recovery-{uuid.uuid4().hex}",
             event_name="purchase",
             offer_id=offer_id,
             publisher_id=publisher_id,
             cap_kind="daily",
             business_date=business_date,
         )
-        assert claimed is True and first_owner
+        assert claimed is True and owner
         redis_keys.extend([row.redis_counter_key, row.redis_token_key])
         assert await RedisCapManager.check_and_increment_daily(
             offer_id,
@@ -382,8 +379,9 @@ async def test_mysql_redis_stale_recovery_worker_cannot_decrement_committed_conv
             reservation_id=row.reservation_key,
             reservation_date=datetime.combine(business_date, time(12, 0)),
         )
-        await CapReservationLedger.mark_reserved(row.reservation_key, first_owner)
-        # 先使初始 reservation 可被恢复 Worker 认领；Worker A 随后会自行续租。
+        await CapReservationLedger.mark_reserved(row.reservation_key, owner)
+
+        # 使记录可被恢复 Worker A 认领。
         async with session_factory() as session:
             await session.execute(
                 update(CapReservation)
@@ -392,67 +390,43 @@ async def test_mysql_redis_stale_recovery_worker_cannot_decrement_committed_conv
             )
             await session.commit()
 
-        async def pause_stale_token_read(counter_key, token_key):
-            stale_read_paused.set()
-            await asyncio.wait_for(release_stale_read.wait(), timeout=10)
-            return await original_token_state(counter_key, token_key)
-
-        async def pause_committed_finalize(key, state, *, lease_owner=None):
-            if state == "COMMITTED" and lease_owner != first_owner:
-                committed_finalize_paused.set()
-                await asyncio.wait_for(release_committed_finalize.wait(), timeout=10)
-            return await original_finalize(
-                key, state, lease_owner=lease_owner
-            )
+        async def pause_first_token_observation(counter_key, token_key):
+            nonlocal read_count
+            token_state = await original_token_state(counter_key, token_key)
+            read_count += 1
+            if read_count == 1:
+                assert token_state == "PRESENT"
+                stale_read_paused.set()
+                await asyncio.wait_for(release_stale_read.wait(), timeout=10)
+            return token_state
 
         monkeypatch.setattr(
             recovery_module.RedisCapManager,
             "get_reservation_token_state",
-            pause_stale_token_read,
+            pause_first_token_observation,
         )
-        monkeypatch.setattr(
-            CapReservationLedger, "finalize", staticmethod(pause_committed_finalize)
-        )
-
         stale_worker = asyncio.create_task(
             recovery_module.recover_cap_reservations(batch_size=10)
         )
         await asyncio.wait_for(stale_read_paused.wait(), timeout=10)
 
-        # 旧 Worker 已完成“转化不存在”的查询，但尚未读取 token；此时模拟租约过期。
+        # A 已观察到 PRESENT 但尚未调用 Lua；模拟 A 的租约过期并由 B 接管。
         async with session_factory() as session:
             await session.execute(
                 update(CapReservation)
                 .where(CapReservation.reservation_key == row.reservation_key)
                 .values(lease_expires_at=get_app_now_naive() - timedelta(seconds=1))
             )
-            await session.execute(
-                text(
-                    "INSERT INTO postback_conversions "
-                    "(platform, conversion_id, event_name) "
-                    "VALUES (:platform, :conversion_id, :event_name)"
-                ),
-                {
-                    "platform": "ci",
-                    "conversion_id": conversion_id,
-                    "event_name": "purchase",
-                },
-            )
             await session.commit()
 
-        new_worker = asyncio.create_task(
-            recovery_module.recover_cap_reservations(batch_size=10)
+        new_worker_stats = await asyncio.wait_for(
+            recovery_module.recover_cap_reservations(batch_size=10),
+            timeout=15,
         )
-        await asyncio.wait_for(committed_finalize_paused.wait(), timeout=10)
-
-        # 新 Worker 已确认正式转化存在，暂停在 COMMITTED token 清理之前。
-        # 释放旧 Worker，使其按过期查询结果尝试 Redis rollback。
+        # B 已将 token 原子改为 ROLLED_BACK 并 DECR；A 继续使用旧观察结果，
+        # Redis Lua 必须识别墓碑并返回，不得第二次 DECR。
         release_stale_read.set()
-        stale_stats = await asyncio.wait_for(stale_worker, timeout=10)
-
-        # 等旧 Worker 的 Redis 副作用及 DB owner 拒绝都已完成，再让新 Worker 收尾。
-        release_committed_finalize.set()
-        new_stats = await asyncio.wait_for(new_worker, timeout=10)
+        stale_worker_stats = await asyncio.wait_for(stale_worker, timeout=15)
 
         async with session_factory() as session:
             final_row = await session.scalar(
@@ -460,20 +434,25 @@ async def test_mysql_redis_stale_recovery_worker_cannot_decrement_committed_conv
                     CapReservation.reservation_key == row.reservation_key
                 )
             )
-        counter_value = await redis.get(row.redis_counter_key)
-        token_value = await redis.get(row.redis_token_key)
+        assert final_row.state == "ROLLED_BACK"
+        assert final_row.redis_reserved is False
+        assert await redis.get(row.redis_counter_key) == "0"
+        assert await redis.get(row.redis_token_key) == "ROLLED_BACK"
+        assert new_worker_stats["rolled_back"] == 1
+        assert stale_worker_stats["rolled_back"] == 1
 
-        assert final_row.state == "COMMITTED"
-        assert final_row.redis_token_cleaned is True
-        assert counter_value == "1", (
-            "正式转化已提交，旧 Worker 不得因过期查询结果将 Redis counter DECR"
-        )
-        assert token_value is None
-        assert stale_stats["failed"] == 1
-        assert new_stats["committed"] == 1
+        cleanup_stats = await recovery_module.recover_cap_reservations(batch_size=10)
+        async with session_factory() as session:
+            cleaned_row = await session.scalar(
+                select(CapReservation).where(
+                    CapReservation.reservation_key == row.reservation_key
+                )
+            )
+        assert cleaned_row.redis_token_cleaned is True
+        assert await redis.get(row.redis_token_key) is None
+        assert cleanup_stats["tokens_cleaned"] == 1
     finally:
         release_stale_read.set()
-        release_committed_finalize.set()
         if redis_keys:
             await redis.delete(*redis_keys)
         await redis.aclose()
