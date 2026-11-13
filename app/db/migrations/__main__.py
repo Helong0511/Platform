@@ -5,6 +5,8 @@ validate 仅校验仓库内迁移清单和 SQL 文件，不创建数据库连接
 from __future__ import annotations
 
 import argparse
+import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -33,6 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.db.migrations")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("validate", help="validate manifest and SQL statement boundaries (offline)")
+    subparsers.add_parser("apply", help="apply pending migrations using MIGRATION_DATABASE_URL")
     args = parser.parse_args(argv)
 
     if args.command == "validate":
@@ -40,6 +43,23 @@ def main(argv: list[str] | None = None) -> int:
             return _validate()
         except (MigrationManifestError, MigrationSQLParseError, OSError) as exc:
             print(f"Migration validation failed: {exc}", file=sys.stderr)
+            return 1
+
+    if args.command == "apply":
+        database_url = os.getenv("MIGRATION_DATABASE_URL", "").strip()
+        if not database_url:
+            print("Migration failed: MIGRATION_DATABASE_URL is required; application DSN is never used.", file=sys.stderr)
+            return 2
+        try:
+            from app.db.migrations.runner import apply_migrations
+
+            completed = asyncio.run(apply_migrations(database_url))
+            print(f"Migration apply completed: {len(completed)} revision(s)")
+            for revision in completed:
+                print(f"  applied {revision}")
+            return 0
+        except (MigrationManifestError, MigrationSQLParseError, RuntimeError, ValueError, OSError) as exc:
+            print(f"Migration apply failed: {type(exc).__name__}", file=sys.stderr)
             return 1
     parser.error("unsupported command")
     return 2
