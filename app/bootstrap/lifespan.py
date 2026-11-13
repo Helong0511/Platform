@@ -97,6 +97,25 @@ async def _bootstrap_database_schema() -> None:
                     )
 
 
+async def _sync_scheduled_tasks_for_worker(worker_pid: int) -> None:
+    """同步任务配置；调度 Worker 同步失败时拒绝启动，纯 API Worker 可降级。"""
+    try:
+        await init_scheduled_tasks_in_db()
+        logger.info("[Worker PID:%s] 定时任务配置已同步到数据库", worker_pid)
+    except Exception as db_init_error:
+        # 不输出数据库异常原文，避免日志泄露 SQL 参数。
+        logger.error(
+            "[Worker PID:%s] 定时任务配置同步失败：exception_type=%s",
+            worker_pid,
+            type(db_init_error).__name__,
+        )
+        # 纯 API Worker（未运行 APScheduler）可降级启动；调度 Worker 不能使用旧配置继续调度。
+        if settings.should_run_scheduler():
+            raise RuntimeError(
+                "定时任务配置同步失败，调度 Worker 拒绝启动"
+            ) from db_init_error
+
+
 def _should_run_cache_warmup() -> bool:
     """仅在单进程或 Gunicorn 的首个 API worker 中执行预热。"""
     if os.getenv("GUNICORN_ROLE", "api").strip().lower() == "scheduler":
@@ -197,21 +216,7 @@ async def lifespan(app: FastAPI):
         )
 
     # 同步 task_config.py → scheduled_tasks 表；调度 Worker 必须依赖完整配置。
-    try:
-        await init_scheduled_tasks_in_db()
-        logger.info(f"[Worker PID:{worker_pid}] 定时任务配置已同步到数据库")
-    except Exception as db_init_error:
-        # 不输出数据库异常原文，避免日志泄露 SQL 参数。
-        logger.error(
-            "[Worker PID:%s] 定时任务配置同步失败：exception_type=%s",
-            worker_pid,
-            type(db_init_error).__name__,
-        )
-        # 纯 API Worker（未运行 APScheduler）可降级启动；调度 Worker 不能使用旧配置继续调度。
-        if settings.should_run_scheduler():
-            raise RuntimeError(
-                "定时任务配置同步失败，调度 Worker 拒绝启动"
-            ) from db_init_error
+    await _sync_scheduled_tasks_for_worker(worker_pid)
 
     # 定时任务调度器：仅调度 worker 启动（Gunicorn 多 worker 时由 SCHEDULER_WORKER=1 标识）
     if settings.should_run_scheduler():
