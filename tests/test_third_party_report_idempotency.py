@@ -415,6 +415,9 @@ async def test_admin_identity_edit_recomputes_non_outbox_event_key(monkeypatch):
             "conversion_id": "old-conversion",
             "event_key": "old-key",
             "outbox_enqueued": False,
+            "identity_scope": "unscoped",
+            "platform": None,
+            "destination_pixel_id": "pixel-direct",
         },
     )()
 
@@ -473,6 +476,9 @@ async def test_admin_cannot_change_outbox_event_identity(monkeypatch):
             "conversion_id": "conversion-original",
             "event_key": "platform-scoped-event-key",
             "outbox_enqueued": True,
+            "identity_scope": "platform_scoped",
+            "platform": "meta",
+            "destination_pixel_id": "pixel-meta",
         },
     )()
 
@@ -529,6 +535,9 @@ async def test_attempted_outbox_payload_is_immutable(monkeypatch):
             "conversion_id": "conversion-attempted",
             "event_key": "stable-attempted-event-key",
             "outbox_enqueued": True,
+            "identity_scope": "platform_scoped",
+            "platform": "meta",
+            "destination_pixel_id": "pixel-meta",
             "status": "failed",
             "attempt_count": 1,
             "report_start_time": datetime(2026, 11, 11, 11, 59, 0),
@@ -588,6 +597,9 @@ async def test_unattempted_failed_outbox_payload_can_be_corrected_after_lease_ex
             "conversion_id": "conversion-not-attempted",
             "event_key": "stable-not-attempted-event-key",
             "outbox_enqueued": True,
+            "identity_scope": "platform_scoped",
+            "platform": "meta",
+            "destination_pixel_id": "pixel-meta",
             "status": "failed",
             "attempt_count": 0,
             "report_start_time": now - timedelta(seconds=third_party_report.REPORT_LOG_LEASE_SECONDS + 2),
