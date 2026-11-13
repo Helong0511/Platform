@@ -1,6 +1,6 @@
 """MySQL 增量 migration Runner。
 
-仅接受独立 MIGRATION_DATABASE_URL；不读取应用运行时 DSN。
+仅接受独立 MIGRATION_DATABASE_URL；不读取或回退到应用运行时 DSN。
 每条 migration 先持久化 running，再逐条执行并提交；MySQL DDL 隐式提交，
 失败时记录 failed/running 并 fail closed，禁止未经人工核验自动重跑部分 DDL。
 """
@@ -10,9 +10,9 @@ import hashlib
 import logging
 import re
 from pathlib import Path
-from urllib.parse import quote
 
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.db.migrations.ledger import validate_ledger_rows
@@ -80,6 +80,24 @@ def _parse_mysql_version(value: str) -> tuple[int, int, int]:
     return tuple(int(part) for part in match.groups())
 
 
+def _ensure_distinct_database_account(migration_url, application_database_url: str | None) -> None:
+    """同一 MySQL endpoint/database 不允许复用应用运行账号执行 DDL。"""
+    if not application_database_url:
+        return
+    app_url = make_url(application_database_url)
+    if app_url.get_backend_name() != "mysql":
+        return
+    same_target = (
+        migration_url.host == app_url.host
+        and (migration_url.port or 3306) == (app_url.port or 3306)
+        and migration_url.database == app_url.database
+    )
+    if same_target and migration_url.username == app_url.username:
+        raise MigrationRunnerError(
+            "迁移 DSN 必须使用独立于应用运行账号的 MySQL 用户"
+        )
+
+
 async def _consume_result(connection, statement: str) -> None:
     result = await connection.exec_driver_sql(statement)
     try:
@@ -105,13 +123,17 @@ async def _ensure_ledger_schema(connection) -> None:
             {"table_name": _LEDGER_TABLE},
         )
     ).mappings().one_or_none()
-    if table is None or table["ENGINE"] != "InnoDB" or table["TABLE_COLLATION"] != "utf8mb4_0900_ai_ci":
+    if (
+        table is None
+        or table["ENGINE"] != "InnoDB"
+        or table["TABLE_COLLATION"] != "utf8mb4_0900_ai_ci"
+    ):
         raise MigrationRunnerError("migration ledger 表引擎或 collation 不符合要求")
 
     column_rows = (
         await connection.execute(
             text(
-                "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, "
+                "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, "
                 "CHARACTER_SET_NAME, COLLATION_NAME "
                 "FROM information_schema.COLUMNS "
                 "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name"
@@ -187,13 +209,192 @@ async def _ensure_ledger_schema(connection) -> None:
         "chk_platform_migration_execution_order",
         "chk_platform_migration_state_fields",
     }
-    if set(checks) != expected_checks or any(row["ENFORCED"] != "YES" for row in checks.values()):
+    if (
+        set(checks) != expected_checks
+        or any(row["ENFORCED"] != "YES" for row in checks.values())
+    ):
         raise MigrationRunnerError("migration ledger CHECK 约束缺失或未强制执行")
+    clauses = {name: str(row["CHECK_CLAUSE"]).lower() for name, row in checks.items()}
+    if (
+        "running" not in clauses["chk_platform_migration_status"]
+        or "applied" not in clauses["chk_platform_migration_status"]
+        or "failed" not in clauses["chk_platform_migration_status"]
+        or "regexp_like" not in clauses["chk_platform_migration_checksum"]
+        or "[0-9a-f]" not in clauses["chk_platform_migration_checksum"]
+        or "{64}" not in clauses["chk_platform_migration_checksum"]
+        or "execution_order" not in clauses["chk_platform_migration_execution_order"]
+        or "applied_at" not in clauses["chk_platform_migration_state_fields"]
+        or "error_type" not in clauses["chk_platform_migration_state_fields"]
+    ):
+        raise MigrationRunnerError("migration ledger CHECK 约束定义错误")
+
+
+async def _apply_with_locked_connection(
+    connection,
+    *,
+    root: Path,
+    manifest: tuple[Migration, ...],
+    lock_timeout: int,
+) -> tuple[str, ...]:
+    lock_name = _migration_lock_name(str((await connection.execute(text("SELECT DATABASE()"))).scalar_one()))
+    lock_result = await connection.execute(
+        text("SELECT GET_LOCK(:lock_name, :timeout)"),
+        {"lock_name": lock_name, "timeout": lock_timeout},
+    )
+    if lock_result.scalar_one_or_none() != 1:
+        raise MigrationLockUnavailable("无法取得数据库 migration GET_LOCK")
+    await connection.commit()
+
+    try:
+        session_info = (
+            await connection.execute(
+                text(
+                    "SELECT VERSION() AS server_version, DATABASE() AS database_name, "
+                    "@@SESSION.sql_mode AS sql_mode, "
+                    "@@character_set_connection AS connection_charset"
+                )
+            )
+        ).mappings().one()
+        if _parse_mysql_version(session_info["server_version"]) < _MIN_MYSQL_VERSION:
+            raise MigrationRunnerError("Runner 要求 MySQL 8.0.16 或更高版本")
+        if session_info["connection_charset"].lower() != "utf8mb4":
+            raise MigrationRunnerError("migration 连接字符集必须为 utf8mb4")
+
+        sql_mode = {
+            item.strip().upper()
+            for item in (session_info["sql_mode"] or "").split(",")
+            if item.strip()
+        }
+        backslash_escapes = "NO_BACKSLASH_ESCAPES" not in sql_mode
+        parsed: dict[str, tuple[str, ...]] = {}
+        for migration in manifest:
+            sql = (root / migration.path).read_text(encoding="utf-8")
+            parsed[migration.revision] = split_mysql_statements(
+                sql, backslash_escapes=backslash_escapes
+            )
+            if not parsed[migration.revision]:
+                raise MigrationRunnerError(
+                    f"migration 没有可执行 SQL：{migration.revision}"
+                )
+
+        await _ensure_ledger_schema(connection)
+        raw_rows = (
+            await connection.execute(
+                text(
+                    "SELECT revision, checksum, status, execution_order "
+                    "FROM platform_schema_migrations ORDER BY execution_order"
+                )
+            )
+        ).mappings().all()
+        applied_checksums = validate_ledger_rows(
+            raw_rows,
+            repository_root=root,
+            migrations=manifest,
+        )
+        pending = plan_migrations(
+            applied_checksums,
+            repository_root=root,
+            migrations=manifest,
+        )
+
+        completed: list[str] = []
+        for migration in pending:
+            execution_order = len(applied_checksums) + 1
+            await connection.execute(
+                text(
+                    "INSERT INTO platform_schema_migrations "
+                    "(revision, checksum, status, execution_order) "
+                    "VALUES (:revision, :checksum, 'running', :execution_order)"
+                ),
+                {
+                    "revision": migration.revision,
+                    "checksum": migration.sha256,
+                    "execution_order": execution_order,
+                },
+            )
+            await connection.commit()
+
+            try:
+                for statement in parsed[migration.revision]:
+                    await _consume_result(connection, statement)
+                result = await connection.execute(
+                    text(
+                        "UPDATE platform_schema_migrations "
+                        "SET status = 'applied', applied_at = CURRENT_TIMESTAMP(6), "
+                        "error_type = NULL WHERE revision = :revision AND status = 'running'"
+                    ),
+                    {"revision": migration.revision},
+                )
+                if (result.rowcount or 0) != 1:
+                    raise MigrationRunnerError(
+                        f"migration ledger 状态转换失败：{migration.revision}"
+                    )
+                await connection.commit()
+            except Exception as exc:
+                # COMMIT ACK 可能丢失；先读 ledger 判断 applied 是否实际已提交。
+                try:
+                    await connection.rollback()
+                    current_status = await connection.scalar(
+                        text(
+                            "SELECT status FROM platform_schema_migrations "
+                            "WHERE revision = :revision"
+                        ),
+                        {"revision": migration.revision},
+                    )
+                    if current_status == "applied":
+                        applied_checksums[migration.revision] = migration.sha256
+                        completed.append(migration.revision)
+                        continue
+                    result = await connection.execute(
+                        text(
+                            "UPDATE platform_schema_migrations "
+                            "SET status = 'failed', error_type = :error_type "
+                            "WHERE revision = :revision AND status = 'running'"
+                        ),
+                        {
+                            "revision": migration.revision,
+                            "error_type": type(exc).__name__[:128],
+                        },
+                    )
+                    if (result.rowcount or 0) == 1:
+                        await connection.commit()
+                    else:
+                        await connection.rollback()
+                except Exception:
+                    # 连接中断时保留 running 墓碑；下一次 apply 会 fail closed。
+                    logger.error(
+                        "Migration 失败状态无法回写；ledger 保留 running：revision=%s",
+                        migration.revision,
+                    )
+                raise MigrationExecutionError(
+                    f"migration 执行失败：{migration.revision}；"
+                    "MySQL DDL 可能部分提交，必须先人工核验再恢复"
+                ) from exc
+
+            applied_checksums[migration.revision] = migration.sha256
+            completed.append(migration.revision)
+        return tuple(completed)
+    finally:
+        # GET_LOCK 是 session lock，不随 COMMIT/ROLLBACK 释放；必须在同一连接显式释放。
+        try:
+            released = await connection.scalar(
+                text("SELECT RELEASE_LOCK(:lock_name)"),
+                {"lock_name": lock_name},
+            )
+            await connection.commit()
+            if released != 1:
+                logger.error("Migration GET_LOCK 未能显式释放；连接关闭将释放会话锁")
+        except Exception as exc:
+            logger.warning(
+                "Migration GET_LOCK 释放异常；连接关闭将释放会话锁：exception_type=%s",
+                type(exc).__name__,
+            )
 
 
 async def apply_migrations(
     database_url: str,
     *,
+    application_database_url: str | None = None,
     repository_root: str | Path | None = None,
     migrations: tuple[Migration, ...] | None = None,
     lock_timeout: int = 60,
@@ -208,145 +409,27 @@ async def apply_migrations(
     if not isinstance(lock_timeout, int) or not 0 <= lock_timeout <= 600:
         raise ValueError("lock_timeout 必须在 0 到 600 秒之间")
 
-    from sqlalchemy.engine import make_url
-
     url = make_url(database_url)
     if url.get_backend_name() != "mysql" or url.drivername != "mysql+aiomysql":
         raise MigrationRunnerError("Runner 仅接受 mysql+aiomysql 独立迁移 DSN")
     if not url.database:
         raise MigrationRunnerError("迁移 DSN 必须明确指定数据库名")
+    _ensure_distinct_database_account(url, application_database_url)
 
     root = Path(repository_root).resolve() if repository_root else Path(__file__).resolve().parents[3]
     manifest = validate_manifest(root, migrations)
     engine = create_async_engine(url, echo=False, pool_pre_ping=False)
-    completed: list[str] = []
-    lock_name = _migration_lock_name(url.database)
-    lock_acquired = False
-    connection = None
-
     try:
         async with engine.connect() as connection:
-            lock_result = await connection.execute(
-                text("SELECT GET_LOCK(:lock_name, :timeout)"),
-                {"lock_name": lock_name, "timeout": lock_timeout},
-            )
-            acquired = lock_result.scalar_one_or_none()
+            # 在同一物理连接中取得锁、执行所有 DDL 并释放锁。
+            await connection.exec_driver_sql("SET NAMES utf8mb4")
             await connection.commit()
-            if acquired != 1:
-                raise MigrationLockUnavailable("无法取得数据库 migration GET_LOCK")
-            lock_acquired = True
-
-            session_info = (
-                await connection.execute(
-                    text(
-                        "SELECT VERSION() AS server_version, DATABASE() AS database_name, "
-                        "@@SESSION.sql_mode AS sql_mode, "
-                        "@@character_set_connection AS connection_charset"
-                    )
-                )
-            ).mappings().one()
-            if session_info["database_name"] != url.database:
-                raise MigrationRunnerError("连接实际数据库与迁移 DSN 指定数据库不一致")
-            if _parse_mysql_version(session_info["server_version"]) < _MIN_MYSQL_VERSION:
-                raise MigrationRunnerError("Runner 要求 MySQL 8.0.16 或更高版本")
-            if session_info["connection_charset"].lower() != "utf8mb4":
-                raise MigrationRunnerError("migration 连接字符集必须为 utf8mb4")
-
-            sql_mode = {
-                item.strip().upper()
-                for item in (session_info["sql_mode"] or "").split(",")
-                if item.strip()
-            }
-            backslash_escapes = "NO_BACKSLASH_ESCAPES" not in sql_mode
-            parsed: dict[str, tuple[str, ...]] = {}
-            for migration in manifest:
-                sql = (root / migration.path).read_text(encoding="utf-8")
-                parsed[migration.revision] = split_mysql_statements(
-                    sql, backslash_escapes=backslash_escapes
-                )
-                if not parsed[migration.revision]:
-                    raise MigrationRunnerError(
-                        f"migration 没有可执行 SQL：{migration.revision}"
-                    )
-
-            await _ensure_ledger_schema(connection)
-            raw_rows = (
-                await connection.execute(
-                    text(
-                        "SELECT revision, checksum, status, execution_order "
-                        "FROM platform_schema_migrations ORDER BY execution_order"
-                    )
-                )
-            ).mappings().all()
-            applied_checksums = validate_ledger_rows(
-                raw_rows,
-                repository_root=root,
-                migrations=manifest,
+            return await _apply_with_locked_connection(
+                connection,
+                root=root,
+                manifest=manifest,
+                lock_timeout=lock_timeout,
             )
-            pending = plan_migrations(
-                applied_checksums,
-                repository_root=root,
-                migrations=manifest,
-            )
-
-            for migration in pending:
-                execution_order = len(applied_checksums) + 1
-                await connection.execute(
-                    text(
-                        "INSERT INTO platform_schema_migrations "
-                        "(revision, checksum, status, execution_order) "
-                        "VALUES (:revision, :checksum, 'running', :execution_order)"
-                    ),
-                    {
-                        "revision": migration.revision,
-                        "checksum": migration.sha256,
-                        "execution_order": execution_order,
-                    },
-                )
-                await connection.commit()
-
-                try:
-                    for statement in parsed[migration.revision]:
-                        await _consume_result(connection, statement)
-                    await connection.execute(
-                        text(
-                            "UPDATE platform_schema_migrations "
-                            "SET status = 'applied', applied_at = CURRENT_TIMESTAMP(6), "
-                            "error_type = NULL WHERE revision = :revision AND status = 'running'"
-                        ),
-                        {"revision": migration.revision},
-                    )
-                    await connection.commit()
-                except Exception as exc:
-                    try:
-                        await connection.rollback()
-                        await connection.execute(
-                            text(
-                                "UPDATE platform_schema_migrations "
-                                "SET status = 'failed', error_type = :error_type "
-                                "WHERE revision = :revision AND status = 'running'"
-                            ),
-                            {
-                                "revision": migration.revision,
-                                "error_type": type(exc).__name__[:128],
-                            },
-                        )
-                        await connection.commit()
-                    except Exception:
-                        # 连接中断时保留 running 墓碑；下一次 apply 会 fail closed。
-                        logger.error(
-                            "Migration 失败状态无法回写；ledger 保留 running：revision=%s",
-                            migration.revision,
-                        )
-                    raise MigrationExecutionError(
-                        f"migration 执行失败：{migration.revision}；"
-                        "MySQL DDL 可能部分提交，必须先人工核验再恢复"
-                    ) from exc
-
-                applied_checksums[migration.revision] = migration.sha256
-                completed.append(migration.revision)
-
-            return tuple(completed)
     except (MigrationRunnerError, MigrationManifestError, MigrationSQLParseError):
         raise
     except Exception as exc:
@@ -355,19 +438,4 @@ async def apply_migrations(
             f"Migration Runner 失败：exception_type={type(exc).__name__}"
         ) from exc
     finally:
-        if connection is not None and lock_acquired:
-            try:
-                result = await connection.execute(
-                    text("SELECT RELEASE_LOCK(:lock_name)"),
-                    {"lock_name": lock_name},
-                )
-                released = result.scalar_one_or_none()
-                await connection.commit()
-                if released != 1:
-                    logger.error("Migration GET_LOCK 未能显式释放；连接关闭将释放会话锁")
-            except Exception as exc:
-                logger.warning(
-                    "Migration GET_LOCK 释放异常；连接关闭将释放会话锁：exception_type=%s",
-                    type(exc).__name__,
-                )
         await engine.dispose()

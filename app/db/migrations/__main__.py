@@ -51,9 +51,15 @@ def main(argv: list[str] | None = None) -> int:
             print("Migration failed: MIGRATION_DATABASE_URL is required; application DSN is never used.", file=sys.stderr)
             return 2
         try:
+            from app.core.config import settings
             from app.db.migrations.runner import apply_migrations
 
-            completed = asyncio.run(apply_migrations(database_url))
+            completed = asyncio.run(
+                apply_migrations(
+                    database_url,
+                    application_database_url=str(settings.SQLALCHEMY_DATABASE_URI),
+                )
+            )
             print(f"Migration apply completed: {len(completed)} revision(s)")
             for revision in completed:
                 print(f"  applied {revision}")
