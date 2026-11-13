@@ -2,7 +2,7 @@
 第三方上报日志 ORM 模型。
 """
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
-    UniqueConstraint, Date, Numeric, text
+    UniqueConstraint, Date, Numeric, LargeBinary, text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -117,5 +117,32 @@ class ThirdPartyReportLog(Base):
             "report_start_time",
             "id",
         ),
+    )
+
+class ThirdPartyReportIdentityLock(Base):
+    """跨直接发送与 Postback Outbox 的基础事件身份仲裁锁。
+
+    锁记录永久保留，不按时间清理；删除锁行会使同一身份重新出现不同互斥对象。
+    identity_value 保存规范化后的完整 UTF-8 身份串，用于检测 SHA-256 键碰撞。
+    """
+    __tablename__ = "third_party_report_identity_locks"
+
+    identity_key = Column(
+        String(64, collation="ascii_bin"),
+        primary_key=True,
+        nullable=False,
+        comment="四字段基础事件身份的 SHA-256",
+    )
+    identity_value = Column(
+        LargeBinary(4096),
+        nullable=False,
+        comment="长度前缀编码的完整 UTF-8 基础身份，用于碰撞核验",
+    )
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        default=get_app_now_naive,
+        server_default=text("CURRENT_TIMESTAMP"),
+        comment="锁行首次创建时间；锁行永久保留",
     )
 
