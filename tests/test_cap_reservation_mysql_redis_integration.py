@@ -860,9 +860,6 @@ async def test_mysql_tcp_proxy_drops_real_commit_ack_and_preserves_cap_reservati
         rolled_back = []
         finalized = []
 
-        async def renew_lease(*args, **kwargs):
-            return None
-
         async def finalize(*args, **kwargs):
             finalized.append((args, kwargs))
 
@@ -870,9 +867,6 @@ async def test_mysql_tcp_proxy_drops_real_commit_ack_and_preserves_cap_reservati
             rolled_back.extend(reservations)
 
         from app.core.postback import processor as processor_module
-        monkeypatch.setattr(
-            processor_module.CapReservationLedger, "renew_lease", renew_lease
-        )
         monkeypatch.setattr(
             processor_module.CapReservationLedger, "finalize", finalize
         )
@@ -942,7 +936,15 @@ async def test_mysql_tcp_proxy_drops_real_commit_ack_and_preserves_cap_reservati
                 text("SELECT COUNT(*) FROM postback_conversions WHERE id = :id"),
                 {"id": conversion_id},
             )
+            ledger_state = await connection.scalar(
+                text(
+                    "SELECT state FROM cap_reservations "
+                    "WHERE reservation_key = :reservation_key"
+                ),
+                {"reservation_key": "b" * 64},
+            )
         assert persisted == 1, "MySQL 实际未提交，无法证明 COMMIT ACK 丢失场景"
+        assert ledger_state == "COMMITTED", "转化与 Cap Reservation 账本必须同一事务提交"
     finally:
         if proxy_server is not None:
             proxy_server.close()

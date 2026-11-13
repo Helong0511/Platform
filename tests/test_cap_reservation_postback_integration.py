@@ -220,6 +220,48 @@ async def test_fail_open_rollback_finalizes_ledger_without_redis_decrement(monke
 
 
 @pytest.mark.asyncio
+async def test_postback_fence_failure_never_runs_stale_redis_compensation(monkeypatch):
+    calls = []
+
+    class FakeDB:
+        async def rollback(self):
+            calls.append("db_rollback")
+
+        async def commit(self):
+            raise AssertionError("stale Postback must not reach DB COMMIT")
+
+    async def reject_stage_commit(*args, **kwargs):
+        raise RuntimeError("Cap Reservation 提交栅栏失败")
+
+    async def forbidden_rollback(reservations):
+        calls.append(("redis_rollback", reservations))
+
+    from app.core.postback import processor as processor_module
+    monkeypatch.setattr(
+        processor_module.CapReservationLedger,
+        "stage_commit_in_transaction",
+        reject_stage_commit,
+    )
+    monkeypatch.setattr(
+        processor_module.CapChecker,
+        "rollback_reservations",
+        forbidden_rollback,
+    )
+
+    reservations = [
+        ("daily", 77, 12, datetime(2026, 11, 11), "e" * 64, "e" * 64, "stale-owner", True)
+    ]
+    with pytest.raises(RuntimeError, match="提交栅栏失败"):
+        await PostbackProcessor._commit_conversion_with_cap_reconciliation(
+            db=FakeDB(),
+            conversion_id=9002,
+            cap_reservations=reservations,
+        )
+
+    assert calls == ["db_rollback"]
+
+
+@pytest.mark.asyncio
 async def test_postback_stages_ledger_commit_in_business_transaction_before_database_commit(monkeypatch):
     calls = []
 
