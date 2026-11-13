@@ -16,6 +16,7 @@ from app.core.utils import get_app_now_naive
 from app.core.third_party_report import (
     REPORT_LOG_LEASE_SECONDS,
     _claim_report_log,
+    _lock_report_base_identity,
     build_event_idempotency_key,
     send_third_party_report,
     update_report_log,
@@ -56,6 +57,14 @@ async def enqueue_postback_report(
     if not normalized_platform:
         raise ValueError("Postback platform 不能为空")
 
+    # 与直接发送路径使用同一四字段身份锁；锁持有到调用方的转化事务提交/回滚。
+    await _lock_report_base_identity(
+        db,
+        source="postback",
+        adsid=adsid,
+        event=event,
+        conversion_id=conversion_id,
+    )
     event_key = build_event_idempotency_key(
         "postback", adsid, event, conversion_id, platform=normalized_platform
     )
