@@ -319,6 +319,8 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             completed_at=now,
             clear_next_retry_time=True,
             expected_report_start_time=lease_token,
+            expected_identity_scope="platform_scoped",
+            expected_platform=payload["platform"],
         )
         if not updated:
             return {"success": False, "retryable": True, "reason": "report_lease_lost"}
@@ -345,6 +347,8 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             completed_at=now,
             clear_next_retry_time=True,
             expected_report_start_time=lease_token,
+            expected_identity_scope="platform_scoped",
+            expected_platform=payload["platform"],
         )
         if not updated:
             return {"success": False, "retryable": True, "reason": "report_lease_lost"}
@@ -372,6 +376,8 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             completed_at=get_app_now_naive(),
             next_retry_time=retry_at,
             expected_report_start_time=lease_token,
+            expected_identity_scope="platform_scoped",
+            expected_platform=payload["platform"],
         )
         if not updated:
             return {"success": False, "retryable": True, "reason": "report_lease_lost"}
