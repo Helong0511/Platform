@@ -50,6 +50,15 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         path="sql/migrations/20261112_third_party_report_pii_retention.sql",
         sha256="2d9a32a7e0a71f9ec8cdce77c40cea834d912c97d65c1926c8fbac34db5e33cb",
     ),
+    Migration(
+        revision="20261113_third_party_report_identity_scope",
+        path="sql/migrations/20261113_third_party_report_identity_scope.sql",
+        sha256="1c9971602ac456cb35552a11f21cce935bcda754d766a292fcf563d26e28c66a",
+        depends_on=(
+            "20261111_third_party_report_outbox",
+            "20261112_third_party_report_pii_retention",
+        ),
+    ),
 )
 
 _REVISION_PATTERN = re.compile(r"^20[0-9]{6}_[a-z0-9_]+$")
