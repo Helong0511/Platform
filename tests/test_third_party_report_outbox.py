@@ -1166,3 +1166,45 @@ async def test_outbox_payload_editor_uses_row_lock_and_rejects_active_lease(monk
     assert "for update" in captured["sql"]
     assert "committed" not in captured
     assert row.email == "old@example.invalid"
+
+
+async def test_enqueue_refuses_existing_platform_scoped_event_owned_by_another_platform():
+    import pytest
+    from app.services.third_party_report_outbox import LegacyEventIdentityConflict
+
+    existing = type(
+        "Existing",
+        (),
+        {
+            "id": 84,
+            "identity_scope": "platform_scoped",
+            "platform": "other-platform",
+            "outbox_enqueued": True,
+        },
+    )()
+
+    class FakeDB:
+        async def scalar(self, statement):
+            return existing
+
+        async def flush(self):
+            raise AssertionError("平台不匹配时不得修改或复用事件")
+
+    with pytest.raises(LegacyEventIdentityConflict):
+        await outbox.enqueue_postback_report(
+            FakeDB(),
+            platform="bft",
+            adsid="same-click",
+            event="Purchase",
+            conversion_id="same-conversion",
+            email=None,
+            ip=None,
+            phone=None,
+            ua=None,
+            currency="USD",
+            amount=1.0,
+            short_link_id=5,
+            cloak_name=None,
+            short_code=None,
+            click_time=None,
+        )
