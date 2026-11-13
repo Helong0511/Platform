@@ -112,6 +112,7 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
             mysql_collate="utf8mb4_0900_ai_ci",
         )
         Index("ix_drift_child_label", child.c.label)
+        Index("ix_drift_child_parent_id", child.c.parent_id)
 
         url = URL.create(
             "mysql+pymysql",
@@ -140,8 +141,9 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
                 f"ALTER TABLE `{database}`.drift_child "
                 "CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci, "
                 "ADD INDEX ix_drift_child_label (label), "
+                "ADD INDEX ix_drift_child_parent_id (parent_id), "
                 "ADD CONSTRAINT fk_drift_child_parent "
-                "FOREIGN KEY (parent_id) REFERENCES drift_parent (id) ON DELETE CASCADE"
+                f"FOREIGN KEY (parent_id) REFERENCES `{database}`.drift_parent (id) ON DELETE CASCADE"
             )
         with engine.connect() as connection:
             corrected = _schema_metadata_drift(connection, metadata)
