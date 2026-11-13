@@ -599,6 +599,10 @@ async def send_third_party_report(
     ua = (ua or "").strip()
     adsid = (adsid or "").strip()
 
+    # platform 只允许由持久化 Outbox 入口提供；直接发送必须明确保持 unscoped。
+    if report_log_id is None and platform:
+        return {"success": False, "retryable": False, "reason": "invalid_report_identity_scope"}
+
     # 既有日志 ID 只能发送其持久化 Outbox 载荷；校验必须先于凭证分支、租约认领和 HTTP。
     if report_log_id is not None:
         try:
