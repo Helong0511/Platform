@@ -74,7 +74,7 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     Migration(
         revision="20261113_third_party_report_identity_scope_constraints",
         path="sql/migrations/20261113_third_party_report_identity_scope_constraints.sql",
-        sha256="06c81f67d9d9cbcc170ac21142bdc8ee2c3835792bb83f4cb092c92f2f91fe88",
+        sha256="5cf0615eed331b99efdd2650a09b48f8d6c9249f4ca644fc206268b2e8190939",
         depends_on=("20261113_third_party_report_identity_scope",),
     ),
     Migration(
