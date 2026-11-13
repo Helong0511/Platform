@@ -495,6 +495,9 @@ async def test_outbox_scan_is_bounded_and_filters_due_unexpired_attempts(monkeyp
             if "attempt_count >=" in sql:
                 captured["exhausted_sql"] = sql
                 return 4
+            if "identity_scope !=" in sql:
+                captured["scope_blocked_sql"] = sql
+                return 2
             captured["terminal_failed_sql"] = sql
             return 6
 
@@ -522,7 +525,8 @@ async def test_outbox_scan_is_bounded_and_filters_due_unexpired_attempts(monkeyp
     stats = await outbox.process_postback_report_outbox(batch_size=2)
 
     assert processed == [101, 102]
-    assert stats == {"selected": 2, "success": 2, "retryable": 0, "failed": 0, "exhausted": 4, "terminal_failed": 6}
+    assert stats == {"selected": 2, "success": 2, "retryable": 0, "failed": 0, "exhausted": 4, "terminal_failed": 6, "scope_blocked": 2}
+    assert "identity_scope !=" in captured["scope_blocked_sql"]
     assert "third_party_report_logs.attempt_count >= third_party_report_logs.max_attempts" in captured["exhausted_sql"]
     assert "third_party_report_logs.pii_scrubbed_at is null" in captured["exhausted_sql"]
     assert captured["normalization_committed"] is True
