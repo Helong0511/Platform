@@ -1260,3 +1260,98 @@ async def test_purchase_viewcontent_link_skips_when_destination_missing(monkeypa
     )
 
     assert linked is False
+
+
+async def test_create_report_log_reuses_only_same_unscoped_pixel_destination(monkeypatch):
+    class Result:
+        def __init__(self, row):
+            self.row = row
+
+        def scalars(self):
+            return self
+
+        def first(self):
+            return self.row
+
+    class FakeDB:
+        def __init__(self, row):
+            self.row = row
+
+        async def execute(self, statement):
+            return Result(self.row)
+
+    class SessionContext:
+        def __init__(self, row):
+            self.db = FakeDB(row)
+
+        async def __aenter__(self):
+            return self.db
+
+        async def __aexit__(self, *args):
+            return False
+
+    base = {
+        "id": 88,
+        "identity_scope": "unscoped",
+        "platform": None,
+        "destination_pixel_id": "pixel-A",
+    }
+
+    monkeypatch.setattr(
+        third_party_report,
+        "AsyncSessionLocal",
+        lambda: SessionContext(type("ReportRow", (), base.copy())()),
+    )
+    same_destination = await third_party_report.create_report_log(
+        source="short_link",
+        adsid="same-click",
+        event="Purchase",
+        email="",
+        ip="",
+        phone="",
+        ua="",
+        conversion_id="same-conversion",
+        destination_pixel_id="pixel-A",
+    )
+
+    monkeypatch.setattr(
+        third_party_report,
+        "AsyncSessionLocal",
+        lambda: SessionContext(
+            type("ReportRow", (), {**base, "destination_pixel_id": "pixel-B"})()
+        ),
+    )
+    different_destination = await third_party_report.create_report_log(
+        source="short_link",
+        adsid="same-click",
+        event="Purchase",
+        email="",
+        ip="",
+        phone="",
+        ua="",
+        conversion_id="same-conversion",
+        destination_pixel_id="pixel-A",
+    )
+
+    monkeypatch.setattr(
+        third_party_report,
+        "AsyncSessionLocal",
+        lambda: SessionContext(
+            type("ReportRow", (), {**base, "identity_scope": "legacy_unresolved"})()
+        ),
+    )
+    unresolved_legacy = await third_party_report.create_report_log(
+        source="short_link",
+        adsid="same-click",
+        event="Purchase",
+        email="",
+        ip="",
+        phone="",
+        ua="",
+        conversion_id="same-conversion",
+        destination_pixel_id="pixel-A",
+    )
+
+    assert same_destination == 88
+    assert different_destination == 0
+    assert unresolved_legacy == 0
