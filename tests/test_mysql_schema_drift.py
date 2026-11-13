@@ -9,6 +9,7 @@ import pytest
 import pymysql
 from sqlalchemy import (
     Column,
+    CheckConstraint,
     ForeignKey,
     Index,
     Integer,
@@ -108,6 +109,7 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
                 nullable=False,
             ),
             Column("label", String(20), nullable=False),
+            CheckConstraint("label <> ''", name="ck_drift_child_label_nonempty"),
             mysql_charset="utf8mb4",
             mysql_collate="utf8mb4_0900_ai_ci",
         )
@@ -128,6 +130,7 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
             drift = _schema_metadata_drift(connection, metadata)
         assert "drift_child" in drift["index_mismatches"]
         assert "drift_child" in drift["foreign_key_mismatches"]
+        assert "drift_child" in drift["check_constraint_mismatches"]
         assert drift["table_option_mismatches"]["drift_child"] == {
             "mysql_charset": {"expected": "utf8mb4", "actual": "latin1"},
             "mysql_collate": {
@@ -143,7 +146,8 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
                 "ADD INDEX ix_drift_child_label (label), "
                 "ADD INDEX ix_drift_child_parent_id (parent_id), "
                 "ADD CONSTRAINT fk_drift_child_parent "
-                f"FOREIGN KEY (parent_id) REFERENCES `{database}`.drift_parent (id) ON DELETE CASCADE"
+                f"FOREIGN KEY (parent_id) REFERENCES `{database}`.drift_parent (id) ON DELETE CASCADE, "
+                "ADD CONSTRAINT ck_drift_child_label_nonempty CHECK (label <> '')"
             )
         with engine.connect() as connection:
             corrected = _schema_metadata_drift(connection, metadata)
@@ -156,6 +160,7 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
             "index_mismatches": {},
             "unique_constraint_mismatches": {},
             "foreign_key_mismatches": {},
+            "check_constraint_mismatches": {},
             "table_option_mismatches": {},
         }
     finally:
