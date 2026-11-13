@@ -676,3 +676,49 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 ### 当前状态
 
 本次代码提交会触发新的 CI；在新 HEAD 的 Backend / Frontend 全部成功前，不将改动视为已验收。PR #1 保持 Open / Draft，不合并、不部署；只使用隔离 CI 服务和合成数据。
+
+
+## 2026-11-13 Run #1508 验收与大表幂等键回填实施设计
+
+### Run #1508 最新证据
+
+- 验证 HEAD：`101e31b2251ba1b637ab4543ae477b461dac1971`。
+- Run #1508：https://github.com/Helong0511/Platform/actions/runs/43354050248。
+- Backend：**602 passed、1 skipped、1 warning**；其中真实隔离 MySQL 测试覆盖了本轮 Python / MySQL event identity golden vectors。
+- Frontend：依赖安装、advisory、Lint、Build、Mock API Browser E2E 全部成功。
+- 1 skipped：本地核对脚本未纳入 CI；1 warning：passlib 在 Python 3.11 使用 `crypt` 的弃用警告。
+- CI 服务为 GitHub Actions 隔离 MySQL 8.0 / Redis 7.4；未连接生产服务或真实第三方 API。
+
+### 为什么不能把全表 UPDATE 改成简单的 LIMIT 就结束
+
+当前历史 migration 的数据回填为单条：
+
+`UPDATE third_party_report_logs SET event_key = ... WHERE event_key IS NULL`
+
+仅添加 `ORDER BY id LIMIT N` 只能把一次更新限制为一批，不能自动循环、保存进度或证明所有行都处理完。若在 SQL 文件中手工重复固定批次，也无法安全覆盖任意规模和中途故障恢复。因此需要将 schema DDL 与可恢复数据回填明确拆分。
+
+### 推荐实施：Migration Runner 管理的可恢复 Keyset Backfill
+
+此处为后续新 migration / Runner 的设计要求，不是已实现功能：
+
+1. **历史 SQL 保持不可变**：不得编辑已登记的 `20261110_third_party_report_event_idempotency.sql`，不得修改其 manifest SHA-256。
+2. **新增 schema revision**：只负责确认所需列、进度表、索引/约束前置条件；DDL 每一步必须具备信息架构检查和可诊断失败行为。
+3. **数据回填声明版本化**：在 manifest 中登记专用 backfill operation 的代码路径、SHA-256、revision 依赖、目标表、主键、目标列、算法版本、batch_size 上限和限速参数。Runner 不允许从数据库内容拼接任意 SQL 标识符；表名、列名和表达式必须来自经过校验的静态声明。
+4. **稳定 Keyset 游标**：按主键递增读取待处理范围，记录 `last_processed_id`，避免 OFFSET 随数据增长退化；每批只处理 `event_key IS NULL AND id > last_processed_id` 的有限行，并在同一批内确认更新数量。
+5. **批次提交与进度原子性**：每批更新和进度游标在同一事务提交。进程崩溃时，要么本批数据和游标都提交，要么都回滚；恢复后从已提交游标继续。若数据回填需要跨多次 commit，不能把整个回填伪装成一个可回滚事务。
+6. **并发防护**：Runner 使用全局 migration session lock；同一 backfill revision 不能被两个 Runner 同时执行。业务写入在回填窗口内若可能插入 NULL event_key，必须先通过双写/写入门禁消除竞态，或在收尾阶段重复扫描 NULL 并做最终一致性检查。
+7. **节流和观测**：配置单批行数、批次间隔、最大执行时长、锁等待上限；记录每批起止主键、读取/更新数量、耗时、重试次数和错误类型。日志不得包含 PII、SQL 参数或凭据。
+8. **完成条件**：不能只依据游标到达当前 MAX(id)。必须执行 `COUNT(*) WHERE event_key IS NULL`、重复 key 分组检查，并验证本 revision 的回填范围和算法版本。最终 NULL=0、重复=0 后，才允许单独执行 NOT NULL / UNIQUE 收敛 DDL。
+9. **唯一键冲突处置**：若批次发现两个不同旧行映射到同一 key，停止该 revision 并保留旧唯一索引；写入脱敏冲突报告，要求人工决定。禁止自动删除、合并或覆盖日志。
+10. **失败恢复**：记录 failed 状态和脱敏错误摘要；自动恢复只允许从已提交游标继续执行幂等批次。若目标行在进度游标之后被并发改写，最终 NULL 扫描必须发现并回补；无法证明时 fail-closed。
+11. **性能验收**：在临时 MySQL 使用接近目标规模的合成行数，记录每批吞吐、锁等待 P95/P99、事务时长、redo/undo 增长、磁盘使用、buffer pool 命中、复制延迟（如 CI 环境无法模拟复制则明确标记未覆盖）。需至少演练中断、重启续跑、重复执行、并发 Runner 拒绝、冲突停止和最终约束创建。
+12. **发布顺序**：先部署兼容写入逻辑（新写入直接生成正确 event_key），再运行可恢复历史回填；完成冲突审查和 NULL/重复校验后再建立 NOT NULL / UNIQUE；最后才允许移除旧约束。实际部署需备份与发布审批。
+
+### 当前实现状态
+
+- 当前 manifest 只有 SQL migration entries，尚未登记 Python backfill operation。
+- 当前 planner/parser/离线 CLI 不具备执行批次、记录游标、限速或恢复的能力。
+- 当前没有 backfill progress ledger，也没有 Runner。
+- 因此上面的分批方案只是明确的实施规范，不能作为已经修复全表 UPDATE 风险的证据。
+- 历史四字段与平台五字段身份兼容问题独立存在；即使分批回填成功，也不能自动推断旧日志平台归属。
+- 在批次 Runner、历史身份歧义策略、隔离规模演练完成前，迁移仍阻断上线。
