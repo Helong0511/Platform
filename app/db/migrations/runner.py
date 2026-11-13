@@ -80,8 +80,22 @@ def _parse_mysql_version(value: str) -> tuple[int, int, int]:
     return tuple(int(part) for part in match.groups())
 
 
+def _mysql_endpoint_identity(url) -> tuple[str, str, int | None]:
+    """提取不含凭据的 MySQL 连接端点；Socket 连接优先于 TCP host/port。"""
+    socket = url.query.get("unix_socket")
+    if isinstance(socket, (tuple, list)):
+        socket = socket[0] if socket else None
+    if socket:
+        return ("unix_socket", str(socket).strip(), None)
+    host = (url.host or "").strip().rstrip(".").casefold()
+    port = int(url.port or 3306)
+    if not host:
+        raise MigrationRunnerError("MySQL DSN 必须明确指定主机或 Unix Socket")
+    return ("tcp", host, port)
+
+
 def _ensure_distinct_database_account(migration_url, application_database_url: str | None) -> None:
-    """同一 MySQL endpoint/database 不允许复用应用运行账号执行 DDL。"""
+    """迁移与应用必须指向同一 MySQL endpoint/database，且使用不同账号。"""
     if not application_database_url:
         return
     app_url = make_url(application_database_url)
@@ -92,6 +106,10 @@ def _ensure_distinct_database_account(migration_url, application_database_url: s
     if migration_url.database != app_url.database:
         raise MigrationRunnerError(
             "迁移 DSN 与应用数据库 DSN 必须指向同一个数据库名"
+        )
+    if _mysql_endpoint_identity(migration_url) != _mysql_endpoint_identity(app_url):
+        raise MigrationRunnerError(
+            "迁移 DSN 与应用数据库 DSN 必须指向同一个 MySQL 服务器端点"
         )
     if migration_url.username == app_url.username:
         raise MigrationRunnerError(
