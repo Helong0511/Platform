@@ -45,6 +45,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
     index_mismatches = {}
     unique_constraint_mismatches = {}
     foreign_key_mismatches = {}
+    check_constraint_mismatches = {}
     table_option_mismatches = {}
 
     def type_mismatch(expected_type, actual_type, dialect_name: str) -> bool:
@@ -191,6 +192,23 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                 "actual": actual_fks,
             }
 
+        # CHECK 约束属于数据库完整性边界；名称由 ORM 与版本化 migration 共同维护。
+        expected_checks = sorted(
+            constraint.name
+            for constraint in table.constraints
+            if constraint.__class__.__name__ == "CheckConstraint" and constraint.name
+        )
+        actual_checks = sorted(
+            item.get("name")
+            for item in inspector.get_check_constraints(table.name, schema=table.schema)
+            if item.get("name")
+        )
+        if expected_checks != actual_checks:
+            check_constraint_mismatches[table.fullname] = {
+                "expected": expected_checks,
+                "actual": actual_checks,
+            }
+
         if dialect_name == "mysql":
             expected_options = {}
             mysql_options = table.dialect_options["mysql"]
@@ -249,6 +267,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         "index_mismatches": index_mismatches,
         "unique_constraint_mismatches": unique_constraint_mismatches,
         "foreign_key_mismatches": foreign_key_mismatches,
+        "check_constraint_mismatches": check_constraint_mismatches,
         "table_option_mismatches": table_option_mismatches,
     }
 
