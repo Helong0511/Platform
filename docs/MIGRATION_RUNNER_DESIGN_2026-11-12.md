@@ -1267,3 +1267,23 @@ Run #1530（SHA 99468dedab4632dfa71f6ab432349d984b14307d）Backend / Frontend �
 ### 剩余阻断
 
 platform / identity_scope / destination Pixel 尚未加入模型与 migration；Worker claim / renew / scanner / terminalizer 和管理员 retry/edit 尚未使用统一 scope gate。Purchase / ViewContent 关联当前为安全降级，等待目的地字段及迁移完成后恢复。事件身份 P1 仍未关闭。
+
+
+## 2026-11-13 Run #1530：Pixel 目的地关联策略最终收紧
+
+更正上一节关于直接发送关联的临时保留策略：短链 source（short_link / short_link_dp_* / short_link_load_dp_*）是阶段 / dp 标识，不是 Pixel ID 或 Pixel 配置主键；同一个 source + adsid 也不能证明目标 Pixel 相同。由于 ThirdPartyReportLog 没有持久化 Pixel ID，直接发送与 Outbox 都无法验证 ViewContent 和 Purchase 属于同一目的地。
+
+因此当前实现统一要求 destination identity 已持久化且可验证后才允许 Purchase -> ViewContent 关联。当前模型没有该字段，所以两条路径均跳过关联。此调整只暂停 ViewContent 的 conversion_id 后补元数据，不改变 event_key、Purchase 事件内容或发送目的地。
+
+代码：
+- b5a0dc8f98c8894510745f6e44be44bf1ba43732：发送路径传入 destination identity 不可验证状态，关联 helper fail-closed。
+- 99468dedab4632dfa71f6ab432349d984b14307d：更新 Outbox 与直接发送的关联测试。
+
+Run #1530（SHA 99468dedab4632dfa71f6ab432349d984b14307d）Backend / Frontend success：
+- Backend 608 passed、1 skipped、1 warning。
+- Outbox 与直接发送两条关联路径均验证在缺少 Pixel destination identity 时不查询、不修改 ViewContent。
+- report_log_id / payload / lease 一致性单元测试与真实隔离 MySQL 测试通过。
+- Frontend Lint / Build / Playwright Mock API E2E 通过。
+- npm audit 仍有 axios / follow-redirects 两项 High；Python 3.11 crypt 弃用 warning 仍存在。
+
+当前 HEAD 的文档提交后续另有 CI；本节仅记录 Run #1530 所覆盖的应用与测试 SHA。platform / identity_scope / destination Pixel 持久化、Worker 和管理员 scope gate、Migration Runner 与 backfill 仍未完成。
