@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import os
 import secrets
@@ -71,9 +72,25 @@ def _root_connect(database: str | None = None):
     )
 
 
+class _TwoPartyBarrier:
+    """让两个真实 DB session 都完成首次 SELECT 后再继续，稳定复现启动竞争。"""
+
+    def __init__(self):
+        self._arrived = 0
+        self._lock = asyncio.Lock()
+        self._ready = asyncio.Event()
+
+    async def wait(self):
+        async with self._lock:
+            self._arrived += 1
+            if self._arrived == 2:
+                self._ready.set()
+        await asyncio.wait_for(self._ready.wait(), timeout=10)
+
+
 @pytest.mark.asyncio
 async def test_mysql_runtime_account_can_bootstrap_admin_but_cannot_run_ddl(monkeypatch):
-    """真实 MySQL 验证 init_db 的 DML 能力与运行账号的 DDL 拒绝边界。"""
+    """真实 MySQL 验证低权限 DML、双 Worker 首次启动竞争和 DDL 拒绝边界。"""
     username = "platform_ci_runtime"
     password = secrets.token_hex(24)
     root_engine = None
@@ -116,11 +133,9 @@ async def test_mysql_runtime_account_can_bootstrap_admin_but_cannot_run_ddl(monk
         )
         async_url = runtime_url.set(drivername="mysql+aiomysql")
         async_engine = create_async_engine(async_url, pool_pre_ping=True)
-        monkeypatch.setattr(
-            database_module,
-            "AsyncSessionLocal",
-            async_sessionmaker(async_engine, expire_on_commit=False),
-        )
+        session_factory = async_sessionmaker(async_engine, expire_on_commit=False)
+
+        monkeypatch.setattr(database_module, "AsyncSessionLocal", session_factory)
         monkeypatch.setattr(database_module.settings, "FIRST_SUPERUSER", "runtime-ci-admin")
         monkeypatch.setattr(
             database_module.settings,
@@ -133,7 +148,40 @@ async def test_mysql_runtime_account_can_bootstrap_admin_but_cannot_run_ddl(monk
             lambda self, value: setattr(self, "hashed_password", "ci-test-hash"),
         )
 
-        await database_module.init_db()
+        # 强制两个 Worker 都先读到“尚无管理员”，再并发竞争唯一键。
+        barrier = _TwoPartyBarrier()
+
+        class _BarrierSession:
+            def __init__(self, session):
+                self._session = session
+                self._first_execute = True
+
+            async def __aenter__(self):
+                await self._session.__aenter__()
+                return self
+
+            async def __aexit__(self, *args):
+                return await self._session.__aexit__(*args)
+
+            async def execute(self, *args, **kwargs):
+                result = await self._session.execute(*args, **kwargs)
+                if self._first_execute:
+                    self._first_execute = False
+                    await barrier.wait()
+                return result
+
+            def __getattr__(self, name):
+                return getattr(self._session, name)
+
+        monkeypatch.setattr(
+            database_module,
+            "AsyncSessionLocal",
+            lambda: _BarrierSession(session_factory()),
+        )
+        await asyncio.gather(database_module.init_db(), database_module.init_db())
+
+        # 恢复普通 session factory，验证已存在管理员时重复启动保持幂等。
+        monkeypatch.setattr(database_module, "AsyncSessionLocal", session_factory)
         await database_module.init_db()
 
         with _root_connect(DATABASE) as verify:
@@ -145,6 +193,8 @@ async def test_mysql_runtime_account_can_bootstrap_admin_but_cannot_run_ddl(monk
                 row = cursor.fetchone()
                 assert row is not None
                 assert row[0] == "runtime-ci-admin"
+                cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+                assert cursor.fetchone()[0] == 1
 
         runtime = pymysql.connect(
             host=HOST,
