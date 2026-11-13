@@ -1006,3 +1006,90 @@ async def test_mysql_direct_and_postback_creation_share_one_base_identity_lock(m
         if engine is not None:
             await engine.dispose()
         _drop_isolated_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_identity_lock_rollback_releases_row_and_hash_collision_fails_closed(monkeypatch):
+    """真实 MySQL 验证事务回滚释放首次锁行，并拒绝 SHA-256 键对应不同原文。"""
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(ThirdPartyReportIdentityLock.__table__.create)
+
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
+
+        rollback_identity = (
+            "postback",
+            f"rollback-{uuid.uuid4().hex}",
+            "Purchase",
+            f"conversion-{uuid.uuid4().hex}",
+        )
+        rollback_key = report_module.build_event_idempotency_key(*rollback_identity)
+        async with session_factory() as session:
+            with pytest.raises(RuntimeError, match="synthetic rollback"):
+                async with session.begin():
+                    await report_module._lock_report_base_identity(
+                        session,
+                        source=rollback_identity[0],
+                        adsid=rollback_identity[1],
+                        event=rollback_identity[2],
+                        conversion_id=rollback_identity[3],
+                    )
+                    raise RuntimeError("synthetic rollback")
+
+        async with session_factory() as session:
+            missing = await session.get(ThirdPartyReportIdentityLock, rollback_key)
+            assert missing is None
+            async with session.begin():
+                reacquired = await report_module._lock_report_base_identity(
+                    session,
+                    source=rollback_identity[0],
+                    adsid=rollback_identity[1],
+                    event=rollback_identity[2],
+                    conversion_id=rollback_identity[3],
+                )
+                assert reacquired == rollback_key
+
+        collision_identity = (
+            "postback",
+            f"collision-{uuid.uuid4().hex}",
+            "Purchase",
+            f"conversion-{uuid.uuid4().hex}",
+        )
+        collision_key = report_module.build_event_idempotency_key(*collision_identity)
+        async with session_factory() as session:
+            session.add(
+                ThirdPartyReportIdentityLock(
+                    identity_key=collision_key,
+                    identity_value=b"not-the-canonical-identity",
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            with pytest.raises(RuntimeError, match="SHA-256"):
+                async with session.begin():
+                    await report_module._lock_report_base_identity(
+                        session,
+                        source=collision_identity[0],
+                        adsid=collision_identity[1],
+                        event=collision_identity[2],
+                        conversion_id=collision_identity[3],
+                    )
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
