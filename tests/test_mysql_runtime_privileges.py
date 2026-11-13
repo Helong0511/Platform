@@ -121,6 +121,10 @@ async def test_mysql_runtime_account_can_bootstrap_admin_but_cannot_run_ddl(monk
         )
         root_engine = create_engine(root_url, pool_pre_ping=True)
         User.__table__.create(root_engine)
+        with root_engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE runtime_ddl_probe (id INT NOT NULL PRIMARY KEY)"
+            )
 
         runtime_url = URL.create(
             "mysql+pymysql",
@@ -210,11 +214,16 @@ async def test_mysql_runtime_account_can_bootstrap_admin_but_cannot_run_ddl(monk
             with runtime.cursor() as cursor:
                 cursor.execute("SELECT COUNT(*) FROM users")
                 assert cursor.fetchone()[0] == 1
-                with pytest.raises(pymysql.err.OperationalError) as denied:
-                    cursor.execute(
-                        "CREATE TABLE runtime_ddl_must_be_denied (id INT NOT NULL)"
-                    )
-                assert denied.value.args[0] == 1142
+                ddl_statements = (
+                    "CREATE TABLE runtime_ddl_must_be_denied (id INT NOT NULL)",
+                    "ALTER TABLE runtime_ddl_probe ADD COLUMN forbidden_column INT NULL",
+                    "CREATE INDEX runtime_ddl_must_be_denied_idx ON runtime_ddl_probe (id)",
+                    "DROP TABLE runtime_ddl_probe",
+                )
+                for statement in ddl_statements:
+                    with pytest.raises(pymysql.err.OperationalError) as denied:
+                        cursor.execute(statement)
+                    assert denied.value.args[0] == 1142, statement
         finally:
             runtime.close()
     finally:
