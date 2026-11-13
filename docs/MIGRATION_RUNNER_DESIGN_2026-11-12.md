@@ -629,3 +629,25 @@ GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的�
 - 新增修复 migration，不得修改已登记的 `20261110_third_party_report_event_idempotency.sql` 历史文件或其 manifest checksum。
 - 在完成历史数据分类、回填策略、唯一键冲突演练和回滚/前向修复预案前，不得合并或上线。
 
+
+
+## 2026-11-13 幂等键问题的调用链精确化（补充，避免过度概括）
+
+进一步读取 `app/core/postback/processor.py` 后，需将上一节风险描述精确限定：
+
+- `PostbackProcessor.process(platform, ...)` 将请求平台原样传递至 `_enqueue_third_party_report_if_needed()`。
+- 该方法调用 `enqueue_postback_report(platform=platform, ...)`；Outbox 生成 key 时传入 platform，故新 Outbox 事件使用五字段身份。
+- `app/core/third_party_report.py::create_report_log()` 和无既有 report_log_id 的直接发送路径生成 key 时没有传 platform，使用四字段身份。
+- SQL migration 的四字段回填与通用 builder 的默认（platform=None）行为相符；它不是对默认算法的错误实现。真正的不一致是：Outbox 的平台作用域算法与历史四字段日志没有显式的兼容/映射策略。
+- 因而不能声称“所有历史记录必然产生重复”。可以确认的是：如果历史 postback 日志由四字段直接发送路径创建，而升级后的同一逻辑事件进入五字段 Outbox 查询，则两者 key 不相等，Outbox 的 `SELECT ... WHERE event_key = platform_scoped_key` 无法复用四字段旧日志。是否实际存在此类记录、规模多少，需要离线数据画像和历史调用版本证据确认。
+
+### 必须补充的审计与验收
+
+1. 查明旧版 postback 是否曾通过 `create_report_log(source="postback", ...)` / 直接发送路径创建日志，以及部署版本切换时间。
+2. 在脱敏副本或合成数据上分别构造 legacy 四字段行、platform-scoped 五字段行，证明当前 Outbox 查询的命中/不命中行为；禁止读取生产数据库来画像。
+3. 对无法确定平台的 legacy 行，不允许按当前请求平台强行归属，也不允许把 platform 维度整体删除。应明确历史事件的复用策略（例如 legacy-key fallback 需有歧义检测、冲突保护和审计记录），并先证明不会跨平台误合并。
+4. 将算法定义集中到单一版本化规范；应用代码与迁移脚本可分别实现，但必须通过同一组跨语言 golden vectors（ASCII、中文、emoji、空字符串、前后空格、ViewContent 补写 conversion_id、平台大小写）验证字节级一致。
+5. 对 `platform` 当前只做 `strip()`、不统一大小写的行为作明确业务决策；不能在迁移时擅自 lower/casefold，否则可能改变既有平台标识语义。
+6. 增加升级前后兼容测试，覆盖唯一键冲突、并发 Postback、重复请求、旧行已发送/未发送/正在租约中，以及 legacy fallback 发现多个候选时 fail-closed。
+
+在完成以上画像与兼容策略前，此项仍是迁移发布阻断，但风险结论应表述为“存在可证明的 key 不兼容路径，实际历史影响待离线确认”，而非“所有旧记录都会重复”。
