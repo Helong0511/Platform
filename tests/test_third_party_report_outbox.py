@@ -6,6 +6,10 @@ from datetime import datetime
 from app.services import third_party_report_outbox as outbox
 
 
+async def _async_true():
+    return True
+
+
 async def test_enqueue_postback_report_uses_current_transaction_without_commit(monkeypatch):
     class FakeDB:
         def __init__(self):
@@ -296,6 +300,7 @@ async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
     )
     monkeypatch.setattr(outbox, "_claim_report_log", claim_before_snapshot)
     monkeypatch.setattr(outbox, "_resolve_pixel_credentials", resolve)
+    monkeypatch.setattr(outbox, "_bind_outbox_destination", lambda *args, **kwargs: _async_true())
     monkeypatch.setattr(outbox, "send_third_party_report", send)
     monkeypatch.setattr(
         "app.core.third_party_report._get_report_status", report_status
@@ -387,6 +392,7 @@ async def test_outbox_missing_credentials_keeps_event_retryable(monkeypatch):
     monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
     monkeypatch.setattr(outbox, "get_app_now_naive", lambda: datetime(2026, 11, 11, 12, 0, 0))
     monkeypatch.setattr(outbox, "_resolve_pixel_credentials", resolve)
+    monkeypatch.setattr(outbox, "_bind_outbox_destination", lambda *args, **kwargs: _async_true())
     monkeypatch.setattr(outbox, "_claim_report_log", claim)
     monkeypatch.setattr(outbox, "update_report_log", update)
 
@@ -602,8 +608,9 @@ async def test_remote_acceptance_with_lost_local_ack_retries_same_event_id(monke
         status_reads += 1
         return "pending" if status_reads == 1 else "success"
 
-    async def claim(report_id):
+    async def claim(report_id, **kwargs):
         assert report_id == 119
+        assert kwargs.get("expected_scope") == "platform_scoped"
         return datetime(2026, 11, 11, 12, 0, 0)
 
     monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
@@ -614,6 +621,7 @@ async def test_remote_acceptance_with_lost_local_ack_retries_same_event_id(monke
     )
     monkeypatch.setattr(outbox, "_claim_report_log", claim)
     monkeypatch.setattr(outbox, "_resolve_pixel_credentials", resolve)
+    monkeypatch.setattr(outbox, "_bind_outbox_destination", lambda *args, **kwargs: _async_true())
     monkeypatch.setattr(outbox, "send_third_party_report", send)
     monkeypatch.setattr(
         "app.core.third_party_report._get_report_status", report_status
@@ -871,6 +879,8 @@ async def test_outbox_claims_before_reading_and_never_reads_scrubbed_payload(mon
 
     class FakeDB:
         async def scalar(self, statement):
+            if "select third_party_report_logs.platform" in str(statement).lower():
+                return row.platform
             captured["read"] = True
             return row
 
@@ -881,8 +891,9 @@ async def test_outbox_claims_before_reading_and_never_reads_scrubbed_payload(mon
         async def __aexit__(self, *args):
             return False
 
-    async def claim(report_log_id):
+    async def claim(report_log_id, **kwargs):
         assert report_log_id == 301
+        assert kwargs.get("expected_scope") == "platform_scoped"
         return None
 
     async def status_pending(report_log_id):
