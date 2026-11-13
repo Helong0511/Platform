@@ -225,8 +225,7 @@ async def _bind_outbox_destination(
                 ThirdPartyReportLog.id == report_log_id,
                 ThirdPartyReportLog.outbox_enqueued.is_(True),
                 ThirdPartyReportLog.identity_scope == "platform_scoped",
-                ThirdPartyReportLog.platform.is_not(None),
-                ThirdPartyReportLog.platform != "",
+                ThirdPartyReportLog.platform == platform,
                 ThirdPartyReportLog.identity_scope == "platform_scoped",
                 ThirdPartyReportLog.platform == platform,
                 ThirdPartyReportLog.report_start_time == lease_token,
@@ -257,10 +256,25 @@ async def _bind_outbox_destination(
 
 
 async def process_postback_report_outbox_item(report_log_id: int) -> dict:
-    """先原子认领发送租约，再读取载荷，避免管理端修正与 Worker 快照竞态。"""
+    """先读取非敏感平台标识，再按精确作用域原子认领，最后读取发送载荷。"""
+    async with AsyncSessionLocal() as db:
+        platform = await db.scalar(
+            select(ThirdPartyReportLog.platform).where(
+                ThirdPartyReportLog.id == report_log_id,
+                ThirdPartyReportLog.outbox_enqueued.is_(True),
+                ThirdPartyReportLog.identity_scope == "platform_scoped",
+                ThirdPartyReportLog.platform.is_not(None),
+                ThirdPartyReportLog.platform != "",
+                ThirdPartyReportLog.pii_scrubbed_at.is_(None),
+            ).limit(1)
+        )
+    if not platform:
+        return {"success": False, "retryable": False, "reason": "report_identity_scope_unresolved"}
+
     lease_token = await _claim_report_log(
         report_log_id,
         expected_scope="platform_scoped",
+        platform=platform,
     )
     if lease_token is None:
         from app.core.third_party_report import _get_report_status
@@ -393,6 +407,18 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
         platform=payload["platform"],
         pixel_id=pixel_id,
     ):
+        now = get_app_now_naive()
+        await update_report_log(
+            report_log_id,
+            status="failed",
+            error_message="像素目的地与事件首次绑定的 Pixel 不一致，需要人工核对",
+            report_start_time=now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
+            completed_at=now,
+            clear_next_retry_time=True,
+            expected_report_start_time=lease_token,
+            expected_identity_scope="platform_scoped",
+            expected_platform=payload["platform"],
+        )
         return {"success": False, "retryable": False, "reason": "pixel_destination_mismatch"}
 
     send_result = await send_third_party_report(
@@ -505,6 +531,9 @@ async def process_postback_report_outbox(
         exhausted_count = await db.scalar(
             select(func.count(ThirdPartyReportLog.id)).where(
                 ThirdPartyReportLog.outbox_enqueued.is_(True),
+                ThirdPartyReportLog.identity_scope == "platform_scoped",
+                ThirdPartyReportLog.platform.is_not(None),
+                ThirdPartyReportLog.platform != "",
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                 ThirdPartyReportLog.status == "failed",
                 ThirdPartyReportLog.next_retry_time.is_(None),
@@ -515,6 +544,9 @@ async def process_postback_report_outbox(
         terminal_failed_count = await db.scalar(
             select(func.count(ThirdPartyReportLog.id)).where(
                 ThirdPartyReportLog.outbox_enqueued.is_(True),
+                ThirdPartyReportLog.identity_scope == "platform_scoped",
+                ThirdPartyReportLog.platform.is_not(None),
+                ThirdPartyReportLog.platform != "",
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                 ThirdPartyReportLog.status == "failed",
                 ThirdPartyReportLog.next_retry_time.is_(None),
