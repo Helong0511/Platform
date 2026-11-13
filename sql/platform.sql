@@ -14,6 +14,9 @@
  Date: 29/07/2026 12:30:00
 */
 
+-- WARNING: 本文件是完整基线快照，包含 DROP TABLE IF EXISTS，具有破坏性。
+-- 仅允许用于全新/可丢弃数据库的初始化演练；已有环境升级必须使用经审批的增量 migration。
+
 SET NAMES utf8mb4;
 
 -- 若数据库不存在则创建，并切换到该库
@@ -1902,28 +1905,7 @@ CREATE TABLE IF NOT EXISTS cap_reservations (
     KEY idx_cap_reservation_event (platform, conversion_id, event_name),
     KEY idx_cap_reservation_scope (offer_id, publisher_id, cap_kind, business_date),
     CONSTRAINT chk_cap_reservation_key_sha256 CHECK (LENGTH(reservation_key) = 64),
-    CONSTRAINT chk_cap_reservation_key_hex CHECK (REGEXP_LIKE(reservation_key COLLATE utf8mb4_bin, '^[0-9a-f]{64}
-    CONSTRAINT chk_cap_reservation_offer_positive CHECK (offer_id > 0),
-    CONSTRAINT chk_cap_reservation_publisher_positive CHECK (publisher_id IS NULL OR publisher_id > 0),
-    CONSTRAINT chk_cap_reservation_attempts_nonnegative CHECK (attempts >= 0),
-    CONSTRAINT chk_cap_reservation_kind_date CHECK (
-        (cap_kind = 'daily' AND business_date IS NOT NULL) OR
-        (cap_kind = 'total' AND business_date IS NULL)
-    ),
-    CONSTRAINT chk_cap_reservation_state CHECK (
-        state IN ('PREPARED', 'RESERVED', 'COMMITTED', 'ROLLED_BACK', 'NEEDS_RECONCILIATION')
-    )
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  COMMENT='Cap Redis 预留持久化账本';
-
--- 迁移后人工核验（仅隔离环境或正式发布审批窗口执行）：
--- SHOW CREATE TABLE cap_reservations;
--- SHOW INDEX FROM cap_reservations;
--- SELECT COUNT(*) FROM cap_reservations;
-
-SET FOREIGN_KEY_CHECKS = 1;
-, 'c')),
-    CONSTRAINT chk_cap_reservation_offer_positive CHECK (offer_id > 0),
+    CONSTRAINT chk_cap_reservation_key_hex CHECK (REGEXP_LIKE(reservation_key COLLATE utf8mb4_bin, '^[0-9a-f]{64}    CONSTRAINT chk_cap_reservation_offer_positive CHECK (offer_id > 0),
     CONSTRAINT chk_cap_reservation_publisher_positive CHECK (publisher_id IS NULL OR publisher_id > 0),
     CONSTRAINT chk_cap_reservation_attempts_nonnegative CHECK (attempts >= 0),
     CONSTRAINT chk_cap_reservation_kind_date CHECK (
