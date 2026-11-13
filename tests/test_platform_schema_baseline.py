@@ -41,7 +41,7 @@ def test_platform_baseline_and_incremental_migrations_cover_all_orm_tables():
     declared_tables = set()
     pattern = re.compile(
         r"CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+"
-        r"`?([A-Za-z0-9_]+)`?\s*\\(",
+        r"`?([A-Za-z0-9_]+)`?\s*\(",
         re.IGNORECASE,
     )
     for source in sql_sources:
