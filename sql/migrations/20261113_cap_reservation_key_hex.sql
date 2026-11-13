@@ -9,6 +9,7 @@ SET @cap_reservation_hex_check_count = (
       AND TABLE_NAME = 'cap_reservations'
       AND CONSTRAINT_TYPE = 'CHECK'
       AND CONSTRAINT_NAME = 'chk_cap_reservation_key_hex'
+      AND ENFORCED = 'YES'
 );
 SET @cap_reservation_hex_check_clause = (
     SELECT CHECK_CLAUSE
@@ -43,6 +44,15 @@ SET @cap_reservation_hex_check_valid = (
     FROM information_schema.CHECK_CONSTRAINTS
     WHERE CONSTRAINT_SCHEMA = DATABASE()
       AND CONSTRAINT_NAME = 'chk_cap_reservation_key_hex'
+      AND EXISTS (
+          SELECT 1
+          FROM information_schema.TABLE_CONSTRAINTS
+          WHERE CONSTRAINT_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'cap_reservations'
+            AND CONSTRAINT_NAME = 'chk_cap_reservation_key_hex'
+            AND CONSTRAINT_TYPE = 'CHECK'
+            AND ENFORCED = 'YES'
+      )
 );
 SET @cap_reservation_hex_postcondition_sql = IF(
     @cap_reservation_hex_check_valid,
