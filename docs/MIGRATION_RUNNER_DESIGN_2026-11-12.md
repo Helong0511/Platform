@@ -163,3 +163,46 @@ CI 只能连接 GitHub Actions 创建的 loopback 临时 MySQL/Redis，所有数
 - PR #1 继续 Open / Draft；不合并 main、不部署。
 - 凭据安全专项仍按用户要求暂缓。
 - 未连接生产服务器、数据库、Redis、队列或真实第三方接口。
+
+## 2026-11-13 启动入口与部署单元复核
+
+本次复核基于分支 `fix/non-credential-hardening-2026-11` 当前 HEAD `90bf1c65eb5479ac30db3ea7d82d479f9859669f`，读取了以下文件：
+
+- `app/bootstrap/lifespan.py`
+- `app/db/database.py`
+- `app/core/database.py`
+- `.github/workflows/ci.yml`
+- `systemd/Platform-backend.service`
+- `systemd/Platform-scheduler.service`
+- `tests/test_database_init.py`
+- `tests/test_mysql_migrations.py`
+
+### 已直接确认的启动行为
+
+1. Backend 与 Scheduler 两个 systemd unit 都以 Gunicorn 启动同一个 `app.main:app`，因此两者都会执行 FastAPI lifespan。
+2. 两个服务都继承 `/data/Platform/.env`，并分别覆盖 `GUNICORN_ROLE=api` / `GUNICORN_ROLE=scheduler`。这两个服务都会进入当前 schema bootstrap 路径；不是只有 API 服务执行。
+3. 当前 lifespan 顺序为：`create_database()` → `_bootstrap_database_schema()` → `init_db()`。MySQL 场景下前两步分别需要创建数据库权限及当前连接可执行 ORM DDL 的权限。
+4. `_bootstrap_database_schema()` 的 MySQL advisory lock 只串行化两个启动者的 `create_all()`，并未将 DDL 移出应用 Worker，也未将权限降为只读。
+5. `app/core/database.py::create_tables()` 是另一个可调用的 `Base.metadata.create_all()` 封装。当前已直接确认该函数定义存在，但本轮未完成全仓库所有调用点的穷尽搜索；不得据此断言它没有调用者。
+6. `init_db()` 会在每个启动 lifespan 中检查管理员并在不存在时创建默认管理员。唯一键冲突路径有并发重查，但这仍是应用启动时的业务数据写入，不是 schema migration。
+7. `init_scheduled_tasks_in_db()` 在 API 与 Scheduler 启动路径都会调用。它是任务配置数据同步，不应混入 schema revision ledger；应由单一协调者或具备幂等/锁/告警的专用同步流程负责。
+8. 当前 CI 启动临时 MySQL 8.0 和 Redis 7.4，并执行全量 pytest；迁移 SQL 集成测试直接调用测试辅助执行器。CI 尚未证明存在独立 Migration Runner、专用迁移身份或只读启动 schema gate。
+
+### 当前启动漂移检查的边界
+
+`_schema_metadata_drift()` 仅报告缺表、缺列。它没有核对列类型/长度、NULL 属性、默认值、主键/唯一约束、普通索引、外键、CHECK、字符集或 collation。因此它只能作为最低限度存在性检查，不能被描述为完整 schema drift 检测或 migration 完成证明。
+
+### 本次核查范围限制
+
+GitHub Tree 可确认仓库文件清单，但本轮没有成功取得可用的分支级全仓库代码搜索结果。因此，`create_all`、`create_tables`、`create_database`、`init_db` 的所有间接调用点仍未穷尽。后续必须在可执行的仓库工作区使用类似 `git grep -nE 'create_all|create_tables|create_database|init_db'` 的方式完成全仓库搜索，并检查动态导入、脚本入口、测试夹具和部署命令后，才能关闭此项。
+
+### 下一阶段实施顺序（不可跳步）
+
+1. 完成全仓库调用点搜索和入口清单，先标记哪些入口属于生产运行路径、测试路径、手工运维路径。
+2. 实现独立 provisioning / migration 命令与 ledger；不要先删除现有 `create_all`，避免空库初始化路径被破坏。
+3. 在隔离 MySQL 中验证空库 provisioning、旧库 migration、checksum drift、未知 revision、非连续 ledger、并发 GET_LOCK、连接中断及 DDL 部分完成后的人工恢复。
+4. 增加 schema revision 只读 gate，先以观察/拒绝不兼容启动的方式验证；再将 systemd 发布流程改为先执行 migration job、后启动 API/Scheduler。
+5. 确认应用运行身份不再拥有 CREATE DATABASE / CREATE / ALTER / DROP 等 schema 权限；migration 身份与运行身份分离。
+6. 最后移除 lifespan 的自动建库/建表行为，并对两个 systemd unit 的启动顺序和失败恢复做隔离演练。
+
+以上结论不授权连接任何生产服务器、数据库、Redis、队列或真实第三方接口。PR 仍保持 Open / Draft，不合并、不部署；凭据安全专项继续暂缓。
