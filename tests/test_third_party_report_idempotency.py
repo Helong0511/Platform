@@ -487,6 +487,69 @@ async def test_admin_identity_edit_recomputes_non_outbox_event_key(monkeypatch):
     )
 
 
+async def test_admin_cannot_rewrite_attempted_direct_event_identity(monkeypatch):
+    """直接发送事件一旦尝试，管理员不能改写其幂等身份与历史归属。"""
+    log_entry = type(
+        "ReportLog",
+        (),
+        {
+            "id": 206,
+            "source": "short_link",
+            "adsid": "already-sent-adsid",
+            "event": "Purchase",
+            "conversion_id": "already-sent-conversion",
+            "event_key": "already-sent-event-key",
+            "outbox_enqueued": False,
+            "identity_scope": "unscoped",
+            "platform": None,
+            "destination_pixel_id": "pixel-direct",
+            "pii_scrubbed_at": None,
+            "attempt_count": 1,
+            "status": "failed",
+            "report_start_time": None,
+            "report_success_time": None,
+            "completed_at": None,
+        },
+    )()
+
+    class Result:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return log_entry
+
+    class FakeDB:
+        committed = False
+
+        async def execute(self, statement):
+            return Result()
+
+        async def commit(self):
+            self.committed = True
+
+    class SessionContext:
+        def __init__(self):
+            self.db = FakeDB()
+
+        async def __aenter__(self):
+            return self.db
+
+        async def __aexit__(self, *args):
+            return False
+
+    context = SessionContext()
+    monkeypatch.setattr(third_party_report, "AsyncSessionLocal", lambda: context)
+
+    assert await third_party_report.update_report_log_params(
+        log_id=206,
+        adsid="rewritten-adsid",
+    ) is False
+    assert context.db.committed is False
+    assert log_entry.adsid == "already-sent-adsid"
+    assert log_entry.event_key == "already-sent-event-key"
+
+
 async def test_admin_identity_edit_rejects_unresolved_legacy_target(monkeypatch):
     """管理员编辑不能绕过创建入口对历史平台归属不明身份的拒绝策略。"""
     log_entry = type(
