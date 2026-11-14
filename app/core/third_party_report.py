@@ -1420,66 +1420,73 @@ def is_outbox_payload_editable(report_log, now: Optional[datetime] = None) -> bo
     return report_start_time is None or report_start_time < stale_lease_time
 
 
-async def retry_report_log(log_id: int):
+async def retry_report_log(log_id: int, db=None):
     """
     将失败的持久化 Outbox 事件重新排队。
 
-    不在请求进程中创建非持久化 asyncio task，也不从日志读取旧凭据；
-    worker 在实际发送时按短链/斗篷配置引用解析当前有效凭据。
-    非 Outbox 日志缺少可靠配置引用，拒绝伪装成可重试成功。
+    传入调用方 AsyncSession 时不自行提交，使状态更新可与管理员审计日志
+    在同一事务提交；独立调用时保留原有独立 session + commit 行为。
+    不在请求进程中创建非持久化 asyncio task，也不从日志读取旧凭据。
     """
     now = get_app_now_naive()
     stale_lease_time = now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1)
-    try:
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(
-                update(ThirdPartyReportLog)
-                .where(
-                    ThirdPartyReportLog.id == log_id,
-                    ThirdPartyReportLog.outbox_enqueued.is_(True),
-                    ThirdPartyReportLog.identity_scope == "platform_scoped",
-                    ThirdPartyReportLog.platform.is_not(None),
-                    ThirdPartyReportLog.platform != "",
-                    ThirdPartyReportLog.status == "failed",
-                    ThirdPartyReportLog.pii_scrubbed_at.is_(None),
-                    or_(
-                        ThirdPartyReportLog.error_message.is_(None),
-                        ThirdPartyReportLog.error_message != "短链接已删除，无法解析像素配置",
+
+    async def _enqueue(session, *, commit: bool) -> bool:
+        result = await session.execute(
+            update(ThirdPartyReportLog)
+            .where(
+                ThirdPartyReportLog.id == log_id,
+                ThirdPartyReportLog.outbox_enqueued.is_(True),
+                ThirdPartyReportLog.identity_scope == "platform_scoped",
+                ThirdPartyReportLog.platform.is_not(None),
+                ThirdPartyReportLog.platform != "",
+                ThirdPartyReportLog.status == "failed",
+                ThirdPartyReportLog.pii_scrubbed_at.is_(None),
+                or_(
+                    ThirdPartyReportLog.error_message.is_(None),
+                    ThirdPartyReportLog.error_message != "短链接已删除，无法解析像素配置",
+                ),
+                or_(
+                    ThirdPartyReportLog.short_link_id.is_not(None),
+                    (
+                        ThirdPartyReportLog.cloak_name.is_not(None)
+                        & ThirdPartyReportLog.short_code.is_not(None)
                     ),
-                    or_(
-                        ThirdPartyReportLog.short_link_id.is_not(None),
-                        (
-                            ThirdPartyReportLog.cloak_name.is_not(None)
-                            & ThirdPartyReportLog.short_code.is_not(None)
-                        ),
-                    ),
-                    or_(
-                        ThirdPartyReportLog.report_start_time.is_(None),
-                        ThirdPartyReportLog.report_start_time < stale_lease_time,
-                    ),
-                )
-                .values(
-                    status="pending",
-                    attempt_count=0,
-                    response_status=None,
-                    response_body=None,
-                    log_id=None,
-                    error_message=None,
-                    report_start_time=stale_lease_time,
-                    report_success_time=None,
-                    completed_at=None,
-                    next_retry_time=now,
-                )
+                ),
+                or_(
+                    ThirdPartyReportLog.report_start_time.is_(None),
+                    ThirdPartyReportLog.report_start_time < stale_lease_time,
+                ),
             )
-            await db.commit()
-            if (result.rowcount or 0) != 1:
-                logger.info(
-                    "[第三方上报] 重试未入队：日志不存在、非 Outbox、非失败状态或租约仍有效: id=%s",
-                    log_id,
-                )
-                return False
-            logger.info("[第三方上报] Outbox 事件已重新排队，等待持久化 worker：id=%s", log_id)
-            return True
+            .values(
+                status="pending",
+                attempt_count=0,
+                response_status=None,
+                response_body=None,
+                log_id=None,
+                error_message=None,
+                report_start_time=stale_lease_time,
+                report_success_time=None,
+                completed_at=None,
+                next_retry_time=now,
+            )
+        )
+        if (result.rowcount or 0) != 1:
+            logger.info(
+                "[第三方上报] 重试未入队：日志不存在、非 Outbox、非失败状态或租约仍有效: id=%s",
+                log_id,
+            )
+            return False
+        if commit:
+            await session.commit()
+        logger.info("[第三方上报] Outbox 事件已重新排队，等待持久化 worker：id=%s", log_id)
+        return True
+
+    try:
+        if db is not None:
+            return await _enqueue(db, commit=False)
+        async with AsyncSessionLocal() as session:
+            return await _enqueue(session, commit=True)
     except Exception as exc:
         logger.warning("[第三方上报] Outbox 重试入队失败：id=%s error_type=%s", log_id, type(exc).__name__)
         return False
