@@ -33,6 +33,7 @@ from app.schemas.audit_log import (
     UserAuditLogResponse,
     UserAuditLogListResponse,
     UserAuditLogQuery,
+    ClientErrorReportRequest,
 )
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.services.audit_log_service import AuditLogService
@@ -238,11 +239,7 @@ async def get_audit_log(
 )
 async def log_client_error(
         request: Request,
-        error_type: str = Query(..., description="错误类型"),
-        error_message: str = Query(..., description="错误信息"),
-        error_stack: Optional[str] = Query(None, description="错误堆栈"),
-        error_url: Optional[str] = Query(None, description="错误发生的URL"),
-        user_agent: Optional[str] = Query(None, description="用户代理"),
+        payload: ClientErrorReportRequest,
         db: AsyncSession = Depends(get_db)
 ):
     """
@@ -250,12 +247,12 @@ async def log_client_error(
     
     注意：此端点允许未认证用户访问，用于记录前端错误
     """
-    error_type = (error_type or "")[:100]
-    error_message = (error_message or "")[:500]
-    if error_stack:
-        error_stack = error_stack[:2000]
-    if error_url:
-        error_url = error_url[:500]
+    # Pydantic 在请求体入口强制校验长度，避免 URL 查询参数泄露错误消息/堆栈。
+    error_type = payload.error_type
+    error_message = payload.error_message
+    error_stack = payload.error_stack
+    error_url = payload.error_url
+    user_agent = payload.user_agent
 
     # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在AuditLogService中）
