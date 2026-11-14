@@ -137,3 +137,14 @@ MySQL 官方参考：
 - 错误上报失败日志只记录异常类型，不输出异常原文，防止数据库/网络异常把敏感值再次写入应用日志。
 - 以上属于针对前端错误上报路径的定向脱敏，不等于所有通用审计写入调用的递归脱敏已经完成。`log_user_action` 的通用 `details`、`request_params` 仍需继续审计调用点与字段语义，不能仅依赖本节保证所有审计内容无敏感信息。
 - 未认证错误上报端点仍需单独完成速率限制、体积限制、来源滥用防护与保留策略验收；不得因已加入 CSRF 说明就视为匿名端点具备完整滥用防护。
+
+
+## 12. 通用审计写入的递归凭据脱敏（2026-11-14）
+
+- `log_user_action` 是审计日志统一写入入口；现在 `request_params` 与 `details` 在 JSON 序列化前统一递归处理，不再只过滤顶层字段。
+- 对常见凭据字段名进行大小写/分隔符归一化后匹配，包括 password/passwd、token/access_token/refresh_token、secret/client_secret、api_key、authorization、cookie/set-cookie、private_key、session_id、CSRF/XSRF 与通用 key；命中字段值替换为 `[REDACTED]`。
+- 对普通字符串值中的 Bearer 凭据和常见 `token=...`、`password:...` 等赋值形式做二次过滤；`error_message` 同样经过此处理。
+- 递归深度上限为 12，日期继续转为 ISO 字符串；列表/元组/集合统一序列化为数组。
+- 该规则是常见凭据的防御性过滤，不是任意秘密识别器；业务调用方仍不得把完整请求体、原始凭据或不必要的个人信息传入审计接口。新凭据命名必须同步扩充规则与回归测试。
+- 未登录 `/api/v1/audit-logs/client-error` 已在 `RateLimitMiddleware` 中单独使用 `client-error` bucket，生产/默认请求上限再收紧为最多 10 次/分钟（以客户端 IP 为计数维度）；Redis 不可用时回退进程内计数，跨 worker 一致性会下降，需监控 Redis 降级状态。
+- 审计日志查看权限、外部不可变归档、数据库账号禁止 UPDATE/DELETE、保留期和备份恢复演练仍是独立待办；本次递归脱敏不代表这些控制已完成。
