@@ -8,7 +8,6 @@
 - GET /              分页列表
 - GET /stats/summary 统计概览
 - GET /{log_id}      单条详情
-- GET /{log_id}      单条详情
 - POST /client-error 前端错误上报。
 
 说明：系统运维接口，含定时任务、审计日志、会话、缓存、斗篷与敏感路径探测。"""
