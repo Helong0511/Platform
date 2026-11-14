@@ -575,7 +575,7 @@ async def retry_third_party_report(
     # ---------- 入口：参数与依赖准备 ----------
     # ---------- 异常处理 ----------
     try:
-        success = await retry_report_log(log_id)
+        success = await retry_report_log(log_id, db=db)
         
         # ---------- 条件分支 ----------
         if not success:
