@@ -40,6 +40,7 @@ from app.schemas.third_party_report import (
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.core.third_party_report import (
     REPORT_LOG_LEASE_SECONDS,
+    MAX_MANUAL_REPORT_RETRIES,
     is_outbox_payload_editable,
     retry_report_log,
     update_report_log_params,
@@ -113,6 +114,7 @@ def _can_requeue_report(log, now: Optional[datetime] = None) -> bool:
         or not getattr(log, "platform", None)
         or getattr(log, "status", None) != "failed"
         or getattr(log, "pii_scrubbed_at", None) is not None
+        or int(getattr(log, "manual_retry_count", 0) or 0) >= MAX_MANUAL_REPORT_RETRIES
         or getattr(log, "error_message", None) == "短链接已删除，无法解析像素配置"
     ):
         return False
