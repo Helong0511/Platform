@@ -343,5 +343,5 @@ class AuditLogService:
             await commit_audit_log(self.db)
         except Exception as e:
             # 记录错误日志失败不应该影响前端，静默处理
-            logger.warning(f"记录客户端错误日志失败: {e}")
+            logger.warning("记录客户端错误日志失败: error_type=%s", type(e).__name__)
             await self.db.rollback()
