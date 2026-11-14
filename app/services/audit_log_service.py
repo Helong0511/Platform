@@ -14,6 +14,8 @@
 2. 审计日志可能含敏感参数；列表响应应保持最小字段集，详情访问需单独授权并对请求参数、错误文本等内容进行脱敏评估
 """
 import logging
+import re
+from urllib.parse import urlsplit
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -34,6 +36,32 @@ logger = logging.getLogger(__name__)
 
 # 统计缓存键前缀，便于发现缓存与数据库汇总不一致时批量失效
 AUDIT_LOG_STATS_CACHE_PREFIX = "audit_log_stats"
+
+# 客户端错误可能把 URL 查询参数、邮箱或认证信息带入异常文本/堆栈。
+_SENSITIVE_ASSIGNMENT_RE = re.compile(r'(?i)(\b(?:access[_-]?token|refresh[_-]?token|token|authorization|password|passwd|secret|api[_-]?key)\b\s*[:=]\s*)([^\s,;&]+)')
+_BEARER_RE = re.compile(r'(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+')
+_EMAIL_RE = re.compile(r'(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b')
+
+def _sanitize_client_error_text(value: Optional[str], limit: int) -> Optional[str]:
+    """对前端错误文本/堆栈做有限脱敏，保留诊断结构但隐藏常见凭据和邮箱。"""
+    if not value:
+        return None
+    sanitized = str(value)[:limit]
+    sanitized = _BEARER_RE.sub('Bearer [REDACTED]', sanitized)
+    sanitized = _SENSITIVE_ASSIGNMENT_RE.sub(r'\1[REDACTED]', sanitized)
+    sanitized = _EMAIL_RE.sub('[REDACTED_EMAIL]', sanitized)
+    return sanitized
+
+
+def _sanitize_client_error_url(value: Optional[str]) -> str:
+    """只保留 URL 路径，绝不将 query、fragment、userinfo 或主机写入审计详情。"""
+    if not value:
+        return 'unknown'
+    try:
+        parsed = urlsplit(str(value))
+        return (parsed.path or '/')[:500]
+    except (TypeError, ValueError):
+        return 'unknown'
 
 
 async def invalidate_audit_log_stats_cache() -> int:
@@ -311,15 +339,13 @@ class AuditLogService:
             username: 未登录时的用户名占位（可选）
         """
 
-        # 截断超长字段，控制单行 audit 体积
-        max_error_length = 1000
-        truncated_error = error_message[:max_error_length] if len(error_message) > max_error_length else error_message
-
-        # 限制堆栈长度
-        max_stack_length = 2000
-        truncated_stack = None
-        if error_stack:
-            truncated_stack = error_stack[:max_stack_length] if len(error_stack) > max_stack_length else error_stack
+        # 仅保留路径；URL 查询参数/片段可能含 OAuth code、广告标识或业务凭据。
+        safe_error_url = _sanitize_client_error_url(error_url)
+        # 限长并对异常消息/堆栈中的常见凭据和邮箱做脱敏。
+        truncated_error = _sanitize_client_error_text(error_message, 1000) or '未知客户端错误'
+        truncated_stack = _sanitize_client_error_text(error_stack, 2000)
+        safe_error_type = _sanitize_client_error_text(error_type, 100) or 'JavaScriptError'
+        safe_user_agent = (user_agent or '')[:500]
 
         try:
             await log_user_action(
@@ -328,15 +354,15 @@ class AuditLogService:
                 user=current_user,
                 username=username,
                 resource_type="FRONTEND",
-                resource_name=error_url or "unknown",
+                resource_name=safe_error_url,
                 ip_address=ip_address,
-                user_agent=user_agent[:500] if user_agent else None,
+                user_agent=safe_user_agent or None,
                 success=False,
                 error_message=truncated_error,
                 details={
-                    "error_type": error_type or "JavaScriptError",
-                    "url": error_url or "unknown",
-                    "user_agent": user_agent or "",
+                    "error_type": safe_error_type,
+                    "url": safe_error_url,
+                    "user_agent": safe_user_agent,
                     "stack_trace": truncated_stack
                 }
             )
