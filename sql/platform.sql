@@ -1050,7 +1050,7 @@ CREATE TABLE IF NOT EXISTS `third_party_report_logs`  (
   `adsid` VARCHAR(500) NOT NULL COMMENT '广告事件ID',
   `event` VARCHAR(50) NOT NULL COMMENT '事件类型：ViewContent, Purchase',
   `event_key` VARCHAR(64) NOT NULL COMMENT '事件幂等键：稳定事件身份字段的 SHA-256（ViewContent 不含后补 conversion_id）',
-  `platform` VARCHAR(100) NULL DEFAULT NULL COMMENT 'Postback 平台标识；非平台事件为 NULL',
+  `platform` VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL DEFAULT NULL COMMENT 'Postback 平台标识；非平台事件为 NULL；按二进制规则精确比较',
   `identity_scope` VARCHAR(32) NOT NULL DEFAULT 'legacy_unresolved' COMMENT 'unscoped/platform_scoped/legacy_unresolved',
   `destination_pixel_id` VARCHAR(100) NULL DEFAULT NULL COMMENT '非敏感 Meta Pixel 目的地 ID；不保存 access_token',
   `use_hash` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否对email、ip、phone进行哈希处理：True=哈希，False=不哈希',
