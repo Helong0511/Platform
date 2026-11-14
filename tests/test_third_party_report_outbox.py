@@ -15,6 +15,10 @@ def _mock_identity_lock_for_outbox_unit_tests(monkeypatch):
         return "unit-test-identity-lock"
 
     monkeypatch.setattr(outbox, "_lock_report_base_identity", no_database_lock)
+    async def no_legacy_conflict(db, **kwargs):
+        return False
+
+    monkeypatch.setattr(outbox, "_has_legacy_unresolved_base_identity", no_legacy_conflict)
 
 
 async def _async_true():
