@@ -28,9 +28,9 @@ _AUDIT_SECRET_KEYS = {
     'secret', 'clientsecret', 'apikey', 'authorization', 'cookie',
     'setcookie', 'privatekey', 'sessionid', 'csrf', 'xsrftoken', 'key',
 }
-_AUDIT_BEARER_RE = re.compile(r'(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+')
+_AUDIT_BEARER_RE = re.compile(r'(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+')
 _AUDIT_SECRET_ASSIGNMENT_RE = re.compile(
-    r'(?i)(\\b(?:access[_-]?token|refresh[_-]?token|token|authorization|password|passwd|secret|client[_-]?secret|api[_-]?key)\\b\\s*[:=]\\s*)([^\\s,;&]+)'
+    r'(?i)(\b(?:access[_-]?token|refresh[_-]?token|token|authorization|password|passwd|secret|client[_-]?secret|api[_-]?key)\b\s*[:=]\s*)([^\s,;&]+)'
 )
 
 def _sanitize_audit_value(value: Any, depth: int = 0) -> Any:
@@ -51,7 +51,7 @@ def _sanitize_audit_value(value: Any, depth: int = 0) -> Any:
         return [_sanitize_audit_value(item, depth + 1) for item in value]
     if isinstance(value, str):
         sanitized_text = _AUDIT_BEARER_RE.sub('Bearer [REDACTED]', value)
-        return _AUDIT_SECRET_ASSIGNMENT_RE.sub(r'\\1[REDACTED]', sanitized_text)
+        return _AUDIT_SECRET_ASSIGNMENT_RE.sub(r'\1[REDACTED]', sanitized_text)
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     if value is None or isinstance(value, (bool, int, float)):
