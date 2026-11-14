@@ -558,6 +558,86 @@ async def test_admin_cannot_rewrite_attempted_direct_event_identity(monkeypatch)
     assert log_entry.email == "sent@example.invalid"
 
 
+async def test_admin_identity_edit_rechecks_worker_claim_after_row_lock(monkeypatch):
+    """Worker 在快照后先认领事件时，管理员必须在行锁内发现活动租约并拒绝修改。"""
+    log_entry = type(
+        "ReportLog",
+        (),
+        {
+            "id": 207,
+            "source": "short_link",
+            "adsid": "race-adsid",
+            "event": "Purchase",
+            "conversion_id": "race-conversion",
+            "event_key": "race-event-key",
+            "outbox_enqueued": False,
+            "identity_scope": "unscoped",
+            "platform": None,
+            "destination_pixel_id": "pixel-direct",
+            "pii_scrubbed_at": None,
+            "attempt_count": 0,
+            "status": "pending",
+            "report_start_time": None,
+            "report_success_time": None,
+            "completed_at": None,
+        },
+    )()
+
+    class Result:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return log_entry
+
+    class FakeDB:
+        committed = False
+        execute_count = 0
+
+        async def execute(self, statement):
+            self.execute_count += 1
+            if self.execute_count == 2:
+                # 模拟 Worker 在管理员读取快照后、取得行锁前完成原子认领。
+                log_entry.report_start_time = third_party_report.get_app_now_naive()
+            return Result()
+
+        async def commit(self):
+            self.committed = True
+
+    class SessionContext:
+        def __init__(self):
+            self.db = FakeDB()
+
+        async def __aenter__(self):
+            return self.db
+
+        async def __aexit__(self, *args):
+            return False
+
+    context = SessionContext()
+
+    async def lock_identity(*args, **kwargs):
+        return "locked"
+
+    async def no_legacy_conflict(*args, **kwargs):
+        return False
+
+    monkeypatch.setattr(third_party_report, "AsyncSessionLocal", lambda: context)
+    monkeypatch.setattr(third_party_report, "_lock_report_base_identity", lock_identity)
+    monkeypatch.setattr(
+        third_party_report, "_has_legacy_unresolved_base_identity", no_legacy_conflict
+    )
+
+    assert await third_party_report.update_report_log_params(
+        log_id=207,
+        adsid="rewritten-race-adsid",
+    ) is False
+    assert context.db.execute_count == 2
+    assert context.db.committed is False
+    assert log_entry.adsid == "race-adsid"
+    assert log_entry.event_key == "race-event-key"
+
+
 async def test_admin_identity_edit_rejects_unresolved_legacy_target(monkeypatch):
     """管理员编辑不能绕过创建入口对历史平台归属不明身份的拒绝策略。"""
     log_entry = type(
