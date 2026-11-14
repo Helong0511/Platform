@@ -42,7 +42,8 @@ class ThirdPartyReportLogBase(BaseSchema):
     use_hash: bool = Field(True, description="是否对email、ip、phone进行哈希处理")
     status: str = Field(..., max_length=20, description="状态")
     attempt_count: int = Field(0, description="尝试次数")
-    max_attempts: int = Field(3, description="最大尝试次数")
+    max_attempts: int = Field(3, description="自动重试周期内最大尝试次数")
+    manual_retry_count: int = Field(0, ge=0, description="管理员手动重新入队累计次数")
     response_status: Optional[int] = Field(None, description="响应状态码")
     log_id: Optional[str] = Field(None, max_length=100, description="日志ID")
     """
@@ -93,7 +94,8 @@ class ThirdPartyReportLogListResponse(BaseSchema):
     use_hash: bool = Field(True, description="是否对email、ip、phone进行哈希处理")
     status: str = Field(..., max_length=20, description="状态")
     attempt_count: int = Field(0, description="尝试次数")
-    max_attempts: int = Field(3, description="最大尝试次数")
+    max_attempts: int = Field(3, description="自动重试周期内最大尝试次数")
+    manual_retry_count: int = Field(0, ge=0, description="管理员手动重新入队累计次数")
     response_status: Optional[int] = Field(None, description="响应状态码")
     log_id: Optional[str] = Field(None, max_length=100, description="日志ID")
     """
