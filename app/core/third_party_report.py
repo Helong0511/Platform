@@ -1630,6 +1630,32 @@ async def update_report_log_params(
                 return False
 
             if identity_changed:
+                # 快照读取与取得行锁之间，Worker 可能已原子认领该事件。
+                # 必须在锁内基于最新行状态再次检查，不能依赖锁前快照。
+                now = get_app_now_naive()
+                current_lease_time = getattr(log_entry, "report_start_time", None)
+                current_active_lease = bool(
+                    current_lease_time
+                    and current_lease_time
+                    >= now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS)
+                )
+                if (
+                    getattr(log_entry, "identity_scope", None) != "unscoped"
+                    or getattr(log_entry, "platform", None) is not None
+                    or getattr(log_entry, "outbox_enqueued", False)
+                    or int(getattr(log_entry, "attempt_count", 0) or 0) > 0
+                    or getattr(log_entry, "status", None) == "success"
+                    or getattr(log_entry, "report_success_time", None) is not None
+                    or getattr(log_entry, "completed_at", None) is not None
+                    or current_active_lease
+                ):
+                    logger.warning(
+                        "[第三方上报] 行锁内发现事件已被认领、尝试或完成，拒绝修改身份: id=%s",
+                        log_id,
+                    )
+                    return False
+
+            if identity_changed:
                 new_adsid = adsid if adsid is not None else log_entry.adsid
                 new_event = event if event is not None else log_entry.event
                 new_conversion_id = (
