@@ -7,7 +7,7 @@
 主要端点（前缀 /audit-logs）：
 - GET /              分页列表
 - GET /stats/summary 统计概览
-- DELETE /clear-all  清空全部日志（TRUNCATE + 重置自增）
+- GET /{log_id}      单条详情
 - GET /{log_id}      单条详情
 - POST /client-error 前端错误上报。
 
