@@ -60,6 +60,30 @@ def _sanitize_audit_value(value: Any, depth: int = 0) -> Any:
         return _sanitize_audit_value(value.__dict__, depth + 1)
     return str(value)
 
+def sanitize_audit_log_response_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """读取历史审计记录时再次脱敏，覆盖修复上线前已落库的旧数据。"""
+    sanitized = dict(payload)
+    for field_name in ('request_params', 'details'):
+        raw_value = sanitized.get(field_name)
+        if raw_value is None:
+            continue
+        if isinstance(raw_value, str):
+            try:
+                parsed_value = json.loads(raw_value)
+            except (TypeError, ValueError):
+                parsed_value = raw_value
+        else:
+            parsed_value = raw_value
+        safe_value = _sanitize_audit_value(parsed_value)
+        sanitized[field_name] = (
+            json.dumps(safe_value, ensure_ascii=False)
+            if not isinstance(safe_value, str) else safe_value
+        )
+    if sanitized.get('error_message'):
+        sanitized['error_message'] = str(_sanitize_audit_value(sanitized['error_message']))[:1000]
+    return sanitized
+
+
 ALLOWED_ACTION_TYPES = {
     "LOGIN",  # 登录
     "LOGOUT",  # 登出
