@@ -69,7 +69,7 @@ def test_platform_baseline_third_party_identity_scope_is_complete():
     table_sql = source[table_start:table_end]
     statements = split_mysql_statements(table_sql)
     assert len(statements) == 1
-    for column in ("platform", "identity_scope", "destination_pixel_id"):
+    for column in ("platform", "identity_scope", "destination_pixel_id", "manual_retry_count"):
         assert f"`{column}`" in statements[0]
     assert "idx_third_party_scope_due" in statements[0]
     assert "chk_third_party_identity_scope_v1" in statements[0]
