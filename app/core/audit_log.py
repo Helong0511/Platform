@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 _AUDIT_SECRET_KEYS = {
     'password', 'passwd', 'token', 'accesstoken', 'refreshtoken',
     'secret', 'clientsecret', 'apikey', 'authorization', 'cookie',
-    'setcookie', 'privatekey', 'sessionid', 'csrf', 'xsrftoken', 'key',
+    'setcookie', 'privatekey', 'secretkey', 'signingkey', 'encryptionkey', 'sessionid', 'csrf', 'xsrftoken',
 }
 _AUDIT_BEARER_RE = re.compile(r'(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+')
 _AUDIT_SECRET_ASSIGNMENT_RE = re.compile(
@@ -56,9 +56,10 @@ def _sanitize_audit_value(value: Any, depth: int = 0) -> Any:
         return value.isoformat()
     if value is None or isinstance(value, (bool, int, float)):
         return value
-    if hasattr(value, '__dict__'):
-        return _sanitize_audit_value(value.__dict__, depth + 1)
-    return str(value)
+    # 不展开未知对象的 __dict__，避免把对象内部状态或凭据意外写入审计记录。
+    if isinstance(value, (bytes, bytearray)):
+        return '[BINARY_VALUE_OMITTED]'
+    return f'[UNSERIALIZABLE:{type(value).__name__}]'
 
 def sanitize_audit_log_response_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """读取历史审计记录时再次脱敏，覆盖修复上线前已落库的旧数据。"""
