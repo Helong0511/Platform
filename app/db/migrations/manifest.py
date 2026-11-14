@@ -83,6 +83,12 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         sha256="ee2ff49f0afd71727c0d00c03bd7a99f0c25592b4d27351ccb8f357b8596ebc4",
         depends_on=("20261113_third_party_report_identity_scope",),
     ),
+    Migration(
+        revision="20261114_third_party_report_platform_binary_collation",
+        path="sql/migrations/20261114_third_party_report_platform_binary_collation.sql",
+        sha256="59a1f9be0dff16628437d15e000d5f928640e7a0d92848ad698d519426b6c66b",
+        depends_on=("20261113_third_party_report_identity_scope",),
+    ),
 )
 
 _REVISION_PATTERN = re.compile(r"^20[0-9]{6}_[a-z0-9_]+$")
