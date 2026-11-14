@@ -152,3 +152,46 @@ def test_client_error_sanitizers_remove_query_credentials_and_pii():
     assert 'secret-value' not in sanitized
     assert 'pass123' not in sanitized
     assert '[REDACTED]' in sanitized
+
+
+@pytest.mark.asyncio
+async def test_log_user_action_recursively_redacts_nested_credentials():
+    import json
+    from types import SimpleNamespace
+
+    from app.core.audit_log import log_user_action
+
+    class FakeDB:
+        def __init__(self):
+            self.record = None
+
+        def add(self, record):
+            self.record = record
+
+    db = FakeDB()
+    await log_user_action(
+        db=db,
+        action_type='UPDATE',
+        user=SimpleNamespace(id=9, username='operator'),
+        resource_type='TEST',
+        error_message='request failed token=inline-secret',
+        request_params={
+            'filters': {'refresh_token': 'nested-refresh', 'status': 'active'},
+            'items': [{'Authorization': 'Bearer abc.def', 'name': 'safe'}],
+        },
+        details={
+            'before': {'client_secret': 'nested-client-secret'},
+            'after': [{'api_key': 'nested-api-key', 'enabled': True}],
+            'note': 'Bearer xyz.123 was rejected',
+        },
+    )
+
+    params = json.loads(db.record.request_params)
+    details = json.loads(db.record.details)
+    assert params['filters']['refresh_token'] == '[REDACTED]'
+    assert params['items'][0]['Authorization'] == '[REDACTED]'
+    assert params['items'][0]['name'] == 'safe'
+    assert details['before']['client_secret'] == '[REDACTED]'
+    assert details['after'][0]['api_key'] == '[REDACTED]'
+    assert 'xyz.123' not in details['note']
+    assert 'inline-secret' not in db.record.error_message
