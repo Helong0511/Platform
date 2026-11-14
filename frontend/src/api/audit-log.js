@@ -28,12 +28,4 @@ export const getAuditLogStats = async (params) => {
   }, { returnDataOnly: true });
 };
 
-/**
- * 清除全部操作日志（TRUNCATE + 重置自增，仅管理员）。
- */
-export const clearAllAuditLogs = async () => {
-  return request({
-    url: '/api/v1/audit-logs/clear-all',
-    method: 'delete'
-  }, { returnDataOnly: true });
-};
+
