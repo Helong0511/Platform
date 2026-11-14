@@ -731,6 +731,128 @@ async def test_mysql_outbox_pixel_destination_is_bound_once_and_cannot_silently_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("event", "legacy_conversion_id", "new_conversion_id"),
+    [
+        ("Purchase", "legacy-conversion", "legacy-conversion"),
+        ("Purchase", None, ""),
+        ("ViewContent", "legacy-conversion", "new-conversion"),
+    ],
+)
+async def test_mysql_unresolved_legacy_platform_key_blocks_new_direct_and_other_platform_events(
+    monkeypatch, event, legacy_conversion_id, new_conversion_id
+):
+    """历史五字段 key 没有 platform 列时，任何新平台/直接发送入口都必须 fail closed。"""
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(ThirdPartyReportLog.__table__.create)
+            await connection.run_sync(ThirdPartyReportIdentityLock.__table__.create)
+
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
+        monkeypatch.setattr(outbox_module, "AsyncSessionLocal", session_factory)
+
+        identity = uuid.uuid4().hex
+        adsid = f"legacy-five-field-{identity}"
+        stored_conversion_id = (
+            legacy_conversion_id if event != "ViewContent" else legacy_conversion_id
+        )
+        legacy_key = report_module.build_event_idempotency_key(
+            "postback",
+            adsid,
+            event,
+            stored_conversion_id,
+            platform="legacy-platform-A",
+        )
+        now = get_app_now_naive()
+        async with session_factory() as session:
+            session.add(
+                ThirdPartyReportLog(
+                    source="postback",
+                    adsid=adsid,
+                    event=event,
+                    event_key=legacy_key,
+                    conversion_id=stored_conversion_id,
+                    platform=None,
+                    identity_scope="legacy_unresolved",
+                    destination_pixel_id=None,
+                    outbox_enqueued=True,
+                    status="failed",
+                    attempt_count=1,
+                    max_attempts=12,
+                    created_at=now,
+                    next_retry_time=None,
+                )
+            )
+            await session.commit()
+
+        # 新平台 B 的五字段 key 与历史平台 A 不同，但基础身份相同，必须拒绝。
+        async with session_factory() as session:
+            with pytest.raises(outbox_module.LegacyEventIdentityConflict):
+                async with session.begin():
+                    await outbox_module.enqueue_postback_report(
+                        session,
+                        platform="legacy-platform-B",
+                        adsid=adsid,
+                        event=event,
+                        conversion_id=new_conversion_id,
+                        email=None,
+                        ip=None,
+                        phone=None,
+                        ua=None,
+                        currency="USD",
+                        amount=3.0,
+                        short_link_id=9,
+                        cloak_name=None,
+                        short_code=None,
+                        click_time=None,
+                    )
+
+        # 无平台直接发送入口也必须检查相同的 unresolved 基础身份，不能绕过 Postback 门禁。
+        direct_id = await report_module.create_report_log(
+            source="postback",
+            adsid=adsid,
+            event=event,
+            email="",
+            ip="",
+            phone="",
+            ua="",
+            conversion_id=new_conversion_id,
+            destination_pixel_id="pixel-direct",
+        )
+        assert direct_id == 0
+
+        async with session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(ThirdPartyReportLog).where(
+                        ThirdPartyReportLog.adsid == adsid
+                    )
+                )
+            ).scalars().all()
+            assert len(rows) == 1
+            assert rows[0].identity_scope == "legacy_unresolved"
+            assert rows[0].event_key == legacy_key
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
+
+
+@pytest.mark.asyncio
 async def test_mysql_direct_and_postback_creation_share_one_base_identity_lock(monkeypatch):
     """真实 MySQL 并发验证直接发送与 Postback 首次创建只能有一个身份所有者。"""
     database = _create_isolated_database()
