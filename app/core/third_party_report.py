@@ -1530,6 +1530,28 @@ async def update_report_log_params(
                     log_id,
                 )
                 return False
+            if identity_changed:
+                # 直接发送日志一旦开始尝试，就成为外部事件身份的审计证据；
+                # 不允许管理员改写已尝试/成功/已完成事件的幂等身份。
+                now = get_app_now_naive()
+                report_start_time = getattr(snapshot, "report_start_time", None)
+                active_lease = bool(
+                    report_start_time
+                    and report_start_time
+                    >= now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS)
+                )
+                if (
+                    int(getattr(snapshot, "attempt_count", 0) or 0) > 0
+                    or getattr(snapshot, "status", None) == "success"
+                    or getattr(snapshot, "report_success_time", None) is not None
+                    or getattr(snapshot, "completed_at", None) is not None
+                    or active_lease
+                ):
+                    logger.warning(
+                        "[第三方上报] 已尝试、已完成或租约有效的事件身份不可修改: id=%s",
+                        log_id,
+                    )
+                    return False
             if identity_scope == "platform_scoped" and not getattr(snapshot, "platform", None):
                 logger.warning("[第三方上报] 平台作用域日志缺少平台标识: id=%s", log_id)
                 return False
