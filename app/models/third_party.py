@@ -74,8 +74,12 @@ class ThirdPartyReportLog(Base):
     
     # 上报状态
     status = Column(String(20), nullable=False, index=True, comment='上报状态：pending, success, failed')
-    attempt_count = Column(Integer, default=0, comment='尝试次数')
-    max_attempts = Column(Integer, default=3, comment='最大尝试次数')
+    attempt_count = Column(Integer, default=0, comment='自动重试周期内的尝试次数')
+    max_attempts = Column(Integer, default=3, comment='自动重试周期内最大尝试次数')
+    manual_retry_count = Column(
+        Integer, nullable=False, default=0, server_default=text("0"),
+        comment='管理员手动重新入队累计次数；不随自动重试重置',
+    )
     
     # 响应信息
     response_status = Column(Integer, nullable=True, comment='响应状态码')
