@@ -83,7 +83,7 @@ def test_manifest_rejects_unknown_or_forward_dependency(tmp_path: Path):
 
 
 def test_manifest_is_explicit_and_contains_no_unreviewed_files():
-    assert len(MIGRATION_MANIFEST) == 10
+    assert len(MIGRATION_MANIFEST) == 11
     assert all(item.path.startswith("sql/migrations/") for item in MIGRATION_MANIFEST)
 
 def test_manifest_rejects_revision_path_mismatch(tmp_path: Path):
