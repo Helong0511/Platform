@@ -106,3 +106,31 @@ async def test_client_error_logging_failure_does_not_expose_exception_text(monke
     assert "RuntimeError" in caplog.text
     assert "private@example.com" not in caplog.text
     assert "secret-value" not in caplog.text
+
+
+def test_client_error_report_schema_enforces_bounded_json_fields():
+    from pydantic import ValidationError
+
+    from app.schemas.audit_log import ClientErrorReportRequest
+
+    valid = ClientErrorReportRequest(
+        error_type="TypeError",
+        error_message="synthetic failure",
+        error_stack="stack",
+        error_url="https://example.invalid/app",
+        user_agent="test-agent",
+    )
+    assert valid.error_type == "TypeError"
+
+    with pytest.raises(ValidationError):
+        ClientErrorReportRequest(
+            error_type="TypeError",
+            error_message="x" * 501,
+        )
+
+    with pytest.raises(ValidationError):
+        ClientErrorReportRequest(
+            error_type="TypeError",
+            error_message="failure",
+            error_stack="x" * 2001,
+        )
