@@ -1727,3 +1727,55 @@ def test_platform_binary_collation_migration_is_idempotent_and_preserves_identit
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
         connection.close()
+
+
+def test_manual_retry_budget_migration_is_idempotent_and_preserves_existing_rows():
+    """真实 MySQL 验证旧 Outbox 行默认计数为 0，迁移可重复执行。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+            cursor.execute(
+                "CREATE TABLE third_party_report_logs ("
+                "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "status VARCHAR(20) NOT NULL"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            cursor.executemany(
+                "INSERT INTO third_party_report_logs (status) VALUES (%s)",
+                [("failed",), ("success",)],
+            )
+
+            migration_path = (
+                "sql/migrations/"
+                "20261114_third_party_report_manual_retry_budget.sql"
+            )
+            _run_sql_file(cursor, migration_path)
+            _run_sql_file(cursor, migration_path)
+
+            cursor.execute(
+                "SELECT COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT "
+                "FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() "
+                "AND TABLE_NAME = 'third_party_report_logs' "
+                "AND COLUMN_NAME = 'manual_retry_count'"
+            )
+            assert cursor.fetchone() == ("int", "NO", "0")
+
+            cursor.execute(
+                "SELECT manual_retry_count FROM third_party_report_logs ORDER BY id"
+            )
+            assert cursor.fetchall() == ((0,), (0,))
+
+            cursor.execute(
+                "UPDATE third_party_report_logs "
+                "SET manual_retry_count = manual_retry_count + 1 WHERE id = 1"
+            )
+            cursor.execute(
+                "SELECT manual_retry_count FROM third_party_report_logs WHERE id = 1"
+            )
+            assert cursor.fetchone() == (1,)
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+        connection.close()
