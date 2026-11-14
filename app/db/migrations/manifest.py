@@ -86,7 +86,7 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     Migration(
         revision="20261114_third_party_report_platform_binary_collation",
         path="sql/migrations/20261114_third_party_report_platform_binary_collation.sql",
-        sha256="59a1f9be0dff16628437d15e000d5f928640e7a0d92848ad698d519426b6c66b",
+        sha256="9357f7d6cb29c23fe28499697e032169892f1ee50b50cd78279db879c0b08b4d",
         depends_on=("20261113_third_party_report_identity_scope",),
     ),
 )
