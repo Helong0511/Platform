@@ -27,6 +27,7 @@ from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.dependencies import get_audit_log_service
 from app.core.utils import get_client_ip
+from app.core.audit_log import sanitize_audit_log_response_payload
 from app.models.models import UserAuditLog, User
 from fastapi import Request
 from app.schemas.audit_log import (
@@ -217,7 +218,17 @@ async def get_audit_log(
             )
 
         return ResponseBaseSchema.success(
-            data=UserAuditLogResponse.model_validate(log),
+            data=UserAuditLogResponse.model_validate(
+                sanitize_audit_log_response_payload({
+                    field: getattr(log, field, None)
+                    for field in (
+                        'id', 'user_id', 'username', 'action_type', 'resource_type',
+                        'resource_id', 'resource_name', 'ip_address', 'user_agent',
+                        'request_method', 'request_path', 'request_params',
+                        'status_code', 'success', 'error_message', 'details', 'created_at',
+                    )
+                })
+            ),
             message="获取日志详情成功"
         )
 
