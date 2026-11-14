@@ -11,7 +11,7 @@
 
 注意事项：
 1. 统计缓存键含 start_date/end_date，区间变更须自然失效
-2. 审计日志可能含敏感参数，列表接口应脱敏或省略 request_body
+2. 审计日志可能含敏感参数；列表响应应保持最小字段集，详情访问需单独授权并对请求参数、错误文本等内容进行脱敏评估
 """
 import logging
 from datetime import datetime
@@ -178,7 +178,7 @@ class AuditLogService:
         if not force_refresh:
             cached = await get_cached(cache_key, key_prefix="audit_log")
             if cached:
-                # 轻量校验：总量与库内一致才使用缓存（防止清表后仍显示旧统计）
+                # 轻量校验：总量与库内一致才使用缓存，避免展示过期汇总
                 total_count_result = await self.db.execute(
                     select(func.count(UserAuditLog.id)).where(_count_where())
                 )
