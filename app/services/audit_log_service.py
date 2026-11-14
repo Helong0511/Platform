@@ -283,54 +283,6 @@ class AuditLogService:
         )
         return result.scalar_one_or_none()
 
-    async def clear_all_audit_logs(self) -> Dict[str, Any]:
-        """
-        清空全部操作日志并重置自增主键（等价于 TRUNCATE + AUTO_INCREMENT=1）。
-
-        MySQL 的 TRUNCATE/ALTER 为 DDL（隐式提交），须在独立 AUTOCOMMIT 连接上执行，
-        避免与会话事务冲突。清空后不写审计行，以免自增再次递增。
-
-        注意：InnoDB 的 ``SHOW TABLE STATUS`` / ``INFORMATION_SCHEMA`` 对
-        Auto_increment 常返回缓存旧值，不能作为重置结果依据；显式 ALTER 为 1
-        且表空时，对外一律报告下次 ID 从 1 开始。
-        """
-        from app.core.database import engine
-
-        # 结束当前事务，避免会话连接状态干扰后续查询
-        await self.db.rollback()
-
-        async with engine.connect() as conn:
-            # DDL 必须走自动提交，否则部分环境下 TRUNCATE 会失败或状态异常
-            await conn.execution_options(isolation_level="AUTOCOMMIT")
-            await conn.execute(text("TRUNCATE TABLE `user_audit_logs`"))
-            await conn.execute(
-                text("ALTER TABLE `user_audit_logs` AUTO_INCREMENT = 1")
-            )
-            # 行数用 COUNT 核实（比 SHOW TABLE STATUS 的 Rows 准）
-            count_result = await conn.execute(
-                text("SELECT COUNT(*) AS cnt FROM `user_audit_logs`")
-            )
-            rows = int(count_result.scalar() or 0)
-
-        # 已显式 ALTER 为 1；勿信 SHOW TABLE STATUS 的缓存 Auto_increment
-        auto_increment = 1
-        if rows != 0:
-            logger.warning(
-                "清表后 user_audit_logs 仍有 %s 行，请人工核查",
-                rows,
-            )
-
-        # 注意：不可 expire_all()——会把同会话的 current_user 一并过期，
-        # 路由层随后访问 user.id 会触发异步懒加载 MissingGreenlet。
-        await invalidate_audit_log_stats_cache()
-
-        return {
-            "cleared": True,
-            "table": "user_audit_logs",
-            "rows": rows,
-            "auto_increment": auto_increment,
-        }
-
     async def log_client_error(
             self,
             error_type: str,
