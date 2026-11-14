@@ -1571,6 +1571,21 @@ async def update_report_log_params(
                         conversion_id=conversion_value,
                     )
 
+                # 管理编辑同样必须尊重历史未解析身份门禁。旧平台归属不能
+                # 根据本次编辑内容推断，否则可绕过创建入口的 fail-closed 保护。
+                if await _has_legacy_unresolved_base_identity(
+                    db,
+                    source=new_identity[0],
+                    adsid=new_identity[1],
+                    event=new_identity[2],
+                    conversion_id=new_identity[3],
+                ):
+                    logger.warning(
+                        "[第三方上报] 管理编辑目标身份存在平台归属未确认的历史事件，拒绝修改: id=%s",
+                        log_id,
+                    )
+                    return False
+
             # 取得身份锁后再锁定目标行，并确认快照身份没有被并发管理员操作改写。
             result = await db.execute(
                 select(ThirdPartyReportLog)
