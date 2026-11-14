@@ -306,7 +306,7 @@ async def test_manual_retry_enqueues_only_persisted_outbox_rows(monkeypatch):
     assert "third_party_report_logs.outbox_enqueued is true" in captured["sql"]
     assert "third_party_report_logs.pii_scrubbed_at is null" in captured["sql"]
     assert "third_party_report_logs.manual_retry_count < %s" in captured["sql"]
-    assert "manual_retry_count =" in captured["sql"]
+    assert "manual_retry_count=(" in captured["sql"]
     assert "3" in captured["params"].values()
     assert "failed" in captured["params"].values()
     assert "next_retry_time" in captured["sql"]
