@@ -186,51 +186,6 @@ async def get_audit_log_stats(
         )
 
 
-@router.delete(
-    "/clear-all",
-    response_model=ResponseBaseSchema[dict],
-    summary="清除全部操作日志",
-    description="TRUNCATE user_audit_logs 并重置 AUTO_INCREMENT=1，仅管理员可访问",
-)
-async def clear_all_audit_logs(
-        request: Request,
-        db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(require_admin),
-):
-    """
-    清空操作日志表（不可恢复）。
-
-    效果等同：
-    TRUNCATE TABLE `user_audit_logs`;
-    ALTER TABLE user_audit_logs AUTO_INCREMENT = 1;
-    """
-    audit_log_service: AuditLogService = await get_audit_log_service(db)
-    # 先取出标量，避免清表流程影响会话对象后懒加载失败
-    admin_id = current_user.id
-    admin_username = current_user.username
-    try:
-        result = await audit_log_service.clear_all_audit_logs()
-        logger.warning(
-            "管理员清空全部操作日志: user_id=%s username=%s ip=%s auto_increment=%s",
-            admin_id,
-            admin_username,
-            get_client_ip(request),
-            result.get("auto_increment"),
-        )
-        return ResponseBaseSchema.success(
-            data=result,
-            message="已清除全部操作日志",
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("清除全部操作日志失败: error_type=%s", type(e).__name__)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail="清除全部操作日志失败，请稍后重试",
-        )
-
-
 @router.get(
     "/{log_id}",
     response_model=ResponseBaseSchema[UserAuditLogResponse],
