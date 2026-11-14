@@ -311,6 +311,37 @@ async def test_manual_retry_enqueues_only_persisted_outbox_rows(monkeypatch):
     assert "report_start_time <" in captured["sql"]
 
 
+async def test_manual_retry_can_join_admin_audit_transaction_without_own_commit(monkeypatch):
+    """管理端传入共享 session，重试入队不应先于审计日志单独提交。"""
+    from datetime import datetime
+    from sqlalchemy.dialects import mysql
+
+    captured = {"committed": False}
+
+    class Result:
+        rowcount = 1
+
+    class SharedDB:
+        async def execute(self, statement):
+            compiled = statement.compile(dialect=mysql.dialect())
+            captured["sql"] = str(compiled).lower()
+            return Result()
+
+        async def commit(self):
+            captured["committed"] = True
+
+    shared_db = SharedDB()
+    monkeypatch.setattr(
+        third_party_report,
+        "get_app_now_naive",
+        lambda: datetime(2026, 11, 11, 12, 0, 0),
+    )
+
+    assert await third_party_report.retry_report_log(42, db=shared_db) is True
+    assert captured["committed"] is False
+    assert "third_party_report_logs.status = %s" in captured["sql"]
+
+
 async def test_manual_retry_returns_false_when_another_request_won(monkeypatch):
     """并发管理员重试的失败方不得重复入队。"""
     class Result:
