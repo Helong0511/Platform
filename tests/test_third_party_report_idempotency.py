@@ -488,7 +488,7 @@ async def test_admin_identity_edit_recomputes_non_outbox_event_key(monkeypatch):
 
 
 async def test_admin_cannot_rewrite_attempted_direct_event_identity(monkeypatch):
-    """直接发送事件一旦尝试，管理员不能改写其幂等身份与历史归属。"""
+    """直接发送事件一旦尝试，管理员不能改写其幂等身份与历史发送载荷。"""
     log_entry = type(
         "ReportLog",
         (),
@@ -509,6 +509,7 @@ async def test_admin_cannot_rewrite_attempted_direct_event_identity(monkeypatch)
             "report_start_time": None,
             "report_success_time": None,
             "completed_at": None,
+            "email": "sent@example.invalid",
         },
     )()
 
@@ -548,6 +549,13 @@ async def test_admin_cannot_rewrite_attempted_direct_event_identity(monkeypatch)
     assert context.db.committed is False
     assert log_entry.adsid == "already-sent-adsid"
     assert log_entry.event_key == "already-sent-event-key"
+
+    assert await third_party_report.update_report_log_params(
+        log_id=206,
+        email="rewritten@example.invalid",
+    ) is False
+    assert context.db.committed is False
+    assert log_entry.email == "sent@example.invalid"
 
 
 async def test_admin_identity_edit_rejects_unresolved_legacy_target(monkeypatch):
