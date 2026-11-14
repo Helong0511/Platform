@@ -37,7 +37,7 @@ class ThirdPartyReportLog(Base):
     )
     conversion_id = Column(String(255), nullable=True, index=True, comment='转化ID')
     # 新事件显式标记身份作用域；历史数据迁移后保持 legacy_unresolved，禁止推断归属。
-    platform = Column(String(100), nullable=True, comment='Postback 平台标识；非平台事件为 NULL')
+    platform = Column(String(100, collation="utf8mb4_bin"), nullable=True, comment='Postback 平台标识；非平台事件为 NULL；按二进制规则精确比较')
     identity_scope = Column(
         String(32),
         nullable=False,
