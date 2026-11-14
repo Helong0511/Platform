@@ -35,6 +35,10 @@ def _mock_identity_lock_for_report_unit_tests(monkeypatch):
 
     monkeypatch.setattr(third_party_report, "_lock_report_base_identity", no_database_lock)
     monkeypatch.setattr(report_outbox, "_lock_report_base_identity", no_database_lock)
+    async def no_legacy_conflict(db, **kwargs):
+        return False
+
+    monkeypatch.setattr(report_outbox, "_has_legacy_unresolved_base_identity", no_legacy_conflict)
 
 
 async def test_create_report_log_persists_event_key(monkeypatch):
@@ -965,7 +969,7 @@ def test_blank_platform_is_treated_as_unscoped_identity():
 
 
 
-async def test_postback_enqueue_fails_closed_on_legacy_four_field_identity():
+async def test_postback_enqueue_fails_closed_on_legacy_four_field_identity(monkeypatch):
     """历史四字段事件无法证明平台归属时，禁止新建平台作用域事件造成重复发送。"""
     from app.services.third_party_report_outbox import (
         LegacyEventIdentityConflict,
@@ -989,6 +993,10 @@ async def test_postback_enqueue_fails_closed_on_legacy_four_field_identity():
             raise AssertionError("检测到历史身份冲突时不得写入新 Outbox 行")
 
     db = FakeDB()
+    async def legacy_identity_conflict(db_arg, **kwargs):
+        return True
+
+    monkeypatch.setattr(report_outbox, "_has_legacy_unresolved_base_identity", legacy_identity_conflict)
     with pytest.raises(LegacyEventIdentityConflict):
         await enqueue_postback_report(
             db,
@@ -1007,7 +1015,7 @@ async def test_postback_enqueue_fails_closed_on_legacy_four_field_identity():
             short_code=None,
             click_time=None,
         )
-    assert db.scalar_calls == 2
+    assert db.scalar_calls == 0
     assert db.added == []
 
 
