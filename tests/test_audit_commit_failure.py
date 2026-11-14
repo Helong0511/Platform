@@ -71,3 +71,38 @@ async def test_log_user_action_strict_mode_propagates_audit_enqueue_failure():
             resource_type="TEST",
             strict=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_client_error_logging_failure_does_not_expose_exception_text(monkeypatch, caplog):
+    import logging
+
+    from app.services import audit_log_service
+
+    class FakeDB:
+        def __init__(self):
+            self.rollback_called = False
+
+        async def rollback(self):
+            self.rollback_called = True
+
+    async def fail_with_sensitive_exception(**_kwargs):
+        raise RuntimeError("private@example.com access_token=secret-value")
+
+    db = FakeDB()
+    monkeypatch.setattr(
+        audit_log_service,
+        "log_user_action",
+        fail_with_sensitive_exception,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="app.services.audit_log_service"):
+        await audit_log_service.AuditLogService(db).log_client_error(
+            error_type="TypeError",
+            error_message="synthetic frontend error",
+        )
+
+    assert db.rollback_called is True
+    assert "RuntimeError" in caplog.text
+    assert "private@example.com" not in caplog.text
+    assert "secret-value" not in caplog.text
