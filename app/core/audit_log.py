@@ -7,6 +7,7 @@
 """
 import json
 import logging
+import re
 from datetime import datetime, date, timezone
 from typing import Optional, Dict, Any
 from fastapi import Request
@@ -19,6 +20,46 @@ from app.core.utils import get_client_ip, get_app_now_naive
 logger = logging.getLogger(__name__)
 
 # 允许记录的操作类型白名单
+
+
+# 审计 JSON 可能来自不同业务模块；在统一写入边界递归过滤常见认证凭据。
+_AUDIT_SECRET_KEYS = {
+    'password', 'passwd', 'token', 'accesstoken', 'refreshtoken',
+    'secret', 'clientsecret', 'apikey', 'authorization', 'cookie',
+    'setcookie', 'privatekey', 'sessionid', 'csrf', 'xsrftoken', 'key',
+}
+_AUDIT_BEARER_RE = re.compile(r'(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+')
+_AUDIT_SECRET_ASSIGNMENT_RE = re.compile(
+    r'(?i)(\\b(?:access[_-]?token|refresh[_-]?token|token|authorization|password|passwd|secret|client[_-]?secret|api[_-]?key)\\b\\s*[:=]\\s*)([^\\s,;&]+)'
+)
+
+def _sanitize_audit_value(value: Any, depth: int = 0) -> Any:
+    """递归脱敏审计 JSON 中的凭据字段，并限制异常深度。"""
+    if depth > 12:
+        return '[MAX_DEPTH]'
+    if isinstance(value, dict):
+        sanitized = {}
+        for key, nested in value.items():
+            key_text = str(key)
+            normalized_key = re.sub(r'[^a-z0-9]', '', key_text.lower())
+            if normalized_key in _AUDIT_SECRET_KEYS:
+                sanitized[key_text] = '[REDACTED]'
+            else:
+                sanitized[key_text] = _sanitize_audit_value(nested, depth + 1)
+        return sanitized
+    if isinstance(value, (list, tuple, set)):
+        return [_sanitize_audit_value(item, depth + 1) for item in value]
+    if isinstance(value, str):
+        sanitized_text = _AUDIT_BEARER_RE.sub('Bearer [REDACTED]', value)
+        return _AUDIT_SECRET_ASSIGNMENT_RE.sub(r'\\1[REDACTED]', sanitized_text)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if hasattr(value, '__dict__'):
+        return _sanitize_audit_value(value.__dict__, depth + 1)
+    return str(value)
+
 ALLOWED_ACTION_TYPES = {
     "LOGIN",  # 登录
     "LOGOUT",  # 登出
@@ -122,50 +163,22 @@ async def log_user_action(
             if not final_user_agent:
                 final_user_agent = request.headers.get("user-agent", "")[:500]  # 限制长度
 
-        # 处理请求参数（移除敏感信息）
+        # 统一递归脱敏请求参数和详情，避免业务调用方漏掉嵌套凭据字段。
         final_request_params = None
         if request_params:
-            # 移除敏感字段
-            sensitive_fields = {"password", "token", "secret", "key", "authorization"}
-            filtered_params = {
-                k: v for k, v in request_params.items()
-                if k.lower() not in sensitive_fields
-            }
-            if filtered_params:
-                try:
-                    final_request_params = json.dumps(filtered_params, ensure_ascii=False)
-                except (TypeError, ValueError):
-                    final_request_params = str(filtered_params)[:1000]  # 限制长度
+            try:
+                sanitized_params = _sanitize_audit_value(request_params)
+                final_request_params = json.dumps(sanitized_params, ensure_ascii=False)
+            except (TypeError, ValueError):
+                final_request_params = str(_sanitize_audit_value(str(request_params)))[:1000]
 
-        # 处理详细信息
         final_details = None
         if details:
             try:
-                # 将 details 中的日期对象转换为字符串，以便 JSON 序列化
-                def convert_dates(obj):
-                    """递归转换日期对象为字符串"""
-                    if isinstance(obj, dict):
-                        return {k: convert_dates(v) for k, v in obj.items()}
-                    elif isinstance(obj, list):
-                        return [convert_dates(item) for item in obj]
-                    elif isinstance(obj, (datetime, date)):
-                        # 日期对象转换为 ISO 格式字符串
-                        return obj.isoformat()
-                    elif hasattr(obj, '__dict__'):
-                        # 其他对象尝试转换为字典
-                        return convert_dates(obj.__dict__)
-                    else:
-                        return obj
-                
-                # 转换日期对象
-                converted_details = convert_dates(details)
-                final_details = json.dumps(converted_details, ensure_ascii=False)
-            except (TypeError, ValueError) as e:
-                # 如果转换失败，尝试直接序列化
-                try:
-                    final_details = json.dumps(details, ensure_ascii=False, default=str)
-                except (TypeError, ValueError):
-                    final_details = str(details)[:1000]  # 限制长度
+                sanitized_details = _sanitize_audit_value(details)
+                final_details = json.dumps(sanitized_details, ensure_ascii=False)
+            except (TypeError, ValueError):
+                final_details = str(_sanitize_audit_value(str(details)))[:1000]
 
         # 创建日志记录
         audit_log = UserAuditLog(
@@ -182,7 +195,7 @@ async def log_user_action(
             request_params=final_request_params,
             status_code=status_code,
             success=success,
-            error_message=error_message[:1000] if error_message else None,  # 限制长度
+            error_message=str(_sanitize_audit_value(error_message))[:1000] if error_message else None,  # 限制长度并过滤凭据
             details=final_details,
             created_at=get_app_now_naive()  # 使用北京时间
         )
