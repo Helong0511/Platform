@@ -15,6 +15,17 @@ from pydantic import BaseModel, Field
 from app.schemas.base import BaseSchema, ResponseBaseSchema, PaginatedResponseBaseSchema
 
 
+class ClientErrorReportRequest(BaseModel):
+    """前端错误上报请求；使用 JSON body，避免敏感错误内容进入 URL 查询日志。"""
+
+    error_type: str = Field(..., min_length=1, max_length=100)
+    error_message: str = Field(..., min_length=1, max_length=500)
+    error_stack: Optional[str] = Field(None, max_length=2000)
+    error_url: Optional[str] = Field(None, max_length=500)
+    user_agent: Optional[str] = Field(None, max_length=500)
+
+
+
 class UserAuditLogBase(BaseSchema):
     """
     用户操作日志基础模型
