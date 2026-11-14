@@ -46,6 +46,7 @@ class UserAuditLogBase(BaseSchema):
     status_code: Optional[int] = Field(None, description="HTTP状态码")
     success: bool = Field(True, description="操作是否成功")
     error_message: Optional[str] = Field(None, description="错误信息")
+    details: Optional[str] = Field(None, description="脱敏后的详细审计信息")
     """
     用户操作日志响应模型
     
