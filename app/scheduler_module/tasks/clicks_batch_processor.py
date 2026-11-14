@@ -13,6 +13,7 @@
 2. 队列积压时增大 batch size 与执行频率，监控 queue length
 """
 import logging
+import time
 from datetime import datetime, timezone
 from typing import List, Dict, Any
 
@@ -25,6 +26,8 @@ from app.core.clicks_queue import (
     acknowledge_reserved,
     drain_clicks_queue,
     get_queue_length,
+    get_processing_queue_length,
+    get_dead_letter_length,
     recover_processing_queue,
     requeue_reserved,
     reserve_clicks,
@@ -45,7 +48,7 @@ MAX_BATCH_TIME = 30
 
 async def process_clicks_queue() -> Dict[str, int]:
     """
-    批量处理点击记录队列（循环处理直到队列为空或达到最大批次数）
+    批量处理点击记录队列（队列为空、达到最大批次数或运行 30 秒即停止）
     
     Returns:
         处理结果统计：{
@@ -59,7 +62,11 @@ async def process_clicks_queue() -> Dict[str, int]:
         'processed': 0,
         'inserted': 0,
         'failed': 0,
+        'deduplicated': 0,
+        'ack_failed': 0,
         'queue_remaining': 0,
+        'processing_remaining': 0,
+        'dead_letter': 0,
         'skipped': False,
         'drained': 0,
     }
@@ -85,8 +92,12 @@ async def process_clicks_queue() -> Dict[str, int]:
         # 循环处理，直到队列为空或达到最大批次数（防止长时间占用）
         max_batches = 10  # 最多处理10批（10,000条记录）
         batch_count = 0
+        processing_started_at = time.monotonic()
 
-        while batch_count < max_batches:
+        while (
+            batch_count < max_batches
+            and time.monotonic() - processing_started_at < MAX_BATCH_TIME
+        ):
             # 获取队列长度
             queue_length = await get_queue_length()
             if queue_length == 0:
@@ -109,6 +120,7 @@ async def process_clicks_queue() -> Dict[str, int]:
             batch_count += 1
             result['processed'] += len(clicks)
             batch_failed = False
+            valid_clicks: List[Dict[str, Any]] = []
 
             # 批量插入到数据库
             async with AsyncSessionLocal() as db:
@@ -124,7 +136,6 @@ async def process_clicks_queue() -> Dict[str, int]:
                     # 记录被过滤的记录数
                     filtered_count = len(clicks) - len(valid_clicks)
                     if filtered_count > 0:
-                        result['failed'] += filtered_count
                         logger.warning(
                             f"第 {batch_count} 批：过滤了 {filtered_count} 条无效记录，"
                             f"剩余 {len(valid_clicks)} 条有效记录"
@@ -137,17 +148,22 @@ async def process_clicks_queue() -> Dict[str, int]:
                     await _validate_short_link_ids(db, valid_clicks)
 
                     # 4. 批量插入 Click 记录
-                    inserted_count = await _batch_insert_clicks(db, valid_clicks)
-                    result['inserted'] += inserted_count
-                    result['failed'] += len(valid_clicks) - inserted_count
+                    inserted_count, duplicate_count = await _batch_insert_clicks(db, valid_clicks)
 
+                    # 只有 DB COMMIT 确认成功后才计入成功统计；COMMIT 结果不确定时整批回队。
                     await db.commit()
-                    await acknowledge_reserved(raw_items)
+                    result['inserted'] += inserted_count
+                    result['deduplicated'] += duplicate_count
+                    result['failed'] += filtered_count + len(valid_clicks) - inserted_count - duplicate_count
+                    acknowledged = await acknowledge_reserved(raw_items)
+                    if not acknowledged:
+                        result['ack_failed'] += len(raw_items)
                     logger.debug(
                         f"批量插入点击记录成功（第 {batch_count} 批）: "
                         f"处理={len(clicks)}, "
                         f"插入={inserted_count}, "
-                        f"失败={len(clicks) - inserted_count}"
+                        f"重复跳过={duplicate_count}, "
+                        f"失败={len(clicks) - inserted_count - duplicate_count}"
                     )
                 except Exception as e:
                     await db.rollback()
@@ -156,7 +172,8 @@ async def process_clicks_queue() -> Dict[str, int]:
                         f"批量插入点击记录失败（第 {batch_count} 批）: error={e}",
                         exc_info=True
                     )
-                    result['failed'] += len(valid_clicks) if 'valid_clicks' in locals() else len(clicks)
+                    # 整批回队，按本次失败批次统计；不要沿用上批 valid_clicks 的局部状态。
+                    result['failed'] += len(clicks)
                     await requeue_reserved(raw_items)
 
             if batch_failed:
@@ -165,11 +182,14 @@ async def process_clicks_queue() -> Dict[str, int]:
 
         # 获取剩余队列长度
         result['queue_remaining'] = await get_queue_length()
+        result['processing_remaining'] = await get_processing_queue_length()
+        result['dead_letter'] = await get_dead_letter_length()
 
         # 注意：处理结果日志由调用方（short_link_tasks.py）统一输出，避免重复
 
     except Exception as e:
         logger.error(f"处理点击队列异常: error={e}", exc_info=True)
+        raise
 
     return result
 
@@ -213,7 +233,8 @@ async def _enrich_clicks_with_advertiser_id(db: AsyncSession, clicks: List[Dict[
                 # 缓存Offer信息
                 await set_offer_cache(offer_id, advertiser_id, offer_name)
         except Exception as e:
-            logger.warning(f"批量查询Offer失败: error={e}")
+            logger.error("批量查询 Offer 失败，保留原始队列记录并重试: %s", e, exc_info=True)
+            raise
 
     # 补充advertiser_id到点击记录
     for click in clicks:
@@ -326,12 +347,9 @@ async def _validate_offer_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) ->
         # 返回所有记录（无效的offer_id已被设置为None，上游Offer ID已转换为主键ID）
         return clicks
     except Exception as e:
-        logger.error(f"验证offer_id失败: error={e}，将清空所有offer_id以避免外键约束错误", exc_info=True)
-        # 如果验证失败，清空所有offer_id以避免外键约束错误，但仍保存记录
-        for click in clicks:
-            if click.get('offer_id') is not None:
-                click['offer_id'] = None
-        return clicks
+        # DB 查询失败时真实有效性未知；不能把关联 ID 清空后继续入库，否则会永久丢失归因。
+        logger.error("验证 Offer ID 失败，保留原始记录并回队重试: %s", e, exc_info=True)
+        raise
 
 
 async def _validate_short_link_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) -> None:
@@ -371,158 +389,139 @@ async def _validate_short_link_ids(db: AsyncSession, clicks: List[Dict[str, Any]
                 )
                 click['short_link_id'] = None
     except Exception as e:
-        logger.warning(f"验证short_link_id失败: error={e}，将清空所有short_link_id")
-        # 如果验证失败，清空所有short_link_id以避免外键约束错误
-        for click in clicks:
-            if click.get('short_link_id') is not None:
-                click['short_link_id'] = None
+        # DB 查询失败不等于短链不存在；清空 FK 会造成无法恢复的归因数据丢失。
+        logger.error("验证 short_link_id 失败，保留原始记录并回队重试: %s", e, exc_info=True)
+        raise
 
 
-async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -> int:
+async def _batch_insert_clicks(
+    db: AsyncSession,
+    clicks: List[Dict[str, Any]],
+) -> tuple[int, int]:
     """
-    批量插入点击记录到数据库（高并发优化）
-    
-    Args:
-        db: 数据库会话
-        clicks: 点击记录列表
-        
-    Returns:
-        成功插入的记录数
+    批量插入点击记录。
+
+    返回 (新插入数, 已存在/并发重复数)。批量 INSERT 遇到唯一键冲突后先回滚失败
+    事务，再通过 SAVEPOINT 逐条插入；非重复完整性错误继续抛出，交由队列回队重试。
     """
     if not clicks:
-        return 0
+        return 0, 0
 
     try:
-        # 准备批量插入数据
         insert_data = []
-        now = get_app_now_naive()  # 使用北京时间
+        now = get_app_now_naive()
 
         for click in clicks:
-            # 处理click_time（可能是ISO格式字符串或datetime对象）
-            click_time = click.get('click_time')
+            click_time = click.get("click_time")
             if isinstance(click_time, str):
                 try:
-                    # 解析ISO格式字符串
-                    if click_time.endswith('Z'):
-                        click_time = click_time[:-1] + '+00:00'
+                    if click_time.endswith("Z"):
+                        click_time = click_time[:-1] + "+00:00"
                     click_time = datetime.fromisoformat(click_time)
-                    # 如果带时区信息，转换为北京时间（naive）
                     if click_time.tzinfo is not None:
-                        # 转换为UTC时间，再转换为北京时间
-                        if click_time.tzinfo != timezone.utc:
-                            # 先转换为UTC
-                            click_time = click_time.astimezone(timezone.utc)
-                        # 从UTC转换为北京时间（naive）
-                        click_time = click_time.replace(tzinfo=timezone.utc).astimezone(APP_TIMEZONE).replace(
-                            tzinfo=None)
-                    # 如果已经是naive，假设是北京时间（新数据都是北京时间）
+                        click_time = click_time.astimezone(timezone.utc)
+                        click_time = click_time.astimezone(APP_TIMEZONE).replace(tzinfo=None)
                 except (ValueError, AttributeError):
                     click_time = now
             elif isinstance(click_time, datetime):
-                # 如果是datetime对象
                 if click_time.tzinfo is not None:
-                    # 带时区信息，转换为北京时间（naive）
-                    if click_time.tzinfo != timezone.utc:
-                        # 先转换为UTC
-                        click_time = click_time.astimezone(timezone.utc)
-                    # 从UTC转换为北京时间（naive）
-                    click_time = click_time.replace(tzinfo=timezone.utc).astimezone(APP_TIMEZONE).replace(tzinfo=None)
-                # 如果已经是naive，假设是北京时间（新数据都是北京时间）
+                    click_time = click_time.astimezone(timezone.utc)
+                    click_time = click_time.astimezone(APP_TIMEZONE).replace(tzinfo=None)
             else:
                 click_time = now
 
             insert_data.append({
-                'click_id': click.get('click_id'),
-                'offer_id': click.get('offer_id'),
-                'publisher_id': click.get('publisher_id'),
-                'advertiser_id': click.get('advertiser_id'),
-                'short_link_id': click.get('short_link_id'),
-                'click_time': click_time,
-                'ip': click.get('ip'),
-                'device': click.get('device'),
-                'country': click.get('country'),
-                'user_agent': click.get('user_agent'),
-                'referer': click.get('referer'),
-                'conversion_id': click.get('conversion_id'),
-                'created_at': now,
-                # 软件信息
-                'os': click.get('os'),
-                'os_version': click.get('os_version'),
-                'browser': click.get('browser'),
-                'browser_version': click.get('browser_version'),
-                'accept_language': click.get('accept_language'),
-                'accept_encoding': click.get('accept_encoding'),
-                'is_bot': click.get('is_bot', False),
-                # 硬件信息
-                'device_type': click.get('device_type'),
-                'device_brand': click.get('device_brand'),
-                'device_model': click.get('device_model'),
-                # URL参数和请求头
-                'url_params': click.get('url_params'),
-                'all_headers': click.get('all_headers'),
-                # URL记录
-                'original_request_url': click.get('original_request_url'),
-                'final_redirect_url': click.get('final_redirect_url'),
+                "click_id": click.get("click_id"),
+                "offer_id": click.get("offer_id"),
+                "publisher_id": click.get("publisher_id"),
+                "advertiser_id": click.get("advertiser_id"),
+                "short_link_id": click.get("short_link_id"),
+                "click_time": click_time,
+                "ip": click.get("ip"),
+                "device": click.get("device"),
+                "country": click.get("country"),
+                "user_agent": click.get("user_agent"),
+                "referer": click.get("referer"),
+                "conversion_id": click.get("conversion_id"),
+                "created_at": now,
+                "os": click.get("os"),
+                "os_version": click.get("os_version"),
+                "browser": click.get("browser"),
+                "browser_version": click.get("browser_version"),
+                "accept_language": click.get("accept_language"),
+                "accept_encoding": click.get("accept_encoding"),
+                "is_bot": click.get("is_bot", False),
+                "device_type": click.get("device_type"),
+                "device_brand": click.get("device_brand"),
+                "device_model": click.get("device_model"),
+                "url_params": click.get("url_params"),
+                "all_headers": click.get("all_headers"),
+                "original_request_url": click.get("original_request_url"),
+                "final_redirect_url": click.get("final_redirect_url"),
             })
 
-        # 检查重复的 click_id（避免插入时出现唯一性约束错误）
-        click_ids = [item['click_id'] for item in insert_data if item.get('click_id')]
+        click_ids = [item["click_id"] for item in insert_data if item.get("click_id")]
+        duplicate_count = 0
         if click_ids:
             result = await db.execute(
-                select(Click.click_id)
-                .where(Click.click_id.in_(click_ids))
+                select(Click.click_id).where(Click.click_id.in_(click_ids))
             )
             existing_click_ids = {row[0] for row in result.all()}
-
-            # 过滤掉已存在的记录
             if existing_click_ids:
-                logger.warning(
-                    f"检测到 {len(existing_click_ids)} 个重复的 click_id，将跳过这些记录: "
-                    f"{list(existing_click_ids)[:10]}..."  # 只显示前10个
+                duplicate_count += sum(
+                    1 for item in insert_data
+                    if item.get("click_id") in existing_click_ids
                 )
                 insert_data = [
                     item for item in insert_data
-                    if item.get('click_id') not in existing_click_ids
+                    if item.get("click_id") not in existing_click_ids
                 ]
 
         if not insert_data:
-            logger.debug("所有点击记录已存在，无需插入")
-            return 0
+            logger.debug("点击记录均已存在，作为幂等重复跳过")
+            return 0, duplicate_count
 
-        # 批量插入（使用bulk insert提高性能）
         try:
-            stmt = insert(Click).values(insert_data)
-            await db.execute(stmt)
-
-            logger.debug(f"批量插入 {len(insert_data)} 条点击记录到数据库")
-            return len(insert_data)
-        except IntegrityError as e:
-            # 如果仍然出现唯一性约束错误（可能是并发插入导致的），记录警告
-            error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
-            if 'Duplicate entry' in error_msg or 'UNIQUE constraint' in error_msg:
-                logger.warning(
-                    f"批量插入时检测到重复的 click_id（可能是并发插入导致的）: {error_msg}"
-                )
-                # 尝试逐条插入，跳过重复的记录
-                inserted_count = 0
-                for item in insert_data:
-                    try:
-                        stmt = insert(Click).values([item])
-                        await db.execute(stmt)
-                        await db.commit()
-                        inserted_count += 1
-                    except IntegrityError:
-                        # 跳过重复的记录
-                        await db.rollback()
-                        continue
-                    except Exception:
-                        await db.rollback()
-                        raise
-
-                logger.debug(f"逐条插入完成，成功插入 {inserted_count}/{len(insert_data)} 条记录")
-                return inserted_count
-            else:
+            await db.execute(insert(Click).values(insert_data))
+            return len(insert_data), duplicate_count
+        except IntegrityError as bulk_error:
+            error_msg = str(bulk_error.orig if getattr(bulk_error, "orig", None) else bulk_error)
+            lowered = error_msg.lower()
+            is_duplicate = (
+                "duplicate entry" in lowered
+                or "unique constraint" in lowered
+                or "unique violation" in lowered
+            )
+            if not is_duplicate:
                 raise
+
+            # 批量事务已进入失败状态；先回滚，再用 SAVEPOINT 隔离每条记录。
+            await db.rollback()
+            inserted_count = 0
+            for item in insert_data:
+                try:
+                    async with db.begin_nested():
+                        await db.execute(insert(Click).values([item]))
+                    inserted_count += 1
+                except IntegrityError as row_error:
+                    row_msg = str(
+                        row_error.orig if getattr(row_error, "orig", None) else row_error
+                    ).lower()
+                    row_duplicate = (
+                        "duplicate entry" in row_msg
+                        or "unique constraint" in row_msg
+                        or "unique violation" in row_msg
+                    )
+                    if row_duplicate:
+                        duplicate_count += 1
+                        continue
+                    raise
+            logger.info(
+                "点击记录批量插入遇到并发重复，已逐条隔离处理: inserted=%s duplicate=%s",
+                inserted_count, duplicate_count,
+            )
+            return inserted_count, duplicate_count
+
     except Exception as e:
-        logger.error(f"批量插入点击记录失败: error={e}", exc_info=True)
+        logger.error("批量插入点击记录失败: error=%s", e, exc_info=True)
         raise

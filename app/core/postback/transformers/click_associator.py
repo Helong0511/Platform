@@ -105,6 +105,8 @@ class ClickAssociator:
                     select(Publisher).where(Publisher.id == publisher_id).limit(1)
                 )
                 association["publisher"] = r.scalars().first()
+                if association["publisher"] is not None:
+                    association["client_id"] = association["publisher"].client_id
             if offer_id and association.get("offer") is None:
                 r = await db.execute(
                     select(Offer).where(Offer.id == offer_id).limit(1)
@@ -116,7 +118,10 @@ class ClickAssociator:
                 )
                 association["advertiser"] = r.scalars().first()
         except Exception as e:
-            logger.warning("令牌关联 ORM  enrichment 失败（不影响 ID 归因）: %s", e)
+            logger.warning(
+                "令牌关联 ORM enrichment 失败（不影响 ID 归因）：%s",
+                type(e).__name__,
+            )
 
         return association
 
@@ -132,7 +137,7 @@ class ClickAssociator:
             logger.debug("Click ID 为空，无法关联")
             return None
 
-        logger.info(f"开始关联 Click ID（数据库）: {click_id}")
+        logger.info("开始关联 Click ID（数据库）：present=%s", bool(click_id))
         
         # 使用指数退避策略重试查询，处理批量处理延迟问题（最多约 2.4s）
         max_attempts = 5
@@ -156,17 +161,17 @@ class ClickAssociator:
                 click = result.scalars().first()
                 
                 if click:
-                    logger.info(f"第 {attempt + 1} 次尝试：找到 Click 记录：id={click.id}, click_id={click.click_id}")
+                    logger.info("第 %s 次尝试：找到 Click 记录：id=%s", attempt + 1, click.id)
                     break
                 else:
-                    logger.warning(f"第 {attempt + 1} 次尝试：未找到 Click 记录：click_id={click_id}")
+                    logger.warning("第 %s 次尝试：未找到 Click 记录", attempt + 1)
                     if attempt < max_attempts - 1:
                         # 指数退避：delay = base_delay * (2 ^ attempt)
                         delay = base_delay * (2 ** attempt)
                         logger.debug(f"等待 {delay:.2f} 秒后重试...")
                         await asyncio.sleep(delay)
             except Exception as e:
-                logger.error(f"第 {attempt + 1} 次尝试查询 Click 记录失败：{e}")
+                logger.error("第 %s 次尝试查询 Click 记录失败：%s", attempt + 1, type(e).__name__)
                 if attempt < max_attempts - 1:
                     # 指数退避：delay = base_delay * (2 ** attempt)
                     delay = base_delay * (2 ** attempt)
@@ -174,14 +179,14 @@ class ClickAssociator:
                     await asyncio.sleep(delay)
         
         if not click:
-            logger.error(f"多次尝试后仍未找到 Click 记录：click_id={click_id}")
+            logger.error("多次尝试后仍未找到 Click 记录")
             return None
         
         url_params = parse_stored_url_params(click.url_params, for_use=False)
         if url_params:
-            logger.debug("成功解析 url_params: %s", url_params)
+            logger.debug("成功解析 url_params：字段数=%s", len(url_params))
         elif click.url_params:
-            logger.warning("解析 url_params 失败: %s", click.url_params)
+            logger.warning("解析 url_params 失败：原始参数已省略")
         
         # 提取关联信息
         association = {
@@ -198,6 +203,8 @@ class ClickAssociator:
             'os': click.os,
             'offer': click.offer,
             'publisher': click.publisher,
+            # 客户归属以点击时的渠道配置为准，不能信任回调请求体中的 client_id。
+            'client_id': click.publisher.client_id if click.publisher else None,
             'advertiser': click.advertiser,
             'url_params': url_params,
         }

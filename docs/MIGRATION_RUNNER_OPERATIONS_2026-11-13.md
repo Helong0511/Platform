@@ -1,0 +1,159 @@
+# Migration Runner 操作说明（2026-11-13）
+
+## 1. 当前功能
+
+仓库提供以下命令：
+
+```bash
+python -m app.db.migrations validate
+python -m app.db.migrations status
+python -m app.db.migrations apply
+```
+
+- `validate`：离线校验 manifest、文件 SHA-256 和 SQL 分句，不连接数据库。
+- `status`：只读查询 `platform_schema_migrations`，不创建表、不执行 DDL。
+- `apply`：通过专用 MySQL 迁移账号执行待应用的增量 migration。
+
+## 2. 运行前提
+
+1. MySQL 版本至少 8.0.16。
+2. 连接字符集为 utf8mb4。
+3. `MIGRATION_DATABASE_URL` 必须显式设置为 `mysql+aiomysql` DSN。
+4. 应用数据库也必须为 MySQL，且与迁移 DSN 指向同一数据库名、同一服务器端点（TCP 主机/端口或 Unix Socket）；迁移账号用户名必须不同于应用运行账号。CLI 会从应用设置读取 `SQLALCHEMY_DATABASE_URI` 并在任何不匹配时 fail closed。
+5. 目标数据库必须由受控 provisioning 预先创建并选定。完整基线导入时使用 MySQL 客户端显式指定目标库，例如 `mysql --default-character-set=utf8mb4 --database=<目标库> < sql/platform.sql`；基线文件不再自行 CREATE DATABASE 或 USE。Runner 只执行 `app/db/migrations/manifest.py` 登记的增量 migration，不会导入 `sql/platform.sql`。
+
+示例仅展示变量形式，不要把真实密码提交到仓库或写入命令历史：
+
+```bash
+export MIGRATION_DATABASE_URL='mysql+aiomysql://<migration_user>:<password>@<db-host>:3306/platform?charset=utf8mb4'
+python -m app.db.migrations validate
+python -m app.db.migrations status
+python -m app.db.migrations apply
+```
+
+## 3. 执行语义
+
+- Runner 使用单个物理 MySQL connection，从 `GET_LOCK` 到 `RELEASE_LOCK` 不切换连接。
+- 每个 revision 在执行 SQL 前先写入 `running`。
+- 所有语句按顺序执行；每条语句结果集会被消费并关闭。
+- 全部成功后写入 `applied`。
+- 明确失败写入 `failed`；连接中断时可能保留 `running`。
+- MySQL DDL 会隐式提交，不能假设整份 migration 可以事务回滚。
+- 出现 `running` 或 `failed` 时，Runner 会停止，不会自动重跑；先检查 schema 实际状态、DDL 已完成边界和 checksum，再制定单独 forward-fix。
+- `status` 返回非零阻断码时，不得忽略后启动部署。
+
+## 4. 基线文件安全边界
+
+`sql/platform.sql` 是完整 schema 快照，含 `DROP TABLE IF EXISTS` 和客户端 DELIMITER / routine 定义；当前快照不包含 `CREATE DATABASE` 或 `USE`，由 provisioning 预先创建目标库，并通过 MySQL 客户端 `--database=<目标库>` 显式选择。它不是增量 migration，也不是 Runner 的输入。
+
+- 只允许在全新或可丢弃数据库上使用经过审核的初始化流程。
+- 当前 manifest 共 12 条 revision；执行前必须先运行 `validate`，并核对 `status` 与目标环境基线版本。
+- 绝不能把它用于已有数据库升级。
+- 不要把“ORM 表名覆盖测试通过”误认为所有列、索引、外键、CHECK 和字符集都已完成物理结构核验。
+
+## 5. MySQL DDL 在线变更风险
+
+当前 migration 中的部分 `ALTER TABLE ... ADD COLUMN ... AFTER ...` 未显式指定 `ALGORITHM`。MySQL 8.0 会优先使用受支持的 `INSTANT`，但当操作不满足 `INSTANT` 条件时，可能退回 `INPLACE` 或 `COPY`；后两者的表重建/并发访问特性不同。尤其当前 Runner 最低版本是 8.0.16，而 `INSTANT ADD COLUMN` 在 8.0.29 之前只允许追加到列尾，当前 migration 使用 `AFTER` 指定列位置，因此不能仅凭版本号推断会采用 INSTANT。
+
+上线前必须在与目标环境相同的 MySQL 小版本、表结构、行数和索引规模的隔离副本上演练每条 DDL，记录实际算法、耗时、metadata lock 等待、复制延迟和写入影响。未完成演练前，不得在大表上直接执行这些 migration。后续应根据正式支持的 MySQL 最低版本，决定是否统一要求 `ALGORITHM=INSTANT`（不支持时立即失败）或采用受控在线变更工具；不得让 MySQL 静默退回高影响算法。
+
+参考：
+- MySQL 8.0 `ALTER TABLE` 算法说明：https://dev.mysql.com/doc/refman/8.0/en/alter-table.html
+- MySQL 8.0 InnoDB Online DDL 限制：https://dev.mysql.com/doc/refman/8.0/en/innodb-online-ddl-operations.html
+
+## 6. 当前尚未达到生产使用条件
+
+- API/Scheduler lifespan 已移除 `create_database()` 与 `Base.metadata.create_all()`，启动时只读检查 migration revision 和 ORM 表/列是否存在。
+- 旧的 `create_tables()` / `create_database()` helper 尚待全仓调用点核查与禁用/迁移。
+- Runner 尚未成为 systemd 部署的唯一 schema 变更入口；仍需演练 migration job 先于 API/Scheduler 启动。
+- 新库基线导入、旧库升级、备份恢复、worker pause/resume 和失败人工恢复演练仍未完成。
+
+因此：当前命令和 CI 仅证明隔离测试环境中的 Runner 与只读启动 gate 行为；未完成真实新库/旧库部署演练前，不能在生产执行，也不能宣称上线就绪。
+
+
+## 7. 当前隔离验收记录
+
+- PR HEAD：`6394f63976a79ffdbfe414dc46060db4f7773b76`。
+- GitHub Actions Run #43398657923：Backend 669 passed、1 skipped、1 warning；Frontend 依赖审计、Lint、Build、Playwright Mock API E2E 全部通过。
+- 该结果只覆盖 GitHub Actions 临时 MySQL/Redis 与合成数据；不代表空库完整导入、旧库真实规模升级、备份恢复或生产 DDL 风险演练已经完成。
+- PR #1 仍为 Open / Draft；不合并、不部署。
+
+
+## 8. 第三方上报平台标识二进制排序规则迁移（2026-11-14）
+
+新增 revision：`20261114_third_party_report_platform_binary_collation`。
+
+- ORM 模型与基线 schema 将 `third_party_report_logs.platform` 明确设为 `utf8mb4_bin`，确保数据库平台标识比较与应用层精确字符串身份一致。
+- 增量 SQL 将既有列调整为 `VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL DEFAULT NULL`；不重写历史 platform 值或 event_key。
+- 迁移通过 `information_schema.COLUMNS` 判断目标结构，已符合时跳过 ALTER；执行后再次核验结构，核验失败必须让 migration 失败，不得写入 applied。
+- 该 ALTER 可能重建关联索引。正式环境执行前，必须在同版本、同结构、相近数据量和索引规模的隔离副本测量 DDL 算法、耗时、metadata lock、复制延迟、磁盘峰值和业务写入影响；未演练前禁止直接生产执行。
+- CI 新增真实 MySQL migration 测试：从旧 `utf8mb4_0900_ai_ci` 列升级，连续执行 migration 两次，并检查精确比较、历史值保留和索引保留。测试只覆盖 CI 临时 MySQL，不代表生产大表在线 DDL 演练或备份恢复已通过。
+- 当前 CI 正在对最新 migration 测试修正进行复验；以最新 PR HEAD 的 Backend / Frontend 全部通过结果为准，不能用此前失败 Run 的结果替代。
+- PR #1 仍为 Open / Draft；此迁移未经生产副本演练前不得合并部署。
+
+MySQL 官方参考：
+- Collation 与大小写敏感比较：https://dev.mysql.com/doc/refman/8.0/en/case-sensitivity.html
+- ALTER TABLE 行为与算法：https://dev.mysql.com/doc/refman/8.0/en/alter-table.html
+- 字符串类型与字符集/排序规则：https://dev.mysql.com/doc/refman/8.0/en/string-type-syntax.html
+
+## 9. 管理员 Outbox 重试与审计事务一致性（2026-11-14）
+
+管理员手动重试不是直接发送 HTTP 请求，而是将失败 Outbox 事件重新置为待处理。该状态变更与“谁在何时触发了重试”的审计记录必须同生共死。
+
+- API 现在把请求依赖注入的同一个数据库 session 传给 `retry_report_log`。
+- 重试 SQL 更新不再在核心函数内提前独立 commit；随后写入的管理员操作审计日志由 API 的统一 commit 一起提交。
+- 若审计写入或统一 commit 失败，重试状态变更不会单独落库，避免出现“事件已重新排队但审计日志缺失”。
+- 独立调用 `retry_report_log(log_id)` 的兼容路径仍使用自己的 session 并提交；管理 API 必须传入共享 session。
+- 新增单元测试验证传入共享 session 时核心函数不会自行 commit。
+- 现在每条事件增加独立 `manual_retry_count`，历史记录迁移时默认为 0；管理员重新入队通过条件 UPDATE 原子递增，单条事件整个生命周期最多人工重新入队 3 次。自动 `attempt_count` 仍只表示当前自动重试周期，重置它不会重置人工累计次数。
+- 达到 3 次后，API 不再允许人工重新入队；需要进一步处置时应走独立的事件纠错/补偿流程，不得直接改数据库计数或反复重置自动次数。当前上限是保守的代码策略，业务负责人仍需确认是否符合运营要求。
+- 重试动作仍与管理员审计日志在同一事务提交；每次成功入队都会产生管理员操作审计记录。审计日志保留、查询/导出权限及不可篡改性仍需专项验收。
+
+## 10. 审计日志防清空与留存边界（2026-11-14）
+
+审计日志属于安全追踪证据，不应提供普通业务管理员可直接清空的入口。原管理端“清除全部日志”会对 user_audit_logs 执行 MySQL TRUNCATE 和 ALTER TABLE AUTO_INCREMENT = 1，具有不可恢复的数据破坏能力，并且 DDL 隐式提交，无法与“清空动作自身的审计记录”放入同一个普通事务。
+
+本轮已移除该破坏性功能的完整调用链：
+
+- 删除后端 DELETE /api/v1/audit-logs/clear-all 路由。
+- 删除服务层执行 TRUNCATE / 重置自增 ID 的方法。
+- 删除管理端“清除全部日志”按钮、二次确认处理和对应 composable 状态。
+- 删除前端 API 客户端中的清空接口封装。
+- 审计查询、详情和统计功能保留，不影响正常日志检索。
+
+运营要求：
+
+- 不允许通过管理端清空、重置或覆盖审计历史。
+- 如因法规或隐私政策需要到期处置，应设计独立的、受控的保留期归档/脱敏/销毁流程；必须先归档、记录审批和执行证据，并保证操作记录写入独立的防篡改审计介质，不能复用普通管理员的清表功能。
+- 审计日志的查询、导出权限与业务操作权限应分离；后续还需验证导出水印/访问审计、最小权限、留存期限、备份恢复及不可篡改存储。
+- 当前移除的是在线清空入口，不代表已经完成法规留存策略或 WORM/外部不可变存储建设。
+
+
+## 11. 前端错误上报的敏感信息边界（2026-11-14）
+
+- 前端错误消息与堆栈通过 JSON 请求体提交，不再拼接到 URL 查询参数；服务端 Pydantic schema 对字段长度实施入口校验。
+- 客户端错误日志写入前，仅保留发生页面的 path，不记录 URL host、query 或 fragment，避免 OAuth code、广告参数或临时凭据进入审计详情。
+- 错误消息、堆栈和错误类型对常见 Bearer、token/password/secret/api-key 赋值及邮箱做脱敏；字段仍有长度上限。
+- 错误上报失败日志只记录异常类型，不输出异常原文，防止数据库/网络异常把敏感值再次写入应用日志。
+- 以上属于针对前端错误上报路径的定向脱敏，不等于所有通用审计写入调用的递归脱敏已经完成。`log_user_action` 的通用 `details`、`request_params` 仍需继续审计调用点与字段语义，不能仅依赖本节保证所有审计内容无敏感信息。
+- 未认证错误上报端点仍需单独完成速率限制、体积限制、来源滥用防护与保留策略验收；不得因已加入 CSRF 说明就视为匿名端点具备完整滥用防护。
+
+
+## 12. 通用审计写入的递归凭据脱敏（2026-11-14）
+
+- `log_user_action` 是审计日志统一写入入口；现在 `request_params` 与 `details` 在 JSON 序列化前统一递归处理，不再只过滤顶层字段。
+- 对常见凭据字段名进行大小写/分隔符归一化后匹配，包括 password/passwd、token/access_token/refresh_token、secret/client_secret、api_key、authorization、cookie/set-cookie、private_key、session_id、CSRF/XSRF 与通用 key；命中字段值替换为 `[REDACTED]`。
+- 对普通字符串值中的 Bearer 凭据和常见 `token=...`、`password:...` 等赋值形式做二次过滤；`error_message` 同样经过此处理。
+- 递归深度上限为 12，日期继续转为 ISO 字符串；列表/元组/集合统一序列化为数组。
+- 该规则是常见凭据的防御性过滤，不是任意秘密识别器；业务调用方仍不得把完整请求体、原始凭据或不必要的个人信息传入审计接口。新凭据命名必须同步扩充规则与回归测试。
+- 未登录 `/api/v1/audit-logs/client-error` 已在 `RateLimitMiddleware` 中单独使用 `client-error` bucket，生产/默认请求上限再收紧为最多 10 次/分钟（以客户端 IP 为计数维度）；Redis 不可用时回退进程内计数，跨 worker 一致性会下降，需监控 Redis 降级状态。
+- 审计日志查看权限、外部不可变归档、数据库账号禁止 UPDATE/DELETE、保留期和备份恢复演练仍是独立待办；本次递归脱敏不代表这些控制已完成。
+## 13. 历史审计详情读取时的二次脱敏（2026-11-14）
+
+- 通用审计写入脱敏不能追溯清理上线前已经落库的记录；详情 API 必须在响应边界再次解析并脱敏 `request_params`、`details` 与 `error_message`。
+- 详情响应 Schema 显式包含 `details`，由同一脱敏函数处理后再序列化，避免前端读取历史明文凭据。
+- 敏感字段匹配保留 `accessToken`、`client-secret`、`api_key`、Authorization、Cookie 等明确凭据名称；不把通用业务字段 `key` 一概判为凭据，避免损坏关联键、业务标识。
+- 未知对象不再展开 `__dict__`，避免对象内部属性被意外写入审计记录；不可序列化对象以类型标记替代。
+- 该修复只覆盖审计详情 API 的历史记录读取路径；数据库中旧值仍然存在，不代表已完成静态数据清理。需要清理数据库时，应另行设计备份、审计与可回滚的数据迁移。
+- 审计详情目前仍由 `require_admin` 角色保护；系统当前角色模型没有经过确认的细粒度审计查看权限。上线前仍需评估管理员是否应默认看到完整请求上下文，以及是否需要拆分基础详情与敏感字段授权。
+- 匿名客户端错误上报虽有独立 10 次/分钟 IP 限流且继续要求 CSRF，但应用层尚未建立对 chunked/缺失 Content-Length 请求体的统一硬上限。生产反向代理也必须配置请求体大小限制；在代理配置和端到端验证完成前，不应把 Pydantic 字段长度约束视为完整的请求体 DoS 防护。

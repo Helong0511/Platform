@@ -94,7 +94,7 @@ async def send_notification_async(
                 f"转化通知发送成功: conversion_id={conversion.id}, "
                 f"product_id={product.id if product else None}, "
                 f"client_id={client.id if client else None}, "
-                f"address={notification_address[:50]}, channel={notification_channel}"
+                f"channel={notification_channel}"
             )
             return True
         else:
@@ -103,11 +103,11 @@ async def send_notification_async(
                 f"转化通知发送失败: conversion_id={conversion.id}, "
                 f"product_id={product.id if product else None}, "
                 f"client_id={client.id if client else None}, "
-                f"address={notification_address[:50]}, channel={notification_channel}, "
+                f"channel={notification_channel}, "
                 f"status=failed"
             )
             if raise_on_failure:
-                raise Exception(f"通知发送失败: channel={notification_channel}, address={notification_address[:50]}")
+                raise Exception(f"通知发送失败: channel={notification_channel}")
             return False
 
     except Exception as e:
@@ -121,7 +121,7 @@ async def send_notification_async(
                 notification_channel=notification_channel if 'notification_channel' in locals() else 'unknown',
                 notification_status='failed',
                 notification_message=message,
-                error_message=str(e)[:500],
+                error_message=f"通知发送异常（{type(e).__name__}）",
                 auto_notify=True,  # 转化通知是自动通知
                 created_at=get_app_now_naive()
             )
@@ -129,17 +129,15 @@ async def send_notification_async(
             # 仅 flush，避免异常路径中 commit 污染外层 Postback 事务
             await db.flush()
         except Exception as commit_error:
-            logger.error(f"保存通知记录失败: {commit_error}")
+            logger.error("保存通知记录失败：error_type=%s", type(commit_error).__name__)
 
         # 通知发送异常，记录详细错误日志
         logger.error(
             f"发送转化通知异常: conversion_id={conversion.id}, "
             f"product_id={product.id if product else None}, "
             f"client_id={client.id if client else None}, "
-            f"address={notification_address[:50]}, "
             f"channel={notification_channel if 'notification_channel' in locals() else 'unknown'}, "
-            f"error={str(e)}",
-            exc_info=True
+            f"error_type={type(e).__name__}"
         )
         if raise_on_failure:
             raise
@@ -167,7 +165,7 @@ async def send_to_address(
             ok = await send_telegram_notify_async(address, message)
             if ok:
                 logger.debug(
-                    f"Telegram 通知已发送: chat_id={address}, "
+                    "Telegram 通知已发送："
                     f"message_length={len(message)}"
                 )
             return ok
@@ -175,7 +173,7 @@ async def send_to_address(
             # 邮箱地址
             # TODO: 实现邮件通知
             logger.error(
-                f"邮件通知功能尚未实现: address={address}, "
+                f"邮件通知功能尚未实现: "
                 f"channel=email, status=not_implemented"
             )
             return False
@@ -187,22 +185,21 @@ async def send_to_address(
             )
         else:
             logger.error(
-                f"不支持的通知渠道: channel={channel}, address={address[:50]}, "
+                f"不支持的通知渠道: channel={channel}, "
                 f"status=unsupported_channel"
             )
             return False
 
     except asyncio.TimeoutError:
         logger.error(
-            f"发送通知超时: channel={channel}, address={address[:50]}, "
+            f"发送通知超时: channel={channel}, "
             f"timeout=5.0s"
         )
         return False
     except Exception as e:
         logger.error(
-            f"发送通知异常: channel={channel}, address={address[:50]}, "
-            f"error={str(e)}",
-            exc_info=True
+            f"发送通知异常: channel={channel}, "
+            f"error_type={type(e).__name__}"
         )
         return False
 
@@ -225,7 +222,7 @@ async def send_webhook_notification(
 
         allowed, reason = validate_outbound_url(url)
         if not allowed:
-            logger.error("Webhook URL 未通过 SSRF 校验: %s", reason)
+            logger.error("Webhook URL 未通过 SSRF 校验：reason=rejected")
             return False
 
         # 构建通知数据
@@ -243,26 +240,25 @@ async def send_webhook_notification(
 
             if 200 <= response.status_code < 300:
                 logger.debug(
-                    f"Webhook 通知已发送: url={url[:50]}, "
+                    "Webhook 通知已发送："
                     f"status={response.status_code}"
                 )
                 return True
             else:
                 logger.error(
-                    f"Webhook 通知返回非成功状态: url={url[:50]}, "
-                    f"status={response.status_code}, response={response.text[:200]}"
+                    "Webhook 通知返回非成功状态："
+                    f"status={response.status_code}, "
                 )
                 return False
 
     except httpx.TimeoutException:
         logger.error(
-            f"Webhook 通知超时: url={url[:50]}, timeout=10.0s"
+            "Webhook 通知超时：timeout=10.0s"
         )
         return False
     except Exception as e:
         logger.error(
-            f"Webhook 通知异常: url={url[:50]}, error={str(e)}",
-            exc_info=True
+            f"Webhook 通知异常：error_type={type(e).__name__}"
         )
         return False
 
@@ -305,7 +301,7 @@ async def send_to_channel(
                 logger.warning("邮件通知需要配置邮箱地址（email_address）")
                 return False
             # TODO: 实现邮件通知
-            logger.warning(f"邮件通知功能尚未实现: recipient={recipient}")
+            logger.warning("邮件通知功能尚未实现：收件人已配置")
             return False
         elif channel == 'sms':
             # 使用产品配置的手机号
@@ -313,17 +309,19 @@ async def send_to_channel(
                 logger.warning("短信通知需要配置手机号（phone_number）")
                 return False
             # TODO: 实现短信通知
-            logger.warning(f"短信通知功能尚未实现: recipient={recipient}")
+            logger.warning("短信通知功能尚未实现：收件人已配置")
             return False
         else:
             logger.warning(f"不支持的通知渠道: {channel}")
             return False
 
     except asyncio.TimeoutError:
-        logger.warning(f"发送通知超时: channel={channel}, recipient={recipient}")
+        logger.warning("发送通知超时：channel=%s", channel)
         return False
     except Exception as e:
         logger.warning(
-            f"发送通知失败: channel={channel}, recipient={recipient}, error={str(e)}"
+            "发送通知失败：channel=%s error_type=%s",
+            channel,
+            type(e).__name__,
         )
         return False

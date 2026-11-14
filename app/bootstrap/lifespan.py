@@ -7,6 +7,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from sqlalchemy import inspect, text
 
 from app.core.cache_manager import CacheManager
 from app.core.config import settings
@@ -22,11 +23,312 @@ from app.core.telegram.service_notify import (
 )
 from app.core.telegram.shared_state import cleanup_stale_shared_state
 from app.core.timezone_utils import check_and_validate_timezone, log_timezone_info
+from app.db.migrations.gate import verify_schema_revision
 from app.models import Base
 from app.scheduler_module import init_scheduled_tasks, shutdown_scheduler, start_scheduler
 from app.scheduler_module.task_init import init_scheduled_tasks_in_db
 
 logger = logging.getLogger(__name__)
+
+
+def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
+    """只读核验 ORM 表、列、类型、NULL、主键、索引、外键及显式表字符集规则；绝不执行 DDL。"""
+    from sqlalchemy import Boolean, Integer, Numeric, String
+
+    target_metadata = metadata or Base.metadata
+    inspector = inspect(sync_connection)
+    missing_tables = []
+    missing_columns = {}
+    column_type_mismatches = {}
+    nullable_mismatches = {}
+    primary_key_mismatches = {}
+    index_mismatches = {}
+    unique_constraint_mismatches = {}
+    foreign_key_mismatches = {}
+    check_constraint_mismatches = {}
+    table_option_mismatches = {}
+
+    def type_mismatch(expected_type, actual_type, dialect_name: str) -> bool:
+        expected_affinity = expected_type._type_affinity
+        actual_affinity = actual_type._type_affinity
+        if dialect_name == "mysql" and isinstance(expected_type, Boolean):
+            is_mysql_boolean_storage = (
+                actual_type.__class__.__name__.upper() == "TINYINT"
+                and (
+                    getattr(actual_type, "display_width", None) == 1
+                    or getattr(actual_type, "length", None) == 1
+                )
+            )
+            affinity_matches = actual_affinity is Boolean or is_mysql_boolean_storage
+        else:
+            affinity_matches = expected_affinity is actual_affinity
+        if not affinity_matches:
+            return True
+        if isinstance(expected_type, String) and expected_type.length is not None:
+            if getattr(actual_type, "length", None) != expected_type.length:
+                return True
+        if isinstance(expected_type, Numeric):
+            for attribute in ("precision", "scale"):
+                expected_value = getattr(expected_type, attribute, None)
+                if expected_value is not None and getattr(actual_type, attribute, None) != expected_value:
+                    return True
+        expected_collation = getattr(expected_type, "collation", None)
+        if expected_collation and getattr(actual_type, "collation", None) != expected_collation:
+            return True
+        return False
+
+    def foreign_key_signature(item):
+        options = item.get("options") or {}
+        return (
+            tuple(item.get("constrained_columns") or ()),
+            item.get("referred_table"),
+            tuple(item.get("referred_columns") or ()),
+            (options.get("ondelete") or "").upper(),
+            (options.get("onupdate") or "").upper(),
+        )
+
+    dialect_name = sync_connection.dialect.name
+    for table in target_metadata.sorted_tables:
+        if not inspector.has_table(table.name, schema=table.schema):
+            missing_tables.append(table.fullname)
+            continue
+
+        actual_columns = {
+            column["name"]: column
+            for column in inspector.get_columns(table.name, schema=table.schema)
+        }
+        absent = sorted(
+            column.name for column in table.columns
+            if column.name not in actual_columns
+        )
+        if absent:
+            missing_columns[table.fullname] = absent
+
+        for column in table.columns:
+            actual = actual_columns.get(column.name)
+            if actual is None:
+                continue
+            if type_mismatch(column.type, actual["type"], dialect_name):
+                column_type_mismatches.setdefault(table.fullname, {})[column.name] = {
+                    "expected": str(column.type),
+                    "actual": str(actual["type"]),
+                }
+            # 主键列的非空语义由 PK 约束保证；SQLite 反射可能报告 nullable=True。
+            if (
+                not column.primary_key
+                and bool(actual["nullable"]) != bool(column.nullable)
+            ):
+                nullable_mismatches.setdefault(table.fullname, {})[column.name] = {
+                    "expected": bool(column.nullable),
+                    "actual": bool(actual["nullable"]),
+                }
+
+        expected_pk = sorted(column.name for column in table.primary_key.columns)
+        actual_pk = sorted(
+            inspector.get_pk_constraint(table.name, schema=table.schema).get("constrained_columns") or []
+        )
+        if expected_pk != actual_pk:
+            primary_key_mismatches[table.fullname] = {
+                "expected": expected_pk,
+                "actual": actual_pk,
+            }
+
+        expected_indexes = sorted(
+            (index.name, tuple(column.name for column in index.columns))
+            for index in table.indexes
+            if not index.unique
+        )
+        actual_indexes = sorted(
+            (item.get("name"), tuple(item.get("column_names") or ()))
+            for item in inspector.get_indexes(table.name, schema=table.schema)
+            if item.get("name") and not item.get("unique")
+        )
+        if expected_indexes != actual_indexes:
+            index_mismatches[table.fullname] = {
+                "expected": expected_indexes,
+                "actual": actual_indexes,
+            }
+
+        expected_unique = sorted({
+            tuple(column.name for column in constraint.columns)
+            for constraint in table.constraints
+            if constraint.__class__.__name__ == "UniqueConstraint"
+        } | {
+            tuple(column.name for column in index.columns)
+            for index in table.indexes
+            if index.unique
+        })
+        actual_unique = sorted({
+            tuple(item.get("column_names") or ())
+            for item in inspector.get_unique_constraints(table.name, schema=table.schema)
+        } | {
+            tuple(item.get("column_names") or ())
+            for item in inspector.get_indexes(table.name, schema=table.schema)
+            if item.get("unique")
+        })
+        if expected_unique != actual_unique:
+            unique_constraint_mismatches[table.fullname] = {
+                "expected": expected_unique,
+                "actual": actual_unique,
+            }
+
+        expected_fks = sorted(
+            (
+                tuple(element.parent.name for element in fk.elements),
+                fk.elements[0].column.table.name,
+                tuple(element.column.name for element in fk.elements),
+                (fk.ondelete or "").upper(),
+                (fk.onupdate or "").upper(),
+            )
+            for fk in table.foreign_key_constraints
+        )
+        actual_fks = sorted(
+            foreign_key_signature(item)
+            for item in inspector.get_foreign_keys(table.name, schema=table.schema)
+        )
+        if expected_fks != actual_fks:
+            foreign_key_mismatches[table.fullname] = {
+                "expected": expected_fks,
+                "actual": actual_fks,
+            }
+
+        # CHECK 约束属于数据库完整性边界；名称由 ORM 与版本化 migration 共同维护。
+        expected_checks = sorted(
+            constraint.name
+            for constraint in table.constraints
+            if constraint.__class__.__name__ == "CheckConstraint" and constraint.name
+        )
+        actual_checks = sorted(
+            item.get("name")
+            for item in inspector.get_check_constraints(table.name, schema=table.schema)
+            if item.get("name")
+        )
+        if expected_checks != actual_checks:
+            check_constraint_mismatches[table.fullname] = {
+                "expected": expected_checks,
+                "actual": actual_checks,
+            }
+
+        if dialect_name == "mysql":
+            expected_options = {}
+            mysql_options = table.dialect_options["mysql"]
+            for option, inspector_key in (
+                ("charset", "mysql_charset"),
+                ("collate", "mysql_collate"),
+            ):
+                expected_value = mysql_options.get(option)
+                if expected_value:
+                    expected_options[inspector_key] = expected_value
+            if expected_options:
+                # MySQL Inspector.get_table_options() 在部分驱动版本中不返回 charset/collation；
+                # 从 information_schema 读取服务器实际记录，不能把 None 当作真实值。
+                schema_name = table.schema or sync_connection.execute(
+                    text("SELECT DATABASE()")
+                ).scalar_one_or_none()
+                actual_collation = None
+                actual_charset = None
+                if schema_name:
+                    actual_collation = sync_connection.execute(
+                        text(
+                            "SELECT TABLE_COLLATION FROM information_schema.TABLES "
+                            "WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME = :table_name"
+                        ),
+                        {"schema_name": schema_name, "table_name": table.name},
+                    ).scalar_one_or_none()
+                    if actual_collation:
+                        actual_charset = sync_connection.execute(
+                            text(
+                                "SELECT CHARACTER_SET_NAME FROM information_schema.COLLATIONS "
+                                "WHERE COLLATION_NAME = :collation_name"
+                            ),
+                            {"collation_name": actual_collation},
+                        ).scalar_one_or_none()
+                actual_options = {
+                    "mysql_charset": actual_charset,
+                    "mysql_collate": actual_collation,
+                }
+                mismatches = {
+                    key: {
+                        "expected": value,
+                        "actual": actual_options.get(key),
+                    }
+                    for key, value in expected_options.items()
+                    if (actual_options.get(key) or "").lower() != value.lower()
+                }
+                if mismatches:
+                    table_option_mismatches[table.fullname] = mismatches
+
+    return {
+        "missing_tables": sorted(missing_tables),
+        "missing_columns": missing_columns,
+        "column_type_mismatches": column_type_mismatches,
+        "nullable_mismatches": nullable_mismatches,
+        "primary_key_mismatches": primary_key_mismatches,
+        "index_mismatches": index_mismatches,
+        "unique_constraint_mismatches": unique_constraint_mismatches,
+        "foreign_key_mismatches": foreign_key_mismatches,
+        "check_constraint_mismatches": check_constraint_mismatches,
+        "table_option_mismatches": table_option_mismatches,
+    }
+
+
+async def _verify_database_schema() -> str | None:
+    """只读核验 migration revision 与 ORM 表/列/类型/NULL/主键/索引/外键/显式字符集；应用 Worker 不执行 schema DDL。"""
+    async with engine.connect() as connection:
+        current_revision = await verify_schema_revision(connection)
+        drift = await connection.run_sync(_schema_metadata_drift)
+        if any(drift.values()):
+            raise RuntimeError(
+                "数据库 schema 与 ORM 不一致："
+                f"missing_tables={drift['missing_tables']}; "
+                f"missing_columns={drift['missing_columns']}; "
+                f"column_type_mismatches={drift['column_type_mismatches']}; "
+                f"nullable_mismatches={drift['nullable_mismatches']}; "
+                f"primary_key_mismatches={drift['primary_key_mismatches']}; "
+                f"index_mismatches={drift['index_mismatches']}; "
+                f"unique_constraint_mismatches={drift['unique_constraint_mismatches']}; "
+                f"foreign_key_mismatches={drift['foreign_key_mismatches']}; "
+                f"check_constraint_mismatches={drift['check_constraint_mismatches']}; "
+                f"table_option_mismatches={drift['table_option_mismatches']}"
+            )
+    return current_revision
+
+
+async def _sync_scheduled_tasks_for_worker(worker_pid: int) -> None:
+    """同步任务配置；调度 Worker 同步失败时拒绝启动，纯 API Worker 可降级。"""
+    try:
+        await init_scheduled_tasks_in_db()
+        logger.info("[Worker PID:%s] 定时任务配置已同步到数据库", worker_pid)
+    except Exception as db_init_error:
+        # 不输出数据库异常原文，避免日志泄露 SQL 参数。
+        logger.error(
+            "[Worker PID:%s] 定时任务配置同步失败：exception_type=%s",
+            worker_pid,
+            type(db_init_error).__name__,
+        )
+        # 纯 API Worker（未运行 APScheduler）可降级启动；调度 Worker 不能使用旧配置继续调度。
+        if settings.should_run_scheduler():
+            raise RuntimeError(
+                "定时任务配置同步失败，调度 Worker 拒绝启动"
+            ) from db_init_error
+
+
+async def _start_scheduler_for_worker(worker_pid: int) -> None:
+    """启动 APScheduler；任何初始化失败都必须阻止调度 Worker 就绪。"""
+    try:
+        logger.info("[Worker PID:%s] 开始初始化定时任务调度器...", worker_pid)
+        await init_scheduled_tasks()
+        logger.info("[Worker PID:%s] 定时任务初始化完成，正在启动调度器...", worker_pid)
+        await start_scheduler()
+        logger.info("[Worker PID:%s] 定时任务调度器已启动", worker_pid)
+    except Exception as scheduler_error:
+        # 调度器不可用时不能将 Worker 标记为健康；日志不输出异常原文。
+        logger.error(
+            "[Worker PID:%s] 定时任务调度器启动失败：exception_type=%s",
+            worker_pid,
+            type(scheduler_error).__name__,
+        )
+        raise RuntimeError("定时任务调度器启动失败，调度 Worker 拒绝就绪") from scheduler_error
 
 
 def _should_run_cache_warmup() -> bool:
@@ -47,7 +349,7 @@ async def lifespan(app: FastAPI):
     """
     应用生命周期管理（启动 / 关闭）。
 
-    启动：时区校验 → 建表 → init_db → 缓存预热 → 调度器与 Telegram Bot → Redis
+    启动：时区校验 → 只读 schema revision/drift gate → init_db → 缓存预热 → 调度器与 Telegram Bot → Redis
     关闭：停止调度器、释放 Bot 锁、关闭 Redis、通知服务下线
     """
     # ====== 启动时执行 ======
@@ -76,69 +378,34 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.debug("点击落库策略日志跳过: %s", e)
 
-    # 确保数据库存在并创建表（多进程环境：每个 worker 都会执行，但数据库操作是安全的）
+    # 只读核验数据库 migration revision 与 ORM 结构；API/Scheduler Worker 不创建数据库或执行 DDL。
+    # 新库必须先由 provisioning 导入基线并运行独立 Migration Runner。
     try:
-        from app.db.database import create_database
-
-        # 创建数据库（如果不存在）
-        await create_database()
-
-        # 创建所有表（如果不存在，使用 IF NOT EXISTS 语义）
-        # 导入所有模型以确保SQLAlchemy能够发现所有表
-        from app.models import (
-            User, Client, Product, AdData, ProductAssignment,
-            ScheduledTask, UserAuditLog, UserSession, TokenBlacklist,
-            PostbackConversion, PendingPostbackConversion, PostbackIpWhitelist
+        current_revision = await _verify_database_schema()
+        logger.info(
+            "[Worker PID:%s] 数据库 schema revision 与 ORM 结构核验通过：revision=%s",
+            worker_pid,
+            current_revision,
         )
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+    except Exception as exc:
+        logger.error(
+            "[Worker PID:%s] 数据库 schema 初始化/核验失败，拒绝启动：exception_type=%s",
+            worker_pid,
+            type(exc).__name__,
+        )
+        raise RuntimeError("数据库 schema 未达到应用启动要求，拒绝启动") from exc
 
-        logger.info(f"[Worker PID:{worker_pid}] 数据库表创建完成")
-    except Exception as e:
-        # 检查是否是 MySQL 并发 DDL 错误（错误代码 1684）
-        # 这个错误表示表正在被其他进程修改，可以安全忽略
-        is_concurrent_ddl_error = False
-        error_code = None
-
-        # 尝试从异常中提取错误代码
-        try:
-            if hasattr(e, 'orig'):
-                # SQLAlchemy 包装的异常 (sqlalchemy.exc.OperationalError)
-                orig = e.orig
-                if hasattr(orig, 'args') and len(orig.args) > 0:
-                    error_code = orig.args[0] if isinstance(orig.args[0], int) else None
-            elif hasattr(e, 'args') and len(e.args) > 0:
-                # 直接 pymysql 异常
-                error_code = e.args[0] if isinstance(e.args[0], int) else None
-
-            # 检查错误代码或错误消息
-            if error_code == 1684 or (str(e) and '1684' in str(e)):
-                is_concurrent_ddl_error = True
-        except Exception:
-            # 如果提取错误代码失败，检查错误消息
-            error_str = str(e)
-            if '1684' in error_str or 'concurrent DDL' in error_str.lower():
-                is_concurrent_ddl_error = True
-
-        if is_concurrent_ddl_error:
-            # 这是预期的并发行为，降级为信息级别
-            logger.info(
-                f"[Worker PID:{worker_pid}] 检测到并发 DDL 操作（表可能正在被其他 worker 创建），"
-                f"这是正常的多进程环境行为，继续启动..."
-            )
-        else:
-            # 其他错误，记录为错误级别
-            logger.error(f"[Worker PID:{worker_pid}] 数据库表创建失败: {e}", exc_info=True)
-            # 不抛出异常，允许应用继续启动（可能是表已存在或其他 worker 已创建）
-            logger.warning(f"[Worker PID:{worker_pid}] 继续启动应用...")
-
-    # 初始化数据库，创建默认管理员账户
+    # 初始化数据库，创建默认管理员账户；核心 DB 初始化失败时不得继续对外提供服务。
     try:
         await init_db()
         logger.info(f"[Worker PID:{worker_pid}] 数据库初始化完成（包括默认管理员账户）")
-    except Exception as e:
-        logger.error(f"[Worker PID:{worker_pid}] 数据库初始化失败: {e}", exc_info=True)
-        # 不抛出异常，允许应用继续启动
+    except Exception as exc:
+        logger.error(
+            "[Worker PID:%s] 数据库初始化失败，拒绝启动：exception_type=%s",
+            worker_pid,
+            type(exc).__name__,
+        )
+        raise RuntimeError("数据库初始化失败，拒绝启动") from exc
 
     # 加载标准维度配置（scheduled_tasks.standard_report_type → 内存）
     try:
@@ -164,28 +431,12 @@ async def lifespan(app: FastAPI):
             "支持降级的组件使用内存存储，短链接/Offer缓存与预热已禁用"
         )
 
-    # 同步 task_config.py → scheduled_tasks 表（与是否启动 APScheduler 解耦）
-    # 本地 Windows 常见 ENABLE_SCHEDULER=false 仅跑 API，仍须写入新任务供管理端展示与后续启用调度
-    try:
-        await init_scheduled_tasks_in_db()
-        logger.info(f"[Worker PID:{worker_pid}] 定时任务配置已同步到数据库")
-    except Exception as db_init_error:
-        logger.warning(
-            f"[Worker PID:{worker_pid}] 同步任务到数据库失败: {db_init_error}，继续启动..."
-        )
+    # 同步 task_config.py → scheduled_tasks 表；调度 Worker 必须依赖完整配置。
+    await _sync_scheduled_tasks_for_worker(worker_pid)
 
     # 定时任务调度器：仅调度 worker 启动（Gunicorn 多 worker 时由 SCHEDULER_WORKER=1 标识）
     if settings.should_run_scheduler():
-        try:
-            logger.info(f"[Worker PID:{worker_pid}] 开始初始化定时任务调度器...")
-
-            await init_scheduled_tasks()
-            logger.info(f"[Worker PID:{worker_pid}] 定时任务初始化完成，正在启动调度器...")
-            await start_scheduler()
-            logger.info(f"[Worker PID:{worker_pid}] 定时任务调度器已启动")
-        except Exception as e:
-            logger.error(f"[Worker PID:{worker_pid}] 定时任务初始化失败: {e}", exc_info=True)
-            logger.warning(f"[Worker PID:{worker_pid}] 应用将继续启动，但定时任务功能可能不可用")
+        await _start_scheduler_for_worker(worker_pid)
     else:
         logger.info(
             f"[Worker PID:{worker_pid}] 跳过定时任务调度器"

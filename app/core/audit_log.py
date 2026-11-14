@@ -7,6 +7,7 @@
 """
 import json
 import logging
+import re
 from datetime import datetime, date, timezone
 from typing import Optional, Dict, Any
 from fastapi import Request
@@ -19,6 +20,71 @@ from app.core.utils import get_client_ip, get_app_now_naive
 logger = logging.getLogger(__name__)
 
 # 允许记录的操作类型白名单
+
+
+# 审计 JSON 可能来自不同业务模块；在统一写入边界递归过滤常见认证凭据。
+_AUDIT_SECRET_KEYS = {
+    'password', 'passwd', 'token', 'accesstoken', 'refreshtoken',
+    'secret', 'clientsecret', 'apikey', 'authorization', 'cookie',
+    'setcookie', 'privatekey', 'secretkey', 'signingkey', 'encryptionkey', 'sessionid', 'csrf', 'xsrftoken',
+}
+_AUDIT_BEARER_RE = re.compile(r'(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+')
+_AUDIT_SECRET_ASSIGNMENT_RE = re.compile(
+    r'(?i)(\b(?:access[_-]?token|refresh[_-]?token|token|authorization|password|passwd|secret|client[_-]?secret|api[_-]?key)\b\s*[:=]\s*)([^\s,;&]+)'
+)
+
+def _sanitize_audit_value(value: Any, depth: int = 0) -> Any:
+    """递归脱敏审计 JSON 中的凭据字段，并限制异常深度。"""
+    if depth > 12:
+        return '[MAX_DEPTH]'
+    if isinstance(value, dict):
+        sanitized = {}
+        for key, nested in value.items():
+            key_text = str(key)
+            normalized_key = re.sub(r'[^a-z0-9]', '', key_text.lower())
+            if normalized_key in _AUDIT_SECRET_KEYS:
+                sanitized[key_text] = '[REDACTED]'
+            else:
+                sanitized[key_text] = _sanitize_audit_value(nested, depth + 1)
+        return sanitized
+    if isinstance(value, (list, tuple, set)):
+        return [_sanitize_audit_value(item, depth + 1) for item in value]
+    if isinstance(value, str):
+        sanitized_text = _AUDIT_BEARER_RE.sub('Bearer [REDACTED]', value)
+        return _AUDIT_SECRET_ASSIGNMENT_RE.sub(r'\1[REDACTED]', sanitized_text)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    # 不展开未知对象的 __dict__，避免把对象内部状态或凭据意外写入审计记录。
+    if isinstance(value, (bytes, bytearray)):
+        return '[BINARY_VALUE_OMITTED]'
+    return f'[UNSERIALIZABLE:{type(value).__name__}]'
+
+def sanitize_audit_log_response_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """读取历史审计记录时再次脱敏，覆盖修复上线前已落库的旧数据。"""
+    sanitized = dict(payload)
+    for field_name in ('request_params', 'details'):
+        raw_value = sanitized.get(field_name)
+        if raw_value is None:
+            continue
+        if isinstance(raw_value, str):
+            try:
+                parsed_value = json.loads(raw_value)
+            except (TypeError, ValueError):
+                parsed_value = raw_value
+        else:
+            parsed_value = raw_value
+        safe_value = _sanitize_audit_value(parsed_value)
+        sanitized[field_name] = (
+            json.dumps(safe_value, ensure_ascii=False)
+            if not isinstance(safe_value, str) else safe_value
+        )
+    if sanitized.get('error_message'):
+        sanitized['error_message'] = str(_sanitize_audit_value(sanitized['error_message']))[:1000]
+    return sanitized
+
+
 ALLOWED_ACTION_TYPES = {
     "LOGIN",  # 登录
     "LOGOUT",  # 登出
@@ -57,7 +123,8 @@ async def log_user_action(
         success: bool = True,
         error_message: Optional[str] = None,
         details: Optional[Dict[str, Any]] = None,
-        request_params: Optional[Dict[str, Any]] = None
+        request_params: Optional[Dict[str, Any]] = None,
+        strict: bool = False
 ) -> None:
     """
     记录用户操作日志
@@ -79,6 +146,7 @@ async def log_user_action(
         error_message: 错误信息
         details: 详细信息（字典格式，会自动转换为JSON）
         request_params: 请求参数（字典格式，会自动转换为JSON，不包含敏感信息）
+        strict: 严格模式；关键业务要求审计日志准备失败时向上抛出
     """
     # 检查操作类型是否在白名单中
     if action_type not in ALLOWED_ACTION_TYPES:
@@ -120,50 +188,22 @@ async def log_user_action(
             if not final_user_agent:
                 final_user_agent = request.headers.get("user-agent", "")[:500]  # 限制长度
 
-        # 处理请求参数（移除敏感信息）
+        # 统一递归脱敏请求参数和详情，避免业务调用方漏掉嵌套凭据字段。
         final_request_params = None
         if request_params:
-            # 移除敏感字段
-            sensitive_fields = {"password", "token", "secret", "key", "authorization"}
-            filtered_params = {
-                k: v for k, v in request_params.items()
-                if k.lower() not in sensitive_fields
-            }
-            if filtered_params:
-                try:
-                    final_request_params = json.dumps(filtered_params, ensure_ascii=False)
-                except (TypeError, ValueError):
-                    final_request_params = str(filtered_params)[:1000]  # 限制长度
+            try:
+                sanitized_params = _sanitize_audit_value(request_params)
+                final_request_params = json.dumps(sanitized_params, ensure_ascii=False)
+            except (TypeError, ValueError):
+                final_request_params = str(_sanitize_audit_value(str(request_params)))[:1000]
 
-        # 处理详细信息
         final_details = None
         if details:
             try:
-                # 将 details 中的日期对象转换为字符串，以便 JSON 序列化
-                def convert_dates(obj):
-                    """递归转换日期对象为字符串"""
-                    if isinstance(obj, dict):
-                        return {k: convert_dates(v) for k, v in obj.items()}
-                    elif isinstance(obj, list):
-                        return [convert_dates(item) for item in obj]
-                    elif isinstance(obj, (datetime, date)):
-                        # 日期对象转换为 ISO 格式字符串
-                        return obj.isoformat()
-                    elif hasattr(obj, '__dict__'):
-                        # 其他对象尝试转换为字典
-                        return convert_dates(obj.__dict__)
-                    else:
-                        return obj
-                
-                # 转换日期对象
-                converted_details = convert_dates(details)
-                final_details = json.dumps(converted_details, ensure_ascii=False)
-            except (TypeError, ValueError) as e:
-                # 如果转换失败，尝试直接序列化
-                try:
-                    final_details = json.dumps(details, ensure_ascii=False, default=str)
-                except (TypeError, ValueError):
-                    final_details = str(details)[:1000]  # 限制长度
+                sanitized_details = _sanitize_audit_value(details)
+                final_details = json.dumps(sanitized_details, ensure_ascii=False)
+            except (TypeError, ValueError):
+                final_details = str(_sanitize_audit_value(str(details)))[:1000]
 
         # 创建日志记录
         audit_log = UserAuditLog(
@@ -180,7 +220,7 @@ async def log_user_action(
             request_params=final_request_params,
             status_code=status_code,
             success=success,
-            error_message=error_message[:1000] if error_message else None,  # 限制长度
+            error_message=str(_sanitize_audit_value(error_message))[:1000] if error_message else None,  # 限制长度并过滤凭据
             details=final_details,
             created_at=get_app_now_naive()  # 使用北京时间
         )
@@ -198,27 +238,30 @@ async def log_user_action(
 
     except Exception as e:
         # 日志记录失败不应该影响业务逻辑，但需要详细记录错误
-        logger.error(
-            f"记录用户操作日志失败: action_type={action_type}, "
-            f"username={final_username}, resource_type={resource_type}, "
-            f"error={e}",
-            exc_info=True
+        logger.exception(
+            "记录用户操作日志失败: action_type=%s, username=%s, resource_type=%s",
+            action_type, final_username, resource_type,
         )
+        if strict:
+            raise
 
 
 async def commit_audit_log(db: AsyncSession) -> None:
     """
-    提交会话中的审计日志。
-    当业务操作已在 service 内 commit 后，需单独提交审计记录时调用。
+    提交当前事务（包含业务变更和审计日志）。
+
+    提交失败必须向上抛出：调用方不能在业务事务已回滚时仍返回成功响应。
+    回滚仅用于清理失败事务，不得吞掉原始提交异常。
     """
     try:
         await db.commit()
-    except Exception as e:
-        logger.warning(f"提交审计日志失败: {e}")
+    except Exception:
+        logger.exception("提交业务变更及审计日志失败，事务已尝试回滚")
         try:
             await db.rollback()
         except Exception:
-            pass
+            logger.exception("提交失败后的数据库事务回滚也失败")
+        raise
 
 
 # 便捷函数
@@ -267,7 +310,8 @@ async def log_create(
         request: Optional[Request] = None,
         success: bool = True,
         error_message: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
+        strict: bool = False
 ) -> None:
     """记录创建操作"""
     await log_user_action(
@@ -280,7 +324,8 @@ async def log_create(
         request=request,
         success=success,
         error_message=error_message,
-        details=details
+        details=details,
+        strict=strict
     )
 
 
@@ -293,7 +338,8 @@ async def log_update(
         request: Optional[Request] = None,
         success: bool = True,
         error_message: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
+        strict: bool = False
 ) -> None:
     """记录更新操作"""
     await log_user_action(
@@ -306,7 +352,8 @@ async def log_update(
         request=request,
         success=success,
         error_message=error_message,
-        details=details
+        details=details,
+        strict=strict
     )
 
 
@@ -319,7 +366,8 @@ async def log_delete(
         request: Optional[Request] = None,
         success: bool = True,
         error_message: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
+        strict: bool = False
 ) -> None:
     """记录删除操作"""
     await log_user_action(
@@ -332,7 +380,8 @@ async def log_delete(
         request=request,
         success=success,
         error_message=error_message,
-        details=details
+        details=details,
+        strict=strict
     )
 
 

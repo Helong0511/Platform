@@ -31,7 +31,7 @@
 注意事项：
 1. 登录接口使用OAuth2PasswordRequestForm格式（username/password）
 2. 所有需要认证的接口都需要在请求头中携带Bearer令牌
-3. 客户角色的IP白名单验证：127.0.0.1始终允许
+3. 客户角色的 IP 白名单验证：包括回环地址在内，均须显式列入白名单
 4. 登录失败不会暴露具体原因（用户名不存在或密码错误都返回相同错误）。
 
 说明：用户认证，含登录、刷新令牌、登出及 JWT 校验。"""
@@ -48,8 +48,8 @@ from sqlalchemy.orm import selectinload
 
 from app.core.audit_log import log_login, log_logout, commit_audit_log
 from app.core.auth_response import build_token_json_response, clear_auth_cookies, raise_auth_error
+from app.core.api_auth import _get_active_user_clients, _is_user_client_ip_allowed
 from app.core.auth_user_payload import build_auth_user_payload
-from app.core.async_orm import get_first_loaded_collection_item
 from app.core.config import settings
 from app.core.csrf import issue_csrf_token_for_user
 from app.core.errors import ErrorCode
@@ -122,7 +122,7 @@ async def login(
     - 密码验证使用安全的bcrypt算法
     - 登录失败不暴露具体原因（防止用户名枚举攻击）
     - 客户IP白名单验证（仅客户角色）
-    - 127.0.0.1始终允许（本地访问）
+    - 回环地址不再隐式放行，必须显式列入 allowed_ips
     - 所有登录尝试都记录到审计日志
     
     响应内容：
@@ -213,18 +213,9 @@ async def login(
     except HTTPException:
         raise
     except Exception as e:
-        error_msg = str(e)
         error_type = type(e).__name__
-        logger.error(
-            f"登录过程中发生异常: {error_type}: {error_msg}, "
-            f"用户名={form_data.username if form_data else 'unknown'}, "
-            f"IP={client_ip}",
-            exc_info=True
-        )
-        if settings.is_development:
-            detail = f"登录失败: {error_type}: {error_msg}"
-        else:
-            detail = "登录服务暂时不可用，请稍后重试"
+        logger.error("登录过程中发生异常: error_type=%s", error_type)
+        detail = "登录服务暂时不可用，请稍后重试"
         raise_auth_error(
             ErrorCode.SERVICE_UNAVAILABLE,
             detail,
@@ -257,39 +248,43 @@ async def login(
             http_status=status.HTTP_403_FORBIDDEN,
         )
 
-    # ====== 客户IP白名单检查 ======
-    # 只有客户角色需要检查IP白名单，管理员不受限制
-    # 127.0.0.1和localhost始终允许（本地访问）
+    # ====== 客户 IP 白名单检查 ======
+    # 登录与外部客户 API 共用同一白名单规则；回环地址也必须显式列入。
+    active_client_records = (
+        _get_active_user_clients(getattr(user, "clients", None))
+        if user.role == UserRole.CLIENT
+        else []
+    )
+    if user.role == UserRole.CLIENT and not active_client_records:
+        await _record_login_failure(
+            db,
+            request,
+            user=user,
+            error_message="客户账号没有启用中的客户主体",
+        )
+        raise_auth_error(
+            ErrorCode.FORBIDDEN,
+            "当前客户账号没有可用的客户主体，请联系管理员",
+            http_status=status.HTTP_403_FORBIDDEN,
+        )
+    client_record = active_client_records[0] if active_client_records else None
     if user.role == UserRole.CLIENT:
-        # 127.0.0.1和localhost始终允许
-        local_ips = ["127.0.0.1", "localhost", "::1"]
-        if client_ip not in local_ips:
-            # 优化：客户信息已在查询用户时通过selectinload加载，直接使用
-            client = get_first_loaded_collection_item(user, "clients")
-
-            if client:
-                # 检查IP白名单
-                allowed_ips = client.allowed_ips
-                if allowed_ips and allowed_ips.strip():
-                    # 解析IP白名单（支持逗号分隔）
-                    allowed_ip_list = [ip.strip() for ip in allowed_ips.split(",") if ip.strip()]
-                    if allowed_ip_list and client_ip not in allowed_ip_list:
-                        logger.warning(
-                            f"客户登录失败: IP不在白名单中, "
-                            f"用户名={form_data.username}, IP={client_ip}, "
-                            f"白名单={allowed_ips}"
-                        )
-                        await _record_login_failure(
-                            db, request,
-                            user=user,
-                            error_message=f"IP地址 {client_ip} 不在允许列表中",
-                        )
-                        raise_auth_error(
-                            ErrorCode.FORBIDDEN,
-                            f"IP地址 {client_ip} 不在允许列表中，请联系管理员",
-                            http_status=status.HTTP_403_FORBIDDEN,
-                        )
-                # 如果allowed_ips为空或None，则不限制IP（向后兼容）
+        if not _is_user_client_ip_allowed(active_client_records, client_ip):
+            logger.warning(
+                "客户登录失败：来源 IP 不在白名单中，user_id=%s",
+                user.id,
+            )
+            await _record_login_failure(
+                db,
+                request,
+                user=user,
+                error_message="来源 IP 不在客户允许列表中",
+            )
+            raise_auth_error(
+                ErrorCode.FORBIDDEN,
+                "当前来源 IP 不在客户允许列表中，请联系管理员",
+                http_status=status.HTTP_403_FORBIDDEN,
+            )
 
     # ====== 生成访问令牌和刷新令牌 ======
     # 创建JWT访问令牌，设置过期时间（从配置中读取）
@@ -317,13 +312,18 @@ async def login(
     # 如果是客户角色，获取客户的api_enabled和has_publisher信息
     api_enabled = False
     has_publisher = False
-    client_record = get_first_loaded_collection_item(user, "clients")
-    if user.role == UserRole.CLIENT and client_record:
-        api_enabled = bool(client_record.api_enabled)
+    all_client_records = getattr(user, "clients", None) or []
+    password_change_enabled = bool(active_client_records) and bool(all_client_records) and all(
+        bool(getattr(client, "password_change_enabled", False))
+        for client in all_client_records
+    )
+    if user.role == UserRole.CLIENT and active_client_records:
+        active_client_ids = [client.id for client in active_client_records]
+        api_enabled = any(bool(client.api_enabled) for client in active_client_records)
         publisher_check = await db.execute(
             select(func.count(Publisher.id)).where(
                 and_(
-                    Publisher.client_id == client_record.id,
+                    Publisher.client_id.in_(active_client_ids),
                     Publisher.is_active == True,
                 )
             )
@@ -334,6 +334,7 @@ async def login(
         user,
         api_enabled=api_enabled,
         has_publisher=has_publisher,
+        password_change_enabled=password_change_enabled,
         client=client_record,
     )
 
@@ -391,7 +392,7 @@ async def logout(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"退出登录失败: {e}", exc_info=True)
+        logger.error("退出登录失败: error_type=%s", type(e).__name__)
         clear_auth_cookies(response)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,

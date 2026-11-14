@@ -110,6 +110,7 @@ class PostbackForwardLog(Base):
     retry_count = Column(Integer, default=0, comment='重试次数')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')
     completed_at = Column(DateTime, nullable=True, comment='完成时间')
+    pii_scrubbed_at = Column(DateTime, nullable=True, comment='PII 按保留策略清理时间')
 
     # 关系
     conversion = relationship("PostbackConversion", foreign_keys=[conversion_id])
@@ -122,6 +123,7 @@ class PostbackForwardLog(Base):
         Index("idx_forward_log_publisher", "publisher_id"),
         Index("idx_forward_log_created_at", "created_at"),
         Index("idx_forward_log_success", "success"),
+        Index("idx_forward_log_pii_retention", "pii_scrubbed_at", "created_at", "id"),
     )
 
 class PostbackForwardQueue(Base):
@@ -417,6 +419,28 @@ class ShortLink(Base):
         Index("idx_short_link_channel_id", "channel_id"),
         Index("idx_short_link_active", "is_active"),
         Index("idx_short_link_created_at", "created_at"),
+    )
+
+
+class ShortLinkClickSyncBatch(Base):
+    """
+    短链接点击刷盘幂等账本。
+
+    Redis pending batch 与 Redis 不可用时的单次点击事件共用唯一账本。
+    pending batch 只有在 Redis pending key 确认删除后才标记 acknowledged；
+    DB fallback event 在同一事务提交时直接标记 acknowledged。
+    """
+    __tablename__ = "short_link_click_sync_batches"
+
+    batch_id = Column(String(64), primary_key=True, comment="Redis pending batch UUID")
+    short_code = Column(String(20), nullable=False, comment="短链接代码")
+    click_count = Column(Integer, nullable=False, comment="本批次待入账点击数")
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment="创建时间")
+    acknowledged_at = Column(DateTime, nullable=True, comment="Redis pending key 确认删除时间")
+
+    __table_args__ = (
+        Index("idx_short_click_batch_code_created", "short_code", "created_at"),
+        Index("idx_short_click_batch_ack_created", "acknowledged_at", "created_at"),
     )
 
 

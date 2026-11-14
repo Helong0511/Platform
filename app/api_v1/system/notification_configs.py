@@ -685,10 +685,10 @@ async def test_telegram_connection(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"测试 Telegram 连接失败: {str(e)}", exc_info=True)
+        logger.error("测试 Telegram 连接失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"测试连接失败: {str(e)}"
+            detail="测试连接失败，请检查配置后重试"
         )
 
 
@@ -742,9 +742,9 @@ async def send_test_message(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"发送测试消息失败: {str(e)}", exc_info=True)
+        logger.error("发送测试消息失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"发送测试消息失败: {str(e)}"
+            detail="发送测试消息失败，请检查配置后重试"
         )
 

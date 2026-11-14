@@ -89,6 +89,13 @@ def mark_scheduler_shutting_down() -> None:
     _scheduler_shutting_down = True
 
 
+def _task_lock_timeout_seconds(task_name: str) -> int:
+    """为可能处理大批量数据的队列任务提供足够长的恢复租约。"""
+    if task_name == "点击记录队列批量处理":
+        return 900
+    return DEFAULT_TIMEOUT_SECONDS
+
+
 def get_scheduler() -> AsyncIOScheduler:
     """
     获取调度器实例（线程安全的单例模式）
@@ -232,6 +239,8 @@ async def execute_task_with_lock(
         )
         return
 
+    task_lock_timeout = _task_lock_timeout_seconds(task_name)
+
     # 查询任务的cron表达式和运行状态
     db = AsyncSessionLocal()
     try:
@@ -255,7 +264,7 @@ async def execute_task_with_lock(
                 now_app = get_app_now_naive()  # 使用北京时间比较
                 elapsed = (now_app - last_run_app).total_seconds()
 
-                if elapsed < DEFAULT_TIMEOUT_SECONDS:
+                if elapsed < task_lock_timeout:
                     log_scheduled_task_skip(
                         task_name,
                         "任务仍在运行中，跳过本次触发",
@@ -263,7 +272,7 @@ async def execute_task_with_lock(
                             f"holder_pid={task_record.last_run_pid} "
                             f"holder_host={task_record.last_run_host} "
                             f"elapsed_sec={elapsed:.1f} "
-                            f"timeout_sec={DEFAULT_TIMEOUT_SECONDS}"
+                            f"timeout_sec={task_lock_timeout}"
                         ),
                     )
                     return
@@ -339,7 +348,11 @@ async def _execute_task_with_lock_internal(
         **kwargs: 任务函数关键字参数
     """
     # 先抢 Redis 锁，再抢 MySQL 行锁（双保险）
-    redis_token = await acquire_redis_scheduler_lock(task_name)
+    task_lock_timeout = _task_lock_timeout_seconds(task_name)
+    redis_token = await acquire_redis_scheduler_lock(
+        task_name,
+        ttl_seconds=task_lock_timeout + 60,
+    )
     if redis_token is None:
         log_scheduled_task_skip(
             task_name,
@@ -349,7 +362,10 @@ async def _execute_task_with_lock_internal(
         return
 
     # 尝试获取 MySQL 行锁
-    acquired, lock_db = await acquire_task_lock(task_name)
+    acquired, lock_db = await acquire_task_lock(
+        task_name,
+        timeout_seconds=task_lock_timeout,
+    )
     if not acquired:
         await release_redis_scheduler_lock(task_name, redis_token)
         log_scheduled_task_skip(

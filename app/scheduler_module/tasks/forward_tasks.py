@@ -22,38 +22,87 @@ logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 5
 BATCH_SIZE = 50
+# 单条任务领取后设置租约，避免多个 Web Worker / Scheduler 同时发送同一转化。
+FORWARD_TASK_LEASE_SECONDS = 300
 RETRY_DELAYS = [60, 300, 900, 3600, 7200]
+
+
+def _due_forward_task_query(now):
+    """领取一条到期任务；MySQL 8 使用 SKIP LOCKED 避免多消费者重复领取。"""
+    return (
+        select(PostbackForwardQueue)
+        .where(PostbackForwardQueue.next_retry_time <= now)
+        .order_by(PostbackForwardQueue.next_retry_time, PostbackForwardQueue.id)
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    )
+
+
+def _latest_forward_log_query(
+    conversion_id: int,
+    *,
+    publisher_id: int | None = None,
+    product_id: int | None = None,
+):
+    """按稳定顺序读取目标最近一次转发日志，避免同秒日志顺序不确定。"""
+    query = (
+        select(PostbackForwardLog)
+        .where(PostbackForwardLog.conversion_id == conversion_id)
+        .order_by(
+            PostbackForwardLog.created_at.desc(),
+            PostbackForwardLog.id.desc(),
+        )
+        .limit(1)
+    )
+    if publisher_id is not None:
+        query = query.where(PostbackForwardLog.publisher_id == publisher_id)
+    elif product_id is not None:
+        query = query.where(
+            PostbackForwardLog.product_id == product_id,
+            PostbackForwardLog.publisher_id.is_(None),
+        )
+    return query
 
 
 async def trigger_forward_processing():
     """Fire-and-Forget 触发转发队列消费。"""
     try:
         await process_forward_queue()
-    except Exception as e:
-        logger.error(f"触发转发处理任务失败: {e}", exc_info=True)
+    except Exception as exc:
+        logger.error("触发转发处理任务失败：error_type=%s", type(exc).__name__)
 
 
 async def process_forward_queue():
-    """批量处理到期转发重试任务。"""
+    """逐条领取并处理到期任务，避免多消费者并发重复发送。"""
     try:
         async with AsyncSessionLocal() as db:
-            now = get_app_now_naive()
-            query = (
-                select(PostbackForwardQueue)
-                .where(PostbackForwardQueue.next_retry_time <= now)
-                .order_by(PostbackForwardQueue.next_retry_time)
-                .limit(BATCH_SIZE)
-            )
-            result = await db.execute(query)
-            tasks = result.scalars().all()
-            if not tasks:
-                return
+            processed = 0
+            while processed < BATCH_SIZE:
+                now = get_app_now_naive()
+                result = await db.execute(_due_forward_task_query(now))
+                task = result.scalars().first()
+                if not task:
+                    break
 
-            logger.info("开始处理转发队列，任务数: %s", len(tasks))
-            for task in tasks:
+                # 在发送外部 HTTP 请求前先提交租约。其它消费者随后看不到该到期任务；
+                # 若进程崩溃，租约到期后任务会自动重新进入队列。
+                task.next_retry_time = now + timedelta(
+                    seconds=FORWARD_TASK_LEASE_SECONDS
+                )
+                await db.commit()
+
+                logger.info(
+                    "已领取转发队列任务：queue_id=%s lease=%ss",
+                    task.id,
+                    FORWARD_TASK_LEASE_SECONDS,
+                )
                 await process_single_task(db, task)
-    except Exception as e:
-        logger.error(f"转发队列处理任务异常: {e}", exc_info=True)
+                processed += 1
+
+            if processed:
+                logger.info("本轮转发队列处理结束：已领取 %s 条任务", processed)
+    except Exception as exc:
+        logger.error("转发队列处理任务异常：error_type=%s", type(exc).__name__)
 
 
 async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
@@ -91,21 +140,11 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
                 await db.commit()
                 return
 
-            log_query = (
-                select(PostbackForwardLog)
-                .where(PostbackForwardLog.conversion_id == task.conversion_id)
-                .order_by(PostbackForwardLog.created_at.desc())
-                .limit(1)
+            log_query = _latest_forward_log_query(
+                task.conversion_id,
+                publisher_id=task.publisher_id,
+                product_id=task.product_id,
             )
-            if task.publisher_id:
-                log_query = log_query.where(
-                    PostbackForwardLog.publisher_id == task.publisher_id
-                )
-            elif task.product_id:
-                log_query = log_query.where(
-                    PostbackForwardLog.product_id == task.product_id,
-                    PostbackForwardLog.publisher_id.is_(None),
-                )
             latest_log = (await db.execute(log_query)).scalars().first()
 
             if latest_log and latest_log.success:
@@ -116,14 +155,13 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
                 await _schedule_or_drop_retry(db, task)
         except Exception as forward_err:
             logger.error(
-                "转发重试执行失败: queue_id=%s err=%s",
+                "转发重试执行失败：queue_id=%s error_type=%s",
                 task.id,
-                forward_err,
-                exc_info=True,
+                type(forward_err).__name__,
             )
             await _schedule_or_drop_retry(db, task)
-    except Exception as e:
-        logger.error(f"处理单条转发任务失败: {e}", exc_info=True)
+    except Exception as exc:
+        logger.error("处理单条转发任务失败：error_type=%s", type(exc).__name__)
         await db.rollback()
 
 

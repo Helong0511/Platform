@@ -41,6 +41,7 @@ from app.models.cpl import (
     AdvertiserTest,
     AffiliateTest,
 )
+from app.models.cap_reservation import CapReservation
 from app.models.deduction import ConversionDeductionConfig, ConversionDeductionLog
 from app.models.security import (
     SensitivePathProbeLog,
@@ -86,6 +87,7 @@ __all__ = [
     "OfferDiscount",
     "AdvertiserTest",
     "AffiliateTest",
+    "CapReservation",
     "ConversionDeductionConfig",
     "ConversionDeductionLog",
     "SensitivePathProbeLog",

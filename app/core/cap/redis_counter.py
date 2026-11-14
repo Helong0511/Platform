@@ -7,6 +7,7 @@ cpl:cap:daily:{offer_id}:{date_str} -> int
 cpl:cap:total:{offer_id} -> int
 """
 import logging
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -38,55 +39,156 @@ def get_total_cap_key(offer_id: int, publisher_id: Optional[int] = None) -> str:
     return key
 
 
+class _CapReservationStateLost(RuntimeError):
+    """幂等令牌存在但计数状态丢失；必须 fail-closed，不能误判为成功或超限。"""
+
+
+class _CapReservationAlreadyRolledBack(RuntimeError):
+    """稳定 reservation 已进入回滚终态；重复预留必须 fail-closed。"""
+
+
 class RedisCapManager:
     """Redis Cap 管理器"""
 
     @staticmethod
-    def _redis_unavailable_result() -> bool:
-        """Redis 不可用时按 CAP_FAIL_OPEN 决定放行或拒绝。"""
+    def _redis_unavailable_result() -> Optional[bool]:
+        """Redis 不可用时返回三态结果；fail-open 放行但不伪造 reservation。"""
         if settings.CAP_FAIL_OPEN:
-            logger.warning("Redis不可用，Cap fail-open 放行")
-            return True
+            logger.warning("Redis不可用，Cap fail-open 放行（未创建 Redis reservation）")
+            return None
         logger.error("Redis不可用，Cap fail-close 拒绝")
-        return False
+        raise RuntimeError("Redis unavailable during Cap reservation")
 
     @staticmethod
-    def _lua_failure_result() -> bool:
+    def _lua_failure_result() -> Optional[bool]:
         if settings.CAP_FAIL_OPEN:
-            logger.warning("Redis Cap Lua 失败，fail-open 放行")
-            return True
+            logger.warning("Redis Cap Lua 失败，fail-open 放行（未创建 Redis reservation）")
+            return None
         logger.error("Redis Cap Lua 失败，fail-close 拒绝")
-        return False
+        raise RuntimeError("Redis Cap reservation Lua failed")
     
-    # Lua：先判限再递增，超限返回 -1（不修改 key）
-    # KEYS[1]: cap_key
-    # ARGV[1]: expire_seconds
-    # ARGV[2]: initial_value（冷启动，key 不存在时使用）
-    # ARGV[3]: limit
+    # Lua：以唯一 reservation token 保证预留幂等；同一请求重试不会重复 INCR。
+    # KEYS[1]: cap_key；KEYS[2]: reservation token key
+    # ARGV[1]: expire_seconds；ARGV[2]: DB 初始值；ARGV[3]: limit
     _RESERVE_LUA = """
+    local counter_ttl = tonumber(ARGV[1]) or 0
+    local token_ttl = tonumber(ARGV[4]) or counter_ttl
+    local existing_token = redis.call('GET', KEYS[2])
+    if existing_token then
+        -- 已回滚墓碑是终态证据，不能被同一 reservation 的重试当成有效预留。
+        if existing_token == 'ROLLED_BACK' then
+            return -3
+        end
+        if existing_token ~= '1' then
+            return -2
+        end
+        -- token 仍在但 counter 已被独立淘汰/删除时，绝不能把缺失计数当作 0 放行。
+        if redis.call('EXISTS', KEYS[1]) == 0 then
+            return -2
+        end
+        local existing = tonumber(redis.call('GET', KEYS[1]))
+        if not existing or existing < 0 or existing ~= math.floor(existing) then
+            return -2
+        end
+        -- 即使本次只是幂等重试，也必须清除历史 Total key 的旧 TTL。
+        if counter_ttl > 0 then
+            redis.call('EXPIRE', KEYS[1], counter_ttl)
+        else
+            redis.call('PERSIST', KEYS[1])
+        end
+        return existing
+    end
     local limit = tonumber(ARGV[3])
-    local current = redis.call('GET', KEYS[1])
+    local db_count = tonumber(ARGV[2])
+    if not limit or limit <= 0 or limit ~= math.floor(limit) then
+        return -2
+    end
+    if not db_count or db_count < 0 or db_count ~= math.floor(db_count) then
+        return -2
+    end
+    local redis_value = redis.call('GET', KEYS[1])
+    -- 达到上限时也必须清除旧 Total key 的 TTL，不能让满额计数器自动消失。
+    if redis_value and counter_ttl == 0 then
+        redis.call('PERSIST', KEYS[1])
+    end
+    local current = tonumber(redis_value)
+    -- 已存在但不是非负整数的计数值属于数据损坏，不能回退到 DB 初值覆盖。
+    if redis_value and (not current or current < 0 or current ~= math.floor(current)) then
+        return -2
+    end
     if not current then
-        current = tonumber(ARGV[2]) or 0
+        current = db_count
     else
-        current = tonumber(current)
+        current = math.max(current, db_count)
     end
     if current >= limit then
         return -1
     end
     local new_val = current + 1
+    -- Daily key 设置滚动 TTL；Total key 使用 counter_ttl=0，必须永久保留。
     redis.call('SET', KEYS[1], new_val)
-    redis.call('EXPIRE', KEYS[1], ARGV[1])
+    if counter_ttl > 0 then
+        redis.call('EXPIRE', KEYS[1], counter_ttl)
+    else
+        -- 兼容旧版本遗留的 30 天 TTL，首次新代码预留时主动清除。
+        redis.call('PERSIST', KEYS[1])
+    end
+    -- reservation token 保留到账本终态；终态清理任务负责删除，不能使用固定 TTL。
+    redis.call('SET', KEYS[2], '1')
+    if token_ttl > 0 then
+        redis.call('EXPIRE', KEYS[2], token_ttl)
+    else
+        redis.call('PERSIST', KEYS[2])
+    end
     return new_val
+    """
+
+    # 仅当本次 token 仍存在时撤销一次；重复调用不会误减其他请求的计数。
+    _ROLLBACK_RESERVATION_LUA = """
+    local token_value = redis.call('GET', KEYS[2])
+    if not token_value then
+        -- token 缺失无法证明此前没有 INCR，也无法区分已回滚与 token 被淘汰。
+        return -3
+    end
+    if token_value == 'ROLLED_BACK' then
+        -- 上次 Lua 已完成回滚但 DB ACK 可能丢失；墓碑证明不得再次 DECR。
+        local current_after_rollback = tonumber(redis.call('GET', KEYS[1]) or '0')
+        if not current_after_rollback or current_after_rollback < 0
+            or current_after_rollback ~= math.floor(current_after_rollback) then
+            return -2
+        end
+        return current_after_rollback
+    end
+    -- 计数器缺失可能是独立淘汰/重启；保留 token 作为恢复证据。
+    if redis.call('EXISTS', KEYS[1]) == 0 then
+        return -2
+    end
+    local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+    if not current or current < 0 or current ~= math.floor(current) then
+        return -2
+    end
+    if current <= 0 then
+        return -2
+    end
+    -- 保留持久化墓碑，覆盖 Redis 回滚成功到 MySQL 终态提交之间的崩溃窗口。
+    redis.call('SET', KEYS[2], 'ROLLED_BACK')
+    redis.call('PERSIST', KEYS[2])
+    return redis.call('DECR', KEYS[1])
     """
 
     # Lua：原子回滚（decr 后若 <0 则归零，避免并发 set 覆盖丢失计数）
     # KEYS[1]: cap_key
     # 返回: 回滚后的最终值
     _DECREMENT_LUA = """
+    -- 不对不存在的 key 执行 DECR，避免创建没有 TTL 的负数 key。
+    local current = redis.call('GET', KEYS[1])
+    if not current then
+        return 0
+    end
     local val = redis.call('DECR', KEYS[1])
     if val < 0 then
-        redis.call('SET', KEYS[1], 0)
+        -- INCR 恢复到 0，保留原 TTL；SET 会清除 TTL。
+        redis.call('INCR', KEYS[1])
         return 0
     end
     return val
@@ -97,8 +199,10 @@ class RedisCapManager:
         offer_id: int, 
         limit: int, 
         publisher_id: Optional[int] = None,
-        initial_value: Optional[int] = None
-    ) -> bool:
+        initial_value: Optional[int] = None,
+        reservation_id: Optional[str] = None,
+        reservation_date: Optional[datetime] = None,
+    ) -> Optional[bool]:
         """
         检查并增加每日计数 (原子操作)
         
@@ -115,24 +219,48 @@ class RedisCapManager:
         if not redis:
             return RedisCapManager._redis_unavailable_result()
             
-        now = get_app_now_naive()
+        # 调用方若已在同一业务事务中确定日期，必须沿用该日期；
+        # 防止等待 Redis/跨午夜时重新取时，导致预留与 DB 快照、回滚 key 不一致。
+        now = reservation_date or get_app_now_naive()
         key = get_daily_cap_key(offer_id, now, publisher_id)
         
         try:
             init_val = str(initial_value) if initial_value is not None else "0"
+            token = reservation_id or uuid.uuid4().hex
+            token_key = f"{key}:reservation:{token}"
             current = await redis.eval(
                 RedisCapManager._RESERVE_LUA,
-                1,
+                2,
                 key,
+                token_key,
                 DEFAULT_EXPIRE_SECONDS,
                 init_val,
                 str(limit),
+                0,  # token 生命周期由持久化账本终态控制，不使用固定 TTL。
             )
-            if int(current) < 0:
+            current = int(current)
+            if current == -3:
+                raise _CapReservationAlreadyRolledBack(
+                    "Redis 日 Cap reservation 已回滚，拒绝同一 reservation 重复预留"
+                )
+            if current == -2:
+                raise _CapReservationStateLost("Redis 日 Cap 计数 key 丢失或状态损坏，拒绝重试放行")
+            if current < 0:
                 return False
             return True
+        except (_CapReservationStateLost, _CapReservationAlreadyRolledBack):
+            raise
         except Exception as e:
-            logger.error(f"Redis Lua操作失败: {e}", exc_info=True)
+            logger.error("Redis 日 Cap 预留结果不确定，使用唯一令牌执行幂等补偿：%s", e, exc_info=True)
+            try:
+                rolled_back = await RedisCapManager.decrement_daily(
+                    offer_id, publisher_id, reservation_date=now,
+                    reservation_id=token,
+                )
+            except Exception:
+                rolled_back = -1
+            if rolled_back < 0:
+                raise RuntimeError("Redis 日 Cap 预留结果不确定且令牌补偿失败") from e
             return RedisCapManager._lua_failure_result()
 
     @staticmethod
@@ -140,8 +268,9 @@ class RedisCapManager:
         offer_id: int, 
         limit: int, 
         publisher_id: Optional[int] = None,
-        initial_value: Optional[int] = None
-    ) -> bool:
+        initial_value: Optional[int] = None,
+        reservation_id: Optional[str] = None,
+    ) -> Optional[bool]:
         """
         检查并增加总计数
         """
@@ -153,67 +282,156 @@ class RedisCapManager:
         
         try:
             init_val = str(initial_value) if initial_value is not None else "0"
+            token = reservation_id or uuid.uuid4().hex
+            token_key = f"{key}:reservation:{token}"
             current = await redis.eval(
                 RedisCapManager._RESERVE_LUA,
-                1,
+                2,
                 key,
-                30 * 24 * 3600,
+                token_key,
+                0,  # Total Cap 计数器不能自动过期。
                 init_val,
                 str(limit),
+                0,  # Total token 在账本终态前永久保留，防止恢复窗口过期。
             )
-            if int(current) < 0:
+            current = int(current)
+            if current == -3:
+                raise _CapReservationAlreadyRolledBack(
+                    "Redis 总 Cap reservation 已回滚，拒绝同一 reservation 重复预留"
+                )
+            if current == -2:
+                raise _CapReservationStateLost("Redis 总 Cap 计数 key 丢失或状态损坏，拒绝重试放行")
+            if current < 0:
                 return False
             return True
+        except (_CapReservationStateLost, _CapReservationAlreadyRolledBack):
+            raise
         except Exception as e:
-            logger.error(f"Redis Lua操作失败: {e}", exc_info=True)
+            logger.error("Redis 总 Cap 预留结果不确定，使用唯一令牌执行幂等补偿：%s", e, exc_info=True)
+            try:
+                rolled_back = await RedisCapManager.decrement_total(
+                    offer_id, publisher_id, reservation_id=token,
+                )
+            except Exception:
+                rolled_back = -1
+            if rolled_back < 0:
+                raise RuntimeError("Redis 总 Cap 预留结果不确定且令牌补偿失败") from e
             return RedisCapManager._lua_failure_result()
             
     @staticmethod
-    async def decrement_daily(
-        offer_id: int,
-        publisher_id: Optional[int] = None
-    ) -> int:
-        """
-        减少每日计数 (用于回滚，原子操作)
+    async def counter_key_exists(counter_key: str) -> Optional[bool]:
+        """检查计数 key 是否存在；None 表示 Redis 不可用或查询状态未知。"""
+        redis = await get_redis_client()
+        if not redis:
+            return None
+        try:
+            return bool(await redis.exists(counter_key))
+        except Exception:
+            logger.error("检查 Cap counter key 是否存在失败：%s", counter_key, exc_info=True)
+            return None
 
-        Returns:
-            int: 回滚后的最终计数值；Redis 不可用或异常返回 -1
+    @staticmethod
+    async def get_reservation_token_state(counter_key: str, token_key: str) -> str:
+        """
+        返回 PRESENT / ROLLED_BACK / ABSENT / UNKNOWN。
+        ROLLED_BACK 是原子回滚墓碑；Redis 不可用、token 存在但 counter 丢失、数据格式损坏均为 UNKNOWN。
         """
         redis = await get_redis_client()
         if not redis:
+            return "UNKNOWN"
+        try:
+            token_value, counter_value = await redis.mget(token_key, counter_key)
+            if token_value is None:
+                return "ABSENT"
+            if token_value in (b"ROLLED_BACK", "ROLLED_BACK"):
+                # 墓碑独立证明原子回滚已完成，即使 counter 后续自然过期也不再 DECR。
+                return "ROLLED_BACK"
+            if counter_value is None:
+                return "UNKNOWN"
+            int(counter_value)  # 校验计数值格式，损坏时不能冒险回滚。
+            return "PRESENT"
+        except Exception:
+            logger.error("读取 Cap Reservation token 状态失败：%s", token_key, exc_info=True)
+            return "UNKNOWN"
+
+    @staticmethod
+    async def rollback_reservation_keys(counter_key: str, token_key: str) -> int:
+        """只根据账本保存的原始 key/token 原子回滚，不重新推导业务 scope。"""
+        redis = await get_redis_client()
+        if not redis:
+            return -1
+        try:
+            return int(await redis.eval(
+                RedisCapManager._ROLLBACK_RESERVATION_LUA,
+                2,
+                counter_key,
+                token_key,
+            ))
+        except Exception:
+            logger.error("按持久化账本回滚 Cap Reservation 失败：%s", token_key, exc_info=True)
             return -1
 
-        now = get_app_now_naive()
-        key = get_daily_cap_key(offer_id, now, publisher_id)
+    @staticmethod
+    async def delete_reservation_token(token_key: str) -> bool:
+        """终态账本确认后删除幂等 token，不修改已提交的 Cap counter。"""
+        if not token_key:
+            return False
+        redis = await get_redis_client()
+        if not redis:
+            raise RuntimeError("Redis unavailable while cleaning committed Cap reservation token")
         try:
-            # 使用 Lua 脚本原子化 decr + 负数归零，避免 TOCTOU 竞态
-            # （decr 后到 set(0) 之间若有 incr 会丢失计数或导致配额虚增）
-            val = await redis.eval(RedisCapManager._DECREMENT_LUA, 1, key)
+            await redis.delete(token_key)
+            return True
+        except Exception as exc:
+            logger.error("清理已终结 Cap reservation token 失败：%s", token_key, exc_info=True)
+            raise RuntimeError("Cap reservation token cleanup failed") from exc
+
+    @staticmethod
+    async def decrement_daily(
+        offer_id: int,
+        publisher_id: Optional[int] = None,
+        reservation_date: Optional[datetime] = None,
+        reservation_id: Optional[str] = None,
+    ) -> int:
+        """按原业务日期回退日 Cap；带 token 时保证同一预留最多回退一次。"""
+        redis = await get_redis_client()
+        if not redis:
+            return -1
+        key_date = reservation_date or get_app_now_naive()
+        key = get_daily_cap_key(offer_id, key_date, publisher_id)
+        try:
+            if reservation_id:
+                token_key = f"{key}:reservation:{reservation_id}"
+                val = await redis.eval(
+                    RedisCapManager._ROLLBACK_RESERVATION_LUA, 2, key, token_key
+                )
+            else:
+                val = await redis.eval(RedisCapManager._DECREMENT_LUA, 1, key)
             return int(val)
         except Exception as e:
-            logger.error(f"Redis回滚失败: {e}", exc_info=True)
+            logger.error("Redis 日 Cap 回滚失败：%s", e, exc_info=True)
             return -1
 
     @staticmethod
     async def decrement_total(
         offer_id: int,
-        publisher_id: Optional[int] = None
+        publisher_id: Optional[int] = None,
+        reservation_id: Optional[str] = None,
     ) -> int:
-        """
-        减少总计数 (用于回滚，原子操作)
-
-        Returns:
-            int: 回滚后的最终计数值；Redis 不可用或异常返回 -1
-        """
+        """回退总 Cap；带 token 时保证同一预留最多回退一次。"""
         redis = await get_redis_client()
         if not redis:
             return -1
-
         key = get_total_cap_key(offer_id, publisher_id)
         try:
-            # 使用 Lua 脚本原子化 decr + 负数归零，避免并发 set 覆盖丢失计数
-            val = await redis.eval(RedisCapManager._DECREMENT_LUA, 1, key)
+            if reservation_id:
+                token_key = f"{key}:reservation:{reservation_id}"
+                val = await redis.eval(
+                    RedisCapManager._ROLLBACK_RESERVATION_LUA, 2, key, token_key
+                )
+            else:
+                val = await redis.eval(RedisCapManager._DECREMENT_LUA, 1, key)
             return int(val)
         except Exception as e:
-            logger.error(f"Redis回滚失败: {e}", exc_info=True)
+            logger.error("Redis 总 Cap 回滚失败：%s", e, exc_info=True)
             return -1

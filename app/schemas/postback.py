@@ -148,6 +148,7 @@ class PostbackForwardLogResponse(BaseSchema):
     retry_count: int
     created_at: datetime
     completed_at: Optional[datetime]
+    pii_scrubbed_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 

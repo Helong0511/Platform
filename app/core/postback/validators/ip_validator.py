@@ -31,10 +31,11 @@ class IpValidator:
         Returns:
             tuple: (是否通过验证，清理后的 IP 地址)
         """
-        # IP 为空或无法获取时仍允许处理（反向代理/CDN 等场景无法可靠取 IP），记录警告
-        if not request_ip or not request_ip.strip() or request_ip.strip() == "unknown":
-            logger.warning("Postback 请求 IP 为空或无法获取：request_ip=%r", request_ip)
-            return True, None
+        # 无法确认来源 IP 时必须 fail-closed；代理/CDN 场景应通过可信代理配置解析真实 IP，
+        # 不能因 request.client 缺失或头部异常而绕过 Postback IP 白名单。
+        if not request_ip or not request_ip.strip() or request_ip.strip().lower() == "unknown":
+            logger.warning("Postback 请求 IP 为空或无法获取，拒绝处理")
+            return False, None
         
         # 清理 IP 地址
         cleaned_ip = IpValidator._clean_ip(request_ip)
@@ -43,7 +44,7 @@ class IpValidator:
         is_whitelisted = await IpValidator._check_whitelist(cleaned_ip, db)
         
         if not is_whitelisted:
-            logger.warning(f"IP 地址不在白名单中：{cleaned_ip}")
+            logger.warning("IP 地址不在白名单中，拒绝处理")
             return False, cleaned_ip
         
         return True, cleaned_ip

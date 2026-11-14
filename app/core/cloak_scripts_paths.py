@@ -13,17 +13,23 @@
 """
 from __future__ import annotations
 
+import logging
 import os
+import re
+import stat
+import tempfile
 from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 
 from app.core.bridge_html_sanitize import sanitize_bridge_html_strict
 
-# 桥页模板 LRU 缓存：键为规范化绝对路径，值为 (mtime, 文本内容)
+logger = logging.getLogger(__name__)
+
+# 桥页模板 LRU 缓存：键为规范化绝对路径，值为 (mtime_ns, size, inode, 文本内容)
 # 文件 mtime 变化或 invalidate_bridge_template_cache 调用时自动失效
 _MAX_BRIDGE_TEMPLATE_CACHE_ENTRIES = 128
-_bridge_template_cache: OrderedDict[str, tuple[float, str]] = OrderedDict()
+_bridge_template_cache: OrderedDict[str, tuple[int, int, int, str]] = OrderedDict()
 
 # 生产环境桥页根目录（与部署脚本约定一致）
 SCRIPTS_DIR_SERVER = "/data/Platform/scripts"
@@ -39,23 +45,93 @@ def iter_bridge_search_bases() -> tuple[str, str]:
     return SCRIPTS_DIR_SERVER, _project_scripts_dir()
 
 
+_SAFE_CLOAK_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
+
+
 def bridge_html_filename(cloak_name: str) -> str:
-    """斗篷名对应的桥页文件名，如 master -> master.html。"""
+    """斗篷名对应的桥页文件名；在文件系统边界再次校验，不能只信任 API Schema。"""
+    if not isinstance(cloak_name, str) or not _SAFE_CLOAK_NAME_RE.fullmatch(cloak_name):
+        raise ValueError("斗篷名称无效：仅支持 1～100 位字母、数字、下划线和中划线")
     return f"{cloak_name}.html"
 
 
 def resolve_bridge_html_read_path(bridge_page_name: str) -> Optional[str]:
-    """返回首个存在的桥页文件绝对路径（与 /change 读取顺序一致：服务器目录优先）。"""
+    """返回首个存在的桥页文件绝对路径；仅接受安全的单层 .html 文件名。"""
+    if not isinstance(bridge_page_name, str) or not bridge_page_name.endswith(".html"):
+        raise ValueError("桥页文件名无效")
+    cloak_name = bridge_page_name[:-5]
+    try:
+        expected_filename = bridge_html_filename(cloak_name)
+    except ValueError as exc:
+        raise ValueError("桥页文件名无效") from exc
+    if expected_filename != bridge_page_name:
+        raise ValueError("桥页文件名无效")
     for base in iter_bridge_search_bases():
         path = os.path.join(base, bridge_page_name)
-        if os.path.isfile(path):
+        try:
+            file_stat = os.lstat(path)
+        except FileNotFoundError:
+            continue
+        # 桥页是应用主动对外返回的 HTML；不跟随符号链接，避免读取脚本目录外文件。
+        if stat.S_ISLNK(file_stat.st_mode):
+            logger.warning("拒绝读取符号链接桥页：%s", path)
+            continue
+        if stat.S_ISREG(file_stat.st_mode):
             return path
     return None
 
 
 def bridge_html_exists(cloak_name: str) -> bool:
-    """任一候选路径存在同名文件即视为已部署桥页。"""
-    return resolve_bridge_html_read_path(bridge_html_filename(cloak_name)) is not None
+    """任一候选路径存在同名文件即视为已部署桥页；历史脏数据按不可用处理。"""
+    try:
+        filename = bridge_html_filename(cloak_name)
+    except ValueError:
+        return False
+    return resolve_bridge_html_read_path(filename) is not None
+
+
+def atomic_write_bridge_html(target_path: str, content: str) -> None:
+    """
+    以同目录临时文件 + os.replace 原子替换桥页，避免并发请求读到截断/半写入 HTML。
+
+    保留已有文件权限；新文件使用 0644。临时文件与目标文件处于同一文件系统，
+    确保 os.replace 不跨设备。写入前先 flush + fsync。
+    """
+    target = os.path.abspath(target_path)
+    parent = os.path.dirname(target)
+    try:
+        target_mode = stat.S_IMODE(os.stat(target).st_mode)
+    except FileNotFoundError:
+        target_mode = 0o644
+
+    fd, temporary_path = tempfile.mkstemp(
+        prefix=f".{os.path.basename(target)}.",
+        suffix=".tmp",
+        dir=parent,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary_path, target_mode)
+        # 原子替换：读取方只会看到完整旧文件或完整新文件。
+        os.replace(temporary_path, target)
+        # 尽力持久化目录项；部分平台/文件系统不支持目录 fsync。
+        try:
+            directory_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError:
+            pass
+    except Exception:
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def read_bridge_html_template_cached(absolute_path: str) -> str:
@@ -77,19 +153,20 @@ def read_bridge_html_template_cached(absolute_path: str) -> str:
     norm = os.path.normpath(os.path.abspath(absolute_path))
     try:
         st = os.stat(norm)
-        mtime = st.st_mtime
+        # 使用纳秒时间、文件大小和 inode，避免同一秒内原子替换时 mtime 精度碰撞。
+        signature = (st.st_mtime_ns, st.st_size, st.st_ino)
     except OSError:
         raise
 
     cached = _bridge_template_cache.get(norm)
-    if cached is not None and cached[0] == mtime:
+    if cached is not None and cached[:3] == signature:
         _bridge_template_cache.move_to_end(norm)
-        return cached[1]
+        return cached[3]
 
     with open(norm, "r", encoding="utf-8") as f:
         content = f.read()
 
-    _bridge_template_cache[norm] = (mtime, content)
+    _bridge_template_cache[norm] = (*signature, content)
     _bridge_template_cache.move_to_end(norm)
     while len(_bridge_template_cache) > _MAX_BRIDGE_TEMPLATE_CACHE_ENTRIES:
         _bridge_template_cache.popitem(last=False)
@@ -140,18 +217,18 @@ def resolve_bridge_html_write_path(cloak_name: str) -> str:
     name = bridge_html_filename(cloak_name)
     for base in iter_bridge_search_bases():
         candidate = os.path.join(base, name)
-        if os.path.isfile(candidate):
+        if os.path.lexists(candidate):
+            candidate_stat = os.lstat(candidate)
+            if stat.S_ISLNK(candidate_stat.st_mode) or not stat.S_ISREG(candidate_stat.st_mode):
+                raise ValueError("桥页目标必须是普通文件，拒绝符号链接或特殊文件")
             if os.access(candidate, os.W_OK):
                 return candidate
-            # 文件存在但不可写：目录可写时尝试删除后重写（等价覆盖）
+            # 原子替换只要求父目录可写，不要求旧文件本身可写。
+            # 不要提前删除旧文件：若后续上传失败，应保留当前可用桥页。
             if os.access(base, os.W_OK):
-                try:
-                    os.remove(candidate)
-                    return candidate
-                except OSError:
-                    pass
+                return candidate
             raise PermissionError(
-                "桥页文件不可写，无法覆盖上传。" + _permission_help_extra(candidate)
+                "桥页文件及其目录均不可写，无法原子替换上传。" + _permission_help_extra(candidate)
             )
 
     server, local = iter_bridge_search_bases()

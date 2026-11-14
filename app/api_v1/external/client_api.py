@@ -16,7 +16,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -99,7 +99,10 @@ async def _background_client_api_side_effects(
             )
             await commit_audit_log(bg_db)
     except Exception as log_error:
-        logger.warning(f"后台记录客户API访问日志失败: {log_error}")
+        logger.warning(
+            "后台记录客户 API 访问日志失败：error_type=%s",
+            type(log_error).__name__,
+        )
 
     if telegram_msg:
         try:
@@ -110,7 +113,10 @@ async def _background_client_api_side_effects(
         except asyncio.TimeoutError:
             logger.warning("后台发送 Telegram 通知超时")
         except Exception as notify_error:
-            logger.warning(f"后台发送 Telegram 通知失败: {notify_error}")
+            logger.warning(
+                "后台发送 Telegram 通知失败：error_type=%s",
+                type(notify_error).__name__,
+            )
 
 
 @router.get(
@@ -119,21 +125,34 @@ async def _background_client_api_side_effects(
     summary="获取当前客户 API 密钥",
 )
 async def get_client_api_key(
+    client_id: int | None = Query(default=None, ge=1, description="多客户账号需指定要查看密钥的客户 ID"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """客户登录后按需获取 API 密钥，用于对接文档与签名示例。"""
+    """客户登录后按需获取指定客户的 API 密钥；单客户账号兼容旧调用。"""
     if current_user.role != UserRole.CLIENT:
         raise_api_exception(ErrorCode.FORBIDDEN, detail="仅客户账号可获取 API 密钥")
-    result = await db.execute(
-        select(Client).where(Client.user_id == current_user.id, Client.is_active == True)
+
+    query = select(Client).where(
+        Client.user_id == current_user.id,
+        Client.is_active == True,
     )
-    client = result.scalars().first()
-    if not client:
-        raise_api_exception(ErrorCode.CLIENT_NOT_FOUND, detail="客户信息不存在")
+    if client_id is not None:
+        query = query.where(Client.id == client_id)
+    result = await db.execute(query.order_by(Client.id.asc()))
+    clients = result.scalars().all()
+    if not clients:
+        raise_api_exception(ErrorCode.CLIENT_NOT_FOUND, detail="客户信息不存在或无权访问")
+    if client_id is None and len(clients) > 1:
+        raise_api_exception(
+            ErrorCode.INVALID_PARAMETER,
+            detail="当前账号关联多个客户，请通过 client_id 指定要获取密钥的客户",
+        )
+
+    client = clients[0]
     if not client.api_enabled:
         raise_api_exception(ErrorCode.FORBIDDEN, detail="API 访问未启用")
-    return ResponseBaseSchema.success(data={"key": client.key})
+    return ResponseBaseSchema.success(data={"client_id": client.id, "key": client.key})
 
 
 # ====== 请求模型 ======
@@ -258,8 +277,13 @@ async def get_client_products(
     # ---------- 入口：参数与依赖准备 ----------
     # ---------- 异常处理 ----------
     try:
-        # 验证请求（产品接口不需要额外的参数）
-        client = await verify_client_request(api_request, db)
+        # 使用可信代理边界解析客户端 IP，并在认证入口执行客户白名单。
+        client_ip = get_client_ip(request)
+        client = await verify_client_request(
+            api_request,
+            db,
+            client_ip=client_ip,
+        )
 
         # 查询该客户的所有激活产品
         result = await db.execute(
@@ -309,10 +333,13 @@ async def get_client_products(
         # ---------- 条件分支 ----------
         if isinstance(e, HTTPException):
             raise e
-        logger.error(f"查询产品列表失败: {str(e)}", exc_info=True)
+        logger.error(
+            "查询产品列表失败：error_type=%s",
+            type(e).__name__,
+        )
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"查询产品列表失败：{str(e)}"
+            detail="查询产品列表失败，请稍后重试",
         )
 
 
@@ -356,9 +383,12 @@ async def get_client_data(
                 detail=str(exc),
             )
 
+        # 在签名认证前解析来源 IP，白名单不读取可伪造的原始请求头。
+        client_ip = get_client_ip(request)
         client = await verify_client_request(
             api_request,
             db,
+            client_ip=client_ip,
             data_type=api_request.data_type,
             # 签名须与请求体原文一致；country_ad_unit 等别名在查询前才规范化
             dimension=api_request.dimension,
@@ -449,7 +479,6 @@ async def get_client_data(
         )
 
         username, user_full_name = await _get_client_user_names(db, client.user_id)
-        client_ip = get_client_ip(request)
 
         telegram_msg = None
         if len(data_list) > 0:
@@ -516,7 +545,10 @@ async def get_client_data(
         # ---------- 条件分支 ----------
         if isinstance(e, HTTPException):
             raise e
-        logger.error(f"查询广告数据失败: {str(e)}", exc_info=True)
+        logger.error(
+            "查询广告数据失败：error_type=%s",
+            type(e).__name__,
+        )
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail="查询广告数据失败，请稍后重试"

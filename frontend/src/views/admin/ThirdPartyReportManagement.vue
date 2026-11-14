@@ -142,7 +142,34 @@
           </template>
         </el-table-column>
         <el-table-column v-if="columnVisibility.attempt_count" prop="attempt_count" label="尝试次数" width="100"
-          align="center" />
+          align="center">
+          <template #default="scope">
+            {{ scope.row.attempt_count || 0 }} / {{ scope.row.max_attempts || 0 }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="manual_retry_count" label="人工重试" width="110" align="center">
+          <template #default="scope">
+            {{ scope.row.manual_retry_count || 0 }} / 3
+          </template>
+        </el-table-column>
+        <el-table-column prop="outbox_enqueued" label="持久化队列" width="120" align="center">
+          <template #default="scope">
+            <el-tag v-if="scope.row.outbox_enqueued" :type="getOutboxTag(scope.row)" size="small">
+              {{ getOutboxLabel(scope.row) }}
+            </el-tag>
+            <span v-else>非队列事件</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="next_retry_time" label="下次重试时间" width="180">
+          <template #default="scope">
+            {{ scope.row.next_retry_time ? formatDateTime(scope.row.next_retry_time) : '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="outbox_error_category" label="队列失败原因" min-width="220" show-overflow-tooltip>
+          <template #default="scope">
+            {{ scope.row.outbox_error_category || '-' }}
+          </template>
+        </el-table-column>
         <el-table-column v-if="columnVisibility.response_status" prop="response_status" label="响应状态码" width="120"
           align="center">
           <template #default="scope">
@@ -161,11 +188,15 @@
         </el-table-column>
         <el-table-column v-if="columnVisibility.use_hash" prop="use_hash" label="哈希处理" width="120" align="center">
           <template #default="scope">
-            <el-button size="small" :type="scope.row.use_hash ? 'success' : 'danger'"
+            <el-button v-if="!scope.row.outbox_enqueued || scope.row.outbox_payload_editable"
+              size="small" :type="scope.row.use_hash ? 'success' : 'danger'"
               @click="handleHashToggle(scope.row)" :loading="scope.row._hashLoading"
               :disabled="scope.row._hashLoading || loading">
               {{ scope.row.use_hash ? '启用' : '禁用' }}
             </el-button>
+            <el-tag v-else :type="scope.row.use_hash ? 'success' : 'danger'" size="small">
+              {{ scope.row.use_hash ? '已启用' : '已禁用' }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column v-if="columnVisibility.created_at" prop="created_at" label="创建时间" width="180">
@@ -193,12 +224,13 @@
             <el-button type="primary" link size="small" @click="handleViewDetail(scope.row)">
               详情
             </el-button>
-            <el-button type="warning" link size="small" @click="handleEdit(scope.row)">
+            <el-button v-if="!scope.row.outbox_enqueued || scope.row.outbox_payload_editable"
+              type="warning" link size="small" @click="handleEdit(scope.row)">
               编辑
             </el-button>
-            <el-button v-if="scope.row.status === 'failed'" type="danger" link size="small"
-              @click="handleRetry(scope.row)">
-              重新上报
+            <el-button v-if="scope.row.can_requeue"
+              type="danger" link size="small" @click="handleRetry(scope.row)">
+              重新排队
             </el-button>
           </template>
         </el-table-column>
@@ -242,13 +274,25 @@
           </el-descriptions-item>
           <el-descriptions-item label="尝试次数">{{ currentLog.attempt_count }} / {{ currentLog.max_attempts
           }}</el-descriptions-item>
-          <el-descriptions-item :label="currentLog.use_hash ? '邮箱（已哈希）' : '邮箱'">
+          <el-descriptions-item label="人工重新入队次数">
+            {{ currentLog.manual_retry_count || 0 }} / 3
+          </el-descriptions-item>
+          <el-descriptions-item label="持久化队列状态">
+            <el-tag v-if="currentLog.outbox_enqueued" :type="getOutboxTag(currentLog)" size="small">
+              {{ getOutboxLabel(currentLog) }}
+            </el-tag>
+            <span v-else>非队列事件，不支持持久化重新排队</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="下次重试时间">
+            {{ currentLog.next_retry_time ? formatDateTime(currentLog.next_retry_time) : '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="邮箱（已脱敏）">
             {{ currentLog.email || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item :label="currentLog.use_hash ? 'IP地址（已哈希）' : 'IP地址'">
+          <el-descriptions-item label="IP地址（已脱敏）">
             {{ currentLog.ip || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item :label="currentLog.use_hash ? '手机号（已哈希）' : '手机号'">
+          <el-descriptions-item label="手机号（已脱敏）">
             {{ currentLog.phone || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="哈希处理">
@@ -274,7 +318,7 @@
           <el-descriptions-item label="完成时间">
             {{ currentLog.completed_at ? formatDateTime(currentLog.completed_at) : '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="用户代理" :span="2">
+          <el-descriptions-item label="用户代理（已隐藏）" :span="2">
             {{ currentLog.ua || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="完整上报参数" :span="2" v-if="currentLog.report_params">
@@ -324,19 +368,19 @@
           <el-input v-model.number="editForm.amount" type="number" placeholder="请输入支付金额" />
         </el-form-item>
         <el-form-item label="邮箱">
-          <el-input v-model="editForm.email" placeholder="请输入邮箱" />
+          <el-input v-model="editForm.email" placeholder="留空保持原值；输入新邮箱以替换" />
         </el-form-item>
         <el-form-item label="IP地址">
-          <el-input v-model="editForm.ip" placeholder="请输入IP地址" />
+          <el-input v-model="editForm.ip" placeholder="留空保持原值；输入新 IP 以替换" />
         </el-form-item>
         <el-form-item label="手机号">
-          <el-input v-model="editForm.phone" placeholder="请输入手机号" />
+          <el-input v-model="editForm.phone" placeholder="留空保持原值；输入新手机号以替换" />
         </el-form-item>
         <el-form-item label="用户代理">
-          <el-input v-model="editForm.ua" type="textarea" :rows="3" placeholder="请输入用户代理" />
+          <el-input v-model="editForm.ua" type="textarea" :rows="3" placeholder="留空保持原值；输入新 UA 以替换" />
         </el-form-item>
         <el-form-item label="完整上报参数">
-          <el-input v-model="editForm.report_params" type="textarea" :rows="4" placeholder="请输入完整上报参数（JSON格式）" />
+          <el-input v-model="editForm.report_params" type="textarea" :rows="4" placeholder="留空保持原值；输入新的 JSON 参数以替换" />
         </el-form-item>
         <el-form-item label="哈希处理">
           <el-switch v-model="editForm.use_hash" />
@@ -456,6 +500,27 @@ const editForm = reactive({
 
 const formatJson = formatReportJson;
 
+// 根据持久化 Outbox 字段准确展示重试状态，避免将普通失败日志误认为可重试。
+const getOutboxLabel = (row) => {
+  if (!row?.outbox_enqueued) return '非队列事件';
+  if (row.status === 'success') return '已成功';
+  if (row.outbox_error_category?.includes('配置缺失')) return '配置缺失';
+  if ((row.attempt_count || 0) >= (row.max_attempts || 0)) return '重试耗尽';
+  if (row.outbox_processing) return '处理中';
+  if (row.status === 'pending') return '等待 worker';
+  if (row.next_retry_time) {
+    return new Date(row.next_retry_time).getTime() > Date.now() ? '等待重试' : '等待 worker';
+  }
+  return '需人工处理';
+};
+
+const getOutboxTag = (row) => {
+  const label = getOutboxLabel(row);
+  if (label === '已成功') return 'success';
+  if (label === '重试耗尽' || label === '待核查' || label === '配置缺失') return 'danger';
+  return 'warning';
+};
+
 // 查看详情
 const handleViewDetail = async (log) => {
   try {
@@ -477,11 +542,11 @@ const handleEdit = async (log) => {
     editForm.conversion_id = detail.conversion_id || '';
     editForm.currency = detail.currency || '';
     editForm.amount = detail.amount || '';
-    editForm.email = detail.email || '';
-    editForm.ip = detail.ip || '';
-    editForm.phone = detail.phone || '';
-    editForm.ua = detail.ua || '';
-    editForm.report_params = detail.report_params || '';
+    editForm.email = ''; // 详情接口只返回脱敏值，留空表示不修改原始字段。
+    editForm.ip = ''; // 详情接口只返回脱敏值，留空表示不修改原始字段。
+    editForm.phone = ''; // 详情接口只返回脱敏值，留空表示不修改原始字段。
+    editForm.ua = ''; // 详情接口只返回脱敏值，留空表示不修改原始字段。
+    editForm.report_params = ''; // 详情接口只返回脱敏值，留空表示不修改原始字段。
     editForm.use_hash = detail.use_hash !== false;
     editDialogVisible.value = true;
   } catch (error) {
@@ -518,7 +583,7 @@ const handleSaveEdit = async () => {
 const handleRetry = async (log) => {
   try {
     await ElMessageBox.confirm(
-      '确定要重新上报这条日志吗？',
+      '确定将这条失败的 Outbox 事件重新排队吗？后台 worker 将在符合条件时发送。',
       '提示',
       {
         confirmButtonText: '确定',
@@ -527,7 +592,7 @@ const handleRetry = async (log) => {
       }
     );
     await retryThirdPartyReport(log.id);
-    ElMessage.success('已触发重新上报，请稍后刷新查看结果');
+    ElMessage.success('已重新排队，后台 worker 将处理；请稍后刷新查看结果');
     fetchLogs();
   } catch (error) {
     if (error !== 'cancel') {

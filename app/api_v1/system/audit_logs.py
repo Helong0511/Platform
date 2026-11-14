@@ -7,7 +7,6 @@
 主要端点（前缀 /audit-logs）：
 - GET /              分页列表
 - GET /stats/summary 统计概览
-- DELETE /clear-all  清空全部日志（TRUNCATE + 重置自增）
 - GET /{log_id}      单条详情
 - POST /client-error 前端错误上报。
 
@@ -28,12 +27,14 @@ from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.dependencies import get_audit_log_service
 from app.core.utils import get_client_ip
+from app.core.audit_log import sanitize_audit_log_response_payload
 from app.models.models import UserAuditLog, User
 from fastapi import Request
 from app.schemas.audit_log import (
     UserAuditLogResponse,
     UserAuditLogListResponse,
     UserAuditLogQuery,
+    ClientErrorReportRequest,
 )
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.services.audit_log_service import AuditLogService
@@ -126,10 +127,10 @@ async def get_audit_logs(
         raise
 
     except Exception as e:
-        logger.error(f"获取用户操作日志列表失败: {e}", exc_info=True)
+        logger.error("获取用户操作日志列表失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取日志列表失败：{str(e)}"
+            detail="获取日志列表失败，请稍后重试"
         )
 
 
@@ -179,55 +180,10 @@ async def get_audit_log_stats(
         raise
 
     except Exception as e:
-        logger.error(f"获取日志统计信息失败: {e}", exc_info=True)
+        logger.error("获取日志统计信息失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取统计信息失败：{str(e)}"
-        )
-
-
-@router.delete(
-    "/clear-all",
-    response_model=ResponseBaseSchema[dict],
-    summary="清除全部操作日志",
-    description="TRUNCATE user_audit_logs 并重置 AUTO_INCREMENT=1，仅管理员可访问",
-)
-async def clear_all_audit_logs(
-        request: Request,
-        db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(require_admin),
-):
-    """
-    清空操作日志表（不可恢复）。
-
-    效果等同：
-    TRUNCATE TABLE `user_audit_logs`;
-    ALTER TABLE user_audit_logs AUTO_INCREMENT = 1;
-    """
-    audit_log_service: AuditLogService = await get_audit_log_service(db)
-    # 先取出标量，避免清表流程影响会话对象后懒加载失败
-    admin_id = current_user.id
-    admin_username = current_user.username
-    try:
-        result = await audit_log_service.clear_all_audit_logs()
-        logger.warning(
-            "管理员清空全部操作日志: user_id=%s username=%s ip=%s auto_increment=%s",
-            admin_id,
-            admin_username,
-            get_client_ip(request),
-            result.get("auto_increment"),
-        )
-        return ResponseBaseSchema.success(
-            data=result,
-            message="已清除全部操作日志",
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"清除全部操作日志失败: {e}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"清除全部操作日志失败：{str(e)}",
+            detail="获取统计信息失败，请稍后重试"
         )
 
 
@@ -262,17 +218,27 @@ async def get_audit_log(
             )
 
         return ResponseBaseSchema.success(
-            data=UserAuditLogResponse.model_validate(log),
+            data=UserAuditLogResponse.model_validate(
+                sanitize_audit_log_response_payload({
+                    field: getattr(log, field, None)
+                    for field in (
+                        'id', 'user_id', 'username', 'action_type', 'resource_type',
+                        'resource_id', 'resource_name', 'ip_address', 'user_agent',
+                        'request_method', 'request_path', 'request_params',
+                        'status_code', 'success', 'error_message', 'details', 'created_at',
+                    )
+                })
+            ),
             message="获取日志详情成功"
         )
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取用户操作日志详情失败: {e}", exc_info=True)
+        logger.error("获取用户操作日志详情失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取日志详情失败: {str(e)}"
+            detail="获取日志详情失败，请稍后重试"
         )
 
 
@@ -284,11 +250,7 @@ async def get_audit_log(
 )
 async def log_client_error(
         request: Request,
-        error_type: str = Query(..., description="错误类型"),
-        error_message: str = Query(..., description="错误信息"),
-        error_stack: Optional[str] = Query(None, description="错误堆栈"),
-        error_url: Optional[str] = Query(None, description="错误发生的URL"),
-        user_agent: Optional[str] = Query(None, description="用户代理"),
+        payload: ClientErrorReportRequest,
         db: AsyncSession = Depends(get_db)
 ):
     """
@@ -296,12 +258,12 @@ async def log_client_error(
     
     注意：此端点允许未认证用户访问，用于记录前端错误
     """
-    error_type = (error_type or "")[:100]
-    error_message = (error_message or "")[:500]
-    if error_stack:
-        error_stack = error_stack[:2000]
-    if error_url:
-        error_url = error_url[:500]
+    # Pydantic 在请求体入口强制校验长度，避免 URL 查询参数泄露错误消息/堆栈。
+    error_type = payload.error_type
+    error_message = payload.error_message
+    error_stack = payload.error_stack
+    error_url = payload.error_url
+    user_agent = payload.user_agent
 
     # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在AuditLogService中）
@@ -356,7 +318,7 @@ async def log_client_error(
 
     except Exception as e:
         # 记录错误日志失败不应该影响前端，静默处理
-        logger.warning(f"记录客户端错误日志失败: {e}")
+        logger.warning("记录客户端错误日志失败: error_type=%s", type(e).__name__)
         return ResponseBaseSchema.success(
             data={"message": "错误日志记录失败"},
             message="错误日志记录失败"

@@ -9,13 +9,13 @@ Cap（转化上限）服务层。
 - 被管理端 Cap 管理 API 调用
 
 注意事项：
-1. Cap 归零由 ``cpl_tasks.reset_daily_caps`` 在 UTC 0 点执行
+1. Cap 归零由 ``cpl_tasks.reset_daily_caps`` 按调度器配置时区的每日 00:00 执行（默认 Asia/Shanghai）
 2. 修改 Cap 配置后应同步 Redis/内存计数状态（如有缓存）
 """
 import logging
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import func, delete
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
@@ -23,7 +23,7 @@ from sqlalchemy.orm import joinedload
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.utils import get_app_now_naive
-from app.models.models import OfferCap, Offer, Advertiser, Publisher, User
+from app.models.models import OfferCap, Offer, Publisher, User
 from app.schemas.cpl.cap import OfferCapResponse
 from app.services.base_service import BaseService
 
@@ -41,6 +41,78 @@ class CapService(BaseService[OfferCap]):
     def __init__(self, db: AsyncSession):
         """注入异步数据库会话。"""
         super().__init__(db, OfferCap)
+
+    async def _validate_cap_scope(
+        self,
+        scope: Dict[str, Any],
+        *,
+        exclude_cap_id: Optional[int] = None,
+    ) -> Offer:
+        """校验 Cap 归属与唯一业务范围，并锁定 Offer 串行化同一 Offer 的配置写入。
+
+        Offer 行锁让通过本服务创建/更新同一 Offer 的并发请求串行执行；
+        不能用可空列的普通复合唯一索引替代，因为 MySQL UNIQUE 允许多个 NULL。
+        """
+        cap_type = scope.get("cap_type")
+        if cap_type not in {"offer", "advertiser_offer"}:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail="Cap 类型只能是 offer 或 advertiser_offer",
+            )
+
+        offer_id = scope.get("offer_id")
+        offer_result = await self.db.execute(
+            select(Offer).where(Offer.id == offer_id).with_for_update()
+        )
+        offer = offer_result.scalars().first()
+        if not offer:
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail=f"Offer ID {offer_id} 不存在",
+            )
+
+        advertiser_id = scope.get("advertiser_id")
+        if cap_type == "advertiser_offer":
+            if advertiser_id is None or advertiser_id != offer.advertiser_id:
+                raise_api_exception(
+                    ErrorCode.INVALID_PARAMETER,
+                    detail="广告主专属 Cap 的 advertiser_id 必须与 Offer 所属广告主一致",
+                )
+        elif advertiser_id is not None:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail="Offer 全局 Cap 不允许设置 advertiser_id",
+            )
+
+        publisher_id = scope.get("publisher_id")
+        if publisher_id is not None:
+            publisher_result = await self.db.execute(
+                select(Publisher.id).where(Publisher.id == publisher_id).limit(1)
+            )
+            if publisher_result.scalar_one_or_none() is None:
+                raise_api_exception(
+                    ErrorCode.RESOURCE_NOT_FOUND,
+                    detail=f"渠道ID {publisher_id} 不存在",
+                )
+
+        duplicate_filters = [
+            OfferCap.cap_type == cap_type,
+            OfferCap.advertiser_id == advertiser_id,
+            OfferCap.offer_id == offer_id,
+            OfferCap.publisher_id == publisher_id,
+        ]
+        if exclude_cap_id is not None:
+            duplicate_filters.append(OfferCap.id != exclude_cap_id)
+        duplicate_result = await self.db.execute(
+            select(OfferCap.id).where(*duplicate_filters).limit(1)
+        )
+        if duplicate_result.scalar_one_or_none() is not None:
+            raise_api_exception(
+                ErrorCode.RESOURCE_ALREADY_EXISTS,
+                detail="相同 Offer、广告主、渠道和 Cap 类型的配置已存在",
+            )
+
+        return offer
 
     @staticmethod
     def to_cap_response(cap: OfferCap) -> OfferCapResponse:
@@ -85,7 +157,7 @@ class CapService(BaseService[OfferCap]):
 
         Args:
             offer_id: 限定单个 Offer，None 表示全量扫描
-            fix: True 时由 consistency_checker 自动修复不一致项
+            fix: 兼容旧 API 参数；为保护并发预留，不再执行 DB -> Redis 自动覆盖
 
         Returns:
             tuple[list, str]: (不一致记录列表, 人类可读摘要信息)
@@ -100,7 +172,7 @@ class CapService(BaseService[OfferCap]):
         if inconsistencies:
             message = f"发现 {len(inconsistencies)} 个不一致的记录"
             if fix:
-                message += "，已自动修复"
+                message += "；自动覆盖修复已禁用，需通过安全同步流程处理"
         else:
             message = "所有Cap计数一致"
         return inconsistencies, message
@@ -126,40 +198,8 @@ class CapService(BaseService[OfferCap]):
         Raises:
             APIException: 关联实体不存在或数据库写入失败
         """
-        # --- 关联实体校验 ---
-        offer_result = await self.db.execute(
-            select(Offer).where(Offer.id == cap_data['offer_id'])
-        )
-        offer = offer_result.scalars().first()
-        if not offer:
-            raise_api_exception(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                detail=f"Offer ID {cap_data['offer_id']} 不存在"
-            )
-
-        # 如果是advertiser_offer类型，验证广告主
-        if cap_data.get('cap_type') == 'advertiser_offer' and cap_data.get('advertiser_id'):
-            adv_result = await self.db.execute(
-                select(Advertiser).where(Advertiser.id == cap_data['advertiser_id'])
-            )
-            advertiser = adv_result.scalars().first()
-            if not advertiser:
-                raise_api_exception(
-                    ErrorCode.RESOURCE_NOT_FOUND,
-                    detail=f"广告主ID {cap_data['advertiser_id']} 不存在"
-                )
-
-        # 如果指定了渠道，验证渠道
-        if cap_data.get('publisher_id'):
-            pub_result = await self.db.execute(
-                select(Publisher).where(Publisher.id == cap_data['publisher_id'])
-            )
-            publisher = pub_result.scalars().first()
-            if not publisher:
-                raise_api_exception(
-                    ErrorCode.RESOURCE_NOT_FOUND,
-                    detail=f"渠道ID {cap_data['publisher_id']} 不存在"
-                )
+        # 锁定 Offer 并校验广告主归属、渠道及重复配置。
+        await self._validate_cap_scope(cap_data)
 
         # 设置Cap开始日期（用于Total Cap）
         cap_start_date = None
@@ -311,7 +351,7 @@ class CapService(BaseService[OfferCap]):
             APIException: 记录不存在或提交失败
         """
         result = await self.db.execute(
-            select(OfferCap).where(OfferCap.id == cap_id)
+            select(OfferCap).where(OfferCap.id == cap_id).with_for_update()
         )
         cap = result.scalars().first()
 
@@ -321,9 +361,54 @@ class CapService(BaseService[OfferCap]):
                 detail=f"Cap配置ID {cap_id} 不存在"
             )
 
-        # 如果更新了total_cap且之前没有cap_start_date，设置开始日期
+        # Cap 的计数器以 Offer/渠道作为 Redis key 维度。
+        # 修改配置归属会让旧范围的 DB 计数被带入新范围，或让新旧范围共享错误的基线；
+        # 因此已有配置不允许原地迁移范围。需要调整范围时，应删除旧配置并新建目标范围配置。
+        scope_fields = ("cap_type", "advertiser_id", "offer_id", "publisher_id")
+        changed_scope = {
+            key: update_data[key]
+            for key in scope_fields
+            if key in update_data and update_data[key] != getattr(cap, key)
+        }
+        if changed_scope:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail=(
+                    "不允许原地修改 Cap 的归属范围（"
+                    + ", ".join(sorted(changed_scope.keys()))
+                    + "）；请删除旧配置后按目标范围重新创建，避免计数器串用"
+                ),
+            )
+
+        # 先合并现有范围与更新字段，再执行与创建相同的完整校验。
+        effective_scope = {
+            "cap_type": cap.cap_type,
+            "advertiser_id": cap.advertiser_id,
+            "offer_id": cap.offer_id,
+            "publisher_id": cap.publisher_id,
+        }
+        effective_scope.update({
+            key: update_data[key]
+            for key in ("cap_type", "advertiser_id", "offer_id", "publisher_id")
+            if key in update_data
+        })
+        await self._validate_cap_scope(
+            effective_scope,
+            exclude_cap_id=cap_id,
+        )
+
+        # 在持有行锁时记录修改前值，供 API 写入完整的变更审计。
+        # 仅记录本次请求涉及的模型字段，避免把无关字段或敏感信息写入审计。
+        audit_before = {
+            key: getattr(cap, key)
+            for key in update_data
+            if hasattr(cap, key)
+        }
+
+        # 如果首次设置 total_cap 且尚无 cap_start_date，设置开始日期。
         if 'total_cap' in update_data and update_data['total_cap'] and not cap.cap_start_date:
             update_data['cap_start_date'] = get_app_now_naive()  # 使用北京时间
+            audit_before.setdefault("cap_start_date", cap.cap_start_date)
 
         for key, value in update_data.items():
             if hasattr(cap, key):
@@ -342,6 +427,8 @@ class CapService(BaseService[OfferCap]):
             result = await self.db.execute(query)
             # 使用joinedload时，为了安全起见使用unique()去重
             cap = result.unique().scalars().first()
+            # refresh 后重新附加快照，供 API 记录实际变更前后的值。
+            cap._audit_before = audit_before
 
             logger.info(f"Cap配置更新成功: cap_id={cap_id}")
             return cap
@@ -357,7 +444,7 @@ class CapService(BaseService[OfferCap]):
             self,
             cap_id: int,
             current_user: User
-    ) -> None:
+    ) -> Dict[str, Any]:
         """
         物理删除 Cap 配置。
 
@@ -368,8 +455,9 @@ class CapService(BaseService[OfferCap]):
         Raises:
             APIException: 记录不存在或删除失败
         """
+        # 与转化预留、同步器使用相同的 OfferCap 行锁协议，避免删除和计数更新交错。
         result = await self.db.execute(
-            select(OfferCap).where(OfferCap.id == cap_id)
+            select(OfferCap).where(OfferCap.id == cap_id).with_for_update()
         )
         cap = result.scalars().first()
 
@@ -380,10 +468,26 @@ class CapService(BaseService[OfferCap]):
             )
 
         try:
-            await self.db.execute(delete(OfferCap).where(OfferCap.id == cap_id))
+            # 删除已锁定的 ORM 实体，避免绕过当前事务内的行锁对象。
+            # 物理删除前保留配置快照，供 API 写入可追溯的审计详情。
+            deleted_snapshot = {
+                "cap_id": cap.id,
+                "cap_type": cap.cap_type,
+                "advertiser_id": cap.advertiser_id,
+                "offer_id": cap.offer_id,
+                "publisher_id": cap.publisher_id,
+                "daily_cap": cap.daily_cap,
+                "total_cap": cap.total_cap,
+                "current_daily_count": cap.current_daily_count,
+                "current_total_count": cap.current_total_count,
+                "cap_start_date": cap.cap_start_date,
+                "is_active": cap.is_active,
+            }
+            await self.db.delete(cap)
             await self.db.flush()
 
             logger.info(f"Cap配置删除成功: cap_id={cap_id}")
+            return deleted_snapshot
         except Exception as e:
             await self.db.rollback()
             logger.error(f"删除Cap配置失败: {str(e)}", exc_info=True)

@@ -7,6 +7,7 @@
 """
 import hashlib
 import hmac
+import ipaddress
 import logging
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -126,6 +127,65 @@ def verify_signature(
     return hmac.compare_digest(calculated_sign, provided)
 
 
+def _is_client_ip_allowed(allowed_ips: str | None, client_ip: str | None) -> bool:
+    """按客户配置校验来源 IP；空白配置不限制，配置错误时 fail-closed。"""
+    configured = (allowed_ips or "").strip()
+    if not configured:
+        return True
+
+    try:
+        remote_ip = ipaddress.ip_address((client_ip or "").strip())
+    except ValueError:
+        return False
+
+    entries = [item.strip() for item in configured.split(",") if item.strip()]
+    if not entries:
+        # 非空但只包含分隔符的配置不是“未配置”，必须拒绝。
+        return False
+
+    allowed = set()
+    for entry in entries:
+        try:
+            allowed.add(ipaddress.ip_address(entry))
+        except ValueError:
+            # 管理配置中只要存在非法条目就拒绝，避免错误配置意外扩大访问范围。
+            logger.error("客户 IP 白名单配置无效：拒绝访问")
+            return False
+
+    # IPv4-mapped IPv6 地址按其 IPv4 地址匹配，避免双栈代理造成误拒绝。
+    if isinstance(remote_ip, ipaddress.IPv6Address) and remote_ip.ipv4_mapped:
+        remote_ip = remote_ip.ipv4_mapped
+    return remote_ip in allowed
+
+
+def _get_active_user_clients(clients):
+    """按 ID 稳定排序，仅返回仍启用的客户主体。"""
+    # User.clients 是一对多关系且未声明 order_by；不能依赖数据库偶然返回顺序
+    # 决定登录响应中默认展示的 Client。与用户管理 API 使用相同的稳定排序。
+    active_clients = [
+        client
+        for client in (clients or [])
+        if bool(getattr(client, "is_active", True))
+    ]
+    return sorted(
+        active_clients,
+        key=lambda client: int(getattr(client, "id", 0) or 0),
+    )
+
+
+def _is_user_client_ip_allowed(clients, client_ip: str | None) -> bool:
+    """
+    对共享同一登录账号的多个启用中 Client 采用交集策略：
+    每个已配置白名单的启用中 Client 都必须允许当前来源 IP；停用主体不再参与授权。
+    """
+    configured_policies = [
+        getattr(client, "allowed_ips", None)
+        for client in _get_active_user_clients(clients)
+        if (getattr(client, "allowed_ips", None) or "").strip()
+    ]
+    return all(_is_client_ip_allowed(policy, client_ip) for policy in configured_policies)
+
+
 async def verify_client_request(
     request: any,  # ClientAPIBaseRequest 类型
     db: AsyncSession,
@@ -136,6 +196,7 @@ async def verify_client_request(
     page: int | None = None,
     page_size: int | None = None,
     time_tolerance: int = CLIENT_API_TIME_TOLERANCE_SECONDS,
+    client_ip: str | None = None,
 ) -> Client:
     """
     验证客户请求
@@ -186,6 +247,14 @@ async def verify_client_request(
         raise_api_exception(
             ErrorCode.CLIENT_API_VALIDATION_FAILED,
             detail="客户API访问未启用，请联系管理员开启"
+        )
+
+    # IP 白名单必须使用经过可信代理边界解析的客户端 IP，不直接读取请求头。
+    if not _is_client_ip_allowed(client.allowed_ips, client_ip):
+        logger.warning("客户 API 来源 IP 不在允许列表中：client_id=%s", client.id)
+        raise_api_exception(
+            ErrorCode.FORBIDDEN,
+            detail="当前来源 IP 不在客户 API 允许列表中",
         )
 
     # 2. 验证请求时间差异（默认正负 15 秒内）

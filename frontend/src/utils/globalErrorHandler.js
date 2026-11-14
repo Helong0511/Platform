@@ -47,15 +47,16 @@ async function recordFrontendError(errorInfo) {
   try {
     // 使用全局 axios（initAxiosConfig 已设置 withCredentials，可带 Cookie / CSRF）
     const axios = (await import('axios')).default;
-    const params = new URLSearchParams({
+    const payload = {
       error_type: errorInfo.error_type || 'JavaScriptError',
       error_message: errorInfo.error_message || '未知错误',
       ...(errorInfo.error_stack && { error_stack: errorInfo.error_stack }),
       ...(errorInfo.error_url && { error_url: errorInfo.error_url }),
       ...(errorInfo.user_agent && { user_agent: errorInfo.user_agent })
-    });
+    };
 
-    await axios.post(`/api/v1/audit-logs/client-error?${params.toString()}`, {}, {
+    // 错误消息/堆栈放在 JSON 请求体，避免进入 URL、代理访问日志与浏览器历史。
+    await axios.post('/api/v1/audit-logs/client-error', payload, {
       timeout: 5000,
       skipErrorMessage: true,
       silent: true,

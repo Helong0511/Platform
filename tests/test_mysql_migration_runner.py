@@ -1,0 +1,545 @@
+"""独立 Migration Runner 的真实 MySQL 隔离集成测试。
+
+只允许 GitHub Actions loopback 临时 MySQL；数据库名随机生成并在 finally 中删除。
+"""
+from __future__ import annotations
+
+import hashlib
+import ipaddress
+import os
+import secrets
+from pathlib import Path
+
+import pytest
+import pymysql
+from sqlalchemy import URL
+
+from app.db.migrations.ledger import MigrationLedgerError
+from app.db.migrations.manifest import Migration
+from app.db.migrations.runner import (
+    MigrationExecutionError,
+    MigrationLockUnavailable,
+    MigrationRunnerError,
+    _migration_lock_name,
+    apply_migrations,
+    read_migration_status,
+)
+
+
+HOST = os.getenv("MYSQL_INTEGRATION_HOST")
+PORT = int(os.getenv("MYSQL_INTEGRATION_PORT", "3306"))
+ROOT_USER = os.getenv("MYSQL_INTEGRATION_USER", "root")
+ROOT_PASSWORD = os.getenv("MYSQL_INTEGRATION_PASSWORD", "")
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    if not host:
+        return False
+    if host.strip().lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip()).is_loopback
+    except ValueError:
+        return False
+
+
+_SAFE_MYSQL_CI = (
+    os.getenv("UNIT_TEST") == "1"
+    and os.getenv("GITHUB_ACTIONS") == "true"
+    and os.getenv("MYSQL_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS") == "1"
+    and _is_loopback_host(HOST)
+    and os.getenv("MYSQL_INTEGRATION_DATABASE", "platform_ci") == "platform_ci"
+)
+if (
+    os.getenv("GITHUB_ACTIONS") == "true"
+    or (os.getenv("UNIT_TEST") == "1" and HOST)
+) and not _SAFE_MYSQL_CI:
+    raise RuntimeError(
+        "拒绝运行 Migration Runner 集成测试：必须使用 GitHub Actions loopback 临时 MySQL"
+    )
+
+pytestmark = pytest.mark.skipif(
+    not _SAFE_MYSQL_CI,
+    reason="仅在 GitHub Actions loopback 临时 MySQL 中运行",
+)
+
+
+def _root_connect(database: str | None = None):
+    return pymysql.connect(
+        host=HOST,
+        port=PORT,
+        user=ROOT_USER,
+        password=ROOT_PASSWORD,
+        database=database,
+        charset="utf8mb4",
+        autocommit=True,
+        connect_timeout=5,
+        read_timeout=10,
+        write_timeout=10,
+    )
+
+
+def _create_database() -> str:
+    database = f"platform_ci_mr_{secrets.token_hex(5)}"
+    connection = _root_connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"CREATE DATABASE `{database}` "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
+            )
+    finally:
+        connection.close()
+    return database
+
+
+def _drop_database(database: str) -> None:
+    connection = _root_connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
+    finally:
+        connection.close()
+
+
+def _database_url(database: str) -> str:
+    return URL.create(
+        "mysql+aiomysql",
+        username=ROOT_USER,
+        password=ROOT_PASSWORD,
+        host=HOST,
+        port=PORT,
+        database=database,
+        query={"charset": "utf8mb4"},
+    ).render_as_string(hide_password=False)
+
+
+def _application_database_url(database: str) -> str:
+    return URL.create(
+        "mysql+aiomysql",
+        username="platform_application_runtime",
+        password="runtime-only",
+        host=HOST,
+        port=PORT,
+        database=database,
+        query={"charset": "utf8mb4"},
+    ).render_as_string(hide_password=False)
+
+
+def _write_migrations(tmp_path: Path, definitions):
+    migrations = []
+    for revision, sql in definitions:
+        relative = f"sql/migrations/{revision}.sql"
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(sql, encoding="utf-8")
+        migrations.append(
+            Migration(
+                revision=revision,
+                path=relative,
+                sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
+            )
+        )
+    return tuple(migrations)
+
+
+@pytest.mark.asyncio
+async def test_runner_applies_in_order_and_is_idempotent(tmp_path: Path):
+    database = _create_database()
+    try:
+        migrations = _write_migrations(
+            tmp_path,
+            [
+                (
+                    "20261110_runner_create",
+                    "CREATE TABLE runner_probe ("
+                    "id INT NOT NULL PRIMARY KEY, value VARCHAR(32) NOT NULL"
+                    ") ENGINE=InnoDB;",
+                ),
+                (
+                    "20261111_runner_alter",
+                    "ALTER TABLE runner_probe "
+                    "ADD COLUMN enabled TINYINT NOT NULL DEFAULT 1;",
+                ),
+            ],
+        )
+        url = _database_url(database)
+
+        applied = await apply_migrations(
+            url, application_database_url=_application_database_url(database), repository_root=tmp_path, migrations=migrations
+        )
+        assert applied == tuple(item.revision for item in migrations)
+
+        # 第二次执行必须只读 ledger 并返回空计划，不重复执行 DDL。
+        assert await apply_migrations(
+            url, application_database_url=_application_database_url(database), repository_root=tmp_path, migrations=migrations
+        ) == ()
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SHOW COLUMNS FROM runner_probe")
+                columns = {row[0] for row in cursor.fetchall()}
+                assert columns == {"id", "value", "enabled"}
+                cursor.execute(
+                    "SELECT revision, status, execution_order "
+                    "FROM platform_schema_migrations ORDER BY execution_order"
+                )
+                rows = cursor.fetchall()
+                assert rows == (
+                    (migrations[0].revision, "applied", 1),
+                    (migrations[1].revision, "applied", 2),
+                )
+    finally:
+        _drop_database(database)
+
+
+@pytest.mark.asyncio
+async def test_runner_requires_exclusive_same_database_get_lock(tmp_path: Path):
+    database = _create_database()
+    lock_connection = _root_connect(database)
+    try:
+        migrations = _write_migrations(
+            tmp_path,
+            [("20261110_runner_lock", "CREATE TABLE lock_probe (id INT PRIMARY KEY);")],
+        )
+        lock_name = _migration_lock_name(database)
+        with lock_connection.cursor() as cursor:
+            cursor.execute("SELECT GET_LOCK(%s, 0)", (lock_name,))
+            assert cursor.fetchone()[0] == 1
+
+        with pytest.raises(MigrationLockUnavailable):
+            await apply_migrations(
+                _database_url(database),
+                application_database_url=_application_database_url(database),
+                repository_root=tmp_path,
+                migrations=migrations,
+                lock_timeout=0,
+            )
+
+        with lock_connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'platform_schema_migrations'",
+                (database,),
+            )
+            assert cursor.fetchone()[0] == 0
+    finally:
+        try:
+            with lock_connection.cursor() as cursor:
+                cursor.execute("SELECT RELEASE_LOCK(%s)", (_migration_lock_name(database),))
+        finally:
+            lock_connection.close()
+            _drop_database(database)
+
+
+@pytest.mark.asyncio
+async def test_runner_records_partial_ddl_failure_and_refuses_automatic_retry(tmp_path: Path):
+    database = _create_database()
+    try:
+        migrations = _write_migrations(
+            tmp_path,
+            [
+                (
+                    "20261110_runner_partial",
+                    "CREATE TABLE partial_probe (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB; "
+                    "ALTER TABLE missing_runner_table ADD COLUMN unsafe_retry INT;",
+                )
+            ],
+        )
+        url = _database_url(database)
+        with pytest.raises(MigrationExecutionError):
+            await apply_migrations(
+                url, application_database_url=_application_database_url(database), repository_root=tmp_path, migrations=migrations
+            )
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT status, error_type FROM platform_schema_migrations "
+                    "WHERE revision = %s",
+                    (migrations[0].revision,),
+                )
+                row = cursor.fetchone()
+                assert row[0] == "failed"
+                assert row[1]
+                cursor.execute(
+                    "SELECT COUNT(*) FROM information_schema.TABLES "
+                    "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'partial_probe'",
+                    (database,),
+                )
+                assert cursor.fetchone()[0] == 1
+
+        # MySQL DDL 已部分提交；Runner 不得猜测性重跑。
+        with pytest.raises(MigrationLedgerError, match="manual DDL recovery is required"):
+            await apply_migrations(
+                url, application_database_url=_application_database_url(database), repository_root=tmp_path, migrations=migrations
+            )
+    finally:
+        _drop_database(database)
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_wrong_same_name_ledger_table(tmp_path: Path):
+    database = _create_database()
+    try:
+        migrations = _write_migrations(
+            tmp_path,
+            [("20261110_runner_guard", "CREATE TABLE must_not_run (id INT PRIMARY KEY);")],
+        )
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "CREATE TABLE platform_schema_migrations ("
+                    "revision VARCHAR(64) NOT NULL PRIMARY KEY"
+                    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+                )
+
+        with pytest.raises(MigrationRunnerError, match="ledger"):
+            await apply_migrations(
+                _database_url(database),
+                application_database_url=_application_database_url(database),
+                repository_root=tmp_path,
+                migrations=migrations,
+            )
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM information_schema.TABLES "
+                    "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'must_not_run'",
+                    (database,),
+                )
+                assert cursor.fetchone()[0] == 0
+    finally:
+        _drop_database(database)
+
+
+def test_runner_rejects_reusing_application_database_account():
+    url = "mysql+aiomysql://same_user:secret@127.0.0.1:3306/platform"
+    with pytest.raises(MigrationRunnerError, match="独立于应用运行账号"):
+        from app.db.migrations.runner import _ensure_distinct_database_account
+        from sqlalchemy.engine import make_url
+
+        _ensure_distinct_database_account(make_url(url), url)
+
+
+def test_runner_rejects_migration_target_database_different_from_application():
+    from app.db.migrations.runner import (
+        MigrationRunnerError,
+        _ensure_distinct_database_account,
+    )
+    from sqlalchemy.engine import make_url
+
+    migration_url = make_url(
+        "mysql+aiomysql://migration_user:secret@127.0.0.1:3306/platform_migrations"
+    )
+    application_url = (
+        "mysql+aiomysql://application_user:secret@127.0.0.1:3306/platform"
+    )
+
+    with pytest.raises(MigrationRunnerError, match="同一个数据库名"):
+        _ensure_distinct_database_account(migration_url, application_url)
+
+
+def test_runner_rejects_application_mysql_url_without_database_name():
+    from app.db.migrations.runner import (
+        MigrationRunnerError,
+        _ensure_distinct_database_account,
+    )
+    from sqlalchemy.engine import make_url
+
+    migration_url = make_url(
+        "mysql+aiomysql://migration_user:secret@127.0.0.1:3306/platform"
+    )
+    application_url = "mysql+aiomysql://application_user:secret@127.0.0.1:3306/"
+
+    with pytest.raises(MigrationRunnerError, match="应用数据库 DSN"):
+        _ensure_distinct_database_account(migration_url, application_url)
+
+
+@pytest.mark.asyncio
+async def test_status_is_read_only_for_empty_database_and_reports_ledger_rows(tmp_path: Path):
+    database = _create_database()
+    try:
+        url = _database_url(database)
+        app_url = _application_database_url(database)
+        assert await read_migration_status(
+            url, application_database_url=app_url
+        ) == ()
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM information_schema.TABLES "
+                    "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'platform_schema_migrations'",
+                    (database,),
+                )
+                assert cursor.fetchone()[0] == 0
+
+        migrations = _write_migrations(
+            tmp_path,
+            [("20261110_runner_status", "CREATE TABLE status_probe (id INT PRIMARY KEY);")],
+        )
+        await apply_migrations(
+            url,
+            application_database_url=app_url,
+            repository_root=tmp_path,
+            migrations=migrations,
+        )
+        rows = await read_migration_status(url, application_database_url=app_url)
+        assert len(rows) == 1
+        assert rows[0]["revision"] == migrations[0].revision
+        assert rows[0]["status"] == "applied"
+        assert rows[0]["execution_order"] == 1
+    finally:
+        _drop_database(database)
+
+def test_runner_rejects_migration_target_on_different_mysql_host():
+    from app.db.migrations.runner import (
+        MigrationRunnerError,
+        _ensure_distinct_database_account,
+    )
+    from sqlalchemy.engine import make_url
+
+    migration_url = make_url(
+        "mysql+aiomysql://migration_user:secret@migration-db.internal:3306/platform"
+    )
+    application_url = (
+        "mysql+aiomysql://application_user:secret@app-db.internal:3306/platform"
+    )
+
+    with pytest.raises(MigrationRunnerError, match="同一个 MySQL 服务器端点"):
+        _ensure_distinct_database_account(migration_url, application_url)
+
+
+def test_runner_rejects_migration_target_on_different_mysql_port():
+    from app.db.migrations.runner import (
+        MigrationRunnerError,
+        _ensure_distinct_database_account,
+    )
+    from sqlalchemy.engine import make_url
+
+    migration_url = make_url(
+        "mysql+aiomysql://migration_user:secret@127.0.0.1:3307/platform"
+    )
+    application_url = (
+        "mysql+aiomysql://application_user:secret@127.0.0.1:3306/platform"
+    )
+
+    with pytest.raises(MigrationRunnerError, match="同一个 MySQL 服务器端点"):
+        _ensure_distinct_database_account(migration_url, application_url)
+
+
+def test_runner_accepts_same_mysql_host_with_implicit_default_port():
+    from app.db.migrations.runner import _ensure_distinct_database_account
+    from sqlalchemy.engine import make_url
+
+    migration_url = make_url(
+        "mysql+aiomysql://migration_user:secret@DB.INTERNAL/platform"
+    )
+    application_url = (
+        "mysql+aiomysql://application_user:secret@db.internal:3306/platform"
+    )
+
+    _ensure_distinct_database_account(migration_url, application_url)
+
+def test_runner_rejects_non_mysql_application_database():
+    from app.db.migrations.runner import (
+        MigrationRunnerError,
+        _ensure_distinct_database_account,
+    )
+    from sqlalchemy.engine import make_url
+
+    migration_url = make_url(
+        "mysql+aiomysql://migration_user:secret@127.0.0.1:3306/platform"
+    )
+    application_url = "sqlite+aiosqlite:///./platform.db"
+
+    with pytest.raises(MigrationRunnerError, match="应用数据库必须使用 MySQL"):
+        _ensure_distinct_database_account(migration_url, application_url)
+
+
+
+@pytest.mark.asyncio
+async def test_identity_scope_check_constraint_is_enforced_and_migration_is_idempotent(tmp_path: Path):
+    """真实 MySQL 验证身份作用域 CHECK 约束拒绝非法组合，并允许安全重跑。"""
+    database = _create_database()
+    try:
+        migration_path = (
+            Path(__file__).resolve().parents[1]
+            / "sql/migrations/20261113_third_party_report_identity_scope_constraints.sql"
+        )
+        migration_sql = migration_path.read_text(encoding="utf-8")
+        migrations = _write_migrations(
+            tmp_path,
+            [("20261113_identity_scope_constraints", migration_sql)],
+        )
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "CREATE TABLE third_party_report_logs ("
+                    "id INT NOT NULL PRIMARY KEY AUTO_INCREMENT, "
+                    "identity_scope VARCHAR(32) NOT NULL, "
+                    "platform VARCHAR(100) NULL"
+                    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+                )
+                cursor.executemany(
+                    "INSERT INTO third_party_report_logs (identity_scope, platform) VALUES (%s, %s)",
+                    [
+                        ("legacy_unresolved", None),
+                        ("unscoped", None),
+                        ("platform_scoped", "meta"),
+                    ],
+                )
+
+        url = _database_url(database)
+        app_url = _application_database_url(database)
+        await apply_migrations(
+            url,
+            application_database_url=app_url,
+            repository_root=tmp_path,
+            migrations=migrations,
+        )
+        # 直接重放 SQL，验证 migration 脚本本身可重复执行（不只是 ledger 跳过）。
+        from app.db.migrations.sql_parser import split_mysql_statements
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                for statement in split_mysql_statements(migration_sql):
+                    cursor.execute(statement)
+
+        # Runner 随后必须根据 ledger 返回空计划，不重复应用 revision。
+        assert await apply_migrations(
+            url,
+            application_database_url=app_url,
+            repository_root=tmp_path,
+            migrations=migrations,
+        ) == ()
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                invalid_rows = [
+                    ("unknown_scope", None),
+                    ("platform_scoped", None),
+                    ("platform_scoped", ""),
+                    ("platform_scoped", "   "),
+                    ("unscoped", "meta"),
+                    ("legacy_unresolved", "meta"),
+                ]
+                for scope, platform in invalid_rows:
+                    with pytest.raises(pymysql.err.OperationalError) as error:
+                        cursor.execute(
+                            "INSERT INTO third_party_report_logs (identity_scope, platform) VALUES (%s, %s)",
+                            (scope, platform),
+                        )
+                    assert error.value.args[0] == 3819
+                cursor.execute(
+                    "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS "
+                    "WHERE CONSTRAINT_SCHEMA = %s AND TABLE_NAME = 'third_party_report_logs' "
+                    "AND CONSTRAINT_NAME = 'chk_third_party_identity_scope_v1' "
+                    "AND CONSTRAINT_TYPE = 'CHECK'",
+                    (database,),
+                )
+                assert cursor.fetchone()[0] == 1
+    finally:
+        _drop_database(database)

@@ -27,6 +27,7 @@ from app.core.constants import MAX_PAGE_SIZE
 from app.core.cloak_scripts_paths import (
     MAX_BRIDGE_HTML_BYTES,
     bridge_html_exists,
+    atomic_write_bridge_html,
     invalidate_bridge_template_cache,
     resolve_bridge_html_write_path,
     validate_bridge_html_bytes,
@@ -620,14 +621,13 @@ async def upload_cloak_bridge_html(
     # ---------- 异常处理 ----------
     try:
         target_path = resolve_bridge_html_write_path(config.cloak_name)
-    except (FileNotFoundError, PermissionError) as exc:
+    except (FileNotFoundError, PermissionError, ValueError) as exc:
         raise_api_exception(ErrorCode.VALIDATION_ERROR, detail=str(exc))
 
     # ---------- 异常处理 ----------
     try:
-        # ---------- 上下文管理 ----------
-        with open(target_path, "w", encoding="utf-8", newline="") as f:
-            f.write(text)
+        # 同目录原子替换，避免其它 Worker 在写入过程中读取到空文件或半截 HTML。
+        atomic_write_bridge_html(target_path, text)
     except OSError as exc:
         logger.exception("写入桥页 HTML 失败: %s", target_path)
         raise_api_exception(ErrorCode.VALIDATION_ERROR, detail=f"写入文件失败：{exc}")

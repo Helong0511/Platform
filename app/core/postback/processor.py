@@ -10,14 +10,14 @@ Postback 统一处理器模块（重构版）
 """
 import asyncio
 import logging
-from decimal import Decimal
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Dict, Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import AsyncSessionLocal
 from app.core.postback.errors import DeductionProcessingError
 from app.core.postback.pipeline import attribution_ids_from_association
 from app.core.postback.validators.ip_validator import IpValidator
@@ -32,6 +32,7 @@ from app.core.postback.pipeline import (
     step_save_conversion,
     step_validate_offer_status,
     deactivate_short_links_on_cap_exceeded,
+    conversion_status_for_cap,
 )
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
@@ -39,10 +40,18 @@ from app.models.models import (
     AdminNotificationConfig,
     CloakConfig,
     PostbackConversion,
+    PostbackForwardQueue,
+    Publisher,
+    Product,
     ShortLink,
 )
 from app.services.telegram_notification_service import TelegramNotificationService
-from app.core.third_party_report import send_third_party_report
+from app.services.third_party_report_outbox import (
+    enqueue_postback_report,
+    process_postback_report_outbox,
+)
+from app.core.utils import get_app_now_naive
+from app.services.cap_reservation_ledger import CapReservationLedger
 from app.core.url.url_params_util import (
     parse_stored_url_params,
     resolve_dp_from_url_params,
@@ -55,6 +64,26 @@ logger = logging.getLogger(__name__)
 class PostbackProcessor:
     """Postback 统一处理器"""
     
+    @staticmethod
+    async def _conversion_event_exists(
+        *,
+        db: AsyncSession,
+        platform: str,
+        conversion_id: str,
+        event_name: str,
+    ) -> bool:
+        """IntegrityError 后仅在事件唯一键已存在时判定为并发重复。"""
+        result = await db.execute(
+            select(PostbackConversion.id)
+            .where(
+                PostbackConversion.platform == platform,
+                PostbackConversion.conversion_id == conversion_id,
+                PostbackConversion.event_name == event_name,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
     @staticmethod
     async def process(
         platform: str,
@@ -77,14 +106,22 @@ class PostbackProcessor:
         # 详细日志：开始处理 Postback
         logger.info(f"=== PostBack 接收处理开始 ===")
         logger.info(f"平台: {platform}")
-        logger.info(f"请求 IP: {request_ip}")
+        logger.info("请求 IP 已接收：present=%s", bool(request_ip))
         logger.debug(f"原始数据键: {list(raw_data.keys()) if isinstance(raw_data, dict) else type(raw_data)}")
-        
+
+        # Redis Cap reservation 不参与数据库事务；任何未提交阶段的异常都必须精确回退。
+        # 一旦进入 COMMIT reconciliation，则由该函数根据数据库实际提交结果负责处理，
+        # 外层异常处理不得再次 DECR，避免重复回退造成 Cap 计数虚低。
+        cap_reservations: list[tuple] = []
+        cap_rollback_attempted = False
+        cap_commit_reconciliation_started = False
+        third_party_report_outbox_id: Optional[int] = None
+
         try:
             # ========== 第 1 步：IP 验证 ==========
             logger.info("=== 第 1 步：IP 验证 ===")
             ip_valid, cleaned_ip = await IpValidator.validate(request_ip, db)
-            logger.info(f"IP 验证结果: {ip_valid}, 清理后 IP: {cleaned_ip}")
+            logger.info("IP 验证结果: valid=%s", ip_valid)
             
             if not ip_valid:
                 logger.warning("IP 验证失败，处理失败流程")
@@ -101,7 +138,7 @@ class PostbackProcessor:
                 # 使用平台特定处理器验证
                 data_valid, error_msg = await handler.validate(raw_data)
                 if not data_valid:
-                    logger.warning(f"数据验证失败：platform={platform}, error={error_msg}")
+                    logger.warning("数据验证失败：platform=%s", platform)
                     return {
                         "success": True,
                         "message": "数据验证失败",
@@ -116,7 +153,7 @@ class PostbackProcessor:
                 # 回退到通用验证和标准化
                 data_valid, errors = DataValidator.validate(raw_data, platform)
                 if not data_valid:
-                    logger.warning(f"数据验证失败：platform={platform}, errors={errors}")
+                    logger.warning("数据验证失败：platform=%s error_count=%s", platform, len(errors))
                     return {
                         "success": True,
                         "message": "数据验证失败",
@@ -127,12 +164,12 @@ class PostbackProcessor:
                 logger.info("=== 第 3 步：数据标准化 ===")
                 normalized_data = DataNormalizer.normalize(raw_data, platform)
             
-            logger.info(f"标准化后数据: {normalized_data}")
+            logger.info("Postback 数据标准化完成：field_count=%s", len(normalized_data))
             
             # ========== 第 4 步：Click ID 关联 ==========
             logger.info("=== 第 4 步：Click ID 关联 ===")
             click_id = normalized_data.get('click_id')
-            logger.info(f"关联 Click ID: {click_id}")
+            logger.info("Click ID 关联开始：click_id_present=%s", bool(click_id))
             
             pipe_ctx = PostbackPipelineContext(
                 platform=platform,
@@ -144,7 +181,10 @@ class PostbackProcessor:
             click_association = await step_associate_click(pipe_ctx)
             click_association = pipe_ctx.click_association
 
-            logger.info(f"Click 关联结果: {click_association}")
+            logger.info(
+                "Click 关联完成：field_count=%s",
+                len(click_association) if isinstance(click_association, dict) else 0,
+            )
 
             # ========== 第 4.5 步：Offer 激活状态校验 ==========
             logger.info("=== 第 4.5 步：Offer 激活状态校验 ===")
@@ -161,7 +201,7 @@ class PostbackProcessor:
             logger.info("=== 第 5 步：重复检测 ===")
             conversion_id = normalized_data.get('conversion_id')
             event_name = normalized_data.get('event_name')
-            logger.info(f"检测重复：conversion_id={conversion_id}, event_name={event_name}")
+            logger.info("检测重复：platform=%s event_name=%s", platform, event_name)
 
             pipe_ctx.normalized_data = normalized_data
             is_dup = await step_check_duplicate(pipe_ctx)
@@ -183,15 +223,14 @@ class PostbackProcessor:
                 final_payout, deduction_info, skip_save_and_forward = await step_apply_discount(pipe_ctx)
             except DeductionProcessingError as ded_err:
                 await db.rollback()
-                logger.error("扣量计算失败，已回滚：%s", ded_err, exc_info=True)
+                logger.error("扣量计算失败，已回滚：error_type=%s", type(ded_err).__name__)
                 return {
                     "success": False,
                     "message": "扣量计算失败，请重试",
                     "retryable": True,
                 }
             logger.info(
-                f"扣量计算结果：final_payout={final_payout}, "
-                f"skip_save={skip_save_and_forward}, 扣量信息：{deduction_info}"
+                f"扣量计算结果：final_payout={final_payout}, skip_save={skip_save_and_forward}"
             )
 
             if skip_save_and_forward:
@@ -213,20 +252,25 @@ class PostbackProcessor:
             cap_status = "cap_ok"
             logger.info("=== Cap 原子预留 ===")
             try:
-                cap_incremented, cap_status = await CapChecker.increment(
-                    offer_id=offer_id,
-                    publisher_id=publisher_id,
-                    advertiser_id=advertiser_id,
-                    db=db,
+                cap_incremented, cap_status, cap_reservations = (
+                    await CapChecker.increment_with_reservations(
+                        offer_id=offer_id,
+                        publisher_id=publisher_id,
+                        advertiser_id=advertiser_id,
+                        db=db,
+                        reservation_context={
+                            "platform": platform,
+                            "conversion_id": normalized_data.get("conversion_id") or "",
+                            "event_name": normalized_data.get("event_name") or "default",
+                        },
+                    )
                 )
-            except Exception:
+            except Exception as cap_error:
                 # CapChecker/increment_cap_count 已按实际预留回退 Redis，此处勿再全量 DECR
                 await db.rollback()
                 logger.error(
-                    "Cap 计数递增异常，已回滚：offer_id=%s publisher_id=%s",
-                    offer_id,
-                    publisher_id,
-                    exc_info=True,
+                    "Cap 计数递增异常，已回滚：error_type=%s",
+                    type(cap_error).__name__,
                 )
                 return {
                     "success": False,
@@ -251,7 +295,7 @@ class PostbackProcessor:
                 # 真超限：ORM 已 refresh，按 CapExceeded 入库（0 金额 + 关短链）
                 cap_ok = False
                 pipe_ctx.cap_ok = False
-                pipe_ctx.conversion_status = f"CapExceeded({cap_status or 'cap_exceeded'})"
+                pipe_ctx.conversion_status = conversion_status_for_cap(False)
                 pipe_ctx.final_payout = Decimal("0")
                 final_payout = Decimal("0")
                 logger.warning(
@@ -270,53 +314,46 @@ class PostbackProcessor:
             try:
                 conversion = await step_save_conversion(pipe_ctx)
             except IntegrityError:
-                if cap_ok:
-                    await CapChecker.rollback_redis(
-                        offer_id=offer_id,
-                        publisher_id=publisher_id,
-                        advertiser_id=advertiser_id,
-                        db=db,
-                    )
+                # 先回滚失败事务，再按正式事件唯一键核验；不能把外键/其他唯一约束错误误报为重复。
                 await db.rollback()
-                logger.info("并发重复转化，已跳过：platform=%s", platform)
+                # 先撤销本次预留，再做只读重复核验；避免核验查询自身失败时留下可回滚的 Redis 预留。
+                if cap_reservations:
+                    cap_rollback_attempted = True
+                    await CapChecker.rollback_reservations(cap_reservations)
+                is_duplicate_event = await PostbackProcessor._conversion_event_exists(
+                    db=db,
+                    platform=platform,
+                    conversion_id=normalized_data.get("conversion_id") or "",
+                    event_name=normalized_data.get("event_name") or "default",
+                )
+                if not is_duplicate_event:
+                    logger.error(
+                        "转化保存触发非重复事件 IntegrityError，已回滚：platform=%s event_name=%s",
+                        platform,
+                        normalized_data.get("event_name"),
+                    )
+                    raise
+                logger.info(
+                    "并发重复转化，已跳过：platform=%s event_name=%s",
+                    platform,
+                    normalized_data.get("event_name"),
+                )
                 return {
                     "success": True,
                     "message": "重复转化，已跳过",
                 }
             except Exception as save_err:
-                if cap_ok:
-                    await CapChecker.rollback_redis(
-                        offer_id=offer_id,
-                        publisher_id=publisher_id,
-                        advertiser_id=advertiser_id,
-                        db=db,
-                    )
                 await db.rollback()
-                logger.error("保存转化记录失败，已回滚：%s", save_err, exc_info=True)
+                if cap_reservations:
+                    cap_rollback_attempted = True
+                    await CapChecker.rollback_reservations(cap_reservations)
+                logger.error("保存转化记录失败，已回滚：error_type=%s", type(save_err).__name__)
                 raise
             logger.info(
-                f"转化记录保存成功：ID={conversion.id}, "
-                f"conversion_id={conversion.conversion_id}"
+                f"转化记录保存成功：ID={conversion.id}"
             )
 
-            # ========== 第 11 步：提交事务（Cap / 短链 / 转化原子提交） ==========
-            logger.info("=== 第 11 步：提交事务 ====")
-            await db.commit()
-            logger.info("事务提交成功")
-
-            # 入库成功后再做第三方像素上报，避免 DB 回滚后产生幽灵 CAPI 事件
-            try:
-                await PostbackProcessor._send_third_party_report_if_needed(
-                    click_association=click_association,
-                    normalized_data=normalized_data,
-                    raw_data=raw_data,
-                    db=db,
-                )
-            except Exception as pixel_err:
-                logger.error("第三方像素上报失败（转化已入库）: %s", pixel_err, exc_info=True)
-            
-            # ========== 第 9/9b 步：渠道 + 产品转发（后台，不阻塞上游回调） ==========
-            logger.info("=== 第 9/9b 步：调度下游转发（后台） ====")
+            # 转发任务与转化记录在同一事务入队，避免提交后进程崩溃造成首次转发丢失。
             should_forward_pub = bool(
                 cap_ok
                 and not pipe_ctx.skip_save_and_forward
@@ -328,15 +365,63 @@ class PostbackProcessor:
                 and not pipe_ctx.skip_save_and_forward
                 and conversion.product_id
             )
-            if should_forward_pub or should_forward_prod:
-                PostbackProcessor._schedule_downstream_forwards(
-                    conversion_id=conversion.id,
-                    click_association=click_association,
-                    forward_publisher=should_forward_pub,
-                    forward_product=should_forward_prod,
-                )
-            else:
-                logger.info("跳过下游转发（Cap 超限、扣量或无目标）")
+            queued_forwards = await PostbackProcessor._enqueue_downstream_forward_tasks(
+                db=db,
+                conversion=conversion,
+                click_association=click_association,
+                forward_publisher=should_forward_pub,
+                forward_product=should_forward_prod,
+            )
+
+            # 第三方事件 Outbox 与转化、Cap、下游队列同一事务提交，封闭 commit 后进程崩溃漏报窗口。
+            third_party_report_outbox_id = await PostbackProcessor._enqueue_third_party_report_if_needed(
+                platform=platform,
+                click_association=click_association,
+                normalized_data=normalized_data,
+                db=db,
+            )
+
+            # ========== 第 11 步：提交事务（Cap / 短链 / 转化 / 转发队列 / 第三方 Outbox 原子提交） ==========
+            logger.info("=== 第 11 步：提交事务 ====")
+            cap_commit_reconciliation_started = True
+            await PostbackProcessor._commit_conversion_with_cap_reconciliation(
+                db=db,
+                conversion_id=conversion.id,
+                cap_reservations=cap_reservations,
+            )
+            logger.info("事务提交成功")
+
+            # 立即触发仅作为低延迟优化；真正的恢复依赖数据库队列和每分钟定时任务。
+            if queued_forwards:
+                try:
+                    from app.scheduler_module.tasks.forward_tasks import trigger_forward_processing
+
+                    asyncio.create_task(trigger_forward_processing())
+                except RuntimeError:
+                    logger.warning(
+                        "当前无可用事件循环，首次转发由持久化队列定时任务接管"
+                    )
+
+            # 提交后立即尝试消费 Outbox 仅作为低延迟优化；进程崩溃时由每分钟调度任务恢复。
+            if third_party_report_outbox_id:
+                try:
+                    asyncio.get_running_loop().create_task(
+                        process_postback_report_outbox(
+                            batch_size=1,
+                            report_log_id=third_party_report_outbox_id,
+                        )
+                    )
+                except RuntimeError:
+                    logger.warning(
+                        "当前无可用事件循环，第三方 Report Outbox 将由持久化调度任务接管：id=%s",
+                        third_party_report_outbox_id,
+                    )
+            
+            logger.info(
+                "持久化下游转发任务已入队：conversion_record_id=%s queued=%s",
+                conversion.id,
+                queued_forwards,
+            )
 
             # ========== 第 10 步：通知发送 ==========
             logger.info("=== 第 10 步：通知发送 ====")
@@ -344,7 +429,7 @@ class PostbackProcessor:
                 await PostbackNotifier.notify_conversion(conversion, db)
                 logger.info("通知发送完成")
             except Exception as e:
-                logger.warning(f"通知发送失败：{e}", exc_info=True)
+                logger.warning("通知发送失败：error_type=%s", type(e).__name__)
             
             # ========== 完成 ==========
             logger.info("=== PostBack 处理完成 ===")
@@ -361,125 +446,205 @@ class PostbackProcessor:
                 "payout": final_payout
             }
         except Exception as e:
-            # 发生异常时回滚事务
-            await db.rollback()
-            logger.error(f"Postback 处理失败，已回滚事务：platform={platform}, error={str(e)}", exc_info=True)
+            # COMMIT 前若异常发生在转化保存/队列入队等步骤，回退本次已成功预留的 Redis Cap。
+            # COMMIT reconciliation 已启动时由其自行判断数据库提交结果，禁止外层重复 DECR。
+            if cap_reservations and not cap_rollback_attempted and not cap_commit_reconciliation_started:
+                cap_rollback_attempted = True
+                try:
+                    await CapChecker.rollback_reservations(cap_reservations)
+                except Exception:
+                    logger.critical(
+                        "Postback 在 COMMIT 前异常，Cap reservation 回退失败，需对账：reservation_count=%s",
+                        len(cap_reservations),
+                    )
+            # 发生异常时回滚数据库事务
+            try:
+                await db.rollback()
+            except Exception:
+                logger.error("Postback 异常后的数据库回滚失败")
+            logger.error("Postback 处理失败，已回滚事务：platform=%s error_type=%s", platform, type(e).__name__)
             raise
     
     @staticmethod
-    def _snapshot_click_association(
-        click_association: Optional[Dict[str, Any]],
-    ) -> Optional[Dict[str, Any]]:
-        """拷贝 Click 关联中的可序列化字段，供后台转发使用。"""
-        if not click_association:
-            return None
-        keys = (
-            "publisher_id",
-            "offer_id",
-            "click_id",
-            "product_id",
-            "client_id",
-            "ip",
-            "user_agent",
-            "url_params",
-            "short_link_id",
-        )
-        snap: Dict[str, Any] = {}
-        for key in keys:
-            if key in click_association:
-                snap[key] = click_association[key]
-        return snap
+    async def _commit_conversion_with_cap_reconciliation(
+        *,
+        db: AsyncSession,
+        conversion_id: int,
+        cap_reservations: list[tuple],
+    ) -> None:
+        """
+        在同一 MySQL 事务内提交正式转化与 Cap Reservation COMMITTED 状态。
+
+        账本状态更新是 Postback 与恢复 Worker 的线性化点。Redis token 清理在
+        MySQL 提交后执行；清理失败由恢复 Worker 重试，不得影响已提交的业务事实。
+        """
+        commit_attempted = False
+        try:
+            # 必须使用当前 Postback Session：账本行锁与转化记录由同一事务提交。
+            # 不能用独立 Session 续租后再提交，否则恢复 Worker 仍可在两步之间接管。
+            for reservation in cap_reservations or []:
+                ledger_key = reservation[5] if len(reservation) > 5 else None
+                lease_owner = reservation[6] if len(reservation) > 6 else None
+                if ledger_key:
+                    await CapReservationLedger.stage_commit_in_transaction(
+                        db, ledger_key, lease_owner
+                    )
+
+            # stage_commit 的 UPDATE 已锁定账本行；恢复 Worker 使用 SKIP LOCKED，
+            # 因而不能在此事务提交前领取同一条记录。
+            commit_attempted = True
+            await db.commit()
+
+            # 正式转化与账本 COMMITTED 已原子提交；现在只做可重试的 Redis token 清理。
+            for reservation in cap_reservations or []:
+                ledger_key = reservation[5] if len(reservation) > 5 else None
+                lease_owner = reservation[6] if len(reservation) > 6 else None
+                if ledger_key:
+                    try:
+                        await CapReservationLedger.finalize(
+                            ledger_key, "COMMITTED", lease_owner=lease_owner
+                        )
+                    except Exception as ledger_error:
+                        logger.critical(
+                            "转化与 Cap Reservation 已提交，但 Redis token 清理未完成，将由恢复任务重试：error_type=%s",
+                            type(ledger_error).__name__,
+                        )
+            return
+        except Exception as commit_error:
+            try:
+                await db.rollback()
+            except Exception as rollback_error:
+                logger.critical(
+                    "Postback COMMIT 异常后 DB rollback 也失败；保留 Redis Cap reservation：error_type=%s",
+                    type(rollback_error).__name__,
+                )
+                raise commit_error
+
+            # 提交栅栏失败意味着账本已被恢复 Worker 接管或进入终态。
+            # 此时不能由旧 Postback 再碰 Redis；由当前账本 owner 完成恢复。
+            if not commit_attempted:
+                raise commit_error
+
+            try:
+                result = await db.execute(
+                    select(PostbackConversion.id)
+                    .where(PostbackConversion.id == conversion_id)
+                    .limit(1)
+                )
+                committed = result.scalar_one_or_none() is not None
+            except Exception as lookup_error:
+                logger.critical(
+                    "Postback COMMIT 结果无法确认；为避免 Cap 超卖，保留 Redis reservation：error_type=%s",
+                    type(lookup_error).__name__,
+                )
+                raise commit_error
+
+            if not committed and cap_reservations:
+                try:
+                    await CapChecker.rollback_reservations(cap_reservations)
+                except Exception as rollback_error:
+                    logger.critical(
+                        "Postback COMMIT 确认未提交，但 Redis Cap reservation 回退失败：error_type=%s",
+                        type(rollback_error).__name__,
+                    )
+            elif committed:
+                # COMMIT 响应丢失但正式转化已存在：账本状态应随同一事务已提交；
+                # finalize 只负责幂等清理 token，不再承担跨库状态决策。
+                for reservation in cap_reservations or []:
+                    ledger_key = reservation[5] if len(reservation) > 5 else None
+                    lease_owner = reservation[6] if len(reservation) > 6 else None
+                    if ledger_key:
+                        try:
+                            await CapReservationLedger.finalize(
+                                ledger_key, "COMMITTED", lease_owner=lease_owner
+                            )
+                        except Exception as ledger_error:
+                            logger.critical(
+                                "正式转化已存在但 Reservation token 清理失败：error_type=%s",
+                                type(ledger_error).__name__,
+                            )
+                logger.critical(
+                    "Postback COMMIT 返回异常但 DB 已确认转化存在；保留 Redis Cap reservation"
+                )
+            raise commit_error
 
     @staticmethod
-    def _schedule_downstream_forwards(
+    async def _enqueue_downstream_forward_tasks(
         *,
-        conversion_id: int,
+        db: AsyncSession,
+        conversion: PostbackConversion,
         click_association: Optional[Dict[str, Any]],
         forward_publisher: bool,
         forward_product: bool,
-    ) -> None:
-        """
-        入库成功后后台转发。
+    ) -> int:
+        """在转化事务中写入首次下游转发任务，保证提交后可由 Scheduler 恢复。"""
+        queued = 0
+        now = get_app_now_naive()
 
-        使用独立 DB 会话并显式 commit，避免：
-        1) 下游超时拖垮上游回调；
-        2) get_postback_db 不自动 commit 导致转发日志丢失。
-        """
-        assoc_snap = PostbackProcessor._snapshot_click_association(click_association)
-
-        async def _run() -> None:
-            async with AsyncSessionLocal() as fwd_db:
-                try:
-                    result = await fwd_db.execute(
-                        select(PostbackConversion).where(
-                            PostbackConversion.id == conversion_id
+        if forward_publisher:
+            publisher_id = (click_association or {}).get("publisher_id")
+            if publisher_id:
+                result = await db.execute(
+                    select(Publisher).where(Publisher.id == publisher_id).limit(1)
+                )
+                publisher = result.scalars().first()
+                if publisher and publisher.is_active and publisher.postback_url:
+                    db.add(
+                        PostbackForwardQueue(
+                            conversion_id=conversion.id,
+                            product_id=None,
+                            publisher_id=publisher_id,
+                            downstream_url=publisher.postback_url,
+                            request_method=publisher.postback_method or "GET",
+                            request_params=None,
+                            request_data=None,
+                            retry_count=0,
+                            next_retry_time=now,
                         )
                     )
-                    conv = result.scalars().first()
-                    if not conv:
-                        logger.warning(
-                            "后台转发跳过：转化不存在 conversion_id=%s",
-                            conversion_id,
-                        )
-                        return
-                    if forward_publisher:
-                        logger.info(
-                            "后台渠道转发开始：conversion_id=%s publisher_id=%s",
-                            conversion_id,
-                            (assoc_snap or {}).get("publisher_id"),
-                        )
-                        await PostbackForwarder.forward_to_publisher(
-                            conv, fwd_db, assoc_snap
-                        )
-                    if forward_product:
-                        logger.info(
-                            "后台产品转发开始：conversion_id=%s product_id=%s",
-                            conversion_id,
-                            conv.product_id,
-                        )
-                        await PostbackForwarder.forward_to_product(
-                            conv, fwd_db, assoc_snap
-                        )
-                    await fwd_db.commit()
-                    logger.info(
-                        "后台下游转发完成并已提交：conversion_id=%s",
-                        conversion_id,
-                    )
-                except Exception as exc:
-                    await fwd_db.rollback()
-                    logger.warning(
-                        "后台下游转发失败：conversion_id=%s err=%s",
-                        conversion_id,
-                        exc,
-                        exc_info=True,
-                    )
+                    queued += 1
 
-        try:
-            asyncio.create_task(_run())
+        if forward_product and conversion.product_id:
+            result = await db.execute(
+                select(Product).where(Product.id == conversion.product_id).limit(1)
+            )
+            product = result.scalars().first()
+            if product and product.is_active and product.downstream_postback_url:
+                db.add(
+                    PostbackForwardQueue(
+                        conversion_id=conversion.id,
+                        product_id=conversion.product_id,
+                        publisher_id=None,
+                        downstream_url=product.downstream_postback_url,
+                        request_method=product.downstream_postback_method or "GET",
+                        request_params=None,
+                        request_data=None,
+                        retry_count=0,
+                        next_retry_time=now,
+                    )
+                )
+                queued += 1
+
+        if queued:
+            await db.flush()
             logger.info(
-                "已调度后台转发：conversion_id=%s pub=%s prod=%s",
-                conversion_id,
-                forward_publisher,
-                forward_product,
+                "已在转化事务中写入下游转发队列：conversion_id=%s count=%s",
+                conversion.id,
+                queued,
             )
-        except Exception as exc:
-            logger.warning(
-                "调度后台转发失败：conversion_id=%s err=%s",
-                conversion_id,
-                exc,
-                exc_info=True,
-            )
+        return queued
 
     @staticmethod
-    async def _send_third_party_report_if_needed(
+    async def _enqueue_third_party_report_if_needed(
+        *,
+        platform: str,
         click_association: Optional[Dict[str, Any]],
         normalized_data: Dict[str, Any],
-        raw_data: Dict[str, Any],
         db: AsyncSession,
-    ) -> None:
-        """去重通过后执行第三方像素上报，避免重复 CAPI 事件。"""
+    ) -> Optional[int]:
+        """在转化主事务中持久化第三方上报 Outbox，不在请求线程直接发送网络请求。"""
         if not click_association:
-            return
+            return None
 
         raw_url_params = click_association.get("url_params")
         if isinstance(raw_url_params, dict):
@@ -497,155 +662,106 @@ class PostbackProcessor:
         email = scalar_query_value(url_params.get("email"))
         phone = scalar_query_value(url_params.get("phone"))
 
-        amount_raw = raw_data.get("payout")
-        if amount_raw is None:
-            amount = 0.0
-        else:
-            try:
-                amount = float(str(amount_raw).strip())
-                if amount < 0:
-                    amount = 0.0
-            except (ValueError, TypeError, AttributeError):
-                amount = 0.0
-
         if not fbclid and not dp:
-            logger.debug("未检测到 fbclid/dp，跳过第三方上报")
-            return
+            logger.debug("未检测到 fbclid/dp，不创建第三方 Report Outbox")
+            return None
 
         cloak_cfg_pb = None
         if dp:
-            try:
-                cr_pb = await db.execute(
-                    select(CloakConfig).where(CloakConfig.cloak_name == str(dp).strip())
-                )
-                cloak_cfg_pb = cr_pb.scalars().first()
-            except Exception as exc:
-                logger.warning("查询斗篷 postback 配置失败：%s", exc)
-
-        from app.core.config import settings
-        from app.services.cloak_pixel_mapping import get_cloak_pixel_config
-
-        # 像素凭证仅来自短链自定义或启用中的斗篷配置，不再回退全局 FACEBOOK_*
-        facebook_pixel_id: Optional[str] = None
-        facebook_access_token: Optional[str] = None
-        facebook_api_version: Optional[str] = settings.FACEBOOK_API_VERSION
-        config_source = "未解析"
-        short_link = None
+            result = await db.execute(
+                select(CloakConfig).where(CloakConfig.cloak_name == str(dp).strip())
+            )
+            cloak_cfg_pb = result.scalars().first()
 
         short_link_id = click_association.get("short_link_id")
+        short_code = click_association.get("short_code")
         if short_link_id:
-            try:
-                result = await db.execute(select(ShortLink).where(ShortLink.id == short_link_id))
-                short_link = result.scalars().first()
-                if short_link and short_link.facebook_pixel_id and short_link.facebook_access_token:
-                    facebook_pixel_id = short_link.facebook_pixel_id
-                    facebook_access_token = short_link.facebook_access_token
-                    facebook_api_version = short_link.facebook_api_version or settings.FACEBOOK_API_VERSION
-                    config_source = f"短链接配置 (short_link_id={short_link_id})"
-            except Exception as exc:
-                logger.warning("查询数据库像素配置失败：%s", exc)
-
-        if not facebook_access_token and dp and short_link and short_link.short_code:
-            try:
-                cloak_pixel_config = await get_cloak_pixel_config(
-                    db=db,
-                    dp=dp,
-                    short_code=short_link.short_code,
-                    use_cache=True,
-                )
-                if cloak_pixel_config:
-                    facebook_pixel_id = cloak_pixel_config.get("facebook_pixel_id")
-                    facebook_access_token = cloak_pixel_config.get("facebook_access_token")
-                    facebook_api_version = (
-                        cloak_pixel_config.get("facebook_api_version")
-                        or settings.FACEBOOK_API_VERSION
-                    )
-                    config_source = f"斗篷配置表[{dp}]"
-            except Exception as exc:
-                logger.warning("查询斗篷配置表失败：%s", exc)
-
-        if not facebook_pixel_id or not facebook_access_token:
-            logger.info(
-                "无可用像素凭证，跳过第三方上报：dp=%s source=%s",
-                dp,
-                config_source,
+            short_link = await db.scalar(
+                select(ShortLink).where(ShortLink.id == short_link_id).limit(1)
             )
-            return
+            if short_link and short_link.short_code:
+                short_code = short_link.short_code
 
-        logger.info("像素配置来源：%s", config_source)
-
+        amount_raw = normalized_data.get("payout")
         try:
-            click_time = click_association.get("click_time")
-            # 斗篷总开关关闭时不按本斗篷做 postback CAPI
-            use_cfg_pb = bool(
-                cloak_cfg_pb
-                and getattr(cloak_cfg_pb, "is_enabled", False)
-                and getattr(cloak_cfg_pb, "postback_report_enabled", False)
+            amount_decimal = Decimal(str(amount_raw))
+            amount = (
+                amount_decimal
+                if amount_decimal.is_finite() and amount_decimal >= 0
+                else Decimal("0")
             )
-            if use_cfg_pb:
-                fb_event = (cloak_cfg_pb.postback_report_event or "Purchase").strip() or "Purchase"
-                cur_send = (cloak_cfg_pb.postback_report_currency or "USD").strip().upper() or "USD"
-                fixed_val = getattr(cloak_cfg_pb, "postback_report_value", None)
-                try:
-                    fixed_val = float(fixed_val) if fixed_val is not None else None
-                except (TypeError, ValueError):
-                    fixed_val = None
-                if fb_event == "Purchase":
-                    amt_send = fixed_val if (fixed_val is not None and fixed_val > 0) else amount
-                else:
-                    amt_send = None
-                    cur_send = None
-            else:
-                fb_event = "Purchase"
-                cur_send = "USD"
-                amt_send = amount
+        except (InvalidOperation, ValueError, TypeError):
+            amount = Decimal("0")
 
-            if fb_event == "Purchase" and (amt_send is None or amt_send <= 0):
-                logger.warning("Purchase 金额无效，跳过第三方上报")
-                return
-
-            report_adsid = fbclid or (
-                scalar_query_value(url_params.get("click_id"))
-                or scalar_query_value(url_params.get("cid"))
-                or (str(click_id).strip() if click_id else None)
-                or (
-                    str(normalized_data.get("conversion_id")).strip()
-                    if normalized_data.get("conversion_id")
-                    else None
-                )
-            )
-            if not report_adsid:
-                logger.warning("缺少可用 adsid，跳过第三方上报")
-                return
-
-            report_kw: Dict[str, Any] = {
-                "adsid": report_adsid,
-                "conversion_id": str(click_id)[:200],
-                "event": fb_event,
-                "email": email,
-                "ip": ip,
-                "phone": phone,
-                "ua": ua,
-                "source": "postback",
-                "click_time": click_time,
-                "facebook_pixel_id": facebook_pixel_id,
-                "facebook_access_token": facebook_access_token,
-                "facebook_api_version": facebook_api_version,
-            }
+        use_cfg_pb = bool(
+            cloak_cfg_pb
+            and getattr(cloak_cfg_pb, "is_enabled", False)
+            and getattr(cloak_cfg_pb, "postback_report_enabled", False)
+        )
+        if use_cfg_pb:
+            fb_event = (cloak_cfg_pb.postback_report_event or "Purchase").strip() or "Purchase"
+            cur_send = (cloak_cfg_pb.postback_report_currency or "USD").strip().upper() or "USD"
+            fixed_val = getattr(cloak_cfg_pb, "postback_report_value", None)
+            try:
+                fixed_val = Decimal(str(fixed_val)) if fixed_val is not None else None
+            except (TypeError, ValueError, InvalidOperation):
+                fixed_val = None
             if fb_event == "Purchase":
-                report_kw["currency"] = cur_send or "USD"
-                report_kw["amount"] = float(amt_send)
+                amt_send = fixed_val if fixed_val is not None and fixed_val > 0 else amount
+            else:
+                amt_send = None
+                cur_send = None
+        else:
+            fb_event = "Purchase"
+            cur_send = "USD"
+            amt_send = amount
 
-            await send_third_party_report(**report_kw)
-            logger.info(
-                "第三方上报成功：adsid=%s fbclid=%s dp=%s event=%s",
-                report_adsid,
-                fbclid,
-                dp,
-                fb_event,
+        if fb_event == "Purchase" and (amt_send is None or amt_send <= 0):
+            logger.warning("Purchase 金额无效，不创建第三方 Report Outbox")
+            return None
+
+        report_adsid = fbclid or (
+            scalar_query_value(url_params.get("click_id"))
+            or scalar_query_value(url_params.get("cid"))
+            or (str(click_id).strip() if click_id else None)
+            or (
+                str(normalized_data.get("conversion_id")).strip()
+                if normalized_data.get("conversion_id")
+                else None
             )
-        except Exception as exc:
-            logger.error("第三方上报失败：%s", exc)
+        )
+        if not report_adsid:
+            logger.warning("缺少可用 adsid，不创建第三方 Report Outbox")
+            return None
+
+        conversion_id = str(normalized_data.get("conversion_id") or "").strip()
+        if not conversion_id:
+            # 正常 DataValidator 应拒绝无稳定事件 ID；这里再做一道防御。
+            raise ValueError("第三方 Report Outbox 缺少稳定 conversion_id")
+
+        outbox_id = await enqueue_postback_report(
+            db,
+            platform=platform,
+            adsid=report_adsid,
+            event=fb_event,
+            conversion_id=conversion_id,
+            email=email,
+            ip=ip,
+            phone=phone,
+            ua=ua,
+            currency=cur_send,
+            amount=amt_send,
+            short_link_id=int(short_link_id) if short_link_id else None,
+            cloak_name=str(dp).strip() if dp else None,
+            short_code=str(short_code).strip() if short_code else None,
+            click_time=click_association.get("click_time"),
+        )
+        logger.info(
+            "第三方 Report Outbox 已写入转化事务：id=%s event=%s",
+            outbox_id,
+            fb_event,
+        )
+        return outbox_id
 
     @staticmethod
     async def _handle_ip_failure(
@@ -688,7 +804,7 @@ class PostbackProcessor:
                     "⚠️ Postback IP 验证失败",
                     "",
                     f"平台：{platform}",
-                    f"转化 ID/点击 ID: {conversion_id_hint}",
+                    "转化 ID/点击 ID: [已省略]",
                     "说明：IP 为空或无法获取，已拒绝处理（不入库、不转发）。"
                 ]
                 
@@ -700,12 +816,12 @@ class PostbackProcessor:
                     commit=False,
                 )
         except Exception as e:
-            logger.warning(f"发送 IP 验证失败通知失败：{e}")
+            logger.warning("发送 IP 验证失败通知失败：error_type=%s", type(e).__name__)
 
         try:
             await db.commit()
         except Exception as e:
-            logger.warning(f"提交 IP 失败通知记录失败: {e}")
+            logger.warning("提交 IP 失败通知记录失败：error_type=%s", type(e).__name__)
             await db.rollback()
         
         return {

@@ -14,15 +14,12 @@
  Date: 29/07/2026 12:30:00
 */
 
+-- WARNING: 本文件是完整基线快照，包含 DROP TABLE IF EXISTS，具有破坏性。
+-- 仅允许用于全新/可丢弃数据库的初始化演练；已有环境升级必须使用经审批的增量 migration。
+
 SET NAMES utf8mb4;
 
--- 若数据库不存在则创建，并切换到该库
-CREATE DATABASE IF NOT EXISTS `platform`
-  DEFAULT CHARACTER SET utf8mb4
-  DEFAULT COLLATE utf8mb4_0900_ai_ci;
-
-USE `platform`;
-
+-- 请由受控 provisioning 预先创建目标数据库，并通过 mysql --database=<目标库> 选择它。
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- ----------------------------
@@ -762,11 +759,13 @@ CREATE TABLE IF NOT EXISTS `postback_forward_logs`  (
   `retry_count` INT NULL DEFAULT NULL COMMENT '重试次数',
   `created_at` DATETIME NOT NULL COMMENT '创建时间',
   `completed_at` DATETIME NULL DEFAULT NULL COMMENT '完成时间',
+  `pii_scrubbed_at` DATETIME NULL DEFAULT NULL COMMENT 'PII 按保留策略清理时间',
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_forward_log_product`(`product_id` ASC) USING BTREE,
   INDEX `idx_forward_log_conversion`(`conversion_id` ASC) USING BTREE,
   INDEX `idx_forward_log_success`(`success` ASC) USING BTREE,
   INDEX `idx_forward_log_created_at`(`created_at` ASC) USING BTREE,
+  INDEX `idx_forward_log_pii_retention`(`pii_scrubbed_at` ASC, `created_at` ASC, `id` ASC) USING BTREE,
   INDEX `idx_forward_log_publisher`(`publisher_id` ASC) USING BTREE,
   CONSTRAINT `postback_forward_logs_ibfk_1` FOREIGN KEY (`conversion_id`) REFERENCES `postback_conversions` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `postback_forward_logs_ibfk_2` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
@@ -1050,6 +1049,10 @@ CREATE TABLE IF NOT EXISTS `third_party_report_logs`  (
   `source` VARCHAR(50) NOT NULL COMMENT '上报来源：short_link/斗篷点击, postback/转化回调',
   `adsid` VARCHAR(500) NOT NULL COMMENT '广告事件ID',
   `event` VARCHAR(50) NOT NULL COMMENT '事件类型：ViewContent, Purchase',
+  `event_key` VARCHAR(64) NOT NULL COMMENT '事件幂等键：稳定事件身份字段的 SHA-256（ViewContent 不含后补 conversion_id）',
+  `platform` VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL DEFAULT NULL COMMENT 'Postback 平台标识；非平台事件为 NULL；按二进制规则精确比较',
+  `identity_scope` VARCHAR(32) NOT NULL DEFAULT 'legacy_unresolved' COMMENT 'unscoped/platform_scoped/legacy_unresolved',
+  `destination_pixel_id` VARCHAR(100) NULL DEFAULT NULL COMMENT '非敏感 Meta Pixel 目的地 ID；不保存 access_token',
   `use_hash` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否对email、ip、phone进行哈希处理：True=哈希，False=不哈希',
   `email` VARCHAR(255) NULL DEFAULT NULL COMMENT '邮箱（原始值）',
   `ip` VARCHAR(50) NULL DEFAULT NULL COMMENT 'IP地址（原始值）',
@@ -1057,8 +1060,9 @@ CREATE TABLE IF NOT EXISTS `third_party_report_logs`  (
   `ua` TEXT NULL COMMENT '用户代理',
   `report_params` TEXT NULL COMMENT '完整上报参数（JSON格式）',
   `status` VARCHAR(20) NOT NULL COMMENT '上报状态：pending, success, failed',
-  `attempt_count` INT NULL DEFAULT 0 COMMENT '尝试次数',
-  `max_attempts` INT NULL DEFAULT 3 COMMENT '最大尝试次数',
+  `attempt_count` INT NULL DEFAULT 0 COMMENT '自动重试周期内的尝试次数',
+  `max_attempts` INT NULL DEFAULT 3 COMMENT '自动重试周期内最大尝试次数',
+  `manual_retry_count` INT NOT NULL DEFAULT 0 COMMENT '管理员手动重新入队累计次数；不随自动重试重置',
   `response_status` INT NULL DEFAULT NULL COMMENT '响应状态码',
   `response_body` TEXT NULL COMMENT '响应内容',
   `log_id` VARCHAR(100) NULL DEFAULT NULL COMMENT '第三方返回的logId',
@@ -1067,19 +1071,45 @@ CREATE TABLE IF NOT EXISTS `third_party_report_logs`  (
   `report_start_time` DATETIME NULL DEFAULT NULL COMMENT '上报开始时间',
   `report_success_time` DATETIME NULL DEFAULT NULL COMMENT '上报成功时间',
   `completed_at` DATETIME NULL DEFAULT NULL COMMENT '完成时间',
+  `pii_scrubbed_at` DATETIME NULL DEFAULT NULL COMMENT 'PII 按保留策略清理时间；保留事件幂等键',
   `conversion_id` VARCHAR(255) NULL DEFAULT NULL COMMENT '转化ID',
   `currency` VARCHAR(10) NULL DEFAULT NULL COMMENT '货币类型',
   `amount` DECIMAL(12, 4) NULL DEFAULT NULL COMMENT '支付金额',
+  `outbox_enqueued` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否由转化事务创建的持久化 Outbox 事件',
+  `short_link_id` INT NULL DEFAULT NULL COMMENT '用于恢复像素配置的短链接 ID（非外键，保留删除后的证据）',
+  `cloak_name` VARCHAR(100) NULL DEFAULT NULL COMMENT '斗篷配置名称（仅配置引用）',
+  `short_code` VARCHAR(100) NULL DEFAULT NULL COMMENT '短链接短码（仅配置引用）',
+  `click_time` DATETIME NULL DEFAULT NULL COMMENT '点击发生时间，用于稳定构造 Meta event_time/fbc',
+  `next_retry_time` DATETIME NULL DEFAULT NULL COMMENT 'Outbox 下次可重试时间',
   PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE INDEX `unique_source_adsid`(`source` ASC, `adsid` ASC) USING BTREE,
+  UNIQUE INDEX `unique_event_key`(`event_key` ASC) USING BTREE,
   INDEX `idx_third_party_source`(`source` ASC) USING BTREE,
   INDEX `idx_third_party_adsid`(`adsid` ASC) USING BTREE,
   INDEX `idx_third_party_event`(`event` ASC) USING BTREE,
   INDEX `idx_third_party_status`(`status` ASC) USING BTREE,
   INDEX `idx_third_party_created_at`(`created_at` ASC) USING BTREE,
+  INDEX `idx_third_party_pii_retention`(`pii_scrubbed_at` ASC, `created_at` ASC, `id` ASC) USING BTREE,
   INDEX `idx_third_party_status_created`(`status` ASC, `created_at` ASC) USING BTREE,
-  INDEX `idx_conversion_id`(`conversion_id` ASC) USING BTREE
+  INDEX `idx_conversion_id`(`conversion_id` ASC) USING BTREE,
+  INDEX `idx_third_party_outbox_due`(`outbox_enqueued` ASC, `status` ASC, `next_retry_time` ASC, `report_start_time` ASC, `id` ASC) USING BTREE,
+  INDEX `idx_third_party_scope_due`(`identity_scope` ASC, `platform` ASC, `outbox_enqueued` ASC, `status` ASC, `next_retry_time` ASC, `report_start_time` ASC, `id` ASC) USING BTREE,
+  CONSTRAINT `chk_third_party_identity_scope_v1` CHECK (
+    (`identity_scope` IN ('legacy_unresolved', 'unscoped', 'platform_scoped')) AND
+    ((`identity_scope` = 'platform_scoped' AND `platform` IS NOT NULL AND LENGTH(TRIM(`platform`)) > 0) OR
+     (`identity_scope` IN ('unscoped', 'legacy_unresolved') AND `platform` IS NULL))
+  )
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '第三方上报日志表' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for third_party_report_identity_locks
+-- ----------------------------
+DROP TABLE IF EXISTS `third_party_report_identity_locks`;
+CREATE TABLE IF NOT EXISTS `third_party_report_identity_locks` (
+  `identity_key` CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '四字段基础事件身份 SHA-256',
+  `identity_fingerprint` BINARY(64) NOT NULL COMMENT '基础身份的独立 SHA-512 指纹；不保存原始点击标识',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '锁行首次创建时间；锁行永久保留',
+  PRIMARY KEY (`identity_key`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '第三方上报跨直接发送与 Postback 的基础身份仲裁锁';
 
 -- ----------------------------
 -- Table structure for cloak_configs
@@ -1842,5 +1872,71 @@ INSERT INTO `country_aliases` VALUES
 (50, 'Kosovo', 'kosovo', 'XK', '科索沃'),
 (51, 'Republic of Kosovo', 'republic of kosovo', 'XK', '科索沃'),
 (52, 'Falkland Islands (Islas Malvinas)', 'falkland islands islas malvinas', 'GB', '福克兰群岛 属于 英国');
+
+
+-- 短链接点击刷盘幂等账本：解决 DB COMMIT 与 Redis ACK 之间的崩溃/响应丢失窗口。
+CREATE TABLE IF NOT EXISTS short_link_click_sync_batches (
+    batch_id VARCHAR(64) NOT NULL COMMENT 'Redis pending batch UUID',
+    short_code VARCHAR(20) NOT NULL COMMENT '短链接代码',
+    click_count INT NOT NULL COMMENT '本批次待入账点击数',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    acknowledged_at DATETIME NULL COMMENT 'Redis pending key 确认删除时间',
+    PRIMARY KEY (batch_id),
+    KEY idx_short_click_batch_code_created (short_code, created_at),
+    KEY idx_short_click_batch_ack_created (acknowledged_at, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='短链接点击刷盘幂等账本';
+
+-- Cap Reservation 持久化账本：与 Postback DB 事务解耦，支持 Redis 预留崩溃恢复。
+CREATE TABLE IF NOT EXISTS cap_reservations (
+    id INT NOT NULL AUTO_INCREMENT COMMENT '预留账本主键',
+    reservation_key VARCHAR(64) NOT NULL COMMENT '稳定预留键：正式事件键与 Cap scope 的 SHA-256',
+    platform VARCHAR(50) NOT NULL COMMENT 'Postback 平台',
+    conversion_id VARCHAR(255) NOT NULL COMMENT '正式转化事件 ID',
+    event_name VARCHAR(100) NOT NULL DEFAULT 'default' COMMENT '标准化事件名称',
+    offer_id INT NOT NULL COMMENT '预留时的 Offer ID 快照',
+    publisher_id INT NULL COMMENT '预留时的 Publisher ID 快照；NULL 表示全局渠道范围',
+    cap_kind VARCHAR(10) NOT NULL COMMENT 'Cap 类型：daily 或 total',
+    business_date DATE NULL COMMENT 'Daily 业务日期；Total 必须为 NULL',
+    redis_counter_key VARCHAR(255) NOT NULL COMMENT 'Redis 计数器 Key 快照',
+    redis_token_key VARCHAR(512) NOT NULL COMMENT 'Redis reservation token Key 快照',
+    redis_reserved BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否确认 Redis Lua 已成功预留；区分 fail-open 无 token 路径',
+    redis_token_cleaned BOOLEAN NOT NULL DEFAULT FALSE COMMENT '终态后是否已清理 Redis token；清理失败由恢复任务重试',
+    state VARCHAR(24) NOT NULL DEFAULT 'PREPARED'
+        COMMENT 'PREPARED/RESERVED/COMMITTED/ROLLED_BACK/NEEDS_RECONCILIATION',
+    attempts INT NOT NULL DEFAULT 0 COMMENT '恢复尝试次数',
+    lease_owner VARCHAR(64) NULL COMMENT '恢复 Worker 租约持有者',
+    lease_expires_at DATETIME NULL COMMENT '恢复 Worker 租约到期时间',
+    last_error TEXT NULL COMMENT '最近一次恢复错误摘要',
+    prepared_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'PREPARED 创建时间',
+    reserved_at DATETIME NULL COMMENT 'Redis 预留确认时间',
+    finalized_at DATETIME NULL COMMENT '终态确认时间',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_cap_reservation_key (reservation_key),
+    KEY idx_cap_reservation_state_updated (state, updated_at),
+    KEY idx_cap_reservation_lease (state, lease_expires_at),
+    KEY idx_cap_reservation_event (platform, conversion_id, event_name),
+    KEY idx_cap_reservation_scope (offer_id, publisher_id, cap_kind, business_date),
+    CONSTRAINT chk_cap_reservation_key_sha256 CHECK (LENGTH(reservation_key) = 64),
+    CONSTRAINT chk_cap_reservation_key_hex CHECK (REGEXP_LIKE(reservation_key COLLATE utf8mb4_bin, '^[0-9a-f]{64}$', 'c')),
+    CONSTRAINT chk_cap_reservation_offer_positive CHECK (offer_id > 0),
+    CONSTRAINT chk_cap_reservation_publisher_positive CHECK (publisher_id IS NULL OR publisher_id > 0),
+    CONSTRAINT chk_cap_reservation_attempts_nonnegative CHECK (attempts >= 0),
+    CONSTRAINT chk_cap_reservation_kind_date CHECK (
+        (cap_kind = 'daily' AND business_date IS NOT NULL) OR
+        (cap_kind = 'total' AND business_date IS NULL)
+    ),
+    CONSTRAINT chk_cap_reservation_state CHECK (
+        state IN ('PREPARED', 'RESERVED', 'COMMITTED', 'ROLLED_BACK', 'NEEDS_RECONCILIATION')
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Cap Redis 预留持久化账本';
+
+-- 迁移后人工核验（仅隔离环境或正式发布审批窗口执行）：
+-- SHOW CREATE TABLE cap_reservations;
+-- SHOW INDEX FROM cap_reservations;
+-- SELECT COUNT(*) FROM cap_reservations;
 
 SET FOREIGN_KEY_CHECKS = 1;

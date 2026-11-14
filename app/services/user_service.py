@@ -59,7 +59,7 @@ class UserService(BaseService[User]):
             cache = await get_cache_backend()
             await cache.delete("user_stats")
         except Exception as e:
-            logger.warning(f"清除 user_stats 缓存失败: {e}")
+            logger.warning("清除 user_stats 缓存失败: error_type=%s", type(e).__name__)
 
     async def _revoke_sessions_on_disable(
             self,
@@ -80,10 +80,9 @@ class UserService(BaseService[User]):
             )
         except Exception as e:
             logger.error(
-                "禁用用户时撤销会话失败: user_id=%s, err=%s",
+                "禁用用户时撤销会话失败: user_id=%s error_type=%s",
                 user_id,
-                e,
-                exc_info=True,
+                type(e).__name__,
             )
 
     async def get_user_by_id(
@@ -277,7 +276,7 @@ class UserService(BaseService[User]):
         try:
             await invalidate_user_permission_cache(user.id)
         except Exception as e:
-            logger.warning(f"清除权限缓存失败: {e}")
+            logger.warning("清除权限缓存失败: error_type=%s", type(e).__name__)
 
         await self.invalidate_user_stats_cache()
 
@@ -389,7 +388,7 @@ class UserService(BaseService[User]):
         try:
             await invalidate_user_permission_cache(user_id)
         except Exception as e:
-            logger.warning(f"清除权限缓存失败: {e}")
+            logger.warning("清除权限缓存失败: error_type=%s", type(e).__name__)
 
         await self.invalidate_user_stats_cache()
 
@@ -432,7 +431,7 @@ class UserService(BaseService[User]):
         try:
             await invalidate_user_permission_cache(user_id)
         except Exception as e:
-            logger.warning(f"清除权限缓存失败: {e}")
+            logger.warning("清除权限缓存失败: error_type=%s", type(e).__name__)
 
         await self.invalidate_user_stats_cache()
 
@@ -473,11 +472,15 @@ class UserService(BaseService[User]):
 
             # 如果是客户角色，检查是否允许修改密码
             if user.role == UserRole.CLIENT:
-                client = get_first_loaded_collection_item(user, "clients")
-                if client and not client.password_change_enabled:
+                # 同一登录账号可能关联多个 Client；任一关联客户禁用改密时均拒绝，
+                # 避免只检查第一条记录而绕过其它客户的管理策略。
+                client_records = getattr(user, "clients", None) or []
+                if client_records and any(
+                    not client.password_change_enabled for client in client_records
+                ):
                     raise_api_exception(
                         ErrorCode.FORBIDDEN,
-                        detail="客户密码修改功能已被管理员禁用，请联系管理员修改密码"
+                        detail="至少一个关联客户已禁用密码修改，请联系管理员"
                     )
 
         # 验证旧密码（管理员修改他人密码时不需要验证旧密码）
@@ -519,7 +522,7 @@ class UserService(BaseService[User]):
                 revoked,
             )
         except Exception as revoke_exc:
-            logger.warning("改密后吊销会话失败（密码已更新）: %s", revoke_exc)
+            logger.warning("改密后吊销会话失败（密码已更新）: error_type=%s", type(revoke_exc).__name__)
 
         # 记录审计日志
         await log_user_action(
@@ -589,22 +592,27 @@ class UserService(BaseService[User]):
             "with_client_info": client_users_count
         }
 
-    async def check_client_has_publisher(self, client_id: int) -> bool:
+    async def check_client_has_publisher(self, client_id: int | List[int]) -> bool:
         """
-        判断客户是否至少有一个激活中的渠道（Publisher）。
-
-        用于业务侧「客户是否已配置下游渠道」类校验。
+        判断一个或多个客户主体是否至少有一个启用中的渠道（Publisher）。
 
         Args:
-            client_id: 客户 ID
+            client_id: 单个客户 ID 或客户 ID 列表
 
         Returns:
-            True 表示存在 is_active 的 Publisher
+            True 表示至少存在一个 is_active 的 Publisher
         """
+        client_ids = (
+            [int(client_id)]
+            if isinstance(client_id, int)
+            else [int(value) for value in client_id if value is not None]
+        )
+        if not client_ids:
+            return False
         publisher_result = await self.db.execute(
             select(func.count(Publisher.id)).where(
                 and_(
-                    Publisher.client_id == client_id,
+                    Publisher.client_id.in_(client_ids),
                     Publisher.is_active == True
                 )
             )

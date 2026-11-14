@@ -96,7 +96,7 @@ from sqlalchemy.future import select
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.utils import get_app_now_naive
-from app.models.models import User, UserRole
+from app.models.models import Client, User, UserRole
 from app.models.session import TokenBlacklist
 
 # 获取日志记录器
@@ -502,82 +502,49 @@ async def get_current_user(
             error_code=ErrorCode.TOKEN_INVALID,
         )
 
-    # ====== 查询用户（使用权限缓存优化） ======
-    # 尝试使用权限缓存，减少数据库查询
-    try:
-        from app.core.permission_cache import get_user_permissions
-        
-        # 先检查缓存中的权限信息
-        permissions = await get_user_permissions(int(user_id), db)
-        
-        # 如果缓存中有权限信息，先进行基本检查
-        if permissions.get("role") is None:
-            _raise_auth(
-                "用户不存在",
-                error_code=ErrorCode.USER_NOT_FOUND,
-                http_status=status.HTTP_404_NOT_FOUND,
+    # 每次认证都读取当前用户行：角色、禁用状态和登录限制必须反映数据库最新值。
+    # 原权限缓存路径仍会再次查询 User 表，既未省去 DB 查询，又可能因缓存过期延迟账号状态变更。
+    result = await db.execute(select(User).where(User.id == int(user_id)))
+    user = result.scalars().first()
+
+    if user is None:
+        _raise_auth(
+            "用户不存在",
+            error_code=ErrorCode.USER_NOT_FOUND,
+            http_status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if not user.is_active:
+        _raise_auth(
+            "用户已被禁用",
+            error_code=ErrorCode.USER_DISABLED,
+            http_status=status.HTTP_403_FORBIDDEN,
+        )
+    if user.login_restricted:
+        _raise_auth(
+            user.login_message or "登录已被限制",
+            error_code=ErrorCode.FORBIDDEN,
+            http_status=status.HTTP_403_FORBIDDEN,
+        )
+
+    # 已签发的 access token 不能绕过客户主体停用：每次认证都确认至少存在一个启用中的 Client。
+    if user.role == UserRole.CLIENT:
+        active_client_row = await db.execute(
+            select(Client.id)
+            .where(
+                Client.user_id == user.id,
+                Client.is_active.is_(True),
             )
-
-        if not permissions.get("is_active", True):
+            .limit(1)
+        )
+        if active_client_row.scalar_one_or_none() is None:
             _raise_auth(
-                "用户已被禁用",
-                error_code=ErrorCode.USER_DISABLED,
-                http_status=status.HTTP_403_FORBIDDEN,
-            )
-
-        if permissions.get("login_restricted", False):
-            _raise_auth(
-                "登录已被限制",
-                error_code=ErrorCode.FORBIDDEN,
-                http_status=status.HTTP_403_FORBIDDEN,
-            )
-        
-        # 如果缓存检查通过，仍然需要查询完整的用户对象（因为需要返回User对象）
-        # 但可以优化：如果只需要权限检查，可以直接使用缓存
-        result = await db.execute(select(User).where(User.id == int(user_id)))
-        user = result.scalars().first()
-        
-        if user is None:
-            _raise_auth(
-                "用户不存在",
-                error_code=ErrorCode.USER_NOT_FOUND,
-                http_status=status.HTTP_404_NOT_FOUND,
-            )
-
-        return user
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        # 缓存功能失败，回退到直接查询数据库
-        logger.warning(f"权限缓存检查失败，回退到数据库查询: {e}")
-        
-        # 从数据库查询用户信息
-        result = await db.execute(select(User).where(User.id == int(user_id)))
-        user = result.scalars().first()
-
-        if user is None:
-            _raise_auth(
-                "用户不存在",
-                error_code=ErrorCode.USER_NOT_FOUND,
-                http_status=status.HTTP_404_NOT_FOUND,
-            )
-
-        if not user.is_active:
-            _raise_auth(
-                "用户已被禁用",
-                error_code=ErrorCode.USER_DISABLED,
-                http_status=status.HTTP_403_FORBIDDEN,
-            )
-
-        if user.login_restricted:
-            _raise_auth(
-                user.login_message or "登录已被限制",
+                "当前客户账号没有可用的客户主体，请联系管理员",
                 error_code=ErrorCode.FORBIDDEN,
                 http_status=status.HTTP_403_FORBIDDEN,
             )
 
-        return user
+    return user
 
 
 # ====== 管理员权限依赖 ======
@@ -660,7 +627,7 @@ async def require_admin_or_self(
     # 检查当前客户是否有权限访问自己的数据
     # 注意：Client 需要在函数内导入以避免循环导入
     from app.models.models import Client
-    result = await db.execute(select(Client).where(Client.user_id == current_user.id, Client.id == client_id))
+    result = await db.execute(select(Client).where(Client.user_id == current_user.id, Client.id == client_id, Client.is_active.is_(True)))
     client = result.scalars().first()
 
     if not client:
@@ -716,18 +683,30 @@ async def require_publisher_or_admin(
             error_code=ErrorCode.FORBIDDEN,
             http_status=status.HTTP_403_FORBIDDEN,
         )
-    from app.models.models import Client
-    from app.services.user_service import UserService
+    from app.models.models import Client, Publisher
 
-    client_row = await db.execute(select(Client).where(Client.user_id == current_user.id))
-    client = client_row.scalars().first()
-    if not client:
+    # User 与 Client 是一对多关系；必须检查该用户全部 Client 的渠道归属。
+    client_row = await db.execute(select(Client.id).where(
+        Client.user_id == current_user.id,
+        Client.is_active.is_(True),
+    ))
+    client_ids = [int(value) for value in client_row.scalars().all()]
+    if not client_ids:
         _raise_auth(
             "客户信息不存在",
             error_code=ErrorCode.CLIENT_NOT_FOUND,
             http_status=status.HTTP_403_FORBIDDEN,
         )
-    if not await UserService(db).check_client_has_publisher(client.id):
+
+    publisher_row = await db.execute(
+        select(Publisher.id)
+        .where(
+            Publisher.client_id.in_(client_ids),
+            Publisher.is_active.is_(True),
+        )
+        .limit(1)
+    )
+    if publisher_row.scalar_one_or_none() is None:
         _raise_auth(
             "需要关联渠道权限",
             error_code=ErrorCode.FORBIDDEN,

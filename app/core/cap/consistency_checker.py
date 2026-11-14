@@ -20,108 +20,101 @@ async def check_cap_consistency(
     offer_id: int = None,
     fix_inconsistencies: bool = False
 ) -> List[Dict[str, Any]]:
-    """
-    检查Cap计数一致性
-    
-    Args:
-        db: 数据库会话
-        offer_id: 可选的Offer ID，如果提供则只检查该Offer的Cap
-        fix_inconsistencies: 是否自动修复不一致的数据
-        
-    Returns:
-        不一致的记录列表，每个记录包含：
-        - cap_id: Cap配置ID
-        - offer_id: Offer ID
-        - publisher_id: 渠道ID
-        - db_daily_count: DB中的每日计数
-        - redis_daily_count: Redis中的每日计数
-        - db_total_count: DB中的总计数
-        - redis_total_count: Redis中的总计数
-        - inconsistencies: 不一致的类型列表
-    """
+    """检查 DB/Redis Cap 计数；Redis key 缺失时将状态标记为未知，绝不推断为 0。"""
     inconsistencies = []
-    
+
     try:
-        # 查询Cap配置
         query = select(OfferCap).where(OfferCap.is_active == True)
         if offer_id:
             query = query.where(OfferCap.offer_id == offer_id)
-        
+
         result = await db.execute(query)
         caps = result.scalars().all()
-        
+
         redis = await get_redis_client()
         if not redis:
-            logger.warning("Redis不可用，无法进行一致性检查")
-            return inconsistencies
-        
+            # 无法读取 Redis 时，不能把“未知”伪装成“无不一致”。
+            # 通过异常让 API 返回失败状态，调用方可明确区分检查失败与检查通过。
+            logger.error("Redis不可用，Cap一致性检查无法完成")
+            raise RuntimeError("Redis 不可用，无法完成 Cap 计数一致性检查")
+
         now = get_app_now_naive()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        
+
         for cap in caps:
             cap_issues = []
-            
-            # 检查每日Cap
+            redis_daily_count = None
+            redis_total_count = None
+            db_daily_count = None
+            db_total_count = None
+
             if cap.daily_cap:
-                redis_key = get_daily_cap_key(cap.offer_id, now, cap.publisher_id)
-                redis_val = await redis.get(redis_key)
-                redis_daily_count = int(redis_val) if redis_val else 0
-                
-                # 获取DB计数（考虑是否需要重置）
                 if cap.cap_start_date and cap.cap_start_date.date() == today_start.date():
                     db_daily_count = cap.current_daily_count
                 else:
                     db_daily_count = 0
-                
-                if redis_daily_count != db_daily_count:
-                    cap_issues.append(f"每日计数不一致: DB={db_daily_count}, Redis={redis_daily_count}")
-                    
-                    if fix_inconsistencies:
-                        # 修复：以DB为准，更新Redis
-                        try:
-                            await redis.setex(redis_key, 48 * 3600, db_daily_count)
-                            logger.info(f"已修复每日计数不一致: cap_id={cap.id}, 设置为{db_daily_count}")
-                        except Exception as e:
-                            logger.error(f"修复每日计数失败: cap_id={cap.id}, error={e}")
-            
-            # 检查总Cap
+
+                redis_key = get_daily_cap_key(cap.offer_id, now, cap.publisher_id)
+                redis_val = await redis.get(redis_key)
+                if redis_val is None:
+                    cap_issues.append(
+                        "每日 Redis 计数 key 缺失，真实计数未知；不按 0 处理，也不执行自动修复"
+                    )
+                else:
+                    redis_daily_count = int(redis_val)
+                    if redis_daily_count != db_daily_count:
+                        cap_issues.append(
+                            f"每日计数不一致: DB={db_daily_count}, Redis={redis_daily_count}"
+                        )
+                        if fix_inconsistencies:
+                            logger.warning(
+                                "Cap 自动修复已禁用（每日计数）；需通过持行锁的安全同步流程处理：cap_id=%s",
+                                cap.id,
+                            )
+
             if cap.total_cap:
+                db_total_count = cap.current_total_count
                 redis_key = get_total_cap_key(cap.offer_id, cap.publisher_id)
                 redis_val = await redis.get(redis_key)
-                redis_total_count = int(redis_val) if redis_val else 0
-                db_total_count = cap.current_total_count
-                
-                if redis_total_count != db_total_count:
-                    cap_issues.append(f"总计数不一致: DB={db_total_count}, Redis={redis_total_count}")
-                    
-                    if fix_inconsistencies:
-                        # 修复：以DB为准，更新Redis
-                        try:
-                            await redis.setex(redis_key, 30 * 24 * 3600, db_total_count)
-                            logger.info(f"已修复总计数不一致: cap_id={cap.id}, 设置为{db_total_count}")
-                        except Exception as e:
-                            logger.error(f"修复总计数失败: cap_id={cap.id}, error={e}")
-            
+                if redis_val is None:
+                    cap_issues.append(
+                        "总计 Redis 计数 key 缺失，真实计数未知；不按 0 处理，也不执行自动修复"
+                    )
+                else:
+                    redis_total_count = int(redis_val)
+                    if redis_total_count != db_total_count:
+                        cap_issues.append(
+                            f"总计数不一致: DB={db_total_count}, Redis={redis_total_count}"
+                        )
+                        if fix_inconsistencies:
+                            logger.warning(
+                                "Cap 自动修复已禁用（总计数）；需通过持行锁的安全同步流程处理：cap_id=%s",
+                                cap.id,
+                            )
+
             if cap_issues:
+                if fix_inconsistencies:
+                    cap_issues.append(
+                        "未执行自动覆盖修复：为保护并发预留，需使用安全同步/人工核验流程"
+                    )
                 inconsistencies.append({
                     "cap_id": cap.id,
                     "offer_id": cap.offer_id,
                     "publisher_id": cap.publisher_id,
-                    "db_daily_count": cap.current_daily_count if cap.daily_cap else None,
-                    "redis_daily_count": redis_daily_count if cap.daily_cap else None,
-                    "db_total_count": cap.current_total_count if cap.total_cap else None,
-                    "redis_total_count": redis_total_count if cap.total_cap else None,
-                    "inconsistencies": cap_issues
+                    "db_daily_count": db_daily_count,
+                    "redis_daily_count": redis_daily_count,
+                    "db_total_count": db_total_count,
+                    "redis_total_count": redis_total_count,
+                    "inconsistencies": cap_issues,
                 })
-        
+
         if inconsistencies:
-            logger.warning(f"发现 {len(inconsistencies)} 个Cap计数不一致")
+            logger.warning("发现 %s 个Cap计数问题", len(inconsistencies))
         else:
             logger.info("Cap计数一致性检查通过")
-        
-        return inconsistencies
-        
-    except Exception as e:
-        logger.error(f"Cap计数一致性检查失败: {str(e)}", exc_info=True)
-        raise
 
+        return inconsistencies
+
+    except Exception as e:
+        logger.error("Cap计数一致性检查失败: %s", str(e), exc_info=True)
+        raise

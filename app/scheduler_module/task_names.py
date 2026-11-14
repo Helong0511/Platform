@@ -18,6 +18,9 @@
 2. 常量值长度受 scheduled_tasks.name 字段限制
 """
 
+# Postback 下游转发队列处理
+POSTBACK_FORWARD_QUEUE_TASK_NAME = "Postback转发队列处理"
+
 # ==================== 任务名称常量定义 ====================
 # 数据归档任务
 ARCHIVE_DATA_TASK_NAME = "数据归档任务"
@@ -84,6 +87,9 @@ GAM_API_TASK_NAME = "Google API获取数据"
 
 # CPL 系统定时任务
 RESET_DAILY_CAPS_TASK_NAME = "每日Cap重置"
+CAP_RESERVATION_RECOVERY_TASK_NAME = "Cap Reservation 崩溃恢复"
+THIRD_PARTY_REPORT_OUTBOX_TASK_NAME = "第三方上报 Outbox 投递"
+THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME = "第三方上报 PII 生命周期清理"
 
 # 广告数据健康巡检
 AD_DATA_BASELINE_FREEZE_TASK_NAME = "广告数据标准日冻结"
@@ -93,6 +99,7 @@ AD_DATA_HEALTH_SCAN_TASK_NAME = "广告数据健康巡检"
 # 用于快速查找任务名称，格式：{任务模块名: 任务名称常量}
 
 TASK_NAME_MAP = {
+    "forward_tasks": POSTBACK_FORWARD_QUEUE_TASK_NAME,
     "archive_old_data": ARCHIVE_DATA_TASK_NAME,
     "cleanup_old_logs": CLEANUP_LOGS_TASK_NAME,
     "cleanup_file_logs": CLEANUP_FILE_LOGS_TASK_NAME,
@@ -115,6 +122,8 @@ TASK_NAME_MAP = {
     "asone_task": ASONE_API_TASK_NAME,
     "gam_task": GAM_API_TASK_NAME,
     "cpl_tasks": RESET_DAILY_CAPS_TASK_NAME,
+    "cap_reservation_recovery": CAP_RESERVATION_RECOVERY_TASK_NAME,
+    "third_party_report_tasks": THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
     "ad_data_health_task": AD_DATA_HEALTH_SCAN_TASK_NAME,
 }
 
@@ -122,6 +131,7 @@ TASK_NAME_MAP = {
 # 用于批量操作和验证
 
 ALL_TASK_NAMES = [
+    POSTBACK_FORWARD_QUEUE_TASK_NAME,
     ARCHIVE_DATA_TASK_NAME,
     CLEANUP_SESSIONS_TASK_NAME,
     CLEANUP_SENSITIVE_PROBES_TASK_NAME,
@@ -144,6 +154,9 @@ ALL_TASK_NAMES = [
     ASONE_API_TASK_NAME,
     GAM_API_TASK_NAME,
     RESET_DAILY_CAPS_TASK_NAME,
+    CAP_RESERVATION_RECOVERY_TASK_NAME,
+    THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
+    THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME,
     AD_DATA_BASELINE_FREEZE_TASK_NAME,
     AD_DATA_HEALTH_SCAN_TASK_NAME,
 ]

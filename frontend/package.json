@@ -7,7 +7,9 @@
     "dev": "vite --port 3310",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "eslint --ext .js,.vue src --quiet"
+    "lint": "eslint --ext .js,.vue src --quiet",
+    "audit": "npm audit",
+    "audit:production": "npm audit --omit=dev"
   },
   "browserslist": [
     "defaults",
@@ -16,19 +18,26 @@
   ],
   "dependencies": {
     "@element-plus/icons-vue": "2.3.2",
-    "axios": "1.18.1",
+    "axios": "1.21.1",
     "echarts": "6.1.0",
     "element-plus": "^2.11.7",
     "pinia": "3.0.3",
-    "vue": "3.5.22",
+    "vue": "3.5.45",
     "vue-router": "4.6.3"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "6.0.1",
-    "eslint": "8.57.0",
-    "eslint-plugin-vue": "9.28.0",
+    "eslint": "10.14.0",
+    "eslint-plugin-vue": "10.11.1",
     "linkedom": "^0.18.12",
     "postcss": "8.5.26",
-    "vite": "7.3.6"
+    "vite": "7.3.8",
+    "@eslint/js": "10.0.1",
+    "@stylistic/eslint-plugin": "5.10.0",
+    "globals": "17.14.0"
+  },
+  "overrides": {
+    "follow-redirects": "1.16.0",
+    "minimatch": "11.0.5"
   }
 }

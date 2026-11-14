@@ -27,7 +27,7 @@ from app.core.short_link.generator import (
     generate_unique_short_code
 )
 from app.models.models import User, UserRole, Offer, ShortLink, Click, PostbackConversion, Publisher
-from app.services.cpl.offer.helpers import assert_client_can_access_offer, get_client_id_for_user
+from app.services.cpl.offer.helpers import assert_client_can_access_offer, get_client_ids_for_user
 from app.services.cpl.offer_stats import (
     offer_stats_period_start,
     offer_stats_previous_range,
@@ -45,7 +45,7 @@ def _sanitize_offer_response_for_client(
         offer_data: OfferResponse,
         current_user: User,
         *,
-        client_id: int | None = None,
+        client_ids: list[int] | None = None,
 ) -> OfferResponse:
     """客户响应不得暴露上游价格、Cap、广告主、他渠 PO/Cap、Tracklink 或内部 Postback。"""
     if current_user.role != UserRole.CLIENT:
@@ -61,10 +61,11 @@ def _sanitize_offer_response_for_client(
     offer_data.postback_url = None
     # 仅保留本客户关联渠道的分配明细（下游 PO/Cap）
     assignments = offer_data.assigned_publishers or []
-    if client_id is not None:
+    if client_ids is not None:
+        allowed_client_ids = set(client_ids)
         offer_data.assigned_publishers = [
             a for a in assignments
-            if isinstance(a, dict) and a.get("client_id") == client_id
+            if isinstance(a, dict) and a.get("client_id") in allowed_client_ids
         ]
     else:
         offer_data.assigned_publishers = []
@@ -190,7 +191,7 @@ async def create_short_link_for_offer(
         return short_link, False  # 新创建的，不是重复
 
     except Exception as e:
-        logger.error(f"为Offer创建主短链接失败: offer_id={offer_id}, error={str(e)}", exc_info=True)
+        logger.error("为 Offer 创建主短链接失败: offer_id=%s error_type=%s", offer_id, type(e).__name__)
         return None, False
 
 
@@ -388,7 +389,7 @@ async def check_and_create_downstream_tracklink_short_link(
                     raise  # 重新抛出异常，让外层处理
 
     except Exception as e:
-        logger.error(f"检查并创建下游Tracklink短链接失败: offer_id={offer_id}, error={str(e)}", exc_info=True)
+        logger.error("检查并创建下游 Tracklink 短链接失败: offer_id=%s error_type=%s", offer_id, type(e).__name__)
         return None, False
 
 
@@ -538,7 +539,7 @@ async def sync_short_links_for_offer(
         return result
 
     except Exception as e:
-        logger.error(f"同步Offer短链接失败: offer_id={offer_id}, error={str(e)}", exc_info=True)
+        logger.error("同步 Offer 短链接失败: offer_id=%s error_type=%s", offer_id, type(e).__name__)
         return result
 
 
@@ -650,7 +651,7 @@ async def get_offers(
     )
 
     # 构建响应数据（广告主信息已通过joinedload预加载，渠道分配已批量加载）
-    client_id = await get_client_id_for_user(db, current_user)
+    client_ids = await get_client_ids_for_user(db, current_user)
     offer_list = []
     # ---------- 循环处理 ----------
     for offer in offers:
@@ -660,7 +661,7 @@ async def get_offers(
         # 从批量查询的结果中获取渠道分配
         offer_data.assigned_publishers = assignments_map.get(offer.id, [])
         offer_data = _sanitize_offer_response_for_client(
-            offer_data, current_user, client_id=client_id
+            offer_data, current_user, client_ids=client_ids
         )
 
         offer_list.append(offer_data)
@@ -769,13 +770,13 @@ async def get_offer_stats(
     # 客户仅统计本客户渠道，避免共享 Offer 上泄露其他下游指标
     publisher_ids = None
     if current_user.role == UserRole.CLIENT:
-        client_id = await get_client_id_for_user(db, current_user)
-        if not client_id:
+        client_ids = await get_client_ids_for_user(db, current_user)
+        if not client_ids:
             publisher_ids = []
         else:
             pub_result = await db.execute(
                 select(Publisher.id).where(
-                    Publisher.client_id == client_id,
+                    Publisher.client_id.in_(client_ids),
                 )
             )
             publisher_ids = list(pub_result.scalars().all())
@@ -932,9 +933,9 @@ async def get_offer(
     # 从已加载的关联中获取广告主名称
     offer_data.advertiser_name = offer.advertiser.advertiser_name if offer.advertiser else None
     offer_data.assigned_publishers = assignments
-    client_id = await get_client_id_for_user(db, current_user)
+    client_ids = await get_client_ids_for_user(db, current_user)
     offer_data = _sanitize_offer_response_for_client(
-        offer_data, current_user, client_id=client_id
+        offer_data, current_user, client_ids=client_ids
     )
 
     return ResponseBaseSchema.success(data=offer_data)

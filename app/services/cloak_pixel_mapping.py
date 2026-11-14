@@ -11,7 +11,7 @@
 无以上两者时返回 None（不再回退全局 FACEBOOK_PIXEL_ID / FACEBOOK_ACCESS_TOKEN）。
 API 版本缺省仍可用 settings.FACEBOOK_API_VERSION（仅版本号，非像素凭证）。
 
-缓存：内存缓存键为 {short_code}:{dp}，TTL 1 小时；配置或桥页变更时调用 invalidate_cloak_cache_for_dp。
+缓存：旧版进程内缓存结构仅为兼容保留，运行时读取路径已禁用；多 Worker 场景下每次从数据库读取权威配置，避免旧 Pixel 凭证跨进程滞留。待共享缓存版本化失效协议完成并验证后才可重新启用缓存。
 """
 import logging
 import re
@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.models import ShortLink, CloakConfig
 from app.core.config import settings
 from app.core.cloak_scripts_paths import bridge_html_exists
+from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -68,11 +69,11 @@ class CloakPixelMappingService:
     2. 根据斗篷名称高效查询像素配置
     3. 参数验证与错误处理
     4. 详细的日志记录
-    5. 缓存机制提高查询效率
+    5. 当前为保证 Gunicorn 多 Worker 配置一致性，每次从数据库读取，不使用进程内凭证缓存
     """
     
     def __init__(self):
-        """初始化内存缓存与时间戳表，TTL 默认 1 小时。"""
+        """初始化兼容旧版缓存容器；当前运行路径不读写该本地凭证缓存。"""
         # 内存缓存：{short_code: pixel_config}
         self._cache: Dict[str, Dict[str, Any]] = {}
         # 缓存过期时间（秒）
@@ -124,13 +125,19 @@ class CloakPixelMappingService:
             logger.error(f"[斗篷像素映射] dp 参数格式无效：{dp}")
             return None
         
-        # 检查缓存（使用 dp 作为缓存键）
+        # 多 Worker 环境下，进程内缓存无法接收其它 Worker 的失效通知。
+        # 在共享缓存版本机制完成前，数据库是配置变更的唯一权威来源；
+        # 即使调用方显式传入 use_cache=True，也不读取或写入本地凭证缓存。
+        # 这会增加一次数据库查询，但避免配置轮换/停用/删除后其它 Worker
+        # 在 TTL 内继续使用旧 Pixel ID 或 Token。
         cache_key = f"{short_code}:{dp}"
         if use_cache:
-            cached_config = self._get_from_cache(cache_key)
-            if cached_config:
-                logger.info(f"[斗篷像素映射] 缓存命中：dp={dp}, short_code={short_code}")
-                return cached_config
+            self.invalidate_cache(cache_key)
+            logger.debug(
+                "[斗篷像素映射] 已绕过进程内凭证缓存，使用数据库权威配置：dp=%s, short_code=%s",
+                dp,
+                short_code,
+            )
         
         try:
             # 从数据库查询短链接信息
@@ -146,6 +153,9 @@ class CloakPixelMappingService:
             
             if not short_link.is_active:
                 logger.warning(f"[斗篷像素映射] 斗篷已停用：short_code={short_code}")
+                return None
+            if short_link.expires_at and short_link.expires_at <= get_app_now_naive():
+                logger.warning("[斗篷像素映射] 短链接已过期：short_code=%s", short_code)
                 return None
             
             # 查询斗篷配置表（仅 is_enabled=True 且存在桥页）
@@ -166,10 +176,6 @@ class CloakPixelMappingService:
             if not self._validate_pixel_config(pixel_config, dp):
                 return None
 
-            # 更新缓存
-            if use_cache:
-                self._update_cache(cache_key, pixel_config)
-
             pixel_id = pixel_config.get("facebook_pixel_id") or ""
             logger.info(
                 "[斗篷像素映射] 成功获取配置：dp=%s, short_code=%s, pixel_id=%s...",
@@ -180,10 +186,13 @@ class CloakPixelMappingService:
 
             return pixel_config
             
-        except Exception as e:
-            logger.error(
-                f"[斗篷像素映射] 查询失败：dp={dp}, short_code={short_code}, error={str(e)}",
-                exc_info=True
+        except Exception as exc:
+            # 数据库异常可能携带 SQL 参数或个人信息；日志仅保留异常类型和内部配置定位字段。
+            logger.warning(
+                "[斗篷像素映射] 查询失败：dp=%s, short_code=%s, error_type=%s",
+                dp,
+                short_code,
+                type(exc).__name__,
             )
             return None
     
@@ -226,6 +235,7 @@ class CloakPixelMappingService:
                 "short_code": short_link.short_code,
                 "original_url": short_link.original_url,
                 "is_active": short_link.is_active,
+                "expires_at": short_link.expires_at,
                 "title": short_link.title,
                 "offer_id": short_link.offer_id,
                 "channel_id": short_link.channel_id,
@@ -253,6 +263,7 @@ class CloakPixelMappingService:
                 "short_code": short_link.short_code,
                 "original_url": short_link.original_url,
                 "is_active": short_link.is_active,
+                "expires_at": short_link.expires_at,
                 "title": short_link.title,
                 "offer_id": short_link.offer_id,
                 "channel_id": short_link.channel_id,
@@ -358,6 +369,15 @@ class CloakPixelMappingService:
             self._cache_timestamps.clear()
             logger.info("[斗篷像素映射] 所有缓存已清除")
 
+    def invalidate_cache_for_short_code(self, short_code: str) -> None:
+        """清除指定短链的全部 dp 缓存，短链配置轮换/停用/删除后调用。"""
+        if not short_code:
+            return
+        prefix = f"{short_code}:"
+        keys = [key for key in list(self._cache.keys()) if key.startswith(prefix)]
+        for cache_key in keys:
+            self.invalidate_cache(cache_key)
+
     def invalidate_cache_for_dp(self, dp: str) -> None:
         """清除所有 short_code:dp 形式的条目（桥页上传/删除或斗篷更名后应调用）。"""
         if not dp or not re.match(r"^[a-zA-Z0-9_-]+$", dp):
@@ -412,16 +432,12 @@ def invalidate_cloak_cache_for_dp(dp: str) -> None:
 
 
 def invalidate_cloak_cache(short_code: Optional[str] = None, dp: Optional[str] = None) -> None:
-    """
-    便捷函数：使缓存失效
-    
-    使用示例：
-    # 清除特定 dp 的缓存
-    invalidate_cloak_cache(short_code="temp_42e8c1b0", dp="master")
-    
-    # 清除所有缓存
-    invalidate_cloak_cache()
-    """
-    cloak_pixel_service.invalidate_cache(
-        cache_key=f"{short_code}:{dp}" if short_code and dp else None
-    )
+    """使指定短链/斗篷缓存失效；无参数时清空全部缓存。"""
+    if short_code and dp:
+        cloak_pixel_service.invalidate_cache(cache_key=f"{short_code}:{dp}")
+    elif short_code:
+        cloak_pixel_service.invalidate_cache_for_short_code(short_code)
+    elif dp:
+        cloak_pixel_service.invalidate_cache_for_dp(dp)
+    else:
+        cloak_pixel_service.invalidate_cache()

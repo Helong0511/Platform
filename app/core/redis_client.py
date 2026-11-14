@@ -27,9 +27,14 @@ _redis_loop: Optional[asyncio.AbstractEventLoop] = None
 # 连接失败后短暂退避，避免每个请求都等待 socket_connect_timeout
 _redis_connect_backoff_until: float = 0.0
 _REDIS_CONNECT_BACKOFF_SECONDS = 60.0
+# 连接池由 redis-py 自身做连接健康检查；应用层最多每 30 秒主动 ping 一次。
+_REDIS_EXPLICIT_PING_INTERVAL_SECONDS = 30.0
+_redis_last_ping_at: float = 0.0
 _redis_dev_no_host_logged = False
 _redis_dev_loopback_skip_logged = False
 _redis_connect_lock: Optional[asyncio.Lock] = None
+# 连接锁所属事件循环；首次连接前也必须显式初始化，避免读取未定义全局变量。
+_redis_connect_lock_loop: Optional[asyncio.AbstractEventLoop] = None
 
 _LOOPBACK_REDIS_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
@@ -74,11 +79,13 @@ def _mark_redis_connect_failed() -> None:
 
 def _reset_redis_singleton(*, reset_connect_lock: bool = False) -> None:
     """丢弃当前单例引用（不在异构事件循环上 close，避免二次破坏）。"""
-    global _redis_client, _redis_loop, _redis_connect_lock
+    global _redis_client, _redis_loop, _redis_connect_lock, _redis_connect_lock_loop, _redis_last_ping_at
     _redis_client = None
     _redis_loop = None
+    _redis_last_ping_at = 0.0
     if reset_connect_lock:
         _redis_connect_lock = None
+        _redis_connect_lock_loop = None
 
 
 async def get_redis_client() -> Optional[aioredis.Redis]:
@@ -87,39 +94,58 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
     如果Redis未配置或连接失败，返回None（使用内存存储）
     """
     global _redis_client, _redis_loop, _redis_dev_no_host_logged, _redis_dev_loopback_skip_logged
-    global _redis_connect_backoff_until, _redis_connect_lock
+    global _redis_connect_backoff_until, _redis_connect_lock, _redis_connect_lock_loop, _redis_last_ping_at
 
     try:
         current_loop = asyncio.get_running_loop()
     except RuntimeError:
         return None
 
-    if time.monotonic() < _redis_connect_backoff_until:
+    now = time.monotonic()
+    if now < _redis_connect_backoff_until:
         return None
 
-    # 事件循环切换时先丢弃旧 Lock（asyncio.Lock 绑定创建时的事件循环）
+    # 热路径不再逐请求获取全局锁并 ping；redis-py 的连接池健康检查负责连接复用。
+    if (
+        _redis_client is not None
+        and _redis_loop is current_loop
+        and not current_loop.is_closed()
+        and now - _redis_last_ping_at < _REDIS_EXPLICIT_PING_INTERVAL_SECONDS
+    ):
+        return _redis_client
+
+    # 无论客户端是否已成功创建，都按事件循环隔离连接锁；
+    # 首次连接失败时 _redis_loop 仍为 None，不能只依赖 _redis_loop 判断锁是否跨 loop。
     if _redis_loop is not None and (_redis_loop is not current_loop or _redis_loop.is_closed()):
         _reset_redis_singleton(reset_connect_lock=True)
 
-    # Lock 仅在已确认存在运行中事件循环的 async 上下文中创建
-    if _redis_connect_lock is None:
+    if (
+        _redis_connect_lock is None
+        or _redis_connect_lock_loop is not current_loop
+        or (_redis_connect_lock_loop is not None and _redis_connect_lock_loop.is_closed())
+    ):
         _redis_connect_lock = asyncio.Lock()
+        _redis_connect_lock_loop = current_loop
 
     async with _redis_connect_lock:
-        if time.monotonic() < _redis_connect_backoff_until:
+        now = time.monotonic()
+        if now < _redis_connect_backoff_until:
             return None
 
-        # 事件循环切换或已关闭时（如 Telegram 线程 asyncio.run）不复用旧客户端
+        # 双重检查：等待锁期间可能已有其他请求完成 ping 或连接初始化。
         if _redis_client is not None:
             if _redis_loop is not current_loop or _redis_loop.is_closed():
                 logger.debug("Redis 客户端与当前事件循环不匹配，将重新连接")
                 _reset_redis_singleton()
+            elif now - _redis_last_ping_at < _REDIS_EXPLICIT_PING_INTERVAL_SECONDS:
+                return _redis_client
             else:
                 try:
                     await _redis_client.ping()
+                    _redis_last_ping_at = time.monotonic()
                     return _redis_client
                 except Exception as e:
-                    logger.warning(f"Redis连接测试失败: {e}，尝试重新连接")
+                    logger.warning(f"Redis 低频健康检查失败: {e}，重置连接并退避")
                     _reset_redis_singleton()
                     _mark_redis_connect_failed()
 
@@ -131,7 +157,7 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
 
         # 检查Redis库是否可用
         if not REDIS_AVAILABLE:
-            logger.warning("Redis库未安装，将使用内存存储。安装命令: pip install redis>=5.0.0")
+            logger.warning("Redis库未安装，将使用内存存储。安装命令: pip install redis>=6.0.0")
             return None
 
         # 如果未配置Redis，返回None（使用内存存储）
@@ -177,7 +203,6 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
                 decode_responses=True,
                 socket_connect_timeout=connect_timeout,
                 socket_timeout=connect_timeout,
-                retry_on_timeout=True,
                 health_check_interval=30,
                 max_connections=max_connections,
                 socket_keepalive=True,
@@ -187,16 +212,9 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
             await _redis_client.ping()
             logger.info(f"Redis连接成功: {redis_host}:{redis_port}/{redis_db}")
 
-            test_key = "test:redis:connection"
-            test_value = "ok"
-            await _redis_client.setex(test_key, 60, test_value)
-            retrieved_value = await _redis_client.get(test_key)
-            if retrieved_value == test_value:
-                logger.info("Redis读写操作测试成功")
-            else:
-                logger.warning("Redis读写操作测试失败")
-
+            # 启动阶段只做 PING，不向共享 Redis 写入通用测试 key。
             _redis_loop = current_loop
+            _redis_last_ping_at = time.monotonic()
             _redis_connect_backoff_until = 0.0
             return _redis_client
         except Exception as e:

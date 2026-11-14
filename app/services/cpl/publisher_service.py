@@ -58,13 +58,16 @@ class PublisherService(BaseService[Publisher]):
         """注入异步数据库会话。"""
         super().__init__(db, Publisher)
 
-    async def _client_id_for_user(self, user: User) -> Optional[int]:
+    async def _client_ids_for_user(self, user: User) -> List[int]:
+        """返回该客户账号全部启用中的客户主体 ID，避免一对多关系只取首项。"""
         if user.role != UserRole.CLIENT:
-            return None
+            return []
         result = await self.db.execute(
-            select(Client.id).where(Client.user_id == user.id).limit(1)
+            select(Client.id)
+            .where(Client.user_id == user.id, Client.is_active.is_(True))
+            .order_by(Client.id.asc())
         )
-        return result.scalar_one_or_none()
+        return [int(value) for value in result.scalars().all()]
 
     async def get_publisher_by_id(
             self,
@@ -102,8 +105,8 @@ class PublisherService(BaseService[Publisher]):
             )
 
         if current_user.role == UserRole.CLIENT:
-            client_id = await self._client_id_for_user(current_user)
-            if not client_id or publisher.client_id != client_id:
+            client_ids = await self._client_ids_for_user(current_user)
+            if not client_ids or publisher.client_id not in client_ids:
                 raise_api_exception(
                     ErrorCode.RESOURCE_NOT_FOUND,
                     detail=f"渠道ID {publisher_id} 不存在"
@@ -142,10 +145,10 @@ class PublisherService(BaseService[Publisher]):
         conditions = []
 
         if current_user.role == UserRole.CLIENT:
-            client_id = await self._client_id_for_user(current_user)
-            if not client_id:
+            client_ids = await self._client_ids_for_user(current_user)
+            if not client_ids:
                 return [], 0
-            conditions.append(Publisher.client_id == client_id)
+            conditions.append(Publisher.client_id.in_(client_ids))
 
         if search:
             # 搜索：名称或ID

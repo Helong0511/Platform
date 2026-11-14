@@ -6,12 +6,45 @@ on:
   pull_request:
     branches: [main, master]
 
+# 同一 PR/分支只保留最新 CI，避免连续提交造成旧测试争抢 Runner 资源。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# 默认只读；只有受限的 lockfile 提交任务单独获得 contents:write。
+permissions:
+  contents: read
+
 jobs:
   backend:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
+    # 仅供 CI 使用的临时 Redis 服务；与任何生产资源完全隔离。
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-password
+          MYSQL_DATABASE: platform_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -p$MYSQL_ROOT_PASSWORD"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Install dependencies
@@ -21,29 +54,115 @@ jobs:
       - name: Run unit tests
         env:
           UNIT_TEST: "1"
+          PYTHON_DOTENV_DISABLED: "1"
           DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+          REDIS_URL: "redis://127.0.0.1:6379/15"
+          REDIS_HOST: "127.0.0.1"
+          REDIS_PORT: "6379"
+          REDIS_DB: "15"
+          REDIS_INTEGRATION_URL: "redis://127.0.0.1:6379/14"
+          REDIS_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS: "1"
+          MYSQL_INTEGRATION_HOST: "127.0.0.1"
+          MYSQL_INTEGRATION_PORT: "3306"
+          MYSQL_INTEGRATION_USER: "root"
+          MYSQL_INTEGRATION_PASSWORD: "ci-root-password"
+          MYSQL_INTEGRATION_DATABASE: "platform_ci"
+          MYSQL_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS: "1"
+          ASONE_API_BASE_URL: "http://127.0.0.1:9"
+          ASONE_API_KEY: ""
+          TEST_API_BASE: "http://127.0.0.1:9"
+          TELEGRAM_ENABLE: "false"
           SECRET_KEY: "ci-test-secret-key-must-be-at-least-32-chars-long"
           PRODUCTION_ENV: "development"
         # 收集仓库中所有测试文件；没有测试时必须失败，禁止“无测试绿色通过”。
         run: |
           shopt -s nullglob
-          mapfile -t TEST_FILES < <(git ls-files 'tests/test_*.py' 'tests/**/test_*.py' | grep -v '^tests/manual/' || true)
+          # -z + NUL 分隔可保留中文、空格和特殊字符；关闭 quotePath 避免 pytest 收到转义后的伪路径。
+          mapfile -d '' -t TRACKED_TEST_FILES < <(
+            git -c core.quotePath=false ls-files -z -- 'tests/test_*.py' 'tests/**/test_*.py'
+          )
+          TEST_FILES=()
+          for test_file in "${TRACKED_TEST_FILES[@]}"; do
+            [[ "$test_file" == tests/manual/* ]] || TEST_FILES+=("$test_file")
+          done
           if [ ${#TEST_FILES[@]} -eq 0 ]; then
             echo "::error::No tests/test_*.py found; refusing to skip pytest."
             exit 1
           fi
-          pytest "${TEST_FILES[@]}" -q --tb=short
+          # 输出逐条测试节点，便于从 Actions 日志核对 MySQL/Redis 集成测试是否真实执行。
+          pytest "${TEST_FILES[@]}" -v -rs --tb=short
 
   frontend:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
-      - run: npm ci || npm install
+          node-version: "24"
+      - run: npm ci
+      # 审计只查询公开 npm Advisory 数据；不访问生产服务.
+      # 先区分全量与生产依赖风险，保留报告而不因未修复项中断其它 CI 验收。
+      - name: Report frontend dependency advisories
+        run: |
+          npm audit --json > "$RUNNER_TEMP/npm-audit-all.json" || true
+          npm audit --omit=dev --json > "$RUNNER_TEMP/npm-audit-production.json" || true
+          node --input-type=commonjs <<'NODE'
+          const fs = require('node:fs');
+
+          for (const [label, path] of [
+            ['all dependencies', process.env.RUNNER_TEMP + '/npm-audit-all.json'],
+            ['production dependencies', process.env.RUNNER_TEMP + '/npm-audit-production.json'],
+          ]) {
+            let report;
+            try {
+              report = JSON.parse(fs.readFileSync(path, 'utf8'));
+            } catch (error) {
+              console.log(`[npm audit] ${label}: report unavailable: ${error.message}`);
+              continue;
+            }
+
+            const meta = report.metadata?.vulnerabilities || {};
+            console.log(
+              `[npm audit] ${label}: total=${meta.total ?? 'unknown'}, ` +
+              `critical=${meta.critical ?? 'unknown'}, high=${meta.high ?? 'unknown'}, ` +
+              `moderate=${meta.moderate ?? 'unknown'}, low=${meta.low ?? 'unknown'}`
+            );
+
+            for (const [name, item] of Object.entries(report.vulnerabilities || {})) {
+              const advisories = (item.via || []).map((entry) => (
+                typeof entry === 'string' ? entry : `${entry.title} (${entry.url})`
+              ));
+              console.log(
+                `[npm audit] ${name}: severity=${item.severity}, direct=${item.isDirect}, ` +
+                `range=${item.range}, fix=${JSON.stringify(item.fixAvailable)}, ` +
+                `via=${advisories.join('; ')}`
+              );
+            }
+          }
+          NODE
       - run: npm run lint
       - run: npm run build
+      - name: Install pinned Playwright browser runner
+        run: |
+          npm install --no-save --package-lock=false playwright@1.65.0
+          npx playwright install --with-deps chromium
+      - name: Start isolated frontend server
+        run: |
+          npm run dev -- --host 127.0.0.1 --port 4173 > /tmp/platform-vite.log 2>&1 &
+          echo $! > /tmp/platform-vite.pid
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173/login >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/platform-vite.log
+          exit 1
+      - name: Browser E2E (mock APIs; no production services)
+        env:
+          E2E_BASE_URL: http://127.0.0.1:4173
+        run: node e2e/smoke.mjs

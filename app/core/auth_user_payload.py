@@ -16,6 +16,7 @@ def build_auth_user_payload(
         *,
         api_enabled: bool = False,
         has_publisher: bool = False,
+        password_change_enabled: bool = False,
         client: Client | None = None,
 ) -> dict[str, Any]:
     """
@@ -32,17 +33,14 @@ def build_auth_user_payload(
         "role": role,
         "api_enabled": api_enabled,
         "has_publisher": has_publisher,
+        "password_change_enabled": password_change_enabled,
     }
     if client is not None:
         payload["client"] = {
             "id": client.id,
             "company_name": client.company_name,
-            "api_enabled": bool(client.api_enabled) if client.api_enabled is not None else False,
-            "password_change_enabled": (
-                bool(client.password_change_enabled)
-                if client.password_change_enabled is not None
-                else False
-            ),
+            "api_enabled": api_enabled,
+            "password_change_enabled": password_change_enabled,
             "has_publisher": has_publisher,
             "has_api_key": bool(client.key),
         }

@@ -36,7 +36,7 @@ export function useClientApiDocExamples() {
   onMounted(async () => {
     if (!clientId.value) return;
     try {
-      const data = await getClientApiKey();
+      const data = await getClientApiKey(clientId.value);
       secretKey.value = data?.key ?? '';
       await refreshSigns();
     } catch {

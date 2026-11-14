@@ -1143,6 +1143,13 @@ class Settings(BaseSettings):
     FACEBOOK_ACCESS_TOKEN: str = os.getenv("FACEBOOK_ACCESS_TOKEN", "")
     FACEBOOK_API_VERSION: str = os.getenv("FACEBOOK_API_VERSION", "v23.0")
 
+    # 第三方上报个人信息保留天数；0 表示关闭自动清理，须经业务/合规批准后显式配置。
+    THIRD_PARTY_REPORT_PII_RETENTION_DAYS: int = Field(
+        default=0,
+        ge=0,
+        description="第三方上报日志 PII 保留天数；0=禁用自动清理（fail-safe）",
+    )
+
     # Cap 检查/递增异常时是否放行（false=fail-close，生产默认关闭放行）
     CAP_FAIL_OPEN: bool = Field(
         default_factory=_resolve_cap_fail_open,

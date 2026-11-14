@@ -74,7 +74,7 @@ class ProductService(BaseService[Product]):
         # 权限过滤：客户只能查看自己的产品
         if current_user.role != UserRole.ADMIN:
             query = query.join(Client, Product.client_id == Client.id).where(
-                Client.user_id == current_user.id
+                Client.user_id == current_user.id, Client.is_active.is_(True)
             )
 
         # 如果需要客户信息，使用selectinload优化查询
@@ -134,7 +134,7 @@ class ProductService(BaseService[Product]):
         # 权限过滤：客户只能查看自己的产品
         if current_user.role != UserRole.ADMIN:
             query = query.join(Client, Product.client_id == Client.id).where(
-                Client.user_id == current_user.id
+                Client.user_id == current_user.id, Client.is_active.is_(True)
             )
         else:
             # 管理员可以查看所有产品，但可以按客户过滤
@@ -188,7 +188,7 @@ class ProductService(BaseService[Product]):
         count_query = select(func.count(Product.id))
         if current_user.role != UserRole.ADMIN:
             count_query = count_query.join(Client, Product.client_id == Client.id).where(
-                Client.user_id == current_user.id
+                Client.user_id == current_user.id, Client.is_active.is_(True)
             )
         elif client_id:
             count_query = count_query.where(Product.client_id == client_id)

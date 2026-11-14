@@ -76,10 +76,10 @@ async def get_conversion_summary(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取转化总览统计失败: {str(e)}", exc_info=True)
+        logger.error("获取转化总览统计失败：error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取转化总览统计失败：{str(e)}"
+            detail="获取转化总览统计失败，请稍后重试",
         )
 
 
@@ -118,8 +118,8 @@ async def get_summary_by_offer(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"按Offer统计失败: {str(e)}", exc_info=True)
+        logger.error("按 Offer 统计失败：error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"按Offer统计失败：{str(e)}"
+            detail="按 Offer 统计失败，请稍后重试",
         )

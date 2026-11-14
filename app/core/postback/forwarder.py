@@ -11,6 +11,7 @@ Postback 转发器（重构版）
 5. 记录转发日志
 6. 发送通知（失败时）
 """
+import asyncio
 import logging
 import json
 from typing import Dict, Any, Optional
@@ -37,6 +38,70 @@ from app.core.url.url_params_util import (
 logger = logging.getLogger(__name__)
 
 
+def _safe_forward_log_request_summary(payload: Optional[Dict[str, Any]]) -> Optional[str]:
+    """转发日志只保留请求字段数量，不持久化可能含 PII 的参数值。"""
+    if not payload:
+        return None
+    return json.dumps(
+        {"redacted": True, "field_count": len(payload)},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+# 通知是尽力而为的旁路任务，不应占用 Postback 队列租约。
+# 保留 Task 引用，避免后台通知协程在完成前被垃圾回收。
+_notification_tasks: set[asyncio.Task] = set()
+
+
+def _schedule_admin_notification(
+    *,
+    message: str,
+    telegram_chat_id: str,
+    notification_type: str,
+) -> None:
+    """异步调度管理员通知，不阻塞下游回传队列的确认/重试。"""
+    task = asyncio.create_task(
+        TelegramNotificationService.send_admin_notification(
+            message=message,
+            telegram_chat_id=telegram_chat_id,
+            notification_type=notification_type,
+        )
+    )
+    _notification_tasks.add(task)
+
+    def _on_done(completed: asyncio.Task) -> None:
+        _notification_tasks.discard(completed)
+        if completed.cancelled():
+            return
+        try:
+            error = completed.exception()
+        except Exception as exc:
+            logger.warning("读取 Postback 通知后台任务结果失败：%s", type(exc).__name__)
+            return
+        if error:
+            logger.warning("Postback 管理员通知后台任务异常：%s", type(error).__name__)
+
+    task.add_done_callback(_on_done)
+
+
+async def _lock_conversion_for_queue_enqueue(
+    db: AsyncSession,
+    conversion_id: int,
+) -> bool:
+    """锁定转化主记录，串行化同一转化的队列去重检查与插入。
+
+    仅依赖「先 SELECT 队列、再 INSERT」会在并发首次入队时产生重复记录。
+    所有入队路径先锁同一转化行，再检查目标队列；锁持续到外层事务提交。
+    """
+    result = await db.execute(
+        select(PostbackConversion.id)
+        .where(PostbackConversion.id == conversion_id)
+        .with_for_update()
+    )
+    return result.scalars().first() is not None
+
+
 class PostbackForwarder:
     """Postback 转发器"""
     
@@ -58,9 +123,9 @@ class PostbackForwarder:
         
         # 详细日志：开始转发流程
         logger.info(f"=== PostBack 转发流程开始 ===")
-        logger.info(f"转化 ID: {conversion.conversion_id}")
+        logger.info("转化记录已加载：record_id=%s", conversion.id)
         logger.info(f"平台: {conversion.platform}")
-        logger.info(f"接收到的 click_id: {conversion.click_id}")
+        logger.info("Click ID 是否存在：present=%s", bool(conversion.click_id))
         logger.info(f"接收到的 payout: {conversion.payout}")
         
         # ========== 第 1 步：获取渠道信息 ==========
@@ -74,18 +139,18 @@ class PostbackForwarder:
             
             # 详细日志：Click 关联信息
             logger.info(f"=== Click 关联信息 ===")
-            logger.info(f"click_id: {click_association_data.get('click_id')}")
+            logger.info("click_id 是否存在：present=%s", bool(click_association_data.get("click_id")))
             logger.info(f"advertiser_id: {click_association_data.get('advertiser_id')}")
             logger.info(f"offer_id: {click_association_data.get('offer_id')}")
             logger.info(f"publisher_id: {click_association_data.get('publisher_id')}")
             logger.info(f"short_link_id: {click_association_data.get('short_link_id')}")
-            logger.info(f"url_params: {click_association_data.get('url_params')}")
+            logger.info("url_params 字段数：%s", len(click_association_data.get("url_params") or {}))
         else:
             # 如果没有提供 click_association，尝试从 conversion 中获取
             if conversion.click_id:
                 from app.core.postback.transformers.click_associator import ClickAssociator
                 # 通过 ClickAssociator 关联点击信息
-                logger.warning(f"尝试通过 click_id 关联信息: {conversion.click_id}")
+                logger.warning("尝试通过 Click ID 关联转化：present=%s", bool(conversion.click_id))
                 click_association = await ClickAssociator.associate(
                     conversion.click_id,
                     db
@@ -98,12 +163,12 @@ class PostbackForwarder:
                     
                     # 详细日志：Click 关联信息
                     logger.info(f"=== Click 关联信息 ===")
-                    logger.info(f"click_id: {click_association_data.get('click_id')}")
+                    logger.info("click_id 是否存在：present=%s", bool(click_association_data.get("click_id")))
                     logger.info(f"advertiser_id: {click_association_data.get('advertiser_id')}")
                     logger.info(f"offer_id: {click_association_data.get('offer_id')}")
                     logger.info(f"publisher_id: {click_association_data.get('publisher_id')}")
                     logger.info(f"short_link_id: {click_association_data.get('short_link_id')}")
-                    logger.info(f"url_params: {click_association_data.get('url_params')}")
+                    logger.info("url_params 字段数：%s", len(click_association_data.get("url_params") or {}))
         
         # 如果没有找到 publisher_id，跳过转发
         if not publisher_id:
@@ -127,7 +192,7 @@ class PostbackForwarder:
         # 详细日志：渠道信息
         logger.info(f"=== 渠道信息 ===")
         logger.info(f"渠道名称: {publisher.publisher_name}")
-        logger.info(f"postback_url: {publisher.postback_url}")
+        logger.info("已加载渠道 Postback URL 配置")
         logger.info(f"postback_method: {publisher.postback_method or 'GET'}")
         logger.info(f"postback_success_check: {publisher.postback_success_check}")
         
@@ -143,7 +208,7 @@ class PostbackForwarder:
         
         # 详细日志：转化数据
         logger.info(f"=== 转化数据 ===")
-        logger.info(f"conversion_id: {conversion_data.get('conversion_id')}")
+        logger.info("转化数据字段数：%s", len(conversion_data))
         logger.info(f"payout: {conversion_data.get('payout')}")
         logger.info(f"event_name: {conversion_data.get('event_name')}")
         
@@ -152,13 +217,13 @@ class PostbackForwarder:
         
         # 详细日志：URL 构建过程
         logger.info(f"=== URL 构建过程 ===")
-        logger.info(f"原始 postback_url: {base_url}")
+        logger.info("开始解析渠道 Postback URL 配置")
         
         # 合并数据用于占位符替换
         url_data = {**conversion_data, **click_association_data}
         # 解析 URL 中的占位符
         resolved_url = PlaceholderResolver.resolve(base_url, url_data)
-        logger.info(f"解析占位符后 URL: {resolved_url}")
+        logger.info("Postback URL 占位符解析完成")
         
         # 构建最终的 postback URL，添加必要的参数
         final_url, params = UrlBuilder.build_postback_url(
@@ -166,8 +231,8 @@ class PostbackForwarder:
             conversion_data,
             click_association_data
         )
-        logger.info(f"最终 URL: {final_url}")
-        logger.info(f"构建的参数: {params}")
+        logger.info("Postback 目标 URL 构建完成")
+        logger.info("Postback 请求参数字段数：%s", len(params or {}))
         
         # ========== 第 4 步：发送 HTTP 请求 ==========
         # 获取渠道配置的请求方法，默认为 GET
@@ -208,15 +273,15 @@ class PostbackForwarder:
             if oid is not None:
                 json_data['offer_id'] = str(oid)
             
-            logger.info(f"POST JSON 数据: {json_data}")
+            logger.info("POST JSON 字段数：%s", len(json_data or {}))
         else:
             # 对于 GET 请求，参数已经在 URL 中
             request_params = params
-            logger.info(f"GET 请求参数: {request_params}")
+            logger.info("GET 参数字段数：%s", len(request_params or {}))
         
         # 详细日志：发送请求
         logger.info(f"=== 发送 HTTP 请求 ===")
-        logger.info(f"发送请求到: {final_url}")
+        logger.info("开始向配置的下游主机发送请求")
         
         # 发送 HTTP 请求
         success, status_code, response_content = await HttpClient.send_request(
@@ -230,7 +295,7 @@ class PostbackForwarder:
         logger.info(f"=== 请求结果 ===")
         logger.info(f"请求成功: {success}")
         logger.info(f"状态码: {status_code}")
-        logger.info(f"响应内容: {response_content[:500] if response_content else '无'}")
+        logger.info("下游响应已接收：body_length=%s", len(response_content or ""))
         
         # ========== 第 5 步：检查转发结果 ==========
         # 获取渠道配置的成功检查规则
@@ -251,13 +316,18 @@ class PostbackForwarder:
             conversion_id=conversion.id,  # 转化 ID
             product_id=conversion.product_id,  # 产品 ID
             publisher_id=publisher_id,  # 渠道 ID
-            downstream_url=final_url,  # 下游 URL
-            request_method=method,  # 请求方法
-            request_params=json.dumps(params, ensure_ascii=False) if params else None,  # 请求参数
-            response_status=status_code,  # 响应状态码
-            response_body=response_content[:1000] if response_content else None,  # 响应内容（限制长度）
+            # 仅保存配置模板；实际 URL 可能已展开 click_id/email 等个人数据。
+            downstream_url=base_url,
+            request_method=method,
+            # 请求值和响应正文可能回显个人信息，转发日志仅保留字段数量。
+            request_data=_safe_forward_log_request_summary(json_data),
+            request_params=_safe_forward_log_request_summary(
+                request_params if request_params is not None else params
+            ),
+            response_status=status_code,
+            response_body=None,
             success=final_success,  # 是否成功
-            error_message=check_message if not final_success else None,  # 错误信息
+            error_message="下游响应未满足成功检查规则" if not final_success else None,  # 脱敏错误信息
             created_at=get_app_now_naive(),  # 创建时间
             completed_at=get_app_now_naive()  # 完成时间
         )
@@ -332,26 +402,24 @@ class PostbackForwarder:
                     "❌ Postback 转发失败",
                     "",
                     f"平台：{conversion.platform}",
-                    f"转化 ID: {conversion.conversion_id}",
+                    f"转化记录 ID: {conversion.id}",
                     f"渠道：{publisher.publisher_name}",
                     f"状态码：{status_code}",
-                    f"检查结果：{check_message}",
+                    "检查结果：转发失败，请在受控系统查看脱敏详情",
                     "",
-                    f"响应：{response_content[:200] if response_content else '无'}"
+                    "响应正文：已省略（可能包含个人信息）"
                 ]
                 
-                # 发送 Telegram 通知
-                await TelegramNotificationService.send_admin_notification(
+                # 通知异步旁路发送，不能让 Telegram 限流/网络重试延长队列租约。
+                _schedule_admin_notification(
                     message="\n".join(msg_lines),
                     telegram_chat_id=admin_config.telegram_chat_id,
                     notification_type='forward_failure',
-                    db=db,
-                    commit=False,
                 )
                 
         except Exception as e:
             # 记录发送通知失败的错误
-            logger.warning(f"发送转发失败通知失败：{e}")
+            logger.warning("发送转发失败通知失败：%s", type(e).__name__)
     
     @staticmethod
     async def _send_success_notification(
@@ -381,25 +449,23 @@ class PostbackForwarder:
                     "✅ Postback 转发成功",
                     "",
                     f"平台：{conversion.platform}",
-                    f"转化 ID: {conversion.conversion_id}",
+                    f"转化记录 ID: {conversion.id}",
                     f"渠道：{publisher.publisher_name}",
                     f"状态码：{status_code}",
                     "",
-                    f"响应：{response_content[:200] if response_content else '无'}"
+                    "响应正文：已省略（可能包含个人信息）"
                 ]
                 
-                # 发送 Telegram 通知
-                await TelegramNotificationService.send_admin_notification(
+                # 通知异步旁路发送，不能让 Telegram 限流/网络重试延长队列租约。
+                _schedule_admin_notification(
                     message="\n".join(msg_lines),
                     telegram_chat_id=admin_config.telegram_chat_id,
                     notification_type='forward_success',
-                    db=db,
-                    commit=False,
                 )
                 
         except Exception as e:
             # 记录发送通知失败的错误
-            logger.warning(f"发送转发成功通知失败：{e}")
+            logger.warning("发送转发成功通知失败：%s", type(e).__name__)
 
     @staticmethod
     async def forward_to_product(
@@ -507,13 +573,17 @@ class PostbackForwarder:
             conversion_id=conversion.id,
             product_id=conversion.product_id,
             publisher_id=None,
-            downstream_url=final_url,
+            # 不保存展开后的个人数据 URL、请求参数值或下游响应正文。
+            downstream_url=base_url,
             request_method=method,
-            request_params=json.dumps(params, ensure_ascii=False) if params else None,
+            request_data=_safe_forward_log_request_summary(json_data),
+            request_params=_safe_forward_log_request_summary(
+                request_params if request_params is not None else params
+            ),
             response_status=status_code,
-            response_body=response_content[:1000] if response_content else None,
+            response_body=None,
             success=final_success,
-            error_message=check_message if not final_success else None,
+            error_message="下游响应未满足成功检查规则" if not final_success else None,
             created_at=get_app_now_naive(),
             completed_at=get_app_now_naive(),
         )
@@ -550,11 +620,21 @@ class PostbackForwarder:
     ) -> None:
         """转发失败时写入重试队列，由定时任务指数退避重试。"""
         try:
+            # 对同一 conversion 加行锁，使并发首次入队的去重查询串行执行。
+            if not await _lock_conversion_for_queue_enqueue(db, conversion.id):
+                logger.warning(
+                    "转发入队跳过：转化记录不存在: conversion_id=%s",
+                    conversion.id,
+                )
+                return
             existing = await db.execute(
                 select(PostbackForwardQueue).where(
                     PostbackForwardQueue.conversion_id == conversion.id,
                     PostbackForwardQueue.publisher_id == publisher_id,
                 )
+                # 使用当前读：在 MySQL REPEATABLE READ 下，普通 SELECT 可能沿用
+                # 等待行锁前建立的旧快照，看不到刚由前一个事务提交的队列记录。
+                .with_for_update()
             )
             if existing.scalars().first():
                 logger.debug(
@@ -566,7 +646,7 @@ class PostbackForwarder:
 
             task = PostbackForwardQueue(
                 conversion_id=conversion.id,
-                product_id=conversion.product_id,
+                product_id=None,
                 publisher_id=publisher_id,
                 downstream_url=downstream_url,
                 request_method=method,
@@ -588,10 +668,9 @@ class PostbackForwarder:
             asyncio.create_task(trigger_forward_processing())
         except Exception as exc:
             logger.error(
-                "入队转发重试失败: conversion_id=%s err=%s",
+                "入队转发重试失败：conversion_record_id=%s error_type=%s",
                 conversion.id,
-                exc,
-                exc_info=True,
+                type(exc).__name__,
             )
 
     @staticmethod
@@ -606,12 +685,21 @@ class PostbackForwarder:
     ) -> None:
         """产品级转发失败时写入重试队列。"""
         try:
+            # 与渠道级共用转化主记录锁，避免不同消费者同时插入重复产品任务。
+            if not await _lock_conversion_for_queue_enqueue(db, conversion.id):
+                logger.warning(
+                    "产品级转发入队跳过：转化记录不存在: conversion_id=%s",
+                    conversion.id,
+                )
+                return
             existing = await db.execute(
                 select(PostbackForwardQueue).where(
                     PostbackForwardQueue.conversion_id == conversion.id,
                     PostbackForwardQueue.product_id == product_id,
                     PostbackForwardQueue.publisher_id.is_(None),
                 )
+                # 与渠道级查询一样必须读取最新已提交状态，避免旧快照导致重复插入。
+                .with_for_update()
             )
             if existing.scalars().first():
                 logger.debug(
@@ -645,10 +733,9 @@ class PostbackForwarder:
             asyncio.create_task(trigger_forward_processing())
         except Exception as exc:
             logger.error(
-                "入队产品级转发重试失败: conversion_id=%s err=%s",
+                "入队产品级转发重试失败：conversion_record_id=%s error_type=%s",
                 conversion.id,
-                exc,
-                exc_info=True,
+                type(exc).__name__,
             )
 
 

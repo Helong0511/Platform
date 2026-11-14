@@ -15,6 +15,7 @@ Postback 下游转发日志查询与补发服务。
 """
 import logging
 from datetime import timedelta
+from urllib.parse import urlsplit
 from typing import List, Optional
 
 from fastapi import HTTPException
@@ -31,6 +32,34 @@ from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.schemas.postback import PostbackForwardLogResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_forward_log_response(log: PostbackForwardLog) -> PostbackForwardLogResponse:
+    """历史日志可能包含原始个人信息，API 只返回脱敏摘要。"""
+    response = PostbackForwardLogResponse.model_validate(log)
+    try:
+        parsed_url = urlsplit(log.downstream_url or "")
+        safe_url = (
+            f"{parsed_url.scheme}://{parsed_url.netloc}"
+            if parsed_url.scheme and parsed_url.netloc
+            else "历史下游 URL 已脱敏"
+        )
+    except ValueError:
+        safe_url = "历史下游 URL 已脱敏"
+
+    return response.model_copy(
+        update={
+            "downstream_url": safe_url,
+            "request_data": "历史请求载荷已脱敏" if log.request_data else None,
+            "request_params": "历史请求参数已脱敏" if log.request_params else None,
+            "response_body": None,
+            "error_message": (
+                "下游响应未满足成功检查规则"
+                if log.error_message
+                else None
+            ),
+        }
+    )
 
 
 class PostbackForwardLogService:
@@ -115,7 +144,7 @@ class PostbackForwardLogService:
             total = (await db.execute(count_query)).scalar() or 0
 
             return PaginatedResponseBaseSchema.success(
-                data=[PostbackForwardLogResponse.model_validate(log) for log in logs],
+                data=[_safe_forward_log_response(log) for log in logs],
                 total=total,
                 page=page,
                 page_size=page_size,
@@ -124,10 +153,10 @@ class PostbackForwardLogService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"查询 PostBack 转发日志失败: {e}", exc_info=True)
+            logger.error("查询 PostBack 转发日志失败：%s", type(e).__name__)
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"查询失败：{str(e)}",
+                detail="查询失败，请查看受控服务端日志",
             )
 
     async def resend_forward(
@@ -160,6 +189,11 @@ class PostbackForwardLogService:
                 raise_api_exception(
                     ErrorCode.RESOURCE_NOT_FOUND,
                     detail=f"转发日志 ID {forward_log_id} 不存在",
+                )
+            if forward_log.pii_scrubbed_at is not None:
+                raise_api_exception(
+                    ErrorCode.CONFLICT,
+                    detail="该转发日志已按保留策略清除载荷，不允许补发",
                 )
 
             conv_result = await db.execute(
@@ -200,10 +234,10 @@ class PostbackForwardLogService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"补发 PostBack 转发失败: {e}", exc_info=True)
+            logger.error("补发 PostBack 转发失败：error_type=%s", type(e).__name__)
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"补发失败：{str(e)}",
+                detail="补发失败，请查看受控服务端日志",
             )
 
 

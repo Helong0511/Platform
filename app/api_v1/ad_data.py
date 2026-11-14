@@ -167,7 +167,7 @@ async def get_clients_with_data(
     except InvalidFilterParameterError as exc:
         raise_filter_validation_api_exception(str(exc))
     except Exception as e:
-        logger.error(f"获取有数据的客户列表失败: {str(e)}", exc_info=True)
+        logger.error("获取有数据的客户列表失败: error_type=%s", type(e).__name__)
         if is_table_definition_changed_error(e):
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
@@ -175,7 +175,7 @@ async def get_clients_with_data(
             )
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取有数据的客户列表失败：{str(e)}。请稍后重试或联系管理员"
+            detail="获取有数据的客户列表失败，请稍后重试或联系管理员"
         )
 
 
@@ -219,10 +219,10 @@ async def get_countries_with_data(
     except InvalidFilterParameterError as exc:
         raise_filter_validation_api_exception(str(exc))
     except Exception as e:
-        logger.error(f"获取有数据的国家列表失败: {str(e)}", exc_info=True)
+        logger.error("获取有数据的国家列表失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取有数据的国家列表失败：{str(e)}。请稍后重试或联系管理员"
+            detail="获取有数据的国家列表失败，请稍后重试或联系管理员"
         )
 
 
@@ -259,10 +259,10 @@ async def get_ad_units_with_data(
     except InvalidFilterParameterError as exc:
         raise_filter_validation_api_exception(str(exc))
     except Exception as e:
-        logger.error(f"获取有数据的广告单元列表失败: {str(e)}", exc_info=True)
+        logger.error("获取有数据的广告单元列表失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取有数据的广告单元列表失败：{str(e)}。请稍后重试或联系管理员"
+            detail="获取有数据的广告单元列表失败，请稍后重试或联系管理员"
         )
 
 
@@ -300,10 +300,10 @@ async def get_products_with_data(
     except InvalidFilterParameterError as exc:
         raise_filter_validation_api_exception(str(exc))
     except Exception as e:
-        logger.error(f"获取有数据的产品列表失败: {str(e)}", exc_info=True)
+        logger.error("获取有数据的产品列表失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取有数据的产品列表失败：{str(e)}。请稍后重试或联系管理员"
+            detail="获取有数据的产品列表失败，请稍后重试或联系管理员"
         )
 
 
@@ -400,10 +400,10 @@ async def get_ad_data_date_range(
     except InvalidFilterParameterError as exc:
         raise_filter_validation_api_exception(str(exc))
     except Exception as e:
-        logger.error(f"获取日期范围失败: {str(e)}", exc_info=True)
+        logger.error("获取日期范围失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取日期范围失败: {str(e)}"
+            detail="获取日期范围失败，请稍后重试"
         )
 
 

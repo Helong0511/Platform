@@ -241,7 +241,7 @@ class OfferCap(Base):
     total_cap = Column(Integer, nullable=True, comment='总Cap')
     current_daily_count = Column(Integer, default=0, comment='当前每日计数')
     current_total_count = Column(Integer, default=0, comment='当前总计数')
-    cap_start_date = Column(DateTime, nullable=True, comment='Cap开始日期（用于Total Cap）')
+    cap_start_date = Column(DateTime, nullable=True, comment='每日计数业务日期标记；兼容历史 Total Cap 起始时间字段，Total 计数本身不按此字段重置')
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
     updated_at = Column(DateTime, default=get_app_now_naive,
