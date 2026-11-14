@@ -17,6 +17,7 @@ from app.core.third_party_report import (
     REPORT_LOG_LEASE_SECONDS,
     _claim_report_log,
     _lock_report_base_identity,
+    _has_legacy_unresolved_base_identity,
     build_event_idempotency_key,
     send_third_party_report,
     update_report_log,
@@ -65,6 +66,16 @@ async def enqueue_postback_report(
         event=event,
         conversion_id=conversion_id,
     )
+    if await _has_legacy_unresolved_base_identity(
+        db,
+        source="postback",
+        adsid=adsid,
+        event=event,
+        conversion_id=conversion_id,
+    ):
+        raise LegacyEventIdentityConflict(
+            "基础身份存在平台归属未确认的历史事件，需人工核实后才能创建"
+        )
     event_key = build_event_idempotency_key(
         "postback", adsid, event, conversion_id, platform=normalized_platform
     )
