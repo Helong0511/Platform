@@ -195,3 +195,43 @@ async def test_log_user_action_recursively_redacts_nested_credentials():
     assert details['after'][0]['api_key'] == '[REDACTED]'
     assert 'xyz.123' not in details['note']
     assert 'inline-secret' not in db.record.error_message
+
+
+def test_legacy_audit_detail_response_is_redacted_without_losing_business_keys():
+    import json
+
+    from app.core.audit_log import sanitize_audit_log_response_payload
+
+    payload = sanitize_audit_log_response_payload({
+        "request_params": json.dumps({
+            "key": "business-correlation-key",
+            "accessToken": "old-access-token",
+            "nested": [{"client-secret": "old-client-secret", "enabled": True}],
+        }),
+        "details": json.dumps({
+            "Authorization": "Bearer legacy.jwt.value",
+            "url": "/callback?token=old-query-token&status=ok",
+        }),
+        "error_message": "failed token=legacy-error-token",
+    })
+
+    params = json.loads(payload["request_params"])
+    details = json.loads(payload["details"])
+    assert params["key"] == "business-correlation-key"
+    assert params["accessToken"] == "[REDACTED]"
+    assert params["nested"][0]["client-secret"] == "[REDACTED]"
+    assert details["Authorization"] == "[REDACTED]"
+    assert "legacy.jwt.value" not in payload["details"]
+    assert "old-query-token" not in payload["details"]
+    assert "legacy-error-token" not in payload["error_message"]
+
+
+def test_audit_sanitizer_does_not_expand_unknown_object_attributes():
+    from types import SimpleNamespace
+
+    from app.core.audit_log import _sanitize_audit_value
+
+    value = SimpleNamespace(password="must-not-be-expanded")
+    sanitized = _sanitize_audit_value(value)
+    assert sanitized == "[UNSERIALIZABLE:SimpleNamespace]"
+    assert "must-not-be-expanded" not in str(sanitized)
