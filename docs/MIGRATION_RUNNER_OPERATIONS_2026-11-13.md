@@ -95,3 +95,14 @@ MySQL 官方参考：
 - Collation 与大小写敏感比较：https://dev.mysql.com/doc/refman/8.0/en/case-sensitivity.html
 - ALTER TABLE 行为与算法：https://dev.mysql.com/doc/refman/8.0/en/alter-table.html
 - 字符串类型与字符集/排序规则：https://dev.mysql.com/doc/refman/8.0/en/string-type-syntax.html
+
+## 9. 管理员 Outbox 重试与审计事务一致性（2026-11-14）
+
+管理员手动重试不是直接发送 HTTP 请求，而是将失败 Outbox 事件重新置为待处理。该状态变更与“谁在何时触发了重试”的审计记录必须同生共死。
+
+- API 现在把请求依赖注入的同一个数据库 session 传给 `retry_report_log`。
+- 重试 SQL 更新不再在核心函数内提前独立 commit；随后写入的管理员操作审计日志由 API 的统一 commit 一起提交。
+- 若审计写入或统一 commit 失败，重试状态变更不会单独落库，避免出现“事件已重新排队但审计日志缺失”。
+- 独立调用 `retry_report_log(log_id)` 的兼容路径仍使用自己的 session 并提交；管理 API 必须传入共享 session。
+- 新增单元测试验证传入共享 session 时核心函数不会自行 commit。
+- 这项改动不改变手动重试次数策略；人工重试次数是否应独立限额、审批或记录为不可覆盖的历史审计事件，仍是后续上线前需明确的运营策略。
