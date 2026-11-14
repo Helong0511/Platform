@@ -104,6 +104,83 @@ def _drop_isolated_database(database: str) -> None:
 
 
 @pytest.mark.asyncio
+async def test_mysql_platform_identity_column_uses_exact_binary_comparison():
+    """真实 MySQL 验证平台身份比较与 Python 字符串精确语义一致。"""
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(ThirdPartyReportLog.__table__.create)
+            result = await connection.execute(
+                text(
+                    "SELECT CHARACTER_SET_NAME, COLLATION_NAME "
+                    "FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA = DATABASE() "
+                    "AND TABLE_NAME = 'third_party_report_logs' "
+                    "AND COLUMN_NAME = 'platform'"
+                )
+            )
+            column = result.mappings().one()
+            assert column["CHARACTER_SET_NAME"] == "utf8mb4"
+            assert column["COLLATION_NAME"] == "utf8mb4_bin"
+
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        inserted = []
+        async with session_factory() as session:
+            for exact_platform, alternate_platform in (("meta", "META"), ("cafe", "café")):
+                token = uuid.uuid4().hex
+                row = ThirdPartyReportLog(
+                    source="ci",
+                    adsid=f"platform-collation-{token}",
+                    event="Purchase",
+                    event_key=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+                    platform=exact_platform,
+                    identity_scope="platform_scoped",
+                    destination_pixel_id="pixel-ci",
+                    conversion_id=token,
+                    status="pending",
+                    outbox_enqueued=True,
+                    attempt_count=0,
+                    max_attempts=3,
+                )
+                session.add(row)
+                inserted.append((row, exact_platform, alternate_platform))
+            await session.commit()
+
+        async with session_factory() as session:
+            for row, exact_platform, alternate_platform in inserted:
+                exact_match = await session.scalar(
+                    select(ThirdPartyReportLog.id).where(
+                        ThirdPartyReportLog.id == row.id,
+                        ThirdPartyReportLog.platform == exact_platform,
+                    )
+                )
+                alternate_match = await session.scalar(
+                    select(ThirdPartyReportLog.id).where(
+                        ThirdPartyReportLog.id == row.id,
+                        ThirdPartyReportLog.platform == alternate_platform,
+                    )
+                )
+                assert exact_match == row.id
+                assert alternate_match is None
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
+
+
+@pytest.mark.asyncio
 async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(monkeypatch):
     """两个 Worker 同时认领同一条 Outbox 时只能有一个成功，过期后可重新认领。"""
     database = _create_isolated_database()
