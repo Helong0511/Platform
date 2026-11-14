@@ -487,6 +487,77 @@ async def test_admin_identity_edit_recomputes_non_outbox_event_key(monkeypatch):
     )
 
 
+async def test_admin_identity_edit_rejects_unresolved_legacy_target(monkeypatch):
+    """管理员编辑不能绕过创建入口对历史平台归属不明身份的拒绝策略。"""
+    log_entry = type(
+        "ReportLog",
+        (),
+        {
+            "id": 205,
+            "source": "short_link",
+            "adsid": "old-adsid",
+            "event": "Purchase",
+            "conversion_id": "old-conversion",
+            "event_key": "old-key",
+            "outbox_enqueued": False,
+            "identity_scope": "unscoped",
+            "platform": None,
+            "destination_pixel_id": "pixel-direct",
+            "pii_scrubbed_at": None,
+        },
+    )()
+
+    class Result:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return log_entry
+
+    class FakeDB:
+        committed = False
+
+        async def execute(self, statement):
+            return Result()
+
+        async def commit(self):
+            self.committed = True
+
+    class SessionContext:
+        def __init__(self):
+            self.db = FakeDB()
+
+        async def __aenter__(self):
+            return self.db
+
+        async def __aexit__(self, *args):
+            return False
+
+    context = SessionContext()
+
+    async def lock_identity(*args, **kwargs):
+        return "locked"
+
+    async def unresolved_target(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(third_party_report, "AsyncSessionLocal", lambda: context)
+    monkeypatch.setattr(third_party_report, "_lock_report_base_identity", lock_identity)
+    monkeypatch.setattr(
+        third_party_report, "_has_legacy_unresolved_base_identity", unresolved_target
+    )
+
+    assert await third_party_report.update_report_log_params(
+        log_id=205,
+        adsid="legacy-adsid",
+        event="Purchase",
+        conversion_id="legacy-conversion",
+    ) is False
+    assert context.db.committed is False
+    assert log_entry.adsid == "old-adsid"
+    assert log_entry.event_key == "old-key"
+
+
 async def test_admin_cannot_change_outbox_event_identity(monkeypatch):
     log_entry = type(
         "ReportLog",
