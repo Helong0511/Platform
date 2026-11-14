@@ -32,12 +32,12 @@ from app.models.models import UserAuditLog, User
 
 logger = logging.getLogger(__name__)
 
-# 统计缓存键前缀，便于批量失效（如清理日志、手工 TRUNCATE 后）
+# 统计缓存键前缀，便于发现缓存与数据库汇总不一致时批量失效
 AUDIT_LOG_STATS_CACHE_PREFIX = "audit_log_stats"
 
 
 async def invalidate_audit_log_stats_cache() -> int:
-    """清除操作日志统计缓存，避免库表已清空但页面仍显示旧汇总。"""
+    """失效操作日志统计缓存，避免页面继续展示过期汇总。"""
     deleted = await invalidate_cache(f"{AUDIT_LOG_STATS_CACHE_PREFIX}:")
     if deleted:
         logger.info("已清除操作日志统计缓存 %s 条", deleted)
@@ -147,7 +147,7 @@ class AuditLogService:
 
         含总量、成功/失败数、Top10 操作类型与资源类型、活跃用户数。
         相同时间范围命中缓存则直接返回（TTL 300s）；返回前会用 COUNT
-        校验缓存总量是否与库内一致，避免手工清表后仍展示旧数据。
+        校验缓存总量是否与库内一致，避免缓存数据与数据库当前总量不一致时继续展示旧汇总。
 
         Args:
             start_date: 统计起始时间
