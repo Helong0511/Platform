@@ -27,13 +27,23 @@ PREPARE migration_stmt FROM @ddl;
 EXECUTE migration_stmt;
 DEALLOCATE PREPARE migration_stmt;
 
--- 迁移后强制核验，防止因列缺失或结构不匹配而静默标记成功。
-SELECT COUNT(*) AS invalid_platform_collation
-FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'third_party_report_logs'
-  AND COLUMN_NAME = 'platform'
-  AND COLUMN_TYPE = 'varchar(100)'
-  AND IS_NULLABLE = 'YES'
-  AND CHARACTER_SET_NAME = 'utf8mb4'
-  AND COLLATION_NAME = 'utf8mb4_bin';
+-- 迁移后强制核验；结构不符合预期时执行故意失败的查询，阻止 ledger 标记 applied。
+SET @platform_identity_collation_valid = (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'third_party_report_logs'
+      AND COLUMN_NAME = 'platform'
+      AND COLUMN_TYPE = 'varchar(100)'
+      AND IS_NULLABLE = 'YES'
+      AND CHARACTER_SET_NAME = 'utf8mb4'
+      AND COLLATION_NAME = 'utf8mb4_bin'
+);
+SET @verify_sql = IF(
+    @platform_identity_collation_valid = 1,
+    'SELECT 1',
+    'SELECT * FROM __platform_identity_collation_validation_failed__'
+);
+PREPARE verify_stmt FROM @verify_sql;
+EXECUTE verify_stmt;
+DEALLOCATE PREPARE verify_stmt;
