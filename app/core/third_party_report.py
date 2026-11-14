@@ -1671,6 +1671,28 @@ async def update_report_log_params(
             payload_updates_requested = any(value is not None for value in (
                 email, ip, phone, ua, currency, amount, report_params, use_hash
             ))
+            if payload_updates_requested and not log_entry.outbox_enqueued:
+                # 直接发送日志同样是外部发送事实；发送后不允许通过管理端改写
+                # 已经使用过的 PII/金额/参数载荷，避免审计记录与实际发送不一致。
+                now = get_app_now_naive()
+                report_start_time = getattr(log_entry, "report_start_time", None)
+                active_lease = bool(
+                    report_start_time
+                    and report_start_time
+                    >= now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS)
+                )
+                if (
+                    int(getattr(log_entry, "attempt_count", 0) or 0) > 0
+                    or getattr(log_entry, "status", None) == "success"
+                    or getattr(log_entry, "report_success_time", None) is not None
+                    or getattr(log_entry, "completed_at", None) is not None
+                    or active_lease
+                ):
+                    logger.warning(
+                        "[第三方上报] 已尝试、已完成或租约有效的直接发送载荷不可修改: id=%s",
+                        log_id,
+                    )
+                    return False
             if (
                 log_entry.outbox_enqueued
                 and payload_updates_requested
