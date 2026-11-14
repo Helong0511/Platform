@@ -73,6 +73,7 @@ def test_third_party_report_response_schemas_expose_outbox_state():
         assert "outbox_enqueued" in response_schema.model_fields
         assert "next_retry_time" in response_schema.model_fields
         assert "pii_scrubbed_at" in response_schema.model_fields
+        assert "manual_retry_count" in response_schema.model_fields
 
     assert "outbox_error_category" in ThirdPartyReportLogListResponse.model_fields
     assert "can_requeue" in ThirdPartyReportLogListResponse.model_fields
@@ -116,6 +117,9 @@ def test_manual_requeue_eligibility_matches_backend_guards():
     }
 
     assert _can_requeue_report(SimpleNamespace(**base), now) is True
+    assert _can_requeue_report(
+        SimpleNamespace(**{**base, "manual_retry_count": 3}), now
+    ) is False
     assert _can_requeue_report(
         SimpleNamespace(**{**base, "outbox_enqueued": False}), now
     ) is False
