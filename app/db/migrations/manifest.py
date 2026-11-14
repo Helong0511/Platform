@@ -84,15 +84,15 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         depends_on=("20261113_third_party_report_identity_scope",),
     ),
     Migration(
-        revision="20261114_third_party_report_platform_binary_collation",
-        path="sql/migrations/20261114_third_party_report_platform_binary_collation.sql",
-        sha256="9357f7d6cb29c23fe28499697e032169892f1ee50b50cd78279db879c0b08b4d",
-        depends_on=("20261113_third_party_report_identity_scope",),
-    ),
-    Migration(
         revision="20261114_third_party_report_manual_retry_budget",
         path="sql/migrations/20261114_third_party_report_manual_retry_budget.sql",
         sha256="b58e9729060e26c54001ee15ef32ef7d69544b26506a086062e7447662f502f8",
+        depends_on=("20261113_third_party_report_identity_scope",),
+    ),
+    Migration(
+        revision="20261114_third_party_report_platform_binary_collation",
+        path="sql/migrations/20261114_third_party_report_platform_binary_collation.sql",
+        sha256="9357f7d6cb29c23fe28499697e032169892f1ee50b50cd78279db879c0b08b4d",
         depends_on=("20261113_third_party_report_identity_scope",),
     ),
 )
