@@ -1703,7 +1703,7 @@ def test_platform_binary_collation_migration_is_idempotent_and_preserves_identit
             cursor.execute(
                 "SELECT platform FROM third_party_report_logs ORDER BY id"
             )
-            assert cursor.fetchall() == [("meta",), ("cafe",)]
+            assert cursor.fetchall() == (("meta",), ("cafe",))
 
             cursor.execute(
                 "SELECT COUNT(*) FROM third_party_report_logs WHERE platform = 'META'"
