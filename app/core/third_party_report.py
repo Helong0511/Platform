@@ -125,6 +125,43 @@ async def _lock_report_base_identity(
     return identity_key
 
 
+async def _has_legacy_unresolved_base_identity(
+    db,
+    *,
+    source: str,
+    adsid: str,
+    event: str,
+    conversion_id: Optional[str],
+) -> bool:
+    """在基础身份锁内查找所有无法证明平台归属的历史事件。
+
+    旧版平台 Outbox 的 event_key 可能包含 platform，但旧模型没有持久化
+    platform。不能只查四字段/当前五字段 event_key，否则会漏掉其它平台
+    的 legacy_unresolved 行并允许重复创建。
+    """
+    query = select(ThirdPartyReportLog.id).where(
+        ThirdPartyReportLog.source == source,
+        ThirdPartyReportLog.adsid == adsid,
+        ThirdPartyReportLog.event == event,
+        ThirdPartyReportLog.identity_scope == "legacy_unresolved",
+    )
+    # ViewContent 的 conversion_id 是后补元数据，不属于基础身份。
+    if event != "ViewContent":
+        if conversion_id:
+            query = query.where(ThirdPartyReportLog.conversion_id == conversion_id)
+        else:
+            # 历史数据可能分别以 NULL 或空字符串表示“没有 conversion_id”；
+            # 幂等键算法将两者规范为同一个空值，冲突查询也必须一致。
+            query = query.where(
+                or_(
+                    ThirdPartyReportLog.conversion_id.is_(None),
+                    ThirdPartyReportLog.conversion_id == "",
+                )
+            )
+    result = await db.execute(query.limit(1).with_for_update())
+    return result.scalars().first() is not None
+
+
 async def create_report_log(
         source: str,
         adsid: str,
@@ -162,6 +199,17 @@ async def create_report_log(
                 event=event,
                 conversion_id=conversion_id,
             )
+            if await _has_legacy_unresolved_base_identity(
+                db,
+                source=source,
+                adsid=adsid,
+                event=event,
+                conversion_id=conversion_id,
+            ):
+                logger.warning(
+                    "[第三方上报] 基础身份存在平台归属未确认的历史事件，拒绝创建直接发送事件"
+                )
+                return 0
             # 同一基础身份下，平台作用域事件与无平台直接发送事件不可并存。
             scoped_query = select(ThirdPartyReportLog.id).where(
                 ThirdPartyReportLog.source == source,
