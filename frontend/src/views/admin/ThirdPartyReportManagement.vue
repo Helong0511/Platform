@@ -147,6 +147,11 @@
             {{ scope.row.attempt_count || 0 }} / {{ scope.row.max_attempts || 0 }}
           </template>
         </el-table-column>
+        <el-table-column prop="manual_retry_count" label="人工重试" width="110" align="center">
+          <template #default="scope">
+            {{ scope.row.manual_retry_count || 0 }} / 3
+          </template>
+        </el-table-column>
         <el-table-column prop="outbox_enqueued" label="持久化队列" width="120" align="center">
           <template #default="scope">
             <el-tag v-if="scope.row.outbox_enqueued" :type="getOutboxTag(scope.row)" size="small">
@@ -269,6 +274,9 @@
           </el-descriptions-item>
           <el-descriptions-item label="尝试次数">{{ currentLog.attempt_count }} / {{ currentLog.max_attempts
           }}</el-descriptions-item>
+          <el-descriptions-item label="人工重新入队次数">
+            {{ currentLog.manual_retry_count || 0 }} / 3
+          </el-descriptions-item>
           <el-descriptions-item label="持久化队列状态">
             <el-tag v-if="currentLog.outbox_enqueued" :type="getOutboxTag(currentLog)" size="small">
               {{ getOutboxLabel(currentLog) }}
