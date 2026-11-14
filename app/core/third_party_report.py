@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 
 REPORT_LOG_LEASE_SECONDS = 300
+# 单个事件整个生命周期最多允许 3 次管理员人工重新入队；不随自动重试周期重置。
+MAX_MANUAL_REPORT_RETRIES = 3
 # HTTPX 的 read timeout 限制相邻数据块之间的等待时间，不限制整个响应的墙钟时长。
 # 单次请求总时限必须明显短于租约，避免慢速持续回包让旧 Worker 长期占有请求。
 REPORT_HTTP_REQUEST_DEADLINE_SECONDS = 60
@@ -1441,6 +1443,7 @@ async def retry_report_log(log_id: int, db=None):
                 ThirdPartyReportLog.platform.is_not(None),
                 ThirdPartyReportLog.platform != "",
                 ThirdPartyReportLog.status == "failed",
+                ThirdPartyReportLog.manual_retry_count < MAX_MANUAL_REPORT_RETRIES,
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                 or_(
                     ThirdPartyReportLog.error_message.is_(None),
@@ -1460,7 +1463,9 @@ async def retry_report_log(log_id: int, db=None):
             )
             .values(
                 status="pending",
+                # 自动重试次数只重置本轮预算；人工重试累计次数永久递增且有独立上限。
                 attempt_count=0,
+                manual_retry_count=ThirdPartyReportLog.manual_retry_count + 1,
                 response_status=None,
                 response_body=None,
                 log_id=None,
