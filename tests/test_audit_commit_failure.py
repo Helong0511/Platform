@@ -134,3 +134,21 @@ def test_client_error_report_schema_enforces_bounded_json_fields():
             error_message="failure",
             error_stack="x" * 2001,
         )
+
+
+def test_client_error_sanitizers_remove_query_credentials_and_pii():
+    from app.services.audit_log_service import (
+        _sanitize_client_error_text,
+        _sanitize_client_error_url,
+    )
+
+    raw_url = 'https://example.invalid/error?access_token=secret&code=oauth-code#private-fragment'
+    assert _sanitize_client_error_url(raw_url) == '/error'
+
+    raw_text = 'failed for user@example.com Bearer abc.def token=secret-value password:pass123'
+    sanitized = _sanitize_client_error_text(raw_text, 2000)
+    assert 'user@example.com' not in sanitized
+    assert 'abc.def' not in sanitized
+    assert 'secret-value' not in sanitized
+    assert 'pass123' not in sanitized
+    assert '[REDACTED]' in sanitized
