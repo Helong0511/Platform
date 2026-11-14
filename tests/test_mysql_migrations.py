@@ -1659,3 +1659,71 @@ def test_cap_reservation_key_hex_migration_rejects_wrong_named_constraint():
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS cap_reservations")
         connection.close()
+
+
+def test_platform_binary_collation_migration_is_idempotent_and_preserves_identity_values():
+    """真实 MySQL 验证旧 ai_ci 列升级、精确比较、索引保留及重复执行。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+            cursor.execute(
+                "CREATE TABLE third_party_report_logs ("
+                "id INT NOT NULL AUTO_INCREMENT, "
+                "platform VARCHAR(100) CHARACTER SET utf8mb4 "
+                "COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL, "
+                "PRIMARY KEY (id), KEY idx_platform_identity_probe (platform)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 "
+                "COLLATE=utf8mb4_0900_ai_ci"
+            )
+            cursor.executemany(
+                "INSERT INTO third_party_report_logs (platform) VALUES (%s)",
+                [("meta",), ("cafe",)],
+            )
+
+            migration_path = (
+                "sql/migrations/"
+                "20261114_third_party_report_platform_binary_collation.sql"
+            )
+            _run_sql_file(cursor, migration_path)
+            # PREPARE/EXECUTE 路径和迁移后核验必须可安全重复执行。
+            _run_sql_file(cursor, migration_path)
+
+            cursor.execute(
+                "SELECT COLUMN_TYPE, IS_NULLABLE, CHARACTER_SET_NAME, COLLATION_NAME "
+                "FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() "
+                "AND TABLE_NAME = 'third_party_report_logs' "
+                "AND COLUMN_NAME = 'platform'"
+            )
+            assert cursor.fetchone() == (
+                "varchar(100)", "YES", "utf8mb4", "utf8mb4_bin"
+            )
+
+            cursor.execute(
+                "SELECT platform FROM third_party_report_logs ORDER BY id"
+            )
+            assert cursor.fetchall() == [("meta",), ("cafe",)]
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM third_party_report_logs WHERE platform = 'META'"
+            )
+            assert cursor.fetchone()[0] == 0
+            cursor.execute(
+                "SELECT COUNT(*) FROM third_party_report_logs WHERE platform = 'café'"
+            )
+            assert cursor.fetchone()[0] == 0
+            cursor.execute(
+                "SELECT COUNT(*) FROM third_party_report_logs WHERE platform = 'meta'"
+            )
+            assert cursor.fetchone()[0] == 1
+
+            cursor.execute("SHOW INDEX FROM third_party_report_logs")
+            indexes = cursor.fetchall()
+            assert [row[4] for row in indexes if row[2] == "idx_platform_identity_probe"] == [
+                "platform"
+            ]
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+        connection.close()
