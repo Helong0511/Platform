@@ -203,6 +203,18 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
         )
         monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
 
+        # 推进的是 SQL 表达式中的数据库时钟，而不是 Worker 本机时钟。
+        # 这样测试仍通过 MySQL 执行到期判断，并能确定性跨越 DATETIME 秒级边界。
+        db_clock_offset = [0]
+        original_db_clock = report_module.get_app_now_sql_expression
+        monkeypatch.setattr(
+            report_module,
+            "get_app_now_sql_expression",
+            lambda offset_seconds=0: original_db_clock(
+                db_clock_offset[0] + offset_seconds
+            ),
+        )
+
         now = get_app_now_naive().replace(microsecond=0)
         event_identity = uuid.uuid4().hex
         event_key = hashlib.sha256(event_identity.encode("utf-8")).hexdigest()
@@ -269,15 +281,13 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
                 update(ThirdPartyReportLog)
                 .where(ThirdPartyReportLog.id == report_id)
                 .values(
-                    # 直接将租约时间设为远早于数据库当前时间的值。
-                    # 不使用 Worker 本机时钟回拨，避免把应用时钟误当成 DB 时钟。
-                    report_start_time=datetime(2000, 1, 1),
                     next_retry_time=datetime(2000, 1, 1),
                 )
             )
             await session.commit()
 
-        # 数据库确认原租约过期后，快时钟 Worker 才能成功接管。
+        # 让 SQL 数据库时钟前进 31 秒，超过 claim 的最小 30 秒租约窗口。
+        db_clock_offset[0] = 31
         replacement_token = await report_module._claim_report_log(
             report_id, expected_scope="platform_scoped", platform="meta"
         )
@@ -306,19 +316,8 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
         )
         assert current_update is True
 
-        # 模拟租约到期：旧 owner 不得续活；新的 claim 可以接管。
-        async with session_factory() as session:
-            await session.execute(
-                update(ThirdPartyReportLog)
-                .where(ThirdPartyReportLog.id == report_id)
-                .values(
-                    report_start_time=now - timedelta(
-                        seconds=report_module.REPORT_LOG_LEASE_SECONDS + 10
-                    ),
-                    next_retry_time=now - timedelta(minutes=1),
-                )
-            )
-            await session.commit()
+        # 再推进 SQL 数据库时钟 31 秒，使 replacement token 真正过期。
+        db_clock_offset[0] = 62
 
         expired_renewal = await report_module._renew_report_log_lease(
             report_id, replacement_token,
@@ -527,8 +526,17 @@ async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover
         )
         monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
 
-        # Worker 本机时钟不参与租约有效期判断；仅使用数据库时钟认定过期。
+        # Worker 本机时钟不参与租约有效期判断；通过 SQL 数据库时钟表达式模拟暂停。
         lease_clock = [get_app_now_naive().replace(microsecond=0)]
+        db_clock_offset = [0]
+        original_db_clock = report_module.get_app_now_sql_expression
+        monkeypatch.setattr(
+            report_module,
+            "get_app_now_sql_expression",
+            lambda offset_seconds=0: original_db_clock(
+                db_clock_offset[0] + offset_seconds
+            ),
+        )
         event_identity = uuid.uuid4().hex
         async with session_factory() as session:
             row = ThirdPartyReportLog(
@@ -554,15 +562,8 @@ async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover
         # Worker A 取得租约后暂停；暂停时间超过租约 TTL。
         worker_a_token = await report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta")
         assert worker_a_token == lease_clock[0]
-        # 模拟 A 长时间暂停：将数据库租约字段置为过期值。
-        # 这比推进本机 mock clock 更准确，因为 claim/renew 的时钟源是 MySQL。
-        async with session_factory() as session:
-            await session.execute(
-                update(ThirdPartyReportLog)
-                .where(ThirdPartyReportLog.id == report_id)
-                .values(report_start_time=datetime(2000, 1, 1))
-            )
-            await session.commit()
+        # Worker A 暂停 31 秒：推进 SQL 表达式的数据库时钟，跨过最小租约 TTL。
+        db_clock_offset[0] = 31
 
         # Worker B 接管同一条记录，A 的令牌从此失效。
         worker_b_token = await report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta")
