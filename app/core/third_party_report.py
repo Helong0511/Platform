@@ -334,6 +334,8 @@ async def update_report_log(
                     return False
                 query = query.where(
                     ThirdPartyReportLog.lease_token == expected_lease_token,
+                    ThirdPartyReportLog.report_start_time >= get_app_now_sql_expression(-REPORT_LOG_LEASE_SECONDS),
+                    ThirdPartyReportLog.report_start_time <= get_app_now_sql_expression(),
                     ThirdPartyReportLog.identity_scope == expected_identity_scope,
                     (
                         ThirdPartyReportLog.platform == expected_platform
@@ -369,6 +371,9 @@ async def update_report_log(
                     log_entry.next_retry_time = next_retry_time
                 if clear_next_retry_time:
                     log_entry.next_retry_time = None
+                # 终态写入同时释放随机令牌；旧 Worker 即使稍后恢复也无法再次通过 fencing。
+                if expected_lease_token is not None and status in {"success", "failed"}:
+                    log_entry.lease_token = None
                 await db.commit()
                 return True
             return False
@@ -435,7 +440,7 @@ async def _validate_existing_report_log_binding(
     ):
         return False
 
-    # Outbox Worker 已认领时，必须仍持有同一个秒级租约；防止旧快照跨租约接管发送。
+    # Outbox Worker 已认领时，必须仍持有同一个随机令牌；防止旧快照跨租约接管发送。
     if lease_token is not None and row.lease_token != lease_token:
         return False
     return True
@@ -541,7 +546,7 @@ async def _claim_report_log(
         if (result.rowcount or 0) != 1:
             await db.commit()
             return None
-        # UPDATE 的租约时间由数据库生成；回读精确值作为 fencing token。
+        # fencing token 是独立随机值；report_start_time 只记录租约起始时间。
         lease_token = await db.scalar(
             select(ThirdPartyReportLog.lease_token).where(
                 ThirdPartyReportLog.id == report_log_id,
@@ -610,8 +615,8 @@ async def _renew_report_log_lease(
             await db.commit()
             return renewed_token
 
-        # DATETIME 秒级精度下，同一秒更新可能返回 changed-rows=0；
-        # 只在 DB 时钟确认原令牌仍未过期且非未来值时接受原令牌。
+        # MySQL changed-rows 模式下，同一令牌的续租回写可能返回 0；
+        # 只在 DB 时钟确认令牌仍未过期且非未来值时接受原令牌。
         current_token = await db.scalar(
             select(ThirdPartyReportLog.lease_token).where(*identity_conditions)
         )
@@ -1484,6 +1489,7 @@ async def retry_report_log(log_id: int, db=None):
                 log_id=None,
                 error_message=None,
                 report_start_time=stale_lease_time,
+                lease_token=None,
                 report_success_time=None,
                 completed_at=None,
                 next_retry_time=get_app_now_sql_expression(),

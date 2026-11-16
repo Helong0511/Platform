@@ -255,6 +255,8 @@ async def _bind_outbox_destination(
                 ThirdPartyReportLog.identity_scope == "platform_scoped",
                 ThirdPartyReportLog.platform == platform,
                 ThirdPartyReportLog.lease_token == lease_token,
+                ThirdPartyReportLog.report_start_time >= get_app_now_sql_expression(-REPORT_LOG_LEASE_SECONDS),
+                ThirdPartyReportLog.report_start_time <= get_app_now_sql_expression(),
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                 or_(
                     ThirdPartyReportLog.destination_pixel_id.is_(None),
@@ -275,6 +277,8 @@ async def _bind_outbox_destination(
                 ThirdPartyReportLog.platform == platform,
                 ThirdPartyReportLog.destination_pixel_id == pixel_id,
                 ThirdPartyReportLog.lease_token == lease_token,
+                ThirdPartyReportLog.report_start_time >= get_app_now_sql_expression(-REPORT_LOG_LEASE_SECONDS),
+                ThirdPartyReportLog.report_start_time <= get_app_now_sql_expression(),
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
             )
         )
@@ -536,6 +540,7 @@ async def process_postback_report_outbox(
                 status="failed",
                 next_retry_time=None,
                 report_start_time=stale_before,
+                lease_token=None,
                 completed_at=func.coalesce(ThirdPartyReportLog.completed_at, now),
                 error_message=func.coalesce(
                     ThirdPartyReportLog.error_message,
