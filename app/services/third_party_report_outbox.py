@@ -117,12 +117,20 @@ async def enqueue_postback_report(
             return int(existing.id)
 
         attempts = int(getattr(existing, "attempt_count", 0) or 0)
-        report_start_time = getattr(existing, "report_start_time", None)
-        active_lease = bool(
-            report_start_time
-            and report_start_time >= now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS)
-        )
-        if existing.status == "success" or attempts > 0 or active_lease:
+        # 活动租约必须由数据库时钟判断；未来时间戳也不应被误判为有效租约。
+        active_lease_id = None
+        if getattr(existing, "report_start_time", None) is not None:
+            active_lease_id = await db.scalar(
+                select(ThirdPartyReportLog.id)
+                .where(
+                    ThirdPartyReportLog.id == existing.id,
+                    ThirdPartyReportLog.report_start_time
+                    >= get_app_now_sql_expression(-REPORT_LOG_LEASE_SECONDS),
+                    ThirdPartyReportLog.report_start_time <= get_app_now_sql_expression(),
+                )
+                .limit(1)
+            )
+        if existing.status == "success" or attempts > 0 or active_lease_id is not None:
             return int(existing.id)
 
         # 仅允许从未尝试发送、且没有活动租约的旧日志升级为 Outbox；
@@ -299,7 +307,8 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
         if existing_status == "success":
             return {"success": True, "deduplicated": True, "report_log_id": report_log_id}
         return {"success": False, "retryable": True, "reason": "report_in_progress"}
-    now = get_app_now_naive()
+    # _claim_report_log 已在数据库侧原子校验 next_retry_time <= DB 当前时间；
+    # 不再用 Worker 本机时钟重复判断，避免时钟偏差造成持有租约却提前退出。
     async with AsyncSessionLocal() as db:
         row = await db.scalar(
             select(ThirdPartyReportLog)
@@ -317,8 +326,6 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             return {"success": False, "retryable": False, "reason": "pii_payload_scrubbed"}
         if row.status == "success":
             return {"success": True, "deduplicated": True}
-        if row.next_retry_time is None or row.next_retry_time > now:
-            return {"success": False, "retryable": True, "reason": "not_due"}
         payload = {
             "adsid": row.adsid,
             "event": row.event,

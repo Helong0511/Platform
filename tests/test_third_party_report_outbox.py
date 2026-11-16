@@ -414,7 +414,8 @@ async def test_outbox_missing_credentials_keeps_event_retryable(monkeypatch):
         return True
 
     monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
-    monkeypatch.setattr(outbox, "get_app_now_naive", lambda: datetime(2026, 11, 11, 12, 0, 0))
+    # 故意让 Worker 本机时间落后于已到期的 DB 记录；认领成功后不得再用本机时间否决。
+    monkeypatch.setattr(outbox, "get_app_now_naive", lambda: datetime(2026, 11, 11, 10, 0, 0))
     monkeypatch.setattr(outbox, "_resolve_pixel_credentials", resolve)
     monkeypatch.setattr(outbox, "_bind_outbox_destination", lambda *args, **kwargs: _async_true())
     monkeypatch.setattr(outbox, "_claim_report_log", claim)
@@ -1269,3 +1270,68 @@ async def test_enqueue_allows_distinct_platform_scoped_events_for_same_base_iden
     assert db.added.platform == "bft"
     assert db.added.identity_scope == "platform_scoped"
     assert db.added.event_key == platform_b_key
+
+
+
+async def test_enqueue_existing_lease_uses_database_clock_not_worker_clock(monkeypatch):
+    from sqlalchemy.dialects import mysql
+
+    existing = type(
+        "Existing",
+        (),
+        {
+            "id": 991,
+            "status": "failed",
+            "next_retry_time": None,
+            "outbox_enqueued": False,
+            "identity_scope": "platform_scoped",
+            "platform": "bft",
+            "destination_pixel_id": None,
+            "max_attempts": 3,
+            "attempt_count": 0,
+            # 本机时钟被故意设置为远未来；此时间戳仍由 DB 查询决定是否有效。
+            "report_start_time": datetime(2030, 1, 1, 0, 0, 0),
+        },
+    )()
+    captured = {}
+
+    class FakeDB:
+        async def scalar(self, statement):
+            compiled = statement.compile(dialect=mysql.dialect())
+            sql = str(compiled).lower()
+            if "for update" in sql:
+                return existing
+            captured["lease_sql"] = sql
+            return None
+
+        async def flush(self):
+            captured["flushed"] = True
+
+    monkeypatch.setattr(
+        outbox,
+        "get_app_now_naive",
+        lambda: datetime(2035, 1, 1, 0, 0, 0),
+    )
+    row_id = await outbox.enqueue_postback_report(
+        FakeDB(),
+        platform="bft",
+        adsid="fbclid-db-clock-lease",
+        event="Purchase",
+        conversion_id="conversion-db-clock-lease",
+        email=None,
+        ip=None,
+        phone=None,
+        ua=None,
+        currency="USD",
+        amount=1.0,
+        short_link_id=2,
+        cloak_name=None,
+        short_code=None,
+        click_time=None,
+    )
+
+    assert row_id == 991
+    assert "report_start_time >= timestampadd" in captured["lease_sql"]
+    assert "report_start_time <= timestampadd" in captured["lease_sql"]
+    assert "utc_timestamp()" in captured["lease_sql"]
+    assert captured["flushed"] is True
