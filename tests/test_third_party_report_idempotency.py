@@ -915,6 +915,9 @@ async def test_unattempted_failed_outbox_payload_can_be_corrected_after_lease_ex
         async def execute(self, statement):
             return Result()
 
+        async def scalar(self, statement):
+            return now
+
         async def commit(self):
             self.committed = True
 
