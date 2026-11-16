@@ -117,3 +117,21 @@ async def test_expired_or_replaced_lease_cannot_renew_or_delete(monkeypatch):
     db = _FakeDB(SimpleNamespace(id=10, click_id=None), SimpleNamespace(id=1, success=False))
     await forward_tasks.process_single_task(db, task)
     assert db.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_worker_revalidates_lease_after_preparation_before_http(monkeypatch):
+    conversion = SimpleNamespace(id=10, click_id=None)
+    task = SimpleNamespace(id=78, conversion_id=10, publisher_id=31, product_id=None, retry_count=0, lease_token="d" * 32)
+    db = _FakeDB(conversion, SimpleNamespace(id=100, success=False))
+    renew_calls = []
+    async def renew(db_arg, task_id, token):
+        renew_calls.append((task_id, token))
+        return len(renew_calls) == 1
+    async def forbidden_forward(*args, **kwargs):
+        raise AssertionError("HTTP must not start after the lease expires during preparation")
+    monkeypatch.setattr(forward_tasks, "_renew_forward_task_lease", renew)
+    monkeypatch.setattr(PostbackForwarder, "forward_to_publisher", forbidden_forward)
+    await forward_tasks.process_single_task(db, task, lease_token=task.lease_token)
+    assert renew_calls == [(task.id, task.lease_token), (task.id, task.lease_token)]
+    assert db.deleted == []
