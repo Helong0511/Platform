@@ -1844,7 +1844,38 @@ async def test_mysql_purchase_link_waits_for_pii_scrub_and_never_restores_link(m
             ))
 
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
-        monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
+        link_waiting_for_view = asyncio.Event()
+
+        class LinkObservingSession:
+            """确认 Purchase 关联已发出 ViewContent 锁定查询后再释放清理事务。"""
+            def __init__(self, session):
+                self.session = session
+
+            async def __aenter__(self):
+                await self.session.__aenter__()
+                return self
+
+            async def __aexit__(self, *args):
+                return await self.session.__aexit__(*args)
+
+            def __getattr__(self, name):
+                return getattr(self.session, name)
+
+            async def execute(self, statement, *args, **kwargs):
+                sql = str(statement).lower()
+                if (
+                    "third_party_report_logs" in sql
+                    and "conversion_id is null" in sql
+                    and "for update" in sql
+                ):
+                    link_waiting_for_view.set()
+                return await self.session.execute(statement, *args, **kwargs)
+
+        monkeypatch.setattr(
+            report_module,
+            "AsyncSessionLocal",
+            lambda: LinkObservingSession(session_factory()),
+        )
 
         class PausingSession:
             """只在清理查询已取得 ViewContent 行锁后暂停，构造可重复的竞态时序。"""
@@ -1947,8 +1978,8 @@ async def test_mysql_purchase_link_waits_for_pii_scrub_and_never_restores_link(m
                 lease_token=purchase_token,
             )
         )
-        # 让关联事务先运行到被清理事务持有的 ViewContent 行锁处，再提交清理。
-        await asyncio.sleep(0.1)
+        # 等待关联事务确实发出 ViewContent SELECT FOR UPDATE（此时会被清理锁阻塞）。
+        await asyncio.wait_for(link_waiting_for_view.wait(), timeout=10)
         release_cleaner.set()
         cleaner_result, link_result = await asyncio.gather(cleaner_task, link_task)
 
