@@ -17,7 +17,9 @@ permissions:
 
 jobs:
   backend:
-    timeout-minutes: 20
+    # MySQL/Redis 故障注入与并发集成测试增长后，20 分钟会在 pytest 仍运行时被强制取消。
+    # 给完整后端测试套件 45 分钟；超时仍会显式失败，不跳过测试。
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     # 仅供 CI 使用的临时 Redis 服务；与任何生产资源完全隔离。
     services:
