@@ -303,3 +303,56 @@ Runner 当前检查迁移账号与应用账号用户名不同、目标数据库�
 - 不得给 runtime 用户授予 CREATE DATABASE；数据库创建应由独立 provisioning 身份或运维流程完成。
 - 下一步优先完成全仓调用点追踪、runtime 的 CREATE DATABASE 拒绝测试、SHOW GRANTS / role 权限快照，以及完整业务路径权限矩阵。
 - PR #1 继续保持 Open / Draft；本轮不合并、不部署，也未连接生产数据库或执行生产授权变更。
+
+
+
+## 17. Runtime DDL 权限测试与最新分支复核（2026-11-16）
+
+### 17.1 最新提交 CI
+
+- PR 分支 HEAD：`38b36c7a4ade231aa1e14b9b6cefcd1257e7ffbe`。
+- CI Run #1798（Run ID `43788892106`）：completed / success。
+- Backend 与 Frontend Job 均成功；前端 npm ci、依赖 Advisory 报告、Lint、Build、Playwright Mock API E2E 成功；后端 Python compile 与 unit tests 成功。
+- 运行记录：https://github.com/Helong0511/Platform/actions/runs/43788892106
+- 此 CI 仅证明隔离测试环境中的任务通过，不代表生产账号权限、生产数据规模 DDL 或完整业务路径已经验收。
+
+### 17.2 Runtime 权限测试最新代码覆盖
+
+复核当前 HEAD 的 `tests/test_mysql_runtime_privileges.py`，确认测试现在已包含以下实际断言：
+
+- Runtime 用户仅获得目标 schema 的 SELECT、INSERT、UPDATE、DELETE。
+- 使用不带 FOR 的 `SHOW GRANTS` 读取授权快照，检查只有预期的 USAGE 与目标 schema DML 授权；同时检查没有 GRANT OPTION。
+- 使用 `CURRENT_ROLE()` 检查当前会话激活角色；该断言本身不能代替 `SHOW GRANTS` 对授予角色/mandatory roles 的检查。
+- Runtime 用户执行 `CREATE DATABASE` 必须失败，错误码限定为 MySQL 1044 或 1142。
+- Runtime 用户执行 CREATE TABLE、ALTER TABLE、CREATE INDEX、DROP TABLE 必须失败。
+- 测试 finally 清理数据库级建库探针，避免权限回归时遗留测试数据库。
+
+以上比早期仅验证 schema 内 DDL 拒绝的测试更完整；但它仍是一个临时用户、一个 schema 和有限 SQL 操作的权限边界测试，不是全量生产授权审计。
+
+### 17.3 旧数据库创建 helper 的调用点状态
+
+本轮重新检查了当前分支以下实际文件：
+
+- `app/main.py`：生产 ASGI 组装入口使用 `app.bootstrap.lifespan.lifespan`。
+- `app/bootstrap/lifespan.py`：先执行只读 schema revision / ORM drift gate，再调用管理员初始化；当前代码未见调用 `create_database()`、`create_tables()` 或 `Base.metadata.create_all()`。
+- `gunicorn.conf.py`：检查 API / Scheduler Gunicorn 配置入口。
+- `app/core/database.py`：`create_tables()` 为 fail-closed 兼容入口。
+- `app/db/database.py`：`create_database()` 仍存在，直接使用应用 `SQLALCHEMY_DATABASE_URI` 执行数据库级 `CREATE DATABASE IF NOT EXISTS`。
+
+本轮未在上述已检查的生产装配文件中发现旧 helper 的调用，但当前分支有 436 个 `app/**/*.py` 文件；本轮没有逐一读取全部 Python 文件，也没有穷尽测试、运维脚本、动态导入和外部部署脚本。因此**仍不能声称全仓库不存在调用点**。GitHub 代码搜索接口检索的是默认分支，不能将其无结果当作当前 PR 分支全量搜索证据。
+
+处置要求不变：
+
+1. 不得向 API / Scheduler / 常驻 Worker 的 runtime 账号授予 CREATE DATABASE。
+2. `create_database()` 不得作为应用启动或生产运行时 provisioning 入口。
+3. 数据库创建必须由独立 provisioning 身份/运维流程完成；不得将应用 DSN 复用为 provisioning DSN。
+4. 在完成当前分支全量调用点核查前，不贸然删除兼容 helper，以免破坏尚未识别的外部工具调用；但应继续把它列为待关闭的遗留入口。
+5. 后续全量调用图应覆盖 app、tests、scripts、部署配置、CI workflow、文档命令和动态导入路径，并记录检索范围与结果。
+
+### 17.4 本轮结论
+
+- 最新 HEAD 的 CI Run #1798 全部成功。
+- Runtime 测试已经显式覆盖 CREATE DATABASE 拒绝与授权快照；早期文档中“尚未直接测试 CREATE DATABASE”的描述应以本节当前代码状态为准。
+- 生产 ASGI / Lifespan / Gunicorn 装配入口已复核，未见旧数据库创建 helper 被调用。
+- 全仓调用点扫描仍未完成；不得把局部入口检查升级为“全仓无调用点”结论。
+- 未连接生产数据库、未执行生产授权变更、未运行生产 DDL；PR #1 继续保持 Open / Draft，不合并 main、不部署。
