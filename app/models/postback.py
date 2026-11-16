@@ -155,6 +155,11 @@ class PostbackForwardQueue(Base):
     product = relationship("Product", foreign_keys=[product_id])
 
     __table_args__ = (
+        CheckConstraint(
+            "(lease_token IS NULL AND lease_expires_at IS NULL) OR "
+            "(lease_token IS NOT NULL AND CHAR_LENGTH(lease_token)=32 AND lease_expires_at IS NOT NULL)",
+            name="chk_forward_queue_lease_pair_v1",
+        ),
         Index("idx_forward_queue_time", "next_retry_time"),
         Index("idx_forward_queue_conversion", "conversion_id"),
         Index("idx_forward_queue_publisher", "publisher_id"),
