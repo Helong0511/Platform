@@ -1804,3 +1804,166 @@ async def test_mysql_purchase_link_rejects_stale_lease_and_scrubbed_view_content
         if engine is not None:
             await engine.dispose()
         _drop_isolated_database(database)
+
+
+
+@pytest.mark.asyncio
+async def test_mysql_purchase_link_waits_for_pii_scrub_and_never_restores_link(monkeypatch):
+    """确定性交错：清理先锁住 ViewContent，Purchase 关联等待后必须看到已清理状态。"""
+    database = _create_isolated_database()
+    engine = None
+    cleaner_locked_view = asyncio.Event()
+    release_cleaner = asyncio.Event()
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(ThirdPartyReportLog.__table__.create)
+            await connection.execute(text(
+                "CREATE TABLE postback_forward_logs ("
+                "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "conversion_id INT NOT NULL, product_id INT NULL, publisher_id INT NULL, "
+                "downstream_url VARCHAR(500) NOT NULL, request_method VARCHAR(10) NOT NULL, "
+                "request_data TEXT NULL, request_params TEXT NULL, response_status INT NULL, "
+                "response_body TEXT NULL, success TINYINT(1) NOT NULL DEFAULT 0, "
+                "error_message TEXT NULL, retry_count INT NOT NULL DEFAULT 0, "
+                "created_at DATETIME NOT NULL, completed_at DATETIME NULL, "
+                "pii_scrubbed_at DATETIME NULL"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            ))
+            await connection.execute(text(
+                "CREATE TABLE postback_forward_queue ("
+                "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "conversion_id INT NOT NULL, product_id INT NULL, publisher_id INT NULL"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            ))
+
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
+
+        class PausingSession:
+            """只在清理查询已取得 ViewContent 行锁后暂停，构造可重复的竞态时序。"""
+            def __init__(self, session):
+                self.session = session
+
+            async def __aenter__(self):
+                await self.session.__aenter__()
+                return self
+
+            async def __aexit__(self, *args):
+                return await self.session.__aexit__(*args)
+
+            def __getattr__(self, name):
+                return getattr(self.session, name)
+
+            async def execute(self, statement, *args, **kwargs):
+                result = await self.session.execute(statement, *args, **kwargs)
+                sql = str(statement).lower()
+                if (
+                    "third_party_report_logs" in sql
+                    and "for update skip locked" in sql
+                    and "pii_scrubbed_at is null" in sql
+                ):
+                    cleaner_locked_view.set()
+                    await release_cleaner.wait()
+                return result
+
+        monkeypatch.setattr(
+            retention_module,
+            "AsyncSessionLocal",
+            lambda: PausingSession(session_factory()),
+        )
+        now = get_app_now_naive()
+        old_created_at = now - timedelta(days=120)
+        adsid = f"ci-pii-link-race-{uuid.uuid4().hex}"
+        pixel_id = "pixel-ci-pii-link-race"
+        purchase_token = uuid.uuid4().hex
+        view_key = hashlib.sha256(
+            f"{adsid}:ViewContent:{uuid.uuid4().hex}".encode("utf-8")
+        ).hexdigest()
+
+        async with session_factory() as session:
+            purchase = ThirdPartyReportLog(
+                source="ci",
+                adsid=adsid,
+                event="Purchase",
+                event_key=hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest(),
+                identity_scope="platform_scoped",
+                platform="meta",
+                destination_pixel_id=pixel_id,
+                conversion_id=f"ci-purchase-{uuid.uuid4().hex}",
+                status="pending",
+                report_start_time=now,
+                lease_token=purchase_token,
+                created_at=now,
+            )
+            view_content = ThirdPartyReportLog(
+                source="ci",
+                adsid=adsid,
+                event="ViewContent",
+                event_key=view_key,
+                identity_scope="platform_scoped",
+                platform="meta",
+                destination_pixel_id=pixel_id,
+                conversion_id=None,
+                status="success",
+                outbox_enqueued=False,
+                report_start_time=None,
+                email="pii-race@example.invalid",
+                ip="203.0.113.77",
+                phone="4155550177",
+                ua="pii-race-agent",
+                report_params='{"email":"pii-race@example.invalid"}',
+                created_at=old_created_at,
+            )
+            session.add_all([purchase, view_content])
+            await session.commit()
+            purchase_id = purchase.id
+            view_content_id = view_content.id
+
+        monkeypatch.setattr(retention_module, "get_app_now_naive", lambda: now)
+        cleaner_task = asyncio.create_task(
+            retention_module.scrub_expired_third_party_report_pii(
+                retention_days=90,
+                batch_size=10,
+            )
+        )
+        await asyncio.wait_for(cleaner_locked_view.wait(), timeout=10)
+
+        link_task = asyncio.create_task(
+            report_module._link_purchase_to_view_content(
+                source="ci",
+                adsid=adsid,
+                conversion_id="must-not-be-restored-after-scrub",
+                report_log_id=purchase_id,
+                destination_pixel_id=pixel_id,
+                identity_scope="platform_scoped",
+                platform="meta",
+                lease_token=purchase_token,
+            )
+        )
+        # 让关联事务先运行到被清理事务持有的 ViewContent 行锁处，再提交清理。
+        await asyncio.sleep(0.1)
+        release_cleaner.set()
+        cleaner_result, link_result = await asyncio.gather(cleaner_task, link_task)
+
+        assert cleaner_result["third_party_report_logs_scrubbed"] == 1
+        assert link_result is False
+        async with session_factory() as session:
+            final_view = await session.get(ThirdPartyReportLog, view_content_id)
+            assert final_view is not None
+            assert final_view.pii_scrubbed_at is not None
+            assert final_view.adsid == ""
+            assert final_view.email is None
+            assert final_view.report_params is None
+            assert final_view.conversion_id is None
+    finally:
+        release_cleaner.set()
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
