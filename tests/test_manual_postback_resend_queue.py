@@ -155,5 +155,6 @@ async def test_manual_resend_rejects_existing_target_queue_task(monkeypatch):
             current_user=SimpleNamespace(id=7),
         )
 
-    assert exc.value.status_code == 409
+    assert exc.value.status_code == 200
+    assert exc.value.detail['code'] == 409
     assert not db.added
