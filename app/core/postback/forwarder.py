@@ -605,7 +605,7 @@ class PostbackForwarder:
         logger.info(
             "产品级 Postback 转发完成：conversion_id=%s, product_id=%s, success=%s",
             conversion.id,
-            conversion.product_id,
+            product_id,
             final_success,
         )
 
