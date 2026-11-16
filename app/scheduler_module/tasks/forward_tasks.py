@@ -8,7 +8,6 @@ Postback 下游转发定时任务模块。
 """
 import logging
 import secrets
-from datetime import timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, delete, or_, update
@@ -199,7 +198,12 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue, *, l
                 await _schedule_or_drop_retry(db, task, lease_token)
         except Exception as forward_err:
             logger.error("转发重试执行失败：queue_id=%s error_type=%s", task.id, type(forward_err).__name__)
-            await _schedule_or_drop_retry(db
+            await _schedule_or_drop_retry(db, task, lease_token)
+    except Exception as exc:
+        logger.error("处理单条转发任务失败：error_type=%s", type(exc).__name__)
+        await db.rollback()
+
+
 async def _schedule_or_drop_retry(db: AsyncSession, task: PostbackForwardQueue, lease_token: str) -> bool:
     """仅当前有效租约可安排退避或移除超限任务。"""
     db_now = get_app_now_sql_expression()
