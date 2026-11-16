@@ -107,7 +107,8 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         path="sql/migrations/20261116_postback_forward_queue_lease_fencing.sql",
         sha256="3e9a0ffb69cbd69b351e9ab1723e06579b917610bee8cd8ba4016f3350ab46d5",
         depends_on=("20261116_third_party_report_random_lease_token",),
-    ),)
+    ),
+)
 
 _REVISION_PATTERN = re.compile(r"^20[0-9]{6}_[a-z0-9_]+$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
