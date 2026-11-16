@@ -55,3 +55,27 @@
 ## 验收
 
 验收以最新代码 SHA 对应的 GitHub Actions 最终结果为准，必须同时通过 Backend 与 Frontend；Backend 必须执行 MySQL/Redis 集成测试，不能只以静态编译或 SQLite 单测替代。历史上因连续提交而取消的运行不计入验收。
+
+
+## 2026-11-16 后续整改：Purchase → ViewContent 关联的 PII fencing
+
+### 风险与修复
+
+- Purchase → ViewContent 关联候选查询必须排除 `pii_scrubbed_at IS NOT NULL` 的历史行。否则已完成保留期清理的 ViewContent 即使其 `adsid` 已被清空，若存在历史部分清理或异常残留，也可能被新 Purchase 再次写入 `conversion_id`，破坏 PII 清理不可逆边界。
+- 当前查询同时要求候选 ViewContent 的 `pii_scrubbed_at IS NULL`、`conversion_id IS NULL`，并按 source、adsid、事件类型、身份作用域、平台和 Pixel 限定。
+- Purchase 本身在同一事务内锁定并重新校验随机 `lease_token`、数据库租约时效、事件身份、Pixel、作用域及未清理状态。过期或已被接管的 Worker 不得建立关联。
+- PII 清理使用 `FOR UPDATE SKIP LOCKED`。关联事务先锁 Purchase 再锁 ViewContent；清理事务若已持有候选行锁，关联查询会等待或跳过受锁行，随后仍以数据库读取到的 `pii_scrubbed_at` 状态作出 fail-closed 判断。清理与关联事务竞争时，不应恢复已清理数据。
+
+### 回归验证
+
+- 在隔离 MySQL 集成测试中增加已清理 ViewContent 拒绝关联的用例。
+- 增加 Purchase 租约已过期的旧 Worker 拒绝关联用例。
+- 保留既有双 Purchase 并发争抢同一 ViewContent 的测试，确保同一候选行最多被一个 Purchase 关联。
+- 最新相关提交：`d4fe76879a77e73d11576d8ca21015f4f8f00c3d`、`bca65fb3e4ed7c0a977a4b2d8326a0e6c51ab235`。
+- 对应 CI Run #1860：Backend、Frontend、Lint、Build、Playwright Mock API E2E 均通过。该结果仅证明 CI 隔离环境覆盖的行为，不代表生产规模故障演练。
+
+### 验收限制
+
+- 当前测试覆盖租约过期与 PII 清理标记边界，但尚未构造“清理事务与关联事务在真实并发时序下交错提交/回滚”的专门压力测试；后续应补充可控事务屏障测试。
+- 不得通过删除 `pii_scrubbed_at`、重新填充 `adsid` 或恢复历史 `conversion_id` 的方式修复关联失败。
+- 若未来调整 PII 清理字段或关联流程，必须同步更新本节测试，并验证旧 Worker fencing 和清理不可逆性。
