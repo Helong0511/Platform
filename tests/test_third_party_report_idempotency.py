@@ -233,6 +233,9 @@ async def test_report_claim_query_limits_failed_retries_to_expired_leases(monkey
             captured["sql"] = str(statement.compile(dialect=mysql.dialect(), compile_kwargs={"literal_binds": True})).lower()
             return Result()
 
+        async def scalar(self, statement):
+            return datetime(2026, 11, 16, 12, 0, 0)
+
         async def commit(self):
             return None
 
