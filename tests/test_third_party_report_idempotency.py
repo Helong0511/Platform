@@ -1717,3 +1717,70 @@ async def test_purchase_viewcontent_link_locks_candidate_row(monkeypatch):
     assert captured["committed"] is True
     assert "ORDER BY THIRD_PARTY_REPORT_LOGS.ID ASC" in captured["sql"]
     assert "FOR UPDATE" in captured["sql"]
+
+
+
+async def test_update_report_log_params_reuses_caller_transaction(monkeypatch):
+    """管理员编辑使用请求依赖的 session，不能在审计写入前自行提交。"""
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    row = SimpleNamespace(
+        id=901,
+        source="short_link",
+        adsid="click-901",
+        event="Purchase",
+        conversion_id="conversion-901",
+        event_key="stable-key-901",
+        identity_scope="unscoped",
+        platform=None,
+        outbox_enqueued=False,
+        pii_scrubbed_at=None,
+        attempt_count=0,
+        status="pending",
+        report_success_time=None,
+        completed_at=None,
+        report_start_time=None,
+        email="old@example.invalid",
+        ip="",
+        phone="",
+        ua="",
+        currency="USD",
+        amount=1,
+        report_params=None,
+        use_hash=True,
+    )
+
+    class Result:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return row
+
+    class CallerSession:
+        def __init__(self):
+            self.commit_calls = 0
+            self.execute_calls = 0
+
+        async def execute(self, statement):
+            self.execute_calls += 1
+            return Result()
+
+        async def scalar(self, statement):
+            return datetime(2026, 11, 16, 12, 0, 0)
+
+        async def commit(self):
+            self.commit_calls += 1
+
+    caller_session = CallerSession()
+    updated = await third_party_report.update_report_log_params(
+        log_id=901,
+        email="new@example.invalid",
+        db=caller_session,
+    )
+
+    assert updated is True
+    assert row.email == "new@example.invalid"
+    assert caller_session.execute_calls == 2
+    assert caller_session.commit_calls == 0
