@@ -3,8 +3,6 @@ name: Emergency Security CI
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [security/remove-public-env-secrets-2026-11]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
