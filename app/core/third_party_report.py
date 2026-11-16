@@ -644,9 +644,10 @@ async def _link_purchase_to_view_content(
     destination_pixel_id: Optional[str],
     identity_scope: str,
     platform: Optional[str],
+    lease_token: Optional[str] = None,
 ) -> bool:
-    """只关联同一身份作用域、同一 Pixel 目的地的 ViewContent。"""
-    if not destination_pixel_id:
+    """在当前 Purchase 租约仍有效时，原子关联同作用域/同 Pixel 的 ViewContent。"""
+    if not destination_pixel_id or not report_log_id or not lease_token:
         logger.info(
             "[第三方上报] 跳过 ViewContent 关联：缺少可验证的 Pixel 目的地：report_log_id=%s",
             report_log_id,
@@ -661,6 +662,40 @@ async def _link_purchase_to_view_content(
 
     try:
         async with AsyncSessionLocal() as db:
+            # 先在同一事务内锁定 Purchase，并使用数据库时钟重新核验租约。
+            # 旧 Worker 即使已经进入发送流程，只要租约过期/被接管，就不能改写关联。
+            db_now = get_app_now_sql_expression()
+            valid_after = get_app_now_sql_expression(-REPORT_LOG_LEASE_SECONDS)
+            purchase_query = (
+                select(ThirdPartyReportLog)
+                .where(
+                    ThirdPartyReportLog.id == report_log_id,
+                    ThirdPartyReportLog.event == "Purchase",
+                    ThirdPartyReportLog.source == source,
+                    ThirdPartyReportLog.adsid == adsid,
+                    ThirdPartyReportLog.identity_scope == identity_scope,
+                    ThirdPartyReportLog.destination_pixel_id == destination_pixel_id,
+                    ThirdPartyReportLog.lease_token == lease_token,
+                    ThirdPartyReportLog.report_start_time >= valid_after,
+                    ThirdPartyReportLog.report_start_time <= db_now,
+                    ThirdPartyReportLog.pii_scrubbed_at.is_(None),
+                    ThirdPartyReportLog.status.in_(("pending", "failed")),
+                    ThirdPartyReportLog.outbox_enqueued.is_(True),
+                )
+            )
+            if identity_scope == "platform_scoped":
+                purchase_query = purchase_query.where(ThirdPartyReportLog.platform == platform)
+            else:
+                purchase_query = purchase_query.where(ThirdPartyReportLog.platform.is_(None))
+            purchase_result = await db.execute(purchase_query.with_for_update())
+            if purchase_result.scalars().first() is None:
+                await db.rollback()
+                logger.info(
+                    "[第三方上报] Purchase 租约已失效，跳过 ViewContent 关联：report_log_id=%s",
+                    report_log_id,
+                )
+                return False
+
             query = (
                 select(ThirdPartyReportLog)
                 .where(ThirdPartyReportLog.source == source)
@@ -986,6 +1021,7 @@ async def send_third_party_report(
             destination_pixel_id=pixel_id,
             identity_scope="platform_scoped" if using_existing_report_log else "unscoped",
             platform=platform,
+            lease_token=report_lease_token,
         )
 
     logger.info("[第三方上报] 使用像素配置 - Pixel ID: %s, API 版本：%s", pixel_id, api_version)
