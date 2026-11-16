@@ -122,6 +122,19 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
         if conversion.click_id:
             click_association = await ClickAssociator.associate(conversion.click_id, db)
 
+        # 记录发送前的目标日志游标。转发器可能因目标停用/配置缺失而提前返回，
+        # 不能把同一目标的历史成功日志误判为本次重试成功。
+        previous_log = (
+            await db.execute(
+                _latest_forward_log_query(
+                    task.conversion_id,
+                    publisher_id=task.publisher_id,
+                    product_id=task.product_id,
+                )
+            )
+        ).scalars().first()
+        previous_log_id = previous_log.id if previous_log else 0
+
         try:
             if task.publisher_id:
                 await PostbackForwarder.forward_to_publisher(
@@ -153,7 +166,11 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
             )
             latest_log = (await db.execute(log_query)).scalars().first()
 
-            if latest_log and latest_log.success:
+            if (
+                latest_log
+                and latest_log.id > previous_log_id
+                and latest_log.success
+            ):
                 await db.delete(task)
                 await db.commit()
                 logger.info("转发重试成功: queue_id=%s", task.id)
