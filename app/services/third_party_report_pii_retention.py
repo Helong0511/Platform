@@ -217,7 +217,7 @@ async def scrub_expired_postback_forward_log_pii(
         result = await db.execute(
             select(PostbackForwardLog)
             .where(
-                PostbackForwardLog.created_at < cutoff,
+                PostbackForwardLog.created_at < cutoff_sql,
                 PostbackForwardLog.completed_at.is_not(None),
                 PostbackForwardLog.pii_scrubbed_at.is_(None),
                 # 有待重试任务时必须保留对应日志，避免破坏自动重试/人工核对链路。
