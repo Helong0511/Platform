@@ -109,7 +109,8 @@ class PostbackForwarder:
     async def forward_to_publisher(
         conversion: PostbackConversion,
         db: AsyncSession,
-        click_association: Optional[Dict[str, Any]] = None
+        click_association: Optional[Dict[str, Any]] = None,
+        target_publisher_id: Optional[int] = None,
     ) -> None:
         """
         将转化数据转发给渠道（Publisher）的 Postback URL
@@ -170,6 +171,10 @@ class PostbackForwarder:
                     logger.info(f"short_link_id: {click_association_data.get('short_link_id')}")
                     logger.info("url_params 字段数：%s", len(click_association_data.get("url_params") or {}))
         
+        # 队列任务必须使用入队时绑定的目标，不得因 Click 关联变化而改投其它渠道。
+        if target_publisher_id is not None:
+            publisher_id = target_publisher_id
+
         # 如果没有找到 publisher_id，跳过转发
         if not publisher_id:
             logger.debug("没有 Publisher ID，跳过转发")
@@ -471,34 +476,41 @@ class PostbackForwarder:
     async def forward_to_product(
         conversion: PostbackConversion,
         db: AsyncSession,
-        click_association: Optional[Dict[str, Any]] = None
+        click_association: Optional[Dict[str, Any]] = None,
+        target_product_id: Optional[int] = None,
     ) -> None:
         """
         将转化数据转发到产品配置的下游 Postback URL（追加于渠道转发之外）。
 
         仅当 conversion.product_id 存在且产品配置了 downstream_postback_url 时执行。
         """
-        if not conversion.product_id:
+        # 队列任务使用持久化的目标 ID；不得因 conversion 当前关联变化而改投其它产品。
+        product_id = (
+            target_product_id
+            if target_product_id is not None
+            else conversion.product_id
+        )
+        if not product_id:
             logger.debug("转化无 product_id，跳过产品级转发")
             return
 
         logger.info(
             "开始产品级 Postback 转发：conversion_id=%s product_id=%s",
             conversion.id,
-            conversion.product_id,
+            product_id,
         )
 
-        product = await CacheManager.get_cached_product(conversion.product_id, db)
+        product = await CacheManager.get_cached_product(product_id, db)
         if not product or not product.downstream_postback_url:
             logger.debug(
                 "产品无下游 Postback URL，跳过：product_id=%s",
-                conversion.product_id,
+                product_id,
             )
             return
         if not product.is_active:
             logger.warning(
                 "产品未激活，跳过产品级转发：product_id=%s",
-                conversion.product_id,
+                product_id,
             )
             return
 
@@ -571,7 +583,7 @@ class PostbackForwarder:
 
         forward_log = PostbackForwardLog(
             conversion_id=conversion.id,
-            product_id=conversion.product_id,
+            product_id=product_id,
             publisher_id=None,
             # 不保存展开后的个人数据 URL、请求参数值或下游响应正文。
             downstream_url=base_url,
@@ -601,7 +613,7 @@ class PostbackForwarder:
             await PostbackForwarder._enqueue_product_forward_retry(
                 db=db,
                 conversion=conversion,
-                product_id=conversion.product_id,
+                product_id=product_id,
                 downstream_url=final_url,
                 method=method,
                 params=params,
