@@ -2,7 +2,7 @@
 Postback 转化、转发、通知、短链、斗篷 ORM 模型。
 """
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
-    UniqueConstraint, Date, Numeric, CheckConstraint
+    UniqueConstraint, Date, Numeric, CheckConstraint, CHAR
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -146,7 +146,7 @@ class PostbackForwardQueue(Base):
     request_params = Column(Text, nullable=True, comment='请求参数（URL参数，用于GET请求）')
     retry_count = Column(Integer, default=0, comment='已重试次数')
     next_retry_time = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='下次业务重试时间；不承担 Worker 租约')
-    lease_token = Column(String(32, collation='ascii_bin'), nullable=True, comment='Worker 独立随机租约令牌')
+    lease_token = Column(CHAR(32, collation='ascii_bin'), nullable=True, comment='Worker 独立随机租约令牌')
     lease_expires_at = Column(DATETIME(fsp=6), nullable=True, comment='Worker 租约过期时间（数据库时钟）')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')
 
