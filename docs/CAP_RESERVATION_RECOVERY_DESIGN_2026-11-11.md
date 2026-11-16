@@ -603,3 +603,18 @@ CapReservation ORM、migration 和 `sql/platform.sql` 统一增加 CHECK 约束�
 5. 终态清理扫描同时覆盖 COMMITTED 与 ROLLED_BACK，保证 DB ACK 后进程再次崩溃也可继续清理。
 
 故障注入必须覆盖：Redis Lua 成功后立即模拟进程退出、相同 token 再次回滚、MySQL 终态提交后但墓碑清理前退出，以及 Daily counter 过期但墓碑仍存在。所有场景必须断言 counter 最多减少一次。
+
+## 31. Redis Reservation token 内容损坏时 fail-closed（2026-11-16）
+
+复核恢复状态读取时发现，旧判断只排除了 `ROLLED_BACK` 墓碑，并验证 counter 可转换为整数；这不足以证明普通 token 是由预留 Lua 写入的有效凭据。若 token 值被污染为 `corrupt`、`0` 等未知值，恢复任务可能误判为 `PRESENT` 并执行回滚扣减。
+
+已在 `app/core/cap/redis_counter.py` 修复：
+- 仅接受精确 token 值 `1`（兼容 Redis 客户端返回 bytes 或 str）作为 `PRESENT`。
+- `ROLLED_BACK` 仍作为独立回滚墓碑状态。
+- 未知 token 值、缺失 counter、负数或非法 counter 均返回 `UNKNOWN`，恢复 Worker 不执行 DECR，而进入 `NEEDS_RECONCILIATION`。
+
+新增 `tests/test_cap_reservation_idempotency.py` 参数化回归用例，覆盖 bytes/str 有效 token、回滚墓碑、损坏 token、非法 token 值、负数 counter、缺失 counter。提交：
+- `d3525e278b696efd0c7cfa8804b5444a6f610d99`：恢复 token 内容严格校验。
+- `40a64d01c0f004dc694c49cd70910a52917d68b5`：参数化回归测试。
+
+验收：GitHub Actions Run #1810 的 Backend 和 Frontend 均成功，包含 Python 编译、后端单元测试、前端 Lint/Build 及 Mock API Playwright E2E。该 CI 结果不替代生产 Redis 数据损坏/淘汰策略演练；未知状态仍需通过受控运维流程人工对账。
