@@ -182,7 +182,7 @@ async def test_mysql_platform_identity_column_uses_exact_binary_comparison():
 
 @pytest.mark.asyncio
 async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(monkeypatch):
-    """两个 Worker 同时认领同一条 Outbox 时只能有一个成功，过期后可重新认领。"""
+    """数据库统一时钟认领；Worker 本机时钟快慢均不能提前接管有效租约。"""
     database = _create_isolated_database()
     engine = None
     try:
@@ -204,9 +204,6 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
         monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
 
         now = get_app_now_naive().replace(microsecond=0)
-        # MySQL DATETIME 使用秒级精度；可控时钟也统一截断微秒，避免测试精度不一致。
-        lease_clock = [now]
-        monkeypatch.setattr(report_module, "get_app_now_naive", lambda: lease_clock[0])
         event_identity = uuid.uuid4().hex
         event_key = hashlib.sha256(event_identity.encode("utf-8")).hexdigest()
         async with session_factory() as session:
@@ -230,45 +227,66 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
             await session.commit()
             report_id = row.id
 
+        # Worker A 本机时钟落后一天，不能因此把到期任务误判为未到期。
+        monkeypatch.setattr(
+            report_module, "get_app_now_naive",
+            lambda: now - timedelta(days=1),
+        )
         claims = await asyncio.gather(
             report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta"),
             report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta"),
         )
         assert sum(token is not None for token in claims) == 1
-        assert all(token is None or isinstance(token, datetime) for token in claims)
+        first_token = next(token for token in claims if token is not None)
+        assert isinstance(first_token, datetime)
 
         async with session_factory() as session:
             claimed_row = await session.scalar(
                 select(ThirdPartyReportLog).where(ThirdPartyReportLog.id == report_id)
             )
             assert claimed_row is not None
-            assert claimed_row.report_start_time is not None
+            assert claimed_row.report_start_time == first_token
 
-            # 模拟 Worker 崩溃：租约过期后，同一事件允许另一个 Worker 接管。
+        # Worker B 本机时钟快一天，也不能提前接管 DB 时钟下仍有效的租约。
+        monkeypatch.setattr(
+            report_module, "get_app_now_naive",
+            lambda: now + timedelta(days=1),
+        )
+        premature_claim = await report_module._claim_report_log(
+            report_id, expected_scope="platform_scoped", platform="meta"
+        )
+        assert premature_claim is None
+
+        # 同一秒续租允许返回当前 token；判断是否过期仍由数据库时钟完成。
+        same_second_renewal = await report_module._renew_report_log_lease(
+            report_id, first_token, expected_scope="platform_scoped", platform="meta"
+        )
+        assert same_second_renewal == first_token
+
+        async with session_factory() as session:
             await session.execute(
                 update(ThirdPartyReportLog)
                 .where(ThirdPartyReportLog.id == report_id)
                 .values(
-                    report_start_time=lease_clock[0] - timedelta(minutes=6),
-                    next_retry_time=lease_clock[0] - timedelta(minutes=1),
+                    report_start_time=now - timedelta(
+                        seconds=report_module.REPORT_LOG_LEASE_SECONDS + 10
+                    ),
+                    next_retry_time=now - timedelta(minutes=1),
                 )
             )
             await session.commit()
 
-        # 过期租约只能由新 Worker 接管；旧 Worker 的租约令牌不能再修改状态。
-        first_token = next(token for token in claims if token is not None)
-        lease_clock[0] += timedelta(seconds=1)
-        new_token = await report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta")
-        assert new_token is not None
-        assert new_token != first_token
-
-        # MySQL DATETIME 秒级精度：同一秒立即续租应确认当前租约仍有效，
-        # 不应因 UPDATE 未改变字段值而被 changed-rows rowcount 误判为失租。
-        same_second_renewal = await report_module._renew_report_log_lease(
-            report_id, new_token, expected_scope="platform_scoped", platform="meta"
+        # 数据库确认原租约过期后，快时钟 Worker 才能成功接管。
+        replacement_token = await report_module._claim_report_log(
+            report_id, expected_scope="platform_scoped", platform="meta"
         )
-        assert same_second_renewal == new_token
+        assert replacement_token is not None
+        assert replacement_token != first_token
 
+        stale_renewal = await report_module._renew_report_log_lease(
+            report_id, first_token, expected_scope="platform_scoped", platform="meta"
+        )
+        assert stale_renewal is None
         stale_update = await report_module.update_report_log(
             report_id,
             status="failed",
@@ -281,32 +299,36 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
         current_update = await report_module.update_report_log(
             report_id,
             status="failed",
-            expected_report_start_time=new_token,
+            expected_report_start_time=replacement_token,
             expected_identity_scope="platform_scoped",
             expected_platform="meta",
         )
         assert current_update is True
 
-        # 当前 Worker 只能在原租约仍有效时续租，续租后旧令牌立即失效。
-        lease_clock[0] += timedelta(seconds=5)
-        renewed_token = await report_module._renew_report_log_lease(
-            report_id, new_token, expected_scope="platform_scoped", platform="meta"
-        )
-        assert renewed_token == lease_clock[0]
-        stale_renewal = await report_module._renew_report_log_lease(
-            report_id, new_token, expected_scope="platform_scoped", platform="meta"
-        )
-        assert stale_renewal is None
+        # 模拟租约到期：旧 owner 不得续活；新的 claim 可以接管。
+        async with session_factory() as session:
+            await session.execute(
+                update(ThirdPartyReportLog)
+                .where(ThirdPartyReportLog.id == report_id)
+                .values(
+                    report_start_time=now - timedelta(
+                        seconds=report_module.REPORT_LOG_LEASE_SECONDS + 10
+                    ),
+                    next_retry_time=now - timedelta(minutes=1),
+                )
+            )
+            await session.commit()
 
-        # 超过 TTL 后，旧 Worker 不得复活租约；新 Worker 可以接管。
-        lease_clock[0] += timedelta(seconds=report_module.REPORT_LOG_LEASE_SECONDS + 1)
         expired_renewal = await report_module._renew_report_log_lease(
-            report_id, renewed_token, expected_scope="platform_scoped", platform="meta"
+            report_id, replacement_token,
+            expected_scope="platform_scoped", platform="meta"
         )
         assert expired_renewal is None
-        replacement_token = await report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta")
-        assert replacement_token == lease_clock[0]
-        assert replacement_token != renewed_token
+        final_token = await report_module._claim_report_log(
+            report_id, expected_scope="platform_scoped", platform="meta"
+        )
+        assert final_token is not None
+        assert final_token != replacement_token
     finally:
         if engine is not None:
             await engine.dispose()
