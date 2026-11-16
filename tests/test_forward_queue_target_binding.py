@@ -108,6 +108,7 @@ async def test_worker_does_not_accept_stale_success_log_when_forwarder_skips(mon
 
     async def skipped_forward(*args, **kwargs):
         # 模拟目标停用/配置缺失时转发器提前返回，没有创建新日志。
+        return None
 
     async def schedule(db_arg, task_arg):
         scheduled.append(task_arg)
