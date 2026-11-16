@@ -167,6 +167,12 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue, *, l
         ).scalars().first()
         previous_log_id = previous_log.id if previous_log else 0
 
+        # 准备阶段可能包含慢查询/点击归因；在真正发出外部 HTTP 前再次校验并续租，
+        # 避免准备阶段耗时导致租约已过期的旧 Worker 仍启动网络副作用。
+        if not await _renew_forward_task_lease(db, task.id, lease_token):
+            logger.info("转发请求发送前租约已失效，拒绝启动 HTTP：queue_id=%s", task.id)
+            return
+
         try:
             if task.publisher_id:
                 await PostbackForwarder.forward_to_publisher(
