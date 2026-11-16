@@ -12,7 +12,7 @@ from typing import Optional
 from sqlalchemy import func, or_, select, update
 
 from app.core.database import AsyncSessionLocal
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, get_app_now_sql_expression
 from app.core.third_party_report import (
     REPORT_LOG_LEASE_SECONDS,
     _claim_report_log,
@@ -480,8 +480,9 @@ async def process_postback_report_outbox(
     """扫描已到期的 Outbox；多 worker 可重复扫描，发送租约保证单条互斥。"""
     if batch_size < 1 or batch_size > 100:
         raise ValueError("Outbox batch_size 必须在 1 到 100 之间")
-    now = get_app_now_naive()
-    stale_before = now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS)
+    # 多 Worker 的到期判断必须使用数据库统一时钟，不能依赖各节点本机时钟。
+    now = get_app_now_sql_expression()
+    stale_before = get_app_now_sql_expression(-REPORT_LOG_LEASE_SECONDS)
     conditions = [
         ThirdPartyReportLog.outbox_enqueued.is_(True),
         ThirdPartyReportLog.identity_scope == "platform_scoped",

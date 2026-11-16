@@ -10,7 +10,7 @@ from sqlalchemy import and_, exists, or_, select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, get_app_now_sql_expression
 from app.models.third_party import ThirdPartyReportLog
 from app.models.postback import PostbackForwardLog, PostbackForwardQueue
 
@@ -43,9 +43,10 @@ async def scrub_expired_third_party_report_pii(
             "message": "未配置 PII 保留期限，按 fail-safe 策略跳过清理",
         }
 
+    # 只将筛选边界放到数据库时钟计算；写入 pii_scrubbed_at 仍保留应用审计时间。
     now = get_app_now_naive()
-    cutoff = now - timedelta(days=days)
-    stale_lease = now - timedelta(seconds=300)
+    cutoff = get_app_now_sql_expression(-(days * 24 * 60 * 60))
+    stale_lease = get_app_now_sql_expression(-300)
     terminal = and_(
         ThirdPartyReportLog.status.in_(("success", "failed")),
         or_(
@@ -208,7 +209,7 @@ async def scrub_expired_postback_forward_log_pii(
         }
 
     now = get_app_now_naive()
-    cutoff = now - timedelta(days=days)
+    cutoff = get_app_now_sql_expression(-(days * 24 * 60 * 60))
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
