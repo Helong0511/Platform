@@ -195,16 +195,21 @@ class Settings(BaseSettings):
             return True
 
         explicit = os.getenv("ENABLE_SCHEDULER", "").strip().lower()
+        # 显式 false 是全局停用开关；独立 scheduler role 已在上方优先放行。
         if explicit in ("false", "0", "no"):
             return False
-        if explicit in ("true", "1", "yes"):
-            return True
 
+        # Gunicorn API 多 Worker 场景必须服从 post_fork 的单 Worker 标记。
+        # ENABLE_SCHEDULER=true 只表示允许 API 进程承担调度职责，不能覆盖 SCHEDULER_WORKER=0，
+        # 否则每个 API Worker 都会启动 APScheduler，导致同一任务被多进程重复执行。
         scheduler_worker = os.getenv("SCHEDULER_WORKER", "").strip()
         if scheduler_worker == "1":
             return True
         if scheduler_worker == "0":
             return False
+
+        if explicit in ("true", "1", "yes"):
+            return True
 
         try:
             workers = int(os.getenv("WORKERS", "0") or "0")
