@@ -157,3 +157,54 @@ MySQL 官方参考：
 - 该修复只覆盖审计详情 API 的历史记录读取路径；数据库中旧值仍然存在，不代表已完成静态数据清理。需要清理数据库时，应另行设计备份、审计与可回滚的数据迁移。
 - 审计详情目前仍由 `require_admin` 角色保护；系统当前角色模型没有经过确认的细粒度审计查看权限。上线前仍需评估管理员是否应默认看到完整请求上下文，以及是否需要拆分基础详情与敏感字段授权。
 - 匿名客户端错误上报虽有独立 10 次/分钟 IP 限流且继续要求 CSRF，但应用层尚未建立对 chunked/缺失 Content-Length 请求体的统一硬上限。生产反向代理也必须配置请求体大小限制；在代理配置和端到端验证完成前，不应把 Pydantic 字段长度约束视为完整的请求体 DoS 防护。
+
+
+## 14. 全量 Migration DDL 风险盘点（2026-11-16）
+
+本节根据当前分支 `fix/non-credential-hardening-2026-11` 的 `app/db/migrations/manifest.py` 和其中登记的 12 个 SQL 文件逐项静态检查。它是 DDL 风险分级，不代表已在目标 MySQL 版本、目标表规模或生产数据上执行。
+
+### 14.1 逐项盘点
+
+| Revision | 主要结构变更 | 静态风险与上线前要求 |
+|---|---|---|
+| `20261110_short_link_click_sync_idempotency` | 新建同步批次表 | 新表创建；需验证目标库中同名表的完整列、索引、字符集与引擎，不能只依赖 `IF NOT EXISTS`。 |
+| `20261110_third_party_report_event_idempotency` | 在既有上报日志表增加 event_key（指定 AFTER）、回填、改 NOT NULL、创建唯一索引、删除旧索引 | **高风险**：包含历史数据回填和多次 ALTER；唯一索引可能扫描/构建大表索引；回填可能产生大量 redo/undo 与复制流量；删旧索引前必须确认新唯一约束与旧查询路径。 |
+| `20261111_cap_reservation_ledger` | 新建 CAP 预留账本表 | 新表创建；核验完整物理结构、唯一约束、索引和字符集。 |
+| `20261111_third_party_report_outbox` | 在上报日志表连续增加多列（多处指定 AFTER）并增加 due 索引 | **高风险**：多个 ALTER 分开执行；MySQL 8.0.16 下指定列位置的 ADD COLUMN 不能假定 INSTANT；索引构建需要评估表扫描、I/O、复制延迟和 metadata lock。 |
+| `20261112_third_party_report_pii_retention` | 在两张既有日志表增加清理时间列并增加索引 | **高风险**：两张日志表分别执行 ALTER/索引创建；必须分别测量，不能以一张表的演练结果代表另一张。 |
+| `20261113_cap_reservation_key_hex` | 增加 CHECK 约束 | 需核验存量数据全部满足约束、目标 MySQL 版本对 CHECK 的执行语义，以及约束添加时的扫描/锁影响。 |
+| `20261113_cap_reservation_schema_guard` | 结构核验/保护逻辑 | 主要是前置结构验证；需确认遇到不匹配结构时 fail closed，不能误把“表存在”视为 schema 正确。 |
+| `20261113_third_party_report_identity_scope` | 增加 platform、identity_scope、destination_pixel_id 列并增加复合索引 | **高风险**：既有大表多列 ALTER 与复合索引构建；历史记录归属保持 unresolved 是正确的保守策略，但仍需评估默认值写入、行版本和索引构建开销。 |
+| `20261113_third_party_report_identity_scope_constraints` | 增加 CHECK 约束 | 需在真实结构副本验证历史 NULL / legacy_unresolved 行与约束兼容，并检查约束确实被目标 MySQL 版本执行。 |
+| `20261113_third_party_report_identity_scope_locks` | 新建身份锁表 | 新表创建；检查字符集/排序规则、主键、唯一键及表结构漂移保护。 |
+| `20261114_third_party_report_manual_retry_budget` | 在上报日志表增加 manual_retry_count | **中高风险**：既有表 ADD COLUMN；必须明确算法和写入可用性要求，并验证旧记录默认值与 ORM 默认值一致。 |
+| `20261114_third_party_report_platform_binary_collation` | 修改 platform 列字符集/排序规则 | **高风险**：既有列定义变更且可能影响关联索引；必须在同版本、相近数据量副本测量实际算法、索引重建、磁盘峰值、metadata lock 和复制延迟。 |
+
+### 14.2 MySQL 算法不能靠“默认在线”推断
+
+MySQL 官方手册明确说明：省略 `ALGORITHM` 时，服务器优先使用支持的 INSTANT，否则使用 INPLACE；若 INPLACE 不支持，还可能使用 COPY。COPY 会复制整表且不允许并发 DML。指定算法则要求服务器使用该算法，不支持时直接失败。见：
+
+- ALTER TABLE 算法、COPY 行为和 LOCK 语义：https://dev.mysql.com/doc/refman/8.0/en/alter-table.html
+- InnoDB Online DDL 支持矩阵：https://dev.mysql.com/doc/refman/8.0/en/innodb-online-ddl-operations.html
+- Online DDL 性能与并发：https://dev.mysql.com/doc/refman/8.0/en/innodb-online-ddl-performance.html
+
+MySQL 8.0.29 之前，INSTANT ADD COLUMN 只能追加到表尾；8.0.29 起才支持放在任意位置。因此本项目当前最低版本 8.0.16，不能将带 `AFTER` 的 ADD COLUMN 当作 INSTANT。官方说明：https://dev.mysql.com/doc/relnotes/mysql/8.0/en/news-8-0-29.html
+
+### 14.3 执行门禁
+
+在满足以下条件之前，不得把上述迁移标记为生产可执行：
+
+1. 为每个 revision 记录目标 MySQL 精确小版本、存储引擎、表行数/数据量、索引规模、表空间类型和关键配置。
+2. 在同版本、同结构、相近数据量的隔离副本逐条执行；记录实际算法（不得只记录 SQL 返回成功）、执行耗时、受影响行数、metadata lock 等待、并发读写影响、redo/undo、磁盘峰值和复制延迟。
+3. 对大表增加索引、列定义修改和历史回填分别制定时间窗口、限速、暂停业务写入策略及失败处置步骤。
+4. 对无法证明低影响的 ALTER，优先选择明确算法并让不支持的操作失败；若最低版本不支持所需算法，则应先调整最低版本策略或采用经验证的在线 schema change 流程，不能静默退化为 COPY。
+5. 对 MySQL DDL 隐式提交的迁移，逐条设计“执行到中途断连”的人工恢复手册；Runner 留下 running/failed 时，禁止直接删除 ledger 记录后盲目重跑。
+6. 所有 SQL migration 内容一旦可能被任何环境应用即视为不可变；后续调整使用新的 forward-only revision，并同步更新 manifest/checksum 与恢复文档。
+
+### 14.4 当前结论
+
+- 12 条 manifest revision 已完成静态 DDL 分类。
+- 尚无本轮证据证明这些 DDL 已在生产规模数据副本完成算法、锁、耗时和磁盘峰值演练。
+- CI 临时 MySQL 的 migration 成功，只能证明该测试数据与该 CI MySQL 配置下可执行，不能替代生产规模演练。
+- 本节不修改任何已登记 SQL migration，也不改变其 SHA-256；未对生产或外部数据库执行任何操作。
+- **上线门禁保持阻断**，直到每条高风险 DDL 有可复核的副本演练记录及失败恢复方案。
