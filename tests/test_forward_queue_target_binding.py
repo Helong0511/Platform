@@ -24,8 +24,10 @@ class _Result:
 
 
 class _FakeDB:
-    def __init__(self, conversion, successful_log):
-        self.results = [conversion, successful_log]
+    def __init__(self, conversion, previous_log, latest_log=None):
+        if latest_log is None:
+            latest_log = SimpleNamespace(id=previous_log.id + 1, success=True)
+        self.results = [conversion, previous_log, latest_log]
         self.deleted = []
         self.committed = False
 
@@ -48,9 +50,18 @@ async def test_publisher_worker_passes_persisted_target_not_click_inference(monk
         publisher_id=31,
         product_id=None,
         retry_count=0,
+        lease_token='a' * 32,
     )
-    db = _FakeDB(conversion, SimpleNamespace(success=True))
+    db = _FakeDB(conversion, SimpleNamespace(id=100, success=False))
     captured = {}
+    async def renew(db_arg, task_id, token):
+        return token == task.lease_token
+    async def delete_owned(db_arg, task_id, token):
+        await db_arg.delete(task)
+        await db_arg.commit()
+        return True
+    monkeypatch.setattr(forward_tasks, '_renew_forward_task_lease', renew)
+    monkeypatch.setattr(forward_tasks, '_delete_owned_forward_task', delete_owned)
 
     async def forward(conversion_arg, db_arg, **kwargs):
         captured.update(kwargs)
@@ -100,10 +111,13 @@ async def test_worker_does_not_accept_stale_success_log_when_forwarder_skips(mon
         publisher_id=31,
         product_id=None,
         retry_count=0,
+        lease_token='b' * 32,
     )
     stale_success = SimpleNamespace(id=100, success=True)
-    db = _FakeDB(conversion, stale_success)
-    db.results.append(stale_success)
+    db = _FakeDB(conversion, stale_success, stale_success)
+    async def renew(db_arg, task_id, token):
+        return token == task.lease_token
+    monkeypatch.setattr(forward_tasks, '_renew_forward_task_lease', renew)
     scheduled = []
 
     async def skipped_forward(*args, **kwargs):
