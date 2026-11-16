@@ -125,11 +125,17 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
         try:
             if task.publisher_id:
                 await PostbackForwarder.forward_to_publisher(
-                    conversion, db, click_association=click_association
+                    conversion,
+                    db,
+                    click_association=click_association,
+                    target_publisher_id=task.publisher_id,
                 )
             elif task.product_id:
                 await PostbackForwarder.forward_to_product(
-                    conversion, db, click_association=click_association
+                    conversion,
+                    db,
+                    click_association=click_association,
+                    target_product_id=task.product_id,
                 )
             else:
                 logger.warning(
