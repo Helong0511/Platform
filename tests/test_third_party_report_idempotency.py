@@ -498,6 +498,9 @@ async def test_admin_identity_edit_recomputes_non_outbox_event_key(monkeypatch):
                 return Result(None)
             return Result(log_entry)
 
+        async def scalar(self, statement):
+            return datetime(2026, 11, 11, 12, 0, 0)
+
         async def commit(self):
             self.committed = True
 
@@ -570,6 +573,9 @@ async def test_admin_cannot_rewrite_attempted_direct_event_identity(monkeypatch)
         async def commit(self):
             self.committed = True
 
+        async def scalar(self, statement):
+            return now
+
     class SessionContext:
         def __init__(self):
             self.db = FakeDB()
@@ -641,6 +647,9 @@ async def test_admin_identity_edit_rechecks_worker_claim_after_row_lock(monkeypa
                 # 模拟 Worker 在管理员读取快照后、取得行锁前完成原子认领。
                 log_entry.report_start_time = third_party_report.get_app_now_naive()
             return Result()
+
+        async def scalar(self, statement):
+            return datetime(2026, 11, 11, 12, 0, 0)
 
         async def commit(self):
             self.committed = True

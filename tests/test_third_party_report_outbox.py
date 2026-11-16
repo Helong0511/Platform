@@ -88,6 +88,7 @@ async def test_enqueue_postback_report_uses_current_transaction_without_commit(m
 
 
 async def test_enqueue_postback_report_reuses_existing_event(monkeypatch):
+    from datetime import timedelta
     existing = type(
         "Existing",
         (),
@@ -317,7 +318,7 @@ async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
         assert kwargs.get("expected_scope") == "platform_scoped"
         # 模拟管理端先完成载荷修正；Worker 认领后读取到的必须是新值。
         row.email = "corrected-after-claim@example.invalid"
-        return datetime(2026, 11, 11, 12, 0, 0)
+        return "a" * 32
 
     monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
     monkeypatch.setattr(
