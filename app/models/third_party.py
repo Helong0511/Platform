@@ -90,10 +90,10 @@ class ThirdPartyReportLog(Base):
     # 时间信息
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')
     report_start_time = Column(DateTime, nullable=True, comment='上报开始时间')
-    lease_token = Column(CHAR(32, collation="ascii_bin"), nullable=True, comment='独立随机租约令牌；report_start_time 仅用于过期判断')
     report_success_time = Column(DateTime, nullable=True, comment='上报成功时间')
     completed_at = Column(DateTime, nullable=True, comment='完成时间')
     pii_scrubbed_at = Column(DateTime, nullable=True, comment='PII 按保留策略清理时间；保留事件幂等键')
+    lease_token = Column(CHAR(32, collation="ascii_bin"), nullable=True, comment='独立随机租约令牌；report_start_time 仅用于过期判断')
     
     __table_args__ = (
         CheckConstraint(
