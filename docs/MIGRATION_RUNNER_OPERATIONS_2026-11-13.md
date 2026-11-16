@@ -381,3 +381,15 @@ Runner 当前检查迁移账号与应用账号用户名不同、目标数据库�
 2. 继续以当前 PR HEAD 为基准，扫描剩余 app / tests 文件及部署配置中的旧 helper 导入/调用。
 3. 对 Scheduler、Outbox、CAP Recovery、Telegram 和外部回传路径建立操作级 SQL 权限矩阵；区分只读、DML、锁/事务操作与 DDL。
 4. PR #1 继续保持 Open / Draft，不合并 main、不部署。
+
+
+## 2026-11-16 新增迁移：第三方上报随机租约令牌
+
+- Revision：`20261116_third_party_report_random_lease_token`
+- 新增列：`third_party_report_logs.lease_token CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL`，追加到表尾。
+- 新增 CHECK：非空令牌必须为 32 位小写十六进制，且必须同时有 `report_start_time`。
+- 旧行不回填令牌；旧行的 `lease_token` 保持 NULL，由下一次原子认领生成新的随机令牌。
+- 该迁移依赖 2026-11-14 手动重试预算与平台二进制排序规则迁移；既有迁移 SQL 与 checksum 不得修改。
+- 表尾新增列可在 MySQL 8.0.29+ 争取 INSTANT ADD COLUMN；CHECK 约束验证、8.0.16–8.0.28 DDL 算法仍须在目标版本副本实测。
+- 部署时先停止并排空旧版 API、Scheduler、Outbox Worker，再执行 migration runner，最后启动全部新版进程；禁止新旧 Worker 混跑。
+- 截至本次审计，尚未在生产等价数据规模上执行迁移；必须记录 DDL 耗时、metadata lock、并发 DML、磁盘峰值与恢复演练结果。
