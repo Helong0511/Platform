@@ -287,7 +287,7 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
             await session.commit()
 
         # 让 SQL 数据库时钟前进 31 秒，超过 claim 的最小 30 秒租约窗口。
-        db_clock_offset[0] = 31
+        db_clock_offset[0] = report_module.REPORT_LOG_LEASE_SECONDS + 1
         replacement_token = await report_module._claim_report_log(
             report_id, expected_scope="platform_scoped", platform="meta"
         )
@@ -317,7 +317,7 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
         assert current_update is True
 
         # 再推进 SQL 数据库时钟 31 秒，使 replacement token 真正过期。
-        db_clock_offset[0] = 62
+        db_clock_offset[0] = (report_module.REPORT_LOG_LEASE_SECONDS + 1) * 2
 
         expired_renewal = await report_module._renew_report_log_lease(
             report_id, replacement_token,
@@ -562,8 +562,8 @@ async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover
         # Worker A 取得租约后暂停；暂停时间超过租约 TTL。
         worker_a_token = await report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta")
         assert worker_a_token == lease_clock[0]
-        # Worker A 暂停 31 秒：推进 SQL 表达式的数据库时钟，跨过最小租约 TTL。
-        db_clock_offset[0] = 31
+        # Worker A 暂停超过租约 TTL：推进 SQL 表达式的数据库时钟，跨过完整租约窗口。
+        db_clock_offset[0] = report_module.REPORT_LOG_LEASE_SECONDS + 1
 
         # Worker B 接管同一条记录，A 的令牌从此失效。
         worker_b_token = await report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta")
