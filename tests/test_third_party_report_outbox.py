@@ -118,6 +118,12 @@ async def test_enqueue_postback_report_reuses_existing_event(monkeypatch):
         "get_app_now_naive",
         lambda: datetime(2026, 11, 11, 12, 0, 0),
     )
+    monkeypatch.setattr(
+        outbox,
+        "get_app_now_sql_expression",
+        lambda offset_seconds=0: datetime(2026, 11, 11, 12, 0, 0)
+        + timedelta(seconds=offset_seconds),
+    )
     db = FakeDB()
     row_id = await outbox.enqueue_postback_report(
         db,
@@ -1122,6 +1128,11 @@ async def test_outbox_retries_after_credentials_are_restored(monkeypatch):
 
     monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
     monkeypatch.setattr(outbox, "get_app_now_naive", lambda: now[0])
+    monkeypatch.setattr(
+        outbox,
+        "get_app_now_sql_expression",
+        lambda offset_seconds=0: now[0] + timedelta(seconds=offset_seconds),
+    )
     monkeypatch.setattr(outbox, "_resolve_pixel_credentials", resolve)
     monkeypatch.setattr(outbox, "_claim_report_log", claim)
     monkeypatch.setattr(outbox, "_bind_outbox_destination", lambda *args, **kwargs: _async_true())
