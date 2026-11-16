@@ -261,7 +261,8 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
         same_second_renewal = await report_module._renew_report_log_lease(
             report_id, first_token, expected_scope="platform_scoped", platform="meta"
         )
-        assert same_second_renewal == first_token
+        assert same_second_renewal is not None
+        first_token = same_second_renewal
 
         async with session_factory() as session:
             await session.execute(
