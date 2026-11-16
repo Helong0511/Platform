@@ -244,7 +244,7 @@ async def _bind_outbox_destination(
     pixel_id: str,
 ) -> bool:
     """在当前有效租约内绑定首次解析的 Pixel；后续配置变更不得改投目的地。"""
-    if not platform or not pixel_id:
+    if not platform or not pixel_id or not isinstance(lease_token, str) or len(lease_token) != 32:
         return False
     async with AsyncSessionLocal() as db:
         result = await db.execute(
@@ -254,7 +254,7 @@ async def _bind_outbox_destination(
                 ThirdPartyReportLog.outbox_enqueued.is_(True),
                 ThirdPartyReportLog.identity_scope == "platform_scoped",
                 ThirdPartyReportLog.platform == platform,
-                ThirdPartyReportLog.report_start_time == lease_token,
+                ThirdPartyReportLog.lease_token == lease_token,
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                 or_(
                     ThirdPartyReportLog.destination_pixel_id.is_(None),
@@ -274,7 +274,7 @@ async def _bind_outbox_destination(
                 ThirdPartyReportLog.identity_scope == "platform_scoped",
                 ThirdPartyReportLog.platform == platform,
                 ThirdPartyReportLog.destination_pixel_id == pixel_id,
-                ThirdPartyReportLog.report_start_time == lease_token,
+                ThirdPartyReportLog.lease_token == lease_token,
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
             )
         )
@@ -358,7 +358,7 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
             completed_at=now,
             clear_next_retry_time=True,
-            expected_report_start_time=lease_token,
+            expected_lease_token=lease_token,
             expected_identity_scope="platform_scoped",
             expected_platform=payload["platform"],
         )
@@ -386,7 +386,7 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
             completed_at=now,
             clear_next_retry_time=True,
-            expected_report_start_time=lease_token,
+            expected_lease_token=lease_token,
             expected_identity_scope="platform_scoped",
             expected_platform=payload["platform"],
         )
@@ -415,7 +415,7 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
             completed_at=get_app_now_naive(),
             next_retry_time=retry_at,
-            expected_report_start_time=lease_token,
+            expected_lease_token=lease_token,
             expected_identity_scope="platform_scoped",
             expected_platform=payload["platform"],
         )
@@ -438,7 +438,7 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
             completed_at=now,
             clear_next_retry_time=True,
-            expected_report_start_time=lease_token,
+            expected_lease_token=lease_token,
             expected_identity_scope="platform_scoped",
             expected_platform=payload["platform"],
         )

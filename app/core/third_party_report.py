@@ -8,6 +8,7 @@ import time
 import httpx
 import hashlib
 import json
+import secrets
 from typing import Optional
 from datetime import datetime, timedelta
 
@@ -311,7 +312,7 @@ async def update_report_log(
         report_params: Optional[str] = None,
         next_retry_time: Optional[datetime] = None,
         clear_next_retry_time: bool = False,
-        expected_report_start_time: Optional[datetime] = None,
+        expected_lease_token: Optional[str] = None,
         expected_identity_scope: Optional[str] = "unscoped",
         expected_platform: Optional[str] = None,
 ):
@@ -323,7 +324,7 @@ async def update_report_log(
     try:
         async with AsyncSessionLocal() as db:
             query = select(ThirdPartyReportLog).where(ThirdPartyReportLog.id == log_id)
-            if expected_report_start_time is not None:
+            if expected_lease_token is not None:
                 # 租约令牌与身份作用域必须同时匹配；过期/错平台 Worker 不得覆盖其它事件。
                 if expected_identity_scope not in {"unscoped", "platform_scoped"}:
                     return False
@@ -332,7 +333,7 @@ async def update_report_log(
                 if expected_identity_scope == "unscoped" and expected_platform:
                     return False
                 query = query.where(
-                    ThirdPartyReportLog.report_start_time == expected_report_start_time,
+                    ThirdPartyReportLog.lease_token == expected_lease_token,
                     ThirdPartyReportLog.identity_scope == expected_identity_scope,
                     (
                         ThirdPartyReportLog.platform == expected_platform
@@ -397,7 +398,7 @@ async def _validate_existing_report_log_binding(
     event_key: Optional[str],
     platform: Optional[str],
     destination_pixel_id: Optional[str],
-    lease_token: Optional[datetime] = None,
+    lease_token: Optional[str] = None,
 ) -> bool:
     """发送前验证 Outbox 日志、平台作用域、目的地与载荷身份一致。"""
     if not report_log_id or not event_key or not platform or not destination_pixel_id:
@@ -435,7 +436,7 @@ async def _validate_existing_report_log_binding(
         return False
 
     # Outbox Worker 已认领时，必须仍持有同一个秒级租约；防止旧快照跨租约接管发送。
-    if lease_token is not None and row.report_start_time != lease_token:
+    if lease_token is not None and row.lease_token != lease_token:
         return False
     return True
 
@@ -496,8 +497,8 @@ async def _claim_report_log(
     *,
     expected_scope: Optional[str] = "unscoped",
     platform: Optional[str] = None,
-) -> Optional[datetime]:
-    """使用数据库统一时钟原子认领事件并返回秒级租约令牌。
+) -> Optional[str]:
+    """使用数据库统一时钟原子认领事件并返回独立随机 fencing 令牌。
 
     多 Worker 的本机时钟可能存在偏差；租约的写入、过期判断必须统一使用 DB 时钟，
     不能让快时钟 Worker 提前接管慢时钟 Worker 的有效任务。
@@ -511,6 +512,7 @@ async def _claim_report_log(
 
     db_now = get_app_now_sql_expression()
     stale_before = get_app_now_sql_expression(-max(30, lease_seconds))
+    lease_token = secrets.token_hex(16)
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             update(ThirdPartyReportLog)
@@ -534,14 +536,14 @@ async def _claim_report_log(
                     ThirdPartyReportLog.next_retry_time <= db_now,
                 ),
             )
-            .values(report_start_time=db_now)
+            .values(report_start_time=db_now, lease_token=lease_token)
         )
         if (result.rowcount or 0) != 1:
             await db.commit()
             return None
         # UPDATE 的租约时间由数据库生成；回读精确值作为 fencing token。
         lease_token = await db.scalar(
-            select(ThirdPartyReportLog.report_start_time).where(
+            select(ThirdPartyReportLog.lease_token).where(
                 ThirdPartyReportLog.id == report_log_id,
                 ThirdPartyReportLog.identity_scope == expected_scope,
                 (
@@ -557,7 +559,7 @@ async def _claim_report_log(
 
 async def _renew_report_log_lease(
     report_log_id: int,
-    lease_token: datetime,
+    lease_token: str,
     lease_seconds: int = REPORT_LOG_LEASE_SECONDS,
     *,
     expected_scope: Optional[str] = "unscoped",
@@ -581,7 +583,7 @@ async def _renew_report_log_lease(
             if expected_scope == "platform_scoped"
             else ThirdPartyReportLog.platform.is_(None)
         ),
-        ThirdPartyReportLog.report_start_time == lease_token,
+        ThirdPartyReportLog.lease_token == lease_token,
         ThirdPartyReportLog.report_start_time >= valid_after,
         ThirdPartyReportLog.report_start_time <= db_now,
         ThirdPartyReportLog.pii_scrubbed_at.is_(None),
@@ -595,7 +597,7 @@ async def _renew_report_log_lease(
         )
         if (result.rowcount or 0) == 1:
             renewed_token = await db.scalar(
-                select(ThirdPartyReportLog.report_start_time).where(
+                select(ThirdPartyReportLog.lease_token).where(
                     ThirdPartyReportLog.id == report_log_id,
                     ThirdPartyReportLog.identity_scope == expected_scope,
                     (
@@ -611,7 +613,7 @@ async def _renew_report_log_lease(
         # DATETIME 秒级精度下，同一秒更新可能返回 changed-rows=0；
         # 只在 DB 时钟确认原令牌仍未过期且非未来值时接受原令牌。
         current_token = await db.scalar(
-            select(ThirdPartyReportLog.report_start_time).where(*identity_conditions)
+            select(ThirdPartyReportLog.lease_token).where(*identity_conditions)
         )
         await db.commit()
         return lease_token if current_token == lease_token else None
@@ -701,7 +703,7 @@ async def send_third_party_report(
         platform: Optional[str] = None,
         report_log_id: Optional[int] = None,
         event_key: Optional[str] = None,
-        report_lease_token: Optional[datetime] = None,
+        report_lease_token: Optional[str] = None,
 ):
     """
     后台任务：发送第三方广告上报
@@ -796,7 +798,7 @@ async def send_third_party_report(
                 report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
                 completed_at=now,
                 next_retry_time=get_app_now_sql_expression(5 * 60),
-                expected_report_start_time=lease_token,
+                expected_lease_token=lease_token,
                 expected_identity_scope="platform_scoped",
                 expected_platform=platform,
             )
@@ -870,7 +872,7 @@ async def send_third_party_report(
         """只允许当前租约持有者更新状态，阻止过期 Worker 覆盖新 Worker。"""
         return await update_report_log(
             *args,
-            expected_report_start_time=lease_token,
+            expected_lease_token=lease_token,
             expected_identity_scope="platform_scoped" if using_existing_report_log else "unscoped",
             expected_platform=platform,
             **kwargs,
