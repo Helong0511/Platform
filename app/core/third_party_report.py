@@ -569,7 +569,7 @@ async def _renew_report_log_lease(
     *,
     expected_scope: Optional[str] = "unscoped",
     platform: Optional[str] = None,
-) -> Optional[datetime]:
+) -> Optional[str]:
     """仅允许尚未过期的当前持有者续租；数据库时钟判定有效期，过期令牌不可复活。"""
     if expected_scope not in {"unscoped", "platform_scoped"}:
         return None
@@ -1564,7 +1564,7 @@ async def update_report_log_params(
             if identity_changed:
                 # 直接发送日志一旦开始尝试，就成为外部事件身份的审计证据；
                 # 不允许管理员改写已尝试/成功/已完成事件的幂等身份。
-                now = get_app_now_naive()
+                now = await db.scalar(select(get_app_now_sql_expression()))
                 report_start_time = getattr(snapshot, "report_start_time", None)
                 active_lease = bool(
                     report_start_time
@@ -1663,7 +1663,7 @@ async def update_report_log_params(
             if identity_changed:
                 # 快照读取与取得行锁之间，Worker 可能已原子认领该事件。
                 # 必须在锁内基于最新行状态再次检查，不能依赖锁前快照。
-                now = get_app_now_naive()
+                now = await db.scalar(select(get_app_now_sql_expression()))
                 current_lease_time = getattr(log_entry, "report_start_time", None)
                 current_active_lease = bool(
                     current_lease_time
@@ -1731,7 +1731,7 @@ async def update_report_log_params(
             if payload_updates_requested and not log_entry.outbox_enqueued:
                 # 直接发送日志同样是外部发送事实；发送后不允许通过管理端改写
                 # 已经使用过的 PII/金额/参数载荷，避免审计记录与实际发送不一致。
-                now = get_app_now_naive()
+                now = await db.scalar(select(get_app_now_sql_expression()))
                 report_start_time = getattr(log_entry, "report_start_time", None)
                 active_lease = bool(
                     report_start_time
@@ -1750,11 +1750,12 @@ async def update_report_log_params(
                         log_id,
                     )
                     return False
-            if (
-                log_entry.outbox_enqueued
-                and payload_updates_requested
-                and not is_outbox_payload_editable(log_entry)
-            ):
+            if log_entry.outbox_enqueued and payload_updates_requested:
+                database_now = await db.scalar(select(get_app_now_sql_expression()))
+                payload_editable = is_outbox_payload_editable(log_entry, now=database_now)
+            else:
+                payload_editable = True
+            if log_entry.outbox_enqueued and payload_updates_requested and not payload_editable:
                 logger.warning(
                     "[第三方上报] 已开始发送或已完成的 Outbox 载荷不可修改: id=%s attempts=%s status=%s",
                     log_id,
