@@ -252,6 +252,7 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
         assert sum(token is not None for token in claims) == 1
         first_token = next(token for token in claims if token is not None)
         assert isinstance(first_token, str) and len(first_token) == 32
+        assert set(first_token) <= set("0123456789abcdef")
 
         async with session_factory() as session:
             claimed_row = await session.scalar(
@@ -325,6 +326,14 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
             expected_scope="platform_scoped", platform="meta"
         )
         assert expired_renewal is None
+        expired_finalize = await report_module.update_report_log(
+            report_id,
+            status="failed",
+            expected_lease_token=replacement_token,
+            expected_identity_scope="platform_scoped",
+            expected_platform="meta",
+        )
+        assert expired_finalize is False
         final_token = await report_module._claim_report_log(
             report_id, expected_scope="platform_scoped", platform="meta"
         )
