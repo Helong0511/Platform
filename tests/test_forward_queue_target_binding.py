@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.postback.forwarder import PostbackForwarder
+from app.core.postback.forwarder import PostbackForwarder, _bind_publisher_target
 from app.scheduler_module.tasks import forward_tasks
 
 
@@ -121,3 +121,29 @@ async def test_worker_does_not_accept_stale_success_log_when_forwarder_skips(mon
     assert scheduled == [task]
     assert db.deleted == []
     assert db.committed is False
+
+
+
+def test_persisted_publisher_target_overrides_stale_click_association_identity():
+    click_data = {
+        "publisher_id": 12,
+        "offer_id": 88,
+        "click_id": "click-1",
+    }
+
+    bound = _bind_publisher_target(click_data, 31)
+
+    assert bound["publisher_id"] == 31
+    assert bound["offer_id"] == 88
+    assert bound["click_id"] == "click-1"
+    # 不修改调用方持有的原始 Click 关联快照。
+    assert click_data["publisher_id"] == 12
+
+
+def test_non_queue_publisher_binding_preserves_click_association_identity():
+    click_data = {"publisher_id": 12, "click_id": "click-1"}
+
+    bound = _bind_publisher_target(click_data, None)
+
+    assert bound == click_data
+    assert bound is not click_data
