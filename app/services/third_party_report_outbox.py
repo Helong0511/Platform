@@ -321,11 +321,17 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
                 ThirdPartyReportLog.outbox_enqueued.is_(True),
                 ThirdPartyReportLog.identity_scope == "platform_scoped",
                 ThirdPartyReportLog.platform == platform,
+                # 认领后再次读取载荷必须验证当前 Worker 仍持有有效租约；
+                # 旧 Worker 即使在接管后继续运行，也不能读取新 Worker 的 PII 载荷。
+                ThirdPartyReportLog.lease_token == lease_token,
+                ThirdPartyReportLog.report_start_time >= get_app_now_sql_expression(-REPORT_LOG_LEASE_SECONDS),
+                ThirdPartyReportLog.report_start_time <= get_app_now_sql_expression(),
+                ThirdPartyReportLog.pii_scrubbed_at.is_(None),
             )
             .limit(1)
         )
         if row is None:
-            return {"success": False, "reason": "outbox_not_found"}
+            return {"success": False, "retryable": True, "reason": "report_lease_lost"}
         if getattr(row, "pii_scrubbed_at", None) is not None:
             return {"success": False, "retryable": False, "reason": "pii_payload_scrubbed"}
         if row.status == "success":
