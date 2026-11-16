@@ -25,9 +25,14 @@ from sqlalchemy.future import select
 
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
-from app.core.postback import PostbackForwarder
-from app.core.utils import parse_date_to_app_timezone
-from app.models.models import PostbackForwardLog, PostbackConversion, User
+from app.core.postback.forwarder import _lock_conversion_for_queue_enqueue
+from app.core.utils import get_app_now_naive, parse_date_to_app_timezone
+from app.models.models import (
+    PostbackForwardLog,
+    PostbackConversion,
+    PostbackForwardQueue,
+    User,
+)
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.schemas.postback import PostbackForwardLogResponse
 
@@ -167,22 +172,17 @@ class PostbackForwardLogService:
         current_user: User,
     ):
         """
-        根据转发日志 ID 手动补发 Postback 至下游渠道。
+        将人工补发请求写入统一转发队列，不在 API 请求内直接发送外部 HTTP。
 
-        从日志还原 conversion_id，加载转化记录后调用 PostbackForwarder。
-        支持渠道（publisher_id）与产品级（product_id）下游补发。
-
-        Args:
-            forward_log_id: PostbackForwardLog 主键。
-            db: 异步数据库会话。
-            current_user: 操作人，写入 info 日志。
-
-        Returns:
-            ResponseBaseSchema，data 含 message、forward_log_id、conversion_id。
+        先锁定原转发日志并校验 PII 状态，再锁定 conversion 主记录，
+        最后按 conversion + 精确目标检查活动队列任务。这样人工补发与自动
+        失败入队共享同一串行化入口，且与 PII 清理通过日志行锁互斥。
         """
         try:
             result = await db.execute(
-                select(PostbackForwardLog).where(PostbackForwardLog.id == forward_log_id)
+                select(PostbackForwardLog)
+                .where(PostbackForwardLog.id == forward_log_id)
+                .with_for_update()
             )
             forward_log = result.scalars().first()
             if not forward_log:
@@ -196,39 +196,84 @@ class PostbackForwardLogService:
                     detail="该转发日志已按保留策略清除载荷，不允许补发",
                 )
 
-            conv_result = await db.execute(
+            # 目标必须明确；Publisher/产品关联被删除后不可猜测或改投其它目标。
+            publisher_id = forward_log.publisher_id
+            product_id = forward_log.product_id
+            if bool(publisher_id) == bool(product_id):
+                raise_api_exception(
+                    ErrorCode.VALIDATION_ERROR,
+                    detail="转发日志必须且只能包含一个有效的下游目标",
+                )
+
+            conversion_result = await db.execute(
                 select(PostbackConversion).where(
                     PostbackConversion.id == forward_log.conversion_id
                 )
             )
-            conversion = conv_result.scalars().first()
+            conversion = conversion_result.scalars().first()
             if not conversion:
                 raise_api_exception(
                     ErrorCode.RESOURCE_NOT_FOUND,
                     detail=f"转化记录 ID {forward_log.conversion_id} 不存在",
                 )
 
-            if forward_log.publisher_id:
-                await PostbackForwarder.forward_to_publisher(conversion, db)
-                message = f"已补发转发到渠道（Publisher ID: {forward_log.publisher_id}）"
-            elif forward_log.product_id:
-                await PostbackForwarder.forward_to_product(conversion, db)
-                message = f"已补发转发到产品下游（Product ID: {forward_log.product_id}）"
-            else:
+            # 与自动失败入队使用同一 conversion 行锁，避免两个事务同时通过去重检查。
+            if not await _lock_conversion_for_queue_enqueue(db, conversion.id):
                 raise_api_exception(
-                    ErrorCode.VALIDATION_ERROR,
-                    detail="转发日志缺少 publisher_id / product_id，无法确定转发目标",
+                    ErrorCode.RESOURCE_NOT_FOUND,
+                    detail="关联转化记录已不存在，无法补发",
                 )
 
+            target_filters = [
+                PostbackForwardQueue.conversion_id == conversion.id,
+                PostbackForwardQueue.publisher_id == publisher_id
+                if publisher_id is not None
+                else PostbackForwardQueue.publisher_id.is_(None),
+                PostbackForwardQueue.product_id == product_id
+                if product_id is not None
+                else PostbackForwardQueue.product_id.is_(None),
+            ]
+            existing_result = await db.execute(
+                select(PostbackForwardQueue)
+                .where(*target_filters)
+                .with_for_update()
+            )
+            if existing_result.scalars().first():
+                raise_api_exception(
+                    ErrorCode.CONFLICT,
+                    detail="该下游目标已有待处理或正在执行的转发任务，请勿重复补发",
+                )
+
+            task = PostbackForwardQueue(
+                conversion_id=conversion.id,
+                publisher_id=publisher_id,
+                product_id=product_id,
+                # Worker 会根据 conversion 和目标当前配置重新构建请求；
+                # 此处只保留原日志中的模板地址，不复制历史请求参数/请求体 PII。
+                downstream_url=forward_log.downstream_url,
+                request_method=forward_log.request_method or "GET",
+                request_data=None,
+                request_params=None,
+                retry_count=0,
+                next_retry_time=get_app_now_naive(),
+            )
+            db.add(task)
+            await db.flush()
+
             logger.info(
-                f"用户 {current_user.id} 补发转发: forward_log_id={forward_log_id}, "
-                f"conversion_id={forward_log.conversion_id}"
+                "人工补发已进入统一转发队列：user_id=%s forward_log_id=%s queue_id=%s target_type=%s",
+                current_user.id,
+                forward_log_id,
+                task.id,
+                "publisher" if publisher_id is not None else "product",
             )
             return ResponseBaseSchema.success(
                 data={
-                    "message": message,
+                    "message": "已加入下游转发队列，将由后台 Worker 处理",
                     "forward_log_id": forward_log_id,
-                    "conversion_id": forward_log.conversion_id,
+                    "conversion_id": conversion.id,
+                    "queue_id": task.id,
+                    "queued": True,
                 }
             )
         except HTTPException:
@@ -239,7 +284,6 @@ class PostbackForwardLogService:
                 ErrorCode.OPERATION_FAILED,
                 detail="补发失败，请查看受控服务端日志",
             )
-
 
     async def get_postback_forward_logs(
         self,
