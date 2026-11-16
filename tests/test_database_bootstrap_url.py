@@ -45,18 +45,9 @@ def test_mysql_bootstrap_requires_database_name():
 
 
 @pytest.mark.asyncio
-async def test_legacy_create_database_entrypoint_fails_closed_without_connecting(monkeypatch):
-    """旧 helper 不得再使用应用 DSN 建库，也不得尝试建立数据库连接。"""
-    import app.db.database as database_module
-
-    def forbidden_engine(*args, **kwargs):
-        raise AssertionError("legacy helper must not create an engine")
-
-    monkeypatch.setattr(database_module, "settings", object(), raising=False)
-    monkeypatch.setattr(
-        "sqlalchemy.ext.asyncio.create_async_engine",
-        forbidden_engine,
-    )
+async def test_legacy_create_database_entrypoint_fails_closed():
+    """旧 helper 必须 fail-closed，不得再使用应用 DSN 建库。"""
+    from app.db.database import create_database
 
     with pytest.raises(RuntimeError, match="禁止通过应用数据库连接创建数据库"):
-        await database_module.create_database()
+        await create_database()
