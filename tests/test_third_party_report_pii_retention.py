@@ -369,6 +369,13 @@ async def test_forward_log_retention_clears_expanded_url_request_and_response(mo
 
     monkeypatch.setattr(retention, "AsyncSessionLocal", lambda: SessionContext())
     monkeypatch.setattr(retention, "get_app_now_naive", lambda: now)
+    # 独立清理入口必须使用数据库时钟表达式，而非应用服务器计算的 cutoff。
+    from sqlalchemy import text
+    monkeypatch.setattr(
+        retention,
+        "get_app_now_sql_expression",
+        lambda offset_seconds=0: text("UTC_TIMESTAMP() - INTERVAL 90 DAY"),
+    )
 
     result = await retention.scrub_expired_postback_forward_log_pii(
         retention_days=90,
@@ -384,6 +391,8 @@ async def test_forward_log_retention_clears_expanded_url_request_and_response(mo
     assert row.error_message is None
     assert row.pii_scrubbed_at == now
     assert "postback_forward_logs.pii_scrubbed_at is null" in captured["sql"]
+    assert "postback_forward_logs.created_at < utc_timestamp() - interval 90 day" in captured["sql"]
+    assert "postback_forward_logs.created_at < %(" not in captured["sql"]
     assert "postback_forward_logs.completed_at is not null" in captured["sql"]
     assert "for update skip locked" in captured["sql"]
     assert "postback_forward_queue" in captured["sql"]
