@@ -295,7 +295,14 @@ async def _verify_database_schema() -> str | None:
 
 
 async def _sync_scheduled_tasks_for_worker(worker_pid: int) -> None:
-    """同步任务配置；调度 Worker 同步失败时拒绝启动，纯 API Worker 可降级。"""
+    """仅调度 Worker 同步任务配置，避免每个 API Worker 重复写入 scheduled_tasks。"""
+    if not settings.should_run_scheduler():
+        logger.debug(
+            "[Worker PID:%s] 纯 API Worker 跳过 scheduled_tasks 配置同步",
+            worker_pid,
+        )
+        return
+
     try:
         await init_scheduled_tasks_in_db()
         logger.info("[Worker PID:%s] 定时任务配置已同步到数据库", worker_pid)
@@ -306,11 +313,10 @@ async def _sync_scheduled_tasks_for_worker(worker_pid: int) -> None:
             worker_pid,
             type(db_init_error).__name__,
         )
-        # 纯 API Worker（未运行 APScheduler）可降级启动；调度 Worker 不能使用旧配置继续调度。
-        if settings.should_run_scheduler():
-            raise RuntimeError(
-                "定时任务配置同步失败，调度 Worker 拒绝启动"
-            ) from db_init_error
+        # 调度 Worker 不能使用旧配置继续调度，必须拒绝启动。
+        raise RuntimeError(
+            "定时任务配置同步失败，调度 Worker 拒绝启动"
+        ) from db_init_error
 
 
 async def _start_scheduler_for_worker(worker_pid: int) -> None:
