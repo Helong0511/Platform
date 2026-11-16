@@ -1671,3 +1671,136 @@ async def test_mysql_manual_retry_and_pii_retention_are_mutually_exclusive(monke
         if engine is not None:
             await engine.dispose()
         _drop_isolated_database(database)
+
+
+
+@pytest.mark.asyncio
+async def test_mysql_purchase_link_rejects_stale_lease_and_scrubbed_view_content(monkeypatch):
+    """真实 MySQL 验证旧 Purchase Worker 与已清理 ViewContent 均不能建立关联。"""
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(ThirdPartyReportLog.__table__.create)
+
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
+
+        now = get_app_now_naive().replace(microsecond=0)
+        pixel_id = "pixel-ci-purchase-link-guard"
+        scrubbed_adsid = f"ci-scrubbed-{uuid.uuid4().hex}"
+        stale_adsid = f"ci-stale-{uuid.uuid4().hex}"
+        scrubbed_purchase_token = uuid.uuid4().hex
+        stale_purchase_token = uuid.uuid4().hex
+        scrubbed_purchase_id = None
+        stale_purchase_id = None
+        scrubbed_view_id = None
+        stale_view_id = None
+
+        async with session_factory() as session:
+            scrubbed_purchase = ThirdPartyReportLog(
+                source="ci",
+                adsid=scrubbed_adsid,
+                event="Purchase",
+                event_key=hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest(),
+                identity_scope="platform_scoped",
+                platform="meta",
+                destination_pixel_id=pixel_id,
+                conversion_id=f"ci-conversion-scrubbed-{uuid.uuid4().hex}",
+                status="pending",
+                report_start_time=now,
+                lease_token=scrubbed_purchase_token,
+                created_at=now,
+            )
+            scrubbed_view = ThirdPartyReportLog(
+                source="ci",
+                adsid=scrubbed_adsid,
+                event="ViewContent",
+                event_key=hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest(),
+                identity_scope="platform_scoped",
+                platform="meta",
+                destination_pixel_id=pixel_id,
+                status="success",
+                conversion_id=None,
+                # 模拟已完成脱敏但关联标识因历史部分清理而仍残留的 fail-closed 边界。
+                pii_scrubbed_at=now,
+                created_at=now,
+            )
+            stale_purchase = ThirdPartyReportLog(
+                source="ci",
+                adsid=stale_adsid,
+                event="Purchase",
+                event_key=hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest(),
+                identity_scope="platform_scoped",
+                platform="meta",
+                destination_pixel_id=pixel_id,
+                conversion_id=f"ci-conversion-stale-{uuid.uuid4().hex}",
+                status="pending",
+                report_start_time=now - timedelta(
+                    seconds=report_module.REPORT_LOG_LEASE_SECONDS + 2
+                ),
+                lease_token=stale_purchase_token,
+                created_at=now,
+            )
+            stale_view = ThirdPartyReportLog(
+                source="ci",
+                adsid=stale_adsid,
+                event="ViewContent",
+                event_key=hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest(),
+                identity_scope="platform_scoped",
+                platform="meta",
+                destination_pixel_id=pixel_id,
+                status="success",
+                conversion_id=None,
+                pii_scrubbed_at=None,
+                created_at=now,
+            )
+            session.add_all([scrubbed_purchase, scrubbed_view, stale_purchase, stale_view])
+            await session.commit()
+            scrubbed_purchase_id = scrubbed_purchase.id
+            stale_purchase_id = stale_purchase.id
+            scrubbed_view_id = scrubbed_view.id
+            stale_view_id = stale_view.id
+
+        scrubbed_result = await report_module._link_purchase_to_view_content(
+            source="ci",
+            adsid=scrubbed_adsid,
+            conversion_id="must-not-restore-scrubbed-pii",
+            report_log_id=scrubbed_purchase_id,
+            destination_pixel_id=pixel_id,
+            identity_scope="platform_scoped",
+            platform="meta",
+            lease_token=scrubbed_purchase_token,
+        )
+        stale_result = await report_module._link_purchase_to_view_content(
+            source="ci",
+            adsid=stale_adsid,
+            conversion_id="must-not-link-from-stale-worker",
+            report_log_id=stale_purchase_id,
+            destination_pixel_id=pixel_id,
+            identity_scope="platform_scoped",
+            platform="meta",
+            lease_token=stale_purchase_token,
+        )
+
+        assert scrubbed_result is False
+        assert stale_result is False
+        async with session_factory() as session:
+            scrubbed_view = await session.get(ThirdPartyReportLog, scrubbed_view_id)
+            stale_view = await session.get(ThirdPartyReportLog, stale_view_id)
+            assert scrubbed_view is not None
+            assert scrubbed_view.pii_scrubbed_at is not None
+            assert scrubbed_view.conversion_id is None
+            assert stale_view is not None
+            assert stale_view.conversion_id is None
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
