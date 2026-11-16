@@ -240,6 +240,8 @@ async def test_mysql_runtime_account_can_bootstrap_admin_but_cannot_run_ddl(monk
         if root_engine is not None:
             root_engine.dispose()
         with root.cursor() as cursor:
+            # 清理 CREATE DATABASE 权限探针；即使断言前意外创建成功也不得遗留 CI 资源。
+            cursor.execute("DROP DATABASE IF EXISTS runtime_ddl_must_be_denied")
             cursor.execute(f"DROP DATABASE IF EXISTS `{DATABASE}`")
             cursor.execute(f"DROP USER IF EXISTS '{username}'@'%'")
         root.close()
