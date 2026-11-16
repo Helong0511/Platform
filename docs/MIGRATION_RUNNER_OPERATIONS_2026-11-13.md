@@ -397,7 +397,7 @@ Runner 当前检查迁移账号与应用账号用户名不同、目标数据库�
 
 ## 2026-11-16 新增迁移：转发队列独立租约 fencing
 
-- Revision：`20261116_postback_forward_queue_lease_fencing`，依赖 `20261116_third_party_report_random_lease_token`。
+- Revision：`20261116_postback_forward_queue_lease_fencing`。该迁移只作用于 `postback_forward_queue`，与第三方上报日志的随机租约迁移相互独立。
 - 在 `postback_forward_queue` 增加可空 `lease_token CHAR(32) CHARACTER SET ascii COLLATE ascii_bin` 与 `lease_expires_at DATETIME(6)`；CHECK 要求两列同时为空或同时有效。旧记录不回填，首次领取时生成 128-bit 随机令牌。
 - `next_retry_time` 只承担业务重试调度，不再被改写为租约到期时间。Worker 领取条件、续租、成功删除、失败退避和超限删除均使用独立 token 与数据库时钟进行条件更新。
 - HTTP 客户端设置 60 秒总请求 deadline，队列租约为 300 秒，给连接/处理和最终状态提交留出余量；仍不能排除进程长时间暂停、网络层已发出请求后租约过期等情形。
