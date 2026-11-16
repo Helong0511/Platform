@@ -10,7 +10,7 @@ from app.scheduler_module.tasks.forward_tasks import (
 
 
 def test_due_forward_task_query_uses_skip_locked():
-    query = _due_forward_task_query(datetime(2026, 11, 10, 12, 0, 0))
+    query = _due_forward_task_query()
     sql = str(query.compile(dialect=mysql.dialect())).upper()
 
     assert "FOR UPDATE SKIP LOCKED" in sql
@@ -275,6 +275,7 @@ async def test_forward_queue_worker_does_not_log_raw_exception_details(
         publisher_id=51,
         product_id=None,
         retry_count=0,
+        lease_token='d' * 32,
     )
 
     class ScalarResult:
@@ -296,6 +297,8 @@ async def test_forward_queue_worker_does_not_log_raw_exception_details(
         return None
 
     monkeypatch.setattr(PostbackForwarder, "forward_to_publisher", fail_forward)
+    async def valid_lease(*args, **kwargs): return True
+    monkeypatch.setattr(forward_tasks, '_renew_forward_task_lease', valid_lease)
     monkeypatch.setattr(forward_tasks, "_schedule_or_drop_retry", no_retry)
 
     with caplog.at_level(logging.ERROR):
