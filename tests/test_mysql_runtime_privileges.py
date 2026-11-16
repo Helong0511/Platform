@@ -99,6 +99,8 @@ async def test_mysql_runtime_account_can_bootstrap_admin_but_cannot_run_ddl(monk
 
     try:
         with root.cursor() as cursor:
+            # 即使权限回归导致 CREATE DATABASE 意外成功，也清理探针库，避免污染 CI MySQL。
+            cursor.execute("DROP DATABASE IF EXISTS runtime_ddl_must_be_denied")
             cursor.execute(f"DROP DATABASE IF EXISTS `{DATABASE}`")
             cursor.execute(f"DROP USER IF EXISTS '{username}'@'%'")
             cursor.execute(
@@ -214,6 +216,12 @@ async def test_mysql_runtime_account_can_bootstrap_admin_but_cannot_run_ddl(monk
             with runtime.cursor() as cursor:
                 cursor.execute("SELECT COUNT(*) FROM users")
                 assert cursor.fetchone()[0] == 1
+
+                # 不能只验证 schema 内 DDL；还必须验证运行账号没有全局建库权限。
+                with pytest.raises(pymysql.err.OperationalError) as create_database_denied:
+                    cursor.execute("CREATE DATABASE runtime_ddl_must_be_denied")
+                assert create_database_denied.value.args[0] in (1044, 1142)
+
                 ddl_statements = (
                     "CREATE TABLE runtime_ddl_must_be_denied (id INT NOT NULL)",
                     "ALTER TABLE runtime_ddl_probe ADD COLUMN forbidden_column INT NULL",
