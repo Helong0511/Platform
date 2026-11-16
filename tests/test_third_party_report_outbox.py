@@ -346,7 +346,7 @@ async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
     assert captured["send"]["report_log_id"] == 91
     assert captured["send"]["event_key"] == "stable-event-key"
     assert captured["send"]["email"] == "corrected-after-claim@example.invalid"
-    assert captured["send"]["report_lease_token"] == datetime(2026, 11, 11, 12, 0, 0)
+    assert captured["send"]["report_lease_token"] == "a" * 32
 
 
 async def test_outbox_worker_rejects_invalid_batch_size():
@@ -405,7 +405,7 @@ async def test_outbox_missing_credentials_keeps_event_retryable(monkeypatch):
             return False
 
     captured = {}
-    lease_token = datetime(2026, 11, 11, 12, 0, 0)
+    lease_token = "a" * 32
 
     async def resolve(**kwargs):
         return None, None, None
@@ -441,7 +441,7 @@ async def test_outbox_missing_credentials_keeps_event_retryable(monkeypatch):
     assert "timestampadd" in retry_sql
     assert "utc_timestamp()" in retry_sql
     assert "access_token" not in captured
-    assert captured["expected_report_start_time"] == lease_token
+    assert captured["expected_lease_token"] == lease_token
 
 
 async def test_postback_report_outbox_is_enqueued_in_conversion_session(monkeypatch):
@@ -833,7 +833,7 @@ async def test_outbox_marks_deleted_short_link_terminal_without_retry(monkeypatc
             return False
 
     captured = {}
-    lease_token = datetime(2026, 11, 11, 12, 0, 0)
+    lease_token = "a" * 32
 
     async def deleted(**kwargs):
         raise outbox.OutboxConfigReferenceDeleted()
@@ -863,7 +863,7 @@ async def test_outbox_marks_deleted_short_link_terminal_without_retry(monkeypatc
     assert captured["status"] == "failed"
     assert captured["error_message"] == "短链接已删除，无法解析像素配置"
     assert captured["clear_next_retry_time"] is True
-    assert captured["expected_report_start_time"] == lease_token
+    assert captured["expected_lease_token"] == lease_token
 
 
 async def test_manual_retry_sql_rejects_deleted_short_link_events(monkeypatch):
@@ -1014,7 +1014,7 @@ async def test_outbox_missing_config_reference_is_finalized_not_rescanned(monkey
             return False
 
     captured = {}
-    lease_token = datetime(2026, 11, 11, 12, 0, 0)
+    lease_token = "a" * 32
 
     async def claim(report_id, **kwargs):
         assert report_id == 96
@@ -1040,7 +1040,7 @@ async def test_outbox_missing_config_reference_is_finalized_not_rescanned(monkey
     assert captured["status"] == "failed"
     assert captured["clear_next_retry_time"] is True
     assert captured["completed_at"] == datetime(2026, 11, 11, 12, 0, 0)
-    assert captured["expected_report_start_time"] == lease_token
+    assert captured["expected_lease_token"] == lease_token
 
 
 
@@ -1049,7 +1049,7 @@ async def test_outbox_retries_after_credentials_are_restored(monkeypatch):
     from datetime import timedelta
 
     now = [datetime(2026, 11, 11, 12, 0, 0)]
-    lease_token = now[0]
+    lease_token = "b" * 32
     row = type(
         "ReportRow",
         (),

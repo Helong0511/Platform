@@ -216,6 +216,7 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
         )
 
         now = get_app_now_naive().replace(microsecond=0)
+        lease_token = uuid.uuid4().hex
         event_identity = uuid.uuid4().hex
         event_key = hashlib.sha256(event_identity.encode("utf-8")).hexdigest()
         async with session_factory() as session:
@@ -250,14 +251,14 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
         )
         assert sum(token is not None for token in claims) == 1
         first_token = next(token for token in claims if token is not None)
-        assert isinstance(first_token, datetime)
+        assert isinstance(first_token, str) and len(first_token) == 32
 
         async with session_factory() as session:
             claimed_row = await session.scalar(
                 select(ThirdPartyReportLog).where(ThirdPartyReportLog.id == report_id)
             )
             assert claimed_row is not None
-            assert claimed_row.report_start_time == first_token
+            assert claimed_row.lease_token == first_token
 
         # Worker B 本机时钟快一天，也不能提前接管 DB 时钟下仍有效的租约。
         monkeypatch.setattr(
@@ -301,7 +302,7 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
         stale_update = await report_module.update_report_log(
             report_id,
             status="failed",
-            expected_report_start_time=first_token,
+            expected_lease_token=first_token,
             expected_identity_scope="platform_scoped",
             expected_platform="meta",
         )
@@ -310,7 +311,7 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
         current_update = await report_module.update_report_log(
             report_id,
             status="failed",
-            expected_report_start_time=replacement_token,
+            expected_lease_token=replacement_token,
             expected_identity_scope="platform_scoped",
             expected_platform="meta",
         )
@@ -568,7 +569,7 @@ async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover
             )
             assert claimed_row is not None
             # 以数据库实际保存值验证认领令牌，不与认领前本机采样时间比较。
-            assert claimed_row.report_start_time == worker_a_token
+            assert claimed_row.lease_token == worker_a_token
 
         # Worker A 暂停超过租约 TTL：推进 SQL 表达式的数据库时钟，跨过完整租约窗口.
         db_clock_offset[0] = report_module.REPORT_LOG_LEASE_SECONDS + 1
@@ -588,7 +589,7 @@ async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover
         stale_worker_finalize = await report_module.update_report_log(
             report_id,
             status="failed",
-            expected_report_start_time=worker_a_token,
+            expected_lease_token=worker_a_token,
             expected_identity_scope="platform_scoped",
             expected_platform="meta",
         )
@@ -598,7 +599,7 @@ async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover
         worker_b_finalize = await report_module.update_report_log(
             report_id,
             status="success",
-            expected_report_start_time=worker_b_token,
+            expected_lease_token=worker_b_token,
             expected_identity_scope="platform_scoped",
             expected_platform="meta",
         )
@@ -610,7 +611,8 @@ async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover
             )
             assert final_row is not None
             assert final_row.status == "success"
-            assert final_row.report_start_time == worker_b_token
+            assert final_row.report_start_time is not None
+            assert final_row.lease_token is None
     finally:
         if engine is not None:
             await engine.dispose()
@@ -719,6 +721,7 @@ async def test_mysql_existing_outbox_report_binding_matches_persisted_payload_an
                 max_attempts=5,
                 next_retry_time=now,
                 report_start_time=now,
+                lease_token=lease_token,
             )
             session.add(row)
             await session.commit()
@@ -733,7 +736,7 @@ async def test_mysql_existing_outbox_report_binding_matches_persisted_payload_an
             event_key=event_key,
             platform="meta",
             destination_pixel_id="pixel-ci",
-            lease_token=now,
+            lease_token=lease_token,
         )
         wrong_adsid = await report_module._validate_existing_report_log_binding(
             report_id,
@@ -744,7 +747,7 @@ async def test_mysql_existing_outbox_report_binding_matches_persisted_payload_an
             event_key=event_key,
             platform="meta",
             destination_pixel_id="pixel-ci",
-            lease_token=now,
+            lease_token=lease_token,
         )
         stale_lease = await report_module._validate_existing_report_log_binding(
             report_id,
@@ -755,7 +758,7 @@ async def test_mysql_existing_outbox_report_binding_matches_persisted_payload_an
             event_key=event_key,
             platform="meta",
             destination_pixel_id="pixel-ci",
-            lease_token=now - timedelta(seconds=1),
+            lease_token='f' * 32,
         )
 
         assert valid is True
@@ -791,7 +794,8 @@ async def test_mysql_outbox_pixel_destination_is_bound_once_and_cannot_silently_
             autoflush=False,
         )
         monkeypatch.setattr(outbox_module, "AsyncSessionLocal", session_factory)
-        lease = get_app_now_naive().replace(microsecond=0)
+        lease = get_app_now_naive().replace(microsecond=0) - timedelta(seconds=1)
+        lease_token = uuid.uuid4().hex
         identity = uuid.uuid4().hex
         async with session_factory() as session:
             row = ThirdPartyReportLog(
@@ -809,6 +813,7 @@ async def test_mysql_outbox_pixel_destination_is_bound_once_and_cannot_silently_
                 max_attempts=5,
                 next_retry_time=lease,
                 report_start_time=lease,
+                lease_token=lease_token,
             )
             session.add(row)
             await session.commit()
@@ -816,19 +821,19 @@ async def test_mysql_outbox_pixel_destination_is_bound_once_and_cannot_silently_
 
         first_bind = await outbox_module._bind_outbox_destination(
             report_id,
-            lease_token=lease,
+            lease_token=lease_token,
             platform="meta",
             pixel_id="pixel-A",
         )
         same_pixel_retry = await outbox_module._bind_outbox_destination(
             report_id,
-            lease_token=lease,
+            lease_token=lease_token,
             platform="meta",
             pixel_id="pixel-A",
         )
         changed_pixel = await outbox_module._bind_outbox_destination(
             report_id,
-            lease_token=lease,
+            lease_token=lease_token,
             platform="meta",
             pixel_id="pixel-B",
         )

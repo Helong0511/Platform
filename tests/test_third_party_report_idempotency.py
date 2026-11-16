@@ -1037,7 +1037,7 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
 @pytest.mark.asyncio
 async def test_report_lease_renewal_failure_prevents_external_request(monkeypatch):
     """发送前续租失败必须 fail-closed，不能创建任何外部 HTTP 请求。"""
-    lease_token = datetime(2026, 11, 12, 12, 0, 0)
+    lease_token = "a" * 32
 
     async def valid_existing_binding(*args, **kwargs):
         return True
@@ -1283,7 +1283,7 @@ async def test_postback_enqueue_fails_closed_on_legacy_four_field_identity(monke
 
 
 async def test_existing_report_log_binding_requires_persisted_identity_and_lease(monkeypatch):
-    lease = datetime(2026, 11, 13, 12, 30, 0)
+    lease = "b" * 32
 
     class Result:
         def scalars(self):
@@ -1304,7 +1304,8 @@ async def test_existing_report_log_binding_requires_persisted_identity_and_lease
                     "event": "Purchase",
                     "conversion_id": "conv-456",
                     "event_key": "persisted-key",
-                    "report_start_time": lease,
+                    "report_start_time": datetime(2026, 11, 13, 12, 30, 0),
+                    "lease_token": lease,
                 },
             )()
 
@@ -1352,7 +1353,7 @@ async def test_existing_report_log_binding_requires_persisted_identity_and_lease
         event_key="persisted-key",
         platform="meta",
         destination_pixel_id="pixel-123",
-        lease_token=datetime(2026, 11, 13, 12, 29, 0),
+        lease_token="c" * 32,
     )
 
     assert valid is True
@@ -1381,6 +1382,7 @@ async def test_send_rejects_mismatched_existing_report_log_before_claim_or_http(
                     "conversion_id": "conv-456",
                     "event_key": "persisted-key",
                     "report_start_time": datetime(2026, 11, 13, 12, 30, 0),
+                    "lease_token": "d" * 32,
                 },
             )()
 
@@ -1420,7 +1422,7 @@ async def test_send_rejects_mismatched_existing_report_log_before_claim_or_http(
         conversion_id="conv-456",
         report_log_id=41,
         event_key="persisted-key",
-        report_lease_token=datetime(2026, 11, 13, 12, 30, 0),
+        report_lease_token="d" * 32,
     )
 
     assert result["success"] is False
