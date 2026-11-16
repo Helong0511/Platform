@@ -346,9 +346,15 @@ class RedisCapManager:
             if token_value in (b"ROLLED_BACK", "ROLLED_BACK"):
                 # 墓碑独立证明原子回滚已完成，即使 counter 后续自然过期也不再 DECR。
                 return "ROLLED_BACK"
+            if token_value not in (b"1", "1"):
+                # 只有 Lua 预留脚本写入的精确值 1 才代表有效预留；
+                # 未知/损坏 token 不能被恢复 Worker 当成可安全 DECR 的 PRESENT。
+                return "UNKNOWN"
             if counter_value is None:
                 return "UNKNOWN"
-            int(counter_value)  # 校验计数值格式，损坏时不能冒险回滚。
+            counter = int(counter_value)
+            if counter < 0:
+                return "UNKNOWN"
             return "PRESENT"
         except Exception:
             logger.error("读取 Cap Reservation token 状态失败：%s", token_key, exc_info=True)
