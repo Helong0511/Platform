@@ -1380,3 +1380,91 @@ async def test_mysql_direct_first_and_postback_first_both_reject_cross_scope_dup
         if engine is not None:
             await engine.dispose()
         _drop_isolated_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_purchase_viewcontent_link_allows_only_one_concurrent_purchase(monkeypatch):
+    """真实 MySQL 验证两个 Purchase 并发关联时，同一 ViewContent 只能被一个占用。"""
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(ThirdPartyReportLog.__table__.create)
+
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
+
+        now = get_app_now_naive().replace(microsecond=0)
+        adsid = f"ci-link-{uuid.uuid4().hex}"
+        pixel_id = "pixel-ci-link"
+        view_key = hashlib.sha256(f"{adsid}:ViewContent".encode("utf-8")).hexdigest()
+        purchase_ids = []
+        purchase_tokens = [uuid.uuid4().hex, uuid.uuid4().hex]
+        async with session_factory() as session:
+            view_content = ThirdPartyReportLog(
+                source="ci",
+                adsid=adsid,
+                event="ViewContent",
+                event_key=view_key,
+                identity_scope="platform_scoped",
+                platform="meta",
+                destination_pixel_id=pixel_id,
+                status="success",
+                created_at=now,
+            )
+            session.add(view_content)
+            for index, token in enumerate(purchase_tokens):
+                purchase = ThirdPartyReportLog(
+                    source="ci",
+                    adsid=adsid,
+                    event="Purchase",
+                    event_key=hashlib.sha256(
+                        f"{adsid}:Purchase:{index}".encode("utf-8")
+                    ).hexdigest(),
+                    identity_scope="platform_scoped",
+                    platform="meta",
+                    destination_pixel_id=pixel_id,
+                    status="pending",
+                    report_start_time=now,
+                    lease_token=token,
+                )
+                session.add(purchase)
+                purchase_ids.append(purchase)
+            await session.commit()
+            view_content_id = view_content.id
+            purchase_ids = [row.id for row in purchase_ids]
+
+        async def link(index: int) -> bool:
+            return await report_module._link_purchase_to_view_content(
+                source="ci",
+                adsid=adsid,
+                conversion_id=f"ci-conversion-{index}",
+                report_log_id=purchase_ids[index],
+                destination_pixel_id=pixel_id,
+                identity_scope="platform_scoped",
+                platform="meta",
+                lease_token=purchase_tokens[index],
+            )
+
+        results = await asyncio.gather(link(0), link(1))
+        assert sum(results) == 1
+
+        async with session_factory() as session:
+            linked = await session.scalar(
+                select(ThirdPartyReportLog).where(
+                    ThirdPartyReportLog.id == view_content_id
+                )
+            )
+            assert linked is not None
+            assert linked.conversion_id in {"ci-conversion-0", "ci-conversion-1"}
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
