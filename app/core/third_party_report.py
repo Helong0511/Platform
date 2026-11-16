@@ -9,6 +9,7 @@ import httpx
 import hashlib
 import json
 import secrets
+from contextlib import asynccontextmanager
 from typing import Optional
 from datetime import datetime, timedelta
 
@@ -25,6 +26,16 @@ from app.models.models import ThirdPartyReportLog, ThirdPartyReportIdentityLock
 from app.core.log_utils import mask_email, mask_hash_prefix, mask_phone
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _report_log_session(session=None):
+    """复用调用方事务；独立调用时才创建并关闭本模块自己的会话。"""
+    if session is not None:
+        yield session
+        return
+    async with AsyncSessionLocal() as owned_session:
+        yield owned_session
 
 
 REPORT_LOG_LEASE_SECONDS = 300
@@ -1528,11 +1539,13 @@ async def update_report_log_params(
         currency: Optional[str] = None,
         amount: Optional[float] = None,
         report_params: Optional[str] = None,
-        use_hash: Optional[bool] = None
+        use_hash: Optional[bool] = None,
+        db=None,
 ):
     """更新日志参数；身份字段变更必须先取得旧/新基础身份锁并检查冲突。"""
+    caller_managed_session = db is not None
     try:
-        async with AsyncSessionLocal() as db:
+        async with _report_log_session(db) as db:
             # 先读取快照但不持有行锁；身份锁必须先于日志行锁，避免与创建路径反向死锁。
             snapshot_result = await db.execute(
                 select(ThirdPartyReportLog)
@@ -1794,7 +1807,8 @@ async def update_report_log_params(
             if use_hash is not None:
                 log_entry.use_hash = use_hash
 
-            await db.commit()
+            if not caller_managed_session:
+                await db.commit()
             logger.info("[第三方上报] 已更新日志参数: id=%s", log_id)
             return True
 
