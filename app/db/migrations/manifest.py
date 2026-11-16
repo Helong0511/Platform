@@ -96,18 +96,17 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         depends_on=("20261113_third_party_report_identity_scope",),
     ),
     Migration(
+        revision="20261116_postback_forward_queue_lease_fencing",
+        path="sql/migrations/20261116_postback_forward_queue_lease_fencing.sql",
+        sha256="3e9a0ffb69cbd69b351e9ab1723e06579b917610bee8cd8ba4016f3350ab46d5",
+    ),
+    Migration(
         revision="20261116_third_party_report_random_lease_token",
         path="sql/migrations/20261116_third_party_report_random_lease_token.sql",
         sha256="c258eb81c04e0b10cf76ac73901c6d63f60f879bad3c6f1ba1d0b062c7217c76",
         depends_on=("20261114_third_party_report_manual_retry_budget", "20261114_third_party_report_platform_binary_collation"),
     ),
 
-    Migration(
-        revision="20261116_postback_forward_queue_lease_fencing",
-        path="sql/migrations/20261116_postback_forward_queue_lease_fencing.sql",
-        sha256="3e9a0ffb69cbd69b351e9ab1723e06579b917610bee8cd8ba4016f3350ab46d5",
-        depends_on=("20261116_third_party_report_random_lease_token",),
-    ),
 )
 
 _REVISION_PATTERN = re.compile(r"^20[0-9]{6}_[a-z0-9_]+$")
