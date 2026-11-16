@@ -64,7 +64,7 @@
 - Purchase → ViewContent 关联候选查询必须排除 `pii_scrubbed_at IS NOT NULL` 的历史行。否则已完成保留期清理的 ViewContent 即使其 `adsid` 已被清空，若存在历史部分清理或异常残留，也可能被新 Purchase 再次写入 `conversion_id`，破坏 PII 清理不可逆边界。
 - 当前查询同时要求候选 ViewContent 的 `pii_scrubbed_at IS NULL`、`conversion_id IS NULL`，并按 source、adsid、事件类型、身份作用域、平台和 Pixel 限定。
 - Purchase 本身在同一事务内锁定并重新校验随机 `lease_token`、数据库租约时效、事件身份、Pixel、作用域及未清理状态。过期或已被接管的 Worker 不得建立关联。
-- PII 清理使用 `FOR UPDATE SKIP LOCKED`。关联事务先锁 Purchase 再锁 ViewContent；清理事务若已持有候选行锁，关联查询会等待或跳过受锁行，随后仍以数据库读取到的 `pii_scrubbed_at` 状态作出 fail-closed 判断。清理与关联事务竞争时，不应恢复已清理数据。
+- PII 清理使用 `FOR UPDATE SKIP LOCKED`。关联事务先锁 Purchase 再锁 ViewContent；若清理事务已持有候选行锁，关联事务的 `SELECT ... FOR UPDATE` 会等待该锁释放（关联查询本身没有使用 `SKIP LOCKED`），随后按 InnoDB 当前读重新判断 `pii_scrubbed_at IS NULL`，已提交清理的行不会成为候选。清理与关联事务竞争时，不应恢复已清理数据。
 
 ### 回归验证
 
