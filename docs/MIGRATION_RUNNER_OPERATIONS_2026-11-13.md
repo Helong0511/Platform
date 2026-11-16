@@ -208,3 +208,46 @@ MySQL 8.0.29 之前，INSTANT ADD COLUMN 只能追加到表尾；8.0.29 起才�
 - CI 临时 MySQL 的 migration 成功，只能证明该测试数据与该 CI MySQL 配置下可执行，不能替代生产规模演练。
 - 本节不修改任何已登记 SQL migration，也不改变其 SHA-256；未对生产或外部数据库执行任何操作。
 - **上线门禁保持阻断**，直到每条高风险 DDL 有可复核的副本演练记录及失败恢复方案。
+
+
+## 15. Runtime 权限边界与旧数据库引导入口复核（2026-11-16）
+
+### 15.1 已确认的安全边界
+
+- `app/bootstrap/lifespan.py` 启动先执行只读 `verify_schema_revision` 与 ORM schema drift 检查，之后才调用 `init_db()`；当前 lifespan 中未见调用 `create_database()` 或 `Base.metadata.create_all()`。
+- `app/core/database.py` 的旧兼容入口 `create_tables()` 已明确抛出异常，提示使用独立 Migration Runner；该入口本身不会执行 DDL。
+- `app/db/migrations/runner.py` 的 `apply_migrations()` 强制要求独立的 `MIGRATION_DATABASE_URL` 与应用 DSN，检查数据库名、MySQL endpoint 和用户名不同；并在单一物理连接持有 GET_LOCK 直到 RELEASE_LOCK。
+- `tests/test_mysql_runtime_privileges.py` 在 GitHub Actions loopback 临时 MySQL 中创建专用 runtime 用户，仅授予目标 schema 的 SELECT/INSERT/UPDATE/DELETE；验证管理员 bootstrap、两个 Worker 并发首次初始化、重复初始化，以及 CREATE/ALTER/CREATE INDEX/DROP 被拒绝。
+
+### 15.2 尚未封闭的旧入口
+
+`app/db/database.py` 仍保留 `create_database()`。它直接使用 `settings.SQLALCHEMY_DATABASE_URI` 建立无默认库连接并执行 `CREATE DATABASE IF NOT EXISTS`。这意味着如果任何脚本、CLI、测试或未来启动流程误调用该 helper，应用运行账号就必须拥有数据库级 CREATE 权限，违背“运行账号 DML-only”的部署原则。
+
+当前确认 lifespan 没有调用该 helper，但本轮无法据此证明全仓库不存在其它调用点。**在全仓库调用点核查完成之前，不得给应用运行账号授予 CREATE DATABASE，也不得把此 helper 视为受支持的生产 provisioning 入口。**
+
+建议后续将数据库创建责任明确交给独立 provisioning 身份/运维流程；在调用点核查后，再决定删除该 helper 或将其改为显式要求独立 provisioning DSN。不得简单把应用 DSN 继续用于 provisioning。
+
+### 15.3 权限测试覆盖边界
+
+当前真实 MySQL 权限测试有意验证的是预置 `users` 表上的管理员初始化路径和 DDL 拒绝边界。它没有覆盖所有 ORM 模型表，也没有执行完整 lifespan、Scheduler、Telegram、CAP recovery、点击队列、Outbox worker、第三方上报扫描器等路径。
+
+因此测试通过只能证明当前 fixture 和所测 SQL 路径可用，不能证明部署账号拥有完整且最小化的生产权限。下一步应从所有运行时 SQL / ORM 操作构建权限矩阵，在完整 schema 上以 runtime 用户逐条执行关键路径，并验证：
+- 业务表仅有必要的 SELECT/INSERT/UPDATE/DELETE；
+- 不具备 CREATE/ALTER/DROP/INDEX/REFERENCES/TRIGGER/EVENT/CREATE ROUTINE 等 schema/对象管理权限；
+- Scheduler、Telegram、Outbox、CAP 恢复与所有 API 启动路径在相同权限下工作；
+- 迁移账号仅在受控 migration job 中使用，不进入 API、Scheduler、Telegram 或常驻 Worker 环境变量。
+
+### 15.4 Migration Runner 的身份检查不是 GRANT 验证
+
+Runner 当前检查迁移账号与应用账号用户名不同、目标数据库和 endpoint 相同。这是身份分离的必要条件，但**不是数据库授权证明**：代码未对实际 `SHOW GRANTS` 或等价授权状态建立完整断言。迁移账号实际具备哪些 DDL 权限、runtime 账号是否存在全局/角色继承权限，仍须由部署前权限审计与真实 MySQL 测试确认。
+
+生产部署验收必须保存两个账号的授权清单（脱敏），核验无全局通配授权、无意外角色继承，并验证 runtime 用户无法执行任何 schema DDL。迁移账号的 DDL 权限应限制在目标 schema 和迁移窗口内；不应因 Runner 使用独立用户名就直接判定权限隔离合格。
+
+### 15.5 当前状态
+
+- Lifespan 启动顺序和只读 schema gate：代码已确认。
+- 旧 `create_tables()`：已 fail closed。
+- 旧 `create_database()`：仍存在；全仓调用点审计未完成。
+- Runtime 权限测试：真实 MySQL fixture 覆盖有限路径；完整业务路径权限矩阵未完成。
+- Migration / runtime 账号真实 GRANT 审计：未完成。
+- 本节仅记录代码审查事实和上线门禁；没有连接生产数据库，也没有执行任何生产授权变更。
