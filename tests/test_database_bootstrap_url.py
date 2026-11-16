@@ -1,6 +1,6 @@
 """数据库引导 URI 解析的纯单元测试，不建立真实数据库连接。"""
 
-from app.db.database import _get_database_bootstrap_target
+import pytest\n\nfrom app.db.database import _get_database_bootstrap_target
 
 
 def test_mysql_bootstrap_preserves_credentials_and_query_parameters():
@@ -42,3 +42,21 @@ def test_mysql_bootstrap_requires_database_name():
 
     with pytest.raises(ValueError, match="必须指定目标数据库名"):
         _get_database_bootstrap_target("mysql+aiomysql://user:secret@localhost/")
+
+
+@pytest.mark.asyncio
+async def test_legacy_create_database_entrypoint_fails_closed_without_connecting(monkeypatch):
+    """旧 helper 不得再使用应用 DSN 建库，也不得尝试建立数据库连接。"""
+    import app.db.database as database_module
+
+    def forbidden_engine(*args, **kwargs):
+        raise AssertionError("legacy helper must not create an engine")
+
+    monkeypatch.setattr(database_module, "settings", object(), raising=False)
+    monkeypatch.setattr(
+        "sqlalchemy.ext.asyncio.create_async_engine",
+        forbidden_engine,
+    )
+
+    with pytest.raises(RuntimeError, match="禁止通过应用数据库连接创建数据库"):
+        await database_module.create_database()
