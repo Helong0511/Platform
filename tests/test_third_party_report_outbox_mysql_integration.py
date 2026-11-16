@@ -1563,3 +1563,111 @@ async def test_mysql_manual_retry_is_atomic_against_admin_and_worker_races(monke
         if engine is not None:
             await engine.dispose()
         _drop_isolated_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_manual_retry_and_pii_retention_are_mutually_exclusive(monkeypatch):
+    """真实 MySQL 验证管理员重试与到期 PII 清理只能有一个先完成。"""
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(ThirdPartyReportLog.__table__.create)
+            await connection.execute(text(
+                "CREATE TABLE postback_forward_logs ("
+                "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "conversion_id INT NOT NULL, product_id INT NULL, publisher_id INT NULL, "
+                "downstream_url VARCHAR(500) NOT NULL, request_method VARCHAR(10) NOT NULL, "
+                "request_data TEXT NULL, request_params TEXT NULL, response_status INT NULL, "
+                "response_body TEXT NULL, success TINYINT(1) NOT NULL DEFAULT 0, "
+                "error_message TEXT NULL, retry_count INT NOT NULL DEFAULT 0, "
+                "created_at DATETIME NOT NULL, completed_at DATETIME NULL, "
+                "pii_scrubbed_at DATETIME NULL"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            ))
+            await connection.execute(text(
+                "CREATE TABLE postback_forward_queue ("
+                "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "conversion_id INT NOT NULL, product_id INT NULL, publisher_id INT NULL"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            ))
+
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
+        monkeypatch.setattr(retention_module, "AsyncSessionLocal", session_factory)
+
+        now = get_app_now_naive()
+        old_created_at = now - timedelta(days=120)
+        event_key = hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest()
+        async with session_factory() as session:
+            row = ThirdPartyReportLog(
+                source="ci",
+                adsid="ci-retry-retention-race",
+                event="Purchase",
+                event_key=event_key,
+                identity_scope="platform_scoped",
+                platform="meta",
+                destination_pixel_id="pixel-ci-retention-race",
+                status="failed",
+                outbox_enqueued=True,
+                attempt_count=5,
+                max_attempts=5,
+                manual_retry_count=0,
+                next_retry_time=None,
+                report_start_time=None,
+                short_link_id=9902,
+                cloak_name="ci-retention-cloak",
+                short_code="ci-retention-short",
+                email="retention-race@example.invalid",
+                ip="203.0.113.25",
+                phone="4155550199",
+                ua="retention-race-agent",
+                report_params='{"email":"retention-race@example.invalid"}',
+                created_at=old_created_at,
+            )
+            session.add(row)
+            await session.commit()
+            report_id = row.id
+
+        monkeypatch.setattr(retention_module, "get_app_now_naive", lambda: now)
+        retry_result, retention_result = await asyncio.gather(
+            report_module.retry_report_log(report_id),
+            retention_module.scrub_expired_third_party_report_pii(
+                retention_days=90,
+                batch_size=10,
+            ),
+        )
+
+        async with session_factory() as session:
+            final_row = await session.get(ThirdPartyReportLog, report_id)
+            assert final_row is not None
+            if retry_result:
+                # 重试先取得行更新资格：清理不能再把待发送载荷擦除。
+                assert final_row.status == "pending"
+                assert final_row.pii_scrubbed_at is None
+                assert final_row.email == "retention-race@example.invalid"
+                assert final_row.manual_retry_count == 1
+            else:
+                # 清理先取得行锁：管理员重试必须因 pii_scrubbed_at 拒绝入队。
+                assert final_row.pii_scrubbed_at is not None
+                assert final_row.adsid == ""
+                assert final_row.email is None
+                assert final_row.report_params is None
+                assert final_row.status == "failed"
+                assert final_row.manual_retry_count == 0
+        assert retention_result["third_party_report_logs_scrubbed"] in (0, 1)
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
