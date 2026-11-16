@@ -84,7 +84,7 @@ async def test_manual_resend_enqueues_exact_target_without_copying_pii(monkeypat
     assert task.retry_count == 0
     assert task.next_retry_time is not None
     assert locked == [(db, 22)]
-    assert response.data["data"]["queued"] is True
+    assert response.data["queued"] is True
 
     # 原日志先以锁定读读取，目标队列去重也必须是锁定读。
     first_sql = str(db.statements[0].compile(dialect=mysql.dialect())).upper()
