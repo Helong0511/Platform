@@ -89,3 +89,34 @@ async def test_product_worker_passes_persisted_target_not_conversion_current_val
     assert "target_publisher_id" not in captured
     assert db.deleted == [task]
     assert db.committed is True
+
+
+@pytest.mark.asyncio
+async def test_worker_does_not_accept_stale_success_log_when_forwarder_skips(monkeypatch):
+    conversion = SimpleNamespace(id=10, click_id=None)
+    task = SimpleNamespace(
+        id=20,
+        conversion_id=10,
+        publisher_id=31,
+        product_id=None,
+        retry_count=0,
+    )
+    stale_success = SimpleNamespace(id=100, success=True)
+    db = _FakeDB(conversion, stale_success)
+    db.results.append(stale_success)
+    scheduled = []
+
+    async def skipped_forward(*args, **kwargs):
+        # 模拟目标停用/配置缺失时转发器提前返回，没有创建新日志。
+
+    async def schedule(db_arg, task_arg):
+        scheduled.append(task_arg)
+
+    monkeypatch.setattr(PostbackForwarder, "forward_to_publisher", skipped_forward)
+    monkeypatch.setattr(forward_tasks, "_schedule_or_drop_retry", schedule)
+
+    await forward_tasks.process_single_task(db, task)
+
+    assert scheduled == [task]
+    assert db.deleted == []
+    assert db.committed is False
