@@ -2,14 +2,7 @@
 数据库初始化模块
 提供数据库创建和初始化功能
 """
-import logging
-
 from sqlalchemy import make_url
-
-from app.core.config import settings
-
-logger = logging.getLogger(__name__)
-
 
 def _get_database_bootstrap_target(database_uri: str):
     """解析数据库引导连接，避免通过字符串替换破坏凭据或数据库名。"""
