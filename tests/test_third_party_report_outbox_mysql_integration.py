@@ -1468,3 +1468,98 @@ async def test_mysql_purchase_viewcontent_link_allows_only_one_concurrent_purcha
         if engine is not None:
             await engine.dispose()
         _drop_isolated_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_manual_retry_is_atomic_against_admin_and_worker_races(monkeypatch):
+    """真实 MySQL 验证人工重试预算原子递增，并与 Worker 认领互斥。"""
+    database = _create_isolated_database()
+    engine = None
+    try:
+        password = quote_plus(MYSQL_PASSWORD)
+        user = quote_plus(MYSQL_USER)
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(ThirdPartyReportLog.__table__.create)
+
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
+        now = get_app_now_naive()
+        admin_key = hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest()
+        worker_key = hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest()
+
+        def retryable_row(event_key: str, adsid: str) -> ThirdPartyReportLog:
+            return ThirdPartyReportLog(
+                source="ci",
+                adsid=adsid,
+                event="Purchase",
+                event_key=event_key,
+                identity_scope="platform_scoped",
+                platform="meta",
+                destination_pixel_id="pixel-ci-retry",
+                status="failed",
+                outbox_enqueued=True,
+                attempt_count=1,
+                max_attempts=5,
+                manual_retry_count=0,
+                report_start_time=None,
+                next_retry_time=now,
+                short_link_id=9901,
+                cloak_name="ci-cloak",
+                short_code="ci-short",
+                email="retry@example.invalid",
+                created_at=now,
+            )
+
+        async with session_factory() as session:
+            admin_row = retryable_row(admin_key, "ci-admin-retry-race")
+            worker_row = retryable_row(worker_key, "ci-worker-retry-race")
+            session.add_all([admin_row, worker_row])
+            await session.commit()
+            admin_id, worker_id = admin_row.id, worker_row.id
+
+        # 两个管理员同时提交同一失败事件：条件 UPDATE 必须只允许一次预算递增。
+        admin_results = await asyncio.gather(
+            report_module.retry_report_log(admin_id),
+            report_module.retry_report_log(admin_id),
+        )
+        assert sorted(admin_results) == [False, True]
+
+        async with session_factory() as session:
+            admin_after = await session.get(ThirdPartyReportLog, admin_id)
+            assert admin_after is not None
+            assert admin_after.status == "pending"
+            assert admin_after.manual_retry_count == 1
+            assert admin_after.attempt_count == 0
+            assert admin_after.lease_token is None
+
+        # 管理员重新入队与 Worker 原子认领并发：最终必须只有一个有效租约，
+        # 无论先后顺序如何，重试计数只能在管理员 UPDATE 成功时递增一次。
+        retry_result, worker_token = await asyncio.gather(
+            report_module.retry_report_log(worker_id),
+            report_module._claim_report_log(
+                worker_id,
+                expected_scope="platform_scoped",
+                platform="meta",
+            ),
+        )
+        assert worker_token is not None
+        async with session_factory() as session:
+            worker_after = await session.get(ThirdPartyReportLog, worker_id)
+            assert worker_after is not None
+            assert worker_after.status == "pending"
+            assert worker_after.lease_token == worker_token
+            assert worker_after.report_start_time is not None
+            assert worker_after.manual_retry_count == (1 if retry_result else 0)
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_database(database)
