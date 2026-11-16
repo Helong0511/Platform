@@ -1482,6 +1482,7 @@ async def test_purchase_viewcontent_link_requires_same_platform_and_pixel(monkey
         adsid="shared-click",
         conversion_id="platform-a-conversion",
         report_log_id=71,
+        lease_token="active-lease-71",
         destination_pixel_id="pixel-a",
         identity_scope="platform_scoped",
         platform="meta",
@@ -1536,6 +1537,7 @@ async def test_unscoped_purchase_viewcontent_link_requires_same_pixel(monkeypatc
         adsid="direct-click",
         conversion_id="direct-conversion",
         report_log_id=72,
+        lease_token="active-lease-72",
         destination_pixel_id="pixel-direct",
         identity_scope="unscoped",
         platform=None,
@@ -1545,6 +1547,62 @@ async def test_unscoped_purchase_viewcontent_link_requires_same_pixel(monkeypatc
     assert "identity_scope = 'unscoped'" in captured["sql"]
     assert "platform is null" in captured["sql"]
     assert "destination_pixel_id = 'pixel-direct'" in captured["sql"]
+
+
+async def test_purchase_viewcontent_link_rejects_lost_purchase_lease(monkeypatch):
+    """Purchase 租约已被接管时，不得查询或修改 ViewContent。"""
+    from sqlalchemy.dialects import mysql
+
+    calls = []
+
+    class Result:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return None
+
+    class FakeDB:
+        async def execute(self, statement):
+            calls.append(
+                str(
+                    statement.compile(
+                        dialect=mysql.dialect(),
+                        compile_kwargs={"literal_binds": True},
+                    )
+                ).lower()
+            )
+            return Result()
+
+        async def rollback(self):
+            calls.append("rollback")
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(third_party_report, "AsyncSessionLocal", lambda: SessionContext())
+
+    linked = await third_party_report._link_purchase_to_view_content(
+        source="postback",
+        adsid="expired-click",
+        conversion_id="expired-conversion",
+        report_log_id=74,
+        destination_pixel_id="pixel-expired",
+        identity_scope="platform_scoped",
+        platform="meta",
+        lease_token="stale-lease",
+    )
+
+    assert linked is False
+    assert len(calls) == 2
+    assert "lease_token = 'stale-lease'" in calls[0]
+    assert "timestampadd" in calls[0]
+    assert "report_start_time" in calls[0]
+    assert calls[1] == "rollback"
 
 
 async def test_purchase_viewcontent_link_skips_when_destination_missing(monkeypatch):
@@ -1707,6 +1765,7 @@ async def test_purchase_viewcontent_link_locks_candidate_row(monkeypatch):
         adsid="ads-123",
         conversion_id="conversion-456",
         report_log_id=99,
+        lease_token="active-lease-99",
         destination_pixel_id="pixel-ci",
         identity_scope="unscoped",
         platform=None,
