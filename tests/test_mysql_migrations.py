@@ -101,7 +101,7 @@ def _run_sql_file(cursor, relative_path: str) -> None:
 
 def _index_columns(cursor, table_name: str, index_name: str) -> list[str]:
     """读取隔离 MySQL 索引的真实列顺序，避免只检查索引名称而漏掉 schema drift。"""
-    allowed_tables = {"third_party_report_logs", "postback_forward_logs"}
+    allowed_tables = {"third_party_report_logs", "postback_forward_logs", "postback_forward_queue"}
     if table_name not in allowed_tables:
         raise ValueError("unexpected migration test table")
     cursor.execute(f"SHOW INDEX FROM `{table_name}` WHERE Key_name = %s", (index_name,))
@@ -1778,4 +1778,116 @@ def test_manual_retry_budget_migration_is_idempotent_and_preserves_existing_rows
     finally:
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+        connection.close()
+
+
+
+def test_forward_queue_lease_migration_is_idempotent_and_preserves_legacy_rows():
+    """真实 MySQL 验证旧队列保持无租约、迁移幂等及字段物理定义。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS postback_forward_queue")
+            cursor.execute(
+                "CREATE TABLE postback_forward_queue ("
+                "id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "next_retry_time DATETIME NOT NULL, retry_count INT NOT NULL DEFAULT 0"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            cursor.execute(
+                "INSERT INTO postback_forward_queue (next_retry_time) "
+                "VALUES (UTC_TIMESTAMP())"
+            )
+            migration_path = "sql/migrations/20261116_postback_forward_queue_lease_fencing.sql"
+            _run_sql_file(cursor, migration_path)
+            _run_sql_file(cursor, migration_path)
+
+            cursor.execute(
+                "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, CHARACTER_SET_NAME, COLLATION_NAME "
+                "FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() "
+                "AND TABLE_NAME='postback_forward_queue' "
+                "AND COLUMN_NAME IN ('lease_token','lease_expires_at') ORDER BY COLUMN_NAME"
+            )
+            assert cursor.fetchall() == (
+                ("lease_expires_at", "datetime(6)", "YES", None, None),
+                ("lease_token", "char(32)", "YES", "ascii", "ascii_bin"),
+            )
+            cursor.execute(
+                "SELECT lease_token, lease_expires_at FROM postback_forward_queue WHERE id=1"
+            )
+            assert cursor.fetchone() == (None, None)
+
+            with pytest.raises(pymysql.err.IntegrityError):
+                cursor.execute(
+                    "UPDATE postback_forward_queue SET lease_token='invalid', "
+                    "lease_expires_at=UTC_TIMESTAMP(6) WHERE id=1"
+                )
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS postback_forward_queue")
+        connection.close()
+
+
+def test_forward_queue_expired_worker_cannot_mutate_after_takeover():
+    """真实 MySQL 顺序模拟 A 租约过期、B 接管后，A 的续租/删除均被 fencing 拒绝。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS postback_forward_queue")
+            cursor.execute(
+                "CREATE TABLE postback_forward_queue ("
+                "id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "next_retry_time DATETIME(6) NOT NULL, retry_count INT NOT NULL DEFAULT 0, "
+                "lease_token CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL, "
+                "lease_expires_at DATETIME(6) NULL, "
+                "CONSTRAINT chk_forward_queue_lease_pair_v1 CHECK ("
+                "(lease_token IS NULL AND lease_expires_at IS NULL) OR "
+                "(lease_token IS NOT NULL AND CHAR_LENGTH(lease_token)=32 AND lease_expires_at IS NOT NULL))"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            cursor.execute(
+                "INSERT INTO postback_forward_queue "
+                "(next_retry_time, lease_token, lease_expires_at) "
+                "VALUES (UTC_TIMESTAMP(6)-INTERVAL 10 SECOND, "
+                "'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', UTC_TIMESTAMP(6)-INTERVAL 1 SECOND)"
+            )
+            # B 在数据库时钟确认 A 已过期后取得全新随机租约。
+            cursor.execute(
+                "UPDATE postback_forward_queue SET lease_token=%s, "
+                "lease_expires_at=UTC_TIMESTAMP(6)+INTERVAL 300 SECOND "
+                "WHERE id=1 AND next_retry_time<=UTC_TIMESTAMP(6) "
+                "AND (lease_token IS NULL OR lease_expires_at<=UTC_TIMESTAMP(6))",
+                ("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",),
+            )
+            assert cursor.rowcount == 1
+
+            # A 的续租和终态删除都必须因为 token 不匹配而影响 0 行。
+            cursor.execute(
+                "UPDATE postback_forward_queue SET lease_expires_at=UTC_TIMESTAMP(6)+INTERVAL 300 SECOND "
+                "WHERE id=1 AND lease_token=%s AND lease_expires_at>UTC_TIMESTAMP(6)",
+                ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",),
+            )
+            assert cursor.rowcount == 0
+            cursor.execute(
+                "DELETE FROM postback_forward_queue "
+                "WHERE id=1 AND lease_token=%s AND lease_expires_at>UTC_TIMESTAMP(6)",
+                ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",),
+            )
+            assert cursor.rowcount == 0
+
+            # B 仍可完成自己的任务；next_retry_time 在领取期间保持原业务时间。
+            cursor.execute(
+                "SELECT lease_token, next_retry_time <= UTC_TIMESTAMP(6) "
+                "FROM postback_forward_queue WHERE id=1"
+            )
+            assert cursor.fetchone() == ("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 1)
+            cursor.execute(
+                "DELETE FROM postback_forward_queue "
+                "WHERE id=1 AND lease_token=%s AND lease_expires_at>UTC_TIMESTAMP(6)",
+                ("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",),
+            )
+            assert cursor.rowcount == 1
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS postback_forward_queue")
         connection.close()
