@@ -1894,12 +1894,15 @@ async def test_mysql_purchase_link_waits_for_pii_scrub_and_never_restores_link(m
 
             async def execute(self, statement, *args, **kwargs):
                 result = await self.session.execute(statement, *args, **kwargs)
-                sql = str(statement).lower()
+                lock_clause = getattr(statement, "_for_update_arg", None)
                 if (
-                    "third_party_report_logs" in sql
-                    and "for update skip locked" in sql
-                    and "pii_scrubbed_at is null" in sql
+                    getattr(lock_clause, "skip_locked", False)
+                    and any(
+                        description.get("entity") is ThirdPartyReportLog
+                        for description in getattr(statement, "column_descriptions", ())
+                    )
                 ):
+                    # execute 返回时 SELECT ... FOR UPDATE 已完成，InnoDB 行锁已持有。
                     cleaner_locked_view.set()
                     await release_cleaner.wait()
                 return result
