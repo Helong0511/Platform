@@ -37,34 +37,14 @@ def _get_database_bootstrap_target(database_uri: str):
 
 async def create_database():
     """
-    创建配置指定的 MySQL 数据库（如果不存在）。
+    兼容旧调用名，但永久禁止应用数据库账号创建数据库。
 
-    使用不指定默认数据库的临时连接，数据库标识符由方言安全引用。
-    非 MySQL 后端不需要执行 CREATE DATABASE。
+    数据库实例/schema provisioning 必须由独立运维身份完成；
+    schema DDL 必须通过 MIGRATION_DATABASE_URL 运行 Migration Runner。
+    即使遗留调用点尚未被发现，也必须 fail-closed，不能回退使用应用 DSN。
     """
-    target = _get_database_bootstrap_target(settings.SQLALCHEMY_DATABASE_URI)
-    if target is None:
-        logger.info("当前数据库后端无需单独创建数据库")
-        return
-
-    server_url, database_name = target
-    temp_engine = None
-    try:
-        from sqlalchemy.ext.asyncio import create_async_engine
-
-        temp_engine = create_async_engine(server_url, echo=False)
-        async with temp_engine.connect() as conn:
-            # 数据库名是 SQL 标识符，不能作为普通绑定参数传递。
-            quoted_database = conn.dialect.identifier_preparer.quote(database_name)
-            await conn.exec_driver_sql(
-                f"CREATE DATABASE IF NOT EXISTS {quoted_database}"
-            )
-            await conn.commit()
-        logger.info("目标数据库已创建或已存在")
-    except Exception as exc:
-        # 不记录原始异常文本，避免驱动异常意外包含连接 URI/凭据。
-        logger.error("创建数据库失败：exception_type=%s", type(exc).__name__)
-        raise
-    finally:
-        if temp_engine is not None:
-            await temp_engine.dispose()
+    raise RuntimeError(
+        "禁止通过应用数据库连接创建数据库；"
+        "请使用独立 provisioning 身份创建数据库，"
+        "并使用 MIGRATION_DATABASE_URL 执行 python -m app.db.migrations apply"
+    )
