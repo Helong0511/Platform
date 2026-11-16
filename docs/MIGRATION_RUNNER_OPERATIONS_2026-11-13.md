@@ -203,7 +203,7 @@ MySQL 8.0.29 之前，INSTANT ADD COLUMN 只能追加到表尾；8.0.29 起才�
 
 ### 14.4 当前结论
 
-- 14 条 manifest revision 已完成静态 DDL 分类。
+- 原有 12 条 manifest revision 已完成静态 DDL 分类；2026-11-16 两条新增迁移另见后续专项记录。
 - 尚无本轮证据证明这些 DDL 已在生产规模数据副本完成算法、锁、耗时和磁盘峰值演练。
 - CI 临时 MySQL 的 migration 成功，只能证明该测试数据与该 CI MySQL 配置下可执行，不能替代生产规模演练。
 - 本节不修改任何已登记 SQL migration，也不改变其 SHA-256；未对生产或外部数据库执行任何操作。
