@@ -700,6 +700,8 @@ async def _link_purchase_to_view_content(
                 .where(ThirdPartyReportLog.source == source)
                 .where(ThirdPartyReportLog.adsid == adsid)
                 .where(ThirdPartyReportLog.event == "ViewContent")
+                # 已完成 PII 清理的历史事件不可被新 Purchase 重新写入关联元数据。
+                .where(ThirdPartyReportLog.pii_scrubbed_at.is_(None))
                 .where(ThirdPartyReportLog.conversion_id.is_(None))
                 .where(ThirdPartyReportLog.identity_scope == identity_scope)
                 .where(ThirdPartyReportLog.destination_pixel_id == destination_pixel_id)
