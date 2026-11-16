@@ -104,7 +104,122 @@ class ThirdPartyReportLog(Base):
             name="chk_third_party_identity_scope_v1",
         ),
         CheckConstraint(
-            "lease_token IS NULL OR (lease_token REGEXP '^[0-9a-f]{32}        Index("idx_third_party_source", "source"),
+            "lease_token IS NULL OR (lease_token REGEXP '^[0-9a-f]{32}        Index("idx_third_party_adsid", "adsid"),
+        Index("idx_third_party_event", "event"),
+        Index("idx_third_party_status", "status"),
+        Index("idx_third_party_created_at", "created_at"),
+        Index("idx_third_party_pii_retention", "pii_scrubbed_at", "created_at", "id"),
+        Index("idx_third_party_status_created", "status", "created_at"),
+        Index(
+            "idx_third_party_scope_due",
+            "identity_scope",
+            "platform",
+            "outbox_enqueued",
+            "status",
+            "next_retry_time",
+            "report_start_time",
+            "id",
+        ),
+        UniqueConstraint('event_key', name='unique_event_key'),
+        Index(
+            "idx_third_party_outbox_due",
+            "outbox_enqueued",
+            "status",
+            "next_retry_time",
+            "report_start_time",
+            "id",
+        ),
+    )
+
+class ThirdPartyReportIdentityLock(Base):
+    """跨直接发送与 Postback Outbox 的基础事件身份仲裁锁。
+
+    锁记录永久保留，不按时间清理；删除锁行会使同一身份重新出现不同互斥对象。
+    只保存独立 SHA-512 指纹，不持久化广告点击标识等原始身份字段。
+    """
+    __tablename__ = "third_party_report_identity_locks"
+
+    identity_key = Column(
+        CHAR(64, collation="ascii_bin"),
+        primary_key=True,
+        nullable=False,
+        comment="四字段基础事件身份的 SHA-256",
+    )
+    identity_fingerprint = Column(
+        BINARY(64),
+        nullable=False,
+        comment="基础身份的独立 SHA-512 指纹；不保存原始点击标识",
+    )
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        default=get_app_now_naive,
+        server_default=text("CURRENT_TIMESTAMP"),
+        comment="锁行首次创建时间；锁行永久保留",
+    )
+
+ AND report_start_time IS NOT NULL)",
+            name="chk_third_party_report_lease_token_v1",
+        ),
+        Index("idx_third_party_source", "source"),
+        Index("idx_third_party_adsid", "adsid"),
+        Index("idx_third_party_event", "event"),
+        Index("idx_third_party_status", "status"),
+        Index("idx_third_party_created_at", "created_at"),
+        Index("idx_third_party_pii_retention", "pii_scrubbed_at", "created_at", "id"),
+        Index("idx_third_party_status_created", "status", "created_at"),
+        Index(
+            "idx_third_party_scope_due",
+            "identity_scope",
+            "platform",
+            "outbox_enqueued",
+            "status",
+            "next_retry_time",
+            "report_start_time",
+            "id",
+        ),
+        UniqueConstraint('event_key', name='unique_event_key'),
+        Index(
+            "idx_third_party_outbox_due",
+            "outbox_enqueued",
+            "status",
+            "next_retry_time",
+            "report_start_time",
+            "id",
+        ),
+    )
+
+class ThirdPartyReportIdentityLock(Base):
+    """跨直接发送与 Postback Outbox 的基础事件身份仲裁锁。
+
+    锁记录永久保留，不按时间清理；删除锁行会使同一身份重新出现不同互斥对象。
+    只保存独立 SHA-512 指纹，不持久化广告点击标识等原始身份字段。
+    """
+    __tablename__ = "third_party_report_identity_locks"
+
+    identity_key = Column(
+        CHAR(64, collation="ascii_bin"),
+        primary_key=True,
+        nullable=False,
+        comment="四字段基础事件身份的 SHA-256",
+    )
+    identity_fingerprint = Column(
+        BINARY(64),
+        nullable=False,
+        comment="基础身份的独立 SHA-512 指纹；不保存原始点击标识",
+    )
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        default=get_app_now_naive,
+        server_default=text("CURRENT_TIMESTAMP"),
+        comment="锁行首次创建时间；锁行永久保留",
+    )
+
+ AND report_start_time IS NOT NULL)",
+            name="chk_third_party_report_lease_token_v1",
+        ),
+        Index("idx_third_party_source", "source"),
         Index("idx_third_party_adsid", "adsid"),
         Index("idx_third_party_event", "event"),
         Index("idx_third_party_status", "status"),
