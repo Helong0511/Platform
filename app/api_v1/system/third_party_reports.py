@@ -45,7 +45,7 @@ from app.core.third_party_report import (
     retry_report_log,
     update_report_log_params,
 )
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, get_app_now_sql_expression
 
 # 创建路由实例
 router = APIRouter()
@@ -284,7 +284,8 @@ async def get_third_party_reports(
 
         # 转换为响应模型
         serialize_started_at = perf_counter()
-        now = get_app_now_naive()
+        # 列表中的租约状态/重试按钮必须与 Worker 使用同一数据库时钟。
+        now = await db.scalar(select(get_app_now_sql_expression()))
         log_responses = []
         # ---------- 循环处理 ----------
         for log in logs:
