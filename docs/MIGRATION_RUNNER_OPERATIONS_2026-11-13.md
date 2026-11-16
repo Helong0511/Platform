@@ -251,3 +251,55 @@ Runner 当前检查迁移账号与应用账号用户名不同、目标数据库�
 - Runtime 权限测试：真实 MySQL fixture 覆盖有限路径；完整业务路径权限矩阵未完成。
 - Migration / runtime 账号真实 GRANT 审计：未完成。
 - 本节仅记录代码审查事实和上线门禁；没有连接生产数据库，也没有执行任何生产授权变更。
+
+## 16. 运行入口追踪与最新 CI 复核（2026-11-16）
+
+### 16.1 本轮核验范围
+
+本轮在 PR 分支当前 HEAD `1198ac6adf0ad24b2a9dca55debb9e4e7b9ba61f` 复核以下文件：
+
+- `app/main.py`：FastAPI 组装根，生产入口为 `app.main:app`，绑定 `app.bootstrap.lifespan.lifespan`；文件中未发现调用 `create_database()`、`create_tables()` 或 `Base.metadata.create_all()`。
+- `app/bootstrap/lifespan.py`：启动先执行只读 schema revision / ORM drift gate，再执行 `init_db()`；当前启动流程不调用数据库创建 helper。
+- `gunicorn.conf.py` 与 `app/core/uvicorn_worker.py`：检查了 API / Scheduler Gunicorn 进程入口与 Worker 装配，未发现调用数据库创建 helper。
+- `app/core/database.py`：`create_tables()` 仍为 fail-closed 兼容入口。
+- `app/db/database.py`：`create_database()` 仍保留并直接使用应用 DSN 执行数据库级 CREATE。
+
+以上是对实际生产装配入口的核验，不等于已逐个读取 548 个 Python 文件并完成全仓调用图。当前仍不能作出“全仓无调用点”的结论；尤其部署脚本、外部运维脚本、测试工具和动态导入路径还需要继续排查。
+
+### 16.2 Runtime MySQL 权限测试的具体边界
+
+复核 `tests/test_mysql_runtime_privileges.py` 后，确认当前测试：
+
+- 在隔离 MySQL 中创建临时 schema 和专用用户；
+- 仅对目标 schema 授予 SELECT、INSERT、UPDATE、DELETE；
+- 通过预置的 `users` 表验证管理员初始化、两个 Worker 首次启动竞争和重复初始化；
+- 以 runtime 用户执行 CREATE TABLE、ALTER TABLE、CREATE INDEX、DROP TABLE，确认被拒绝。
+
+当前测试**没有**直接以 runtime 用户尝试 `CREATE DATABASE`，也没有覆盖所有业务表和所有常驻任务路径；没有将 `SHOW GRANTS` / 角色继承状态作为一份完整权限快照进行断言。因此它不能代替部署前全局权限与角色审计。
+
+后续测试扩展应至少补齐：
+
+1. runtime 用户尝试 `CREATE DATABASE`，确认失败且目标 schema 外也无建库能力；
+2. 读取并规范化 runtime 用户实际授权，检查全局权限、角色授予及默认角色，不只依赖 fixture 中预期的 GRANT 语句；
+3. 在完整 migration schema 上，以 runtime 用户执行关键 API、Scheduler、Telegram、CAP recovery、点击队列和 Outbox 任务的代表性读写路径；
+4. 逐项确认不需要的 CREATE、ALTER、DROP、INDEX、REFERENCES、TRIGGER、EVENT、CREATE ROUTINE 等权限均不可用。
+
+### 16.3 最新 CI 结果
+
+通过分支 Actions runs 列表复核，PR HEAD `1198ac6adf0ad24b2a9dca55debb9e4e7b9ba61f` 对应 Run **43787078201**，状态为 completed / success：
+
+- Backend job：成功；安装依赖、Python compile、unit tests 均成功；
+- Frontend job：成功；npm ci、dependency advisory report、lint、build、Playwright mock API E2E 均成功；
+- 本次运行没有发现仍在执行的 job。
+
+运行链接：https://github.com/Helong0511/Platform/actions/runs/43787078201
+
+该 CI 结果只证明当前自动化任务在隔离环境中通过，不代表生产账号 GRANT、生产级 Migration DDL 演练、完整业务权限矩阵或所有上线门禁已通过。
+
+### 16.4 当前处置结论
+
+- 生产 API / Scheduler 装配入口未发现调用旧数据库创建 helper；但全仓、部署脚本和动态调用路径仍未全部排除。
+- 暂不删除或改写 `create_database()`，避免在调用图未完整前破坏可能存在的受控 provisioning 流程；该 helper 不得作为应用运行账号可用的生产入口。
+- 不得给 runtime 用户授予 CREATE DATABASE；数据库创建应由独立 provisioning 身份或运维流程完成。
+- 下一步优先完成全仓调用点追踪、runtime 的 CREATE DATABASE 拒绝测试、SHOW GRANTS / role 权限快照，以及完整业务路径权限矩阵。
+- PR #1 继续保持 Open / Draft；本轮不合并、不部署，也未连接生产数据库或执行生产授权变更。
