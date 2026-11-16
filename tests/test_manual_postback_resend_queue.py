@@ -55,7 +55,7 @@ async def test_manual_resend_enqueues_exact_target_without_copying_pii(monkeypat
         request_method="POST",
     )
     conversion = SimpleNamespace(id=22)
-    db = _FakeDB([log, conversion, 22, None])
+    db = _FakeDB([log, conversion, None])
     locked = []
 
     async def lock_conversion(session, conversion_id):
@@ -119,7 +119,8 @@ async def test_manual_resend_rejects_scrubbed_log_before_conversion_lookup(monke
             current_user=SimpleNamespace(id=7),
         )
 
-    assert exc.value.status_code == 409
+    assert exc.value.status_code == 200
+    assert exc.value.detail['code'] == 409
     assert not db.added
     assert len(db.statements) == 1
 
@@ -137,7 +138,7 @@ async def test_manual_resend_rejects_existing_target_queue_task(monkeypatch):
     )
     conversion = SimpleNamespace(id=22)
     existing_task = SimpleNamespace(id=55)
-    db = _FakeDB([log, conversion, 22, existing_task])
+    db = _FakeDB([log, conversion, existing_task])
 
     async def lock_conversion(session, conversion_id):
         return True
