@@ -561,8 +561,16 @@ async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover
 
         # Worker A 取得租约后暂停；暂停时间超过租约 TTL。
         worker_a_token = await report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta")
-        assert worker_a_token == lease_clock[0]
-        # Worker A 暂停超过租约 TTL：推进 SQL 表达式的数据库时钟，跨过完整租约窗口。
+        assert worker_a_token is not None
+        async with session_factory() as session:
+            claimed_row = await session.scalar(
+                select(ThirdPartyReportLog).where(ThirdPartyReportLog.id == report_id)
+            )
+            assert claimed_row is not None
+            # 以数据库实际保存值验证认领令牌，不与认领前本机采样时间比较。
+            assert claimed_row.report_start_time == worker_a_token
+
+        # Worker A 暂停超过租约 TTL：推进 SQL 表达式的数据库时钟，跨过完整租约窗口.
         db_clock_offset[0] = report_module.REPORT_LOG_LEASE_SECONDS + 1
 
         # Worker B 接管同一条记录，A 的令牌从此失效。
