@@ -337,17 +337,17 @@ Runner 当前检查迁移账号与应用账号用户名不同、目标数据库�
 - `app/bootstrap/lifespan.py`：先执行只读 schema revision / ORM drift gate，再调用管理员初始化；当前代码未见调用 `create_database()`、`create_tables()` 或 `Base.metadata.create_all()`。
 - `gunicorn.conf.py`：检查 API / Scheduler Gunicorn 配置入口。
 - `app/core/database.py`：`create_tables()` 为 fail-closed 兼容入口。
-- `app/db/database.py`：`create_database()` 仍存在，直接使用应用 `SQLALCHEMY_DATABASE_URI` 执行数据库级 `CREATE DATABASE IF NOT EXISTS`。
+- `app/db/database.py`：旧 `create_database()` 名称暂时保留兼容，但已改为无条件抛出明确 `RuntimeError`；不再读取应用 DSN、不再创建 SQLAlchemy Engine、不再执行任何 SQL。旧 URL 解析 helper 与对应过时测试已删除。
 
 本轮未在上述已检查的生产装配文件中发现旧 helper 的调用，但当前分支有 436 个 `app/**/*.py` 文件；本轮没有逐一读取全部 Python 文件，也没有穷尽测试、运维脚本、动态导入和外部部署脚本。因此**仍不能声称全仓库不存在调用点**。GitHub 代码搜索接口检索的是默认分支，不能将其无结果当作当前 PR 分支全量搜索证据。
 
-处置要求不变：
+处置与后续核查：
 
 1. 不得向 API / Scheduler / 常驻 Worker 的 runtime 账号授予 CREATE DATABASE。
-2. `create_database()` 不得作为应用启动或生产运行时 provisioning 入口。
+2. 旧 `create_database()` 入口现已 fail-closed；任何遗留调用会立即失败，不可能通过应用 DSN 建库。
 3. 数据库创建必须由独立 provisioning 身份/运维流程完成；不得将应用 DSN 复用为 provisioning DSN。
-4. 在完成当前分支全量调用点核查前，不贸然删除兼容 helper，以免破坏尚未识别的外部工具调用；但应继续把它列为待关闭的遗留入口。
-5. 后续全量调用图应覆盖 app、tests、scripts、部署配置、CI workflow、文档命令和动态导入路径，并记录检索范围与结果。
+4. 仍需继续完成全仓调用点核查，以定位并移除/改写遗留调用，避免启动或任务因旧调用而失败。
+5. 后续调用图应覆盖 app、tests、scripts、部署配置、CI workflow、文档命令和动态导入路径，并记录检索范围与结果。
 
 ### 17.4 本轮结论
 
@@ -356,3 +356,28 @@ Runner 当前检查迁移账号与应用账号用户名不同、目标数据库�
 - 生产 ASGI / Lifespan / Gunicorn 装配入口已复核，未见旧数据库创建 helper 被调用。
 - 全仓调用点扫描仍未完成；不得把局部入口检查升级为“全仓无调用点”结论。
 - 未连接生产数据库、未执行生产授权变更、未运行生产 DDL；PR #1 继续保持 Open / Draft，不合并 main、不部署。
+
+
+## 18. 旧数据库创建入口 fail-closed 修复（2026-11-16）
+
+### 18.1 修复内容
+
+- `app/db/database.py` 保留旧 `create_database()` 函数名，避免未识别的外部调用在导入阶段直接失败。
+- 函数现在无条件抛出明确的 `RuntimeError`，不读取 `SQLALCHEMY_DATABASE_URI`，不创建 SQLAlchemy Engine，不执行 SQL。
+- 删除仅服务于旧建库流程的 URL 解析 helper，避免保留无生产用途的引导逻辑。
+- 将 `tests/test_database_bootstrap_url.py` 改为 fail-closed 回归测试，断言旧入口必须拒绝执行。
+- 此防线是纵深防御：即使未来误将旧 helper 接回 Lifespan、Scheduler 或 Worker，也不能使用应用数据库身份执行 CREATE DATABASE。
+
+### 18.2 当前验证边界
+
+- 本次已检查 ASGI / Lifespan、Gunicorn 配置、Scheduler 初始化、CAP Recovery / 点击批处理任务、Telegram 同步数据库模块、Migration CLI 与 Runner 的关键入口。
+- 在已读取的生产入口文件中未发现 `create_database()` 的直接调用；但尚未逐一读取全部 436 个 app Python 文件、全部 111 个 tests Python 文件及部署/外部运维脚本，因此全仓调用点清单仍未完成。
+- 新增的 fail-closed 单测尚待本次提交对应 CI 运行确认；不得提前声称测试已通过。
+- 生产数据库授权和实际 provisioning 流程未被本次代码变更触及。
+
+### 18.3 后续动作
+
+1. 等待本次提交 CI，检查新增测试和完整 Backend / Frontend 检查。
+2. 继续以当前 PR HEAD 为基准，扫描剩余 app / tests 文件及部署配置中的旧 helper 导入/调用。
+3. 对 Scheduler、Outbox、CAP Recovery、Telegram 和外部回传路径建立操作级 SQL 权限矩阵；区分只读、DML、锁/事务操作与 DDL。
+4. PR #1 继续保持 Open / Draft，不合并 main、不部署。
