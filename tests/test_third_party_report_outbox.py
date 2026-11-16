@@ -256,6 +256,7 @@ async def test_enqueue_refuses_to_auto_scope_successful_legacy_report(monkeypatc
 
 
 async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
+    from sqlalchemy.dialects import mysql
     row = type(
         "ReportRow",
         (),
@@ -286,10 +287,14 @@ async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
         },
     )()
 
+    captured = {"payload_read_sql": None}
+
     class FakeDB:
         async def scalar(self, statement):
-            if "select third_party_report_logs.platform" in str(statement).lower():
+            sql = str(statement.compile(dialect=mysql.dialect())).lower()
+            if "select third_party_report_logs.platform" in sql:
                 return row.platform
+            captured["payload_read_sql"] = sql
             return row
 
     class SessionContext:
@@ -299,7 +304,6 @@ async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
         async def __aexit__(self, *args):
             return False
 
-    captured = {}
     async def resolve(**kwargs):
         captured["config_ref"] = kwargs
         return "pixel-current", "token-current", "v23.0"
@@ -348,6 +352,11 @@ async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
     assert captured["send"]["event_key"] == "stable-event-key"
     assert captured["send"]["email"] == "corrected-after-claim@example.invalid"
     assert captured["send"]["report_lease_token"] == "a" * 32
+    # 完整 PII 载荷读取本身也必须受当前租约令牌和 DB 租约有效期保护。
+    assert "third_party_report_logs.lease_token =" in captured["payload_read_sql"]
+    assert "third_party_report_logs.pii_scrubbed_at is null" in captured["payload_read_sql"]
+    assert "timestampadd" in captured["payload_read_sql"]
+    assert "utc_timestamp()" in captured["payload_read_sql"]
 
 
 async def test_outbox_worker_rejects_invalid_batch_size():
