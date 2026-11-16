@@ -38,6 +38,17 @@ from app.core.url.url_params_util import (
 logger = logging.getLogger(__name__)
 
 
+def _bind_publisher_target(
+    click_association_data: Dict[str, Any],
+    target_publisher_id: Optional[int],
+) -> Dict[str, Any]:
+    """队列任务以持久化渠道 ID 覆盖可变的 Click 关联快照。"""
+    bound_data = dict(click_association_data)
+    if target_publisher_id is not None:
+        bound_data["publisher_id"] = target_publisher_id
+    return bound_data
+
+
 def _safe_forward_log_request_summary(payload: Optional[Dict[str, Any]]) -> Optional[str]:
     """转发日志只保留请求字段数量，不持久化可能含 PII 的参数值。"""
     if not payload:
@@ -175,8 +186,10 @@ class PostbackForwarder:
         # 避免实际接收渠道与 Click 关联快照中的 publisher_id 不一致。
         if target_publisher_id is not None:
             publisher_id = target_publisher_id
-            click_association_data = dict(click_association_data)
-            click_association_data["publisher_id"] = target_publisher_id
+            click_association_data = _bind_publisher_target(
+                click_association_data,
+                target_publisher_id,
+            )
 
         # 如果没有找到 publisher_id，跳过转发
         if not publisher_id:
