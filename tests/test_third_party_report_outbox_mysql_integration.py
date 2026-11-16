@@ -703,6 +703,7 @@ async def test_mysql_existing_outbox_report_binding_matches_persisted_payload_an
         monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
 
         now = get_app_now_naive().replace(microsecond=0)
+        lease_token = uuid.uuid4().hex
         event_identity = uuid.uuid4().hex
         event_key = hashlib.sha256(event_identity.encode("utf-8")).hexdigest()
         async with session_factory() as session:

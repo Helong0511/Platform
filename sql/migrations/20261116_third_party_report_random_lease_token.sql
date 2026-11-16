@@ -2,6 +2,7 @@
 -- report_start_time 只负责租约时效判断；lease_token 负责 fencing 身份。
 -- 旧记录保持 lease_token=NULL，由应用在下一次原子认领时生成新令牌。
 -- 本迁移仅新增可空列与 CHECK，不回填旧租约，避免把历史时间戳伪装成随机令牌。
+-- 列追加到表尾，尽量利用 MySQL 8.0.29+ 的 INSTANT ADD COLUMN 能力。
 
 SET @lease_token_column_exists = (
     SELECT COUNT(*)
@@ -13,7 +14,7 @@ SET @lease_token_column_exists = (
 SET @lease_token_ddl = IF(
     @lease_token_column_exists = 1,
     'SELECT 1',
-    'ALTER TABLE third_party_report_logs ADD COLUMN lease_token CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL COMMENT ''独立随机租约令牌；report_start_time 仅用于过期判断'' AFTER report_start_time'
+    'ALTER TABLE third_party_report_logs ADD COLUMN lease_token CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL COMMENT ''独立随机租约令牌；report_start_time 仅用于过期判断'''
 );
 PREPARE lease_token_stmt FROM @lease_token_ddl;
 EXECUTE lease_token_stmt;
