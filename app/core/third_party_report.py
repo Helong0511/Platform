@@ -267,7 +267,7 @@ async def create_report_log(
                 attempt_count=0,
                 max_attempts=max_attempts,
                 created_at=get_app_now_naive(),
-                next_retry_time=get_app_now_naive(),
+                next_retry_time=get_app_now_sql_expression(),
             )
             db.add(log_entry)
             await db.commit()
@@ -793,7 +793,7 @@ async def send_third_party_report(
                 report_log_id,
                 status="failed",
                 error_message="像素凭证暂不可用，Outbox 将自动重试",
-                report_start_time=now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
+                report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
                 completed_at=now,
                 next_retry_time=get_app_now_sql_expression(5 * 60),
                 expected_report_start_time=lease_token,

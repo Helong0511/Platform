@@ -412,7 +412,7 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             report_log_id,
             status="failed",
             error_message="像素凭据暂不可用；Outbox 保留并将在配置恢复后重试",
-            report_start_time=get_app_now_naive() - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
+            report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
             completed_at=get_app_now_naive(),
             next_retry_time=retry_at,
             expected_report_start_time=lease_token,
