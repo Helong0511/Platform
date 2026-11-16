@@ -214,8 +214,9 @@ async def test_mysql_runtime_account_can_bootstrap_admin_but_cannot_run_ddl(monk
         )
         try:
             with runtime.cursor() as cursor:
-                # 真实读取账号授权快照：防止测试 fixture 意外带入全局权限或角色继承。
-                cursor.execute("SHOW GRANTS FOR CURRENT_USER()")
+                # 不带 FOR 子句：SHOW GRANTS 会包含 mandatory_roles；FOR CURRENT_USER() 不包含它们。
+                # 同时结合 CURRENT_ROLE() 检查当前会话实际激活的角色。
+                cursor.execute("SHOW GRANTS")
                 grant_rows = [str(row[0]).upper() for row in cursor.fetchall()]
                 assert len(grant_rows) == 2, grant_rows
                 assert any("USAGE ON *.*" in grant for grant in grant_rows), grant_rows
