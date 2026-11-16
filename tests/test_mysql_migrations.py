@@ -1849,7 +1849,11 @@ def test_forward_queue_expired_worker_cannot_mutate_after_takeover():
                 "INSERT INTO postback_forward_queue "
                 "(next_retry_time, lease_token, lease_expires_at) "
                 "VALUES (UTC_TIMESTAMP(6)-INTERVAL 10 SECOND, "
-                "'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', UTC_TIMESTAMP(6)-INTERVAL 1 SECOND)"
+                "'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', UTC_TIMESTAMP(6)+INTERVAL 300 SECOND)"
+            )
+            # A 先成功领取 300 秒租约；随后通过数据库时钟推进到过期状态。
+            cursor.execute(
+                "UPDATE postback_forward_queue SET lease_expires_at=UTC_TIMESTAMP(6)-INTERVAL 1 SECOND WHERE id=1"
             )
             # B 在数据库时钟确认 A 已过期后取得全新随机租约。
             cursor.execute(
@@ -1870,6 +1874,13 @@ def test_forward_queue_expired_worker_cannot_mutate_after_takeover():
             assert cursor.rowcount == 0
             cursor.execute(
                 "DELETE FROM postback_forward_queue "
+                "WHERE id=1 AND lease_token=%s AND lease_expires_at>UTC_TIMESTAMP(6)",
+                ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",),
+            )
+            assert cursor.rowcount == 0
+            cursor.execute(
+                "UPDATE postback_forward_queue SET retry_count=retry_count+1, "
+                "next_retry_time=UTC_TIMESTAMP(6)+INTERVAL 60 SECOND "
                 "WHERE id=1 AND lease_token=%s AND lease_expires_at>UTC_TIMESTAMP(6)",
                 ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",),
             )
