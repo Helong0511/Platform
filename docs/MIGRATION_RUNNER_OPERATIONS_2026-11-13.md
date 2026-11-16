@@ -47,7 +47,7 @@ python -m app.db.migrations apply
 `sql/platform.sql` 是完整 schema 快照，含 `DROP TABLE IF EXISTS` 和客户端 DELIMITER / routine 定义；当前快照不包含 `CREATE DATABASE` 或 `USE`，由 provisioning 预先创建目标库，并通过 MySQL 客户端 `--database=<目标库>` 显式选择。它不是增量 migration，也不是 Runner 的输入。
 
 - 只允许在全新或可丢弃数据库上使用经过审核的初始化流程。
-- 当前 manifest 共 12 条 revision；执行前必须先运行 `validate`，并核对 `status` 与目标环境基线版本。
+- 当前 manifest 共 14 条 revision；执行前必须先运行 `validate`，并核对 `status` 与目标环境基线版本。
 - 绝不能把它用于已有数据库升级。
 - 不要把“ORM 表名覆盖测试通过”误认为所有列、索引、外键、CHECK 和字符集都已完成物理结构核验。
 
@@ -203,7 +203,7 @@ MySQL 8.0.29 之前，INSTANT ADD COLUMN 只能追加到表尾；8.0.29 起才�
 
 ### 14.4 当前结论
 
-- 12 条 manifest revision 已完成静态 DDL 分类。
+- 14 条 manifest revision 已完成静态 DDL 分类。
 - 尚无本轮证据证明这些 DDL 已在生产规模数据副本完成算法、锁、耗时和磁盘峰值演练。
 - CI 临时 MySQL 的 migration 成功，只能证明该测试数据与该 CI MySQL 配置下可执行，不能替代生产规模演练。
 - 本节不修改任何已登记 SQL migration，也不改变其 SHA-256；未对生产或外部数据库执行任何操作。
@@ -393,3 +393,13 @@ Runner 当前检查迁移账号与应用账号用户名不同、目标数据库�
 - 表尾新增列可在 MySQL 8.0.29+ 争取 INSTANT ADD COLUMN；CHECK 约束验证、8.0.16–8.0.28 DDL 算法仍须在目标版本副本实测。
 - 部署时先停止并排空旧版 API、Scheduler、Outbox Worker，再执行 migration runner，最后启动全部新版进程；禁止新旧 Worker 混跑。
 - 截至本次审计，尚未在生产等价数据规模上执行迁移；必须记录 DDL 耗时、metadata lock、并发 DML、磁盘峰值与恢复演练结果。
+
+
+## 2026-11-16 新增迁移：转发队列独立租约 fencing
+
+- Revision：`20261116_postback_forward_queue_lease_fencing`，依赖 `20261116_third_party_report_random_lease_token`。
+- 在 `postback_forward_queue` 增加可空 `lease_token CHAR(32) CHARACTER SET ascii COLLATE ascii_bin` 与 `lease_expires_at DATETIME(6)`；CHECK 要求两列同时为空或同时有效。旧记录不回填，首次领取时生成 128-bit 随机令牌。
+- `next_retry_time` 只承担业务重试调度，不再被改写为租约到期时间。Worker 领取条件、续租、成功删除、失败退避和超限删除均使用独立 token 与数据库时钟进行条件更新。
+- HTTP 客户端设置 60 秒总请求 deadline，队列租约为 300 秒，给连接/处理和最终状态提交留出余量；仍不能排除进程长时间暂停、网络层已发出请求后租约过期等情形。
+- fencing 只能防止旧 Worker 覆盖新 Worker 的队列状态，不能撤销已经发出的外部 HTTP 副作用；Exactly-once 仍需下游幂等键或接收端去重。
+- 上线顺序：停止并排空旧版 Scheduler/Worker，执行迁移，再启动新版进程；禁止新旧 Worker 混跑。迁移 DDL 算法、metadata lock、数据规模影响仍须在目标 MySQL 版本副本演练。
