@@ -157,6 +157,10 @@ async def test_report_log_claim_is_atomic_for_concurrent_senders(monkeypatch):
             state["claimed"] = True
             return Result(1)
 
+        async def scalar(self, statement):
+            # UPDATE 成功后回读数据库生成的租约时间；FakeDB 必须覆盖真实执行路径。
+            return datetime(2026, 11, 16, 12, 0, 0)
+
         async def commit(self):
             state["commits"] += 1
 

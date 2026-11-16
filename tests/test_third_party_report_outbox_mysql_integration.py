@@ -269,10 +269,10 @@ async def test_mysql_outbox_claim_is_exclusive_and_expired_lease_is_recoverable(
                 update(ThirdPartyReportLog)
                 .where(ThirdPartyReportLog.id == report_id)
                 .values(
-                    report_start_time=now - timedelta(
-                        seconds=report_module.REPORT_LOG_LEASE_SECONDS + 10
-                    ),
-                    next_retry_time=now - timedelta(minutes=1),
+                    # 直接将租约时间设为远早于数据库当前时间的值。
+                    # 不使用 Worker 本机时钟回拨，避免把应用时钟误当成 DB 时钟。
+                    report_start_time=datetime(2000, 1, 1),
+                    next_retry_time=datetime(2000, 1, 1),
                 )
             )
             await session.commit()
@@ -527,9 +527,8 @@ async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover
         )
         monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
 
-        # 使用 MySQL DATETIME 秒级精度的可控时钟模拟 A 暂停及 B 接管。
+        # Worker 本机时钟不参与租约有效期判断；仅使用数据库时钟认定过期。
         lease_clock = [get_app_now_naive().replace(microsecond=0)]
-        monkeypatch.setattr(report_module, "get_app_now_naive", lambda: lease_clock[0])
         event_identity = uuid.uuid4().hex
         async with session_factory() as session:
             row = ThirdPartyReportLog(
@@ -555,11 +554,19 @@ async def test_mysql_outbox_stale_worker_cannot_renew_or_finalize_after_takeover
         # Worker A 取得租约后暂停；暂停时间超过租约 TTL。
         worker_a_token = await report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta")
         assert worker_a_token == lease_clock[0]
-        lease_clock[0] += timedelta(seconds=report_module.REPORT_LOG_LEASE_SECONDS + 1)
+        # 模拟 A 长时间暂停：将数据库租约字段置为过期值。
+        # 这比推进本机 mock clock 更准确，因为 claim/renew 的时钟源是 MySQL。
+        async with session_factory() as session:
+            await session.execute(
+                update(ThirdPartyReportLog)
+                .where(ThirdPartyReportLog.id == report_id)
+                .values(report_start_time=datetime(2000, 1, 1))
+            )
+            await session.commit()
 
         # Worker B 接管同一条记录，A 的令牌从此失效。
         worker_b_token = await report_module._claim_report_log(report_id, expected_scope="platform_scoped", platform="meta")
-        assert worker_b_token == lease_clock[0]
+        assert worker_b_token is not None
         assert worker_b_token != worker_a_token
 
         # A 恢复后，发送前续租检查必须失败；不能进入 HTTP 发送路径。
