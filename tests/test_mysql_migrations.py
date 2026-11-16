@@ -1817,7 +1817,7 @@ def test_forward_queue_lease_migration_is_idempotent_and_preserves_legacy_rows()
             )
             assert cursor.fetchone() == (None, None)
 
-            with pytest.raises(pymysql.err.IntegrityError):
+            with pytest.raises(pymysql.err.OperationalError):
                 cursor.execute(
                     "UPDATE postback_forward_queue SET lease_token='invalid', "
                     "lease_expires_at=UTC_TIMESTAMP(6) WHERE id=1"
