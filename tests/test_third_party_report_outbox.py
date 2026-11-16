@@ -1200,6 +1200,9 @@ async def test_outbox_payload_editor_uses_row_lock_and_rejects_active_lease(monk
             captured["sql"] = str(compiled).lower()
             return Result()
 
+        async def scalar(self, statement):
+            return now
+
         async def commit(self):
             captured["committed"] = True
 
