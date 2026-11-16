@@ -385,61 +385,28 @@ class Settings(BaseSettings):
         return origins
 
     # ====== 数据库配置 ======
-    # 数据库连接URI
-    # 生产环境必须通过环境变量DATABASE_URL设置
-    # 注意：默认值包含明文密码，仅用于开发环境
-    # 使用 Field 的 alias 来映射环境变量名
+    # 数据库连接 URI 必须由部署环境显式注入；仓库不提供任何可连接的默认账号。
+    # 本地开发、CI、测试和生产均通过 DATABASE_URL / SQLALCHEMY_DATABASE_URI 配置。
     SQLALCHEMY_DATABASE_URI: str = Field(
-        default="mysql+aiomysql://remote:kb7$rL3d8!tQ@127.0.0.1:3306/platform?charset=utf8mb4&collation=utf8mb4_0900_ai_ci",
-        alias="DATABASE_URL"
+        default="",
+        alias="DATABASE_URL",
+        validate_default=True,
     )
 
     @field_validator("SQLALCHEMY_DATABASE_URI", mode="before")
     @classmethod
     def validate_database_uri(cls, v):
-        """验证数据库连接URI"""
-        # 获取环境标志
-        is_prod = is_production_env_name(detect_production_env())
-        
-        # 检查是否明确设置了 DATABASE_URL 环境变量
-        explicit_database_url = os.getenv("DATABASE_URL") or os.getenv("SQLALCHEMY_DATABASE_URI")
-        
-        # 如果 v 是 None 或空，从环境变量读取
-        if not v:
-            v = explicit_database_url
-            if not v:
-                # 如果都没有设置，使用默认值（仅开发环境）
-                if is_prod:
-                    logger.error("生产环境必须设置 DATABASE_URL 或 SQLALCHEMY_DATABASE_URI 环境变量")
-                    raise ValueError("生产环境必须设置 DATABASE_URL 或 SQLALCHEMY_DATABASE_URI 环境变量")
-                logger.error(
-                    "未设置 DATABASE_URL：请在 .env 中配置，例如 "
-                    "mysql+aiomysql://user:pass@127.0.0.1:3306/platform?charset=utf8mb4"
-                )
-                raise ValueError(
-                    "必须设置 DATABASE_URL 或 SQLALCHEMY_DATABASE_URI 环境变量"
-                )
-        
-        # 生产环境验证：如果使用默认值（未明确设置环境变量），且包含默认密码，报错
-        if is_prod:
-            # 只有在未明确设置 DATABASE_URL 且包含默认密码时，才报错
-            # 如果用户明确设置了 DATABASE_URL，即使包含这些字符，也允许（可能是用户自己的密码）
-            if not explicit_database_url:
-                # 使用默认值，检查是否包含默认密码
-                if "kb7$rL3d8!tQ" in v or "admin123" in v:
-                    logger.error("生产环境数据库密码不能使用默认值，请设置 DATABASE_URL 环境变量")
-                    raise ValueError("生产环境数据库密码不能使用默认值，请设置 DATABASE_URL 环境变量")
-                logger.warning("生产环境建议通过 DATABASE_URL 环境变量设置数据库连接")
-            else:
-                # 用户明确设置了 DATABASE_URL，允许使用（即使包含默认密码字符，可能是用户自己的配置）
-                # 只给出警告，不报错
-                if "kb7$rL3d8!tQ" in v or "admin123" in v:
-                    if not os.getenv("UNIT_TEST"):
-                        logger.warning(
-                            "检测到数据库连接可能包含默认密码，生产环境建议使用强密码"
-                        )
-
-        return v
+        """拒绝缺失数据库 DSN，避免回退到源码内置账号或密码。"""
+        explicit_database_url = (
+            os.getenv("DATABASE_URL") or os.getenv("SQLALCHEMY_DATABASE_URI")
+        )
+        value = v if isinstance(v, str) and v.strip() else explicit_database_url
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                "必须显式设置 DATABASE_URL 或 SQLALCHEMY_DATABASE_URI；"
+                "不提供默认数据库账号或密码"
+            )
+        return value.strip()
 
     # 数据库连接池配置
     # 多进程环境：每个 worker 独立连接池；未设环境变量时按 CPU 粗调默认值
