@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.telegram.message_sender import send_telegram_message_async as send_telegram_message
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, get_app_now_sql_expression
 from app.models.models import ThirdPartyReportLog, ThirdPartyReportIdentityLock
 from app.core.log_utils import mask_email, mask_hash_prefix, mask_phone
 
@@ -497,10 +497,10 @@ async def _claim_report_log(
     expected_scope: Optional[str] = "unscoped",
     platform: Optional[str] = None,
 ) -> Optional[datetime]:
-    """原子认领事件并返回秒级租约令牌；失败返回 None。
+    """使用数据库统一时钟原子认领事件并返回秒级租约令牌。
 
-    失败状态允许立即重试；pending 状态仅允许首次认领或租约过期后恢复。
-    发送进程异常退出时，租约到期后可由后续请求接管；旧 Worker 的令牌随即失效。
+    多 Worker 的本机时钟可能存在偏差；租约的写入、过期判断必须统一使用 DB 时钟，
+    不能让快时钟 Worker 提前接管慢时钟 Worker 的有效任务。
     """
     if expected_scope not in {"unscoped", "platform_scoped"}:
         return None
@@ -509,9 +509,8 @@ async def _claim_report_log(
     if expected_scope == "unscoped" and platform:
         return None
 
-    # MySQL DATETIME 默认精度为秒，令牌必须先截断微秒，保证回读/比较一致。
-    now = get_app_now_naive().replace(microsecond=0)
-    stale_before = now - timedelta(seconds=max(30, lease_seconds))
+    db_now = get_app_now_sql_expression()
+    stale_before = get_app_now_sql_expression(-max(30, lease_seconds))
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             update(ThirdPartyReportLog)
@@ -524,10 +523,7 @@ async def _claim_report_log(
                     else ThirdPartyReportLog.platform.is_(None)
                 ),
                 ThirdPartyReportLog.status.in_(("pending", "failed")),
-                # PII 清理与发送认领必须在同一行锁/条件 UPDATE 上仲裁：
-                # 若清理先提交，已复制到 Worker 内存的旧载荷也不得再发送。
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
-                # 认领阶段即阻止耗尽预算的事件，避免空转占用 5 分钟租约。
                 ThirdPartyReportLog.attempt_count < ThirdPartyReportLog.max_attempts,
                 or_(
                     ThirdPartyReportLog.report_start_time.is_(None),
@@ -535,13 +531,28 @@ async def _claim_report_log(
                 ),
                 or_(
                     ThirdPartyReportLog.next_retry_time.is_(None),
-                    ThirdPartyReportLog.next_retry_time <= now,
+                    ThirdPartyReportLog.next_retry_time <= db_now,
                 ),
             )
-            .values(report_start_time=now)
+            .values(report_start_time=db_now)
+        )
+        if (result.rowcount or 0) != 1:
+            await db.commit()
+            return None
+        # UPDATE 的租约时间由数据库生成；回读精确值作为 fencing token。
+        lease_token = await db.scalar(
+            select(ThirdPartyReportLog.report_start_time).where(
+                ThirdPartyReportLog.id == report_log_id,
+                ThirdPartyReportLog.identity_scope == expected_scope,
+                (
+                    ThirdPartyReportLog.platform == platform
+                    if expected_scope == "platform_scoped"
+                    else ThirdPartyReportLog.platform.is_(None)
+                ),
+            )
         )
         await db.commit()
-        return now if (result.rowcount or 0) == 1 else None
+        return lease_token
 
 
 async def _renew_report_log_lease(
@@ -552,21 +563,38 @@ async def _renew_report_log_lease(
     expected_scope: Optional[str] = "unscoped",
     platform: Optional[str] = None,
 ) -> Optional[datetime]:
-    """仅允许尚未过期的当前持有者续租；过期令牌不可复活。"""
+    """仅允许尚未过期的当前持有者续租；数据库时钟判定有效期，过期令牌不可复活。"""
     if expected_scope not in {"unscoped", "platform_scoped"}:
         return None
     if expected_scope == "platform_scoped" and not (platform or "").strip():
         return None
     if expected_scope == "unscoped" and platform:
         return None
-    now = get_app_now_naive().replace(microsecond=0)
-    valid_after = now - timedelta(seconds=max(30, lease_seconds))
+
+    db_now = get_app_now_sql_expression()
+    valid_after = get_app_now_sql_expression(-max(30, lease_seconds))
+    identity_conditions = [
+        ThirdPartyReportLog.id == report_log_id,
+        ThirdPartyReportLog.identity_scope == expected_scope,
+        (
+            ThirdPartyReportLog.platform == platform
+            if expected_scope == "platform_scoped"
+            else ThirdPartyReportLog.platform.is_(None)
+        ),
+        ThirdPartyReportLog.report_start_time == lease_token,
+        ThirdPartyReportLog.report_start_time >= valid_after,
+        ThirdPartyReportLog.report_start_time <= db_now,
+        ThirdPartyReportLog.pii_scrubbed_at.is_(None),
+        ThirdPartyReportLog.status.in_(("pending", "failed")),
+    ]
     async with AsyncSessionLocal() as db:
-        # MySQL DATETIME 默认秒级精度：认领后同一秒内续租会写入相同值，
-        # 某些驱动按 changed rows 返回 rowcount=0。此时只做所有权/有效期确认，
-        # 不把仍然有效的当前租约误判为丢失，也不伪造一次续租。
-        if now <= lease_token:
-            result = await db.execute(
+        result = await db.execute(
+            update(ThirdPartyReportLog)
+            .where(*identity_conditions)
+            .values(report_start_time=db_now)
+        )
+        if (result.rowcount or 0) == 1:
+            renewed_token = await db.scalar(
                 select(ThirdPartyReportLog.report_start_time).where(
                     ThirdPartyReportLog.id == report_log_id,
                     ThirdPartyReportLog.identity_scope == expected_scope,
@@ -575,34 +603,18 @@ async def _renew_report_log_lease(
                         if expected_scope == "platform_scoped"
                         else ThirdPartyReportLog.platform.is_(None)
                     ),
-                    ThirdPartyReportLog.report_start_time == lease_token,
-                    ThirdPartyReportLog.report_start_time >= valid_after,
-                    ThirdPartyReportLog.pii_scrubbed_at.is_(None),
-                    ThirdPartyReportLog.status.in_(("pending", "failed")),
                 )
             )
-            current_token = result.scalar_one_or_none()
-            return lease_token if current_token == lease_token else None
+            await db.commit()
+            return renewed_token
 
-        result = await db.execute(
-            update(ThirdPartyReportLog)
-            .where(
-                ThirdPartyReportLog.id == report_log_id,
-                ThirdPartyReportLog.identity_scope == expected_scope,
-                (
-                    ThirdPartyReportLog.platform == platform
-                    if expected_scope == "platform_scoped"
-                    else ThirdPartyReportLog.platform.is_(None)
-                ),
-                ThirdPartyReportLog.report_start_time == lease_token,
-                ThirdPartyReportLog.report_start_time >= valid_after,
-                ThirdPartyReportLog.pii_scrubbed_at.is_(None),
-                ThirdPartyReportLog.status.in_(("pending", "failed")),
-            )
-            .values(report_start_time=now)
+        # DATETIME 秒级精度下，同一秒更新可能返回 changed-rows=0；
+        # 只在 DB 时钟确认原令牌仍未过期且非未来值时接受原令牌。
+        current_token = await db.scalar(
+            select(ThirdPartyReportLog.report_start_time).where(*identity_conditions)
         )
         await db.commit()
-        return now if (result.rowcount or 0) == 1 else None
+        return lease_token if current_token == lease_token else None
 
 
 async def _link_purchase_to_view_content(
