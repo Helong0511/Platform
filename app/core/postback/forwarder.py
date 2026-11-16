@@ -171,9 +171,12 @@ class PostbackForwarder:
                     logger.info(f"short_link_id: {click_association_data.get('short_link_id')}")
                     logger.info("url_params 字段数：%s", len(click_association_data.get("url_params") or {}))
         
-        # 队列任务必须使用入队时绑定的目标，不得因 Click 关联变化而改投其它渠道。
+        # 队列任务必须使用入队时绑定的目标；目标身份同时用于 URL 占位符和请求参数，
+        # 避免实际接收渠道与 Click 关联快照中的 publisher_id 不一致。
         if target_publisher_id is not None:
             publisher_id = target_publisher_id
+            click_association_data = dict(click_association_data)
+            click_association_data["publisher_id"] = target_publisher_id
 
         # 如果没有找到 publisher_id，跳过转发
         if not publisher_id:
