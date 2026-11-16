@@ -795,7 +795,7 @@ async def send_third_party_report(
                 error_message="像素凭证暂不可用，Outbox 将自动重试",
                 report_start_time=now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
                 completed_at=now,
-                next_retry_time=now + timedelta(minutes=5),
+                next_retry_time=get_app_now_sql_expression(5 * 60),
                 expected_report_start_time=lease_token,
                 expected_identity_scope="platform_scoped",
                 expected_platform=platform,
@@ -904,7 +904,7 @@ async def send_third_party_report(
         await update_owned_report_log(
             report_log_id,
             status="failed",
-            report_start_time=get_app_now_naive() - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
+            report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
             completed_at=get_app_now_naive(),
             clear_next_retry_time=True,
         )
@@ -927,7 +927,7 @@ async def send_third_party_report(
             status="failed",
             error_message=error_msg,
             # 将租约标记为已释放，允许失败事件立即被后续重试认领。
-            report_start_time=get_app_now_naive() - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
+            report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
             completed_at=get_app_now_naive(),
             clear_next_retry_time=True,
         )
@@ -1379,13 +1379,13 @@ async def send_third_party_report(
     retry_at = None
     if final_attempt_count < max_attempts_total:
         retry_delay_minutes = min(5 * (2 ** (base_attempt_count // 4)), 60)
-        retry_at = get_app_now_naive() + timedelta(minutes=retry_delay_minutes)
+        retry_at = get_app_now_sql_expression(retry_delay_minutes * 60)
     finalized = await update_owned_report_log(
         report_log_id,
         status="failed",
         attempt_count=final_attempt_count,
         error_message=failure_reasons_str.strip(),
-        report_start_time=get_app_now_naive() - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
+        report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
         completed_at=get_app_now_naive(),
         next_retry_time=retry_at,
         clear_next_retry_time=retry_at is None,
@@ -1442,8 +1442,7 @@ async def retry_report_log(log_id: int, db=None):
     在同一事务提交；独立调用时保留原有独立 session + commit 行为。
     不在请求进程中创建非持久化 asyncio task，也不从日志读取旧凭据。
     """
-    now = get_app_now_naive()
-    stale_lease_time = now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1)
+    stale_lease_time = get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1))
 
     async def _enqueue(session, *, commit: bool) -> bool:
         result = await session.execute(
@@ -1485,7 +1484,7 @@ async def retry_report_log(log_id: int, db=None):
                 report_start_time=stale_lease_time,
                 report_success_time=None,
                 completed_at=None,
-                next_retry_time=now,
+                next_retry_time=get_app_now_sql_expression(),
             )
         )
         if (result.rowcount or 0) != 1:

@@ -143,7 +143,7 @@ async def enqueue_postback_report(
         existing.max_attempts = max(int(existing.max_attempts or 0), 12)
         if has_config_reference:
             existing.status = "pending"
-            existing.next_retry_time = now
+            existing.next_retry_time = get_app_now_sql_expression()
             existing.error_message = None
         else:
             existing.status = "failed"
@@ -179,7 +179,7 @@ async def enqueue_postback_report(
         cloak_name=cloak_name,
         short_code=short_code,
         click_time=click_time,
-        next_retry_time=now if has_config_reference else None,
+        next_retry_time=get_app_now_sql_expression() if has_config_reference else None,
         created_at=now,
     )
     db.add(row)
@@ -355,7 +355,7 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             report_log_id,
             status="failed",
             error_message="缺少短链接/斗篷配置引用，无法解析像素凭据",
-            report_start_time=now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
+            report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
             completed_at=now,
             clear_next_retry_time=True,
             expected_report_start_time=lease_token,
@@ -383,7 +383,7 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             report_log_id,
             status="failed",
             error_message="短链接已删除，无法解析像素配置",
-            report_start_time=now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
+            report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
             completed_at=now,
             clear_next_retry_time=True,
             expected_report_start_time=lease_token,
@@ -407,7 +407,7 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
         pixel_id = access_token = api_version = None
 
     if not pixel_id or not access_token:
-        retry_at = get_app_now_naive() + timedelta(minutes=5)
+        retry_at = get_app_now_sql_expression(5 * 60)
         updated = await update_report_log(
             report_log_id,
             status="failed",
@@ -435,7 +435,7 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             report_log_id,
             status="failed",
             error_message="像素目的地与事件首次绑定的 Pixel 不一致，需要人工核对",
-            report_start_time=now - timedelta(seconds=REPORT_LOG_LEASE_SECONDS + 1),
+            report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
             completed_at=now,
             clear_next_retry_time=True,
             expected_report_start_time=lease_token,

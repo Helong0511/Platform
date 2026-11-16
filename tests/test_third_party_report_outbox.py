@@ -426,7 +426,14 @@ async def test_outbox_missing_credentials_keeps_event_retryable(monkeypatch):
     assert result["retryable"] is True
     assert result["reason"] == "missing_pixel_credentials"
     assert captured["status"] == "failed"
-    assert captured["next_retry_time"] == datetime(2026, 11, 11, 12, 5, 0)
+    from sqlalchemy import select
+    from sqlalchemy.dialects import mysql
+
+    retry_sql = str(
+        select(captured["next_retry_time"]).compile(dialect=mysql.dialect())
+    ).lower()
+    assert "timestampadd" in retry_sql
+    assert "utc_timestamp()" in retry_sql
     assert "access_token" not in captured
     assert captured["expected_report_start_time"] == lease_token
 
