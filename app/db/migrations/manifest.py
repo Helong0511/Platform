@@ -95,6 +95,12 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         sha256="9357f7d6cb29c23fe28499697e032169892f1ee50b50cd78279db879c0b08b4d",
         depends_on=("20261113_third_party_report_identity_scope",),
     ),
+    Migration(
+        revision="20261116_third_party_report_random_lease_token",
+        path="sql/migrations/20261116_third_party_report_random_lease_token.sql",
+        sha256="9bd5d0f2650c004969d96d454fdd565ffcb10b7cfa4524b9bb4a05a1df5ec38d",
+        depends_on=("20261114_third_party_report_platform_binary_collation",),
+    ),
 )
 
 _REVISION_PATTERN = re.compile(r"^20[0-9]{6}_[a-z0-9_]+$")
