@@ -389,3 +389,33 @@ async def test_reservation_rejects_rolled_back_tombstone(monkeypatch, method_nam
             initial_value=0,
             reservation_id="already-rolled-back",
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("token_value", "counter_value", "expected"),
+    [
+        (b"1", b"4", "PRESENT"),
+        ("1", "4", "PRESENT"),
+        (b"ROLLED_BACK", b"3", "ROLLED_BACK"),
+        (b"corrupt", b"4", "UNKNOWN"),
+        (b"0", b"4", "UNKNOWN"),
+        (b"1", b"-1", "UNKNOWN"),
+        (b"1", None, "UNKNOWN"),
+    ],
+)
+async def test_recovery_token_state_rejects_corrupt_token_or_counter(
+    monkeypatch, token_value, counter_value, expected
+):
+    class TokenStateRedis:
+        async def mget(self, *keys):
+            return token_value, counter_value
+
+    async def fake_get_redis_client():
+        return TokenStateRedis()
+
+    monkeypatch.setattr(redis_counter, "get_redis_client", fake_get_redis_client)
+    state = await redis_counter.RedisCapManager.get_reservation_token_state(
+        "cap-counter", "cap-counter:reservation:token"
+    )
+    assert state == expected
