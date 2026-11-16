@@ -45,7 +45,8 @@ async def scrub_expired_third_party_report_pii(
 
     # 只将筛选边界放到数据库时钟计算；写入 pii_scrubbed_at 仍保留应用审计时间。
     now = get_app_now_naive()
-    cutoff = get_app_now_sql_expression(-(days * 24 * 60 * 60))
+    cutoff = now - timedelta(days=days)  # 仅用于返回信息；数据库筛选使用 cutoff_sql。
+    cutoff_sql = get_app_now_sql_expression(-(days * 24 * 60 * 60))
     stale_lease = get_app_now_sql_expression(-300)
     terminal = and_(
         ThirdPartyReportLog.status.in_(("success", "failed")),
@@ -81,7 +82,7 @@ async def scrub_expired_third_party_report_pii(
         result = await db.execute(
             select(ThirdPartyReportLog)
             .where(
-                ThirdPartyReportLog.created_at < cutoff,
+                ThirdPartyReportLog.created_at < cutoff_sql,
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                 terminal,
             )
@@ -137,7 +138,7 @@ async def scrub_expired_third_party_report_pii(
         forward_result = await db.execute(
             select(PostbackForwardLog)
             .where(
-                PostbackForwardLog.created_at < cutoff,
+                PostbackForwardLog.created_at < cutoff_sql,
                 PostbackForwardLog.completed_at.is_not(None),
                 PostbackForwardLog.pii_scrubbed_at.is_(None),
                 ~active_forward_queue,
@@ -209,7 +210,8 @@ async def scrub_expired_postback_forward_log_pii(
         }
 
     now = get_app_now_naive()
-    cutoff = get_app_now_sql_expression(-(days * 24 * 60 * 60))
+    cutoff = now - timedelta(days=days)  # 仅用于返回信息；数据库筛选使用 cutoff_sql。
+    cutoff_sql = get_app_now_sql_expression(-(days * 24 * 60 * 60))
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
