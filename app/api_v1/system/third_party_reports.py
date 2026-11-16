@@ -521,7 +521,8 @@ async def update_third_party_report(
             phone=params.phone,
             ua=params.ua,
             report_params=params.report_params,
-            use_hash=params.use_hash
+            use_hash=params.use_hash,
+            db=db,
         )
         
         # ---------- 条件分支 ----------
