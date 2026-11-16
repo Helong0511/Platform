@@ -161,7 +161,7 @@ MySQL 官方参考：
 
 ## 14. 全量 Migration DDL 风险盘点（2026-11-16）
 
-本节根据当前分支 `fix/non-credential-hardening-2026-11` 的 `app/db/migrations/manifest.py` 和其中登记的 12 个 SQL 文件逐项静态检查。它是 DDL 风险分级，不代表已在目标 MySQL 版本、目标表规模或生产数据上执行。
+本节根据当前分支 `fix/non-credential-hardening-2026-11` 的 `app/db/migrations/manifest.py` 和其中登记的 13 个 SQL 文件逐项静态检查。它是 DDL 风险分级，不代表已在目标 MySQL 版本、目标表规模或生产数据上执行。
 
 ### 14.1 逐项盘点
 
