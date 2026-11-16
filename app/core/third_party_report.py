@@ -680,7 +680,6 @@ async def _link_purchase_to_view_content(
                     ThirdPartyReportLog.report_start_time <= db_now,
                     ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                     ThirdPartyReportLog.status.in_(("pending", "failed")),
-                    ThirdPartyReportLog.outbox_enqueued.is_(True),
                 )
             )
             if identity_scope == "platform_scoped":
@@ -1021,7 +1020,7 @@ async def send_third_party_report(
             destination_pixel_id=pixel_id,
             identity_scope="platform_scoped" if using_existing_report_log else "unscoped",
             platform=platform,
-            lease_token=report_lease_token,
+            lease_token=lease_token,
         )
 
     logger.info("[第三方上报] 使用像素配置 - Pixel ID: %s, API 版本：%s", pixel_id, api_version)
