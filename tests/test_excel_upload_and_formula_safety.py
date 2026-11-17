@@ -9,6 +9,7 @@ from app.api_v1.excel.ad_data_import.excel_reader import validate_and_read_excel
 from app.api_v1.excel.utils import validate_excel_file
 from app.core import excel_io
 from app.core.config import settings
+from app.core.errors import ErrorCode
 
 
 class _OversizedUpload:
