@@ -1,6 +1,5 @@
 """Excel 上传内存上限与导出公式注入回归测试。"""
 from io import BytesIO
-from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
