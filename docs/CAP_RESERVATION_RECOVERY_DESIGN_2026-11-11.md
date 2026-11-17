@@ -618,3 +618,32 @@ CapReservation ORM、migration 和 `sql/platform.sql` 统一增加 CHECK 约束�
 - `40a64d01c0f004dc694c49cd70910a52917d68b5`：参数化回归测试。
 
 验收：GitHub Actions Run #1810 的 Backend 和 Frontend 均成功，包含 Python 编译、后端单元测试、前端 Lint/Build 及 Mock API Playwright E2E。该 CI 结果不替代生产 Redis 数据损坏/淘汰策略演练；未知状态仍需通过受控运维流程人工对账。
+
+
+## 32. Redis Reservation Lua 中途命令错误的部分写入风险（2026-11-17 审计）
+
+### 代码事实
+
+当前 `_RESERVE_LUA` 在同一个脚本内按以下顺序执行：
+
+1. `SET KEYS[1] new_val` 更新 Cap counter；
+2. `EXPIRE` 或 `PERSIST` 设置 counter 生命周期；
+3. `SET KEYS[2] '1'` 创建 reservation token；
+4. `EXPIRE` 或 `PERSIST` 设置 token 生命周期。
+
+这些写命令使用 `redis.call`。如果某个后续命令在运行时返回错误，Redis 会将异常返回给客户端，但此前成功执行的写操作不能假定会自动回滚。Redis 官方 Lua API 明确说明：`redis.call()` 的运行时异常会直接抛出，错误处理应使用 `redis.pcall()`；官方脚本文档也单独说明了低内存条件下脚本写命令的失败行为。
+
+### 风险边界
+
+若 counter 写入已成功、token 写入或后续生命周期命令却发生运行时失败，客户端可能只收到 EVAL 异常，而 Redis 中已经留下部分状态。当前 Python 层在 EVAL 异常后调用 rollback Lua；如果 token 尚未创建，rollback Lua 返回缺失 token 状态，业务进入 fail-closed / NEEDS_RECONCILIATION 是安全方向，但会产生需要人工对账的悬挂 counter。不能把“Lua 原子执行”理解成“脚本内任意命令报错会事务回滚”。
+
+### 必须补充的修复与验收
+
+- 对预留 Lua 每一个写入步骤定义失败语义；使用 `redis.pcall` 或其他可验证协议处理命令错误，且补偿动作本身也必须考虑失败。
+- 不能只把写入顺序简单反转：先写 token 再写 counter 同样可能留下没有对应计数增量的 token。
+- 为 counter/token 增加可恢复的操作阶段或唯一 reservation 状态协议；恢复任务必须能区分“尚未加计数”“已加计数但 token 未落地”“已完成预留”和“已完成回滚”，不能猜测后直接 DECR。
+- 在隔离 Redis 集成环境注入脚本中途失败，覆盖 counter 写成功后 token 写失败、生命周期命令失败、补偿命令失败、客户端 EVAL 响应丢失等情况。
+- 每个场景断言：不能超发、不能重复 DECR、不能把未知状态当作 PRESENT、最终要么自动恢复到正确计数，要么进入可观测且可人工对账的明确状态。
+- 在修复和真实 Redis 故障注入通过前，不得宣称 Cap Reservation 已覆盖所有 Lua 部分失败场景。
+
+参考：Redis 官方 [Lua API](https://redis.io/docs/latest/develop/programmability/lua-api/) 与 [Scripting with Lua](https://redis.io/docs/latest/develop/programmability/eval-intro/)。
