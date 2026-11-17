@@ -107,3 +107,39 @@
 ## 后续审计优先级
 
 下一轮应继续检查尚未逐项核验的 API：广告数据查询/导出、外部 Client API、短链接管理、Postback 管理与重试、系统配置、定时任务、Excel 导入导出，以及所有 batch 路由。优先寻找对象级授权缺失、查询 count 与 data 条件不一致、缓存键遗漏租户维度和批量接口部分越权。
+
+
+## 2026-11-17 外部 Client API 补充审计
+
+### 检查范围
+
+- `app/core/api_auth.py`
+- `app/api_v1/external/client_api.py`
+- `app/services/ad_data/queries/client_api_query.py`
+- `tests/test_client_api_ip_allowlist.py`
+- `tests/test_client_api_key_multi_client.py`
+
+### 已确认的租户范围
+
+- 客户 API 先按 `request.client_id` 查询启用的 Client，并检查 `api_enabled`；请求中的 ID 仅用于定位客户主体，不会直接成为数据查询的授权条件。
+- 产品列表查询使用服务端验证返回的 `client.id` 过滤 `Product.client_id`。
+- 广告数据查询由 `ClientAdDataQuery` 接收已验证的 Client 实体；产品归属过滤使用 `Product.client_id == client.id`，启用分配表时使用按日期解析的唯一归属客户 ID。
+- 分配表路径使用确定性归属规则处理重叠脏数据，避免同一条 AdData 因请求客户不同而同时泄漏给多个客户。
+- IP 白名单配置错误时 fail-closed；客户 IP 从可信代理边界解析，不直接信任任意请求头。
+- HMAC-SHA256 可用；MD5 是否接受由配置解析，未显式设置时生产默认关闭、开发默认开启。
+
+### 已确认的缺口与风险边界
+
+1. `verify_client_request()` 只验证时间戳窗口（默认 ±15 秒）和签名，没有 nonce 或服务端已用签名记录。因此，同一份合法签名请求可在窗口内被重复提交。当前两个客户开放端点（`/client_products`、`/client_data`）均为查询型接口，本轮没有发现该鉴权器被用于扣款、转化写入等非幂等操作；故目前应定性为**查询重放 / 资源放大风险**，不能夸大为已证实的资金或业务状态篡改漏洞。
+2. 客户广告数据 API 接受的日期范围没有最大跨度约束；分页允许每页最多 5000 条、页码最大 100000。虽然数据查询按客户归属过滤，但超大日期区间、大偏移分页可能造成数据库扫描、排序和资源消耗。需要结合数据保留周期、索引、真实客户调用协议和查询计划确定兼容的限额策略。
+3. 增加强制 nonce 或请求去重会改变客户重试行为；若直接按签名拒绝重复请求，合法网络重试也会被拒绝。实施前应确定协议升级方案（例如可选 nonce 的过渡期、幂等响应缓存/请求 ID、Redis 不可用时的安全策略），并为旧版客户端制定明确兼容期限。当前没有贸然改变开放 API 协议。
+
+### 当前 CI 证据更新
+
+- PR #1 HEAD：`b34421f5be5ce816f5d0538c2b326e51df6236f6`
+- Run #1918 / ID `44018193951`，第二次尝试整体成功。
+- Backend：718 passed、1 skipped、1 warning；warning 为 passlib 导入 Python `crypt` 弃用提示。
+- Frontend：依赖安装/审计、Lint、Build、Playwright Mock API E2E 全通过。
+- CI 使用隔离 MySQL 8.0 / Redis 7.4、合成数据和 Mock API，不证明生产数据库权限、生产代理或第三方真实网络已验收。
+
+本节为静态代码审查与当前 CI 证据记录；重放保护和查询资源限额仍未修复，不得标记为关闭。
