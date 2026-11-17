@@ -76,6 +76,6 @@
 
 ### 验收限制
 
-- 当前测试覆盖租约过期与 PII 清理标记边界，但尚未构造“清理事务与关联事务在真实并发时序下交错提交/回滚”的专门压力测试；后续应补充可控事务屏障测试。
+- 已新增 `tests/test_third_party_report_outbox_mysql_integration.py::test_mysql_purchase_link_waits_for_pii_scrub_and_never_restores_link`：使用两个独立 MySQL 事务和可控事件屏障，先让 PII 清理事务取得 ViewContent 行锁，再启动 Purchase 关联并确认其锁定查询确实阻塞；释放清理事务后，断言清理完成、关联返回 False，且 `pii_scrubbed_at`、清空后的 `adsid`、PII 字段和 `conversion_id` 均未被恢复。该测试覆盖确定性交错时序，不等同于高并发压力测试或多实例生产故障演练。
 - 不得通过删除 `pii_scrubbed_at`、重新填充 `adsid` 或恢复历史 `conversion_id` 的方式修复关联失败。
 - 若未来调整 PII 清理字段或关联流程，必须同步更新本节测试，并验证旧 Worker fencing 和清理不可逆性。
