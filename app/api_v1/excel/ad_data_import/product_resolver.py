@@ -6,7 +6,10 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.product_assignment import initialize_product_assignment
+from app.core.product_assignment import (
+    initialize_product_assignment,
+    validate_product_assignments,
+)
 from app.core.product_name import (
     choose_product_match,
     fetch_products_by_name,
@@ -144,27 +147,28 @@ async def find_or_create_product(
         _remember_product(product_map, product_name_map, product_info)
         return product_info
 
-    try:
-        product_start_date = date.today()
-        await initialize_product_assignment(
-            db=db,
-            product_id=saved_product.id,
-            client_id=saved_product.client_id,
-            start_date=product_start_date,
+    product_start_date = date.today()
+    await initialize_product_assignment(
+        db=db,
+        product_id=saved_product.id,
+        client_id=saved_product.client_id,
+        start_date=product_start_date,
+    )
+
+    # 导入新产品时，产品与首条归属记录必须同时成功；校验异常或错误均失败关闭。
+    assignment_validation = await validate_product_assignments(db, saved_product.id)
+    if assignment_validation.get("errors"):
+        raise ValueError(
+            "新产品初始归属记录校验失败: "
+            + "; ".join(assignment_validation["errors"])
         )
-        logger.info(
-            "✅ 产品 %s 的分配记录已初始化：客户 %s，开始日期: %s",
-            saved_product.id,
-            saved_product.client_id,
-            product_start_date,
-        )
-    except Exception as e:
-        logger.warning(
-            "初始化产品分配记录失败: %s，但产品创建继续。产品ID: %s，客户ID: %s",
-            e,
-            saved_product.id,
-            saved_product.client_id,
-        )
+
+    logger.info(
+        "✅ 产品 %s 的分配记录已初始化：客户 %s，开始日期: %s",
+        saved_product.id,
+        saved_product.client_id,
+        product_start_date,
+    )
 
     product_info = _product_info(saved_product, create_client)
     _remember_product(product_map, product_name_map, product_info)
