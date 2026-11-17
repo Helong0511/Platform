@@ -1,0 +1,109 @@
+# RBAC 与多租户 API 范围审计记录（2026-11-17）
+
+## 审计范围
+
+本记录针对分支 `fix/non-credential-hardening-2026-11` 的当前代码快照进行静态审查，重点检查对象级授权（IDOR）、客户主体多重关联、列表/详情/导出范围、统计接口和管理写接口。
+
+本记录不是全仓库安全认证，也不代表生产环境渗透测试已完成。
+
+## 已检查代码
+
+- `app/core/security.py`：`get_current_user`、`require_admin`、`require_admin_or_self`、`require_publisher_or_admin`
+- `app/core/permission_cache.py`：用户权限缓存及失效辅助函数
+- `app/api_v1/clients/clients.py`
+- `app/api_v1/cpl/publishers.py`
+- `app/api_v1/cpl/advertisers.py`
+- `app/api_v1/cpl/offers.py`
+- `app/api_v1/products/products.py`
+- `app/api_v1/products/assignments.py`
+- `app/api_v1/users/users.py`
+- `app/api_v1/dashboard.py`
+- `app/api_v1/cpl/conversions/summary.py`
+- `app/api_v1/cpl/conversions/deductions.py`
+- `app/services/client_service.py`
+- `app/services/cpl/publisher_service.py`
+- `app/services/cpl/advertiser_service.py`
+- `app/services/product_service.py`
+- `app/services/product_assignment_service.py`
+- `app/services/dashboard_service.py`
+- `app/services/cpl/conversion_service.py`
+
+## 已确认的保护措施
+
+### 1. 身份与角色
+
+- 当前认证流程每次从数据库读取 User 行，不依赖 Redis 权限缓存中的旧角色/状态作最终认证判断。
+- 已停用用户、受限登录用户会被拒绝。
+- 客户角色在认证时还会确认至少存在一个启用中的 Client 主体。
+- 管理员路由使用 `require_admin`；客户与管理员共用的读取路由在服务层按当前用户范围过滤。
+- `require_admin_or_self` 对客户详情以 `Client.user_id == current_user.id`、目标 `client_id` 和启用状态共同约束。
+
+### 2. 多 Client 账号
+
+- PublisherService 与 AdvertiserService 均查询当前用户全部启用 Client ID，不只取一条关联记录。
+- Publisher 列表、详情以 Client ID 集合过滤；客户响应对邮箱、Postback URL 等敏感字段进行脱敏。
+- Advertiser 可见范围由当前客户主体下启用的 Publisher 与有效 Offer 分配关系推导；客户响应进行敏感字段脱敏。
+- ConversionService 的客户统计范围由当前用户全部启用 Client 及其启用 Publisher 推导；无可用主体/渠道时返回空集，不回退全局范围。
+- ProductService 对非管理员查询通过 Client.user_id 与 Client.is_active 过滤；请求参数中的 client_id 不会替代服务端身份范围。
+
+### 3. 统计和缓存
+
+- Dashboard 统计和趋势缓存键包含当前用户 ID 与统计周期，避免不同用户共用同一用户范围缓存。
+- Dashboard 主统计、趋势和最近广告数据的非管理员查询均按当前用户所属启用 Client 过滤。
+- ConversionSummary 路由有 Publisher/Admin 角色依赖，服务层再次按客户 Publisher 集合过滤；请求中的 offer_id、publisher_id、advertiser_id 是附加筛选，不替代授权范围。
+- 扣减规则属于管理员商业配置，相关 API 路由要求管理员权限。
+
+### 4. 产品分配历史
+
+- 产品分配历史查询对非管理员同时约束 Product ID、Client.user_id 和 Client.is_active。
+- 客户按 Client ID 查询全量分配历史的端点要求管理员权限。
+- 分配历史校验、清理、日期变更和批量日期变更均要求管理员权限。
+
+### 5. 客户数据导出与 API 密钥
+
+- 客户列表导出端点要求管理员权限。
+- 客户 API 密钥读取端点要求管理员权限；该端点仍属于高敏感管理操作，生产环境应确保后台管理员账号强 MFA、访问审计和最小授权。
+- 普通客户详情响应移除密钥字段，仅返回是否配置密钥的状态。
+
+## 关联测试证据
+
+当前代码树包含以下针对性测试：
+
+- `tests/test_security_permission_cache_freshness.py`：权限缓存过期不能维持已停用用户、登录受限用户的有效身份；停用全部 Client 后旧 Access Token 被拒绝。
+- `tests/test_client_user_multi_membership.py`：一个用户关联多个 Client 时 Publisher 详情和列表按全部启用主体过滤。
+- `tests/test_conversion_saver_tenant_attribution.py`：Postback 回调伪造 client/product 归属不能覆盖可信服务端归因。
+- `tests/test_conversion_client_scope.py`：转化查询客户范围隔离。
+- `tests/test_cpl_offer_multi_client_scope.py`：Offer 多 Client 关联范围。
+- `tests/test_security_client_scope.py`：客户资源访问范围。
+- `tests/test_client_api_key_multi_client.py`：客户 API 多主体关联。
+- `tests/test_client_reconciliation_db_scope.py`：客户对账数据范围。
+
+这些测试名和源码路径证明测试资产存在，不等同于本轮对所有测试重新执行成功。最近完整通过的 CI SHA 与当前分支 HEAD 不一致，必须以当前 HEAD 的成功 CI 重新验收。
+
+## 本轮结论
+
+本轮检查的上述路由与服务层中，未确认一个可直接复现的跨 Client 越权漏洞，因此没有为制造代码改动而修改业务代码。
+
+以下事项仍未完成，不能标记为全量 RBAC 验收通过：
+
+1. 全量枚举所有 API 路由并将每个路由映射到角色、资源范围、读写级别和敏感字段。
+2. 对每个对象 ID 接口执行跨用户、跨 Client、跨 Publisher、跨 Advertiser 的负向 API 集成测试。
+3. 对批量更新、批量删除、导入、导出、异步任务、WebSocket 和后台任务逐一核验授权上下文是否传递。
+4. 核验所有查询缓存键、导出文件缓存、报表缓存是否包含用户/租户范围。
+5. 核验管理员修改 Client.user_id、Publisher.client_id、产品归属和 Offer 分配时的并发与审计完整性。
+6. 核验生产 JWT 密钥、管理员 MFA、会话撤销、Redis ACL 与数据库最小权限。
+
+## 验收规则
+
+- 未登录：拒绝。
+- 普通客户访问其他客户资源：拒绝或返回不泄漏资源存在性的 404。
+- 客户访问自己的多个启用 Client：允许，但仅限这些主体。
+- 客户主体被停用：不得继续通过旧 token 访问该主体数据。
+- 列表、详情、统计、导出、批量接口必须使用同一服务端授权范围。
+- 客户提交的 client_id、publisher_id、advertiser_id、product_id 只能作为筛选输入，不能作为授权凭证。
+- 所有写接口必须检查资源当前归属和目标归属，不能只校验操作者角色。
+- 任何权限查询异常不得退化为全局数据访问。
+
+## 后续审计优先级
+
+下一轮应继续检查尚未逐项核验的 API：广告数据查询/导出、外部 Client API、短链接管理、Postback 管理与重试、系统配置、定时任务、Excel 导入导出，以及所有 batch 路由。优先寻找对象级授权缺失、查询 count 与 data 条件不一致、缓存键遗漏租户维度和批量接口部分越权。
