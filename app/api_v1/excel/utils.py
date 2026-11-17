@@ -39,7 +39,7 @@ def allowed_file(filename: str) -> bool:
     """
     return (
             "." in filename
-            and filename.endswith(('.xlsx', '.xls'))
+            and filename.lower().endswith(('.xlsx', '.xls'))
             and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
     )
 
@@ -63,7 +63,8 @@ async def validate_excel_file(file: UploadFile) -> bytes:
             detail="不支持的文件类型。请上传Excel文件(.xlsx或.xls)"
         )
 
-    contents = await file.read()
+    # 只读取上限 + 1 字节即可判定超限，避免无界读取上传内容。
+    contents = await file.read(settings.MAX_UPLOAD_SIZE + 1)
 
     if len(contents) > settings.MAX_UPLOAD_SIZE:
         raise_api_exception(
