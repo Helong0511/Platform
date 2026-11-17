@@ -92,7 +92,8 @@ jobs:
             exit 1
           fi
           # 输出逐条测试节点，便于从 Actions 日志核对 MySQL/Redis 集成测试是否真实执行。
-          pytest "${TEST_FILES[@]}" -v -rs --tb=short
+          # 卡住时定期输出 Python 线程栈；同时记录最慢测试，避免 45 分钟后只剩取消信息。
+          pytest "${TEST_FILES[@]}" -v -rs --tb=short -o faulthandler_timeout=120 --durations=30
 
   frontend:
     timeout-minutes: 20
