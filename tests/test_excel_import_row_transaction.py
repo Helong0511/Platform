@@ -1,5 +1,5 @@
 """Excel 导入逐行事务边界回归测试。"""
-from datetime import date
+from datetime import datetime
 from types import SimpleNamespace
 
 import pandas as pd
@@ -71,7 +71,7 @@ async def test_invalid_metrics_roll_back_new_product_side_effects_and_cache(monk
         row_processor, "find_or_create_product", fake_find_or_create_product
     )
     row = pd.Series({
-        "date": date(2026, 11, 17),
+        "date": datetime(2026, 11, 17),
         "product_name": "new",
         "request_count": "not-a-number",
         "match_count": 0,
@@ -104,6 +104,7 @@ async def test_invalid_metrics_roll_back_new_product_side_effects_and_cache(monk
     assert result["new_rows"] == 0
     assert result["updated_rows"] == 0
     assert result["errors"][0]["row"] == 2
+    assert "数值字段格式错误" in result["errors"][0]["error"]
 
 
 @pytest.mark.asyncio
@@ -130,7 +131,7 @@ async def test_assignment_initialization_error_is_counted_as_failed_row_and_roll
         row_processor, "find_or_create_product", fake_find_or_create_product
     )
     row = pd.Series({
-        "date": date(2026, 11, 17),
+        "date": datetime(2026, 11, 17),
         "product_name": "broken",
     })
 
