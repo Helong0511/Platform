@@ -35,7 +35,9 @@ async def test_excel_upload_reads_only_limit_plus_one_byte(monkeypatch, validato
     with pytest.raises(HTTPException) as caught:
         await validator(upload)
 
-    assert caught.value.status_code == 400
+    # 项目约定：业务错误使用 HTTP 200，具体错误码放在响应体 code 字段。
+    assert caught.value.status_code == 200
+    assert caught.value.detail["code"] == ErrorCode.BAD_REQUEST
     assert upload.requested_size == 11
 
 
