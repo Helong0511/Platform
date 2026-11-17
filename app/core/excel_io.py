@@ -53,6 +53,12 @@ def build_excel_bytes(
         df = pd.DataFrame(rows)
         df.to_excel(writer, index=False, sheet_name=sheet_name)
         worksheet = writer.sheets[sheet_name]
+        # 导出数据可能包含外部导入的文本；禁止将以 "=" 开头的文本写成可执行公式。
+        # 本系统导出表不包含业务公式，因此所有公式单元格均按普通文本保存。
+        for row_cells in worksheet.iter_rows():
+            for cell in row_cells:
+                if cell.data_type == "f":
+                    cell.data_type = "s"
         for column_cells in worksheet.columns:
             max_length = max(
                 len(str(cell.value)) for cell in column_cells
