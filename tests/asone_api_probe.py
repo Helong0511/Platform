@@ -7,14 +7,9 @@ import urllib.request
 from datetime import date, timedelta
 
 import os
-import sys
 
 API_KEY = (os.getenv("ASONE_API_KEY") or "").strip()
 BASE = os.getenv("ASONE_API_BASE_URL", "https://asone.club").rstrip("/")
-if not API_KEY:
-    print("请设置环境变量 ASONE_API_KEY 后再运行", file=sys.stderr)
-    raise SystemExit(2)
-
 ENDPOINTS = {
     "unit": "/api/channel-unit-report/apiPage",
     "country": "/api/channel-country-report/apiPage",
@@ -52,6 +47,11 @@ def post(path: str, payload: dict) -> tuple[int, dict | str]:
 
 
 def main() -> None:
+    # 允许其他测试或工具安全导入本模块；仅直接执行探测时要求密钥。
+    if not API_KEY:
+        print("请设置环境变量 ASONE_API_KEY 后再运行")
+        raise SystemExit(2)
+
     today = date.today()
     ranges = [
         (today - timedelta(days=7), today),
