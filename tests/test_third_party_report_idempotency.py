@@ -1843,3 +1843,59 @@ async def test_update_report_log_params_reuses_caller_transaction(monkeypatch):
     assert row.email == "new@example.invalid"
     assert caller_session.execute_calls == 2
     assert caller_session.commit_calls == 0
+
+
+
+async def test_direct_event_rejects_platform_scope_when_empty_conversion_is_normalized(monkeypatch):
+    """NULL 与空字符串属于同一基础身份，直接发送不得绕过平台作用域冲突。"""
+    from sqlalchemy.dialects import mysql
+
+    captured = {}
+
+    class Scalars:
+        def first(self):
+            return 701
+
+    class Result:
+        def scalars(self):
+            return Scalars()
+
+    class FakeDB:
+        async def execute(self, statement):
+            sql = str(
+                statement.compile(
+                    dialect=mysql.dialect(),
+                    compile_kwargs={"literal_binds": True},
+                )
+            ).lower()
+            if "third_party_report_logs.identity_scope = 'platform_scoped'" in sql:
+                captured["scope_sql"] = sql
+                return Result()
+            raise AssertionError("命中平台作用域冲突后不应继续查询或创建日志")
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(
+        third_party_report, "AsyncSessionLocal", lambda: SessionContext()
+    )
+
+    result = await third_party_report.create_report_log(
+        source="postback",
+        adsid="same-base-identity",
+        event="Lead",
+        email="",
+        ip="",
+        phone="",
+        ua="",
+        conversion_id=None,
+        destination_pixel_id="pixel-direct",
+    )
+
+    assert result == 0
+    assert "conversion_id is null" in captured["scope_sql"]
+    assert "conversion_id = ''" in captured["scope_sql"]
