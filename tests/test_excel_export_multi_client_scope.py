@@ -80,3 +80,33 @@ async def test_export_rejects_user_without_any_active_client(monkeypatch):
         )
 
     assert caught.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_detail_export_passes_unrestricted_client_filter_to_user_scope(monkeypatch):
+    """明细导出应把 None 交给统一范围过滤器，而非传入字符串 'None'。"""
+    db = _DB(active_client_id=11)
+    captured = {}
+
+    class _StopAfterScope(Exception):
+        pass
+
+    async def capture_scope(*args, **kwargs):
+        captured.update(kwargs)
+        raise _StopAfterScope
+
+    monkeypatch.setattr(export_handler, "check_use_assignment_table", lambda _db: _false())
+    monkeypatch.setattr(export_handler, "apply_ad_data_scope_filters", capture_scope)
+
+    async def _false():
+        return False
+
+    with pytest.raises(_StopAfterScope):
+        await export_handler.export_ad_data_handler(
+            db=db,
+            current_user=_client_user(),
+            daily_summary=False,
+        )
+
+    assert captured["client_id"] is None
+    assert captured["current_user"].id == 701
