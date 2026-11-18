@@ -256,3 +256,29 @@ async def test_report_stats_expose_legacy_scope_and_blocked_outbox_counts():
     assert response.data["legacy_unresolved_count"] == 4
     assert response.data["scope_blocked_outbox_count"] == 4
     assert response.data["pending"] == 5
+
+
+def test_unresolved_outbox_payload_cannot_be_edited():
+    """历史平台归属不明的 Outbox 不允许管理员修改后伪装成可恢复事件。"""
+    from types import SimpleNamespace
+    from app.core.third_party_report import is_outbox_payload_editable
+
+    now = datetime(2026, 11, 18, 12, 0, 0)
+    base = {
+        "outbox_enqueued": True,
+        "identity_scope": "platform_scoped",
+        "platform": "meta",
+        "pii_scrubbed_at": None,
+        "status": "failed",
+        "attempt_count": 0,
+        "report_start_time": None,
+    }
+    assert is_outbox_payload_editable(SimpleNamespace(**base), now) is True
+    assert is_outbox_payload_editable(
+        SimpleNamespace(**{**base, "identity_scope": "legacy_unresolved", "platform": None}),
+        now,
+    ) is False
+    assert is_outbox_payload_editable(
+        SimpleNamespace(**{**base, "platform": None}),
+        now,
+    ) is False
