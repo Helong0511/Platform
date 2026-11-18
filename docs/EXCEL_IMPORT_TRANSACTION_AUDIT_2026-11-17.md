@@ -92,3 +92,12 @@
 3. 覆盖同批次前一行成功、当前行失败、后一行成功，验证前后成功行均可保留，失败行不污染缓存与 ORM Session。
 4. 对共享的 `initialize_product_assignment()` 调用点做全仓扫描，逐个确认“校验失败 / 查询异常”是否必须向上传播；不要仅为 Excel 修复而改变其它业务路径语义。
 5. 集成测试通过后，再将本报告中的 EXCEL-TXN-001 / EXCEL-TXN-002 状态更新为“代码修复 + 真实数据库验收完成”；在此之前不得标记专项验收关闭。
+
+## 2026-11-18 补充：真实 MySQL SAVEPOINT 回归测试
+
+- 新增 `tests/test_excel_import_mysql_integration.py`，通过 GitHub Actions 的 loopback 临时 MySQL 服务创建随机隔离数据库。
+- 测试使用真实 SQLAlchemy `AsyncSession` 与 MySQL SAVEPOINT；模拟产品解析阶段先 INSERT 一条副作用记录，再让数值字段校验失败。
+- 断言失败行的 SAVEPOINT 回滚后，外层事务仍可提交，数据库中不存在该行 INSERT，产品映射缓存恢复，失败统计正确。
+- 测试只允许 `GITHUB_ACTIONS=true`、`UNIT_TEST=1`、loopback 主机、数据库名 `platform_ci` 和显式破坏性测试开关同时满足；不读取生产数据库配置。
+- 本测试目前已提交到专项 PR 分支；**必须等待该分支最新 HEAD 的 Full Audit CI 真正执行此测试并通过后，才可将真实 MySQL SAVEPOINT 验收标记为通过**。
+- 此用例只覆盖“产品创建后数值校验失败”这一条真实 MySQL 回滚路径；ProductAssignment 外键/唯一约束失败、AdData 新增失败、既有 AdData 更新失败，以及同批次成功-失败-成功交错仍需补充专项覆盖。
