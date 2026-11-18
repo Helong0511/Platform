@@ -1,6 +1,6 @@
 # 后端核心依赖（2026-07 安全升级；持续保持下列包为当前 PyPI 最新补丁线）
 fastapi==0.163.1
-starlette==1.4.0
+starlette==1.10.0
 uvicorn[standard]==0.34.0
 sqlalchemy==2.1.9
 pydantic==2.14.3
