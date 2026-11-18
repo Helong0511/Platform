@@ -1853,7 +1853,7 @@ async def get_alerts(
 @monitoring_router.put("/alerts/{alert_ref}/acknowledge", summary="确认告警")
 async def acknowledge_alert_endpoint(
     alert_ref: str,
-    level: Optional[str] = Query(None, enum=[AlertLevel.INFO, AlertLevel.WARNING, AlertLevel.ERROR, AlertLevel.CRITICAL]),
+    level: Optional[Literal["INFO", "WARNING", "ERROR", "CRITICAL"]] = Query(None, description="告警级别筛选"),
     acknowledged: Optional[bool] = Query(None),
 ):
     """
