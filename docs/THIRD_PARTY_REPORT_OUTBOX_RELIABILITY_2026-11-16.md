@@ -114,3 +114,31 @@
 - 剩余自动重试预算全部用于当前选定的数据处理模式，不因预留兜底而浪费一次尝试额度；累计尝试次数仍受 `max_attempts` 限制。
 - 回归测试：`tests/test_third_party_report_idempotency.py::test_report_attempt_budget_never_downgrades_hashing_or_exceeds_limit`。
 - 该修复不改变 IP 地址和 User-Agent 在 Meta CAPI 请求中的字段格式；其传输、留存和访问仍需纳入独立隐私治理。
+
+
+## 2026-11-18 Meta CAPI event_time 与 click_time 分离修复
+
+复核 Meta 官方 Server Event 参数说明：
+- `event_time` 必须表示事件实际发生时间，使用 Unix 秒；超过 7 天的历史事件会导致整批请求被拒绝。
+- `event_id` 与 `event_name` 用于 Pixel 与 CAPI 对应事件去重；浏览器 Pixel 的 `eventID` 必须与服务端 `event_id` 一致。
+- 官方说明跨 Pixel/CAPI 的匹配去重要求同一事件名称和 ID，并在首次接收后的 48 小时内到达；不能把这条规则扩大解释为所有同源 CAPI 重发都具备 exactly-once 保证。
+
+官方资料：
+- https://developers.facebook.com/documentation/ads-commerce/conversions-api/parameters/server-event
+- https://developers.facebook.com/documentation/ads-commerce/conversions-api/deduplicate-pixel-and-server-events
+
+### 本轮修复
+
+- 原实现把短链点击时间 `click_time` 同时作为 Purchase 的 `event_time` 和 `fbc` 时间戳，混淆了点击发生与转化发生两个时点。
+- 现在 `send_third_party_report()` 接收独立 `event_time` 参数；Postback Outbox 使用日志创建时间（即本系统收到转化回调的时间）作为当前可用的事件时间。
+- `click_time` 只用于构造 `fbc` 内的点击时间戳，保持其与原始 fbclid 点击时间一致。
+- 当前 Postback 标准化器尚未将各上游平台的实际转化时间字段统一映射，因此 Outbox 使用回调接收时间作为 fallback；若上游回调明显延迟，仍需按具体平台字段映射真实 conversion timestamp，不能声称回调接收时间等于真实成交时间。
+- 对无时区的数据库 DATETIME，统一按应用配置时区（默认 Asia/Shanghai）本地化后转换 Unix 时间，避免服务器运行在 UTC 时把北京时间 naive 值误当 UTC；带时区值则先转换到应用时区。
+- 直接发送的历史调用在未传 `event_time` 时仍兼容回退到 `click_time`，以免改变 ViewContent 事件语义。
+
+### 验证
+
+- 新增应用时区 naive datetime 与 aware datetime 的 Unix 时间戳单测。
+- Outbox Worker 单测断言将持久化的回调接收时间传给发送函数。
+- 第三方发送回归测试断言 Purchase 的 `event_time` 使用独立转化时间，而 `fbc` 仍使用点击时间。
+- 仍需在 Meta Test Events / Events Manager 中使用测试 Pixel 验证实际事件参数和归因结果；本轮没有调用真实 Meta API。
