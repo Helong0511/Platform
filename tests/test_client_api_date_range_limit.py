@@ -31,7 +31,7 @@ async def test_client_data_rejects_more_than_90_inclusive_days(monkeypatch):
         req_time=int(datetime.now(timezone.utc).timestamp()),
         sign="isolated-signature",
         start_date="2026-01-01",
-        end_date="2026-03-31",
+        end_date="2026-04-01",
     )
 
     with pytest.raises(HTTPException) as caught:
