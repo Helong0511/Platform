@@ -43,7 +43,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime as dt, timedelta, timezone
 from threading import Lock, RLock
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -1836,7 +1836,7 @@ async def get_custom_metric(name: str, limit: int = Query(100, ge=1, le=1000)):
 
 @monitoring_router.get("/alerts", summary="获取告警列表")
 async def get_alerts(
-    level: Optional[str] = Query(None, enum=[AlertLevel.INFO, AlertLevel.WARNING, AlertLevel.ERROR, AlertLevel.CRITICAL]),
+    level: Optional[Literal["INFO", "WARNING", "ERROR", "CRITICAL"]] = Query(None, description="告警级别筛选"),
     acknowledged: Optional[bool] = Query(None),
     limit: int = Query(100, ge=1, le=500)
 ):
