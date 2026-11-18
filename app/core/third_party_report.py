@@ -960,7 +960,9 @@ async def send_third_party_report(
         )
     else:
         base_attempt_count = 0
-        max_attempts_total = max_retries + (1 if use_hash else 0)
+        # 直接发送日志的 max_attempts 与 create_report_log(max_attempts=max_retries) 一致；
+        # 哈希失败不再有明文兜底，因此不能额外预留一次虚假的重试预算。
+        max_attempts_total = max_retries
     if base_attempt_count >= max_attempts_total:
         # 不留住刚取得的租约；该事件已耗尽预算，不得继续发起外部请求。
         await update_owned_report_log(
@@ -972,8 +974,8 @@ async def send_third_party_report(
         )
         return {"success": False, "retryable": False, "reason": "max_attempts_exhausted"}
 
-    # 每次 Worker 执行的总请求数（哈希请求 + 可选非哈希兜底）不得超过
-    # 数据库中剩余的累计预算，防止接近上限时仍固定发送 4 次而超额。
+    # 每次执行的哈希请求数不得超过数据库中剩余的累计预算；
+    # 哈希失败不会切换为明文，达到 max_attempts 后转为终态失败。
     hash_attempts, _fallback_disabled = _calculate_report_attempt_budget(
         base_attempt_count,
         max_attempts_total,
