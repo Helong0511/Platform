@@ -1189,3 +1189,12 @@ PR #1 继续 Open / Draft；本轮不合并 main、不部署、不连接生产�
 - `test_schema_metadata_drift_reports_missing_tables_and_columns` 与 `test_schema_metadata_drift_accepts_complete_existing_schema` 均逐条通过。
 - Frontend：Lint、Build、Playwright Mock API Browser E2E 全部通过。
 - 该测试只验证 schema drift helper 的缺表/缺列判断；不代表真实 MySQL migration runner、备份恢复、索引/约束核验或旧数据迁移演练已经完成。
+
+## 2026-11-18 补充：客户开放 API 防重放 Redis 运行条件
+
+- 客户开放 API 的签名请求防重放使用 Redis 原子 `SET NX EX`，Redis 不可用时认证 fail-closed 并返回 HTTP 503；不得将生产环境降级为进程内去重集合。
+- 防重放键 TTL 覆盖签名时间戳允许窗口（默认 ±15 秒，对应 31 秒 TTL）。同一请求原样重试会返回 409；客户端需重新生成时间戳和签名后重试。
+- 生产 Redis 必须保留足够内存，并将 `maxmemory-policy` 配置为 `noeviction`，避免有效期内的防重放键被 LRU/LFU 等淘汰策略提前删除；内存耗尽时 Redis 写入失败，应用返回 503，而不是接受未去重请求。
+- 发布前需核验实际 Redis 实例的 `INFO memory`、`CONFIG GET maxmemory-policy`（若 ACL 禁止读取配置，须由运维通过配置文件/托管 Redis 控制面提供证据），确认内存水位、淘汰策略、HA 故障切换和告警；不能以 CI 临时 Redis 的通过结果替代生产配置验收。
+- 如当前共享 Redis 同时承载缓存、限流、Cap reservation 等状态，需评估 noeviction 对这些写路径的影响和内存容量；必要时使用独立 Redis 实例/集群，而不是在未评估时直接修改生产全局策略。
+- 此检查是生产部署阻断项；本轮未连接或修改生产 Redis。
