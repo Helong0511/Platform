@@ -106,6 +106,11 @@ def test_production_legacy_secrets_paths_resolve_to_external_directory(monkeypat
             str(repo / "secrets" / "gam-789.json")
         )
 
+    with pytest.raises(ValueError, match="必须位于配置的 GAM_SECRETS_DIR"):
+        storage.resolve_gam_credentials_path(
+            str(tmp_path / "other-secure-dir" / "gam-999.json")
+        )
+
 
 def test_development_legacy_secrets_paths_keep_repository_default(monkeypatch, tmp_path):
     repo = tmp_path / "repo"
@@ -117,3 +122,15 @@ def test_development_legacy_secrets_paths_keep_repository_default(monkeypatch, t
     assert storage.resolve_gam_credentials_path(
         "secrets/gam-123.json"
     ) == repo / "secrets" / "gam-123.json"
+
+
+def test_production_absolute_credentials_still_require_gam_secrets_dir(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    external = tmp_path / "external"
+    monkeypatch.setattr(storage, "ROOT", repo)
+    monkeypatch.setenv("PRODUCTION_ENV", "production")
+    monkeypatch.delenv("GAM_SECRETS_DIR", raising=False)
+
+    with pytest.raises(RuntimeError, match="必须显式配置"):
+        storage.resolve_gam_credentials_path(str(external / "gam-123.json"))
