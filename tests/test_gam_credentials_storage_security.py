@@ -101,7 +101,7 @@ def test_production_legacy_secrets_paths_resolve_to_external_directory(monkeypat
         str(external / "gam-456.json")
     ) == external.resolve() / "gam-456.json"
 
-    with pytest.raises(ValueError, match="不得位于代码仓库"):
+    with pytest.raises(ValueError, match="必须位于配置的 GAM_SECRETS_DIR"):
         storage.resolve_gam_credentials_path(
             str(repo / "secrets" / "gam-789.json")
         )
