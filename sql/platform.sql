@@ -1079,7 +1079,7 @@ CREATE TABLE IF NOT EXISTS `third_party_report_logs`  (
   `short_link_id` INT NULL DEFAULT NULL COMMENT '用于恢复像素配置的短链接 ID（非外键，保留删除后的证据）',
   `cloak_name` VARCHAR(100) NULL DEFAULT NULL COMMENT '斗篷配置名称（仅配置引用）',
   `short_code` VARCHAR(100) NULL DEFAULT NULL COMMENT '短链接短码（仅配置引用）',
-  `click_time` DATETIME NULL DEFAULT NULL COMMENT '点击发生时间，用于稳定构造 Meta event_time/fbc',
+  `click_time` DATETIME NULL DEFAULT NULL COMMENT '点击发生时间，仅用于构造 Meta fbc 点击时间戳',
   `next_retry_time` DATETIME NULL DEFAULT NULL COMMENT 'Outbox 下次可重试时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `unique_event_key`(`event_key` ASC) USING BTREE,
