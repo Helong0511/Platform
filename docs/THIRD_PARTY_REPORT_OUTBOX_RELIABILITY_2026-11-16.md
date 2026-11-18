@@ -79,3 +79,12 @@
 - 已新增 `tests/test_third_party_report_outbox_mysql_integration.py::test_mysql_purchase_link_waits_for_pii_scrub_and_never_restores_link`：使用两个独立 MySQL 事务和可控事件屏障，先让 PII 清理事务取得 ViewContent 行锁，再启动 Purchase 关联并确认其锁定查询确实阻塞；释放清理事务后，断言清理完成、关联返回 False，且 `pii_scrubbed_at`、清空后的 `adsid`、PII 字段和 `conversion_id` 均未被恢复。该测试覆盖确定性交错时序，不等同于高并发压力测试或多实例生产故障演练。
 - 不得通过删除 `pii_scrubbed_at`、重新填充 `adsid` 或恢复历史 `conversion_id` 的方式修复关联失败。
 - 若未来调整 PII 清理字段或关联流程，必须同步更新本节测试，并验证旧 Worker fencing 和清理不可逆性。
+
+
+## 2026-11-18 补充：历史未解析作用域事件的 PII 保留
+
+- `legacy_unresolved` Outbox 记录不会进入发送扫描；该状态不能通过自动重试恢复，必须保持 fail-closed，等待人工核对平台归属。
+- 历史记录可能仍保留 `pending` 状态，因此不能只依赖 `success/failed`、重试耗尽或缺少配置引用来判断 PII 是否可清理。
+- PII 清理器现将 `outbox_enqueued=true AND identity_scope=legacy_unresolved` 作为不可自动发送的隔离终态候选；仍需满足配置保留期限已到、无有效租约（或租约已过期）及尚未清理等公共条件。
+- 清理只擦除广告标识、转化标识、个人信息和发送载荷；保留事件审计骨架与身份作用域，不自动补写 platform 或 Pixel 目的地。
+- 回归测试：`tests/test_third_party_report_pii_retention.py::test_legacy_unresolved_outbox_is_terminal_for_pii_retention`。
