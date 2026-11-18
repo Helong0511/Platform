@@ -235,3 +235,5 @@ dump.rdb
 # sql/：仅上传全量结构 platform.sql；其它增量/备份脚本仅本地保留
 sql/*
 !sql/platform.sql
+# GAM 服务账号 JSON 含私钥，必须由部署外部受控目录提供
+secrets/*.json
