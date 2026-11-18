@@ -271,3 +271,20 @@ async def test_real_redis_set_nx_prevents_client_api_signed_request_replay(monke
     finally:
         await redis.delete(redis_key)
         await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_replay_store_client_lookup_error_fails_closed(monkeypatch):
+    async def broken_lookup():
+        raise OSError("synthetic Redis discovery failure")
+
+    monkeypatch.setattr(api_auth, "get_redis_client", broken_lookup)
+    monkeypatch.setattr(api_auth, "verify_signature", lambda **kwargs: True)
+
+    with pytest.raises(HTTPException) as caught:
+        await api_auth.verify_client_request(
+            _request(), _DB(_client()), client_ip="198.51.100.7"
+        )
+
+    assert caught.value.status_code == 503
+    assert "synthetic Redis discovery failure" not in str(caught.value.detail)
