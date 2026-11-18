@@ -232,9 +232,19 @@ async def create_report_log(
                 ThirdPartyReportLog.identity_scope == "platform_scoped",
             )
             if event != "ViewContent":
-                scoped_query = scoped_query.where(
-                    ThirdPartyReportLog.conversion_id == conversion_id
-                )
+                # 身份键将 NULL 与空字符串统一为同一空值；冲突查询必须采用相同规范，
+                # 否则 NULL / "" 两种历史表示可能绕过 unscoped 与平台事件互斥。
+                if conversion_id:
+                    scoped_query = scoped_query.where(
+                        ThirdPartyReportLog.conversion_id == conversion_id
+                    )
+                else:
+                    scoped_query = scoped_query.where(
+                        or_(
+                            ThirdPartyReportLog.conversion_id.is_(None),
+                            ThirdPartyReportLog.conversion_id == "",
+                        )
+                    )
             scoped_result = await db.execute(scoped_query.limit(1))
             scoped_conflict = scoped_result.scalars().first()
             if scoped_conflict is not None:
@@ -1767,9 +1777,18 @@ async def update_report_log_params(
                     ThirdPartyReportLog.identity_scope == "platform_scoped",
                 )
                 if new_event != "ViewContent":
-                    scoped_query = scoped_query.where(
-                        ThirdPartyReportLog.conversion_id == new_conversion_id
-                    )
+                    # 与 _report_base_identity_value 保持一致：NULL 和空字符串等价。
+                    if new_conversion_id:
+                        scoped_query = scoped_query.where(
+                            ThirdPartyReportLog.conversion_id == new_conversion_id
+                        )
+                    else:
+                        scoped_query = scoped_query.where(
+                            or_(
+                                ThirdPartyReportLog.conversion_id.is_(None),
+                                ThirdPartyReportLog.conversion_id == "",
+                            )
+                        )
                 scoped_result = await db.execute(scoped_query.limit(1))
                 if scoped_result.scalars().first() is not None:
                     logger.warning("[第三方上报] 管理编辑目标身份已属于平台作用域事件，拒绝修改")
