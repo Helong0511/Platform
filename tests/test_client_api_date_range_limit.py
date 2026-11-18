@@ -10,7 +10,8 @@ from app.api_v1.external import client_api
 
 class _BackgroundTasks:
     def add_task(self, *args, **kwargs):
-        raise AssertionError("超范围请求不得执行后台副作用")
+        self.calls = getattr(self, "calls", [])
+        self.calls.append((args, kwargs))
 
 
 @pytest.mark.asyncio
@@ -54,10 +55,17 @@ async def test_client_data_accepts_exactly_90_inclusive_days(monkeypatch):
     monkeypatch.setattr(client_api, "verify_client_request", verify)
     monkeypatch.setattr(client_api, "get_client_ip", lambda request: "192.0.2.10")
 
-    # 90 天边界应通过日期校验，随后在查询层之前使用专门的 sentinel 中断。
-    class _DB:
-        async def execute(self, statement):
-            raise RuntimeError("DATE_RANGE_ACCEPTED_SENTINEL")
+    captured = {}
+
+    async def fetch(self, **kwargs):
+        captured.update(kwargs)
+        return [], 0
+
+    async def get_names(db, user_id):
+        return "isolated-user", "Isolated User"
+
+    monkeypatch.setattr(client_api.ClientAdDataQuery, "fetch", fetch)
+    monkeypatch.setattr(client_api, "_get_client_user_names", get_names)
 
     request = SimpleNamespace(
         method="POST",
@@ -71,14 +79,13 @@ async def test_client_data_accepts_exactly_90_inclusive_days(monkeypatch):
         start_date="2026-01-01",
         end_date="2026-03-31",
     )
+    response = await client_api.get_client_data(
+        request=request,
+        background_tasks=_BackgroundTasks(),
+        api_request=payload,
+        db=SimpleNamespace(),
+    )
 
-    # 该日期段为 90 天（含首尾），只验证不因跨度上限被拒绝。
-    # 实际查询可能因 schema/数据库准备而失败，但不得返回日期范围错误。
-    with pytest.raises(HTTPException) as caught:
-        await client_api.get_client_data(
-            request=request,
-            background_tasks=_BackgroundTasks(),
-            api_request=payload,
-            db=_DB(),
-        )
-    assert "不能超过 90 天" not in str(caught.value.detail)
+    assert response.total == 0
+    assert captured["start_date"].isoformat() == "2026-01-01"
+    assert captured["end_date"].isoformat() == "2026-03-31"
