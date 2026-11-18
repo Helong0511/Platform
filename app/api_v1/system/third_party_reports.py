@@ -359,6 +359,7 @@ async def get_third_party_report_stats(
     - 成功/失败数量
     - 各来源数量
     - 各事件类型数量
+    - 各事件身份作用域数量，以及被作用域安全门禁阻断的 Outbox 数量
     """
     # ---------- 入口：参数与依赖准备 ----------
     # ---------- 异常处理 ----------
@@ -409,13 +410,38 @@ async def get_third_party_report_stats(
         event_stats_result = await db.execute(event_stats_query)
         event_stats = {row[0]: row[1] for row in event_stats_result.all()}
 
+        # 单独呈现身份作用域，避免历史未解析事件混入普通待处理数量而被忽略。
+        identity_scope_query = select(
+            ThirdPartyReportLog.identity_scope,
+            func.count(ThirdPartyReportLog.id),
+        ).where(where_clause).group_by(ThirdPartyReportLog.identity_scope)
+        identity_scope_result = await db.execute(identity_scope_query)
+        identity_scope_stats = {
+            row[0] or "unknown": row[1] for row in identity_scope_result.all()
+        }
+
+        # 只有已入队但不属于 platform_scoped 的事件才计入作用域阻断；
+        # unscoped 的直接发送日志不会被误算成 Outbox 阻断。
+        scope_blocked_query = select(func.count(ThirdPartyReportLog.id)).where(
+            and_(
+                where_clause,
+                ThirdPartyReportLog.outbox_enqueued.is_(True),
+                ThirdPartyReportLog.identity_scope != "platform_scoped",
+            )
+        )
+        scope_blocked_result = await db.execute(scope_blocked_query)
+        scope_blocked_count = scope_blocked_result.scalar_one()
+
         stats = {
             "total": total,
             "success": success_count,
             "failed": failed_count,
             "pending": total - success_count - failed_count,
             "source_stats": source_stats,
-            "event_stats": event_stats
+            "event_stats": event_stats,
+            "identity_scope_stats": identity_scope_stats,
+            "legacy_unresolved_count": identity_scope_stats.get("legacy_unresolved", 0),
+            "scope_blocked_outbox_count": scope_blocked_count,
         }
 
         return ResponseBaseSchema.success(
