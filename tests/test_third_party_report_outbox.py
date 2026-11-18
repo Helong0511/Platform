@@ -170,6 +170,7 @@ async def test_enqueue_does_not_reopen_or_mutate_attempted_outbox_payload(monkey
         "cloak_name": "original-cloak",
         "short_code": "original-code",
         "click_time": datetime(2026, 11, 11, 10, 0, 0),
+            "created_at": datetime(2026, 11, 11, 10, 5, 0),
         "error_message": "original failure",
     }
     existing = type("Existing", (), original.copy())()
@@ -505,6 +506,7 @@ async def test_postback_report_outbox_is_enqueued_in_conversion_session(monkeypa
     assert captured["payload"]["conversion_id"] == "conversion-ci"
     assert captured["payload"]["short_link_id"] == 55
     assert captured["payload"]["short_code"] == "short-ci"
+    assert captured["payload"]["event_time"] == datetime(2026, 11, 11, 10, 5, 0)
 
 
 async def test_outbox_scan_is_bounded_and_filters_due_unexpired_attempts(monkeypatch):
