@@ -26,8 +26,26 @@ GAM_CREDENTIALS_APP_NAME_KEYS = ("application_name", "applicationName")
 
 
 def get_gam_secrets_dir() -> Path:
-    """解析 GAM 密钥存储目录。"""
+    """解析 GAM 密钥存储目录；生产环境必须显式使用仓库外绝对路径。"""
     raw = (os.getenv("GAM_SECRETS_DIR") or "").strip()
+    is_production = os.getenv("PRODUCTION_ENV", "").strip().lower() in {
+        "production",
+        "prod",
+    }
+
+    if is_production:
+        if not raw:
+            raise RuntimeError("生产环境必须显式配置仓库外的 GAM_SECRETS_DIR")
+        path = Path(raw)
+        if not path.is_absolute():
+            raise ValueError("生产环境 GAM_SECRETS_DIR 必须为绝对路径")
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(ROOT.resolve())
+        except ValueError:
+            return resolved
+        raise ValueError("生产环境 GAM_SECRETS_DIR 不得位于代码仓库目录内")
+
     if raw:
         path = Path(raw)
         if not path.is_absolute():
