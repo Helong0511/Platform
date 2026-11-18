@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import uuid
 from pathlib import Path
 
 from sqlalchemy import text
@@ -166,6 +167,99 @@ async def _consume_result(connection, statement: str) -> None:
     await connection.commit()
 
 
+async def _verify_ledger_check_semantics(connection) -> None:
+    """通过可回滚的真实 INSERT 探针验证 ledger CHECK 约束确实拒绝非法状态。"""
+    max_order = int(
+        await connection.scalar(
+            text("SELECT COALESCE(MAX(execution_order), 0) FROM platform_schema_migrations")
+        )
+        or 0
+    )
+    if max_order > 4_294_967_291:
+        raise MigrationRunnerError(
+            "migration ledger execution_order 已接近无符号上限，无法安全执行约束探针"
+        )
+
+    revision_prefix = f"__ledger_check_probe_{uuid.uuid4().hex[:12]}"
+    valid_checksum = "a" * 64
+    probes = (
+        (
+            "status",
+            f"{revision_prefix}_status",
+            valid_checksum,
+            "invalid_status",
+            max_order + 1,
+            None,
+            None,
+        ),
+        (
+            "checksum",
+            f"{revision_prefix}_checksum",
+            "not-a-sha256",
+            "running",
+            max_order + 2,
+            None,
+            None,
+        ),
+        (
+            "execution_order",
+            f"{revision_prefix}_order",
+            valid_checksum,
+            "running",
+            0,
+            None,
+            None,
+        ),
+        (
+            "state_fields",
+            f"{revision_prefix}_state",
+            valid_checksum,
+            "applied",
+            max_order + 3,
+            None,
+            None,
+        ),
+    )
+
+    insert_sql = text(
+        "INSERT INTO platform_schema_migrations "
+        "(revision, checksum, status, execution_order, applied_at, error_type) "
+        "VALUES (:revision, :checksum, :status, :execution_order, :applied_at, :error_type)"
+    )
+    for name, revision, checksum, status, execution_order, applied_at, error_type in probes:
+        savepoint = await connection.begin_nested()
+        try:
+            try:
+                await connection.execute(
+                    insert_sql,
+                    {
+                        "revision": revision,
+                        "checksum": checksum,
+                        "status": status,
+                        "execution_order": execution_order,
+                        "applied_at": applied_at,
+                        "error_type": error_type,
+                    },
+                )
+            except Exception as exc:
+                await savepoint.rollback()
+                original = getattr(exc, "orig", None)
+                args = getattr(original, "args", ()) or ()
+                if not args or args[0] != 3819:
+                    raise MigrationRunnerError(
+                        f"无法确认 migration ledger CHECK 约束有效：{name}"
+                    ) from exc
+            else:
+                await savepoint.rollback()
+                raise MigrationRunnerError(
+                    f"migration ledger CHECK 约束未拒绝非法数据：{name}"
+                )
+        except Exception:
+            if savepoint.is_active:
+                await savepoint.rollback()
+            raise
+
+
 async def _ensure_ledger_schema(connection) -> None:
     await connection.exec_driver_sql(_LEDGER_DDL)
     await connection.commit()
@@ -283,6 +377,10 @@ async def _ensure_ledger_schema(connection) -> None:
         or "error_type" not in clauses["chk_platform_migration_state_fields"]
     ):
         raise MigrationRunnerError("migration ledger CHECK 约束定义错误")
+
+    # 只检查 CHECK_CLAUSE 的文本片段不足以证明约束有效；例如 OR 1=1
+    # 可以保留所有关键字却让条件恒真。使用 SAVEPOINT 探针验证真实拒绝行为。
+    await _verify_ledger_check_semantics(connection)
 
 
 async def _apply_with_locked_connection(
