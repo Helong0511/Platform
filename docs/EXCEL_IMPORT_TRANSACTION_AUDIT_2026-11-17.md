@@ -110,3 +110,28 @@
 - 断言 MySQL 最终仅保留前后两条成功行及其副作用，失败行 INSERT 不存在；失败行产品缓存被回滚，前后成功行缓存和统计保留。
 - PR #12 已 squash 合并，main 合并提交 `b6fda7b2089350a0487404c13055318fec55c0de`；该 SHA 的 main CI 仍需完成后才能记录主线验证通过。
 - 剩余未覆盖：真实 MySQL 中既有 AdData UPDATE 失败回滚、ProductAssignment 初始化写入/约束失败、DB 断连或锁等待超时发生在 SAVEPOINT commit 时，以及并发重复导入冲突。
+
+## 2026-11-18 补充验收状态（PR #11 / PR #12）
+
+> 本节覆盖前文“待 CI 验收 / PR 分支”之后的最新状态。历史段落保留作为审计轨迹，不应再将 PR #11 或 PR #12 标记为待合并。
+
+### 已完成并合并
+
+- PR #11 已 squash 合并，提交 `1ff5d59aaef25d9419aee47c525a1bf26dc1db49`。Full Audit Run `44274572057` 的逐条日志确认 `test_mysql_excel_row_savepoint_rolls_back_real_database_side_effect` 在临时 MySQL 8.0 中实际执行并通过；Backend 汇总 `737 passed, 1 skipped, 1 warning`。
+- PR #12 已合并至 main，提交 `b6fda7b2089350a0487404c13055318fec55c0de`。Full Audit Run `44276242949` 成功，新增 `test_mysql_excel_mixed_rows_keep_successful_rows_and_rollback_only_failed_row` 通过；Backend 汇总 `738 passed, 1 skipped, 1 warning`。
+- 混合行用例在同一个真实 MySQL AsyncSession 中处理成功、失败、成功三行，提交外层事务后确认前后成功行保留，中间失败行及其模拟副作用回滚，映射缓存和统计保持正确。
+
+### 已验证范围的准确边界
+
+- 真实 MySQL 验证了 SAVEPOINT 回滚和成功—失败—成功的行隔离，但测试通过临时 side-effect 表、monkeypatch 产品解析器和测试用 `AdDataProbe` ORM 映射模拟写入路径。
+- 目前尚未使用真实 `Product`、`ProductAssignment` ORM 模型及其生产外键/唯一约束完成完整导入链路集成测试。
+- 仍未覆盖真实 ProductAssignment 创建/验证失败、真实 AdData 新增约束失败、既有 AdData UPDATE 失败回滚、DB 断连或锁等待超时发生在 SAVEPOINT flush/commit 边界、并发重复导入冲突。
+- 因此可将“真实 MySQL SAVEPOINT 基础行为”和“混合行隔离”标记为通过；不得将 Excel 全链路事务故障矩阵标记为全部关闭。
+
+### 当前建议
+
+1. 下一轮优先补充真实 Product / ProductAssignment / AdData ORM 模型的隔离 MySQL 集成测试，避免测试替身掩盖模型约束与级联行为。
+2. 覆盖既有 AdData 更新中途失败，验证失败行修改不会在外层事务提交时泄漏。
+3. 在测试环境注入断连、锁等待超时和 SAVEPOINT 释放失败，确认失败处理不会误报成功或污染后续行。
+4. 每次新增集成测试必须从 Full Audit CI 逐条日志确认执行，而不是仅凭总测试数或模块未 skip 推断通过。
+
