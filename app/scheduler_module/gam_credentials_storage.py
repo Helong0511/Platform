@@ -55,29 +55,42 @@ def get_gam_secrets_dir() -> Path:
 
 
 def resolve_gam_credentials_path(raw: str | Path) -> Path:
-    """解析 GAM 凭据路径；生产环境禁止回退到仓库内的 secrets 文件。"""
+    """解析 GAM 凭据路径；生产环境所有凭据必须位于显式配置的外部目录。"""
     raw_text = str(raw or "").strip()
     if not raw_text:
         raise ValueError("GAM credentials_json 不能为空")
 
     path = Path(raw_text)
+    is_production = os.getenv("PRODUCTION_ENV", "").strip().lower() in {
+        "production",
+        "prod",
+    }
+
+    if is_production:
+        # 无论调用方传入相对还是绝对路径，都要求显式配置唯一的外部密钥根目录。
+        secrets_root = get_gam_secrets_dir().resolve()
+        if not path.is_absolute():
+            if path.parts and path.parts[0].lower() == "secrets":
+                # 兼容数据库/旧配置中的 secrets/gam-*.json 相对路径。
+                path = secrets_root.joinpath(*path.parts[1:])
+            else:
+                path = ROOT / path
+
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(secrets_root)
+        except ValueError:
+            raise ValueError(
+                "生产环境 GAM 凭据必须位于配置的 GAM_SECRETS_DIR 目录内"
+            )
+        return resolved
+
     if not path.is_absolute():
         if path.parts and path.parts[0].lower() == "secrets":
-            # 兼容数据库/旧配置中的 secrets/gam-*.json 相对路径，
-            # 生产时映射到 GAM_SECRETS_DIR，开发时仍映射到项目 secrets/。
             secrets_dir = get_gam_secrets_dir()
             path = secrets_dir.joinpath(*path.parts[1:])
         else:
             path = ROOT / path
-
-    if os.getenv("PRODUCTION_ENV", "").strip().lower() in {"production", "prod"}:
-        resolved = path.resolve()
-        try:
-            resolved.relative_to(ROOT.resolve())
-        except ValueError:
-            return resolved
-        raise ValueError("生产环境 GAM 凭据路径不得位于代码仓库目录内")
-
     return path
 
 
