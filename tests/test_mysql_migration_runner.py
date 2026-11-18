@@ -102,6 +102,11 @@ def _drop_database(database: str) -> None:
     connection = _root_connect()
     try:
         with connection.cursor() as cursor:
+            # 删除随机测试库前撤销该库的临时授权，避免 CI 累积残留授权记录。
+            cursor.execute(
+                f"REVOKE ALL PRIVILEGES ON `{database}`.* "
+                "FROM 'platform_application_runtime'@'%'"
+            )
             cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
     finally:
         connection.close()
