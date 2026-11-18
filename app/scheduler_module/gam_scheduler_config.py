@@ -29,6 +29,15 @@ GAM_CREDENTIALS_NETWORK_PATTERN = re.compile(r"gam-(\d+)\.json$", re.I)
 DEFAULT_GAM_REPORT_KEYS: tuple[str, ...] = ("ad_unit", "country", "site")
 
 
+def _resolve_gam_credentials_path(raw: str | Path) -> Path:
+    """与上传和 API 拉数共用同一套仓库外凭据路径策略。"""
+    from app.scheduler_module.gam_credentials_storage import (
+        resolve_gam_credentials_path,
+    )
+
+    return resolve_gam_credentials_path(raw)
+
+
 def get_gam_scheduler_config_path() -> Path:
     """解析 GAM 调度配置文件路径。"""
     raw = (os.getenv("GAM_SCHEDULER_CONFIG") or "").strip()
@@ -290,9 +299,7 @@ def build_gam_account_view(account: dict[str, Any]) -> dict[str, Any]:
     """构建管理端展示用的单账号视图。"""
     effective = list(account.get("product_whitelist") or [])
     credentials_json = account.get("credentials_json") or ""
-    credentials_path = Path(credentials_json)
-    if not credentials_path.is_absolute():
-        credentials_path = ROOT / credentials_json
+    credentials_path = _resolve_gam_credentials_path(credentials_json)
     return {
         "key": account["key"],
         "network_code": _network_code_from_credentials(credentials_json),
@@ -397,9 +404,7 @@ def pick_gam_account_for_report_probe(
         credentials_json = str(item.get("credentials_json") or "").strip()
         if not credentials_json:
             continue
-        credentials_path = Path(credentials_json)
-        if not credentials_path.is_absolute():
-            credentials_path = ROOT / credentials_json
+        credentials_path = _resolve_gam_credentials_path(credentials_json)
         if credentials_path.is_file():
             return item
 

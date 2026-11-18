@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import stat
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -25,14 +26,72 @@ GAM_CREDENTIALS_APP_NAME_KEYS = ("application_name", "applicationName")
 
 
 def get_gam_secrets_dir() -> Path:
-    """解析 GAM 密钥存储目录。"""
+    """解析 GAM 密钥存储目录；生产环境必须显式使用仓库外绝对路径。"""
     raw = (os.getenv("GAM_SECRETS_DIR") or "").strip()
+    is_production = os.getenv("PRODUCTION_ENV", "").strip().lower() in {
+        "production",
+        "prod",
+    }
+
+    if is_production:
+        if not raw:
+            raise RuntimeError("生产环境必须显式配置仓库外的 GAM_SECRETS_DIR")
+        path = Path(raw)
+        if not path.is_absolute():
+            raise ValueError("生产环境 GAM_SECRETS_DIR 必须为绝对路径")
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(ROOT.resolve())
+        except ValueError:
+            return resolved
+        raise ValueError("生产环境 GAM_SECRETS_DIR 不得位于代码仓库目录内")
+
     if raw:
         path = Path(raw)
         if not path.is_absolute():
             path = ROOT / path
         return path
     return DEFAULT_GAM_SECRETS_DIR
+
+
+def resolve_gam_credentials_path(raw: str | Path) -> Path:
+    """解析 GAM 凭据路径；生产环境所有凭据必须位于显式配置的外部目录。"""
+    raw_text = str(raw or "").strip()
+    if not raw_text:
+        raise ValueError("GAM credentials_json 不能为空")
+
+    path = Path(raw_text)
+    is_production = os.getenv("PRODUCTION_ENV", "").strip().lower() in {
+        "production",
+        "prod",
+    }
+
+    if is_production:
+        # 无论调用方传入相对还是绝对路径，都要求显式配置唯一的外部密钥根目录。
+        secrets_root = get_gam_secrets_dir().resolve()
+        if not path.is_absolute():
+            if path.parts and path.parts[0].lower() == "secrets":
+                # 兼容数据库/旧配置中的 secrets/gam-*.json 相对路径。
+                path = secrets_root.joinpath(*path.parts[1:])
+            else:
+                path = ROOT / path
+
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(secrets_root)
+        except ValueError:
+            raise ValueError(
+                "生产环境 GAM 凭据必须位于配置的 GAM_SECRETS_DIR 目录内"
+            )
+        return resolved
+
+    if not path.is_absolute():
+        if path.parts and path.parts[0].lower() == "secrets":
+            secrets_dir = get_gam_secrets_dir()
+            path = secrets_dir.joinpath(*path.parts[1:])
+        else:
+            path = ROOT / path
+    return path
 
 
 def parse_network_code_from_filename(filename: str) -> str | None:
@@ -73,29 +132,66 @@ def _ensure_writable_file(path: Path) -> None:
     if not path.is_file():
         return
     try:
-        current_mode = path.stat().st_mode
-        path.chmod(current_mode | stat.S_IWRITE)
+        if os.name != "nt":
+            # 覆盖前先收紧旧文件，避免上传期间旧私钥继续保持 group/world-readable。
+            path.chmod(0o600)
+        else:
+            current_mode = path.stat().st_mode
+            path.chmod(current_mode | stat.S_IWRITE)
     except OSError as exc:
         raise PermissionError(
             f"密钥文件不可写: {path}，请取消只读属性或关闭占用该文件的程序后重试"
         ) from exc
 
 
-def _write_credentials_file(target_path: Path, text: str) -> None:
-    """原子写入密钥文件，避免覆盖只读/半写入状态。"""
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    _ensure_writable_file(target_path)
-    tmp_path = target_path.with_name(f".{target_path.name}.uploading")
+def _ensure_private_directory(directory: Path) -> None:
+    """创建并收紧密钥目录权限；POSIX 下仅允许目录所有者访问。"""
     try:
-        tmp_path.write_text(text, encoding="utf-8")
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if os.name != "nt":
+            os.chmod(directory, 0o700)
+    except OSError as exc:
+        raise PermissionError(
+            f"无法确保 GAM 密钥目录为私有目录: {directory}"
+        ) from exc
+
+
+def _write_credentials_file(target_path: Path, text: str) -> None:
+    """以私有权限原子写入密钥文件，避免 umask 过宽暴露服务账号私钥。"""
+    _ensure_private_directory(target_path.parent)
+    if target_path.is_symlink():
+        raise PermissionError("拒绝覆盖符号链接形式的 GAM 密钥文件")
+
+    _ensure_writable_file(target_path)
+    # 使用随机临时文件名，避免并发上传同一 network_code 时互相覆盖临时文件。
+    tmp_path = target_path.with_name(
+        f".{target_path.name}.{uuid.uuid4().hex}.uploading"
+    )
+    file_mode = 0o600
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    file_descriptor = None
+    try:
+        # os.open 的 mode 在创建瞬间生效，避免先以 0644 写入再 chmod 的暴露窗口。
+        file_descriptor = os.open(tmp_path, flags, file_mode)
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as stream:
+            file_descriptor = None
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if os.name != "nt":
+            os.chmod(tmp_path, file_mode)
         os.replace(tmp_path, target_path)
+        if os.name != "nt":
+            os.chmod(target_path, file_mode)
     except PermissionError:
         raise
     except OSError as exc:
         raise PermissionError(
-            f"无法写入密钥文件 {target_path}：{exc}"
+            f"无法写入密钥文件 {target_path}：{type(exc).__name__}"
         ) from exc
     finally:
+        if file_descriptor is not None:
+            os.close(file_descriptor)
         if tmp_path.exists():
             try:
                 tmp_path.unlink()
