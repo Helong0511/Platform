@@ -581,10 +581,11 @@ const getOutboxLabel = (row) => {
   if (row.outbox_error_category?.includes('配置缺失')) return '配置缺失';
   if ((row.attempt_count || 0) >= (row.max_attempts || 0)) return '重试耗尽';
   if (row.outbox_processing) return '处理中';
-  if (row.status === 'pending') return '等待 worker';
+  // 优先判断 next_retry_time，避免 pending 状态的延迟重试被误标成“等待 worker”。
   if (row.next_retry_time) {
     return new Date(row.next_retry_time).getTime() > Date.now() ? '等待重试' : '等待 worker';
   }
+  if (row.status === 'pending') return '等待 worker';
   return '需人工处理';
 };
 
