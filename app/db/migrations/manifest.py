@@ -98,12 +98,12 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     Migration(
         revision="20261116_postback_forward_queue_lease_fencing",
         path="sql/migrations/20261116_postback_forward_queue_lease_fencing.sql",
-        sha256="3e9a0ffb69cbd69b351e9ab1723e06579b917610bee8cd8ba4016f3350ab46d5",
+        sha256="c8fccbd65b265597bcb6b2f1b9fe0520d741aa8f3da8a824ff0ace165f3b1ab0",
     ),
     Migration(
         revision="20261116_third_party_report_random_lease_token",
         path="sql/migrations/20261116_third_party_report_random_lease_token.sql",
-        sha256="c258eb81c04e0b10cf76ac73901c6d63f60f879bad3c6f1ba1d0b062c7217c76",
+        sha256="b7f57594cb6cf7ea15e22f81cfb1fc155c54a8bf6746b3204bc7a39577bc4266",
         depends_on=("20261114_third_party_report_manual_retry_budget", "20261114_third_party_report_platform_binary_collation"),
     ),
 
