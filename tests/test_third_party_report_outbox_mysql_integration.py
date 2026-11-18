@@ -1845,6 +1845,9 @@ async def test_mysql_purchase_link_waits_for_pii_scrub_and_never_restores_link(m
     engine = None
     cleaner_locked_view = asyncio.Event()
     release_cleaner = asyncio.Event()
+    # finally 中也会读取任务句柄，因此必须在进入可能失败的建库步骤前初始化。
+    cleaner_task = None
+    link_task = None
     try:
         password = quote_plus(MYSQL_PASSWORD)
         user = quote_plus(MYSQL_USER)
@@ -1877,8 +1880,6 @@ async def test_mysql_purchase_link_waits_for_pii_scrub_and_never_restores_link(m
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
         link_waiting_for_view = asyncio.Event()
         link_sql_statements = []
-        cleaner_task = None
-        link_task = None
 
         class LinkObservingSession:
             """确认 Purchase 关联已发出 ViewContent 锁定查询后再释放清理事务。"""
