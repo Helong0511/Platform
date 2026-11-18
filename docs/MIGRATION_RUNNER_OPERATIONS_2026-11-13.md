@@ -455,3 +455,45 @@ MySQL 官方手册说明，Proxy User 认证可以让外部连接用户以另一
 5. 全仓库调用点与外部部署脚本核查；旧 `create_database()` 已 fail-closed，但尚不能声称所有外部/动态调用点均已排除。
 
 PR #1 继续 Open / Draft；本轮没有合并 main、没有部署，也没有连接生产资源。
+
+
+## 20. 2026-11-18 新增 CHECK 约束迁移的结构核验缺口
+
+复核两条 2026-11-16 新增租约迁移：
+
+- `20261116_postback_forward_queue_lease_fencing.sql`
+- `20261116_third_party_report_random_lease_token.sql`
+
+发现两条脚本在创建 CHECK 约束前，均通过 `information_schema.TABLE_CONSTRAINTS` 检查同名约束是否存在；若同名约束已存在就跳过创建。最终验证也只确认约束名称与类型存在，没有验证 `CHECK_CONSTRAINTS.CHECK_CLAUSE` 的逻辑内容，也没有确认 `ENFORCED='YES'`。
+
+因此，同名但表达式被错误放宽的 CHECK，或未强制执行的约束，可能被迁移脚本误认为成功并写入 applied ledger。当前 MySQL 8.0.16+ 对 CHECK 的强制执行能力已由 Runner 版本门禁约束，但这不能替代对具体约束对象的核验。
+
+**风险等级：P2（数据库完整性纵深防御）。** 暂无证据表明现有 CI / 生产表中存在被篡改约束；这是迁移脚本对既有同名约束的校验不足。
+
+处置原则：
+1. 不修改已登记、已执行迁移的 SQL 文件或 SHA-256，避免破坏不可变迁移历史。
+2. 增加后续独立迁移/部署前 schema verifier：分别读取两个表的 CHECK_CONSTRAINTS.CHECK_CLAUSE 和 TABLE_CONSTRAINTS.ENFORCED，验证完整逻辑，而不只匹配名称。
+3. 对同名错误表达式或 ENFORCED=NO 必须 fail closed；不得自动 DROP / 重建约束，因为这可能触发表重建或锁表。
+4. 新增真实 MySQL 回归测试：预先创建同名但逻辑被放宽的 CHECK、以及未强制约束场景，确认 verifier 在执行任何业务迁移前拒绝继续。
+5. 当前 CI 的身份作用域 CHECK 测试确实插入非法行并确认错误码 3819；它不覆盖上述两条租约 CHECK 的同名错误结构场景。
+
+## 21. Outbox 串行批次与 Scheduler 租约时长复核
+
+当前 `process_postback_report_outbox()` 以顺序 `for` 循环处理最多 20 条事件；调度任务 `process_third_party_report_outbox_task()` 固定传入 `batch_size=20`。
+
+每条事件的 HTTP 请求总 deadline 为 60 秒，最多 3 次请求，失败退避还会等待（当前指数退避）。因此单条事件的理论网络阶段耗时可接近 180 秒，20 条串行批次可能超过 3,600 秒；实际耗时取决于响应、失败次数和配置解析时间。
+
+但 Scheduler 的 `_task_lock_timeout_seconds()` 目前只对“点击记录队列批量处理”设置 900 秒，其它任务默认 300 秒。第三方 Outbox 任务没有专属超时配置；Redis Scheduler lock TTL 由该超时加 60 秒计算，默认约 360 秒。
+
+这形成明确的**调度锁时长与批次最坏执行时间不匹配**。单条事件的数据库租约与 fencing 能限制旧 Worker 更新记录，但不能阻止过期 Scheduler 锁被新批次接管，也不能撤回已发出的外部 HTTP 请求。
+
+**风险等级：P2（积压/调度重叠/重复外部投递风险，非已证实的数据破坏）。**
+
+本轮未直接调高锁 TTL 或增加并发，原因是必须先核实数据库连接池容量、第三方 API 限流、HTTP 请求总 deadline、任务队列并发和进程停机行为。后续改进顺序：
+1. 为 Outbox 增加独立的批次 wall-clock deadline / 剩余预算，批次耗时达到阈值时停止领取新事件。
+2. 将 Scheduler 任务锁超时和 Redis TTL 设为与批次 deadline 一致，并确保 DB 锁 stale 判定、Redis 锁 TTL、APScheduler max_instances 的关系一致。
+3. 考虑较小批次或受控并发；并发上限必须由 DB pool、第三方 rate limit 和单条租约 fencing 共同约束。
+4. 增加测试覆盖“批次耗时逼近锁超时、Redis TTL 过期、旧批次仍运行、新批次启动”的交错时序，并验证旧批次不会覆盖新租约状态。
+5. 监控 batch duration、oldest due age、selected/success/retryable/failed、lock contention 与租约丢失率。
+
+PR #1 继续 Open / Draft；以上是代码证据支持的审计发现，不代表已在生产发生调度重叠或重复发送。
