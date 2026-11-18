@@ -1,4 +1,4 @@
-"""第三方上报管理 API 的个人信息脱敏测试。"""
+import pytest\n"""第三方上报管理 API 的个人信息脱敏测试。"""
 import json
 
 from app.api_v1.system.third_party_reports import (
@@ -202,3 +202,56 @@ def test_report_api_errors_never_echo_raw_exception_details():
     source = Path("app/api_v1/system/third_party_reports.py").read_text(encoding="utf-8")
     assert "str(e)" not in source
     assert "detail=f" not in source
+
+
+@pytest.mark.asyncio
+async def test_report_stats_expose_legacy_scope_and_blocked_outbox_counts():
+    """统计摘要必须单独呈现历史未解析作用域及被安全门禁阻断的 Outbox。"""
+    from types import SimpleNamespace
+    from app.api_v1.system.third_party_reports import get_third_party_report_stats
+
+    class FakeResult:
+        def __init__(self, scalar=None, rows=None):
+            self._scalar = scalar
+            self._rows = rows or []
+
+        def scalar_one(self):
+            return self._scalar
+
+        def all(self):
+            return self._rows
+
+    class FakeDB:
+        def __init__(self):
+            self.results = [
+                FakeResult(scalar=12),
+                FakeResult(scalar=4),
+                FakeResult(scalar=3),
+                FakeResult(rows=[("postback", 8), ("short_link", 4)]),
+                FakeResult(rows=[("Purchase", 9), ("ViewContent", 3)]),
+                FakeResult(rows=[
+                    ("platform_scoped", 7),
+                    ("legacy_unresolved", 4),
+                    ("unscoped", 1),
+                ]),
+                FakeResult(scalar=4),
+            ]
+
+        async def execute(self, statement):
+            assert self.results, "统计接口执行了未预期的额外查询"
+            return self.results.pop(0)
+
+    response = await get_third_party_report_stats(
+        db=FakeDB(),
+        current_user=SimpleNamespace(id=1),
+    )
+
+    assert response.code == 200
+    assert response.data["identity_scope_stats"] == {
+        "platform_scoped": 7,
+        "legacy_unresolved": 4,
+        "unscoped": 1,
+    }
+    assert response.data["legacy_unresolved_count"] == 4
+    assert response.data["scope_blocked_outbox_count"] == 4
+    assert response.data["pending"] == 5
