@@ -93,6 +93,15 @@
             <el-option label="处理中" value="pending"></el-option>
           </el-select>
         </el-form-item>
+        <el-form-item label="身份作用域">
+          <el-select v-model="searchForm.identity_scope" placeholder="全部" clearable style="width: 190px;" name="identity_scope"
+            popper-class="select-dropdown" :teleported="true">
+            <el-option label="全部" value=""></el-option>
+            <el-option label="历史身份未解析" value="legacy_unresolved"></el-option>
+            <el-option label="非平台作用域" value="unscoped"></el-option>
+            <el-option label="平台作用域已确认" value="platform_scoped"></el-option>
+          </el-select>
+        </el-form-item>
         <el-form-item label="时间范围" class="date-range-item">
           <el-date-picker v-model="dateRange" name="dateRange" type="datetimerange" range-separator="至"
             start-placeholder="开始时间" end-placeholder="结束时间" format="YYYY-MM-DD HH:mm:ss"
