@@ -26,7 +26,31 @@
             <span class="stat-label">处理中：</span>
             <span class="stat-value warning">{{ stats.pending || 0 }}</span>
           </span>
+          <span class="stat-item">
+            <span class="stat-label">平台作用域已确认：</span>
+            <span class="stat-value">{{ stats.identity_scope_stats?.platform_scoped || 0 }}</span>
+          </span>
+          <span class="stat-item">
+            <span class="stat-label">历史身份未解析：</span>
+            <span class="stat-value danger">{{ stats.legacy_unresolved_count || 0 }}</span>
+          </span>
+          <span class="stat-item">
+            <span class="stat-label">作用域阻断队列：</span>
+            <span class="stat-value danger">{{ stats.scope_blocked_outbox_count || 0 }}</span>
+          </span>
         </div>
+      </div>
+    </div>
+
+    <el-alert
+      v-if="Number(stats?.scope_blocked_outbox_count || 0) > 0"
+      type="warning"
+      :closable="false"
+      show-icon
+      class="scope-warning"
+      title="存在平台身份未确认的历史队列事件"
+      :description="`当前筛选范围内有 ${stats.scope_blocked_outbox_count} 条已入队事件因身份作用域未确认而禁止自动重试。请先核对原始业务证据；不得根据来源或旧事件编号猜测平台及 Pixel 目的地。`"
+    />
       </div>
     </div>
 
@@ -112,6 +136,13 @@
         <el-table-column v-if="columnVisibility.event" prop="event" label="事件类型" width="120" align="center">
           <template #default="scope">
             <el-tag size="small">{{ scope.row.event }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="identity_scope" label="身份作用域" width="190" align="center">
+          <template #default="scope">
+            <el-tag :type="getIdentityScopeTag(scope.row.identity_scope)" size="small">
+              {{ getIdentityScopeLabel(scope.row.identity_scope) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column v-if="columnVisibility.conversion_id" prop="conversion_id" label="转化ID" min-width="180"
@@ -264,6 +295,13 @@
           <el-descriptions-item label="事件类型">
             <el-tag size="small">{{ currentLog.event }}</el-tag>
           </el-descriptions-item>
+          <el-descriptions-item label="身份作用域">
+            <el-tag :type="getIdentityScopeTag(currentLog.identity_scope)" size="small">
+              {{ getIdentityScopeLabel(currentLog.identity_scope) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="平台">{{ currentLog.platform || '未确认' }}</el-descriptions-item>
+          <el-descriptions-item label="Pixel 目的地">{{ currentLog.destination_pixel_id || '未确认' }}</el-descriptions-item>
           <el-descriptions-item label="转化ID">{{ currentLog.conversion_id || '-' }}</el-descriptions-item>
           <el-descriptions-item label="货币类型">{{ currentLog.currency || '-' }}</el-descriptions-item>
           <el-descriptions-item label="支付金额">{{ currentLog.amount || '-' }}</el-descriptions-item>
@@ -282,6 +320,19 @@
               {{ getOutboxLabel(currentLog) }}
             </el-tag>
             <span v-else>非队列事件，不支持持久化重新排队</span>
+          </el-descriptions-item>
+          <el-descriptions-item
+            v-if="currentLog.outbox_enqueued && currentLog.identity_scope !== 'platform_scoped'"
+            label="安全限制"
+            :span="2"
+          >
+            <el-alert
+              type="warning"
+              :closable="false"
+              show-icon
+              title="该历史队列事件禁止自动重试及载荷编辑"
+              description="平台身份或 Pixel 目的地尚未得到可靠确认。请依据原始业务证据进行人工核对；系统不会自动推断或补写历史归属。"
+            />
           </el-descriptions-item>
           <el-descriptions-item label="下次重试时间">
             {{ currentLog.next_retry_time ? formatDateTime(currentLog.next_retry_time) : '-' }}
@@ -500,10 +551,26 @@ const editForm = reactive({
 
 const formatJson = formatReportJson;
 
+// 明确区分平台身份作用域，避免把历史未解析事件误认为普通待处理任务。
+const getIdentityScopeLabel = (scope) => {
+  if (scope === 'platform_scoped') return '平台作用域已确认';
+  if (scope === 'legacy_unresolved') return '历史身份未解析';
+  if (scope === 'unscoped') return '非平台作用域';
+  return '作用域未知';
+};
+
+const getIdentityScopeTag = (scope) => {
+  if (scope === 'platform_scoped') return 'success';
+  if (scope === 'legacy_unresolved') return 'danger';
+  if (scope === 'unscoped') return 'info';
+  return 'warning';
+};
+
 // 根据持久化 Outbox 字段准确展示重试状态，避免将普通失败日志误认为可重试。
 const getOutboxLabel = (row) => {
   if (!row?.outbox_enqueued) return '非队列事件';
   if (row.status === 'success') return '已成功';
+  if (row.identity_scope !== 'platform_scoped' || !row.platform) return '禁止自动重试（身份未确认）';
   if (row.outbox_error_category?.includes('配置缺失')) return '配置缺失';
   if ((row.attempt_count || 0) >= (row.max_attempts || 0)) return '重试耗尽';
   if (row.outbox_processing) return '处理中';
@@ -517,7 +584,7 @@ const getOutboxLabel = (row) => {
 const getOutboxTag = (row) => {
   const label = getOutboxLabel(row);
   if (label === '已成功') return 'success';
-  if (label === '重试耗尽' || label === '待核查' || label === '配置缺失') return 'danger';
+  if (label === '重试耗尽' || label === '待核查' || label === '配置缺失' || label === '禁止自动重试（身份未确认）') return 'danger';
   return 'warning';
 };
 
