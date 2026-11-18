@@ -195,11 +195,9 @@ class Settings(BaseSettings):
         if role == "scheduler":
             return True
 
-        # Gunicorn 为具体 worker 注入的标记比通用环境开关更具体，必须优先，
-        # 防止 API worker 在 ENABLE_SCHEDULER=true 时意外启动重复调度器。
+        # API worker 的“禁止调度”标记必须优先，防止显式开关误启用重复调度器。
+        # SCHEDULER_WORKER=1 只表示当前 worker 具备调度归属；仍不能覆盖显式关闭。
         scheduler_worker = os.getenv("SCHEDULER_WORKER", "").strip()
-        if scheduler_worker == "1":
-            return True
         if scheduler_worker == "0":
             return False
 
@@ -207,6 +205,9 @@ class Settings(BaseSettings):
         if explicit in ("false", "0", "no"):
             return False
         if explicit in ("true", "1", "yes"):
+            return True
+
+        if scheduler_worker == "1":
             return True
 
         try:
