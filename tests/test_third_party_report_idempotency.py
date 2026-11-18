@@ -1853,12 +1853,18 @@ async def test_direct_event_rejects_platform_scope_when_empty_conversion_is_norm
     captured = {}
 
     class Scalars:
+        def __init__(self, value):
+            self.value = value
+
         def first(self):
-            return 701
+            return self.value
 
     class Result:
+        def __init__(self, value):
+            self.value = value
+
         def scalars(self):
-            return Scalars()
+            return Scalars(self.value)
 
     class FakeDB:
         async def execute(self, statement):
@@ -1868,9 +1874,11 @@ async def test_direct_event_rejects_platform_scope_when_empty_conversion_is_norm
                     compile_kwargs={"literal_binds": True},
                 )
             ).lower()
+            if "third_party_report_logs.identity_scope = 'legacy_unresolved'" in sql:
+                return Result(None)
             if "third_party_report_logs.identity_scope = 'platform_scoped'" in sql:
                 captured["scope_sql"] = sql
-                return Result()
+                return Result(701)
             raise AssertionError("命中平台作用域冲突后不应继续查询或创建日志")
 
     class SessionContext:
