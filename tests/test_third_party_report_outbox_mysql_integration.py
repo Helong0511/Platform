@@ -1876,6 +1876,9 @@ async def test_mysql_purchase_link_waits_for_pii_scrub_and_never_restores_link(m
 
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
         link_waiting_for_view = asyncio.Event()
+        link_sql_statements = []
+        cleaner_task = None
+        link_task = None
 
         class LinkObservingSession:
             """确认 Purchase 关联已发出 ViewContent 锁定查询后再释放清理事务。"""
@@ -1894,6 +1897,7 @@ async def test_mysql_purchase_link_waits_for_pii_scrub_and_never_restores_link(m
 
             async def execute(self, statement, *args, **kwargs):
                 sql = str(statement).lower()
+                link_sql_statements.append(sql[:1000])
                 if (
                     "third_party_report_logs" in sql
                     and "conversion_id is null" in sql
@@ -2013,7 +2017,16 @@ async def test_mysql_purchase_link_waits_for_pii_scrub_and_never_restores_link(m
             )
         )
         # 等待关联事务确实发出 ViewContent SELECT FOR UPDATE（此时会被清理锁阻塞）。
-        await asyncio.wait_for(link_waiting_for_view.wait(), timeout=10)
+        try:
+            await asyncio.wait_for(link_waiting_for_view.wait(), timeout=10)
+        except asyncio.TimeoutError as exc:
+            task_state = (
+                "done" if link_task.done() else "pending"
+            )
+            raise AssertionError(
+                "Purchase 关联未发出 ViewContent 锁定查询；"
+                f"link_task={task_state}, observed_sql={link_sql_statements!r}"
+            ) from exc
         release_cleaner.set()
         cleaner_result, link_result = await asyncio.gather(cleaner_task, link_task)
 
@@ -2029,6 +2042,22 @@ async def test_mysql_purchase_link_waits_for_pii_scrub_and_never_restores_link(m
             assert final_view.conversion_id is None
     finally:
         release_cleaner.set()
+        # 失败路径也必须等待/取消并回收两个任务，不能让异步 MySQL 连接
+        # 在 pytest event loop 关闭后继续持有隔离库的 metadata lock。
+        pending_tasks = [
+            task for task in (cleaner_task, link_task)
+            if task is not None and not task.done()
+        ]
+        if pending_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*pending_tasks, return_exceptions=True),
+                    timeout=5,
+                )
+            except asyncio.TimeoutError:
+                for task in pending_tasks:
+                    task.cancel()
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
         if engine is not None:
             await engine.dispose()
         _drop_isolated_database(database)
