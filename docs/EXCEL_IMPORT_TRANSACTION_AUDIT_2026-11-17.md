@@ -66,3 +66,29 @@
 - 尚未新增上述回归测试，也尚未修改导入事务实现。
 - 必须先完成测试和实现，再运行最新 HEAD 的完整 Backend / Frontend CI。
 - PR #1 继续保持 Draft/Open；不合并、不部署。
+
+## 2026-11-18 复核：逐行 SAVEPOINT 已落地，专项 MySQL 验收仍需补齐
+
+> 本节优先于上文“待修复”状态。上文保留为发现问题时的历史证据，不代表当前 HEAD 仍保持原实现。
+
+### 当前代码状态（PR #1 HEAD `7672f708ad6be6c50605b3d82eeba33b15d16a9c`）
+
+- `app/api_v1/excel/ad_data_import/row_processor.py` 在每行开始时调用 `db.begin_nested()`，以 SAVEPOINT 包围该行产品解析、Product / ProductAssignment 创建、AdData 新增或更新。
+- 行成功时提交 SAVEPOINT；行失败时回滚当前 SAVEPOINT，并恢复 `product_map`、`product_name_map`、`existing_records` 与统计结果快照，避免失败行缓存污染后续行。
+- `app/api_v1/excel/ad_data_import/product_resolver.py` 在新 Product 初始化 ProductAssignment 后重新调用 `validate_product_assignments()`；校验返回 errors 时抛出异常，交由行级 SAVEPOINT 回滚。
+- `initialize_product_assignment()` 内部仍保留“校验错误只记录日志”的历史行为；Excel 路径通过 resolver 的第二次校验 fail-closed。不能据此推断所有其它调用该 helper 的业务路径也已经 fail-closed。
+- `create_product_assignment()` 对验证产生的 ValueError 会重新抛出；非 ValueError 的验证异常会被记录后继续，因此必须保留调用方独立校验和数据库约束，不能只依赖 helper 内部验证。
+
+### 当前测试证据与限制
+
+- 新增 `tests/test_excel_import_row_transaction.py` 覆盖数值字段失败时回滚当前行及缓存，以及 Product 已插入后归属初始化失败时回滚并计为失败行。
+- 该专项测试使用 fake DB / fake SAVEPOINT，并通过 mock 替代 `find_or_create_product()`；它没有实际运行 SQLAlchemy AsyncSession、MySQL SAVEPOINT、Product / ProductAssignment 外键与唯一约束，也没有验证同一批次“成功行 → 失败行 → 后续成功行”的真实提交隔离。
+- Run #1982（HEAD `7672f708ad6be6c50605b3d82eeba33b15d16a9c`）Backend 732 passed、1 skipped、1 warning；这是全套 CI 证据，不等于上述缺失的 Excel 专项 MySQL 故障矩阵已覆盖。
+
+### 剩余验收要求
+
+1. 增加仅运行于 GitHub Actions loopback 临时 MySQL 的集成测试，使用真实 AsyncSession 和 SAVEPOINT。
+2. 覆盖 Product 插入后 ProductAssignment 创建失败、Assignment 校验失败、AdData 新增失败、既有 AdData 更新失败等中途故障；逐项查询数据库确认失败行没有残留副作用。
+3. 覆盖同批次前一行成功、当前行失败、后一行成功，验证前后成功行均可保留，失败行不污染缓存与 ORM Session。
+4. 对共享的 `initialize_product_assignment()` 调用点做全仓扫描，逐个确认“校验失败 / 查询异常”是否必须向上传播；不要仅为 Excel 修复而改变其它业务路径语义。
+5. 集成测试通过后，再将本报告中的 EXCEL-TXN-001 / EXCEL-TXN-002 状态更新为“代码修复 + 真实数据库验收完成”；在此之前不得标记专项验收关闭。
