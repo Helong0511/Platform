@@ -18,7 +18,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core import third_party_report as report_module
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, get_app_now_sql_expression
 from app.models.third_party import ThirdPartyReportLog, ThirdPartyReportIdentityLock
 from app.models.postback import PostbackForwardLog
 from app.services import third_party_report_pii_retention as retention_module
@@ -1639,7 +1639,9 @@ async def test_mysql_manual_retry_and_pii_retention_are_mutually_exclusive(monke
         monkeypatch.setattr(report_module, "AsyncSessionLocal", session_factory)
         monkeypatch.setattr(retention_module, "AsyncSessionLocal", session_factory)
 
-        now = get_app_now_naive()
+        # 租约时间必须使用与关联查询相同的 MySQL 时钟，避免测试主机与 DB 时钟偏差。
+        async with session_factory() as clock_session:
+            now = await clock_session.scalar(select(get_app_now_sql_expression()))
         old_created_at = now - timedelta(days=120)
         event_key = hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest()
         async with session_factory() as session:
