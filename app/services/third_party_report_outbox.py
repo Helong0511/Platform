@@ -349,7 +349,7 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             "currency": row.currency,
             "amount": float(row.amount) if row.amount is not None else None,
             "click_time": row.click_time,
-            "created_at": row.created_at,
+            "created_at": getattr(row, "created_at", None) or get_app_now_naive(),
             "event_key": row.event_key,
             "platform": row.platform,
             "destination_pixel_id": row.destination_pixel_id,
