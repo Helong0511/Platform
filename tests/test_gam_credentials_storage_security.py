@@ -116,6 +116,7 @@ def test_development_legacy_secrets_paths_keep_repository_default(monkeypatch, t
     repo = tmp_path / "repo"
     repo.mkdir()
     monkeypatch.setattr(storage, "ROOT", repo)
+    monkeypatch.setattr(storage, "DEFAULT_GAM_SECRETS_DIR", repo / "secrets")
     monkeypatch.setenv("PRODUCTION_ENV", "development")
     monkeypatch.delenv("GAM_SECRETS_DIR", raising=False)
 
