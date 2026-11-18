@@ -242,7 +242,7 @@ async def test_mysql_excel_mixed_rows_keep_successful_rows_and_rollback_only_fai
             Column("ad_unit", String(150), nullable=False),
             Column("data_source", String(32), nullable=False),
             Column("report_type", String(16), nullable=False),
-            Column("upstream_account", String(64), nullable=False),
+            Column("upstream_account", String(64), nullable=False, default="", server_default=""),
             Column("request_count", Integer, nullable=False),
             Column("match_count", Integer, nullable=False),
             Column("display_count", Integer, nullable=False),
