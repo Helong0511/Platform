@@ -498,7 +498,7 @@ PR #1 继续 Open / Draft；本轮没有合并 main、没有部署，也没有�
 
 PR #1 继续 Open / Draft；以上是代码证据支持的审计发现，不代表已在生产发生调度重叠或重复发送。
 
-## 20. 2026-11-18：Migration Runner 实际认证身份复核已实现
+## 22. 2026-11-18：Migration Runner 实际认证身份复核已实现
 
 > 本节更新第 19.2 节的状态。历史发现仍保留，但“Runner 尚未读取实际 CURRENT_USER()”这一旧结论已被本节的代码修复取代。
 
@@ -531,7 +531,7 @@ Run #1986（2026-11-18，提交 `a5575428f312ef272e031aad6e1914ca79676053`）已
 **验收结论：**“不同 DSN 用户名可能映射到同一有效授权账号”的代码层缺口已修复并通过隔离 MySQL CI；数据库授权最小化、角色/代理配置审计及生产级迁移演练仍未完成，不能因此解除上线阻断。
 
 
-## 21. 2026-11-18：Migration Runner 测试中的 Runtime 最小权限边界
+## 23. 2026-11-18：Migration Runner 测试中的 Runtime 最小权限边界
 
 - 复核发现此前 Migration Runner MySQL 集成测试为验证应用连接身份，在随机测试库上给 `platform_application_runtime` 授予了 `ALL PRIVILEGES`。该授权仅发生于 GitHub Actions 临时 MySQL，但会使测试无法证明 runtime 身份在迁移目标库上不具备 DDL 权限。
 - 已将随机测试库授权收紧为仅 `SELECT`。Migration Runner 仍使用 CI 管理员/迁移连接执行 DDL；应用 DSN 只用于服务端身份和数据库选择校验。
@@ -540,12 +540,12 @@ Run #1986（2026-11-18，提交 `a5575428f312ef272e031aad6e1914ca79676053`）已
 - 本次不连接生产数据库、不修改生产授权、不合并 PR、不部署。
 
 
-## 22. 2026-11-18：CI 审计工作流与主线安全工作流分离
+## 24. 2026-11-18：CI 审计工作流与主线安全工作流分离
 
 - 主线当前保留安全配置检查工作流；完整 Backend/MySQL/Redis/Frontend/Playwright 验收使用独立的 `Full Audit CI` 工作流，避免安全修复提交覆盖完整回归能力。
 - 两套工作流均不连接生产资源；完整审计使用 GitHub Actions 临时 MySQL/Redis 服务。
 
-## 15. 生产 DDL 预检硬门槛（2026-11-18）
+## 25. 生产 DDL 预检硬门槛（2026-11-18）
 
 生产执行任何既有大表 migration 前，必须先在与生产 MySQL 小版本、表结构、数据量和索引规模尽可能一致的隔离副本完成演练，并记录：实际 DDL 算法、metadata lock 等待、执行耗时、磁盘峰值、redo/undo 增长、复制延迟和业务写入影响。不得仅依据 CI 临时数据库的通过结果放行生产 DDL。
 
