@@ -83,3 +83,22 @@
 - 本次仅更新审计记录；未访问云 IAM、生产服务器或生产凭据，也未展示任何密钥值。
 
 **上述轮换、仓库外迁移、历史清理与 IAM 审计完成前，凭据安全专项不得关闭，项目不得标记为可安全上线。**
+
+## 2026-11-18 复核补充：RSA JWT 与 TLS 私钥
+
+### 当前公开 Git tree 中的私钥
+
+- `keys/private_key.pem`：当前 main 跟踪的 PEM 私钥文件，包含 PKCS#8 `PRIVATE KEY` 内容；与同目录 `keys/public_key.pem` 的公钥用途不同，私钥必须按已公开泄露处理。
+- `app/core/security.py::_resolve_rsa_key_path()` 当前存在按 basename 回退到仓库 `keys/` 目录的逻辑。历史 `.env` 的 RSA 私钥路径配置 basename 为 `private_key.pem`，公钥路径 basename 为 `public_key.pem`。当配置路径不存在时，该回退可能让应用实际加载仓库内公开私钥；必须先修复生产环境回退行为，再轮换 JWT 密钥对。
+- `nginx/btfrx.online/client.btfrx.online.key`：当前 main 跟踪的 RSA 私钥文件，按已公开私钥处理。仓库内 `nginx.conf` 当前指向 Certbot `/etc/letsencrypt/.../privkey.pem`，因此暂不能确认该仓库内私钥是否仍是线上证书对应密钥；必须用证书公钥指纹与实际部署证书核对，若匹配或无法证明已废弃，则轮换 TLS 证书/私钥。
+- `keys/public_key.pem` 与 `nginx/btfrx.online/client.btfrx.online_bundle.pem` 当前仅包含公钥/证书 PEM 块，不是私钥；无需因“文件扩展名为 pem”就一并当作私钥删除，但必须确保 JWT 公钥与轮换后的私钥配对。
+
+### 轮换和兼容处置
+
+1. 生成新的 JWT RSA 密钥对，私钥只通过密钥管理服务/环境注入或仓库外受控文件提供；公钥同步到所有验证实例。
+2. 先确认所有 API worker、scheduler、后台任务和刷新令牌验证路径使用同一新密钥对，再切换签名密钥；若采用单公钥验证，切换后旧 access/refresh JWT 将失效，应安排用户重新登录，并清理/轮换相关会话。
+3. 修复生产 RSA 密钥加载逻辑：生产环境禁止按 basename 回退到项目 `keys/`，禁止在未配置密钥时生成进程内临时 RSA 密钥；缺失或路径不安全必须启动/认证 fail-closed。
+4. 核对 `client.btfrx.online.key` 与当前线上证书的公钥指纹；若仍在使用或无法证明已弃用，通过证书签发渠道重新签发/部署 TLS 证书， reload Nginx 并验证证书链。
+5. 完成轮换后再移除 Git 跟踪的私钥文件并重写 Git 历史；不得只删除文件而保留旧私钥继续有效。
+
+本轮只做静态仓库检查，没有连接服务器、读取 `/etc/letsencrypt`、查询线上证书、吊销密钥或修改生产 JWT/Nginx 配置。
