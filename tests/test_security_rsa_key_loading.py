@@ -92,3 +92,62 @@ def test_development_keeps_ephemeral_rsa_fallback(monkeypatch):
 
     assert security.JWTUtils._load_rsa_key("", "", "private") == "synthetic-private"
     assert security.JWTUtils._load_rsa_key("", "", "public") == "synthetic-public"
+
+
+def _write_rsa_pair(directory: Path, name: str):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    directory.mkdir(parents=True, exist_ok=True)
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_path = directory / f"{name}-private.pem"
+    public_path = directory / f"{name}-public.pem"
+    private_path.write_bytes(
+        private.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    )
+    public_path.write_bytes(
+        private.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+    )
+    private_path.chmod(0o600)
+    public_path.chmod(0o644)
+    return private_path, public_path
+
+
+def _configure_production_rsa_paths(monkeypatch, private_path: Path, public_path: Path):
+    monkeypatch.setattr(security.settings, "PRODUCTION_ENV", "production")
+    monkeypatch.setattr(security.settings, "JWT_ALGORITHM", "RS256")
+    monkeypatch.setattr(security.settings, "RSA_PRIVATE_KEY", "")
+    monkeypatch.setattr(security.settings, "RSA_PUBLIC_KEY", "")
+    monkeypatch.setattr(security.settings, "RSA_PRIVATE_KEY_PATH", str(private_path))
+    monkeypatch.setattr(security.settings, "RSA_PUBLIC_KEY_PATH", str(public_path))
+
+
+def test_production_startup_validates_matching_rsa_keypair(monkeypatch, tmp_path):
+    private_path, public_path = _write_rsa_pair(tmp_path / "external", "jwt")
+    _configure_production_rsa_paths(monkeypatch, private_path, public_path)
+
+    security.validate_production_jwt_keypair()
+
+
+def test_production_startup_rejects_mismatched_rsa_keypair(monkeypatch, tmp_path):
+    private_path, _ = _write_rsa_pair(tmp_path / "private", "jwt")
+    _, other_public_path = _write_rsa_pair(tmp_path / "public", "other")
+    _configure_production_rsa_paths(monkeypatch, private_path, other_public_path)
+
+    with pytest.raises(RuntimeError, match="公私钥无效或不匹配"):
+        security.validate_production_jwt_keypair()
+
+
+def test_production_startup_rejects_non_rs256_algorithm(monkeypatch):
+    monkeypatch.setattr(security.settings, "PRODUCTION_ENV", "production")
+    monkeypatch.setattr(security.settings, "JWT_ALGORITHM", "HS256")
+
+    with pytest.raises(RuntimeError, match="必须为 RS256"):
+        security.validate_production_jwt_keypair()
