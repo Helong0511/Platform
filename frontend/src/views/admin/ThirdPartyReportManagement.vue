@@ -42,6 +42,8 @@
       </div>
     </div>
 
+    </div>
+
     <el-alert
       v-if="Number(stats?.scope_blocked_outbox_count || 0) > 0"
       type="warning"
@@ -51,8 +53,6 @@
       title="存在平台身份未确认的历史队列事件"
       :description="`当前筛选范围内有 ${stats.scope_blocked_outbox_count} 条已入队事件因身份作用域未确认而禁止自动重试。请先核对原始业务证据；不得根据来源或旧事件编号猜测平台及 Pixel 目的地。`"
     />
-      </div>
-    </div>
 
     <!-- 筛选控件 -->
     <!-- 筛选区 -->
