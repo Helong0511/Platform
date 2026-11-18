@@ -251,23 +251,30 @@ async def test_real_redis_set_nx_prevents_client_api_signed_request_replay(monke
     monkeypatch.setattr(api_auth, "get_redis_client", isolated_redis_client)
     try:
         assert await redis.ping() is True
-        await api_auth._claim_client_api_request(
-            client_id=client_id,
-            req_time=req_time,
-            sign=sign,
-            time_tolerance=15,
+        import asyncio
+
+        outcomes = await asyncio.gather(
+            *[
+                api_auth._claim_client_api_request(
+                    client_id=client_id,
+                    req_time=req_time,
+                    sign=sign,
+                    time_tolerance=15,
+                )
+                for _ in range(2)
+            ],
+            return_exceptions=True,
         )
+        accepted = [item for item in outcomes if item is None]
+        conflicts = [
+            item
+            for item in outcomes
+            if isinstance(item, HTTPException) and item.status_code == 409
+        ]
+        assert len(accepted) == 1
+        assert len(conflicts) == 1
         assert await redis.get(redis_key) == "1"
         assert 1 <= await redis.ttl(redis_key) <= 31
-
-        with pytest.raises(HTTPException) as caught:
-            await api_auth._claim_client_api_request(
-                client_id=client_id,
-                req_time=req_time,
-                sign=sign,
-                time_tolerance=15,
-            )
-        assert caught.value.status_code == 409
     finally:
         await redis.delete(redis_key)
         await redis.aclose()
