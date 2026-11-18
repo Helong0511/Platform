@@ -744,3 +744,41 @@ async def require_publisher_or_admin(
             http_status=status.HTTP_403_FORBIDDEN,
         )
     return current_user
+
+def validate_production_jwt_keypair() -> None:
+    """启动时验证生产 RS256 密钥配置、路径权限及公私钥匹配关系。"""
+    if not settings.is_production:
+        return
+    if settings.JWT_ALGORITHM != "RS256":
+        raise RuntimeError("生产环境 JWT_ALGORITHM 必须为 RS256")
+
+    private_key = JWTUtils._load_rsa_key(
+        settings.RSA_PRIVATE_KEY,
+        settings.RSA_PRIVATE_KEY_PATH,
+        "private",
+    )
+    public_key = JWTUtils._load_rsa_key(
+        settings.RSA_PUBLIC_KEY,
+        settings.RSA_PUBLIC_KEY_PATH,
+        "public",
+    )
+
+    now = datetime.now(timezone.utc)
+    probe_claims = {
+        "sub": "startup-rsa-key-pair-validation",
+        "iat": now,
+        "exp": now + timedelta(minutes=1),
+    }
+    try:
+        probe_token = jwt_encode(probe_claims, private_key, algorithm="RS256")
+        decoded = jwt_decode(
+            probe_token,
+            public_key,
+            algorithms=["RS256"],
+            options={"verify_aud": False},
+        )
+    except Exception as exc:
+        raise RuntimeError("生产 RSA 公私钥无效或不匹配") from exc
+
+    if decoded.get("sub") != probe_claims["sub"]:
+        raise RuntimeError("生产 RSA 公私钥匹配验证失败")
