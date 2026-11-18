@@ -237,3 +237,6 @@ sql/*
 !sql/platform.sql
 # GAM 服务账号 JSON 含私钥，必须由部署外部受控目录提供
 secrets/*.json
+# JWT / TLS 私钥（公钥和证书链可按需保留）
+keys/private_key.pem
+*.key
