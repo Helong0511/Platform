@@ -195,21 +195,16 @@ class Settings(BaseSettings):
             return True
 
         explicit = os.getenv("ENABLE_SCHEDULER", "").strip().lower()
-        # 显式 false 是全局停用开关；独立 scheduler role 已在上方优先放行。
         if explicit in ("false", "0", "no"):
             return False
+        if explicit in ("true", "1", "yes"):
+            return True
 
-        # Gunicorn API 多 Worker 场景必须服从 post_fork 的单 Worker 标记。
-        # ENABLE_SCHEDULER=true 只表示允许 API 进程承担调度职责，不能覆盖 SCHEDULER_WORKER=0，
-        # 否则每个 API Worker 都会启动 APScheduler，导致同一任务被多进程重复执行。
         scheduler_worker = os.getenv("SCHEDULER_WORKER", "").strip()
         if scheduler_worker == "1":
             return True
         if scheduler_worker == "0":
             return False
-
-        if explicit in ("true", "1", "yes"):
-            return True
 
         try:
             workers = int(os.getenv("WORKERS", "0") or "0")
@@ -1114,13 +1109,6 @@ class Settings(BaseSettings):
     FACEBOOK_PIXEL_ID: str = os.getenv("FACEBOOK_PIXEL_ID", "")
     FACEBOOK_ACCESS_TOKEN: str = os.getenv("FACEBOOK_ACCESS_TOKEN", "")
     FACEBOOK_API_VERSION: str = os.getenv("FACEBOOK_API_VERSION", "v23.0")
-
-    # 第三方上报个人信息保留天数；0 表示关闭自动清理，须经业务/合规批准后显式配置。
-    THIRD_PARTY_REPORT_PII_RETENTION_DAYS: int = Field(
-        default=0,
-        ge=0,
-        description="第三方上报日志 PII 保留天数；0=禁用自动清理（fail-safe）",
-    )
 
     # Cap 检查/递增异常时是否放行（false=fail-close，生产默认关闭放行）
     CAP_FAIL_OPEN: bool = Field(
