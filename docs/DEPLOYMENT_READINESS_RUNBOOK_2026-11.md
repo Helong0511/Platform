@@ -1216,3 +1216,13 @@ PR #1 继续 Open / Draft；本轮不合并 main、不部署、不连接生产�
 - Windows 开发环境不提供与 POSIX 相同的 ACL 保证；生产验收必须在 Linux 主机或等效受控文件系统上完成，并核验 ACL/挂载权限。
 - 当前 main 中仍跟踪两个 GAM JSON 私钥文件；本 PR 不删除这些运行时文件。必须先完成云端密钥吊销/轮换、仓库外目录迁移和 `GAM_SECRETS_DIR` 运行验证，再由单独 PR 移除 Git 跟踪。`.gitignore` 忽略规则只能阻止新文件加入，不会自动取消已跟踪文件。
 - 迁移前不应在生产直接删除 `secrets/*.json`，否则可能导致 GAM 报表任务失效；迁移后仍须清理 Git 历史及 Fork/克隆副本。
+
+## 2026-11-18 合并后安全状态（PR #20–#22）
+
+- PR #20 已合并到 main：记录当前树中 JWT/TLS 私钥泄露并添加忽略规则。
+- PR #21 已合并到 main：生产 RS256 密钥必须从仓库外显式路径加载，启动前验证密钥对，缺失/权限过宽/不匹配时拒绝启动。
+- PR #22 已合并到 main：GAM 凭据统一解析到外部 `GAM_SECRETS_DIR`，上传文件采用 POSIX `0600`、目录 `0700`，并拒绝符号链接目标。
+- PR #22 CI 证据：后端 762 passed、1 skipped、1 warning；前端 Full Audit 与 Emergency Security CI 通过；8 项 GAM 专项测试实际执行并通过。
+- 当前 Git tree 仍跟踪两份 GAM JSON、JWT RSA 私钥和 Nginx TLS 私钥。不得直接删除：先由密钥所有者轮换/吊销，配置生产外部密钥目录、完成 GAM 任务和 JWT 登录验证、核对线上 TLS 证书指纹后再移除 Git 跟踪。
+- 公开 Git 历史中的旧凭据仍需单独扫描和重写；历史重写不能替代凭据吊销。
+- main 分支保护尚未配置/验证；上线前要求保护 main、必须 PR、Full Audit CI 与 Emergency Security CI 通过，禁止 force push 与删除。
