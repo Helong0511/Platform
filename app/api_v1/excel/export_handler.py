@@ -310,11 +310,9 @@ async def export_ad_data_handler(
         )
     )
 
-    scope_client_id = (
-        target_client_id
-        if current_user.role == UserRole.ADMIN
-        else str(target_client_id)
-    )
+    # 非管理员由统一范围过滤器约束其全部启用 Client，不得把 None 转为字符串 "None"。
+    # parse_csv_ints("None") 会报错，导致合法的多 Client 明细导出失败。
+    scope_client_id = target_client_id if current_user.role == UserRole.ADMIN else None
     query = await apply_ad_data_scope_filters(
         db,
         query,
