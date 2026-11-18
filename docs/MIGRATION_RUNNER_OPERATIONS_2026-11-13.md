@@ -538,3 +538,9 @@ Run #1986（2026-11-18，提交 `a5575428f312ef272e031aad6e1914ca79676053`）已
 - 在真实 MySQL 集成测试中新增 runtime 身份断言：验证 `CURRENT_USER()`、`DATABASE()` 和 SELECT 可用，并验证 CREATE TABLE、ALTER TABLE、CREATE INDEX、DROP TABLE 均以权限错误拒绝。
 - 本项修复仅证明 CI 临时 MySQL 中该随机 schema 的授权边界；不等于生产账号 `SHOW GRANTS`、mandatory roles、代理用户映射或全局权限审计已完成。生产部署仍须保存脱敏授权快照，并在完整业务 schema 上执行 runtime 权限矩阵。
 - 本次不连接生产数据库、不修改生产授权、不合并 PR、不部署。
+
+
+## 22. 2026-11-18：CI 审计工作流与主线安全工作流分离
+
+- 主线当前保留安全配置检查工作流；完整 Backend/MySQL/Redis/Frontend/Playwright 验收使用独立的 `Full Audit CI` 工作流，避免安全修复提交覆盖完整回归能力。
+- 两套工作流均不连接生产资源；完整审计使用 GitHub Actions 临时 MySQL/Redis 服务。
