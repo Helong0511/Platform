@@ -55,7 +55,7 @@ import uuid
 from datetime import datetime as dt, timezone
 from enum import Enum
 from threading import Lock
-from typing import Any, Dict, List, Optional
+from typing import Literal, Any, Dict, List, Optional
 
 from app.core.monitoring import build_flat_monitoring_metrics, system_monitor
 
@@ -687,7 +687,7 @@ async def detect_bottlenecks():
 
 @optimization_router.get("/plans", summary="获取优化方案列表")
 async def get_optimization_plans(
-    status: Optional[str] = Query(None, enum=[s.value for s in OptimizationStatus])
+    status: Optional[Literal["pending", "running", "completed", "failed"]] = Query(None, description="优化任务状态筛选")
 ):
     """
     获取优化方案列表
