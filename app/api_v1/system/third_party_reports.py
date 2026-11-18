@@ -214,6 +214,11 @@ async def get_third_party_reports(
         adsid: Optional[str] = Query(None, max_length=500, description="广告ID筛选"),
         event: Optional[str] = Query(None, max_length=50, description="事件类型筛选"),
         status: Optional[str] = Query(None, max_length=20, description="状态筛选"),
+        identity_scope: Optional[str] = Query(
+            None,
+            pattern="^(legacy_unresolved|unscoped|platform_scoped)$",
+            description="事件身份作用域筛选",
+        ),
         start_date: Optional[datetime] = Query(None, description="开始时间"),
         end_date: Optional[datetime] = Query(None, description="结束时间"),
         db: AsyncSession = Depends(get_db),
@@ -251,6 +256,8 @@ async def get_third_party_reports(
         # ---------- 条件分支 ----------
         if status:
             filters.append(ThirdPartyReportLog.status == status)
+        if identity_scope:
+            filters.append(ThirdPartyReportLog.identity_scope == identity_scope)
         # ---------- 条件分支 ----------
         if start_date:
             filters.append(ThirdPartyReportLog.created_at >= start_date)
