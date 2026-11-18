@@ -451,3 +451,54 @@ async def test_unretryable_outbox_without_config_reference_is_terminal_for_pii_r
     assert "third_party_report_logs.outbox_enqueued is true" in sql
     params = " ".join(str(value) for value in captured_params[0].values())
     assert "短链接已删除，无法解析像素配置" in params
+
+
+
+@pytest.mark.asyncio
+async def test_legacy_unresolved_outbox_is_terminal_for_pii_retention(monkeypatch):
+    """无法进入发送扫描的历史作用域事件不能因 pending 状态永久保留 PII。"""
+    captured = []
+
+    class ScalarRows:
+        def all(self):
+            return []
+
+    class Result:
+        def scalars(self):
+            return ScalarRows()
+
+    class FakeDB:
+        async def execute(self, statement):
+            compiled = statement.compile(dialect=mysql.dialect())
+            captured.append((str(compiled).lower(), compiled.params))
+            return Result()
+
+        async def rollback(self):
+            return None
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(retention, "AsyncSessionLocal", lambda: SessionContext())
+    monkeypatch.setattr(
+        retention,
+        "get_app_now_naive",
+        lambda: datetime(2026, 11, 18, 12, 0, 0),
+    )
+
+    result = await retention.scrub_expired_third_party_report_pii(
+        retention_days=30,
+        batch_size=20,
+    )
+
+    assert result["scrubbed"] == 0
+    sql, params = captured[0]
+    assert "third_party_report_logs.outbox_enqueued is true" in sql
+    assert "third_party_report_logs.identity_scope" in sql
+    assert "legacy_unresolved" in " ".join(str(value) for value in params.values())
+    # 即使历史行状态为 pending，也不要求 status in ('success', 'failed') 才可清理。
+    assert "third_party_report_logs.status in" in sql
