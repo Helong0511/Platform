@@ -170,7 +170,6 @@ async def test_enqueue_does_not_reopen_or_mutate_attempted_outbox_payload(monkey
         "cloak_name": "original-cloak",
         "short_code": "original-code",
         "click_time": datetime(2026, 11, 11, 10, 0, 0),
-            "created_at": datetime(2026, 11, 11, 10, 5, 0),
         "error_message": "original failure",
     }
     existing = type("Existing", (), original.copy())()
@@ -281,6 +280,7 @@ async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
             "currency": "USD",
             "amount": 8.5,
             "click_time": None,
+            "created_at": datetime(2026, 11, 11, 10, 5, 0),
             "event_key": "stable-event-key",
             "short_link_id": 11,
             "cloak_name": "cloak-worker",
@@ -351,6 +351,7 @@ async def test_outbox_worker_resolves_credentials_at_send_time(monkeypatch):
     assert captured["send"]["facebook_access_token"] == "token-current"
     assert captured["send"]["report_log_id"] == 91
     assert captured["send"]["event_key"] == "stable-event-key"
+    assert captured["send"]["event_time"] == datetime(2026, 11, 11, 10, 5, 0)
     assert captured["send"]["email"] == "corrected-after-claim@example.invalid"
     assert captured["send"]["report_lease_token"] == "a" * 32
     # 完整 PII 载荷读取本身也必须受当前租约令牌和 DB 租约有效期保护。
@@ -506,7 +507,6 @@ async def test_postback_report_outbox_is_enqueued_in_conversion_session(monkeypa
     assert captured["payload"]["conversion_id"] == "conversion-ci"
     assert captured["payload"]["short_link_id"] == 55
     assert captured["payload"]["short_code"] == "short-ci"
-    assert captured["payload"]["event_time"] == datetime(2026, 11, 11, 10, 5, 0)
 
 
 async def test_outbox_scan_is_bounded_and_filters_due_unexpired_attempts(monkeypatch):
