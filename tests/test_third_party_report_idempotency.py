@@ -1142,30 +1142,26 @@ async def test_report_claim_exception_does_not_leak_exception_text(monkeypatch, 
 
 
 
-def test_report_attempt_budget_never_exceeds_cumulative_limit():
+def test_report_attempt_budget_never_downgrades_hashing_or_exceeds_limit():
     from app.core.third_party_report import _calculate_report_attempt_budget
 
-    # 新事件保留原有 3 次哈希请求 + 1 次非哈希兜底语义。
+    # use_hash=True 时所有重试都保持哈希，不预留或启用明文兜底。
     assert _calculate_report_attempt_budget(
         0, 4, use_hash=True, max_retries=3
-    ) == (3, True)
-
-    # 剩余预算为 2 时，只允许 1 次哈希 + 1 次兜底。
+    ) == (3, False)
     assert _calculate_report_attempt_budget(
         10, 12, use_hash=True, max_retries=3
-    ) == (1, True)
-
-    # 最后 1 次预算只允许非哈希兜底，不能额外发送哈希请求。
+    ) == (2, False)
     assert _calculate_report_attempt_budget(
         11, 12, use_hash=True, max_retries=3
-    ) == (0, True)
+    ) == (1, False)
 
     # 预算耗尽后不再发起任何请求。
     assert _calculate_report_attempt_budget(
         12, 12, use_hash=True, max_retries=3
     ) == (0, False)
 
-    # 不使用哈希时，剩余预算全部用于本轮请求。
+    # 只有调用方显式选择 use_hash=False，才会构造明文邮箱/手机号请求。
     assert _calculate_report_attempt_budget(
         10, 12, use_hash=False, max_retries=3
     ) == (2, False)

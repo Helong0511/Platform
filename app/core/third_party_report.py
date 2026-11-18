@@ -505,16 +505,14 @@ def _calculate_report_attempt_budget(
     use_hash: bool,
     max_retries: int,
 ) -> tuple[int, bool]:
-    """计算本轮哈希请求数与非哈希兜底，严格不超过累计尝试预算。"""
+    """计算本轮请求预算；哈希模式绝不自动降级为明文邮箱/手机号发送。"""
     remaining = max(0, int(max_attempts_total) - max(0, int(base_attempt_count)))
     if remaining == 0:
         return 0, False
-    hash_attempts = min(
-        max(0, int(max_retries)),
-        max(0, remaining - (1 if use_hash else 0)),
-    )
-    fallback_allowed = bool(use_hash and remaining > hash_attempts)
-    return hash_attempts, fallback_allowed
+    # use_hash=True 是数据处理约束，不是首选策略；失败后继续按哈希方式重试，
+    # 不得为了提高成功率而将邮箱/手机号改为明文发送。
+    request_attempts = min(max(0, int(max_retries)), remaining)
+    return request_attempts, False
 
 
 async def _claim_report_log(
@@ -976,7 +974,7 @@ async def send_third_party_report(
 
     # 每次 Worker 执行的总请求数（哈希请求 + 可选非哈希兜底）不得超过
     # 数据库中剩余的累计预算，防止接近上限时仍固定发送 4 次而超额。
-    hash_attempts, fallback_allowed = _calculate_report_attempt_budget(
+    hash_attempts, _fallback_disabled = _calculate_report_attempt_budget(
         base_attempt_count,
         max_attempts_total,
         use_hash=use_hash,
@@ -1260,177 +1258,7 @@ async def send_third_party_report(
     # 构建失败原因字符串
     failure_reasons_str = "\n" + "\n".join(failure_reasons) if failure_reasons else "\n无详细信息"
     
-    # 如果使用哈希失败，尝试一次不使用哈希
-    if fallback_allowed:
-        logger.warning(f"[第三方上报] 所有哈希尝试失败，尝试一次不使用哈希...")
-        try:
-            # 使用 Facebook Graph API（使用自定义或全局配置）
-            url = f"https://graph.facebook.com/{api_version}/{pixel_id}/events"
-            params = {
-                "access_token": access_token
-            }
-            
-            # 构建用户数据（不使用哈希）
-            user_data = {}
-            if email:
-                user_data["em"] = email
-            if phone:
-                user_data["ph"] = phone
-            if ip:
-                user_data["client_ip_address"] = ip
-            if ua:
-                user_data["client_user_agent"] = ua
-
-            # 直接使用事件类型
-            fb_event_name = event
-
-            # 构建事件数据
-            # 使用click_time作为event_time（如果提供），否则使用当前时间戳
-            if click_time:
-                event_time = int(click_time.timestamp())
-            else:
-                event_time = int(time.time())
-            fbc_ts = int(click_time.timestamp()) if click_time else event_time
-            if adsid:
-                user_data["fbc"] = f"fb.1.{fbc_ts}.{adsid}"
-            event_data = {
-                "event_name": fb_event_name,
-                "event_time": event_time,
-                "action_source": "website",
-                "event_id": event_key,
-                "user_data": user_data
-            }
-
-            # 购物事件必须添加 custom_data（Meta 要求 value + currency）
-            if fb_event_name == "Purchase" and amount is not None:
-                event_data["custom_data"] = {
-                    "currency": (currency or "USD"),
-                    "value": float(amount),
-                }
-
-            # 构建请求数据
-            send_data = {
-                "data": [event_data],
-                "test": False
-            }
-
-            # 存储完整上报参数
-            report_params_json = json.dumps(send_data, ensure_ascii=False)
-            attempt_persisted = await update_owned_report_log(
-                report_log_id,
-                report_params=report_params_json,
-                attempt_count=base_attempt_count + hash_attempts + 1,
-            )
-            if attempt_persisted is False:
-                logger.warning(
-                    "[第三方上报] 非哈希兜底尝试次数持久化失败，暂停发送：report_log_id=%s",
-                    report_log_id,
-                )
-                return {
-                    "success": False,
-                    "retryable": True,
-                    "reason": "attempt_state_persist_failed",
-                    "report_log_id": report_log_id,
-                }
-
-            logger.info(
-                "[第三方上报] 开始发送 (尝试 %s/%s - 不使用哈希): report_log_id=%s event=%s",
-                hash_attempts + 1, hash_attempts + 1, report_log_id, event,
-            )
-
-            # 增加超时时间，应对网络延迟
-            if not await renew_owned_report_lease():
-                logger.warning(
-                    "[第三方上报] 发送前租约校验失败，禁止发起外部请求：report_log_id=%s",
-                    report_log_id,
-                )
-                return {
-                    "success": False,
-                    "retryable": True,
-                    "reason": "report_lease_lost_before_send",
-                    "report_log_id": report_log_id,
-                }
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await _post_with_total_deadline(client, url, json=send_data, params=params)
-                # 第三方响应可能回显 user_data；日志只记录状态，不记录响应正文。
-                logger.debug("[第三方上报] 响应状态: status=%s", response.status_code)
-
-                if response.status_code == 200:
-                    try:
-                        response_json = response.json()
-                        if response_json.get("events_received"):
-                            log_id = response_json.get("fbtrace_id", "")
-                            report_success_time = get_app_now_naive()
-                            logger.info(
-                                "[第三方上报] report_log_id=%s 成功 (尝试 %s/%s - 不使用哈希), fbtrace_id=%s",
-                                report_log_id, hash_attempts + 1, hash_attempts + 1, log_id,
-                            )
-                            
-                            success_persisted = await update_owned_report_log(
-                                report_log_id,
-                                status="success",
-                                response_status=response.status_code,
-                                response_body=None,
-                                log_id_from_response=log_id,
-                                report_success_time=report_success_time,
-                                completed_at=report_success_time,
-                                clear_next_retry_time=True,
-                            )
-                            if not success_persisted:
-                                logger.warning(
-                                    "[第三方上报] 第三方已接收事件，但当前 Worker 租约已失效：report_log_id=%s",
-                                    report_log_id,
-                                )
-                                return {
-                                    "success": False,
-                                    "retryable": True,
-                                    "reason": "report_lease_lost_after_send",
-                                    "report_log_id": report_log_id,
-                                }
-                            return
-                        else:
-                            error_msg = "第三方未确认接收事件"
-                            failure_reasons.append(f"尝试 {hash_attempts + 1} (不使用哈希): {error_msg}")
-                            logger.warning(
-                                f"[第三方上报] ✗ 失败 (尝试 {hash_attempts + 1}/{hash_attempts + 1} - 不使用哈希): {error_msg}")
-                            await update_owned_report_log(
-                                report_log_id,
-                                response_status=response.status_code,
-                                response_body=None
-                            )
-                    except Exception:
-                        error_msg = "第三方响应 JSON 解析失败"
-                        failure_reasons.append(f"尝试 {hash_attempts + 1} (不使用哈希): {error_msg}")
-                        logger.warning(
-                            f"[第三方上报] ✗ 失败 (尝试 {hash_attempts + 1}/{hash_attempts + 1} - 不使用哈希): {error_msg}")
-                        await update_owned_report_log(
-                            report_log_id,
-                            response_status=response.status_code,
-                            response_body=None
-                        )
-                else:
-                    error_msg = f"第三方返回 HTTP {response.status_code}"
-                    failure_reasons.append(f"尝试 {hash_attempts + 1} (不使用哈希): {error_msg}")
-                    logger.warning(
-                        f"[第三方上报] ✗ 失败 (尝试 {hash_attempts + 1}/{hash_attempts + 1} - 不使用哈希): {error_msg}")
-                    await update_owned_report_log(
-                        report_log_id,
-                        response_status=response.status_code,
-                        response_body=None
-                    )
-
-        except (httpx.TimeoutException, asyncio.TimeoutError):
-            error_msg = "请求超时"
-            failure_reasons.append(f"尝试 {hash_attempts + 1} (不使用哈希): {error_msg}")
-            logger.warning(f"[第三方上报] ✗ 超时 (尝试 {hash_attempts + 1}/{hash_attempts + 1} - 不使用哈希)")
-        except httpx.ConnectError:
-            error_msg = "连接失败"
-            failure_reasons.append(f"尝试 {hash_attempts + 1} (不使用哈希): {error_msg}")
-            logger.warning(f"[第三方上报] ✗ 连接失败 (尝试 {hash_attempts + 1}/{hash_attempts + 1} - 不使用哈希)")
-        except Exception as e:
-            error_msg = f"请求异常（{type(e).__name__}）"
-            failure_reasons.append(f"尝试 {hash_attempts + 1} (不使用哈希): {error_msg}")
-            logger.warning("[第三方上报] 请求异常（不使用哈希）：%s", type(e).__name__)
+    # 哈希模式不会自动降级为明文；所有请求均已在上方按 use_hash 规则构造。
 
     # 更新失败原因字符串
     failure_reasons_str = "\n" + "\n".join(failure_reasons) if failure_reasons else "\n无详细信息"
@@ -1440,7 +1268,7 @@ async def send_third_party_report(
     )
 
     # 失败后释放发送租约；按累计尝试次数安排退避，达到预算后转为人工重试。
-    final_attempt_count = base_attempt_count + (hash_attempts + (1 if fallback_allowed else 0))
+    final_attempt_count = base_attempt_count + hash_attempts
     retry_at = None
     if final_attempt_count < max_attempts_total:
         retry_delay_minutes = min(5 * (2 ** (base_attempt_count // 4)), 60)
