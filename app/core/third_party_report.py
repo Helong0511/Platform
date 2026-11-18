@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.telegram.message_sender import send_telegram_message_async as send_telegram_message
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.core.utils import get_app_now_naive, get_app_now_sql_expression
+from app.core.utils import APP_TIMEZONE, get_app_now_naive, get_app_now_sql_expression
 from app.models.models import ThirdPartyReportLog, ThirdPartyReportIdentityLock
 from app.core.log_utils import mask_email, mask_hash_prefix, mask_phone
 
@@ -62,6 +62,16 @@ async def _post_with_total_deadline(client, url, *, json, params):
         client.post(url, json=json, params=params),
         timeout=_report_http_request_deadline_seconds(),
     )
+
+
+def _app_datetime_to_unix_timestamp(value: datetime) -> int:
+    """将应用时区 naive DATETIME 或 aware datetime 转为 Unix 秒时间戳。"""
+    if value.tzinfo is None:
+        # 数据库 DATETIME 按应用时区存储；不能依赖运行主机的 TZ 环境变量。
+        localized = APP_TIMEZONE.localize(value, is_dst=None)
+    else:
+        localized = value.astimezone(APP_TIMEZONE)
+    return int(localized.timestamp())
 
 
 def sha256_hash(value: Optional[str]) -> str:
@@ -759,6 +769,7 @@ async def send_third_party_report(
         currency: Optional[str] = None,
         amount: Optional[float] = None,
         click_time: Optional[datetime] = None,
+        event_time: Optional[datetime] = None,
         facebook_api_version: Optional[str] = "v23.0",  # 可选参数，默认与全局 FACEBOOK_API_VERSION 对齐
         platform: Optional[str] = None,
         report_log_id: Optional[int] = None,
@@ -779,7 +790,8 @@ async def send_third_party_report(
     - facebook_access_token: Facebook Access Token（必须）
     
     可选参数：
-    - click_time: 点击时间（datetime 对象），如果提供，将使用该时间作为 event_time
+    - click_time: 点击时间（datetime 对象），用于构造 fbc 中的点击时间戳
+    - event_time: 事件实际发生时间；未提供时兼容回退到 click_time 或当前时间
     - conversion_id: 转化 ID（Purchase 事件必需）
     - currency: 货币类型（默认为 USD）
     - amount: 金额（Purchase 事件必需）
@@ -1048,17 +1060,20 @@ async def send_third_party_report(
             # 直接使用事件类型
             fb_event_name = event
 
-            # 构建事件数据
-            # 使用click_time作为event_time（如果提供），否则使用当前时间戳
-            if click_time:
-                event_time = int(click_time.timestamp())
-            else:
-                event_time = int(time.time())
+            # event_time 表示转化实际发生时间；click_time 仅用于 fbc 的点击时间戳。
+            occurred_at = event_time or click_time
+            event_timestamp = (
+                _app_datetime_to_unix_timestamp(occurred_at)
+                if occurred_at is not None
+                else int(time.time())
+            )
 
-            # fbc 中段时间必须与 fbclid 产生时的点击时间一致（秒级 Unix 时间戳）。
-            # 若误用「发送请求时的 time.time()」而 event_time 仍为点击时间，会出现
-            # event_time < fbc 内嵌时间，Meta 侧常表现为无法归因或报表中不可见。
-            fbc_ts = int(click_time.timestamp()) if click_time else event_time
+            # fbc 中段时间必须与 fbclid 产生时的点击时间一致，不能改用转化接收时间。
+            fbc_ts = (
+                _app_datetime_to_unix_timestamp(click_time)
+                if click_time is not None
+                else event_timestamp
+            )
 
             # 构建用户数据
             user_data = {}
@@ -1081,7 +1096,7 @@ async def send_third_party_report(
                 user_data["fbc"] = f"fb.1.{fbc_ts}.{adsid}"
             event_data = {
                 "event_name": fb_event_name,
-                "event_time": event_time,
+                "event_time": event_timestamp,
                 "action_source": "website",
                 "event_id": event_key,  # 同一业务事件的重试必须复用稳定 event_id
                 "user_data": user_data
