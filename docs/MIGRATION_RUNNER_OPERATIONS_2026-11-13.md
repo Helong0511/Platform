@@ -554,3 +554,12 @@ Run #1986（2026-11-18，提交 `a5575428f312ef272e031aad6e1914ca79676053`）已
 当前重点高风险 migration：event_key 回填及唯一索引、third_party_report_outbox 多列/索引、PII retention 索引、identity scope 多列/复合索引、platform binary collation、postback/third-party lease 字段。失败或部分执行后的 running/failed ledger 状态必须人工核验后才能继续。
 
 CI 证明的是隔离测试正确性；生产放行还需要真实规模 DDL 演练、备份恢复验证和变更窗口/回滚方案。
+
+## 12. Migration Ledger CHECK 约束语义核验（2026-11-18）
+
+- Runner 不再仅凭 information_schema.CHECK_CONSTRAINTS 中的约束名称、ENFORCED 标记和 SQL 文本片段判断约束有效。
+- 物理结构检查后，Runner 在同一 MySQL 连接中通过 SAVEPOINT 执行四类临时 INSERT 探针：非法状态、非法 SHA-256、零 execution_order、与 status 不一致的 applied 状态字段。
+- 每个探针必须由 MySQL CHECK 约束错误码 3819 拒绝；成功插入、其它错误码或无法回滚均 fail closed。
+- 每个探针均回滚到 SAVEPOINT，不留下账本记录；执行序号接近 UNSIGNED INT 上限、无法安全分配探针序号时拒绝继续。
+- 新增真实 MySQL 回归测试：构造字段、索引和 CHECK 名称均匹配，但每个 CHECK 都通过 OR 1=1 变成恒真的账本表；Runner 必须拒绝该表且不能执行后续 migration SQL。
+- 该验证仅证明 ledger CHECK 约束实际拒绝本组非法状态；不替代对 ledger 之外业务表的 schema drift、外键、触发器、数据一致性和真实生产备份恢复演练。
