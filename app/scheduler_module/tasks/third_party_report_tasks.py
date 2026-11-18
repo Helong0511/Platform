@@ -13,7 +13,9 @@ async def process_third_party_report_outbox_task():
     """每分钟消费到期事件；进程重启后由数据库 Outbox 自动恢复。"""
     started = datetime.now(timezone.utc)
     try:
-        stats = await process_postback_report_outbox(batch_size=20)
+        # 单条事件最多 3 次 HTTP 请求，每次总 deadline 60 秒；
+        # 每批限制 3 条，最坏网络预算约 540 秒，低于 900 秒调度锁。
+        stats = await process_postback_report_outbox(batch_size=3)
         duration = (datetime.now(timezone.utc) - started).total_seconds()
         message = (
             f"执行完成：selected={stats['selected']} success={stats['success']} "
