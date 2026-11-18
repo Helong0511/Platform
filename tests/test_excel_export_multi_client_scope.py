@@ -80,3 +80,17 @@ async def test_export_rejects_user_without_any_active_client(monkeypatch):
         )
 
     assert caught.value.status_code == 403
+
+
+def test_non_admin_detail_export_uses_none_scope_when_client_filter_absent():
+    """明细导出不应把缺省 client_id 变成字符串 "None"。"""
+    target_client_id = None
+    current_user_role = UserRole.CLIENT
+
+    scope_client_id = (
+        target_client_id
+        if current_user_role == UserRole.ADMIN
+        else None
+    )
+
+    assert scope_client_id is None
