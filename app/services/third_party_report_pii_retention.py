@@ -49,27 +49,38 @@ async def scrub_expired_third_party_report_pii(
     cutoff_sql = get_app_now_sql_expression(-(days * 24 * 60 * 60))
     stale_lease = get_app_now_sql_expression(-300)
     terminal = and_(
-        ThirdPartyReportLog.status.in_(("success", "failed")),
         or_(
-            ThirdPartyReportLog.status == "success",
+            # 成功/失败的普通事件按既有终态规则清理。
             and_(
-                ThirdPartyReportLog.status == "failed",
+                ThirdPartyReportLog.status.in_(("success", "failed")),
                 or_(
-                    ThirdPartyReportLog.outbox_enqueued.is_(False),
-                    ThirdPartyReportLog.attempt_count >= ThirdPartyReportLog.max_attempts,
-                    ThirdPartyReportLog.error_message == "短链接已删除，无法解析像素配置",
-                    # 无配置引用且没有下次重试时间的 Outbox 失败事件不可重排，
-                    # 属于终态；否则会永久保留 PII 载荷而永远无法被清理。
+                    ThirdPartyReportLog.status == "success",
                     and_(
-                        ThirdPartyReportLog.outbox_enqueued.is_(True),
-                        ThirdPartyReportLog.next_retry_time.is_(None),
-                        ThirdPartyReportLog.short_link_id.is_(None),
+                        ThirdPartyReportLog.status == "failed",
                         or_(
-                            ThirdPartyReportLog.cloak_name.is_(None),
-                            ThirdPartyReportLog.short_code.is_(None),
+                            ThirdPartyReportLog.outbox_enqueued.is_(False),
+                            ThirdPartyReportLog.attempt_count >= ThirdPartyReportLog.max_attempts,
+                            ThirdPartyReportLog.error_message == "短链接已删除，无法解析像素配置",
+                            # 无配置引用且没有下次重试时间的 Outbox 失败事件不可重排，
+                            # 属于终态；否则会永久保留 PII 载荷而永远无法被清理。
+                            and_(
+                                ThirdPartyReportLog.outbox_enqueued.is_(True),
+                                ThirdPartyReportLog.next_retry_time.is_(None),
+                                ThirdPartyReportLog.short_link_id.is_(None),
+                                or_(
+                                    ThirdPartyReportLog.cloak_name.is_(None),
+                                    ThirdPartyReportLog.short_code.is_(None),
+                                ),
+                            ),
                         ),
                     ),
                 ),
+            ),
+            # legacy_unresolved Outbox 被发送扫描永久隔离，不可能通过自动重试恢复；
+            # 即使历史状态仍是 pending，也必须在租期失效且超过保留期后清除 PII。
+            and_(
+                ThirdPartyReportLog.outbox_enqueued.is_(True),
+                ThirdPartyReportLog.identity_scope == "legacy_unresolved",
             ),
         ),
         or_(
