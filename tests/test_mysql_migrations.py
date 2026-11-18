@@ -1920,7 +1920,7 @@ def test_forward_queue_lease_migration_rejects_wrong_same_name_check_constraint(
                 "(lease_token IS NULL OR lease_expires_at IS NULL)"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             )
-            with pytest.raises(pymysql.err.OperationalError) as error:
+            with pytest.raises(pymysql.err.ProgrammingError) as error:
                 _run_sql_file(
                     cursor,
                     "sql/migrations/20261116_postback_forward_queue_lease_fencing.sql",
@@ -1949,7 +1949,7 @@ def test_report_random_lease_migration_rejects_not_enforced_check_constraint():
                 "NOT ENFORCED"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             )
-            with pytest.raises(pymysql.err.OperationalError) as error:
+            with pytest.raises(pymysql.err.ProgrammingError) as error:
                 _run_sql_file(
                     cursor,
                     "sql/migrations/20261116_third_party_report_random_lease_token.sql",
