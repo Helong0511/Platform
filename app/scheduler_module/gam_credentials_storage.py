@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import stat
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -81,21 +82,54 @@ def _ensure_writable_file(path: Path) -> None:
         ) from exc
 
 
-def _write_credentials_file(target_path: Path, text: str) -> None:
-    """原子写入密钥文件，避免覆盖只读/半写入状态。"""
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    _ensure_writable_file(target_path)
-    tmp_path = target_path.with_name(f".{target_path.name}.uploading")
+def _ensure_private_directory(directory: Path) -> None:
+    """创建并收紧密钥目录权限；POSIX 下仅允许目录所有者访问。"""
     try:
-        tmp_path.write_text(text, encoding="utf-8")
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if os.name != "nt":
+            os.chmod(directory, 0o700)
+    except OSError as exc:
+        raise PermissionError(
+            f"无法确保 GAM 密钥目录为私有目录: {directory}"
+        ) from exc
+
+
+def _write_credentials_file(target_path: Path, text: str) -> None:
+    """以私有权限原子写入密钥文件，避免 umask 过宽暴露服务账号私钥。"""
+    _ensure_private_directory(target_path.parent)
+    if target_path.is_symlink():
+        raise PermissionError("拒绝覆盖符号链接形式的 GAM 密钥文件")
+
+    _ensure_writable_file(target_path)
+    # 使用随机临时文件名，避免并发上传同一 network_code 时互相覆盖临时文件。
+    tmp_path = target_path.with_name(
+        f".{target_path.name}.{uuid.uuid4().hex}.uploading"
+    )
+    file_mode = 0o600
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    file_descriptor = None
+    try:
+        # os.open 的 mode 在创建瞬间生效，避免先以 0644 写入再 chmod 的暴露窗口。
+        file_descriptor = os.open(tmp_path, flags, file_mode)
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as stream:
+            file_descriptor = None
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if os.name != "nt":
+            os.chmod(tmp_path, file_mode)
         os.replace(tmp_path, target_path)
+        if os.name != "nt":
+            os.chmod(target_path, file_mode)
     except PermissionError:
         raise
     except OSError as exc:
         raise PermissionError(
-            f"无法写入密钥文件 {target_path}：{exc}"
+            f"无法写入密钥文件 {target_path}：{type(exc).__name__}"
         ) from exc
     finally:
+        if file_descriptor is not None:
+            os.close(file_descriptor)
         if tmp_path.exists():
             try:
                 tmp_path.unlink()
