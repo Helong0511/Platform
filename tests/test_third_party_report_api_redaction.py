@@ -1,4 +1,4 @@
-import pytest\n"""第三方上报管理 API 的个人信息脱敏测试。"""
+"""第三方上报管理 API 的个人信息脱敏测试。"""
 import pytest
 import json
 
