@@ -47,3 +47,40 @@ def test_gam_credentials_writer_refuses_symlink_target(tmp_path):
 
     assert target.is_symlink()
     assert external.read_text(encoding="utf-8") == '{"private_key":"outside-synthetic"}'
+
+
+def test_production_requires_explicit_external_absolute_gam_directory(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(storage, "ROOT", repo)
+    monkeypatch.setattr(storage, "DEFAULT_GAM_SECRETS_DIR", repo / "secrets")
+    monkeypatch.setenv("PRODUCTION_ENV", "production")
+    monkeypatch.delenv("GAM_SECRETS_DIR", raising=False)
+
+    with pytest.raises(RuntimeError, match="必须显式配置"):
+        storage.get_gam_secrets_dir()
+
+    monkeypatch.setenv("GAM_SECRETS_DIR", "secrets")
+    with pytest.raises(ValueError, match="绝对路径"):
+        storage.get_gam_secrets_dir()
+
+    monkeypatch.setenv("GAM_SECRETS_DIR", str(repo / "secrets"))
+    with pytest.raises(ValueError, match="仓库目录内"):
+        storage.get_gam_secrets_dir()
+
+    external = tmp_path / "runtime-secrets"
+    monkeypatch.setenv("GAM_SECRETS_DIR", str(external))
+    assert storage.get_gam_secrets_dir() == external.resolve()
+
+
+def test_development_keeps_local_gam_directory_compatibility(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(storage, "ROOT", repo)
+    monkeypatch.setattr(storage, "DEFAULT_GAM_SECRETS_DIR", repo / "secrets")
+    monkeypatch.setenv("PRODUCTION_ENV", "development")
+    monkeypatch.delenv("GAM_SECRETS_DIR", raising=False)
+
+    assert storage.get_gam_secrets_dir() == repo / "secrets"
+    monkeypatch.setenv("GAM_SECRETS_DIR", "local-gam-secrets")
+    assert storage.get_gam_secrets_dir() == repo / "local-gam-secrets"
