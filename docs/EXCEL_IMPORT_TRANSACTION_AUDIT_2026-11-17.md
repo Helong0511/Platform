@@ -101,3 +101,12 @@
 - 测试只允许 `GITHUB_ACTIONS=true`、`UNIT_TEST=1`、loopback 主机、数据库名 `platform_ci` 和显式破坏性测试开关同时满足；不读取生产数据库配置。
 - 本测试目前已提交到专项 PR 分支；**必须等待该分支最新 HEAD 的 Full Audit CI 真正执行此测试并通过后，才可将真实 MySQL SAVEPOINT 验收标记为通过**。
 - 此用例只覆盖“产品创建后数值校验失败”这一条真实 MySQL 回滚路径；ProductAssignment 外键/唯一约束失败、AdData 新增失败、既有 AdData 更新失败，以及同批次成功-失败-成功交错仍需补充专项覆盖。
+
+## 2026-11-18 补充：真实 MySQL 成功—失败—成功批次隔离
+
+- 新增 `tests/test_excel_import_mysql_integration.py::test_mysql_excel_mixed_rows_keep_successful_rows_and_rollback_only_failed_row`。
+- 在同一个真实 MySQL AsyncSession 中依次处理成功行、失败行、成功行；每行使用独立 SAVEPOINT，最后提交外层事务。
+- 逐条 CI 日志确认测试真实执行并通过：Full Audit Run `44275951810`，SHA `2ff7649706ffc75dc4f4e7807d2c37b971282000`；后端 `738 passed, 1 skipped, 1 warning`。
+- 断言 MySQL 最终仅保留前后两条成功行及其副作用，失败行 INSERT 不存在；失败行产品缓存被回滚，前后成功行缓存和统计保留。
+- PR #12 已 squash 合并，main 合并提交 `b6fda7b2089350a0487404c13055318fec55c0de`；该 SHA 的 main CI 仍需完成后才能记录主线验证通过。
+- 剩余未覆盖：真实 MySQL 中既有 AdData UPDATE 失败回滚、ProductAssignment 初始化写入/约束失败、DB 断连或锁等待超时发生在 SAVEPOINT commit 时，以及并发重复导入冲突。
