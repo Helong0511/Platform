@@ -61,7 +61,7 @@ SET @lease_token_check_valid = (
       AND tc.CONSTRAINT_NAME = 'chk_third_party_report_lease_token_v1'
       AND tc.CONSTRAINT_TYPE = 'CHECK'
       AND tc.ENFORCED = 'YES'
-      AND REGEXP_REPLACE(REPLACE(LOWER(cc.CHECK_CLAUSE), CHAR(96), ''), '[[:space:]()]', '') =
+      AND REGEXP_REPLACE(REPLACE(REPLACE(LOWER(cc.CHECK_CLAUSE), 'regexp_like', 'regexp'), CHAR(96), ''), '[[:space:]()]', '') =
           CONCAT(
               'lease_tokenisnullorlease_tokenregexp',
               CHAR(39),
