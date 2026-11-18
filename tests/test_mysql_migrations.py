@@ -1902,3 +1902,60 @@ def test_forward_queue_expired_worker_cannot_mutate_after_takeover():
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS postback_forward_queue")
         connection.close()
+
+
+def test_forward_queue_lease_migration_rejects_wrong_same_name_check_constraint():
+    """同名但语义更宽松的 CHECK 不得被误认为正确迁移结构。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS postback_forward_queue")
+            cursor.execute(
+                "CREATE TABLE postback_forward_queue ("
+                "id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "next_retry_time DATETIME(6) NOT NULL, retry_count INT NOT NULL DEFAULT 0, "
+                "lease_token CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL, "
+                "lease_expires_at DATETIME(6) NULL, "
+                "CONSTRAINT chk_forward_queue_lease_pair_v1 CHECK "
+                "(lease_token IS NULL OR lease_expires_at IS NULL)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            with pytest.raises(pymysql.err.ProgrammingError) as error:
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261116_postback_forward_queue_lease_fencing.sql",
+                )
+            assert error.value.args[0] == 1146
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS postback_forward_queue")
+        connection.close()
+
+
+def test_report_random_lease_migration_rejects_not_enforced_check_constraint():
+    """同名且表达式正确但 NOT ENFORCED 的 CHECK 仍必须阻断迁移。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+            cursor.execute(
+                "CREATE TABLE third_party_report_logs ("
+                "id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "report_start_time DATETIME NULL, "
+                "lease_token CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL, "
+                "CONSTRAINT chk_third_party_report_lease_token_v1 CHECK "
+                "(lease_token IS NULL OR "
+                "(lease_token REGEXP '^[0-9a-f]{32}$' AND report_start_time IS NOT NULL)) "
+                "NOT ENFORCED"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            with pytest.raises(pymysql.err.ProgrammingError) as error:
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261116_third_party_report_random_lease_token.sql",
+                )
+            assert error.value.args[0] == 1146
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
+        connection.close()
