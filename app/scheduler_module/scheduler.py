@@ -43,6 +43,7 @@ from app.scheduler_module.lock import (
     DEFAULT_TIMEOUT_SECONDS,
 )
 from app.scheduler_module.task_queue import submit_task_to_queue, TaskPriority
+from app.scheduler_module.task_names import THIRD_PARTY_REPORT_OUTBOX_TASK_NAME
 from app.scheduler_module.process_allocator import (
     should_execute_in_current_process, register_task_process_assignment
 )
@@ -90,8 +91,11 @@ def mark_scheduler_shutting_down() -> None:
 
 
 def _task_lock_timeout_seconds(task_name: str) -> int:
-    """为可能处理大批量数据的队列任务提供足够长的恢复租约。"""
-    if task_name == "点击记录队列批量处理":
+    """按任务最坏执行预算设置 DB 锁超时；Redis 锁额外保留 60 秒缓冲。"""
+    if task_name in {
+        "点击记录队列批量处理",
+        THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
+    }:
         return 900
     return DEFAULT_TIMEOUT_SECONDS
 
