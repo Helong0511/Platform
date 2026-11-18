@@ -42,8 +42,6 @@
       </div>
     </div>
 
-    </div>
-
     <el-alert
       v-if="Number(stats?.scope_blocked_outbox_count || 0) > 0"
       type="warning"
