@@ -88,6 +88,11 @@ def _create_database() -> str:
                 f"CREATE DATABASE `{database}` "
                 "CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
             )
+            # CI 专用运行账号只获当前随机测试库权限，验证真实服务端身份。
+            cursor.execute(
+                f"GRANT ALL PRIVILEGES ON `{database}`.* "
+                "TO 'platform_application_runtime'@'%'"
+            )
     finally:
         connection.close()
     return database
