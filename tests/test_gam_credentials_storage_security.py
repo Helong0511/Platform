@@ -84,3 +84,36 @@ def test_development_keeps_local_gam_directory_compatibility(monkeypatch, tmp_pa
     assert storage.get_gam_secrets_dir() == repo / "secrets"
     monkeypatch.setenv("GAM_SECRETS_DIR", "local-gam-secrets")
     assert storage.get_gam_secrets_dir() == repo / "local-gam-secrets"
+
+
+def test_production_legacy_secrets_paths_resolve_to_external_directory(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    external = tmp_path / "secure-runtime" / "gam"
+    monkeypatch.setattr(storage, "ROOT", repo)
+    monkeypatch.setenv("PRODUCTION_ENV", "production")
+    monkeypatch.setenv("GAM_SECRETS_DIR", str(external))
+
+    assert storage.resolve_gam_credentials_path(
+        "secrets/gam-123.json"
+    ) == external.resolve() / "gam-123.json"
+    assert storage.resolve_gam_credentials_path(
+        str(external / "gam-456.json")
+    ) == external.resolve() / "gam-456.json"
+
+    with pytest.raises(ValueError, match="不得位于代码仓库"):
+        storage.resolve_gam_credentials_path(
+            str(repo / "secrets" / "gam-789.json")
+        )
+
+
+def test_development_legacy_secrets_paths_keep_repository_default(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(storage, "ROOT", repo)
+    monkeypatch.setenv("PRODUCTION_ENV", "development")
+    monkeypatch.delenv("GAM_SECRETS_DIR", raising=False)
+
+    assert storage.resolve_gam_credentials_path(
+        "secrets/gam-123.json"
+    ) == repo / "secrets" / "gam-123.json"
