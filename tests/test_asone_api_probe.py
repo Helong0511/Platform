@@ -9,11 +9,9 @@ from datetime import date, timedelta
 import os
 import sys
 
+# 仅在手动执行探测脚本时读取密钥；pytest 导入模块时不得退出或访问外部 API。
 API_KEY = (os.getenv("ASONE_API_KEY") or "").strip()
 BASE = os.getenv("ASONE_API_BASE_URL", "https://asone.club").rstrip("/")
-if not API_KEY:
-    print("请设置环境变量 ASONE_API_KEY 后再运行", file=sys.stderr)
-    raise SystemExit(2)
 
 ENDPOINTS = {
     "unit": "/api/channel-unit-report/apiPage",
@@ -52,6 +50,10 @@ def post(path: str, payload: dict) -> tuple[int, dict | str]:
 
 
 def main() -> None:
+    if not API_KEY:
+        print("请设置环境变量 ASONE_API_KEY 后再运行", file=sys.stderr)
+        raise SystemExit(2)
+
     today = date.today()
     ranges = [
         (today - timedelta(days=7), today),

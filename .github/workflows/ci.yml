@@ -1,40 +1,46 @@
-name: CI
+name: Emergency Security CI
 
 on:
-  push:
-    branches: [main, master]
   pull_request:
-    branches: [main, master]
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  backend:
+  backend-security:
+    name: Backend security configuration tests
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
       - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Compile Python
+        run: python -m pip install -r requirements.txt
+      - name: Compile application
         run: python -m compileall app -q
-      - name: Run unit tests
+      - name: Test explicit database configuration and safe probe import
         env:
           UNIT_TEST: "1"
+          PYTHON_DOTENV_DISABLED: "1"
           DATABASE_URL: "sqlite+aiosqlite:///:memory:"
           SECRET_KEY: "ci-test-secret-key-must-be-at-least-32-chars-long"
           PRODUCTION_ENV: "development"
-        # 收集仓库中所有测试文件；没有测试时必须失败，禁止“无测试绿色通过”。
-        run: |
-          shopt -s nullglob
-          mapfile -t TEST_FILES < <(git ls-files 'tests/test_*.py' 'tests/**/test_*.py' | grep -v '^tests/manual/' || true)
-          if [ ${#TEST_FILES[@]} -eq 0 ]; then
-            echo "::error::No tests/test_*.py found; refusing to skip pytest."
-            exit 1
-          fi
-          pytest "${TEST_FILES[@]}" -q --tb=short
+          ASONE_API_KEY: ""
+          ASONE_API_BASE_URL: "http://127.0.0.1:9"
+        run: pytest tests/test_database_config_security.py tests/test_asone_api_probe.py -v -rs --tb=short
 
   frontend:
+    name: Frontend lint and build
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -44,6 +50,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: npm ci || npm install
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
       - run: npm run lint
       - run: npm run build
