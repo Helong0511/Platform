@@ -529,3 +529,12 @@ Run #1986（2026-11-18，提交 `a5575428f312ef272e031aad6e1914ca79676053`）已
 4. 在目标 MySQL 版本和近生产规模数据副本上完成 migration DDL、metadata lock、磁盘峰值、备份恢复与中断恢复演练。
 
 **验收结论：**“不同 DSN 用户名可能映射到同一有效授权账号”的代码层缺口已修复并通过隔离 MySQL CI；数据库授权最小化、角色/代理配置审计及生产级迁移演练仍未完成，不能因此解除上线阻断。
+
+
+## 21. 2026-11-18：Migration Runner 测试中的 Runtime 最小权限边界
+
+- 复核发现此前 Migration Runner MySQL 集成测试为验证应用连接身份，在随机测试库上给 `platform_application_runtime` 授予了 `ALL PRIVILEGES`。该授权仅发生于 GitHub Actions 临时 MySQL，但会使测试无法证明 runtime 身份在迁移目标库上不具备 DDL 权限。
+- 已将随机测试库授权收紧为仅 `SELECT`。Migration Runner 仍使用 CI 管理员/迁移连接执行 DDL；应用 DSN 只用于服务端身份和数据库选择校验。
+- 在真实 MySQL 集成测试中新增 runtime 身份断言：验证 `CURRENT_USER()`、`DATABASE()` 和 SELECT 可用，并验证 CREATE TABLE、ALTER TABLE、CREATE INDEX、DROP TABLE 均以权限错误拒绝。
+- 本项修复仅证明 CI 临时 MySQL 中该随机 schema 的授权边界；不等于生产账号 `SHOW GRANTS`、mandatory roles、代理用户映射或全局权限审计已完成。生产部署仍须保存脱敏授权快照，并在完整业务 schema 上执行 runtime 权限矩阵。
+- 本次不连接生产数据库、不修改生产授权、不合并 PR、不部署。
