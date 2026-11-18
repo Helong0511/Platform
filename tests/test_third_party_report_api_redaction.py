@@ -260,6 +260,7 @@ async def test_report_stats_expose_legacy_scope_and_blocked_outbox_counts():
 
 def test_unresolved_outbox_payload_cannot_be_edited():
     """历史平台归属不明的 Outbox 不允许管理员修改后伪装成可恢复事件。"""
+    from datetime import datetime
     from types import SimpleNamespace
     from app.core.third_party_report import is_outbox_payload_editable
 
