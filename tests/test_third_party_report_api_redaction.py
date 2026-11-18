@@ -258,6 +258,55 @@ async def test_report_stats_expose_legacy_scope_and_blocked_outbox_counts():
     assert response.data["pending"] == 5
 
 
+@pytest.mark.asyncio
+async def test_report_list_filters_by_identity_scope():
+    """管理端可单独筛选历史未解析身份，且筛选条件进入数据库查询。"""
+    from datetime import datetime
+    from types import SimpleNamespace
+    from app.api_v1.system.third_party_reports import get_third_party_reports
+
+    class FakeResult:
+        def __init__(self, *, rows=None, scalar=None):
+            self._rows = rows or []
+            self._scalar = scalar
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+        def scalar_one(self):
+            return self._scalar
+
+    class FakeDB:
+        def __init__(self):
+            self.statements = []
+            self.results = [FakeResult(rows=[]), FakeResult(scalar=0)]
+
+        async def execute(self, statement):
+            self.statements.append(statement)
+            return self.results.pop(0)
+
+        async def scalar(self, statement):
+            self.statements.append(statement)
+            return datetime(2026, 11, 18, 12, 0, 0)
+
+    db = FakeDB()
+    response = await get_third_party_reports(
+        page=1,
+        page_size=10,
+        identity_scope="legacy_unresolved",
+        db=db,
+        current_user=SimpleNamespace(id=1),
+    )
+
+    assert response.code == 200
+    assert response.total == 0
+    query_params = db.statements[0].compile().params
+    assert "legacy_unresolved" in query_params.values()
+
+
 def test_unresolved_outbox_payload_cannot_be_edited():
     """历史平台归属不明的 Outbox 不允许管理员修改后伪装成可恢复事件。"""
     from datetime import datetime
