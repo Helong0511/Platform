@@ -171,3 +171,103 @@ async def test_invalid_signature_does_not_consume_replay_key(monkeypatch):
         await api_auth.verify_client_request(
             _request(), _DB(_client()), client_ip="198.51.100.7"
         )
+
+
+# 真实 Redis 集成测试仅允许 GitHub Actions 临时 Redis DB14。
+import ipaddress
+import os
+from urllib.parse import urlsplit
+
+from redis.asyncio import Redis
+
+
+REDIS_URL = os.getenv("REDIS_INTEGRATION_URL")
+
+
+def _is_loopback_redis_url(url: str | None) -> bool:
+    if not url:
+        return False
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname
+        if not host:
+            return False
+        if host.strip().lower() == "localhost":
+            loopback = True
+        else:
+            try:
+                loopback = ipaddress.ip_address(host.strip()).is_loopback
+            except ValueError:
+                loopback = False
+        return (
+            parsed.scheme in {"redis", "rediss"}
+            and loopback
+            and parsed.port in (None, 6379)
+            and parsed.path.strip("/") == "14"
+        )
+    except ValueError:
+        return False
+
+
+_SAFE_REDIS_TARGET = (
+    os.getenv("UNIT_TEST") == "1"
+    and os.getenv("GITHUB_ACTIONS") == "true"
+    and os.getenv("REDIS_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS") == "1"
+    and _is_loopback_redis_url(REDIS_URL)
+)
+
+if (
+    os.getenv("GITHUB_ACTIONS") == "true"
+    or (os.getenv("UNIT_TEST") == "1" and REDIS_URL)
+) and not _SAFE_REDIS_TARGET:
+    raise RuntimeError(
+        "拒绝执行客户 API 防重放 Redis 集成测试：仅允许 loopback Redis DB14，"
+        "并显式启用 REDIS_INTEGRATION_ALLOW_DESTRUCTIVE_TESTS=1"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not _SAFE_REDIS_TARGET,
+    reason="仅在 GitHub Actions 临时 Redis DB14 中运行",
+)
+async def test_real_redis_set_nx_prevents_client_api_signed_request_replay(monkeypatch):
+    """真实 Redis 验证防重放键的跨请求原子唯一认领。"""
+    import hashlib
+    import uuid
+
+    redis = Redis.from_url(REDIS_URL, decode_responses=True)
+    client_id = 17
+    req_time = int(datetime.now(timezone.utc).timestamp())
+    sign = f"synthetic-{uuid.uuid4().hex}"
+    fingerprint = hashlib.sha256(
+        f"{client_id}:{req_time}:{sign.lower()}".encode("utf-8")
+    ).hexdigest()
+    redis_key = f"client_api:replay:v1:{fingerprint}"
+
+    async def isolated_redis_client():
+        return redis
+
+    monkeypatch.setattr(api_auth, "get_redis_client", isolated_redis_client)
+    try:
+        assert await redis.ping() is True
+        await api_auth._claim_client_api_request(
+            client_id=client_id,
+            req_time=req_time,
+            sign=sign,
+            time_tolerance=15,
+        )
+        assert await redis.get(redis_key) == "1"
+        assert 1 <= await redis.ttl(redis_key) <= 31
+
+        with pytest.raises(HTTPException) as caught:
+            await api_auth._claim_client_api_request(
+                client_id=client_id,
+                req_time=req_time,
+                sign=sign,
+                time_tolerance=15,
+            )
+        assert caught.value.status_code == 409
+    finally:
+        await redis.delete(redis_key)
+        await redis.aclose()
