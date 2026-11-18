@@ -54,6 +54,33 @@ def get_gam_secrets_dir() -> Path:
     return DEFAULT_GAM_SECRETS_DIR
 
 
+def resolve_gam_credentials_path(raw: str | Path) -> Path:
+    """解析 GAM 凭据路径；生产环境禁止回退到仓库内的 secrets 文件。"""
+    raw_text = str(raw or "").strip()
+    if not raw_text:
+        raise ValueError("GAM credentials_json 不能为空")
+
+    path = Path(raw_text)
+    if not path.is_absolute():
+        if path.parts and path.parts[0].lower() == "secrets":
+            # 兼容数据库/旧配置中的 secrets/gam-*.json 相对路径，
+            # 生产时映射到 GAM_SECRETS_DIR，开发时仍映射到项目 secrets/。
+            secrets_dir = get_gam_secrets_dir()
+            path = secrets_dir.joinpath(*path.parts[1:])
+        else:
+            path = ROOT / path
+
+    if os.getenv("PRODUCTION_ENV", "").strip().lower() in {"production", "prod"}:
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(ROOT.resolve())
+        except ValueError:
+            return resolved
+        raise ValueError("生产环境 GAM 凭据路径不得位于代码仓库目录内")
+
+    return path
+
+
 def parse_network_code_from_filename(filename: str) -> str | None:
     """从上传文件名解析 network_code（gam-{code}.json）。"""
     basename = Path(str(filename or "").strip()).name
