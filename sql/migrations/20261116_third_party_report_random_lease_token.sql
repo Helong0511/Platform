@@ -61,12 +61,14 @@ SET @lease_token_check_valid = (
       AND tc.CONSTRAINT_NAME = 'chk_third_party_report_lease_token_v1'
       AND tc.CONSTRAINT_TYPE = 'CHECK'
       AND tc.ENFORCED = 'YES'
-      AND REGEXP_REPLACE(LOWER(cc.CHECK_CLAUSE), '[[:space:]\x60()]', '') =
-          'lease_tokenisnullorlease_tokenregexp''^[0-9a-f]{32}
-SET @lease_token_verify_sql = IF(
-    @lease_token_schema_valid = 1 AND @lease_token_check_valid = 1,
-    'SELECT 1',
-    'SELECT * FROM __third_party_report_lease_token_validation_failed__'
+      AND REGEXP_REPLACE(REPLACE(LOWER(cc.CHECK_CLAUSE), CHAR(96), ''), '[[:space:]()]', '') =
+          CONCAT(
+              'lease_tokenisnullorlease_tokenregexp',
+              CHAR(39),
+              '^[0-9a-f]{32}',
+              CHAR(39),
+              'andreport_start_timeisnotnull'
+          )
 );
 PREPARE lease_token_verify_stmt FROM @lease_token_verify_sql;
 EXECUTE lease_token_verify_stmt;
