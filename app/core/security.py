@@ -71,6 +71,8 @@ JWT令牌管理：
 import logging
 import os
 import secrets
+import stat
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -142,8 +144,27 @@ def _generate_ephemeral_rsa_pair() -> tuple[str, str]:
     return _ephemeral_rsa_private_pem, _ephemeral_rsa_public_pem
 
 
-def _resolve_rsa_key_path(key_path: str) -> str:
-    """将 Linux 部署路径映射到本地 keys/ 目录（Windows 开发用）。"""
+def _resolve_rsa_key_path(key_path: str, key_type: str = "private") -> str:
+    """解析 RSA 密钥路径；生产环境禁止回退到仓库内的密钥文件。"""
+    if settings.is_production:
+        if not key_path:
+            return ""
+        path = Path(key_path)
+        if not path.is_absolute():
+            raise RuntimeError(
+                f"生产环境 RSA {key_type} 密钥路径必须是绝对路径"
+            )
+        resolved = path.resolve()
+        project_root = Path(__file__).resolve().parents[2]
+        try:
+            resolved.relative_to(project_root)
+        except ValueError:
+            return str(resolved)
+        raise RuntimeError(
+            f"生产环境 RSA {key_type} 密钥不得存放在代码仓库目录内"
+        )
+
+    # 开发环境兼容 Windows 本地 keys/ 目录；生产环境绝不执行此回退。
     if key_path and os.path.exists(key_path):
         return key_path
     if not key_path:
@@ -190,23 +211,33 @@ class JWTUtils:
         if key_content:
             return key_content
         
-        # 尝试从文件加载密钥（含项目 keys/ 目录回退）
-        resolved_path = _resolve_rsa_key_path(key_path)
-        if resolved_path and os.path.exists(resolved_path):
+        # 开发环境允许项目 keys/ 回退；生产环境只允许显式的仓库外密钥路径。
+        resolved_path = _resolve_rsa_key_path(key_path, key_type)
+        if resolved_path and os.path.isfile(resolved_path):
             try:
+                if settings.is_production and key_type == "private":
+                    private_mode = stat.S_IMODE(os.stat(resolved_path).st_mode)
+                    if private_mode & 0o077:
+                        raise PermissionError(
+                            "生产环境 RSA 私钥文件权限过宽，必须限制为仅所有者可读写（如 0600）"
+                        )
                 with open(resolved_path, "r", encoding="utf-8") as f:
                     return f.read()
             except Exception as e:
-                logger.error(f"加载RSA {key_type} 密钥文件失败: {e}")
+                logger.error(
+                    "加载 RSA %s 密钥文件失败：exception_type=%s",
+                    key_type,
+                    type(e).__name__,
+                )
                 raise
-        
-        # 调试：输出环境变量值
-        from app.core.config import detect_production_env
-        production_env = detect_production_env()
-        logger.info(f"RSA密钥加载调试：PRODUCTION_ENV={production_env}")
-        
-        # 无密钥文件：使用进程内固定的临时密钥对
-        logger.warning(f"未配置RSA {key_type} 密钥，使用进程内临时测试密钥对")
+
+        if settings.is_production:
+            raise RuntimeError(
+                f"生产环境未配置有效的 RSA {key_type} 密钥；拒绝使用仓库回退或临时密钥"
+            )
+
+        # 仅开发环境允许使用进程内临时密钥对，避免本地启动依赖真实生产密钥。
+        logger.warning("未配置 RSA %s 密钥，开发环境使用进程内临时测试密钥对", key_type)
         private_pem, public_pem = _generate_ephemeral_rsa_pair()
         return private_pem if key_type == "private" else public_pem
     
@@ -713,3 +744,41 @@ async def require_publisher_or_admin(
             http_status=status.HTTP_403_FORBIDDEN,
         )
     return current_user
+
+def validate_production_jwt_keypair() -> None:
+    """启动时验证生产 RS256 密钥配置、路径权限及公私钥匹配关系。"""
+    if not settings.is_production:
+        return
+    if settings.JWT_ALGORITHM != "RS256":
+        raise RuntimeError("生产环境 JWT_ALGORITHM 必须为 RS256")
+
+    private_key = JWTUtils._load_rsa_key(
+        settings.RSA_PRIVATE_KEY,
+        settings.RSA_PRIVATE_KEY_PATH,
+        "private",
+    )
+    public_key = JWTUtils._load_rsa_key(
+        settings.RSA_PUBLIC_KEY,
+        settings.RSA_PUBLIC_KEY_PATH,
+        "public",
+    )
+
+    now = datetime.now(timezone.utc)
+    probe_claims = {
+        "sub": "startup-rsa-key-pair-validation",
+        "iat": now,
+        "exp": now + timedelta(minutes=1),
+    }
+    try:
+        probe_token = jwt_encode(probe_claims, private_key, algorithm="RS256")
+        decoded = jwt_decode(
+            probe_token,
+            public_key,
+            algorithms=["RS256"],
+            options={"verify_aud": False},
+        )
+    except Exception as exc:
+        raise RuntimeError("生产 RSA 公私钥无效或不匹配") from exc
+
+    if decoded.get("sub") != probe_claims["sub"]:
+        raise RuntimeError("生产 RSA 公私钥匹配验证失败")

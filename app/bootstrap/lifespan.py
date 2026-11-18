@@ -11,6 +11,7 @@ from sqlalchemy import inspect, text
 
 from app.core.cache_manager import CacheManager
 from app.core.config import settings
+from app.core.security import validate_production_jwt_keypair
 from app.core.database import AsyncSessionLocal, engine, init_db
 from app.core.redis_client import close_redis_client, get_redis_client
 from app.core.telegram.file_lock import is_lock_held as has_bot_lock
@@ -363,6 +364,17 @@ async def lifespan(app: FastAPI):
     redis_client = None
     cache_warmup_task = None
     logger.info(f"[Worker PID:{worker_pid}] 应用启动中...")
+
+    # 生产 JWT RS256 密钥必须在开始监听请求前完成路径、权限和公私钥匹配校验。
+    try:
+        validate_production_jwt_keypair()
+    except Exception as exc:
+        logger.error(
+            "[Worker PID:%s] JWT 密钥配置不安全或不可用，拒绝启动：exception_type=%s",
+            worker_pid,
+            type(exc).__name__,
+        )
+        raise RuntimeError("JWT 密钥配置未达到生产启动要求，拒绝启动") from exc
 
     # 检查并验证时区配置（启动时首先检查）
     try:

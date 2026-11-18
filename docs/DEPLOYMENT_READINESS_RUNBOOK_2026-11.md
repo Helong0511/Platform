@@ -1198,3 +1198,11 @@ PR #1 继续 Open / Draft；本轮不合并 main、不部署、不连接生产�
 - 发布前需核验实际 Redis 实例的 `INFO memory`、`CONFIG GET maxmemory-policy`（若 ACL 禁止读取配置，须由运维通过配置文件/托管 Redis 控制面提供证据），确认内存水位、淘汰策略、HA 故障切换和告警；不能以 CI 临时 Redis 的通过结果替代生产配置验收。
 - 如当前共享 Redis 同时承载缓存、限流、Cap reservation 等状态，需评估 noeviction 对这些写路径的影响和内存容量；必要时使用独立 Redis 实例/集群，而不是在未评估时直接修改生产全局策略。
 - 此检查是生产部署阻断项；本轮未连接或修改生产 Redis。
+
+## 2026-11-18 补充：生产 JWT RS256 密钥 fail-closed 要求
+
+- 生产环境 RS256 必须显式提供 RSA 私钥与公钥内容，或分别配置仓库外的绝对路径；私钥文件必须由应用运行账号可读，且 POSIX 权限不得向 group/other 开放（建议 `0600`）。
+- 生产环境禁止按 basename 回退到项目 `keys/` 目录；禁止在 RSA 密钥缺失/路径错误时生成进程内临时密钥。缺失、相对路径、仓库内路径、权限过宽或文件不可读均应 fail-closed。
+- 开发环境仍保留本地 `keys/` 回退和临时密钥，不能将此兼容行为带入生产。
+- 更换 JWT RSA 密钥对后，所有 API worker、scheduler 和 token 验证实例必须同时使用匹配的新公钥；旧签名的 access/refresh token 将无法由新公钥验证，应安排会话失效和用户重新登录。
+- `keys/private_key.pem` 曾公开，必须轮换，不得继续作为生产签名密钥；历史泄露的私钥仍需在云端/密钥管理系统吊销或替换，并在轮换后清理 Git 历史。
