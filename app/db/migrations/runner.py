@@ -119,6 +119,41 @@ def _ensure_distinct_database_account(migration_url, application_database_url: s
         )
 
 
+async def _ensure_connected_database_account_separation(
+    migration_connection, application_database_url: str
+) -> None:
+    """比较 MySQL 服务端认证身份，防止不同 DSN 用户名映射到同一账号。"""
+    migration_identity = await migration_connection.scalar(
+        text("SELECT CURRENT_USER()")
+    )
+    migration_database = await migration_connection.scalar(text("SELECT DATABASE()"))
+    application_engine = create_async_engine(
+        make_url(application_database_url), echo=False, pool_pre_ping=False
+    )
+    try:
+        async with application_engine.connect() as application_connection:
+            application_identity = await application_connection.scalar(
+                text("SELECT CURRENT_USER()")
+            )
+            application_database = await application_connection.scalar(
+                text("SELECT DATABASE()")
+            )
+        if migration_database != application_database:
+            raise MigrationRunnerError(
+                "迁移连接与应用连接实际选择的数据库不一致"
+            )
+        if (
+            not isinstance(migration_identity, str)
+            or not isinstance(application_identity, str)
+            or migration_identity.casefold() == application_identity.casefold()
+        ):
+            raise MigrationRunnerError(
+                "迁移连接与应用连接解析为相同或无法确认的 MySQL 服务端账号"
+            )
+    finally:
+        await application_engine.dispose()
+
+
 async def _consume_result(connection, statement: str) -> None:
     result = await connection.exec_driver_sql(statement)
     try:
@@ -435,6 +470,9 @@ async def read_migration_status(
     engine = create_async_engine(url, echo=False, pool_pre_ping=False)
     try:
         async with engine.connect() as connection:
+            await _ensure_connected_database_account_separation(
+                connection, application_database_url
+            )
             database_name = await connection.scalar(text("SELECT DATABASE()"))
             if database_name != url.database:
                 raise MigrationRunnerError("连接实际数据库与迁移 DSN 指定数据库不一致")
@@ -500,6 +538,10 @@ async def apply_migrations(
     engine = create_async_engine(url, echo=False, pool_pre_ping=False)
     try:
         async with engine.connect() as connection:
+            # 用服务端认证身份复核 DSN，避免代理/映射账号绕过静态用户名检查。
+            await _ensure_connected_database_account_separation(
+                connection, application_database_url
+            )
             # 在同一物理连接中取得锁、执行所有 DDL 并释放锁。
             await connection.exec_driver_sql("SET NAMES utf8mb4")
             await connection.commit()
