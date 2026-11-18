@@ -199,7 +199,18 @@ async def _claim_client_api_request(
     Redis 不可用时 fail-closed；不能退化为进程内集合，否则多 worker 间可重放。
     TTL 覆盖请求时间戳允许窗口的完整跨度（±time_tolerance）。
     """
-    redis = await get_redis_client()
+    try:
+        redis = await get_redis_client()
+    except Exception as exc:
+        logger.error(
+            "客户 API 防重放客户端获取失败：exception_type=%s",
+            type(exc).__name__,
+        )
+        raise_api_exception(
+            ErrorCode.SERVICE_UNAVAILABLE,
+            detail="客户 API 防重放服务暂不可用，请稍后重试",
+        )
+
     if redis is None:
         logger.error("客户 API 防重放存储不可用：拒绝请求")
         raise_api_exception(
