@@ -9,7 +9,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 
 from app.models.models import Offer, OfferPublisherAssignment, Publisher, User, UserRole
-from app.services.cpl.offer.helpers import get_client_id_for_user
+from app.services.cpl.offer.helpers import get_client_ids_for_user
 from app.services.cpl.offer.queries.assignments_query import OfferAssignmentsQuery
 
 
@@ -35,8 +35,8 @@ class OfferListQuery:
         has_join = False
 
         if current_user.role == UserRole.CLIENT:
-            client_id = await get_client_id_for_user(self.db, current_user)
-            if client_id:
+            client_ids = await get_client_ids_for_user(self.db, current_user)
+            if client_ids:
                 query = (
                     query.join(
                         OfferPublisherAssignment,
@@ -48,7 +48,7 @@ class OfferListQuery:
                     )
                     .where(
                         and_(
-                            Publisher.client_id == client_id,
+                            Publisher.client_id.in_(client_ids),
                             Publisher.is_active == True,
                             OfferPublisherAssignment.is_active == True,
                         )

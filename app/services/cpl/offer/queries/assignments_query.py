@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.models.models import OfferPublisherAssignment, Publisher, User
-from app.services.cpl.offer.helpers import assignment_to_dict, get_client_id_for_user
+from app.services.cpl.offer.helpers import assignment_to_dict, get_client_ids_for_user
 
 
 class OfferAssignmentsQuery:
@@ -26,9 +26,11 @@ class OfferAssignmentsQuery:
             .where(Publisher.is_active == True)
         )
 
-        client_id = await get_client_id_for_user(self.db, current_user)
-        if client_id:
-            pub_query = pub_query.where(Publisher.client_id == client_id)
+        client_ids = await get_client_ids_for_user(self.db, current_user)
+        if client_ids is not None:
+            if not client_ids:
+                return []
+            pub_query = pub_query.where(Publisher.client_id.in_(client_ids))
 
         pub_result = await self.db.execute(pub_query)
         return [
@@ -53,9 +55,11 @@ class OfferAssignmentsQuery:
             .where(Publisher.is_active == True)
         )
 
-        client_id = await get_client_id_for_user(self.db, current_user)
-        if client_id:
-            pub_query = pub_query.where(Publisher.client_id == client_id)
+        client_ids = await get_client_ids_for_user(self.db, current_user)
+        if client_ids is not None:
+            if not client_ids:
+                return {}
+            pub_query = pub_query.where(Publisher.client_id.in_(client_ids))
 
         assignments_map: Dict[int, List[Dict[str, Any]]] = {}
         pub_result = await self.db.execute(pub_query)

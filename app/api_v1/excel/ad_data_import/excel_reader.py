@@ -38,7 +38,8 @@ async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes
 
     # 读取文件内容
     max_size = settings.MAX_UPLOAD_SIZE
-    contents = await file.read()
+    # 只读取上限 + 1 字节即可判定超限，避免先把超大上传文件完整读入内存。
+    contents = await file.read(max_size + 1)
 
     # 检查文件大小
     # ---------- 条件分支 ----------

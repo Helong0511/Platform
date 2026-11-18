@@ -136,7 +136,7 @@ async def get_tb_search_data(
     # 权限过滤
     # ---------- 条件分支 ----------
     if not is_admin(current_user):
-        query = query.where(Client.user_id == current_user.id)
+        query = query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
     # ---------- 条件分支 ----------
     elif client_id:
         query = query.where(Client.id == client_id)
@@ -223,7 +223,7 @@ async def get_tb_search_data(
     # 应用相同的过滤条件
     # ---------- 条件分支 ----------
     if not is_admin(current_user):
-        count_query = count_query.where(Client.user_id == current_user.id)
+        count_query = count_query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
     # ---------- 条件分支 ----------
     elif client_id:
         count_query = count_query.where(Client.id == client_id)
@@ -734,7 +734,7 @@ async def get_clients_with_tb_search_data(
         # 权限过滤
         # ---------- 条件分支 ----------
         if not is_admin(current_user):
-            query = query.where(Client.user_id == current_user.id)
+            query = query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
         
         # 日期范围过滤
         # ---------- 条件分支 ----------
@@ -802,7 +802,7 @@ async def get_products_with_tb_search_data(
             assignment_query, use_assignment_table
         )
         if not is_admin(current_user):
-            assignment_query = assignment_query.where(Client.user_id == current_user.id)
+            assignment_query = assignment_query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
         elif client_id:
             assignment_query = assignment_query.where(Client.id == client_id)
 
@@ -823,7 +823,7 @@ async def get_products_with_tb_search_data(
                 TBSearchData, TBSearchData.product_id == Product.id
             )
             current_query = current_query.join(Client, Product.client_id == Client.id)
-            current_query = current_query.where(Client.user_id == current_user.id)
+            current_query = current_query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
             current_query = apply_date_range_filter(
                 current_query,
                 TBSearchData.date,
@@ -901,7 +901,7 @@ async def get_countries_with_tb_search_data(
         # 权限过滤
         # ---------- 条件分支 ----------
         if not is_admin(current_user):
-            query = query.where(Client.user_id == current_user.id)
+            query = query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
         # ---------- 条件分支 ----------
         elif client_id:
             query = query.where(Client.id == client_id)

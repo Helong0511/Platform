@@ -58,7 +58,10 @@ class UrlBuilder:
             parsed.fragment
         ))
         
-        logger.debug(f"构建 Postback URL: {new_url}")
+        logger.debug(
+            "构建 Postback URL 完成：parameter_count=%s",
+            len(merged_params),
+        )
         
         return new_url, merged_params
     

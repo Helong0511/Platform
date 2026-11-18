@@ -131,10 +131,11 @@ def test_wait_before_send_cross_process_chat_gate(monkeypatch):
     monkeypatch.setattr(ms, "MIN_SEND_INTERVAL", 1.0)
     monkeypatch.setattr(ms, "MIN_GLOBAL_SEND_INTERVAL", 0.01)
 
+    # 直接模拟另一个 worker 已占用 per-chat 闸门，避免依赖两次调用之间
+    # 的真实调度时间；本测试只验证跨进程闸门等待，不测试本地时间间隔。
+    fake.setex(ms._REDIS_GATE_CHAT.format(chat_id="chat-a"), 1, "other-worker")
+
     with patch.object(ms, "_get_sync_redis", return_value=fake):
-        ms._wait_before_send("chat-a")
-        ms._last_send_by_chat.clear()
-        ms._last_send_monotonic = 0.0
         ms._wait_before_send("chat-a")
 
     assert any(s >= 0.05 for s in slept)

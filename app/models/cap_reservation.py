@@ -4,7 +4,7 @@ Cap Redis reservation 持久化账本模型。
 该表记录 Redis 计数预留与 Postback 数据库事务之间的跨存储状态。
 不设置 Offer/Publisher 外键：账本必须在业务对象删除后仍保留恢复证据。
 """
-from sqlalchemy import Column, Integer, String, Date, DateTime, Text, Boolean, CheckConstraint, Index, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Date, DateTime, Text, Boolean, CheckConstraint, Index, UniqueConstraint, text
 
 from app.core.utils import get_app_now_naive
 from app.models.base import Base
@@ -21,35 +21,40 @@ class CapReservation(Base):
     )
     platform = Column(String(50), nullable=False, comment="Postback 平台")
     conversion_id = Column(String(255), nullable=False, comment="正式转化事件 ID")
-    event_name = Column(String(100), nullable=False, default="default", comment="标准化事件名称")
+    event_name = Column(String(100), nullable=False, default="default", server_default=text("'default'"), comment="标准化事件名称")
     offer_id = Column(Integer, nullable=False, comment="预留时的 Offer ID 快照")
     publisher_id = Column(Integer, nullable=True, comment="预留时的 Publisher ID 快照；NULL 表示全局渠道范围")
     cap_kind = Column(String(10), nullable=False, comment="Cap 类型：daily 或 total")
     business_date = Column(Date, nullable=True, comment="Daily 业务日期；Total 必须为 NULL")
     redis_counter_key = Column(String(255), nullable=False, comment="Redis 计数器 Key 快照")
     redis_token_key = Column(String(512), nullable=False, comment="Redis reservation token Key 快照")
-    redis_reserved = Column(Boolean, nullable=False, default=False, comment="是否确认 Redis Lua 已成功预留；区分 fail-open 无 token 路径")
-    redis_token_cleaned = Column(Boolean, nullable=False, default=False, comment="终态后是否已清理 Redis token；清理失败由恢复任务重试")
+    redis_reserved = Column(Boolean, nullable=False, default=False, server_default=text("0"), comment="是否确认 Redis Lua 已成功预留；区分 fail-open 无 token 路径")
+    redis_token_cleaned = Column(Boolean, nullable=False, default=False, server_default=text("0"), comment="终态后是否已清理 Redis token；清理失败由恢复任务重试")
     state = Column(
-        String(24), nullable=False, default="PREPARED",
+        String(24), nullable=False, default="PREPARED", server_default=text("'PREPARED'"),
         comment="状态：PREPARED/RESERVED/COMMITTED/ROLLED_BACK/NEEDS_RECONCILIATION",
     )
-    attempts = Column(Integer, nullable=False, default=0, comment="恢复尝试次数")
+    attempts = Column(Integer, nullable=False, default=0, server_default=text("0"), comment="恢复尝试次数")
     lease_owner = Column(String(64), nullable=True, comment="恢复 Worker 租约持有者")
     lease_expires_at = Column(DateTime, nullable=True, comment="恢复 Worker 租约到期时间")
     last_error = Column(Text, nullable=True, comment="最近一次恢复错误摘要")
-    prepared_at = Column(DateTime, nullable=False, default=get_app_now_naive, comment="PREPARED 创建时间")
+    prepared_at = Column(DateTime, nullable=False, default=get_app_now_naive, server_default=text("CURRENT_TIMESTAMP"), comment="PREPARED 创建时间")
     reserved_at = Column(DateTime, nullable=True, comment="Redis 预留确认时间")
     finalized_at = Column(DateTime, nullable=True, comment="终态确认时间")
-    created_at = Column(DateTime, nullable=False, default=get_app_now_naive, comment="创建时间")
+    created_at = Column(DateTime, nullable=False, default=get_app_now_naive, server_default=text("CURRENT_TIMESTAMP"), comment="创建时间")
     updated_at = Column(
         DateTime, nullable=False, default=get_app_now_naive,
-        onupdate=get_app_now_naive, comment="更新时间",
+        onupdate=get_app_now_naive, server_default=text("CURRENT_TIMESTAMP"), comment="更新时间",
     )
 
     __table_args__ = (
-        # 在数据库层强制账本关键语义，避免绕过 Service 的写入破坏恢复依据。
-        CheckConstraint("length(reservation_key) = 64", name="chk_cap_reservation_key_sha256"),
+        # 数据库层约束：避免绕过 Service 写入破坏跨 Redis/MySQL 恢复依据。
+        CheckConstraint("LENGTH(reservation_key) = 64", name="chk_cap_reservation_key_sha256"),
+        # MySQL 使用二进制 collation 和区分大小写的正则；SQLite 测试库不生成此方言约束。
+        CheckConstraint(
+            "REGEXP_LIKE(reservation_key COLLATE utf8mb4_bin, '^[0-9a-f]{64}$', 'c')",
+            name="chk_cap_reservation_key_hex",
+        ).ddl_if(dialect="mysql"),
         CheckConstraint("offer_id > 0", name="chk_cap_reservation_offer_positive"),
         CheckConstraint("publisher_id IS NULL OR publisher_id > 0", name="chk_cap_reservation_publisher_positive"),
         CheckConstraint("attempts >= 0", name="chk_cap_reservation_attempts_nonnegative"),

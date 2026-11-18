@@ -10,7 +10,6 @@ from calendar import monthrange
 from datetime import date, datetime
 from fastapi import Depends
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -234,69 +233,25 @@ async def export_ad_data_handler(
     # 获取客户信息 - 使用selectinload预加载（如果需要）
     # ---------- 条件分支 ----------
     if current_user.role != UserRole.ADMIN:
-        # 优化：直接查询客户，避免额外查询
-        client_query = select(Client).where(Client.user_id == current_user.id)
-        client_result = await db.execute(client_query)
-        client = client_result.scalars().first()
-        # ---------- 条件分支 ----------
-        if not client:
-            logger.warning(f"客户用户 {current_user.username} 没有关联的客户账户")
+        # 多 Client 账号只需确认至少存在一个启用主体；实际数据查询统一按
+        # Client.user_id + Client.is_active 过滤全部主体，不能只取任意第一条。
+        active_client_query = select(Client.id).where(
+            Client.user_id == current_user.id,
+            Client.is_active.is_(True),
+        ).limit(1)
+        client_result = await db.execute(active_client_query)
+        if client_result.scalar_one_or_none() is None:
+            logger.warning("客户用户 %s 没有关联启用中的客户账户", current_user.username)
             raise_api_exception(
                 error_code=ErrorCode.FORBIDDEN,
                 message="没有关联的客户账户，无法导出数据",
-                detail="客户用户必须关联客户账户才能导出数据。请联系管理员为您创建客户账户"
-            )
-        target_client_id = client.id
-
-        # 额外检查：客户是否有任何广告数据（在应用筛选条件之前先检查是否有数据）
-        # 先检查是否使用产品分配历史表
-        use_assignment_table_for_count = await check_use_assignment_table(db)
-
-        data_count_query = select(func.count(AdData.id)).join(
-            Product, AdData.product_id == Product.id
-        )
-        # ---------- 条件分支 ----------
-        if use_assignment_table_for_count:
-            from app.services.ad_data.queries.join_helpers import (
-                join_resolved_client,
-                outerjoin_best_product_assignment,
-                resolved_client_id_expr,
+                detail="客户用户必须关联启用中的客户账户才能导出数据。请联系管理员核实客户账户状态",
             )
 
-            data_count_query = outerjoin_best_product_assignment(data_count_query, AdData.date)
-            data_count_query = join_resolved_client(data_count_query)
-            if target_client_id is not None:
-                data_count_query = data_count_query.where(
-                    resolved_client_id_expr() == target_client_id
-                )
-        else:
-            # 旧的查询方式
-            # ---------- 条件分支 ----------
-            if target_client_id is not None:
-                data_count_query = data_count_query.where(Product.client_id == target_client_id)
-
-        # 应用产品状态过滤（只统计激活状态的产品）
-        data_count_query = data_count_query.where(Product.is_active == True)
-
-        # 应用日期范围过滤（如果指定了日期范围）
-        # ---------- 条件分支 ----------
-        if start_date:
-            data_count_query = data_count_query.where(AdData.date >= start_date)
-        # ---------- 条件分支 ----------
-        if end_date:
-            data_count_query = data_count_query.where(AdData.date <= end_date)
-
-        data_count_result = await db.execute(data_count_query)
-        total_data_count = data_count_result.scalar() or 0
-
-        # ---------- 条件分支 ----------
-        if total_data_count == 0:
-            logger.info(f"客户用户 {current_user.username} (客户ID: {target_client_id}) 没有任何广告数据")
-            raise_api_exception(
-                error_code=ErrorCode.NOT_FOUND,
-                message="无数据，不能导出",
-                detail="您的账户下没有任何广告数据，无法导出。请先导入数据后再试"
-            )
+        # 非管理员不传 client_id 限制单一主体；apply_ad_data_scope_filters
+        # 会在明细与每日汇总查询中统一约束该用户全部启用 Client。
+        # 数据是否存在由后续实际导出查询判断，避免重复扫描和首个 Client 误判无数据。
+        target_client_id = None
     else:
         # 管理员可以指定客户ID，也可以不指定（导出所有客户的数据）
         target_client_id = client_id

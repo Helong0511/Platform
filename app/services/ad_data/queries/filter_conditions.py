@@ -187,7 +187,7 @@ async def apply_ad_data_scope_filters(
     dim_raw = str(dimension).strip() if dimension else None
 
     if not is_admin(current_user):
-        query = query.where(Client.user_id == current_user.id)
+        query = query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
     else:
         client_filter = apply_client_ids_filter(Client.id, client_ids)
         if client_filter is not None:

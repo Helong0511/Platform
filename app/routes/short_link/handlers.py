@@ -223,7 +223,7 @@ async def handle_cached_redirect(
         )
 
     # 更新点击次数
-    await increment_click_count_async(short_code)
+    await increment_click_count_async(short_code, click_id=click_id)
 
     # 打印最终跳转链接详细信息
     log_redirect_details(
@@ -365,8 +365,8 @@ async def handle_database_redirect(
         final_redirect_url=final_url
     )
 
-    # 更新点击次数
-    await increment_click_count_async(short_code)
+    # 使用本次已生成的 click_id，确保同一点击在重试时保持幂等。
+    await increment_click_count_async(short_code, click_id=click_id)
 
     # 打印最终跳转链接详细信息
     log_redirect_details(

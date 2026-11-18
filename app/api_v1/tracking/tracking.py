@@ -43,94 +43,80 @@ logger = logging.getLogger(__name__)
 # 后台任务：创建点击记录（带重试机制）
 async def create_click_background(click_data: dict, max_retries: int = 3):
     """
-    异步创建点击记录，带重试机制
-    
-    如果检测到重复的 click_id，会自动重新生成并重试。
-    
-    Args:
-        click_data: 点击记录数据
-        max_retries: 最大重试次数
+    异步创建点击记录，带有限重试。
+
+    click_id 是单次点击的幂等键。重复 ID 表示同一事件已入库，必须跳过，
+    不能重新生成 ID，否则 Redis 队列回退与后台直写并发时会重复记录同一次点击。
     """
-    # ---------- 入口：参数与依赖准备 ----------
-    
-    # ---------- 上下文管理 ----------
     async with AsyncSessionLocal() as session:
-        # ---------- 循环处理 ----------
-        for attempt in range(max_retries):
-            # ---------- 异常处理 ----------
+        for attempt in range(max(1, int(max_retries))):
             try:
-                # 在插入前检查 click_id 是否已存在
-                click_id = click_data.get('click_id')
-                # ---------- 条件分支 ----------
+                click_id = click_data.get("click_id")
                 if click_id:
                     existing_click = await session.execute(
-                        select(Click).where(Click.click_id == click_id)
+                        select(Click.id).where(Click.click_id == click_id).limit(1)
                     )
-                    # ---------- 条件分支 ----------
-                    if existing_click.scalars().first():
-                        # click_id 已存在，重新生成
-                        logger.warning(
-                            f"检测到重复的 click_id: {click_id}，将重新生成"
-                        )
-                        click_data['click_id'] = regenerate_click_id_from_click_data(
-                            click_data
-                        )
-                        click_id = click_data['click_id']
-                
-                click = Click(**click_data)
-                session.add(click)
-                
-                await session.commit()
-                logger.debug(f"点击记录保存成功: click_id={click_data.get('click_id')}")
-                return  # 成功则返回
-            except IntegrityError as e:
-                # 处理唯一性约束错误（重复的 click_id）
-                error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
-                # ---------- 条件分支 ----------
-                if 'Duplicate entry' in error_msg or 'UNIQUE constraint' in error_msg or 'click_id' in error_msg:
-                    # 检测到重复的 click_id，重新生成并重试
-                    old_click_id = click_data.get('click_id')
-                    click_data['click_id'] = regenerate_click_id_from_click_data(
-                        click_data
-                    )
-                    logger.warning(
-                        f"检测到重复的 click_id（尝试 {attempt + 1}/{max_retries}）: "
-                        f"旧ID={old_click_id}, 新ID={click_data['click_id']}"
-                    )
-                    await session.rollback()
-                    # 立即重试，不需要等待
-                    continue
-                else:
-                    # 其他完整性约束错误，按正常流程处理
-                    # ---------- 条件分支 ----------
-                    if attempt < max_retries - 1:
-                        logger.warning(
-                            f"异步保存点击记录失败（尝试 {attempt + 1}/{max_retries}）: {e}, "
-                            f"click_id={click_data.get('click_id')}"
+                    if existing_click.scalar_one_or_none() is not None:
+                        logger.info(
+                            "点击记录已存在，按 click_id 幂等跳过: click_id=%s",
+                            click_id,
                         )
                         await session.rollback()
-                        # 等待后重试（指数退避）
-                        await asyncio.sleep(2 ** attempt)
-                    else:
-                        raise
-            except Exception as e:
-                # ---------- 条件分支 ----------
-                if attempt < max_retries - 1:
+                        return
+
+                session.add(Click(**click_data))
+                await session.commit()
+                logger.debug("点击记录保存成功: click_id=%s", click_id)
+                return
+
+            except IntegrityError as exc:
+                error_msg = str(
+                    exc.orig if getattr(exc, "orig", None) else exc
+                ).lower()
+                duplicate_click_id = (
+                    ("duplicate entry" in error_msg and "click_id" in error_msg)
+                    or (
+                        "unique constraint" in error_msg
+                        and "click_id" in error_msg
+                    )
+                    or (
+                        "duplicate key" in error_msg
+                        and "click_id" in error_msg
+                    )
+                )
+                await session.rollback()
+                if duplicate_click_id:
+                    logger.info(
+                        "并发写入已先完成该点击，按 click_id 幂等跳过: click_id=%s",
+                        click_data.get("click_id"),
+                    )
+                    return
+
+                if attempt < max(1, int(max_retries)) - 1:
                     logger.warning(
-                        f"异步保存点击记录失败（尝试 {attempt + 1}/{max_retries}）: {e}, "
-                        f"click_id={click_data.get('click_id')}"
+                        "异步保存点击记录遇到完整性错误，将重试: attempt=%s error_type=%s",
+                        attempt + 1,
+                        type(exc).__name__,
                     )
-                    await session.rollback()
-                    # 等待后重试（指数退避）
                     await asyncio.sleep(2 ** attempt)
-                else:
-                    # 最后一次尝试失败，记录错误
-                    logger.error(
-                        f"异步保存点击记录最终失败（已重试 {max_retries} 次）: {e}, "
-                        f"click_id={click_data.get('click_id')}",
-                        exc_info=True
+                    continue
+                raise
+
+            except Exception as exc:
+                await session.rollback()
+                if attempt < max(1, int(max_retries)) - 1:
+                    logger.warning(
+                        "异步保存点击记录失败，将重试: attempt=%s error_type=%s",
+                        attempt + 1,
+                        type(exc).__name__,
                     )
-                    await session.rollback()
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                logger.error(
+                    "异步保存点击记录最终失败: error_type=%s",
+                    type(exc).__name__,
+                )
+                raise
 
 
 @router.get("/track/click/{offer_id}", summary="点击追踪", tags=["点击追踪"])
@@ -293,9 +279,9 @@ async def track_click(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"点击追踪失败: {str(e)}", exc_info=True)
+        logger.error("点击追踪失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"点击追踪失败: {str(e)}"
+            detail="点击追踪失败，请稍后重试"
         )
 

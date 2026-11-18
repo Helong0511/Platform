@@ -83,7 +83,7 @@ async def get_clicks(
             page_size=page_size
         )
     except Exception as e:
-        logger.error(f"获取短链接访问记录列表失败: {str(e)}", exc_info=True)
+        logger.error("获取短链接访问记录列表失败: error_type=%s", type(e).__name__)
         raise
 
 
@@ -108,7 +108,7 @@ async def get_click_detail(
         click_detail = await click_service.get_click_detail(click_record_id)
         return ResponseBaseSchema.success(data=click_detail)
     except Exception as e:
-        logger.error(f"获取短链接访问记录详情失败: id={click_record_id}, error={str(e)}", exc_info=True)
+        logger.error("获取短链接访问记录详情失败: id=%s error_type=%s", click_record_id, type(e).__name__)
         raise
 
 
@@ -149,10 +149,8 @@ async def resend_click_facebook_report(
         )
     except Exception as e:
         logger.error(
-            "Facebook 像素补报失败: click_record_id=%s user=%s error=%s",
+            "Facebook 像素补报失败: click_record_id=%s error_type=%s",
             click_record_id,
-            current_user.username,
-            str(e),
-            exc_info=True
+            type(e).__name__,
         )
         raise

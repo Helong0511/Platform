@@ -90,6 +90,22 @@ async def process_row_data(
         current_user: 当前用户
         result: 结果字典（用于更新统计）
     """
+    # 每行使用独立保存点：失败行回滚其数据库写入，不影响同批次已成功行。
+    # begin_nested 会先 flush 前序成功行，使其位于当前保存点之外。
+    row_transaction = await db.begin_nested()
+    product_map_snapshot = dict(product_map)
+    product_name_map_snapshot = {
+        key: list(items) for key, items in product_name_map.items()
+    }
+    existing_records_snapshot = (
+        dict(existing_records) if existing_records is not None else None
+    )
+    result_snapshot = {
+        key: list(value) if isinstance(value, list) else value
+        for key, value in result.items()
+    }
+    existing_data = None
+
     # ---------- 入口：参数与依赖准备 ----------
     # ---------- 异常处理 ----------
     try:
@@ -389,10 +405,35 @@ async def process_row_data(
                 existing_records[key] = ad_data
 
         result["success_rows"] += 1
+        await row_transaction.commit()
 
     except Exception as e:
+        # 回滚当前行的产品、分配记录、广告数据及其 ORM 修改。
+        if row_transaction.is_active:
+            await row_transaction.rollback()
+
+        # 恢复 Python 缓存，避免失败行创建的产品污染后续行匹配。
+        product_map.clear()
+        product_map.update(product_map_snapshot)
+        product_name_map.clear()
+        product_name_map.update(product_name_map_snapshot)
+        if existing_records is not None and existing_records_snapshot is not None:
+            existing_records.clear()
+            existing_records.update(existing_records_snapshot)
+
+        # SAVEPOINT 回滚会使已修改的 ORM 对象过期；刷新被更新的旧记录，
+        # 使后续行继续使用数据库中的真实值。
+        if existing_data is not None:
+            try:
+                await db.refresh(existing_data)
+            except Exception:
+                logger.exception("Excel 导入失败行回滚后刷新广告数据记录失败")
+
+        # 恢复统计与告警列表，再仅记录本行失败。
+        result.clear()
+        result.update(result_snapshot)
         result["failed_rows"] += 1
-        result["errors"].append({
+        result.setdefault("errors", []).append({
             "row": row_num,
             "error": str(e)
         })

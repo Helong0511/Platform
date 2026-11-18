@@ -13,6 +13,7 @@
 import logging
 import os
 import re
+import stat
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse
@@ -47,6 +48,30 @@ _BRIDGE_STATIC_CSP = (
 )
 
 
+def resolve_bridge_static_path(filename: str, search_bases: tuple[str, ...]) -> str | None:
+    """只解析白名单扩展名的普通静态文件，拒绝路径穿越、符号链接和特殊文件。"""
+    if (
+        not isinstance(filename, str)
+        or not re.fullmatch(r"[a-zA-Z0-9_-][a-zA-Z0-9_.-]*", filename)
+        or filename in {".", ".."}
+    ):
+        return None
+    _, extension = os.path.splitext(filename)
+    if extension.lower() not in _CONTENT_TYPE_MAP:
+        return None
+
+    for base in search_bases:
+        candidate = os.path.join(base, filename)
+        try:
+            candidate_stat = os.lstat(candidate)
+        except FileNotFoundError:
+            continue
+        # 静态资源目录不允许用符号链接暴露目录外文件。
+        if stat.S_ISREG(candidate_stat.st_mode) and not stat.S_ISLNK(candidate_stat.st_mode):
+            return candidate
+    return None
+
+
 def register_bridge_routes(router: APIRouter) -> None:
     """
     将 /bridge/{filename} 静态资源路由注册到短链接路由器。
@@ -73,11 +98,6 @@ def register_bridge_routes(router: APIRouter) -> None:
         Raises:
             HTTPException 404：文件名非法或文件不存在（统一返回「文件不存在」避免泄露目录结构）
         """
-        # 白名单：仅字母、数字、点、下划线、连字符，防止 ../../../etc/passwd 类攻击
-        if not re.match(r"^[a-zA-Z0-9_.-]+$", filename):
-            logger.warning("[桥页静态资源] 文件名包含非法字符：%s", filename)
-            raise_short_link_not_found("文件不存在")
-
         # 生产环境静态资源目录（与 cloak_scripts_paths 中 SCRIPTS_DIR_SERVER 同级 bridge 子目录）
         scripts_dir_server = "/data/Platform/scripts/bridge"
         # 本地开发：app/routes/short_link -> app -> 项目根 -> scripts/bridge
@@ -86,22 +106,15 @@ def register_bridge_routes(router: APIRouter) -> None:
         )
         scripts_dir_local = os.path.join(current_dir, "scripts", "bridge")
 
-        file_path_server = os.path.join(scripts_dir_server, filename)
-        file_path_local = os.path.join(scripts_dir_local, filename)
-
-        # 服务器路径优先，与桥页 HTML 读取策略一致
-        file_path = None
-        if os.path.exists(file_path_server) and os.path.isfile(file_path_server):
-            file_path = file_path_server
-        elif os.path.exists(file_path_local) and os.path.isfile(file_path_local):
-            file_path = file_path_local
-        else:
-            logger.warning("[桥页静态资源] 文件不存在：%s", filename)
+        file_path = resolve_bridge_static_path(
+            filename, (scripts_dir_server, scripts_dir_local)
+        )
+        if not file_path:
+            logger.warning("[桥页静态资源] 文件名非法、文件类型不允许或文件不存在：%s", filename)
             raise_short_link_not_found("文件不存在")
 
-        # 按扩展名设置 Content-Type；未知扩展名用 application/octet-stream
         _, ext = os.path.splitext(filename)
-        content_type = _CONTENT_TYPE_MAP.get(ext.lower(), "application/octet-stream")
+        content_type = _CONTENT_TYPE_MAP[ext.lower()]
 
         response = FileResponse(file_path, media_type=content_type)
         response.headers["Content-Security-Policy"] = _BRIDGE_STATIC_CSP

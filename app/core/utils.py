@@ -26,12 +26,26 @@ from datetime import date, datetime
 from typing import Any, Optional
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from app.core.config import settings
 from app.core.constants import PERCENTAGE_MULTIPLIER
 
 # 应用时区配置（从统一配置读取）
+
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
+
+
+def get_app_now_sql_expression(offset_seconds: int = 0):
+    """返回 MySQL 侧的应用时区当前时间表达式，避免各 Worker 本机时钟偏差。
+
+    数据库使用 UTC_TIMESTAMP() 作为统一时钟，再按应用时区当前 UTC offset
+    转换为与 get_app_now_naive() 一致的 naive DATETIME。
+    """
+    timezone_offset = datetime.now(APP_TIMEZONE).utcoffset()
+    timezone_seconds = int(timezone_offset.total_seconds()) if timezone_offset is not None else 0
+    return func.timestampadd(
+        text("SECOND"), timezone_seconds + int(offset_seconds), func.utc_timestamp()
+    )
 
 
 def get_device_type(request: Request) -> str:
@@ -70,7 +84,8 @@ def get_client_ip(request: Request) -> str:
        ``TRUSTED_PROXIES`` / ``TRUSTED_PROXY_IPS`` 时，才解析代理头。
     3. 对 X-Forwarded-For 从右向左跳过可信代理，取第一个非可信 IP
        （即「最右侧可信链之外的真实客户端」）。
-    4. 优先使用 Cloudflare 的 CF-Connecting-IP（由边缘节点覆盖写入）。
+    4. CF-Connecting-IP 仅在可信代理链路读取；Nginx 必须将其覆盖为
+       real_ip 模块解析后的 $remote_addr，禁止透传客户端原始同名请求头。
     """
     try:
         from app.core.config import settings

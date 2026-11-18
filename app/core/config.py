@@ -187,12 +187,19 @@ class Settings(BaseSettings):
 
         优先级：
         1. GUNICORN_ROLE=scheduler → 独立调度进程始终启用（不受 .env 中 ENABLE_SCHEDULER=false 影响）
-        2. GUNICORN_ROLE=api → 遵循 ENABLE_SCHEDULER（API 多 worker 默认关闭）
-        3. SCHEDULER_WORKER=1/0（Gunicorn post_fork 为首个 API worker 设置）
+        2. SCHEDULER_WORKER=1/0 → Gunicorn worker 生命周期标记优先于通用 ENABLE_SCHEDULER，避免 API worker 被显式配置误启用
+        3. ENABLE_SCHEDULER → 无 worker 标记时才作为通用显式开关
+        4. WORKERS → 未显式配置时，多 worker 默认不启动调度器
         """
         role = os.getenv("GUNICORN_ROLE", "api").strip().lower()
         if role == "scheduler":
             return True
+
+        # API worker 的“禁止调度”标记必须优先，防止显式开关误启用重复调度器。
+        # SCHEDULER_WORKER=1 只表示当前 worker 具备调度归属；仍不能覆盖显式关闭。
+        scheduler_worker = os.getenv("SCHEDULER_WORKER", "").strip()
+        if scheduler_worker == "0":
+            return False
 
         explicit = os.getenv("ENABLE_SCHEDULER", "").strip().lower()
         if explicit in ("false", "0", "no"):
@@ -200,11 +207,8 @@ class Settings(BaseSettings):
         if explicit in ("true", "1", "yes"):
             return True
 
-        scheduler_worker = os.getenv("SCHEDULER_WORKER", "").strip()
         if scheduler_worker == "1":
             return True
-        if scheduler_worker == "0":
-            return False
 
         try:
             workers = int(os.getenv("WORKERS", "0") or "0")

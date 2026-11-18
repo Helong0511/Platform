@@ -1,37 +1,16 @@
-"""
-数据库初始化模块
-提供数据库创建和初始化功能
-"""
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
-from sqlalchemy import text
-from app.core.config import settings
-import logging
-
-logger = logging.getLogger(__name__)
+"""旧数据库引导入口兼容层；生产数据库 provisioning 必须由独立身份执行。"""
 
 
-async def create_database(engine: AsyncEngine | None = None):
+async def create_database():
     """
-    创建数据库（如果不存在）
-    
-    参数:
-        engine: 可选的数据库引擎（如果为None，会创建临时引擎）
-    
-    说明:
-        - 连接到MySQL服务器但不指定数据库
-        - 创建 platform 数据库（如果不存在）
-        - 使用临时引擎，完成后自动释放
+    兼容旧调用名，但永久禁止应用数据库账号创建数据库。
+
+    数据库实例/schema provisioning 必须由独立运维身份完成；
+    schema DDL 必须通过 MIGRATION_DATABASE_URL 运行 Migration Runner。
+    即使遗留调用点尚未被发现，也必须 fail-closed，不能回退使用应用 DSN。
     """
-    # 连接到MySQL服务器但不指定数据库
-    db_url = settings.SQLALCHEMY_DATABASE_URI.replace('/platform', '')
-    temp_engine = create_async_engine(db_url, echo=False)
-    try:
-        async with temp_engine.connect() as conn:
-            await conn.execute(text("CREATE DATABASE IF NOT EXISTS `platform`"))
-            await conn.commit()
-        logger.info("数据库 platform 创建成功或已存在")
-    except Exception as e:
-        logger.error(f"创建数据库失败: {str(e)}")
-        raise
-    finally:
-        await temp_engine.dispose()
+    raise RuntimeError(
+        "禁止通过应用数据库连接创建数据库；"
+        "请使用独立 provisioning 身份创建数据库，"
+        "并使用 MIGRATION_DATABASE_URL 执行 python -m app.db.migrations apply"
+    )

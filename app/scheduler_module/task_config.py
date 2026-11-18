@@ -44,6 +44,12 @@
 """
 from typing import Dict, Any
 
+from app.scheduler_module.task_names import (
+    CAP_RESERVATION_RECOVERY_TASK_NAME,
+    THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
+    THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME,
+)
+
 # 任务配置类型定义
 TaskConfig = Dict[str, Any]
 
@@ -156,7 +162,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "result_getter_function": "get_task_result",
         # 数据库配置
         "cron_expression": "* * * * *",  # 每分钟执行一次（高并发优化，实际处理时会循环处理直到队列为空）
-        "description": "从Redis队列批量取出点击记录并插入到数据库，每分钟执行一次，每次处理最多1000条（高并发优化）",
+        "description": "每分钟批量消费 Redis 点击队列；单次最多处理 10 批（10000 条）或运行 30 秒，支持崩溃恢复、幂等去重和死信监控",
     },
 
     "点击记录归档": {
@@ -189,6 +195,35 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "result_getter_function": "get_task_result",
         "cron_expression": "*/5 * * * *",
         "description": "每5分钟将 Redis Cap 计数同步到数据库",
+    },
+
+    CAP_RESERVATION_RECOVERY_TASK_NAME: {
+        "task_name": CAP_RESERVATION_RECOVERY_TASK_NAME,
+        "task_module": "app.scheduler_module.tasks.cap_reservation_recovery",
+        "task_function": "cap_reservation_recovery_task",
+        "result_getter_module": "app.scheduler_module.tasks.cap_reservation_recovery",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "* * * * *",
+        "description": "每分钟恢复已过期租约的 Cap Reservation；仅对 Redis token 明确存在的孤儿预留执行幂等回滚，未知状态转人工对账",
+    },
+
+    THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME: {
+        "task_name": THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME,
+        "task_module": "app.scheduler_module.tasks.third_party_report_tasks",
+        "task_function": "scrub_third_party_report_pii_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "15 3 * * *",
+        "description": "按显式批准的保留天数清除终态第三方上报记录中的个人信息；默认关闭，不影响待重试 Outbox",
+    },
+    THIRD_PARTY_REPORT_OUTBOX_TASK_NAME: {
+        "task_name": THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
+        "task_module": "app.scheduler_module.tasks.third_party_report_tasks",
+        "task_function": "process_third_party_report_outbox_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "* * * * *",
+        "description": "每分钟投递转化事务中创建的第三方上报 Outbox；凭据仅从短链接/斗篷配置解析，不持久化 access token",
     },
 
     # ========== TQT API获取数据任务 ==========
@@ -452,4 +487,16 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
     },
     #     "description": "任务描述",
     # },
+    # ========== Postback 下游转发与失败重试 ==========
+    "Postback转发队列处理": {
+        "task_name": "Postback转发队列处理",
+        "task_module": "app.scheduler_module.tasks.forward_tasks",
+        "task_function": "process_forward_queue",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "*/1 * * * *",
+        "description": "每分钟处理到期的渠道/产品 Postback 转发任务与失败重试，确保进程重启后可恢复",
+    },
+
+
 }

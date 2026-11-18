@@ -373,7 +373,7 @@ async def check_click_count_stats(
                         break
             except Exception as scan_error:
                 # 如果SCAN失败，降级使用KEYS（仅用于监控端点，影响较小）
-                logger.warning(f"Redis SCAN失败，降级使用KEYS: {scan_error}")
+                logger.warning("Redis SCAN失败，降级使用KEYS: error_type=%s", type(scan_error).__name__)
                 keys = await redis.keys(pattern)
             
             stats["redis_counters"] = len(keys)
@@ -403,9 +403,9 @@ async def check_click_count_stats(
                         "key": key
                     })
                 except Exception as get_error:
-                    logger.debug(f"获取Redis计数器值失败: key={key}, error={get_error}")
+                    logger.debug("获取Redis计数器值失败: error_type=%s", type(get_error).__name__)
         except Exception as e:
-            stats["redis_error"] = str(e)
+            stats["redis_error"] = "Redis 查询失败，请检查服务状态"
     
     # 获取数据库中的总点击次数
     # ---------- 异常处理 ----------
@@ -414,7 +414,7 @@ async def check_click_count_stats(
         total_clicks = result.scalar() or 0
         stats["database_total_clicks"] = int(total_clicks)
     except Exception as e:
-        stats["database_error"] = str(e)
+        stats["database_error"] = "数据库查询失败，请检查服务日志"
     
     # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=stats)
@@ -487,8 +487,8 @@ async def diagnose_short_link_sync(
             diagnosis["issues"].append("短链接在数据库中不存在")
             diagnosis["recommendations"].append("检查短链接代码是否正确，或该短链接已被删除")
     except Exception as e:
-        diagnosis["issues"].append(f"查询数据库失败: {str(e)}")
-        logger.error(f"诊断短链接时查询数据库失败: {e}", exc_info=True)
+        diagnosis["issues"].append("查询数据库失败，请检查服务日志")
+        logger.error("诊断短链接时查询数据库失败: error_type=%s", type(e).__name__)
     
     # 2. 检查Redis中的计数器
     redis = await get_redis_client()
@@ -506,8 +506,8 @@ async def diagnose_short_link_sync(
                     diagnosis["issues"].append(f"Redis中有待同步的计数器值: {diagnosis['redis_counter_value']}")
                     diagnosis["recommendations"].append("等待下次自动同步（每5分钟），或手动触发同步")
         except Exception as e:
-            diagnosis["issues"].append(f"查询Redis计数器失败: {str(e)}")
-            logger.warning(f"诊断短链接时查询Redis失败: {e}")
+            diagnosis["issues"].append("查询Redis计数器失败，请检查Redis服务")
+            logger.warning("诊断短链接时查询Redis失败: error_type=%s", type(e).__name__)
     else:
         diagnosis["issues"].append("Redis不可用")
         diagnosis["recommendations"].append("检查Redis连接配置")
@@ -527,7 +527,7 @@ async def diagnose_short_link_sync(
                     diagnosis["recommendations"].append("等待下次自动同步（每5分钟），或手动触发同步")
                 break
     except Exception as e:
-        logger.warning(f"诊断短链接时查询进程内计数器失败: {e}")
+        logger.warning("诊断短链接时查询进程内计数器失败: error_type=%s", type(e).__name__)
     
     # 4. 分析可能的问题
     # ---------- 条件分支 ----------
@@ -640,7 +640,10 @@ async def update_short_link(
             details={"updated_fields": list(update_data.keys())},
         )
         await commit_audit_log(db)
-    
+        # 服务层先行失效一次；事务提交后再失效，避免并发读取在 commit 前重建旧配置缓存。
+        from app.services.cloak_pixel_mapping import invalidate_cloak_cache
+        invalidate_cloak_cache(short_code=short_link.short_code)
+
     # 构建完整的短链接URL
     base_url = str(request.base_url).rstrip('/')
     response_data = ShortLinkResponse.model_validate(short_link)
@@ -684,7 +687,10 @@ async def delete_short_link(
         request=request,
     )
     await commit_audit_log(db)
-    
+    # 删除事务提交后再次失效，避免并发请求重建已删除短链的旧像素配置缓存。
+    from app.services.cloak_pixel_mapping import invalidate_cloak_cache
+    invalidate_cloak_cache(short_code=short_code)
+
     return ResponseBaseSchema.success(data={"message": "短链接已删除"})
 
 
@@ -733,10 +739,10 @@ async def sync_short_link_clicks(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"手动同步短链接点击次数失败: {str(e)}", exc_info=True)
+        logger.error("手动同步短链接点击次数失败: error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"同步点击次数失败: {str(e)}"
+            detail="同步点击次数失败，请稍后重试"
         )
 
 

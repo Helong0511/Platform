@@ -150,6 +150,29 @@ def _rate_limit_exceeded_response(*, limit: int, window: int) -> JSONResponse:
         },
     )
 
+# Redis 限流计数与 TTL 在同一 Lua 原子操作中完成。
+# 同时修复历史上可能残留的无 TTL key，避免 Redis 内存持续增长。
+_RATE_LIMIT_INCREMENT_LUA = """
+local count = redis.call('INCR', KEYS[1])
+if count == 1 or redis.call('TTL', KEYS[1]) < 0 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count
+"""
+
+
+async def _increment_rate_limit_counter(redis_client, key: str, window: int) -> int:
+    """原子递增限流计数并确保 key 有过期时间。"""
+    return int(
+        await redis_client.eval(
+            _RATE_LIMIT_INCREMENT_LUA,
+            1,
+            key,
+            max(1, int(window)),
+        )
+    )
+
+
 # ====== 限流配置 ======
 # 从配置中读取限流设置，提供默认值
 DEFAULT_RATE_LIMIT = getattr(settings, 'API_RATE_LIMIT', 100)
@@ -263,9 +286,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if redis_client:
             # Redis 计数与 call_next 分离，避免将 CSRF/业务 HTTPException 误判为 Redis 故障
             try:
-                updated_count = int(await redis_client.incr(rate_limit_key))
-                if updated_count == 1:
-                    await redis_client.expire(rate_limit_key, window)
+                updated_count = await _increment_rate_limit_counter(
+                    redis_client,
+                    rate_limit_key,
+                    window,
+                )
                 redis_counted = True
             except Exception as e:
                 error_msg = str(e) or repr(e) or "未知错误"

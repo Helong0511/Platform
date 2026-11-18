@@ -13,6 +13,8 @@ import hashlib
 import json
 import logging
 import time
+import threading
+import weakref
 from functools import wraps
 from typing import Any, Awaitable, Callable, Dict, Optional
 
@@ -24,16 +26,27 @@ logger = logging.getLogger(__name__)
 CACHE_PREFIX = "query_cache:"
 DEFAULT_TTL = 300
 
-# 进程内单飞：同 key 并发未命中只跑一次 factory，其余 await 同一 Future
-_inflight_futures: Dict[str, asyncio.Future] = {}
-_inflight_lock: Optional[asyncio.Lock] = None
+# 单飞状态按事件循环隔离，防止不同线程/asyncio.run 共用另一个 loop 的 Future。
+_inflight_futures: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_inflight_state_guard = threading.Lock()
 
 
-def _get_inflight_lock() -> asyncio.Lock:
-    global _inflight_lock
-    if _inflight_lock is None:
-        _inflight_lock = asyncio.Lock()
-    return _inflight_lock
+def _get_inflight_state() -> tuple[asyncio.Lock, Dict[str, asyncio.Future]]:
+    """获取当前事件循环专属的单飞锁与 Future 表。"""
+    loop = asyncio.get_running_loop()
+    with _inflight_state_guard:
+        # 锁直接挂在 loop 上，避免 WeakKeyDictionary 的 value 反向强引用 key。
+        lock = getattr(loop, "_platform_cache_compat_inflight_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            setattr(loop, "_platform_cache_compat_inflight_lock", lock)
+
+        futures = _inflight_futures.get(loop)
+        if futures is None:
+            futures = {}
+            _inflight_futures[loop] = futures
+
+    return lock, futures
 
 
 def _legacy_storage_key(key: str) -> str:
@@ -259,17 +272,17 @@ async def get_or_set_single_flight(
         return cached
 
     flight_key = _legacy_storage_key(cache_key)
-    lock = _get_inflight_lock()
+    lock, inflight_futures = _get_inflight_state()
     leader_future: Optional[asyncio.Future] = None
     is_leader = False
 
     async with lock:
-        existing = _inflight_futures.get(flight_key)
+        existing = inflight_futures.get(flight_key)
         if existing is not None and not existing.done():
             waiter = existing
         else:
             leader_future = asyncio.get_running_loop().create_future()
-            _inflight_futures[flight_key] = leader_future
+            inflight_futures[flight_key] = leader_future
             is_leader = True
             waiter = None
 
@@ -344,5 +357,5 @@ async def get_or_set_single_flight(
             except Exception:
                 pass
         async with lock:
-            if _inflight_futures.get(flight_key) is leader_future:
-                _inflight_futures.pop(flight_key, None)
+            if inflight_futures.get(flight_key) is leader_future:
+                inflight_futures.pop(flight_key, None)

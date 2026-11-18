@@ -24,12 +24,22 @@ logger = logging.getLogger(__name__)
 PublisherConfigTuple = Tuple[int, Optional[int], Optional[float]]
 
 
-async def get_client_id_for_user(db: AsyncSession, user: User) -> Optional[int]:
-    """获取客户用户关联的 Client.id。"""
+async def get_client_ids_for_user(db: AsyncSession, user: User) -> Optional[List[int]]:
+    """获取客户用户关联的全部 Client.id；非客户用户返回 None。"""
     if user.role != UserRole.CLIENT:
         return None
-    result = await db.execute(select(Client.id).where(Client.user_id == user.id).limit(1))
-    return result.scalar_one_or_none()
+    result = await db.execute(
+        select(Client.id)
+        .where(Client.user_id == user.id, Client.is_active.is_(True))
+        .order_by(Client.id.asc())
+    )
+    return [int(client_id) for client_id in result.scalars().all()]
+
+
+async def get_client_id_for_user(db: AsyncSession, user: User) -> Optional[int]:
+    """兼容旧调用：返回第一个客户 ID；新权限判断必须使用 get_client_ids_for_user。"""
+    client_ids = await get_client_ids_for_user(db, user)
+    return client_ids[0] if client_ids else None
 
 
 async def assert_client_can_access_offer(
@@ -41,8 +51,8 @@ async def assert_client_can_access_offer(
     if user.role != UserRole.CLIENT:
         return
 
-    client_id = await get_client_id_for_user(db, user)
-    if not client_id:
+    client_ids = await get_client_ids_for_user(db, user)
+    if not client_ids:
         raise_api_exception(
             ErrorCode.RESOURCE_NOT_FOUND,
             detail=f"Offer ID {offer_id} 不存在或无权访问",
@@ -54,7 +64,7 @@ async def assert_client_can_access_offer(
         .where(
             and_(
                 OfferPublisherAssignment.offer_id == offer_id,
-                Publisher.client_id == client_id,
+                Publisher.client_id.in_(client_ids),
                 Publisher.is_active == True,
                 OfferPublisherAssignment.is_active == True,
             )

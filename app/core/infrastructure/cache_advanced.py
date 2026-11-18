@@ -6,7 +6,9 @@
 在系统中的位置：热点配置/字典类数据可选用本模块的 ``cache_with_protection`` 等 API。
 """
 import random
+import secrets
 import asyncio
+import weakref
 import logging
 from typing import Optional, Any, Callable, TypeVar
 from contextlib import asynccontextmanager
@@ -16,7 +18,37 @@ from app.core.infrastructure.cache import get_cache_backend
 logger = logging.getLogger(__name__)
 
 # 类型变量
+
 T = TypeVar('T')
+
+# Redis 不可用时，使用进程内/事件循环内锁做尽力保护。
+# 这不是跨进程分布式锁；WeakKey/WeakValue 避免事件循环和空闲锁长期滞留。
+_local_locks_by_loop = weakref.WeakKeyDictionary()
+
+
+def _get_local_lock(key: str) -> asyncio.Lock:
+    """获取当前事件循环内同 key 的本地互斥锁。"""
+    loop = asyncio.get_running_loop()
+    locks = _local_locks_by_loop.get(loop)
+    if locks is None:
+        locks = weakref.WeakValueDictionary()
+        _local_locks_by_loop[loop] = locks
+    lock = locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        locks[key] = lock
+    return lock
+
+
+async def _acquire_local_lock(owner: "DistributedLock") -> bool:
+    """Redis 不可用时降级为当前进程内互斥，不冒充跨进程锁。"""
+    local_lock = _get_local_lock(owner.key)
+    if local_lock.locked():
+        return False
+    await local_lock.acquire()
+    owner._local_lock = local_lock
+    logger.warning("Redis 分布式锁不可用，降级为进程内互斥：%s", owner.key)
+    return True
 
 # 特殊标记：表示"确实为空"（用于缓存穿透保护）
 class NoneMarker:
@@ -149,6 +181,14 @@ class DistributedLock:
     用于防止缓存击穿（热点 Key 过期时大量并发请求）
     """
     
+    # 比较并删除必须在 Redis 内原子完成，避免 GET 与 DELETE 之间锁过期后误删新持有者的锁。
+    _RELEASE_LUA = """
+    if redis.call('GET', KEYS[1]) == ARGV[1] then
+        return redis.call('DEL', KEYS[1])
+    end
+    return 0
+    """
+
     def __init__(self, key: str, timeout: int = 10):
         """
         Args:
@@ -157,7 +197,8 @@ class DistributedLock:
         """
         self.key = f"lock:{key}"
         self.timeout = timeout
-        self.lock_value = f"locked:{random.randint(100000, 999999)}"
+        self.lock_value = secrets.token_urlsafe(32)
+        self._local_lock: Optional[asyncio.Lock] = None
     
     async def acquire(self) -> bool:
         """
@@ -186,12 +227,11 @@ class DistributedLock:
                     logger.debug(f"获取分布式锁失败（已被占用）：{self.key}")
                     return False
             except Exception as e:
-                logger.error(f"获取分布式锁失败：{e}", exc_info=True)
-                return False
+                logger.error("获取 Redis 分布式锁失败，尝试进程内降级：%s", e, exc_info=True)
+                return await _acquire_local_lock(self)
         else:
-            # 内存缓存降级（不支持分布式锁）
-            logger.warning(f"内存缓存不支持分布式锁，跳过：{self.key}")
-            return True
+            # 不得返回 True 假装获得了跨进程分布式锁。
+            return await _acquire_local_lock(self)
     
     async def release(self) -> bool:
         """
@@ -202,24 +242,34 @@ class DistributedLock:
         """
         cache = await get_cache_backend()
         
+        if self._local_lock is not None:
+            if self._local_lock.locked():
+                self._local_lock.release()
+                self._local_lock = None
+                return True
+            self._local_lock = None
+            return False
+
         if hasattr(cache, 'redis') and cache.redis:
             try:
-                # 检查锁是否属于当前实例（防止误删其他进程的锁）
-                current_value = await cache.redis.get(self.key)
-                if current_value == self.lock_value:
-                    await cache.redis.delete(self.key)
+                # Lua 将 owner 校验与删除合并为单条原子操作，避免锁过期/重获期间误删新锁。
+                released = await cache.redis.eval(
+                    self._RELEASE_LUA,
+                    1,
+                    self.key,
+                    self.lock_value,
+                )
+                if int(released or 0) == 1:
                     logger.debug(f"释放分布式锁成功：{self.key}")
                     return True
-                else:
-                    logger.debug(f"锁不属于当前实例，跳过释放：{self.key}")
-                    return False
+                logger.debug(f"锁已过期或不属于当前实例，跳过释放：{self.key}")
+                return False
             except Exception as e:
                 logger.error(f"释放分布式锁失败：{e}", exc_info=True)
                 return False
         else:
-            # 内存缓存降级
-            logger.warning(f"内存缓存不支持分布式锁释放：{self.key}")
-            return True
+            logger.debug(f"本地缓存锁未由当前实例持有：{self.key}")
+            return False
 
 
 @asynccontextmanager

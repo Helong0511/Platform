@@ -234,7 +234,7 @@ async def get_client(
     # 如果是客户用户，只能查看自己的客户信息
     # ---------- 条件分支 ----------
     if current_user.role == UserRole.CLIENT:
-        query = query.where(Client.user_id == current_user.id)
+        query = query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
 
     result = await db.execute(query)
     client = result.scalars().first()
@@ -389,10 +389,10 @@ async def create_client(
 
     except Exception as e:
         # 注意：不需要手动回滚事务，get_db 依赖会自动处理
-        logger.error(f"创建客户失败: {str(e)}", exc_info=True)
+        logger.error("创建客户失败：error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"创建客户失败：{str(e)}。请检查数据格式或联系管理员"
+            detail="创建客户失败，请检查提交内容或联系管理员",
         )
 
 
@@ -438,15 +438,8 @@ async def update_client(
                 detail=f"指定的用户ID {client_in.user_id} 不存在，请确认用户是否存在"
             )
 
-        # 检查新用户是否已有客户关联
-        result = await db.execute(select(Client).where(Client.user_id == client_in.user_id))
-        existing_client = result.scalars().first()
-        # ---------- 条件分支 ----------
-        if existing_client and existing_client.id != client_id:
-            raise_api_exception(
-                ErrorCode.CLIENT_ALREADY_EXISTS,
-                detail=f"用户ID {client_in.user_id} 已关联客户：{existing_client.company_name}。每个用户只能关联一个客户，请选择其他用户"
-            )
+        # Client.user_id 是多对一关系：同一登录账号可以关联多个客户主体。
+        # 不在这里限制一对一；各业务查询必须按 user_id 的全部 Client 记录做范围过滤。
 
     # 更新客户信息
     update_data = client_in.model_dump(exclude_unset=True)
@@ -496,10 +489,10 @@ async def update_client(
         raise
     except Exception as e:
         # 注意：不需要手动回滚事务，get_db 依赖会自动处理
-        logger.error(f"更新客户失败: {str(e)}", exc_info=True)
+        logger.error("更新客户失败：error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"更新客户失败：{str(e)}。请检查数据格式或联系管理员"
+            detail="更新客户失败，请检查提交内容或联系管理员",
         )
 
     logger.info(f"Client {client.company_name} updated by {current_user.username}")
@@ -652,10 +645,10 @@ async def update_client_switches(
         # ---------- 条件分支 ----------
         if isinstance(e, HTTPException):
             raise e
-        logger.error(f"更新客户开关失败: {str(e)}", exc_info=True)
+        logger.error("更新客户开关失败：error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"更新客户开关失败：{str(e)}。请检查数据格式或联系管理员"
+            detail="更新客户开关失败，请稍后重试",
         )
 
     logger.info(f"Client {client.company_name} switches updated by {current_user.username}: {update_details}")
@@ -676,7 +669,7 @@ async def update_client_switches(
     except HTTPException:
         raise
     except Exception as log_error:
-        logger.warning(f"记录更新日志失败: {str(log_error)}")
+        logger.warning("记录客户更新日志失败：error_type=%s", type(log_error).__name__)
 
     # 确保返回的数据包含最新的开关状态
     return ResponseBaseSchema.success(data=_client_public_dict(client))

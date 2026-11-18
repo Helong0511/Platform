@@ -32,6 +32,7 @@ export function useThirdPartyReports(authStore, router) {
     adsid: '',
     event: '',
     status: '',
+    identity_scope: '',
   });
   // dateRange 响应式状态
   const dateRange = ref(getCurrentMonthRange());
@@ -66,6 +67,7 @@ export function useThirdPartyReports(authStore, router) {
         ...(searchForm.adsid && { adsid: searchForm.adsid }),
         ...(searchForm.event && { event: searchForm.event }),
         ...(searchForm.status && { status: searchForm.status }),
+        ...(searchForm.identity_scope && { identity_scope: searchForm.identity_scope }),
         ...(dateRange.value?.length === 2 && {
           start_date: dateRange.value[0],
           end_date: dateRange.value[1],
@@ -87,6 +89,7 @@ export function useThirdPartyReports(authStore, router) {
     searchForm.adsid = '';
     searchForm.event = '';
     searchForm.status = '';
+    searchForm.identity_scope = '';
     dateRange.value = getCurrentMonthRange();
     pagination.page = 1;
     fetchLogs();

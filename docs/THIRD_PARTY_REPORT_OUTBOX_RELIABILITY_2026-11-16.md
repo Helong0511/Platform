@@ -1,0 +1,144 @@
+# Third-party Report Outbox 租约与重试可靠性审计（2026-11-16）
+
+## 本次发现：Outbox 租约使用 Worker 本机时钟
+
+### 风险
+
+此前 _claim_report_log() 与 _renew_report_log_lease() 使用 get_app_now_naive() 生成租约时间并判断租约是否过期。多台 Worker 的系统时钟可能存在偏差：
+
+- 快时钟 Worker 可能把慢时钟 Worker 尚有效的 report_start_time 误判为过期并提前接管，导致两个 Worker 同时向第三方发送同一事件。
+- 慢时钟 Worker 可能延迟认领真正已到期的任务，影响队列恢复时效。
+- 租约令牌、过期判断和重试时间如果分别受不同 Worker 本机时钟影响，会扩大边界不确定性。
+
+### 修复
+
+提交 3ae743935d019b2525e5a6bd1eebedde64d6ba84：
+- 认领时的 report_start_time 写入使用 get_app_now_sql_expression()，由数据库统一时钟产生。
+- 租约过期判断、next_retry_time 到期判断使用同一数据库时钟表达式。
+- 早期实现曾回读数据库秒级 DATETIME 作为 fencing token；该方案已由后续独立随机令牌方案替代。
+- 续租同时使用数据库时钟判断有效期，且要求旧令牌不晚于数据库当前时间；已过期令牌不能复活。
+- 重试时间、租约释放时间、Outbox 扫描和 PII 租约过期判断统一使用数据库时钟表达式。
+
+提交 87121eaec9f77ef96d1d7e8bfb0d40ebbf5a8c52：
+- 更新 MySQL 隔离集成测试。
+- 模拟 Worker A 本机时钟慢一天、Worker B 本机时钟快一天。
+- 验证快时钟 Worker 不能提前接管有效租约；只有数据库时间确认原租约过期后才能接管。
+- 验证旧 Worker 不能续租或修改新 Worker 已接管的记录。
+
+## 2026-11-16 后续整改：独立随机 fencing token
+
+### 已实现的代码与结构
+
+- 新增 ORM 字段 `ThirdPartyReportLog.lease_token`：`CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL`。
+- 新增前向迁移 `20261116_third_party_report_random_lease_token`，加入迁移清单并登记 SHA-256；不修改任何既有迁移文件或 checksum。
+- 每次原子认领通过 `secrets.token_hex(16)` 生成独立 128-bit 随机令牌，并与 DB 生成的 `report_start_time` 一起写入。
+- `report_start_time` 只用于租约时效判断；不再作为 fencing token，也不再以秒级 DATETIME 相等来识别 Worker。
+- 续租、发送前核验、Pixel 目的地绑定、终态更新都按随机令牌匹配；终态更新会清除令牌。
+- 失败重试、手动重试和耗尽状态归一化会释放/清除旧令牌；旧 Worker 的令牌不能更新新 Worker 的记录。
+- 管理端修改身份/载荷时的活动租约判断也改用数据库当前时间。
+- 旧记录保持 `lease_token=NULL`；下一次成功认领时才生成新令牌，不把旧时间戳伪装成随机令牌。
+
+### 迁移与部署注意事项
+
+- 新迁移把列追加到表尾，尽量利用 MySQL 8.0.29+ 的 INSTANT ADD COLUMN；MySQL 8.0.16–8.0.28 的实际 DDL 算法仍需在目标版本验证。
+- CHECK 约束添加仍可能需要扫描/验证现有数据；上线前必须在相同 MySQL 版本、相近数据量副本测量锁等待、耗时和磁盘影响。
+- 部署新代码前必须停止并排空所有旧版 API / Scheduler / Worker。旧版进程不知道 `lease_token`，不能与新版混合运行，否则旧 Worker 可能绕过新令牌条件。
+- migration runner 必须先于应用启动执行；应用账号不得自行执行 DDL。生产账号 grants、真实迁移 job 演练仍是上线验收项。
+
+## 仍需保留的边界
+
+- 数据库时钟成为租约判定权威；部署环境仍应保持 MySQL 主从节点时间同步，并监控数据库时钟异常。
+- 外部平台已接收事件而本地 ACK 丢失时，仍可能发生重试；稳定 event_id 用于第三方幂等去重，不能把系统描述为严格 exactly-once。
+- 新增迁移尚未在生产等价环境执行；CI/隔离 MySQL 验证通过也不能替代目标 MySQL 版本、时区设置、数据规模和多 Worker 部署形态下的 DDL/故障演练。
+- 当前随机令牌改造以最新分支 CI 结果为准；任何尚未通过的 CI 不能作为验收通过依据。
+
+## 验收
+
+验收以最新代码 SHA 对应的 GitHub Actions 最终结果为准，必须同时通过 Backend 与 Frontend；Backend 必须执行 MySQL/Redis 集成测试，不能只以静态编译或 SQLite 单测替代。历史上因连续提交而取消的运行不计入验收。
+
+
+## 2026-11-16 后续整改：Purchase → ViewContent 关联的 PII fencing
+
+### 风险与修复
+
+- Purchase → ViewContent 关联候选查询必须排除 `pii_scrubbed_at IS NOT NULL` 的历史行。否则已完成保留期清理的 ViewContent 即使其 `adsid` 已被清空，若存在历史部分清理或异常残留，也可能被新 Purchase 再次写入 `conversion_id`，破坏 PII 清理不可逆边界。
+- 当前查询同时要求候选 ViewContent 的 `pii_scrubbed_at IS NULL`、`conversion_id IS NULL`，并按 source、adsid、事件类型、身份作用域、平台和 Pixel 限定。
+- Purchase 本身在同一事务内锁定并重新校验随机 `lease_token`、数据库租约时效、事件身份、Pixel、作用域及未清理状态。过期或已被接管的 Worker 不得建立关联。
+- PII 清理使用 `FOR UPDATE SKIP LOCKED`。关联事务先锁 Purchase 再锁 ViewContent；若清理事务已持有候选行锁，关联事务的 `SELECT ... FOR UPDATE` 会等待该锁释放（关联查询本身没有使用 `SKIP LOCKED`），随后按 InnoDB 当前读重新判断 `pii_scrubbed_at IS NULL`，已提交清理的行不会成为候选。清理与关联事务竞争时，不应恢复已清理数据。
+
+### 回归验证
+
+- 在隔离 MySQL 集成测试中增加已清理 ViewContent 拒绝关联的用例。
+- 增加 Purchase 租约已过期的旧 Worker 拒绝关联用例。
+- 保留既有双 Purchase 并发争抢同一 ViewContent 的测试，确保同一候选行最多被一个 Purchase 关联。
+- 最新相关提交：`d4fe76879a77e73d11576d8ca21015f4f8f00c3d`、`bca65fb3e4ed7c0a977a4b2d8326a0e6c51ab235`。
+- 对应 CI Run #1860：Backend、Frontend、Lint、Build、Playwright Mock API E2E 均通过。该结果仅证明 CI 隔离环境覆盖的行为，不代表生产规模故障演练。
+
+### 验收限制
+
+- 已新增 `tests/test_third_party_report_outbox_mysql_integration.py::test_mysql_purchase_link_waits_for_pii_scrub_and_never_restores_link`：使用两个独立 MySQL 事务和可控事件屏障，先让 PII 清理事务取得 ViewContent 行锁，再启动 Purchase 关联并确认其锁定查询确实阻塞；释放清理事务后，断言清理完成、关联返回 False，且 `pii_scrubbed_at`、清空后的 `adsid`、PII 字段和 `conversion_id` 均未被恢复。该测试覆盖确定性交错时序，不等同于高并发压力测试或多实例生产故障演练。
+- 不得通过删除 `pii_scrubbed_at`、重新填充 `adsid` 或恢复历史 `conversion_id` 的方式修复关联失败。
+- 若未来调整 PII 清理字段或关联流程，必须同步更新本节测试，并验证旧 Worker fencing 和清理不可逆性。
+
+
+## 2026-11-18 补充：历史未解析作用域事件的 PII 保留
+
+- `legacy_unresolved` Outbox 记录不会进入发送扫描；该状态不能通过自动重试恢复，必须保持 fail-closed，等待人工核对平台归属。
+- 历史记录可能仍保留 `pending` 状态，因此不能只依赖 `success/failed`、重试耗尽或缺少配置引用来判断 PII 是否可清理。
+- PII 清理器现将 `outbox_enqueued=true AND identity_scope=legacy_unresolved` 作为不可自动发送的隔离终态候选；仍需满足配置保留期限已到、无有效租约（或租约已过期）及尚未清理等公共条件。
+- 清理只擦除广告标识、转化标识、个人信息和发送载荷；保留事件审计骨架与身份作用域，不自动补写 platform 或 Pixel 目的地。
+- 回归测试：`tests/test_third_party_report_pii_retention.py::test_legacy_unresolved_outbox_is_terminal_for_pii_retention`。
+
+
+## 2026-11-18 补充：管理端身份作用域核查与筛选
+
+- 第三方上报日志列表与详情响应显式返回 `identity_scope`、`platform`、`destination_pixel_id`；其中 Pixel ID 是非敏感目的地标识，不包含访问令牌。
+- 管理端列表增加身份作用域列，详情显示平台和 Pixel 目的地；对于已入队且作用域不是 `platform_scoped` 的非成功事件，明确显示“禁止自动重试（身份未确认）”，并隐藏载荷编辑/重试入口（后端仍是最终安全门禁）。
+- 统计摘要增加 `identity_scope_stats`、`legacy_unresolved_count`、`scope_blocked_outbox_count`。这些统计遵循当前日期筛选条件；`scope_blocked_outbox_count` 表示筛选范围内已入队且非 `platform_scoped` 的记录数，不等同于当前正在执行的 Worker 数。
+- 日志列表 API 支持 `identity_scope` 精确筛选，允许值仅为 `legacy_unresolved`、`unscoped`、`platform_scoped`；管理端筛选器与 API 参数保持一致。
+- 回归覆盖：`tests/test_third_party_report_api_redaction.py::test_report_list_filters_by_identity_scope`，以及响应 Schema 的作用域字段断言。
+
+### 人工核对与恢复边界
+
+- 当前实现提供识别、筛选、统计和 fail-closed 阻断；**尚未提供将 `legacy_unresolved` 安全升级为 `platform_scoped` 的人工恢复 API**。不得把 UI 的“人工核对”提示理解为系统已具备恢复能力。
+- 管理员不得通过普通编辑接口改写历史记录的 `identity_scope`、`platform` 或 `destination_pixel_id`；也不得直接 SQL UPDATE、手工重置状态或清除租约后强制重试。
+- 不能依据 `source`、旧 `event_key`、短链接当前配置或相似事件推断历史平台/Pixel 归属。必须有可独立验证的原始业务证据；若 PII 已按保留策略清理，不能从数据库中恢复已删除载荷。
+- 在正式实现恢复工作流前，所有 unresolved Outbox 继续保持不可自动发送。若未来增加恢复能力，必须独立设计不可变核对记录、证据引用、操作者与复核者、双人审批、平台/Pixel 明确确认、幂等键及远端“可能已接收但本地 ACK 丢失”的重复发送处理；恢复动作应生成可追溯的新事件或受控记录，不能静默改写旧身份。
+
+
+## 2026-11-18 补充：哈希发送失败不得自动降级为明文
+
+- 原实现的重试预算会为 `use_hash=True` 预留一次非哈希兜底；哈希请求失败后，后续请求会将邮箱和手机号以明文发送。
+- 该行为与 `use_hash` 的数据处理语义冲突：调用方明确选择哈希，不应因网络/第三方错误而自动改变个人信息处理方式。
+- 现已移除自动明文兜底。选择哈希时，每次自动重试均继续对邮箱/手机号进行哈希；只有调用方显式传入 `use_hash=False` 才会构造明文邮箱/手机号字段。
+- 剩余自动重试预算全部用于当前选定的数据处理模式，不因预留兜底而浪费一次尝试额度；累计尝试次数仍受 `max_attempts` 限制。
+- 回归测试：`tests/test_third_party_report_idempotency.py::test_report_attempt_budget_never_downgrades_hashing_or_exceeds_limit`。
+- 该修复不改变 IP 地址和 User-Agent 在 Meta CAPI 请求中的字段格式；其传输、留存和访问仍需纳入独立隐私治理。
+
+
+## 2026-11-18 Meta CAPI event_time 与 click_time 分离修复
+
+复核 Meta 官方 Server Event 参数说明：
+- `event_time` 必须表示事件实际发生时间，使用 Unix 秒；超过 7 天的历史事件会导致整批请求被拒绝。
+- `event_id` 与 `event_name` 用于 Pixel 与 CAPI 对应事件去重；浏览器 Pixel 的 `eventID` 必须与服务端 `event_id` 一致。
+- 官方说明跨 Pixel/CAPI 的匹配去重要求同一事件名称和 ID，并在首次接收后的 48 小时内到达；不能把这条规则扩大解释为所有同源 CAPI 重发都具备 exactly-once 保证。
+
+官方资料：
+- https://developers.facebook.com/documentation/ads-commerce/conversions-api/parameters/server-event
+- https://developers.facebook.com/documentation/ads-commerce/conversions-api/deduplicate-pixel-and-server-events
+
+### 本轮修复
+
+- 原实现把短链点击时间 `click_time` 同时作为 Purchase 的 `event_time` 和 `fbc` 时间戳，混淆了点击发生与转化发生两个时点。
+- 现在 `send_third_party_report()` 接收独立 `event_time` 参数；Postback Outbox 使用日志创建时间（即本系统收到转化回调的时间）作为当前可用的事件时间。
+- `click_time` 只用于构造 `fbc` 内的点击时间戳，保持其与原始 fbclid 点击时间一致。
+- 当前 Postback 标准化器尚未将各上游平台的实际转化时间字段统一映射，因此 Outbox 使用回调接收时间作为 fallback；若上游回调明显延迟，仍需按具体平台字段映射真实 conversion timestamp，不能声称回调接收时间等于真实成交时间。
+- 对无时区的数据库 DATETIME，统一按应用配置时区（默认 Asia/Shanghai）本地化后转换 Unix 时间，避免服务器运行在 UTC 时把北京时间 naive 值误当 UTC；带时区值则先转换到应用时区。
+- 直接发送的历史调用在未传 `event_time` 时仍兼容回退到 `click_time`，以免改变 ViewContent 事件语义。
+
+### 验证
+
+- 新增应用时区 naive datetime 与 aware datetime 的 Unix 时间戳单测。
+- Outbox Worker 单测断言将持久化的回调接收时间传给发送函数。
+- 第三方发送回归测试断言 Purchase 的 `event_time` 使用独立转化时间，而 `fbc` 仍使用点击时间。
+- 仍需在 Meta Test Events / Events Manager 中使用测试 Pixel 验证实际事件参数和归因结果；本轮没有调用真实 Meta API。

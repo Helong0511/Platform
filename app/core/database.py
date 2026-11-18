@@ -4,7 +4,7 @@
 功能说明：
 - 创建和管理SQLAlchemy异步数据库引擎
 - 提供数据库会话依赖项（FastAPI Depends）
-- 处理数据库初始化和表创建
+- 管理数据库连接与会话；schema 仅由独立 Migration Runner 管理
 - 修复SQLAlchemy 2.0与aiomysql的兼容性问题
 
 数据库配置：
@@ -28,6 +28,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.dialects.mysql import aiomysql as sqlalchemy_aiomysql
 from sqlalchemy.future import select
+from sqlalchemy.exc import IntegrityError
 from app.core.config import settings
 from collections.abc import AsyncGenerator  # Python 3.10+ 推荐使用 collections.abc
 from fastapi import HTTPException
@@ -35,7 +36,7 @@ from fastapi.exceptions import RequestValidationError
 import logging
 import aiomysql as aiomysql_lib
 
-from app.models.models import Base, User, UserRole
+from app.models.models import User, UserRole
 
 # ====== 日志记录器 ======
 logger = logging.getLogger(__name__)
@@ -158,7 +159,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
         except Exception as e:
             # 发生真正的数据库异常时，回滚事务并记录错误
-            logger.error(f"数据库会话错误: {str(e)}", exc_info=True)
+            # SQLAlchemy 异常消息可能包含绑定参数；日志只保留异常类型，不记录原始数据。
+            logger.error("数据库会话错误：exception_type=%s", type(e).__name__)
             await session.rollback()
             raise
         finally:
@@ -182,7 +184,8 @@ async def get_postback_db() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             raise
         except Exception as e:
-            logger.error(f"Postback 数据库会话错误: {str(e)}", exc_info=True)
+            # Postback 参数可能包含 IP、邮箱、click_id 等 PII，禁止写入异常日志。
+            logger.error("Postback 数据库会话错误：exception_type=%s", type(e).__name__)
             await session.rollback()
             raise
         finally:
@@ -206,24 +209,30 @@ async def get_db_readonly() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             raise
         except Exception as e:
-            logger.error(f"只读数据库会话错误: {str(e)}", exc_info=True)
+            # 只读查询错误同样不输出 SQL 参数或原始异常文本。
+            logger.error("只读数据库会话错误：exception_type=%s", type(e).__name__)
             await session.rollback()
             raise
         finally:
             await session.close()
 
 
-# 创建数据库表
 async def create_tables():
-    """
-    创建数据库表
-    
-    注意：生产环境建议使用迁移工具如Alembic
-    这里为了演示简单，直接创建表
-    """
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables created successfully")
+    """兼容旧调用名，但禁止应用进程绕过 Migration Runner 执行 DDL。"""
+    raise RuntimeError(
+        "禁止在应用运行进程中调用 create_tables；"
+        "请使用独立 MIGRATION_DATABASE_URL 执行 python -m app.db.migrations apply"
+    )
+
+
+def _is_duplicate_key_integrity_error(exc: IntegrityError) -> bool:
+    """仅识别唯一键竞争；其它完整性错误必须继续抛出。"""
+    original = getattr(exc, "orig", exc)
+    args = getattr(original, "args", ())
+    if args and args[0] == 1062:
+        return True
+    message = str(original).lower()
+    return "duplicate entry" in message or "unique constraint failed" in message
 
 
 async def init_db():
@@ -267,8 +276,22 @@ async def init_db():
             # 设置密码（自动加密）
             admin.set_password(settings.FIRST_SUPERUSER_PASSWORD)
             session.add(admin)
-            await session.commit()
-            logger.info(f"默认管理员账户已创建: {settings.FIRST_SUPERUSER}")
+            try:
+                await session.commit()
+                logger.info(f"默认管理员账户已创建: {settings.FIRST_SUPERUSER}")
+            except IntegrityError as exc:
+                await session.rollback()
+                if not _is_duplicate_key_integrity_error(exc):
+                    raise
+                # 多个 Worker 同时启动时可能同时读到“无管理员”；
+                # 唯一键只允许一个 Worker 创建成功，其它 Worker 回滚后确认结果即可。
+                concurrent_result = await session.execute(
+                    select(User).where(User.role == UserRole.ADMIN)
+                )
+                concurrent_admin = concurrent_result.scalars().first()
+                if concurrent_admin is None:
+                    raise
+                logger.info("默认管理员账户已由其它 Worker 并发创建")
         else:
             logger.info("管理员账户已存在，跳过创建")
 

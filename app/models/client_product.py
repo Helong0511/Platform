@@ -25,10 +25,10 @@ class Client(Base):
     - contact_person: 联系人姓名，可选，最大50字符
     - phone: 联系电话，可选，最大20字符
     - address: 公司地址，可选，文本类型
-    - allowed_ips: IP白名单，多个IP用逗号分隔，为空则不限制IP访问
+    - allowed_ips: IP白名单，多个IP用逗号分隔；同一用户关联多个 Client 时，所有非空白名单均须允许来源 IP
     - is_active: 是否激活，False时客户无法访问系统
     - api_enabled: 是否允许API访问，True时显示API对接菜单并允许通过API查询数据
-    - password_change_enabled: 是否允许客户修改密码，True时客户可以修改自己的登录密码
+    - password_change_enabled: 是否允许客户修改密码；同一用户关联多个 Client 时，所有关联 Client 均开启才允许修改共享账号密码
     - created_at: 创建时间，自动设置为当前时间
     - updated_at: 更新时间，每次更新时自动更新
     

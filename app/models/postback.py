@@ -2,7 +2,8 @@
 Postback 转化、转发、通知、短链、斗篷 ORM 模型。
 """
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
-    UniqueConstraint, Date, Numeric
+    UniqueConstraint, Date, Numeric, CheckConstraint, CHAR
+from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -110,6 +111,7 @@ class PostbackForwardLog(Base):
     retry_count = Column(Integer, default=0, comment='重试次数')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')
     completed_at = Column(DateTime, nullable=True, comment='完成时间')
+    pii_scrubbed_at = Column(DateTime, nullable=True, comment='PII 按保留策略清理时间')
 
     # 关系
     conversion = relationship("PostbackConversion", foreign_keys=[conversion_id])
@@ -122,6 +124,7 @@ class PostbackForwardLog(Base):
         Index("idx_forward_log_publisher", "publisher_id"),
         Index("idx_forward_log_created_at", "created_at"),
         Index("idx_forward_log_success", "success"),
+        Index("idx_forward_log_pii_retention", "pii_scrubbed_at", "created_at", "id"),
     )
 
 class PostbackForwardQueue(Base):
@@ -142,7 +145,9 @@ class PostbackForwardQueue(Base):
     request_data = Column(Text, nullable=True, comment='请求数据（JSON格式，用于POST请求）')
     request_params = Column(Text, nullable=True, comment='请求参数（URL参数，用于GET请求）')
     retry_count = Column(Integer, default=0, comment='已重试次数')
-    next_retry_time = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='下次重试时间')
+    next_retry_time = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='下次业务重试时间；不承担 Worker 租约')
+    lease_token = Column(CHAR(32, collation='ascii_bin'), nullable=True, comment='Worker 独立随机租约令牌')
+    lease_expires_at = Column(DATETIME(fsp=6), nullable=True, comment='Worker 租约过期时间（数据库时钟）')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')
 
     # 关系
@@ -150,6 +155,11 @@ class PostbackForwardQueue(Base):
     product = relationship("Product", foreign_keys=[product_id])
 
     __table_args__ = (
+        CheckConstraint(
+            "(lease_token IS NULL AND lease_expires_at IS NULL) OR "
+            "(lease_token IS NOT NULL AND CHAR_LENGTH(lease_token)=32 AND lease_expires_at IS NOT NULL)",
+            name="chk_forward_queue_lease_pair_v1",
+        ),
         Index("idx_forward_queue_time", "next_retry_time"),
         Index("idx_forward_queue_conversion", "conversion_id"),
         Index("idx_forward_queue_publisher", "publisher_id"),
@@ -417,6 +427,28 @@ class ShortLink(Base):
         Index("idx_short_link_channel_id", "channel_id"),
         Index("idx_short_link_active", "is_active"),
         Index("idx_short_link_created_at", "created_at"),
+    )
+
+
+class ShortLinkClickSyncBatch(Base):
+    """
+    短链接点击刷盘幂等账本。
+
+    Redis pending batch 与 Redis 不可用时的单次点击事件共用唯一账本。
+    pending batch 只有在 Redis pending key 确认删除后才标记 acknowledged；
+    DB fallback event 在同一事务提交时直接标记 acknowledged。
+    """
+    __tablename__ = "short_link_click_sync_batches"
+
+    batch_id = Column(String(64), primary_key=True, comment="Redis pending batch UUID")
+    short_code = Column(String(20), nullable=False, comment="短链接代码")
+    click_count = Column(Integer, nullable=False, comment="本批次待入账点击数")
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment="创建时间")
+    acknowledged_at = Column(DateTime, nullable=True, comment="Redis pending key 确认删除时间")
+
+    __table_args__ = (
+        Index("idx_short_click_batch_code_created", "short_code", "created_at"),
+        Index("idx_short_click_batch_ack_created", "acknowledged_at", "created_at"),
     )
 
 

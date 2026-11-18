@@ -30,6 +30,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def _exclusive_end_datetime(end_date: str) -> datetime:
+    """把包含式结束日期转换为次日零点的排他上界。"""
+    return parse_date_to_app_timezone(end_date, is_end_date=False) + timedelta(days=1)
+
 # 客户不可见的上游金额与广告主字段（文档约定仅管理员可见）
 _CLIENT_HIDDEN_SUMMARY_TOTAL_KEYS = frozenset({"total_po", "total_profit"})
 _CLIENT_HIDDEN_STATS_KEYS = frozenset({
@@ -121,7 +126,7 @@ class ConversionService:
             start_datetime = parse_date_to_app_timezone(start_date, is_end_date=False)
         if end_date:  # 结束日期
             # 结束日期需要包含当天的所有时间，所以+1天并使用00:00:00作为上界（不包含）
-            end_datetime = parse_date_to_app_timezone(end_date, is_end_date=False) + timedelta(days=1)
+            end_datetime = _exclusive_end_datetime(end_date)
 
         # 如果没有指定日期，默认查询最近30天
         if not start_datetime:  # 开始日期默认30天前
@@ -131,41 +136,39 @@ class ConversionService:
             end_datetime = get_app_now_naive()
             end_datetime = end_datetime.replace(hour=23, minute=59, second=59, microsecond=999999)
 
-        # --- 客户角色：解析 client_id 与可见渠道列表 ---
+        # --- 客户角色：解析全部 Client 记录与可见渠道列表 ---
         client_publisher_ids = None
-        client_id = None
+        client_ids = None
         if current_user.role == UserRole.CLIENT:
-            # 查询客户关联的Client记录
+            # User 与 Client 是一对多关系；必须收集该用户的全部 Client，不能任取第一条。
             client_result = await self.db.execute(
-                select(Client.id).where(Client.user_id == current_user.id).limit(1)
+                select(Client.id).where(Client.user_id == current_user.id, Client.is_active.is_(True))
             )
-            client_id = client_result.scalar_one_or_none()
-            if client_id:
-                # 查询客户关联的所有活跃渠道
-                publisher_result = await self.db.execute(
-                    select(Publisher.id).where(
-                        and_(
-                            Publisher.client_id == client_id,
-                            Publisher.is_active == True
-                        )
+            client_ids = [int(value) for value in client_result.scalars().all()]
+            if not client_ids:
+                # 客户用户没有关联 Client 时，严格返回空范围，绝不退化为全局查询。
+                return {
+                    "total_clicks": 0,
+                    "total_conversions": 0,
+                    "cr": 0,
+                    "total_po": 0.0,
+                    "total_po_after_discount": 0.0,
+                    "total_profit": 0.0,
+                    "stats_list": [],
+                    "start_date": start_date or (start_datetime.strftime("%Y-%m-%d")),
+                    "end_date": end_date or (end_datetime.strftime("%Y-%m-%d"))
+                }
+
+            publisher_result = await self.db.execute(
+                select(Publisher.id).where(
+                    and_(
+                        Publisher.client_id.in_(client_ids),
+                        Publisher.is_active == True
                     )
                 )
-                client_publisher_ids = list(publisher_result.scalars().all())
-                # 如果客户没有关联的渠道，返回空统计
-                if not client_publisher_ids:
-                    return {
-                        "total_clicks": 0,
-                        "total_conversions": 0,
-                        "cr": 0,
-                        "total_po": 0.0,
-                        "total_po_after_discount": 0.0,
-                        "total_profit": 0.0,
-                        "stats_list": [],
-                        "start_date": start_date or (start_datetime.strftime("%Y-%m-%d")),
-                        "end_date": end_date or (end_datetime.strftime("%Y-%m-%d"))
-                    }
-            else:
-                # 客户没有关联的Client记录，返回空统计
+            )
+            client_publisher_ids = [int(value) for value in publisher_result.scalars().all()]
+            if not client_publisher_ids:
                 return {
                     "total_clicks": 0,
                     "total_conversions": 0,
@@ -462,14 +465,14 @@ class ConversionService:
         # --- 客户角色：downstream_cap 仅裁剪展示（只读，不关短链）---
         # 关短链由 Postback Cap 流水线负责；GET 汇总不写库。
         conversion_cap = 0
-        if current_user.role == UserRole.CLIENT and client_id:
+        if current_user.role == UserRole.CLIENT and client_ids:
             # 展示口径：客户全量渠道 downstream_cap 之和（与筛选结果集无关）
             client_cap_result = await self.db.execute(
                 select(func.sum(OfferPublisherAssignment.downstream_cap))
                 .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
                 .where(
                     and_(
-                        Publisher.client_id == client_id,
+                        Publisher.client_id.in_(client_ids),
                         Publisher.is_active == True,
                         OfferPublisherAssignment.is_active == True,
                         OfferPublisherAssignment.downstream_cap.isnot(None)
@@ -629,24 +632,25 @@ class ConversionService:
         if start_date:
             start_datetime = parse_date_to_app_timezone(start_date)
         if end_date:
-            end_datetime = parse_date_to_app_timezone(end_date)
-            end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
+            # 使用次日零点作为排他上界，避免漏掉结束日最后一秒内的微秒记录。
+            end_datetime = _exclusive_end_datetime(end_date)
 
         # --- 客户角色：限定可见渠道 ---
         client_publisher_ids = None
         if current_user.role == UserRole.CLIENT:
+            # 一个客户用户可能关联多个 Client；查询全部归属渠道，避免只取任意一条记录。
             client_result = await self.db.execute(
-                select(Client.id).where(Client.user_id == current_user.id).limit(1)
+                select(Client.id).where(Client.user_id == current_user.id, Client.is_active.is_(True))
             )
-            client_id = client_result.scalar_one_or_none()
-            if client_id:
-                publisher_result = await self.db.execute(
-                    select(Publisher.id).where(Publisher.client_id == client_id)
-                )
-                client_publisher_ids = list(publisher_result.scalars().all())
-                if not client_publisher_ids:
-                    return []
-            else:
+            client_ids = [int(value) for value in client_result.scalars().all()]
+            if not client_ids:
+                return []
+
+            publisher_result = await self.db.execute(
+                select(Publisher.id).where(Publisher.client_id.in_(client_ids), Publisher.is_active.is_(True))
+            )
+            client_publisher_ids = [int(value) for value in publisher_result.scalars().all()]
+            if not client_publisher_ids:
                 return []
 
         # --- 确定时间窗内有过转化的 Offer 集合 ---
@@ -665,7 +669,7 @@ class ConversionService:
             )
         if end_datetime:
             conversion_offer_query = conversion_offer_query.where(
-                PostbackConversion.created_at <= end_datetime
+                PostbackConversion.created_at < end_datetime
             )
         if client_publisher_ids is not None:
             conversion_offer_query = conversion_offer_query.where(
@@ -705,7 +709,7 @@ class ConversionService:
             )
         if end_datetime:
             click_query = click_query.where(
-                Click.click_time <= end_datetime
+                Click.click_time < end_datetime
             )
         if client_publisher_ids is not None:
             click_query = click_query.where(
@@ -754,7 +758,7 @@ class ConversionService:
             )
         if end_datetime:
             conversion_query = conversion_query.where(
-                PostbackConversion.created_at <= end_datetime
+                PostbackConversion.created_at < end_datetime
             )
         if client_publisher_ids is not None:
             conversion_query = conversion_query.where(

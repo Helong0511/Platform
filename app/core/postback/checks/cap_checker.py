@@ -5,10 +5,13 @@ Cap 限制检查器
 """
 import logging
 from typing import Optional, Tuple
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cap import check_cap, increment_cap_count, rollback_cap_redis_counts
+from app.core.cap.redis_counter import RedisCapManager, get_daily_cap_key, get_total_cap_key
 from app.core.config import settings
+from app.services.cap_reservation_ledger import CapReservationLedger
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +64,7 @@ class CapChecker:
             return True, "cap_ok"
             
         except Exception as e:
-            logger.error(f"Cap 检查失败：{e}", exc_info=True)
+            logger.error("Cap 检查失败：error_type=%s", type(e).__name__)
             if settings.CAP_FAIL_OPEN:
                 return True, "cap_check_error"
             return False, "cap_check_error"
@@ -72,8 +75,10 @@ class CapChecker:
         publisher_id: Optional[int],
         advertiser_id: Optional[int],
         db: AsyncSession,
+        *,
+        reservations: Optional[list[tuple]] = None,
     ) -> None:
-        """DB 回滚后同步回退 Redis Cap 计数。"""
+        """仅按当前请求的 reservation token 回退 Redis；旧式无 token 调用安全拒绝。"""
         if not offer_id:
             return
         await rollback_cap_redis_counts(
@@ -81,8 +86,108 @@ class CapChecker:
             offer_id=offer_id,
             publisher_id=publisher_id,
             advertiser_id=advertiser_id,
+            reservations=reservations,
         )
     
+    @staticmethod
+    async def increment_with_reservations(
+        offer_id: Optional[int],
+        publisher_id: Optional[int],
+        advertiser_id: Optional[int],
+        db: AsyncSession,
+        reservation_context: Optional[dict] = None,
+    ) -> Tuple[bool, str, list[tuple]]:
+        """
+        增加 Cap 并返回本次真正预留的 Redis 计数器列表。
+
+        只回滚实际成功预留的 daily/total key，避免 fail-open 路径误减其它请求的计数。
+        """
+        if not offer_id:
+            logger.debug("没有 Offer ID，跳过 Cap 计数递增")
+            return True, "cap_ok", []
+
+        result = await increment_cap_count(
+            offer_id=offer_id,
+            publisher_id=publisher_id,
+            advertiser_id=advertiser_id,
+            db=db,
+            session_flush=True,
+            include_reservations=True,
+            reservation_context=reservation_context,
+        )
+        return result
+
+    @staticmethod
+    async def rollback_reservations(
+        reservations: list[tuple],
+    ) -> None:
+        """按账本记录回滚 Redis；fail-open 记录只结束账本，不执行 DECR。"""
+        failures = []
+        for reservation in reservations:
+            kind, offer_id, publisher_id = reservation[:3]
+            reservation_date = reservation[3] if len(reservation) > 3 else None
+            reservation_id = reservation[4] if len(reservation) > 4 else None
+            ledger_key = reservation[5] if len(reservation) > 5 else None
+            lease_owner = reservation[6] if len(reservation) > 6 else None
+            redis_reserved = reservation[7] if len(reservation) > 7 else True
+            try:
+                if redis_reserved:
+                    if kind == "daily":
+                        result = await RedisCapManager.decrement_daily(
+                            offer_id, publisher_id,
+                            reservation_date=reservation_date,
+                            reservation_id=reservation_id,
+                        )
+                    elif kind == "total":
+                        result = await RedisCapManager.decrement_total(
+                            offer_id, publisher_id, reservation_id=reservation_id
+                        )
+                    else:
+                        failures.append(f"unknown kind={kind}, offer_id={offer_id}")
+                        continue
+                    if result < 0:
+                        raise RuntimeError(
+                            f"Redis rollback unresolved: kind={kind}, offer_id={offer_id}, token={reservation_id}"
+                        )
+                if ledger_key:
+                    await CapReservationLedger.finalize(
+                        ledger_key, "ROLLED_BACK", lease_owner=lease_owner
+                    )
+                elif redis_reserved and reservation_id:
+                    # 兼容没有持久化账本的旧调用，回滚完成后清理临时墓碑。
+                    counter_key = (
+                        get_daily_cap_key(offer_id, reservation_date, publisher_id)
+                        if kind == "daily"
+                        else get_total_cap_key(offer_id, publisher_id)
+                    )
+                    await RedisCapManager.delete_reservation_token(
+                        f"{counter_key}:reservation:{reservation_id}"
+                    )
+            except Exception as exc:
+                if ledger_key:
+                    try:
+                        await CapReservationLedger.mark_needs_reconciliation(
+                            ledger_key, f"Redis 回滚异常，error_type={type(exc).__name__}", lease_owner=lease_owner
+                        )
+                    except Exception as persist_exc:
+                        logger.critical(
+                            "Cap Reservation 状态更新失败：reservation_key=%s error_type=%s",
+                            ledger_key,
+                            type(persist_exc).__name__,
+                        )
+                failures.append(
+                    f"kind={kind}, offer_id={offer_id}, token={reservation_id}, error_type={type(exc).__name__}"
+                )
+                logger.error(
+                    "Cap reservation rollback failed; continue with remaining tokens：error_type=%s",
+                    type(exc).__name__,
+                )
+        if failures:
+            raise RuntimeError(
+                "Cap reservation rollback incomplete: " + "; ".join(failures)
+            )
+
+
     @staticmethod
     async def increment(
         offer_id: Optional[int],
@@ -90,48 +195,11 @@ class CapChecker:
         advertiser_id: Optional[int],
         db: AsyncSession,
     ) -> Tuple[bool, str]:
-        """
-        增加 Cap 计数（仅 flush，由 PostbackProcessor 统一 commit）。
-
-        Returns:
-            (ok, status)：status 为 cap_ok / cap_exceeded / cap_check_error
-        """
-        if not offer_id:
-            logger.debug("没有 Offer ID，跳过 Cap 计数递增")
-            return True, "cap_ok"
-
-        redis_reserved = False
-        try:
-            passed, status = await increment_cap_count(
-                offer_id=offer_id,
-                publisher_id=publisher_id,
-                advertiser_id=advertiser_id,
-                db=db,
-                session_flush=True,
-            )
-            if not passed:
-                logger.warning(
-                    "Cap 计数递增未通过：offer_id=%s publisher_id=%s status=%s",
-                    offer_id,
-                    publisher_id,
-                    status,
-                )
-                return False, status or "cap_exceeded"
-            # increment_cap_count 已成功预留 Redis；其后异常须由本层回退，避免与
-            # increment 内部 except 的 reserved 回退叠加成双重 DECR。
-            redis_reserved = True
-            await db.flush()
-            logger.debug(
-                f"Cap 计数已增加：offer_id={offer_id}, publisher_id={publisher_id}"
-            )
-            return True, "cap_ok"
-        except Exception as e:
-            if redis_reserved:
-                await rollback_cap_redis_counts(
-                    db=db,
-                    offer_id=offer_id,
-                    publisher_id=publisher_id,
-                    advertiser_id=advertiser_id,
-                )
-            logger.error(f"增加 Cap 计数失败：{e}", exc_info=True)
-            raise
+        """兼容旧调用签名；新事务代码应使用 increment_with_reservations。"""
+        ok, status, _reservations = await CapChecker.increment_with_reservations(
+            offer_id=offer_id,
+            publisher_id=publisher_id,
+            advertiser_id=advertiser_id,
+            db=db,
+        )
+        return ok, status

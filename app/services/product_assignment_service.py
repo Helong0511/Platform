@@ -87,7 +87,7 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
                 User, Client.user_id == User.id
             ).where(
                 ProductAssignment.product_id == product_id,
-                Client.user_id == current_user.id
+                Client.user_id == current_user.id, Client.is_active.is_(True)
             ).order_by(ProductAssignment.start_date.desc())
 
         result = await self.db.execute(query)
@@ -101,7 +101,7 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
             # 如果是客户角色，在查询时直接过滤权限
             if current_user.role != UserRole.ADMIN:
                 product_query = product_query.join(Client, Product.client_id == Client.id).where(
-                    Client.user_id == current_user.id
+                    Client.user_id == current_user.id, Client.is_active.is_(True)
                 )
 
             product_result = await self.db.execute(product_query)

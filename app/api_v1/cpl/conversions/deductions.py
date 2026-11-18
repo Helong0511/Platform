@@ -129,8 +129,8 @@ async def get_deduction_configs(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("获取扣减配置列表失败: %s", e, exc_info=True)
-        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=str(e))
+        logger.error("获取扣减配置列表失败: error_type=%s", type(e).__name__)
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail="获取扣减配置列表失败，请稍后重试")
 
 
 @router.put(
@@ -345,8 +345,8 @@ async def get_deduction_stats(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("获取扣减统计失败: %s", e, exc_info=True)
-        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=str(e))
+        logger.error("获取扣减统计失败: error_type=%s", type(e).__name__)
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail="获取扣减统计失败，请稍后重试")
 
 
 @router.get(
@@ -395,8 +395,8 @@ async def get_deduction_logs(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("获取扣减日志失败: %s", e, exc_info=True)
-        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=str(e))
+        logger.error("获取扣减日志失败: error_type=%s", type(e).__name__)
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail="获取扣减日志失败，请稍后重试")
 
 
 @router.get(
@@ -454,8 +454,8 @@ async def export_deduction_configs(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("导出扣减配置失败: %s", e, exc_info=True)
-        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=str(e))
+        logger.error("导出扣减配置失败: error_type=%s", type(e).__name__)
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail="导出扣减配置失败，请稍后重试")
 
 
 @router.get(
@@ -505,8 +505,8 @@ async def export_deduction_stats(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("导出扣减统计失败: %s", e, exc_info=True)
-        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=str(e))
+        logger.error("导出扣减统计失败: error_type=%s", type(e).__name__)
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail="导出扣减统计失败，请稍后重试")
 
 
 @router.get(
@@ -568,5 +568,5 @@ async def export_deduction_logs(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("导出扣减日志失败: %s", e, exc_info=True)
-        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=str(e))
+        logger.error("导出扣减日志失败: error_type=%s", type(e).__name__)
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail="导出扣减日志失败，请稍后重试")

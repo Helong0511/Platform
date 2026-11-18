@@ -35,17 +35,6 @@
           </span>
         </div>
       </div>
-      <div class="header-actions">
-        <el-button
-          type="danger"
-          :icon="Delete"
-          :loading="clearingAll"
-          :disabled="loading"
-          @click="handleClearAllLogs"
-        >
-          清除全部日志
-        </el-button>
-      </div>
     </div>
 
     <!-- 筛选控件 -->
@@ -369,10 +358,10 @@ import { onMounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem,
-  ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage, ElMessageBox,
+  ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage,
   ElDescriptions, ElDescriptionsItem, ElDatePicker, ElAlert, ElCheckboxGroup, ElCheckbox,
 } from 'element-plus';
-import { Search, Refresh, Loading, Setting, Delete } from '@element-plus/icons-vue';
+import { Search, Refresh, Loading, Setting } from '@element-plus/icons-vue';
 import { useAuthStore } from '../../store';
 import { formatDateTime } from '../../utils/dateFormat';
 import { useDevice } from '../../composables/useDevice';
@@ -401,7 +390,6 @@ const {
 const {
   logs,
   loading,
-  clearingAll,
   stats,
   pagination,
   searchForm,
@@ -411,47 +399,11 @@ const {
   fetchLogs,
   resetFilter,
   handleViewDetail,
-  clearAllLogs,
   bindPaginationWatch,
   finishInitializing,
 } = useAuditLogs(authStore, router);
 
 const formatJson = formatAuditJson;
-
-const handleClearAllLogs = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '将清空 user_audit_logs 全部记录并重置自增 ID 为 1，此操作不可恢复。确定继续？',
-      '清除全部日志',
-      {
-        type: 'warning',
-        confirmButtonText: '确认清除',
-        cancelButtonText: '取消',
-        confirmButtonClass: 'el-button--danger',
-      }
-    );
-    await ElMessageBox.confirm(
-      '请再次确认：所有操作日志将被永久删除，无法找回。',
-      '二次确认',
-      {
-        type: 'error',
-        confirmButtonText: '永久删除',
-        cancelButtonText: '取消',
-        confirmButtonClass: 'el-button--danger',
-      }
-    );
-  } catch {
-    return;
-  }
-
-  try {
-    const result = await clearAllLogs();
-    const autoInc = result?.auto_increment ?? 1;
-    ElMessage.success(`已清除全部操作日志（下次 ID 从 ${autoInc} 开始）`);
-  } catch {
-    // 全局拦截器处理
-  }
-};
 
 bindPaginationWatch();
 

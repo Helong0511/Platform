@@ -337,7 +337,7 @@ class AdDataSummaryQuery:
         query = join_product_and_client(query, use_assignment_table)
 
         if not is_admin(current_user):
-            query = query.where(Client.user_id == current_user.id)
+            query = query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
         elif client_id:
             query = query.where(Client.id == client_id)
 
@@ -429,7 +429,7 @@ class AdDataSummaryQuery:
         query = join_product_and_client(query, use_assignment_table)
 
         if not is_admin(current_user):
-            query = query.where(Client.user_id == current_user.id)
+            query = query.where(Client.user_id == current_user.id, Client.is_active.is_(True))
         elif client_id:
             query = query.where(Client.id == client_id)
 

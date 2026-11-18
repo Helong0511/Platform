@@ -48,10 +48,10 @@ async def get_dashboard_stats(period: str = "week", db: AsyncSession = Depends(g
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取仪表盘统计数据失败: {str(e)}", exc_info=True)
+        logger.error("获取仪表盘统计数据失败：error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取统计数据失败：{str(e)}"
+            detail="获取统计数据失败，请稍后重试",
         )
 
 
@@ -78,7 +78,7 @@ async def get_recent_ad_data(
         
         return ResponseBaseSchema.success(data=response_data)
     except Exception as e:
-        logger.error(f"获取最近广告数据失败: {str(e)}")
+        logger.error("获取最近广告数据失败：error_type=%s", type(e).__name__)
         # 返回空数据而不是抛出异常，保持健壮性
         return ResponseBaseSchema.success(data={
             "ads": [],
@@ -114,8 +114,8 @@ async def get_trend_data(period: str = "week", db: AsyncSession = Depends(get_db
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取趋势数据失败: {str(e)}", exc_info=True)
+        logger.error("获取趋势数据失败：error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取趋势数据失败：{str(e)}"
+            detail="获取趋势数据失败，请稍后重试",
         )

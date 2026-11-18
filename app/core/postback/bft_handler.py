@@ -5,6 +5,8 @@ BFT 平台 Postback 处理器
 import logging
 from typing import Dict, Any, Optional
 from app.core.postback.handlers import PostbackHandler
+from app.core.postback.transformers.normalizer import DataNormalizer
+from app.core.postback.validators.data_validator import validate_payout_value
 
 logger = logging.getLogger(__name__)
 
@@ -18,105 +20,53 @@ class BftPostbackHandler(PostbackHandler):
         return "bft"
     
     async def validate(self, data: Dict[str, Any]) -> tuple[bool, Optional[str]]:
-        """
-        验证 BFT postback 数据
-        
-        BFT 必填参数：
-        - clk_id 或 click_id 或 cid: BFT click ID（必填）
-        - payout 或相关参数: 支付金额（必填）
-        
-        可选参数：
-        - event_name: Event ID（事件ID，可选）
-        """
-        # 支持多种参数名：clk_id, click_id, cid, clickid, conversion_id 等
-        clk_id = (
-            data.get("clk_id") or
-            data.get("click_id") or
-            data.get("cid") or
-            data.get("clickid") or
-            data.get("clickId") or
-            data.get("ClickId") or
-            data.get("conversion_id") or
-            data.get("conversionId")
+        """验证 BFT 回调字段；金额校验与通用入口使用同一 Decimal 规则。"""
+        clk_id = self._first_non_empty(
+            data,
+            "clk_id", "click_id", "cid", "clickid", "clickId", "ClickId",
+            "conversion_id", "conversionId",
         )
-        
-        # 支持多种参数名：payout, PayOut, pay_out, pay-out 等
-        payout = (
-            data.get("payout") or
-            data.get("PayOut") or
-            data.get("pay_out") or
-            data.get("pay-out") or
-            data.get("Pay_Out") or
-            data.get("Payout") or
-            data.get("PAYOUT")
-        )
-        
-        # 验证 clk_id 是必填的
-        if not clk_id or not str(clk_id).strip():
+        if clk_id is None:
             return False, "clk_id 或 click_id 或 cid 参数不能为空"
-        
-        # 验证 payout 是必填且必须大于 0（字符串 "0" 不能用布尔假值判断）
-        if payout is None or str(payout).strip() == '':
-            return False, "payout 参数不能为空"
-        try:
-            payout_val = float(payout)
-            if payout_val <= 0:
-                return False, f"payout 必须大于 0：当前值={payout}"
-        except (ValueError, TypeError):
-            return False, f"payout 格式错误：{payout}（应为数字）"
-        
+        if len(str(clk_id).strip()) > 200:
+            return False, "click_id/conversion_id 过长（最大 200 字符）"
+
+        payout = self._first_non_empty(
+            data,
+            "payout", "PayOut", "pay_out", "pay-out", "Pay_Out", "Payout", "PAYOUT",
+        )
+        payout_error = validate_payout_value(payout)
+        if payout_error:
+            return False, payout_error
+
+        event_name = self._first_non_empty(data, "event_name", "event_id")
+        if event_name is not None and len(str(event_name)) > 100:
+            return False, "event_name 过长（最大 100 字符）"
+
         return True, None
-    
+
     async def normalize(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        标准化 BFT postback 数据
-        
-        BFT 参数映射：
-        - clk_id -> conversion_id
-        - click_id -> conversion_id
-        - event_name -> event_name
-        - devad_id -> devad_id
-        - event_value -> event_value
-        - payout -> payout
-        - carrier -> carrier
-        - os -> os
-        - ip -> ip
-        - gid -> gid
-        - product_id -> product_id
-        - client_id -> client_id
-        """
-        # 处理 clk_id/click_id（可能以不同字段名出现，包括 cid）
-        conversion_id = (
-            data.get("clk_id") or
-            data.get("click_id") or
-            data.get("cid") or
-            data.get("clickid") or
-            data.get("clickId") or
-            data.get("ClickId") or
-            data.get("conversion_id") or
-            data.get("conversionId")
+        """标准化 BFT 回调；金额使用 Decimal，避免 float 精度损失。"""
+        conversion_id = self._first_non_empty(
+            data,
+            "clk_id", "click_id", "cid", "clickid", "clickId", "ClickId",
+            "conversion_id", "conversionId",
         )
-        
-        # 处理 event_name（可能以不同字段名出现）
-        event_name = data.get("event_name") or data.get("event_id")
-        
-        # 处理 payout（支持多种字段名：payout, PayOut, pay_out, pay-out 等）
-        payout = (
-            data.get("payout") or
-            data.get("PayOut") or
-            data.get("pay_out") or
-            data.get("pay-out") or
-            data.get("Pay_Out") or
-            data.get("Payout") or
-            data.get("PAYOUT")
+        event_name_raw = self._first_non_empty(data, "event_name", "event_id")
+        event_name = str(event_name_raw).strip() if event_name_raw is not None else "default"
+        event_name = event_name or "default"
+
+        payout = self._first_non_empty(
+            data,
+            "payout", "PayOut", "pay_out", "pay-out", "Pay_Out", "Payout", "PAYOUT",
         )
-        
-        normalized = {
+
+        return {
             "platform": self.platform_name,
-            "conversion_id": str(conversion_id).strip() if conversion_id else None,
-            "event_name": str(event_name).strip() if event_name else "default",
-            "event_value": self._to_float(data.get("event_value")),
-            "payout": self._to_float(payout),
+            "conversion_id": str(conversion_id).strip() if conversion_id is not None else None,
+            "event_name": event_name,
+            "event_value": DataNormalizer._parse_decimal(data.get("event_value")),
+            "payout": DataNormalizer._parse_decimal(payout),
             "devad_id": self._to_str(data.get("devad_id")),
             "os": self._to_str(data.get("os")),
             "carrier": self._to_str(data.get("carrier")),
@@ -124,22 +74,19 @@ class BftPostbackHandler(PostbackHandler):
             "gid": self._to_str(data.get("gid")),
             "product_id": self._to_int(data.get("product_id")),
             "client_id": self._to_int(data.get("client_id")),
-            "click_id": str(conversion_id).strip() if conversion_id else None,
-            "raw_data": data
+            "click_id": str(conversion_id).strip() if conversion_id is not None else None,
+            "raw_data": data,
         }
-        
-        return normalized
-    
+
     @staticmethod
-    def _to_float(value: Any) -> Optional[float]:
-        """转换为浮点数"""
-        if value is None:
-            return None
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            return None
-    
+    def _first_non_empty(data: Dict[str, Any], *keys: str) -> Optional[Any]:
+        """按字段优先级读取非空值；保留数值 0 供校验拒绝，不错误回退到别名。"""
+        for key in keys:
+            value = data.get(key)
+            if value is not None and str(value).strip() != "":
+                return value
+        return None
+
     @staticmethod
     def _to_int(value: Any) -> Optional[int]:
         """转换为整数"""

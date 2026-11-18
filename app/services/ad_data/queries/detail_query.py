@@ -108,9 +108,12 @@ class DetailQueryBuilder:
                 ErrorCode.USER_NOT_FOUND,
                 detail=f"广告数据关联的用户ID {client.user_id if client else '未知'} 不存在",
             )
-        if not is_admin(current_user) and client.user_id != current_user.id:
+        if not is_admin(current_user) and (
+            client.user_id != current_user.id
+            or not bool(getattr(client, "is_active", False))
+        ):
             raise_api_exception(
                 ErrorCode.AD_DATA_NO_PERMISSION,
-                detail=f"您没有权限访问广告数据ID {data_id}，该数据不属于您的客户账户",
+                detail=f"您没有权限访问广告数据ID {data_id}，该数据不属于您的启用中客户账户",
             )
         return ad_data, product, client, user, assignment, country_info

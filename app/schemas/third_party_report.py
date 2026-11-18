@@ -25,6 +25,9 @@ class ThirdPartyReportLogBase(BaseSchema):
     source: str = Field(..., max_length=50, description="来源")
     adsid: str = Field(..., max_length=500, description="广告ID")
     event: str = Field(..., max_length=50, description="事件类型")
+    platform: Optional[str] = Field(None, max_length=100, description="Postback 平台标识")
+    identity_scope: str = Field("legacy_unresolved", max_length=32, description="事件身份作用域")
+    destination_pixel_id: Optional[str] = Field(None, max_length=100, description="Meta Pixel 目的地 ID")
     conversion_id: Optional[str] = Field(None, max_length=255, description="转化ID")
     currency: Optional[str] = Field(None, max_length=10, description="货币类型")
     amount: Optional[Decimal] = Field(None, description="支付金额")
@@ -33,12 +36,15 @@ class ThirdPartyReportLogBase(BaseSchema):
     phone: Optional[str] = Field(None, max_length=50, description="手机号")
     ua: Optional[str] = Field(None, description="用户代理")
     report_params: Optional[str] = Field(None, description="完整上报参数（JSON格式）")
+    outbox_enqueued: bool = Field(False, description="是否属于持久化 Outbox 事件")
+    next_retry_time: Optional[datetime] = Field(None, description="下次自动重试时间")
+    error_message: Optional[str] = Field(None, description="失败原因（不包含凭据）")
     use_hash: bool = Field(True, description="是否对email、ip、phone进行哈希处理")
     status: str = Field(..., max_length=20, description="状态")
     attempt_count: int = Field(0, description="尝试次数")
-    max_attempts: int = Field(3, description="最大尝试次数")
+    max_attempts: int = Field(3, description="自动重试周期内最大尝试次数")
+    manual_retry_count: int = Field(0, ge=0, description="管理员手动重新入队累计次数")
     response_status: Optional[int] = Field(None, description="响应状态码")
-    response_body: Optional[str] = Field(None, description="响应内容")
     log_id: Optional[str] = Field(None, max_length=100, description="日志ID")
     """
     第三方上报日志响应模型
@@ -57,6 +63,7 @@ class ThirdPartyReportLogResponse(ThirdPartyReportLogBase):
     created_at: datetime
     report_start_time: Optional[datetime] = None
     report_success_time: Optional[datetime] = None
+    pii_scrubbed_at: Optional[datetime] = Field(None, description="个人信息载荷清理时间")
     """
     第三方上报日志列表响应模型（轻量字段）
     
@@ -78,13 +85,17 @@ class ThirdPartyReportLogListResponse(BaseSchema):
     source: str = Field(..., max_length=50, description="来源")
     adsid: str = Field(..., max_length=500, description="广告ID")
     event: str = Field(..., max_length=50, description="事件类型")
+    platform: Optional[str] = Field(None, max_length=100, description="Postback 平台标识")
+    identity_scope: str = Field("legacy_unresolved", max_length=32, description="事件身份作用域")
+    destination_pixel_id: Optional[str] = Field(None, max_length=100, description="Meta Pixel 目的地 ID")
     conversion_id: Optional[str] = Field(None, max_length=255, description="转化ID")
     currency: Optional[str] = Field(None, max_length=10, description="货币类型")
     amount: Optional[Decimal] = Field(None, description="支付金额")
     use_hash: bool = Field(True, description="是否对email、ip、phone进行哈希处理")
     status: str = Field(..., max_length=20, description="状态")
     attempt_count: int = Field(0, description="尝试次数")
-    max_attempts: int = Field(3, description="最大尝试次数")
+    max_attempts: int = Field(3, description="自动重试周期内最大尝试次数")
+    manual_retry_count: int = Field(0, ge=0, description="管理员手动重新入队累计次数")
     response_status: Optional[int] = Field(None, description="响应状态码")
     log_id: Optional[str] = Field(None, max_length=100, description="日志ID")
     """
@@ -96,6 +107,14 @@ class ThirdPartyReportLogListResponse(BaseSchema):
     report_start_time: Optional[datetime] = None
     report_success_time: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    outbox_enqueued: bool = Field(False, description="是否属于持久化 Outbox 事件")
+    pii_scrubbed_at: Optional[datetime] = Field(None, description="个人信息载荷清理时间")
+    next_retry_time: Optional[datetime] = Field(None, description="下次自动重试时间")
+    outbox_error_category: Optional[str] = Field(None, description="脱敏后的 Outbox 失败原因分类")
+    report_params_preview: Optional[str] = Field(None, description="脱敏后的上报参数预览")
+    can_requeue: bool = Field(False, description="当前是否满足人工重新排队条件")
+    outbox_payload_editable: bool = Field(False, description="Outbox 是否仍允许修改发送载荷")
+    outbox_processing: bool = Field(False, description="Outbox 是否处于有效发送租约中")
 
     model_config = {
         "from_attributes": True

@@ -3,6 +3,7 @@ Cap 管理逻辑
 用于检查 Cap 限制和自动下线
 """
 import logging
+import uuid
 from typing import Optional, Tuple
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,7 @@ from app.core.cap.redis_counter import RedisCapManager, get_daily_cap_key, get_t
 from app.core.config import settings
 from app.core.redis_client import get_redis_client
 from app.core.utils import get_app_now_naive
+from app.services.cap_reservation_ledger import CapReservationLedger
 
 
 async def check_cap(
@@ -92,29 +94,26 @@ async def check_cap(
                 
                 if redis:
                     # 尝试从 Redis 读取
+                    # 读取 Redis key 前刷新业务时间，并同步刷新日期边界；
+                    # 避免首次取时与实际 key 日期跨午夜后，拿昨日 DB 计数阻止今日请求。
                     now = get_app_now_naive()
+                    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
                     redis_key = get_daily_cap_key(cap.offer_id, now, cap.publisher_id)
                     redis_val = await redis.get(redis_key)
                     
+                    db_daily_count = (
+                        int(cap.current_daily_count or 0)
+                        if cap.cap_start_date
+                        and cap.cap_start_date.date() == today_start.date()
+                        else 0
+                    )
                     if redis_val is not None:
-                        actual_count = int(redis_val)
+                        # 与原子预留路径一致，不能让 Redis 回退低于 DB 已确认计数。
+                        actual_count = max(int(redis_val), db_daily_count)
                     else:
-                        # Redis 未命中（冷启动），从 DB 初始化
-                        if cap.cap_start_date and cap.cap_start_date.date() == today_start.date():
-                             actual_count = cap.current_daily_count
-                        else:
-                             actual_count = 0
-                        
-                        # SET NX：禁止覆盖并发路径已写入的计数
-                        try:
-                            await redis.set(
-                                redis_key,
-                                actual_count,
-                                ex=48 * 3600,
-                                nx=True,
-                            )
-                        except Exception as e:
-                            logger.warning(f"Redis回写失败: {e}")
+                        # 缺失 key 可能是 Redis 重启/淘汰或在途 reservation；
+                        # 这里只做只读预检查，不得 SET/SETNX 重建，最终由 Lua 原子预留初始化。
+                        actual_count = db_daily_count
                 else:
                     # Redis 不可用，降级到 DB 缓存字段 (不再执行实时 COUNT)
                     if cap.cap_start_date and cap.cap_start_date.date() == today_start.date():
@@ -134,36 +133,132 @@ async def check_cap(
                         total_key = get_total_cap_key(cap.offer_id, cap.publisher_id)
                         redis_val = await redis.get(total_key)
                         if redis_val is not None:
-                            actual_total_count = int(redis_val)
-                        else:
-                            await redis.set(
-                                total_key,
-                                actual_total_count,
-                                ex=30 * 24 * 3600,
-                                nx=True,
+                            # Redis 计数不得低于 DB 已确认值；实际预留仍由 Lua 原子判定。
+                            actual_total_count = max(
+                                int(redis_val),
+                                int(cap.current_total_count or 0),
                             )
+                        # key 缺失时只读使用 DB 值，不在预检查阶段重建 Redis key。
                     except Exception as e:
-                        logger.warning(f"读取 Redis 总Cap失败，回退 DB 字段: {e}")
+                        logger.warning("读取 Redis 总Cap失败，回退 DB 字段：error_type=%s", type(e).__name__)
                 if actual_total_count >= cap.total_cap:
                      return False, f"已达到总Cap限制: {cap.total_cap} (当前: {actual_total_count})"
         
         return True, None
     except Exception as e:
-        logger.error(f"检查Cap失败: {str(e)}", exc_info=True)
+        logger.error("检查Cap失败：error_type=%s", type(e).__name__)
         if settings.CAP_FAIL_OPEN:
             logger.warning("Cap 检查异常，fail-open 放行")
             return True, None
         return False, "cap_check_error"
 
 
-async def _rollback_reserved_redis(
-    reserved: list[tuple[str, int, Optional[int]]],
+async def _rollback_reserved_redis(reserved: list[tuple]) -> None:
+    """按 token 回滚 Redis，并同步结束对应账本；未知状态保留待对账。"""
+    failures = []
+    for reservation in reserved:
+        kind, oid, pid = reservation[:3]
+        reservation_date = reservation[3] if len(reservation) > 3 else None
+        reservation_id = reservation[4] if len(reservation) > 4 else None
+        ledger_key = reservation[5] if len(reservation) > 5 else None
+        lease_owner = reservation[6] if len(reservation) > 6 else None
+        redis_reserved = reservation[7] if len(reservation) > 7 else True
+        try:
+            if redis_reserved:
+                if kind == "daily":
+                    result = await RedisCapManager.decrement_daily(
+                        oid, pid, reservation_date=reservation_date, reservation_id=reservation_id
+                    )
+                elif kind == "total":
+                    result = await RedisCapManager.decrement_total(
+                        oid, pid, reservation_id=reservation_id
+                    )
+                else:
+                    raise RuntimeError(f"unknown kind={kind}, offer_id={oid}")
+                if result < 0:
+                    raise RuntimeError(f"Redis rollback unresolved: kind={kind}, offer_id={oid}, token={reservation_id}")
+            if ledger_key:
+                await CapReservationLedger.finalize(ledger_key, "ROLLED_BACK", lease_owner=lease_owner)
+            elif redis_reserved and reservation_id:
+                # 兼容无事件账本的旧调用：不存在 DB 恢复记录，回滚后立即删除临时墓碑。
+                counter_key = (
+                    get_daily_cap_key(oid, reservation_date, pid)
+                    if kind == "daily" else get_total_cap_key(oid, pid)
+                )
+                await RedisCapManager.delete_reservation_token(
+                    f"{counter_key}:reservation:{reservation_id}"
+                )
+        except Exception as exc:
+            if ledger_key:
+                try:
+                    await CapReservationLedger.mark_needs_reconciliation(
+                        ledger_key, f"Redis 回滚异常，error_type={type(exc).__name__}", lease_owner=lease_owner
+                    )
+                except Exception as persist_exc:
+                    logger.critical("无法更新 Cap Reservation 对账状态：reservation_key=%s error_type=%s", ledger_key, type(persist_exc).__name__)
+            failures.append(f"kind={kind}, offer_id={oid}, token={reservation_id}, error_type={type(exc).__name__}")
+            logger.error("Cap reservation rollback failed; continue with remaining tokens：error_type=%s", type(exc).__name__)
+    if failures:
+        raise RuntimeError("Cap reservation rollback incomplete: " + "; ".join(failures))
+
+
+async def _prepare_cap_ledger_reservation(
+    reservation_context: Optional[dict], *, offer_id: int,
+    publisher_id: Optional[int], cap_kind: str, business_date,
+):
+    """无事件上下文时兼容旧调用；Postback 路径必须先独立提交 PREPARED。"""
+    if not reservation_context:
+        return uuid.uuid4().hex, None, None
+    row, claimed, lease_owner = await CapReservationLedger.prepare_and_claim(
+        platform=reservation_context["platform"],
+        conversion_id=reservation_context["conversion_id"],
+        event_name=reservation_context.get("event_name"),
+        offer_id=offer_id, publisher_id=publisher_id,
+        cap_kind=cap_kind, business_date=business_date,
+    )
+    if not claimed:
+        raise RuntimeError(
+            f"Cap Reservation 已由其他请求处理或需要对账：key={row.reservation_key}, state={row.state}"
+        )
+    return row.reservation_key, row.reservation_key, lease_owner
+
+
+async def _mark_ledger_redis_reserved(
+    ledger_key: Optional[str], lease_owner: Optional[str], *,
+    kind: str, offer_id: int, publisher_id: Optional[int],
+    reservation_date: Optional[datetime], reservation_id: str,
 ) -> None:
-    for kind, oid, pid in reserved:
-        if kind == "daily":
-            await RedisCapManager.decrement_daily(oid, pid)
-        else:
-            await RedisCapManager.decrement_total(oid, pid)
+    """Redis 已成功 INCR 后确认账本；状态写入失败则按同一 token 补偿。"""
+    if not ledger_key:
+        return
+    try:
+        await CapReservationLedger.mark_reserved(ledger_key, lease_owner)
+    except Exception as exc:
+        try:
+            if kind == "daily":
+                rolled_back = await RedisCapManager.decrement_daily(
+                    offer_id, publisher_id, reservation_date=reservation_date,
+                    reservation_id=reservation_id,
+                )
+            else:
+                rolled_back = await RedisCapManager.decrement_total(
+                    offer_id, publisher_id, reservation_id=reservation_id
+                )
+            if rolled_back >= 0:
+                await CapReservationLedger.finalize(
+                    ledger_key, "ROLLED_BACK", lease_owner=lease_owner
+                )
+            else:
+                await CapReservationLedger.mark_needs_reconciliation(
+                    ledger_key, f"RESERVED 标记失败且 Redis 补偿未知：error_type={type(exc).__name__}",
+                    lease_owner=lease_owner,
+                )
+        except Exception as rollback_error:
+            await CapReservationLedger.mark_needs_reconciliation(
+                ledger_key, f"RESERVED 标记失败：error_type={type(exc).__name__}; Redis 补偿失败：error_type={type(rollback_error).__name__}",
+                lease_owner=lease_owner,
+            )
+        raise
 
 
 async def _refresh_offer_caps(db: AsyncSession, caps: list) -> None:
@@ -171,8 +266,13 @@ async def _refresh_offer_caps(db: AsyncSession, caps: list) -> None:
     for cap in caps:
         try:
             await db.refresh(cap)
-        except Exception as e:
-            logger.debug("刷新 OfferCap 失败（可忽略）: id=%s err=%s", getattr(cap, "id", None), e)
+        except Exception as exc:
+            # ORM/DB 异常文本可能包含 SQL 参数或个人数据，只记录异常类型。
+            logger.debug(
+                "刷新 OfferCap 失败（可忽略）: id=%s error_type=%s",
+                getattr(cap, "id", None),
+                type(exc).__name__,
+            )
 
 
 async def increment_cap_count(
@@ -182,7 +282,9 @@ async def increment_cap_count(
     advertiser_id: Optional[int] = None,
     *,
     session_flush: bool = True,
-) -> Tuple[bool, str]:
+    include_reservations: bool = False,
+    reservation_context: Optional[dict] = None,
+) -> Tuple[bool, str] | Tuple[bool, str, list[tuple]]:
     """
     增加 Cap 计数 (线程/进程安全版本)
     
@@ -199,7 +301,13 @@ async def increment_cap_count(
         - (False, "cap_check_error") 基础设施失败（调用方应拒绝入库并允许重试）
     """
     caps = []
-    reserved: list[tuple[str, int, Optional[int]]] = []
+    reserved: list[tuple] = []
+
+    def _result(ok: bool, status: str):
+        if include_reservations:
+            return ok, status, list(reserved)
+        return ok, status
+
     try:
         # 1. 查询所有相关的 Cap 配置，使用 with_for_update() 进行行级锁定
         query = select(OfferCap).where(
@@ -207,7 +315,7 @@ async def increment_cap_count(
                 OfferCap.offer_id == offer_id,
                 OfferCap.is_active == True
             )
-        ).with_for_update()
+        ).order_by(OfferCap.id.asc()).with_for_update()
         
         if publisher_id:
             query = query.where(
@@ -238,94 +346,172 @@ async def increment_cap_count(
         now = get_app_now_naive()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
+        # 同一 Redis key 可能对应 Offer 全局 Cap 与广告主-Offer Cap。
+        # 它们约束的是同一 Offer/渠道转化集合，必须共享一个计数；逐条预留会把单次转化重复计数。
+        daily_groups: dict[tuple[int, Optional[int]], list] = {}
+        total_groups: dict[tuple[int, Optional[int]], list] = {}
         for cap in caps:
-            # 2. 处理每日计数（Redis 先预留名额，成功后再更新 DB）
+            group_key = (cap.offer_id, cap.publisher_id)
             if cap.daily_cap:
-                is_new_day = (
-                    not cap.cap_start_date
-                    or cap.cap_start_date.date() < today_start.date()
-                )
-                # 先算 init，预留成功后再写 ORM，避免失败路径脏写
-                redis_init_val = 0 if is_new_day else (cap.current_daily_count or 0)
-
-                try:
-                    passed = await RedisCapManager.check_and_increment_daily(
-                        cap.offer_id,
-                        cap.daily_cap,
-                        cap.publisher_id,
-                        initial_value=redis_init_val,
-                    )
-                except Exception as e:
-                    logger.warning(f"Redis计数递增同步失败: {e}")
-                    if settings.CAP_FAIL_OPEN:
-                        # fail-open：不改 Redis/ORM 日计数，继续处理 total
-                        logger.warning("Cap 日计数 Redis 失败，fail-open 跳过日计数")
-                        passed = None
-                    else:
-                        await _rollback_reserved_redis(reserved)
-                        await _refresh_offer_caps(db, caps)
-                        return False, "cap_check_error"
-
-                if passed is False:
-                    logger.warning(
-                        f"每日Cap超限: offer={cap.offer_id}, limit={cap.daily_cap}, "
-                        f"current={redis_init_val}"
-                    )
-                    await _rollback_reserved_redis(reserved)
-                    await _refresh_offer_caps(db, caps)
-                    return False, "cap_exceeded"
-
-                if passed is True:
-                    reserved.append(("daily", cap.offer_id, cap.publisher_id))
-                    if is_new_day:
-                        cap.cap_start_date = today_start
-                    cap.current_daily_count = redis_init_val + 1
-            
-            # 3. 处理总计数（Redis 先预留，成功后再更新 DB）
+                daily_groups.setdefault(group_key, []).append(cap)
             if cap.total_cap:
-                redis_init_val = cap.current_total_count or 0
+                total_groups.setdefault(group_key, []).append(cap)
 
-                try:
-                    passed = await RedisCapManager.check_and_increment_total(
-                        cap.offer_id,
-                        cap.total_cap,
-                        cap.publisher_id,
-                        initial_value=redis_init_val,
+        # 2. 每个 Daily Redis key 只原子预留一次；多个约束取最严格上限。
+        for (group_offer_id, group_publisher_id), group_caps in daily_groups.items():
+            db_daily_counts = [
+                int(cap.current_daily_count or 0)
+                if cap.cap_start_date
+                and cap.cap_start_date.date() == today_start.date()
+                else 0
+                for cap in group_caps
+            ]
+            db_daily_count = max(db_daily_counts, default=0)
+            effective_limit = min(int(cap.daily_cap) for cap in group_caps)
+            reservation_id, ledger_key, lease_owner = await _prepare_cap_ledger_reservation(
+                reservation_context, offer_id=group_offer_id,
+                publisher_id=group_publisher_id, cap_kind="daily",
+                business_date=today_start.date(),
+            )
+            try:
+                pending_reservations = await CapReservationLedger.count_uncommitted_for_scope(
+                    offer_id=group_offer_id,
+                    publisher_id=group_publisher_id,
+                    cap_kind="daily",
+                    business_date=today_start.date(),
+                    exclude_reservation_key=ledger_key,
+                )
+                # Redis key 丢失/淘汰时，DB baseline 之外仍可能有未提交的活动预留。
+                # Redis 计数重建需包含它们；DB 快照只增加本次转化，不能固化其它预留。
+                redis_init_val = db_daily_count + pending_reservations
+                passed = await RedisCapManager.check_and_increment_daily(
+                    group_offer_id, effective_limit, group_publisher_id,
+                    initial_value=redis_init_val, reservation_id=reservation_id,
+                    reservation_date=now,
+                )
+            except Exception as e:
+                if ledger_key:
+                    await CapReservationLedger.mark_needs_reconciliation(
+                        ledger_key, f"Redis 日计数预留异常，error_type={type(e).__name__}", lease_owner=lease_owner
                     )
-                except Exception as e:
-                    logger.warning(f"Redis总计数递增同步失败: {e}")
-                    if settings.CAP_FAIL_OPEN:
-                        logger.warning("Cap 总计数 Redis 失败，fail-open 跳过总计数")
-                        passed = None
-                    else:
-                        await _rollback_reserved_redis(reserved)
-                        await _refresh_offer_caps(db, caps)
-                        return False, "cap_check_error"
+                logger.error("Cap 日计数预留/补偿状态不确定，拒绝本次转化：error_type=%s", type(e).__name__)
+                await _rollback_reserved_redis(reserved)
+                reserved.clear()
+                await _refresh_offer_caps(db, caps)
+                return _result(False, "cap_check_error")
 
-                if passed is False:
-                    logger.warning(
-                        f"总Cap超限: offer={cap.offer_id}, limit={cap.total_cap}, "
-                        f"current={redis_init_val}"
+            if passed is False:
+                if ledger_key:
+                    await CapReservationLedger.finalize(
+                        ledger_key, "ROLLED_BACK", lease_owner=lease_owner
                     )
-                    await _rollback_reserved_redis(reserved)
-                    await _refresh_offer_caps(db, caps)
-                    return False, "cap_exceeded"
+                logger.warning(
+                    "每日Cap超限: offer=%s publisher=%s limit=%s current=%s cap_ids=%s",
+                    group_offer_id, group_publisher_id, effective_limit,
+                    redis_init_val, [cap.id for cap in group_caps],
+                )
+                await _rollback_reserved_redis(reserved)
+                reserved.clear()
+                await _refresh_offer_caps(db, caps)
+                return _result(False, "cap_exceeded")
 
-                if passed is True:
-                    reserved.append(("total", cap.offer_id, cap.publisher_id))
-                    if not cap.cap_start_date:
-                        cap.cap_start_date = now
-                    cap.current_total_count = redis_init_val + 1
-        
+            redis_reserved = passed is True
+            if redis_reserved:
+                await _mark_ledger_redis_reserved(
+                    ledger_key, lease_owner, kind="daily", offer_id=group_offer_id,
+                    publisher_id=group_publisher_id, reservation_date=today_start,
+                    reservation_id=reservation_id,
+                )
+            if redis_reserved or ledger_key:
+                reserved.append((
+                    "daily", group_offer_id, group_publisher_id, today_start,
+                    reservation_id, ledger_key, lease_owner, redis_reserved,
+                ))
+
+            # 多个配置共享同一实际计数，保持 DB 快照一致；fail-open 时也只增加一次。
+            for cap in group_caps:
+                cap.cap_start_date = today_start
+                cap.current_daily_count = db_daily_count + 1
+
+        # 3. 每个 Total Redis key 只原子预留一次；多个约束取最严格上限。
+        for (group_offer_id, group_publisher_id), group_caps in total_groups.items():
+            db_total_count = max(
+                (int(cap.current_total_count or 0) for cap in group_caps),
+                default=0,
+            )
+            effective_limit = min(int(cap.total_cap) for cap in group_caps)
+            reservation_id, ledger_key, lease_owner = await _prepare_cap_ledger_reservation(
+                reservation_context, offer_id=group_offer_id,
+                publisher_id=group_publisher_id, cap_kind="total",
+                business_date=None,
+            )
+            try:
+                pending_reservations = await CapReservationLedger.count_uncommitted_for_scope(
+                    offer_id=group_offer_id,
+                    publisher_id=group_publisher_id,
+                    cap_kind="total",
+                    business_date=None,
+                    exclude_reservation_key=ledger_key,
+                )
+                redis_init_val = db_total_count + pending_reservations
+                passed = await RedisCapManager.check_and_increment_total(
+                    group_offer_id, effective_limit, group_publisher_id,
+                    initial_value=redis_init_val, reservation_id=reservation_id,
+                )
+            except Exception as e:
+                if ledger_key:
+                    await CapReservationLedger.mark_needs_reconciliation(
+                        ledger_key, f"Redis 日计数预留异常，error_type={type(e).__name__}", lease_owner=lease_owner
+                    )
+                logger.error("Cap 总计数预留/补偿状态不确定，拒绝本次转化：error_type=%s", type(e).__name__)
+                await _rollback_reserved_redis(reserved)
+                reserved.clear()
+                await _refresh_offer_caps(db, caps)
+                return _result(False, "cap_check_error")
+
+            if passed is False:
+                if ledger_key:
+                    await CapReservationLedger.finalize(
+                        ledger_key, "ROLLED_BACK", lease_owner=lease_owner
+                    )
+                logger.warning(
+                    "总Cap超限: offer=%s publisher=%s limit=%s current=%s cap_ids=%s",
+                    group_offer_id, group_publisher_id, effective_limit,
+                    redis_init_val, [cap.id for cap in group_caps],
+                )
+                await _rollback_reserved_redis(reserved)
+                reserved.clear()
+                await _refresh_offer_caps(db, caps)
+                return _result(False, "cap_exceeded")
+
+            redis_reserved = passed is True
+            if redis_reserved:
+                await _mark_ledger_redis_reserved(
+                    ledger_key, lease_owner, kind="total", offer_id=group_offer_id,
+                    publisher_id=group_publisher_id, reservation_date=None,
+                    reservation_id=reservation_id,
+                )
+            if redis_reserved or ledger_key:
+                reserved.append((
+                    "total", group_offer_id, group_publisher_id, None,
+                    reservation_id, ledger_key, lease_owner, redis_reserved,
+                ))
+
+            for cap in group_caps:
+                if not cap.cap_start_date:
+                    cap.cap_start_date = now
+                cap.current_total_count = db_total_count + 1
+
         # 由调用方控制外层事务时可选跳过 flush，与转化入库同一 commit
         if session_flush:
             await db.flush()
-        return True, "cap_ok"
+        return _result(True, "cap_ok")
         
     except Exception as e:
-        logger.error(f"增加Cap计数失败: {str(e)}", exc_info=True)
+        logger.error("增加Cap计数失败：error_type=%s", type(e).__name__)
         try:
             await _rollback_reserved_redis(reserved)
+            reserved.clear()
         except Exception:
             pass
         if caps:
@@ -338,145 +524,74 @@ async def rollback_cap_redis_counts(
     offer_id: int,
     publisher_id: Optional[int] = None,
     advertiser_id: Optional[int] = None,
+    *,
+    reservations: Optional[list[tuple]] = None,
 ) -> None:
     """
-    DB 事务回滚后同步回退 Redis Cap 计数。
+    仅按当前请求的 reservation token 回退 Redis Cap。
 
-    increment_cap_count 会先写 Redis 再改 DB；外层 rollback 不会撤销 Redis，
-    须在转化入库失败或 Cap 递增判定失败时显式调用本函数。
+    旧版无 token 的全量 DECR 会误减并发请求的计数，故不再执行。
+    未提供 reservation 时保留计数并记录告警，交由对账任务处理。
     """
     if not offer_id:
         return
-    try:
-        query = select(OfferCap).where(
-            and_(
-                OfferCap.offer_id == offer_id,
-                OfferCap.is_active == True,  # noqa: E712
-            )
-        )
-        if publisher_id:
-            query = query.where(
-                or_(
-                    OfferCap.publisher_id == publisher_id,
-                    OfferCap.publisher_id.is_(None),
-                )
-            )
-        if advertiser_id:
-            query = query.where(
-                or_(
-                    OfferCap.cap_type == "offer",
-                    and_(
-                        OfferCap.cap_type == "advertiser_offer",
-                        OfferCap.advertiser_id == advertiser_id,
-                    ),
-                )
-            )
-        else:
-            query = query.where(OfferCap.cap_type == "offer")
-
-        result = await db.execute(query)
-        caps = result.scalars().all()
-        for cap in caps:
-            if cap.daily_cap:
-                await RedisCapManager.decrement_daily(cap.offer_id, cap.publisher_id)
-            if cap.total_cap:
-                await RedisCapManager.decrement_total(cap.offer_id, cap.publisher_id)
-    except Exception as e:
-        logger.error(
-            "回退 Redis Cap 计数失败: offer_id=%s publisher_id=%s err=%s",
+    if not reservations:
+        logger.critical(
+            "拒绝执行无 token 的 Cap Redis 回滚，避免误减并发请求名额："
+            "offer_id=%s publisher_id=%s advertiser_id=%s",
             offer_id,
             publisher_id,
-            e,
-            exc_info=True,
+            advertiser_id,
         )
+        return
+    await _rollback_reserved_redis(reservations)
 
 
 async def reset_daily_caps(db: AsyncSession) -> None:
     """
-    重置每日 Cap 计数（定时任务调用）
-    使用批量更新以提高性能和原子性
-    同时清除Redis中的每日Cap计数
-    
-    Args:
-        db: 数据库会话
+    重置已跨日的每日 Cap DB 计数。
+
+    使用行锁与 Postback 的 Cap 预留串行化，避免午夜并发请求被重置覆盖。
+    不删除 Redis 今日 key：定时任务可能在当天已有流量后才运行，删除今日 key
+    会丢失已经发生的 reservation。历史日期 key 由 TTL 自然回收。
     """
     try:
-        now = get_app_now_naive()
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        
-        # 1. 查询所有需要重置的 Cap 配置（用于清除Redis）
-        query = select(OfferCap).where(
-            and_(
-                OfferCap.is_active == True,
-                OfferCap.daily_cap > 0,
-                or_(
-                    OfferCap.cap_start_date.is_(None),
-                    OfferCap.cap_start_date < today_start
-                )
-            )
-        )
-        result = await db.execute(query)
-        caps_to_reset = result.scalars().all()
-        
-        # 2. 清除Redis中的每日Cap计数
-        redis = await get_redis_client()
-        if redis:
-            try:
-                # 清除今天和昨天的key（防止时区问题）
-                for date_offset in [0, -1]:
-                    reset_date = today_start + timedelta(days=date_offset)
-                    for cap in caps_to_reset:
-                        # 清除所有渠道的每日Cap key
-                        # 包括特定渠道和全局渠道的key
-                        keys_to_delete = []
-                        
-                        # 全局渠道key
-                        global_key = get_daily_cap_key(cap.offer_id, reset_date, None)
-                        keys_to_delete.append(global_key)
-                        
-                        # 如果有特定渠道，也需要清除（虽然可能不存在，但为了安全）
-                        if cap.publisher_id:
-                            pub_key = get_daily_cap_key(cap.offer_id, reset_date, cap.publisher_id)
-                            keys_to_delete.append(pub_key)
-                        
-                        # 批量删除
-                        for key in keys_to_delete:
-                            try:
-                                await redis.delete(key)
-                            except Exception as e:
-                                logger.warning(f"清除Redis key失败: {key}, error: {e}")
-                
-                logger.info(f"成功清除Redis中的每日Cap计数，涉及 {len(caps_to_reset)} 个Cap配置")
-            except Exception as e:
-                logger.warning(f"清除Redis每日Cap计数时出错: {e}，继续执行DB重置")
-        else:
-            logger.warning("Redis不可用，跳过清除Redis计数")
-        
-        # 3. 批量更新数据库
-        stmt = (
-            update(OfferCap)
+        # 先锁定全部有效的每日 Cap，再读取业务日期。
+        # 不能在等待行锁前计算 today_start：任务可能在锁等待期间跨过午夜，
+        # 用旧日期筛选/重置会漏掉刚跨日的记录，或写入过期的日期标记。
+        query = (
+            select(OfferCap)
             .where(
                 and_(
                     OfferCap.is_active == True,
                     OfferCap.daily_cap > 0,
-                    or_(
-                        OfferCap.cap_start_date.is_(None),
-                        OfferCap.cap_start_date < today_start
-                    )
                 )
             )
-            .values(
-                current_daily_count=0,
-                cap_start_date=today_start
-            )
+            .order_by(OfferCap.id.asc())
+            .with_for_update()
         )
-        
-        result = await db.execute(stmt)
+        result = await db.execute(query)
+        locked_caps = result.scalars().all()
+
+        # 必须在获得所有目标行锁之后读取业务日期，确保与转化预留串行化时使用当前日期。
+        now = get_app_now_naive()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        caps_to_reset = [
+            cap for cap in locked_caps
+            if cap.cap_start_date is None or cap.cap_start_date < today_start
+        ]
+
+        # 不通过 bulk UPDATE 绕开 ORM 行锁状态，也不清理今天可能已经创建的 Redis key。
+        for cap in caps_to_reset:
+            cap.current_daily_count = 0
+            cap.cap_start_date = today_start
+
         await db.commit()
-        
-        logger.info(f"成功执行批量每日Cap重置，更新了 {result.rowcount} 条记录")
-        
+        logger.info(
+            "每日 Cap 跨日重置完成：更新 %s 条记录；保留 Redis 今日计数 key",
+            len(caps_to_reset),
+        )
     except Exception as e:
-        logger.error(f"批量重置每日Cap失败: {str(e)}", exc_info=True)
+        logger.error("每日 Cap 跨日重置失败：error_type=%s", type(e).__name__)
         await db.rollback()
         raise

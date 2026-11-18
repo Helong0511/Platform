@@ -33,7 +33,8 @@ def raise_if_postback_retryable(result: dict) -> None:
     if result.get("success") is False and result.get("retryable", True):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=result.get("message") or _POSTBACK_RETRY_HINT,
+            # 上游只需要知道可重试，不应收到内部异常、SQL 细节或可能包含 PII 的错误文本。
+            detail=_POSTBACK_RETRY_HINT,
         )
 
 
@@ -83,7 +84,11 @@ class PostbackReceiveService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error("接收 PostBack 回调时发生错误: %s", e, exc_info=True)
+            # 异常消息/SQL 参数可能包含 click_id、IP、邮箱等原始数据，不写入应用日志。
+            logger.error(
+                "接收 PostBack 回调失败：exception_type=%s",
+                type(e).__name__,
+            )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=_POSTBACK_RETRY_HINT,

@@ -2,14 +2,14 @@
 CPL 系统定时任务模块。
 
 功能说明：
-- 当前包含每日 Cap 计数重置：UTC 零点将各产品/渠道当日转化上限计数归零
+- 当前包含每日 Cap 计数重置：业务时区零点将各产品/渠道当日转化上限计数归零
 - 调用 ``app.core.cap.reset_daily_caps``
 
 在系统中的位置：
-- 由 RESET_DAILY_CAPS_TASK_NAME 在每天 00:00 UTC 触发
+- 由 RESET_DAILY_CAPS_TASK_NAME 在每天 00:00（调度器配置时区，默认 Asia/Shanghai） 触发
 
 注意事项：
-1. Cap 重置时间与业务统计时区（北京）可能不同，报表须标注 UTC 边界
+1. Cap 重置使用调度器配置时区（默认 Asia/Shanghai），须与业务统计日界保持一致
 2. 重置失败会导致当日 Cap 不准，应配置告警
 """
 import logging
@@ -30,7 +30,7 @@ async def reset_daily_caps_task():
     调用 core.cap.reset_daily_caps 更新数据库中的当日计数；
     成功或失败均写入 task_result_store，并记录耗时便于运维排查。
 
-    建议调度: 每天 00:00 UTC 执行一次。
+    建议调度: 每天 00:00（调度器配置时区，默认 Asia/Shanghai） 执行一次。
 
     异常:
         重置失败时写入失败摘要后重新抛出，由调度器捕获
@@ -69,10 +69,23 @@ async def cap_sync_task():
         async with AsyncSessionLocal() as db:
             synchronizer = CapSynchronizer(db)
             stats = await synchronizer.sync_all_active_caps()
-            await db.commit()
-            msg = f"执行成功: success={stats.get('success', 0)} failed={stats.get('failed', 0)}"
+            failed = stats.get("failed", 0)
+            skipped = stats.get("skipped", 0)
+            if failed:
+                raise RuntimeError(
+                    f"Cap 同步批次失败并已回滚：failed={failed}"
+                )
+            msg = (
+                f"执行完成: success={stats.get('success', 0)} "
+                f"skipped_missing_redis_key={skipped} failed=0"
+            )
             set_task_result(CAP_SYNC_TASK_NAME, msg)
-            logger.debug(msg)
+            if skipped:
+                # Redis key 缺失表示真实计数未知；任务虽然没有发生 DB 写入失败，
+                # 但本轮并未完整同步，必须在调度日志中显式暴露为需关注状态。
+                logger.warning("Cap 同步部分完成，存在未知计数快照：%s", msg)
+            else:
+                logger.info(msg)
     except Exception as e:
         set_task_result(CAP_SYNC_TASK_NAME, f"执行失败: {str(e)}")
         logger.error(f"Cap 计数同步任务失败: {e}", exc_info=True)

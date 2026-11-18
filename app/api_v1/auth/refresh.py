@@ -21,7 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
-from app.core.async_orm import get_first_loaded_collection_item
+from app.core.api_auth import _get_active_user_clients, _is_user_client_ip_allowed
+from app.core.utils import get_client_ip
 from app.core.auth_response import (
     build_token_json_response,
     raise_auth_error,
@@ -124,6 +125,29 @@ async def refresh_token(
                 http_status=status.HTTP_403_FORBIDDEN,
             )
 
+        # 刷新令牌同样受客户 IP 白名单约束，避免从非授权来源续期会话。
+        active_client_records = (
+            _get_active_user_clients(getattr(user, "clients", None))
+            if user.role == UserRole.CLIENT
+            else []
+        )
+        if user.role == UserRole.CLIENT and not active_client_records:
+            raise_auth_error(
+                ErrorCode.FORBIDDEN,
+                "当前客户账号没有可用的客户主体，请联系管理员",
+                http_status=status.HTTP_403_FORBIDDEN,
+            )
+        client_record = active_client_records[0] if active_client_records else None
+        if (
+            user.role == UserRole.CLIENT
+            and not _is_user_client_ip_allowed(active_client_records, get_client_ip(request))
+        ):
+            raise_auth_error(
+                ErrorCode.FORBIDDEN,
+                "当前来源 IP 不在客户允许列表中，请联系管理员",
+                http_status=status.HTTP_403_FORBIDDEN,
+            )
+
         await revoke_tokens_from_request(
             db=db,
             request=request,
@@ -151,13 +175,18 @@ async def refresh_token(
 
         api_enabled = False
         has_publisher = False
-        client_record = get_first_loaded_collection_item(user, "clients")
-        if user.role == UserRole.CLIENT and client_record:
-            api_enabled = bool(client_record.api_enabled)
+        all_client_records = getattr(user, "clients", None) or []
+        password_change_enabled = bool(active_client_records) and bool(all_client_records) and all(
+            bool(getattr(client, "password_change_enabled", False))
+            for client in all_client_records
+        )
+        if user.role == UserRole.CLIENT and active_client_records:
+            active_client_ids = [client.id for client in active_client_records]
+            api_enabled = any(bool(client.api_enabled) for client in active_client_records)
             publisher_check = await db.execute(
                 select(func.count(Publisher.id)).where(
                     and_(
-                        Publisher.client_id == client_record.id,
+                        Publisher.client_id.in_(active_client_ids),
                         Publisher.is_active == True,
                     )
                 )
@@ -168,6 +197,7 @@ async def refresh_token(
             user,
             api_enabled=api_enabled,
             has_publisher=has_publisher,
+            password_change_enabled=password_change_enabled,
             client=client_record,
         )
 
@@ -206,7 +236,7 @@ async def refresh_token(
             raise_auth_failure(exc)
     except Exception as e:
         await db.rollback()
-        logger.error(f"刷新令牌失败: {str(e)}", exc_info=True)
+        logger.error("刷新令牌失败: error_type=%s", type(e).__name__)
         try:
             raise_auth_error(
                 ErrorCode.TOKEN_INVALID,

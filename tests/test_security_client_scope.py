@@ -1,0 +1,136 @@
+"""客户权限守卫必须覆盖用户关联的全部 Client 记录。"""
+from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
+from sqlalchemy.dialects import mysql
+
+from app.core.security import require_admin_or_self, require_publisher_or_admin
+from app.models.models import UserRole
+from app.services.ad_data.queries.detail_query import DetailQueryBuilder
+
+
+class _ClientRows:
+    def __init__(self, values):
+        self.values = values
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self.values
+
+
+class _PublisherScalar:
+    def __init__(self, value):
+        self.value = value
+
+    def scalar_one_or_none(self):
+        return self.value
+
+
+class _DB:
+    def __init__(self, client_ids, publisher_id):
+        self.client_ids = client_ids
+        self.publisher_id = publisher_id
+        self.statements = []
+
+    async def execute(self, statement):
+        self.statements.append(str(statement.compile(dialect=mysql.dialect())).lower())
+        if len(self.statements) == 1:
+            return _ClientRows(self.client_ids)
+        return _PublisherScalar(self.publisher_id)
+
+
+@pytest.mark.asyncio
+async def test_publisher_guard_accepts_active_publisher_on_any_owned_client():
+    user = SimpleNamespace(id=906, role=UserRole.CLIENT)
+    db = _DB(client_ids=[101, 202], publisher_id=303)
+
+    result = await require_publisher_or_admin(current_user=user, db=db)
+
+    assert result is user
+    assert len(db.statements) == 2
+    assert "clients.user_id = %s" in db.statements[0]
+    assert "clients.is_active is true" in db.statements[0]
+    assert "publishers.client_id in" in db.statements[1]
+    assert "publishers.is_active" in db.statements[1]
+
+
+@pytest.mark.asyncio
+async def test_publisher_guard_denies_client_user_without_any_client_record():
+    user = SimpleNamespace(id=907, role=UserRole.CLIENT)
+    db = _DB(client_ids=[], publisher_id=None)
+
+    with pytest.raises(HTTPException) as exc:
+        await require_publisher_or_admin(current_user=user, db=db)
+
+    assert exc.value.status_code == 403
+    assert len(db.statements) == 1
+
+
+@pytest.mark.asyncio
+async def test_publisher_guard_denies_when_no_owned_client_has_active_publisher():
+    user = SimpleNamespace(id=908, role=UserRole.CLIENT)
+    db = _DB(client_ids=[101, 202], publisher_id=None)
+
+    with pytest.raises(HTTPException) as exc:
+        await require_publisher_or_admin(current_user=user, db=db)
+
+    assert exc.value.status_code == 403
+    assert len(db.statements) == 2
+    assert "publishers.client_id in" in db.statements[1]
+
+
+
+class _MissingClientResult:
+    def scalars(self):
+        return self
+
+    def first(self):
+        return None
+
+
+class _SingleQueryDB:
+    def __init__(self):
+        self.statements = []
+
+    async def execute(self, statement):
+        self.statements.append(str(statement.compile(dialect=mysql.dialect())).lower())
+        return _MissingClientResult()
+
+
+@pytest.mark.asyncio
+async def test_admin_or_self_guard_rejects_inactive_client_membership():
+    user = SimpleNamespace(id=909, role=UserRole.CLIENT)
+    db = _SingleQueryDB()
+
+    with pytest.raises(HTTPException) as exc:
+        await require_admin_or_self(client_id=505, current_user=user, db=db)
+
+    assert exc.value.status_code == 403
+    assert "clients.is_active is true" in db.statements[0]
+
+
+
+@pytest.mark.asyncio
+async def test_ad_data_detail_denies_inactive_owned_client(monkeypatch):
+    user = SimpleNamespace(id=910, role=UserRole.CLIENT)
+    row = (
+        SimpleNamespace(id=7001, product_id=8001),
+        SimpleNamespace(id=8001),
+        SimpleNamespace(id=101, user_id=910, is_active=False),
+        SimpleNamespace(id=910),
+        None,
+        None,
+    )
+
+    async def fake_fetch_by_id(self, data_id):
+        return row
+
+    monkeypatch.setattr(DetailQueryBuilder, "fetch_by_id", fake_fetch_by_id)
+
+    with pytest.raises(HTTPException) as exc:
+        await DetailQueryBuilder(db=None).fetch_and_authorize(7001, user)
+
+    assert "启用中客户账户" in str(exc.value.detail)

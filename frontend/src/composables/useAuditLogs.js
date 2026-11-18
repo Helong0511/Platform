@@ -4,7 +4,7 @@
  */
 import { reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
-import { getAuditLogs, getAuditLog, getAuditLogStats, clearAllAuditLogs } from '../api/audit-log';
+import { getAuditLogs, getAuditLog, getAuditLogStats } from '../api/audit-log';
 import { getCurrentMonthRange } from '../utils/thirdPartyReportFormat';
 
 /**
@@ -135,31 +135,9 @@ export function useAuditLogs(authStore, router) {
     isInitializing.value = false;
   };
 
-  const clearingAll = ref(false);
-
-  /**
-   * 清空全部操作日志（调用方负责二次确认）。
-   */
-  const clearAllLogs = async () => {
-    try {
-      clearingAll.value = true;
-      const result = await clearAllAuditLogs();
-      logs.value = [];
-      pagination.total = 0;
-      pagination.page = 1;
-      detailDialogVisible.value = false;
-      currentLog.value = null;
-      await fetchStats({ forceRefresh: true });
-      return result;
-    } finally {
-      clearingAll.value = false;
-    }
-  };
-
   return {
     logs,
     loading,
-    clearingAll,
     stats,
     pagination,
     searchForm,
@@ -169,7 +147,6 @@ export function useAuditLogs(authStore, router) {
     fetchLogs,
     resetFilter,
     handleViewDetail,
-    clearAllLogs,
     bindPaginationWatch,
     finishInitializing,
     getCurrentMonthRange,

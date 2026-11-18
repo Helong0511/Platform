@@ -223,10 +223,10 @@ async def get_available_product_names(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting available product names: {str(e)}", exc_info=True)
+        logger.error("获取可用产品名称失败：error_type=%s", type(e).__name__)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"获取产品列表失败：{str(e)}。请稍后重试或联系管理员"
+            detail="获取产品列表失败，请稍后重试或联系管理员",
         )
 
 
@@ -353,7 +353,7 @@ async def create_product(
             }
         )
     except Exception as e:
-        logger.error(f"记录产品创建审计日志失败: {str(e)}", exc_info=True)
+        logger.error("记录产品创建审计日志失败：error_type=%s", type(e).__name__)
     else:
         await commit_audit_log(db)
 

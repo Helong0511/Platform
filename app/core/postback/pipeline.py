@@ -35,6 +35,9 @@ class PostbackPipelineContext:
     click_association: Optional[Dict[str, Any]] = None
     conversion_status: str = "Pending"
     final_payout: Decimal = Decimal("0")
+    trusted_client_id: Optional[int] = None
+    trusted_product_id: Optional[int] = None
+    trusted_attribution_resolved: bool = False
     conversion: Optional[PostbackConversion] = None
     cap_ok: bool = True
     skip_save_and_forward: bool = False
@@ -84,7 +87,7 @@ async def step_validate_offer_status(ctx: PostbackPipelineContext) -> bool:
             )
             offer_obj = r.scalars().first()
         except Exception as e:
-            logger.warning("Offer 状态校验查询失败（放行）: offer_id=%s err=%s", offer_id, e)
+            logger.warning("Offer 状态校验查询失败（放行）：offer_id=%s error_type=%s", offer_id, type(e).__name__)
             return True  # 查询失败不阻断，避免基础设施故障导致转化丢失
 
     if offer_obj and (not offer_obj.is_active or offer_obj.status != "Active"):
@@ -107,6 +110,11 @@ async def step_check_duplicate(ctx: PostbackPipelineContext) -> bool:
         event_name=ctx.normalized_data.get("event_name"),
         db=ctx.db,
     )
+
+
+def conversion_status_for_cap(cap_ok: bool) -> str:
+    """返回数据库可存储且稳定的转化状态；详细超限原因单独用于日志/响应。"""
+    return "Pending" if cap_ok else "CapReached"
 
 
 def attribution_ids_from_association(
@@ -150,7 +158,7 @@ async def step_check_cap(ctx: PostbackPipelineContext) -> Tuple[bool, str]:
         db=ctx.db,
     )
     ctx.cap_ok = cap_ok
-    ctx.conversion_status = "Pending" if cap_ok else f"CapExceeded({cap_status})"
+    ctx.conversion_status = conversion_status_for_cap(cap_ok)
     return cap_ok, cap_status
 
 
@@ -190,12 +198,23 @@ async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[Decimal, An
     """
     offer_id, publisher_id, advertiser_id = attribution_ids_from_association(ctx.click_association)
     original = Decimal(str(ctx.normalized_data.get("payout") or 0))
+    # 客户/产品归属从服务端点击与渠道关系解析，不能使用回调请求体覆盖。
+    (
+        ctx.trusted_client_id,
+        ctx.trusted_product_id,
+    ) = await ConversionSaver.resolve_trusted_attribution(
+        normalized_data=ctx.normalized_data,
+        click_association=ctx.click_association,
+        db=ctx.db,
+    )
+    ctx.trusted_attribution_resolved = True
+
     final_payout, info, skip_save = await DiscountChecker.calculate(
         original_payout=original,
         offer_id=offer_id,
         publisher_id=publisher_id,
-        product_id=ctx.normalized_data.get("product_id"),
-        client_id=ctx.normalized_data.get("client_id"),
+        product_id=ctx.trusted_product_id,
+        client_id=ctx.trusted_client_id,
         advertiser_id=advertiser_id,
         click_id=ctx.normalized_data.get("click_id"),
         db=ctx.db,
@@ -221,6 +240,9 @@ async def step_save_conversion(ctx: PostbackPipelineContext) -> PostbackConversi
         final_payout=ctx.final_payout,
         conversion_status=ctx.conversion_status,
         db=ctx.db,
+        trusted_client_id=ctx.trusted_client_id,
+        trusted_product_id=ctx.trusted_product_id,
+        trusted_attribution_resolved=ctx.trusted_attribution_resolved,
     )
     if ctx.click_association and ctx.conversion:
         await ConversionSaver.update_click_conversion(
