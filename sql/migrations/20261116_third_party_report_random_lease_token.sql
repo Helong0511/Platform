@@ -49,13 +49,29 @@ SET @lease_token_schema_valid = (
       AND CHARACTER_SET_NAME = 'ascii'
       AND COLLATION_NAME = 'ascii_bin'
 );
+-- 同名但表达式错误或 NOT ENFORCED 的约束不能被视为迁移成功。
 SET @lease_token_check_valid = (
     SELECT COUNT(*)
-    FROM information_schema.TABLE_CONSTRAINTS
-    WHERE CONSTRAINT_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'third_party_report_logs'
-      AND CONSTRAINT_NAME = 'chk_third_party_report_lease_token_v1'
-      AND CONSTRAINT_TYPE = 'CHECK'
+    FROM information_schema.TABLE_CONSTRAINTS tc
+    JOIN information_schema.CHECK_CONSTRAINTS cc
+      ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA
+     AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+    WHERE tc.CONSTRAINT_SCHEMA = DATABASE()
+      AND tc.TABLE_NAME = 'third_party_report_logs'
+      AND tc.CONSTRAINT_NAME = 'chk_third_party_report_lease_token_v1'
+      AND tc.CONSTRAINT_TYPE = 'CHECK'
+      AND tc.ENFORCED = 'YES'
+      AND REGEXP_REPLACE(LOWER(cc.CHECK_CLAUSE), '[[:space:]\x60()]', '') =
+          'lease_tokenisnullorlease_tokenregexp''^[0-9a-f]{32}
+SET @lease_token_verify_sql = IF(
+    @lease_token_schema_valid = 1 AND @lease_token_check_valid = 1,
+    'SELECT 1',
+    'SELECT * FROM __third_party_report_lease_token_validation_failed__'
+);
+PREPARE lease_token_verify_stmt FROM @lease_token_verify_sql;
+EXECUTE lease_token_verify_stmt;
+DEALLOCATE PREPARE lease_token_verify_stmt;
+'andreport_start_timeisnotnull'
 );
 SET @lease_token_verify_sql = IF(
     @lease_token_schema_valid = 1 AND @lease_token_check_valid = 1,
