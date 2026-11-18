@@ -687,7 +687,7 @@ async def detect_bottlenecks():
 
 @optimization_router.get("/plans", summary="获取优化方案列表")
 async def get_optimization_plans(
-    status: Optional[Literal["pending", "running", "completed", "failed"]] = Query(None, description="优化任务状态筛选")
+    status: Optional[Literal["PENDING", "APPROVED", "IMPLEMENTING", "COMPLETED", "VERIFIED", "REJECTED"]] = Query(None, description="优化任务状态筛选")
 ):
     """
     获取优化方案列表
