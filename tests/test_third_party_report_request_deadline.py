@@ -5,6 +5,20 @@ import time
 import pytest
 
 from app.core import third_party_report
+from datetime import datetime, timezone
+
+
+def test_naive_datetime_timestamp_uses_application_timezone():
+    value = datetime(2026, 11, 11, 10, 0, 0)
+    expected = int(third_party_report.APP_TIMEZONE.localize(value).timestamp())
+    assert third_party_report._app_datetime_to_unix_timestamp(value) == expected
+
+
+def test_aware_datetime_timestamp_preserves_absolute_instant():
+    value = datetime(2026, 11, 11, 2, 0, 0, tzinfo=timezone.utc)
+    expected = int(value.timestamp())
+    assert third_party_report._app_datetime_to_unix_timestamp(value) == expected
+
 
 
 def test_http_total_deadline_is_shorter_than_report_lease():
