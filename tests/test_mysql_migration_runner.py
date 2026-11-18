@@ -585,3 +585,75 @@ async def test_identity_scope_check_constraint_is_enforced_and_migration_is_idem
                 assert cursor.fetchone()[0] == 1
     finally:
         _drop_database(database)
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_ledger_checks_that_are_present_but_semantically_ineffective(
+    tmp_path: Path,
+):
+    """同名 ledger 的 CHECK 名称/关键字齐全但用 OR TRUE 绕过时，Runner 必须拒绝。"""
+    database = _create_database()
+    try:
+        migrations = _write_migrations(
+            tmp_path,
+            [
+                (
+                    "20261118_runner_check_guard",
+                    "CREATE TABLE must_not_run_when_ledger_checks_are_weak "
+                    "(id INT NOT NULL PRIMARY KEY);",
+                )
+            ],
+        )
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    CREATE TABLE platform_schema_migrations (
+                        revision VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                        checksum CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                        status VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                        execution_order INT UNSIGNED NOT NULL,
+                        started_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                        applied_at DATETIME(6) NULL,
+                        error_type VARCHAR(128) NULL,
+                        PRIMARY KEY (revision),
+                        UNIQUE KEY uq_platform_migration_execution_order (execution_order),
+                        CONSTRAINT chk_platform_migration_status
+                            CHECK (status IN ('running', 'applied', 'failed') OR 1 = 1),
+                        CONSTRAINT chk_platform_migration_checksum
+                            CHECK (
+                                REGEXP_LIKE(checksum COLLATE ascii_bin, '^[0-9a-f]{64}$', 'c')
+                                OR 1 = 1
+                            ),
+                        CONSTRAINT chk_platform_migration_execution_order
+                            CHECK (execution_order > 0 OR 1 = 1),
+                        CONSTRAINT chk_platform_migration_state_fields
+                            CHECK (
+                                (status = 'running' AND applied_at IS NULL AND error_type IS NULL)
+                                OR (status = 'applied' AND applied_at IS NOT NULL AND error_type IS NULL)
+                                OR (status = 'failed' AND applied_at IS NULL AND error_type IS NOT NULL)
+                                OR 1 = 1
+                            )
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+                    """
+                )
+
+        with pytest.raises(MigrationRunnerError, match="CHECK"):
+            await apply_migrations(
+                _database_url(database),
+                application_database_url=_application_database_url(database),
+                repository_root=tmp_path,
+                migrations=migrations,
+            )
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM information_schema.TABLES "
+                    "WHERE TABLE_SCHEMA = %s "
+                    "AND TABLE_NAME = 'must_not_run_when_ledger_checks_are_weak'",
+                    (database,),
+                )
+                assert cursor.fetchone()[0] == 0
+    finally:
+        _drop_database(database)
