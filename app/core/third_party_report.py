@@ -1485,7 +1485,12 @@ async def send_third_party_report(
 
 def is_outbox_payload_editable(report_log, now: Optional[datetime] = None) -> bool:
     """只有尚未尝试发送、失败且租约已释放的 Outbox 才允许修正发送载荷。"""
-    if not getattr(report_log, "outbox_enqueued", False):
+    if (
+        not getattr(report_log, "outbox_enqueued", False)
+        or getattr(report_log, "identity_scope", None) != "platform_scoped"
+        or not (getattr(report_log, "platform", None) or "").strip()
+    ):
+        # 未解析历史身份不能通过编辑载荷伪装成已确认的平台事件。
         return False
     if getattr(report_log, "pii_scrubbed_at", None) is not None:
         return False
