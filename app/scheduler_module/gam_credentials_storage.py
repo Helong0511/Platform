@@ -74,8 +74,12 @@ def _ensure_writable_file(path: Path) -> None:
     if not path.is_file():
         return
     try:
-        current_mode = path.stat().st_mode
-        path.chmod(current_mode | stat.S_IWRITE)
+        if os.name != "nt":
+            # 覆盖前先收紧旧文件，避免上传期间旧私钥继续保持 group/world-readable。
+            path.chmod(0o600)
+        else:
+            current_mode = path.stat().st_mode
+            path.chmod(current_mode | stat.S_IWRITE)
     except OSError as exc:
         raise PermissionError(
             f"密钥文件不可写: {path}，请取消只读属性或关闭占用该文件的程序后重试"
