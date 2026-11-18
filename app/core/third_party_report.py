@@ -769,12 +769,12 @@ async def send_third_party_report(
         currency: Optional[str] = None,
         amount: Optional[float] = None,
         click_time: Optional[datetime] = None,
-        event_time: Optional[datetime] = None,
         facebook_api_version: Optional[str] = "v23.0",  # 可选参数，默认与全局 FACEBOOK_API_VERSION 对齐
         platform: Optional[str] = None,
         report_log_id: Optional[int] = None,
         event_key: Optional[str] = None,
         report_lease_token: Optional[str] = None,
+        event_time: Optional[datetime] = None,
 ):
     """
     后台任务：发送第三方广告上报
