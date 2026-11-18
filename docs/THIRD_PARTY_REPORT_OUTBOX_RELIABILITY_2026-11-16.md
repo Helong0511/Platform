@@ -88,3 +88,19 @@
 - PII 清理器现将 `outbox_enqueued=true AND identity_scope=legacy_unresolved` 作为不可自动发送的隔离终态候选；仍需满足配置保留期限已到、无有效租约（或租约已过期）及尚未清理等公共条件。
 - 清理只擦除广告标识、转化标识、个人信息和发送载荷；保留事件审计骨架与身份作用域，不自动补写 platform 或 Pixel 目的地。
 - 回归测试：`tests/test_third_party_report_pii_retention.py::test_legacy_unresolved_outbox_is_terminal_for_pii_retention`。
+
+
+## 2026-11-18 补充：管理端身份作用域核查与筛选
+
+- 第三方上报日志列表与详情响应显式返回 `identity_scope`、`platform`、`destination_pixel_id`；其中 Pixel ID 是非敏感目的地标识，不包含访问令牌。
+- 管理端列表增加身份作用域列，详情显示平台和 Pixel 目的地；对于已入队且作用域不是 `platform_scoped` 的非成功事件，明确显示“禁止自动重试（身份未确认）”，并隐藏载荷编辑/重试入口（后端仍是最终安全门禁）。
+- 统计摘要增加 `identity_scope_stats`、`legacy_unresolved_count`、`scope_blocked_outbox_count`。这些统计遵循当前日期筛选条件；`scope_blocked_outbox_count` 表示筛选范围内已入队且非 `platform_scoped` 的记录数，不等同于当前正在执行的 Worker 数。
+- 日志列表 API 支持 `identity_scope` 精确筛选，允许值仅为 `legacy_unresolved`、`unscoped`、`platform_scoped`；管理端筛选器与 API 参数保持一致。
+- 回归覆盖：`tests/test_third_party_report_api_redaction.py::test_report_list_filters_by_identity_scope`，以及响应 Schema 的作用域字段断言。
+
+### 人工核对与恢复边界
+
+- 当前实现提供识别、筛选、统计和 fail-closed 阻断；**尚未提供将 `legacy_unresolved` 安全升级为 `platform_scoped` 的人工恢复 API**。不得把 UI 的“人工核对”提示理解为系统已具备恢复能力。
+- 管理员不得通过普通编辑接口改写历史记录的 `identity_scope`、`platform` 或 `destination_pixel_id`；也不得直接 SQL UPDATE、手工重置状态或清除租约后强制重试。
+- 不能依据 `source`、旧 `event_key`、短链接当前配置或相似事件推断历史平台/Pixel 归属。必须有可独立验证的原始业务证据；若 PII 已按保留策略清理，不能从数据库中恢复已删除载荷。
+- 在正式实现恢复工作流前，所有 unresolved Outbox 继续保持不可自动发送。若未来增加恢复能力，必须独立设计不可变核对记录、证据引用、操作者与复核者、双人审批、平台/Pixel 明确确认、幂等键及远端“可能已接收但本地 ACK 丢失”的重复发送处理；恢复动作应生成可追溯的新事件或受控记录，不能静默改写旧身份。
