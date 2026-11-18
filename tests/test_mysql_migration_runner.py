@@ -90,7 +90,7 @@ def _create_database() -> str:
             )
             # CI 专用运行账号只获当前随机测试库权限，验证真实服务端身份。
             cursor.execute(
-                f"GRANT ALL PRIVILEGES ON `{database}`.* "
+                f"GRANT SELECT ON `{database}`.* "
                 "TO 'platform_application_runtime'@'%'"
             )
     finally:
@@ -179,6 +179,38 @@ async def test_runner_applies_in_order_and_is_idempotent(tmp_path: Path):
             url, application_database_url=_application_database_url(database), repository_root=tmp_path, migrations=migrations
         )
         assert applied == tuple(item.revision for item in migrations)
+
+        # 应用身份在迁移目标库只获得只读连接所需的 SELECT；不得继承迁移 DDL 权限。
+        runtime = pymysql.connect(
+            host=HOST,
+            port=PORT,
+            user="platform_application_runtime",
+            password="runtime-only",
+            database=database,
+            charset="utf8mb4",
+            autocommit=True,
+            connect_timeout=5,
+        )
+        try:
+            with runtime.cursor() as cursor:
+                cursor.execute("SELECT CURRENT_USER(), DATABASE()")
+                identity, selected_database = cursor.fetchone()
+                assert identity.casefold().startswith("platform_application_runtime@")
+                assert selected_database == database
+                cursor.execute("SELECT COUNT(*) FROM runner_probe")
+                assert cursor.fetchone()[0] == 0
+                denied_statements = (
+                    "CREATE TABLE runtime_must_not_ddl (id INT NOT NULL)",
+                    "ALTER TABLE runner_probe ADD COLUMN forbidden INT NULL",
+                    "CREATE INDEX runtime_forbidden_idx ON runner_probe (id)",
+                    "DROP TABLE runner_probe",
+                )
+                for statement in denied_statements:
+                    with pytest.raises(pymysql.err.OperationalError) as denied:
+                        cursor.execute(statement)
+                    assert denied.value.args[0] == 1142, statement
+        finally:
+            runtime.close()
 
         # 第二次执行必须只读 ledger 并返回空计划，不重复执行 DDL。
         assert await apply_migrations(
