@@ -17,6 +17,7 @@ from app.core.constants import CLIENT_API_TIME_TOLERANCE_SECONDS
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.models.models import Client
+from app.core.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +187,68 @@ def _is_user_client_ip_allowed(clients, client_ip: str | None) -> bool:
     return all(_is_client_ip_allowed(policy, client_ip) for policy in configured_policies)
 
 
+async def _claim_client_api_request(
+    *,
+    client_id: int,
+    req_time: int,
+    sign: str,
+    time_tolerance: int,
+) -> None:
+    """使用 Redis 原子 SET NX 认领签名，阻止有效时间窗内的重复请求。
+
+    Redis 不可用时 fail-closed；不能退化为进程内集合，否则多 worker 间可重放。
+    TTL 覆盖请求时间戳允许窗口的完整跨度（±time_tolerance）。
+    """
+    try:
+        redis = await get_redis_client()
+    except Exception as exc:
+        logger.error(
+            "客户 API 防重放客户端获取失败：exception_type=%s",
+            type(exc).__name__,
+        )
+        raise_api_exception(
+            ErrorCode.SERVICE_UNAVAILABLE,
+            detail="客户 API 防重放服务暂不可用，请稍后重试",
+        )
+
+    if redis is None:
+        logger.error("客户 API 防重放存储不可用：拒绝请求")
+        raise_api_exception(
+            ErrorCode.SERVICE_UNAVAILABLE,
+            detail="客户 API 防重放服务暂不可用，请稍后重试",
+        )
+
+    # 不将原始签名写入 Redis key；同一签名的大小写变体按同一请求处理。
+    fingerprint_source = f"{client_id}:{req_time}:{(sign or '').lower()}"
+    fingerprint = hashlib.sha256(fingerprint_source.encode("utf-8")).hexdigest()
+    redis_key = f"client_api:replay:v1:{fingerprint}"
+    ttl_seconds = max(1, (2 * int(time_tolerance)) + 1)
+
+    try:
+        claimed = await redis.set(
+            redis_key,
+            "1",
+            ex=ttl_seconds,
+            nx=True,
+        )
+    except Exception as exc:
+        logger.error(
+            "客户 API 防重放存储写入失败：exception_type=%s",
+            type(exc).__name__,
+        )
+        raise_api_exception(
+            ErrorCode.SERVICE_UNAVAILABLE,
+            detail="客户 API 防重放服务暂不可用，请稍后重试",
+        )
+
+    if not claimed:
+        raise_api_exception(
+            ErrorCode.CONFLICT,
+            detail="请求已使用，请重新生成时间戳和签名",
+            status_code=409,
+        )
+
+
 async def verify_client_request(
     request: any,  # ClientAPIBaseRequest 类型
     db: AsyncSession,
@@ -291,5 +354,13 @@ async def verify_client_request(
             ErrorCode.CLIENT_API_VALIDATION_FAILED,
             detail="签名验证失败，请检查签名参数"
         )
+
+    # 只有签名有效的请求才能占用防重放键；Redis 原子 SET NX 防止并发重复认领。
+    await _claim_client_api_request(
+        client_id=client.id,
+        req_time=request.req_time,
+        sign=request.sign,
+        time_tolerance=time_tolerance,
+    )
 
     return client
