@@ -75,6 +75,9 @@ def test_third_party_report_response_schemas_expose_outbox_state():
         assert "next_retry_time" in response_schema.model_fields
         assert "pii_scrubbed_at" in response_schema.model_fields
         assert "manual_retry_count" in response_schema.model_fields
+        assert "identity_scope" in response_schema.model_fields
+        assert "platform" in response_schema.model_fields
+        assert "destination_pixel_id" in response_schema.model_fields
 
     assert "outbox_error_category" in ThirdPartyReportLogListResponse.model_fields
     assert "can_requeue" in ThirdPartyReportLogListResponse.model_fields
