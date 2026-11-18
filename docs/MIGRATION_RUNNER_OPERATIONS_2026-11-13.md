@@ -497,3 +497,35 @@ PR #1 继续 Open / Draft；本轮没有合并 main、没有部署，也没有�
 5. 监控 batch duration、oldest due age、selected/success/retryable/failed、lock contention 与租约丢失率。
 
 PR #1 继续 Open / Draft；以上是代码证据支持的审计发现，不代表已在生产发生调度重叠或重复发送。
+
+## 20. 2026-11-18：Migration Runner 实际认证身份复核已实现
+
+> 本节更新第 19.2 节的状态。历史发现仍保留，但“Runner 尚未读取实际 CURRENT_USER()”这一旧结论已被本节的代码修复取代。
+
+### 20.1 已完成的代码修复
+
+- 新增 `_ensure_connected_database_account_separation()`，不再只依赖 DSN 中配置的用户名。
+- `apply_migrations()` 和 `read_migration_status()` 在迁移连接建立后，额外使用 application DSN 建立真实 MySQL 连接。
+- 分别读取两条连接的 `CURRENT_USER()` 和 `DATABASE()`；若有效授权账号相同、身份无法确认或实际数据库不同，则 fail closed。
+- 静态 DSN 检查仍保留：同一 MySQL endpoint、同一数据库名、不同配置用户名。实际连接检查是额外防线，不替代 endpoint / schema 校验。
+- 应用身份连接在 `finally` 中 dispose；迁移连接仍由原 Runner 持有，从获取 GET_LOCK 到释放锁期间不更换物理连接。
+- 该修复没有声称已完成账号最小权限审计：Runner 仍未将 `SHOW GRANTS`、`CURRENT_ROLE()`、mandatory roles、`@@proxy_user` 或完整代理映射策略纳入自动化断言。
+
+### 20.2 CI 真实 MySQL 验证
+
+Run #1986（2026-11-18，提交 `a5575428f312ef272e031aad6e1914ca79676053`）已成功：
+
+- Backend：**732 passed、1 skipped、1 warning**，27.07 秒。
+- Frontend：Lint、Build、Playwright Mock API Browser E2E 均通过。
+- Migration Runner 的真实 MySQL 测试通过，包括顺序执行、幂等、部分 DDL 失败保护、只读 status 和数据库端点拒绝测试。
+- CI MySQL service 创建独立的 `platform_application_runtime` 账号；每个随机测试库由 root 测试连接单独授权给该账号，使 Runner 的 application DSN 确实连接到另一个服务端账号，而不是只做字符串断言。
+- Run #1986 验证的是提交 `a557542`；之后增加的临时授权撤销清理尚需最新 HEAD CI 再次验证，不得把 #1986 误记为最新 HEAD 的检查结果。
+
+### 20.3 尚未关闭的上线事项
+
+1. 通过脱敏的 `SHOW GRANTS`、`CURRENT_ROLE()`、mandatory roles 与代理身份快照，分别审计 migration / runtime 账号的实际授权范围。
+2. 在完整 schema 上验证 runtime 用户拒绝全部不需要的 DDL，并通过 API、Scheduler、Worker、Outbox、CAP Recovery、Telegram 等真实关键路径权限矩阵。
+3. 评估部署是否允许 Proxy User / 外部认证映射；若允许，应将 `USER()`、`CURRENT_ROLE()`、`@@proxy_user` 与代理配置纳入部署核验。
+4. 在目标 MySQL 版本和近生产规模数据副本上完成 migration DDL、metadata lock、磁盘峰值、备份恢复与中断恢复演练。
+
+**验收结论：**“不同 DSN 用户名可能映射到同一有效授权账号”的代码层缺口已修复并通过隔离 MySQL CI；数据库授权最小化、角色/代理配置审计及生产级迁移演练仍未完成，不能因此解除上线阻断。
