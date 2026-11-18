@@ -67,7 +67,7 @@ class ThirdPartyReportLog(Base):
     short_link_id = Column(Integer, nullable=True, comment="用于恢复像素配置的短链接 ID（非外键，保留删除后的证据）")
     cloak_name = Column(String(100), nullable=True, comment="斗篷配置名称（仅配置引用）")
     short_code = Column(String(100), nullable=True, comment="短链接短码（仅配置引用）")
-    click_time = Column(DateTime, nullable=True, comment="点击发生时间，用于稳定构造 Meta event_time/fbc")
+    click_time = Column(DateTime, nullable=True, comment="点击发生时间，仅用于构造 Meta fbc 点击时间戳")
     next_retry_time = Column(DateTime, nullable=True, comment="Outbox 下次可重试时间")
     report_params = Column(Text, nullable=True, comment='完整上报参数（JSON格式）')
 
