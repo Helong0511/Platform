@@ -578,9 +578,10 @@ const getOutboxLabel = (row) => {
   if (!row?.outbox_enqueued) return '非队列事件';
   if (row.status === 'success') return '已成功';
   if (row.identity_scope !== 'platform_scoped' || !row.platform) return '禁止自动重试（身份未确认）';
+  // 有效租约优先于尝试次数上限：最后一次允许尝试仍在发送时不能误标为“重试耗尽”。
+  if (row.outbox_processing) return '处理中';
   if (row.outbox_error_category?.includes('配置缺失')) return '配置缺失';
   if ((row.attempt_count || 0) >= (row.max_attempts || 0)) return '重试耗尽';
-  if (row.outbox_processing) return '处理中';
   // 优先判断 next_retry_time，避免 pending 状态的延迟重试被误标成“等待 worker”。
   if (row.next_retry_time) {
     return new Date(row.next_retry_time).getTime() > Date.now() ? '等待重试' : '等待 worker';
