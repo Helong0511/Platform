@@ -23,7 +23,7 @@ SET @check_valid = (
       AND tc.CONSTRAINT_NAME = 'chk_forward_queue_lease_pair_v1'
       AND tc.CONSTRAINT_TYPE = 'CHECK'
       AND tc.ENFORCED = 'YES'
-      AND REGEXP_REPLACE(LOWER(cc.CHECK_CLAUSE), '[[:space:]\x60()]', '') =
+      AND REGEXP_REPLACE(REPLACE(LOWER(cc.CHECK_CLAUSE), CHAR(96), ''), '[[:space:]()]', '') =
           'lease_tokenisnullandlease_expires_atisnullorlease_tokenisnotnullandchar_lengthlease_token=32andlease_expires_atisnotnull'
 );
 SET @verify_sql = IF(@valid=2 AND @check_valid=1,'SELECT 1','SELECT * FROM __forward_queue_lease_validation_failed__');
