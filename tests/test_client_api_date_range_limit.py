@@ -43,8 +43,11 @@ async def test_client_data_rejects_more_than_90_inclusive_days(monkeypatch):
             db=SimpleNamespace(),
         )
 
-    assert caught.value.status_code == 400
-    assert "不能超过 90 天" in str(caught.value.detail)
+    # raise_api_exception 使用项目统一错误包装，HTTP status_code 固定为 200；
+    # 应断言业务错误码和结构化 detail，而不是假设标准 HTTP 400。
+    assert caught.value.status_code == 200
+    assert caught.value.detail["code"] == client_api.ErrorCode.INVALID_PARAMETER
+    assert "不能超过 90 天" in caught.value.detail["detail"]
 
 
 @pytest.mark.asyncio
