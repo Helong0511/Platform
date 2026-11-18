@@ -544,3 +544,13 @@ Run #1986（2026-11-18，提交 `a5575428f312ef272e031aad6e1914ca79676053`）已
 
 - 主线当前保留安全配置检查工作流；完整 Backend/MySQL/Redis/Frontend/Playwright 验收使用独立的 `Full Audit CI` 工作流，避免安全修复提交覆盖完整回归能力。
 - 两套工作流均不连接生产资源；完整审计使用 GitHub Actions 临时 MySQL/Redis 服务。
+
+## 15. 生产 DDL 预检硬门槛（2026-11-18）
+
+生产执行任何既有大表 migration 前，必须先在与生产 MySQL 小版本、表结构、数据量和索引规模尽可能一致的隔离副本完成演练，并记录：实际 DDL 算法、metadata lock 等待、执行耗时、磁盘峰值、redo/undo 增长、复制延迟和业务写入影响。不得仅依据 CI 临时数据库的通过结果放行生产 DDL。
+
+以下操作默认列为高风险并要求人工签核：既有大表 ADD/MODIFY COLUMN、ADD/DROP INDEX、ADD CHECK、历史数据 UPDATE 回填、字符集/排序规则变更。若要求 INSTANT/INPLACE，必须显式验证目标 MySQL 版本是否支持；不能接受静默退化到 COPY。
+
+当前重点高风险 migration：event_key 回填及唯一索引、third_party_report_outbox 多列/索引、PII retention 索引、identity scope 多列/复合索引、platform binary collation、postback/third-party lease 字段。失败或部分执行后的 running/failed ledger 状态必须人工核验后才能继续。
+
+CI 证明的是隔离测试正确性；生产放行还需要真实规模 DDL 演练、备份恢复验证和变更窗口/回滚方案。
