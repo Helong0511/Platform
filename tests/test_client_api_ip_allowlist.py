@@ -27,6 +27,29 @@ class FakeDB:
         return FakeResult(self.client)
 
 
+@pytest.fixture(autouse=True)
+def fake_replay_store(monkeypatch):
+    """现有认证/白名单用例使用独立的原子 Redis 去重替身。"""
+    class ReplayStore:
+        def __init__(self):
+            self.keys = set()
+
+        async def set(self, key, value, *, ex, nx):
+            assert ex >= 1
+            assert nx is True
+            if key in self.keys:
+                return None
+            self.keys.add(key)
+            return True
+
+    store = ReplayStore()
+
+    async def get_store():
+        return store
+
+    monkeypatch.setattr(api_auth, "get_redis_client", get_store)
+
+
 def make_client(allowed_ips):
     return SimpleNamespace(
         id=17,
