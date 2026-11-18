@@ -188,7 +188,7 @@ _ensure_utf8_environment()
 logger = logging.getLogger(__name__)
 
 # GCP 服务账号密钥目录
-SECRETS_DIR = ROOT / "secrets"
+SECRETS_DIR = Path("secrets")
 
 
 def _build_gam_zeep_cache():
@@ -863,11 +863,12 @@ GAM_REPORT_SPECS: list[dict] = [
 # ---------------------------------------------------------------------------
 
 def _resolve_credentials_path(raw: str | Path) -> Path:
-    """将相对路径解析为基于项目根目录的绝对路径。"""
-    path = Path(raw)
-    if not path.is_absolute():
-        path = ROOT / path
-    return path
+    """统一解析 GAM 凭据路径，生产环境映射到仓库外的 GAM_SECRETS_DIR。"""
+    from app.scheduler_module.gam_credentials_storage import (
+        resolve_gam_credentials_path,
+    )
+
+    return resolve_gam_credentials_path(raw)
 
 
 def _network_code_from_credentials_path(credentials_path: Path) -> str:
