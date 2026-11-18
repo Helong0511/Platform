@@ -66,6 +66,7 @@ SET @lease_token_check_valid = (
               'lease_tokenisnullorlease_tokenregexp',
               CHAR(39),
               '^[0-9a-f]{32}',
+              CHAR(36),
               CHAR(39),
               'andreport_start_timeisnotnull'
           )
