@@ -945,7 +945,7 @@ async def test_unattempted_failed_outbox_payload_can_be_corrected_after_lease_ex
 
 async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(monkeypatch, caplog):
     """实际执行发送函数：远端接收后本地成功状态提交失败，重试仍使用相同 event_id。"""
-    state = {"status": "pending", "http_event_ids": [], "ack_attempts": 0, "claim": 0}
+    state = {"status": "pending", "http_event_ids": [], "http_event_payloads": [], "ack_attempts": 0, "claim": 0}
 
     async def valid_existing_binding(*args, **kwargs):
         return True
@@ -975,6 +975,7 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
 
         async def post(self, url, *, json, params):
             state["http_event_ids"].append(json["data"][0]["event_id"])
+            state["http_event_payloads"].append(json["data"][0])
             return Response()
 
     async def claim(report_log_id, **kwargs):
@@ -1024,6 +1025,8 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
         "conversion_id": "conversion-ack-loss",
         "currency": "USD",
         "amount": 21.0,
+        "click_time": datetime(2026, 11, 11, 10, 0, 0),
+        "event_time": datetime(2026, 11, 11, 10, 5, 0),
         "report_log_id": 119,
         "event_key": "stable-event-id-ack-loss",
     }
@@ -1041,6 +1044,22 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
     assert state["http_event_ids"] == [
         "stable-event-id-ack-loss",
         "stable-event-id-ack-loss",
+    ]
+    expected_click_ts = third_party_report._app_datetime_to_unix_timestamp(
+        datetime(2026, 11, 11, 10, 0, 0)
+    )
+    expected_event_ts = third_party_report._app_datetime_to_unix_timestamp(
+        datetime(2026, 11, 11, 10, 5, 0)
+    )
+    assert [item["event_time"] for item in state["http_event_payloads"]] == [
+        expected_event_ts,
+        expected_event_ts,
+    ]
+    assert [
+        item["user_data"]["fbc"] for item in state["http_event_payloads"]
+    ] == [
+        f"fb.1.{expected_click_ts}.fbclid-ack-loss",
+        f"fb.1.{expected_click_ts}.fbclid-ack-loss",
     ]
     # 原始客户端 IP 不得进入应用日志（TEST-NET 合成地址）。
     assert "198.51.100.77" not in caplog.text
