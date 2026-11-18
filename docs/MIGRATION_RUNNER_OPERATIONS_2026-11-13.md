@@ -403,3 +403,55 @@ Runner 当前检查迁移账号与应用账号用户名不同、目标数据库�
 - HTTP 客户端设置 60 秒总请求 deadline，队列租约为 300 秒，给连接/处理和最终状态提交留出余量；仍不能排除进程长时间暂停、网络层已发出请求后租约过期等情形。
 - fencing 只能防止旧 Worker 覆盖新 Worker 的队列状态，不能撤销已经发出的外部 HTTP 副作用；Exactly-once 仍需下游幂等键或接收端去重。
 - 上线顺序：停止并排空旧版 Scheduler/Worker，执行迁移，再启动新版进程；禁止新旧 Worker 混跑。迁移 DDL 算法、metadata lock、数据规模影响仍须在目标 MySQL 版本副本演练。
+
+
+
+## 19. 2026-11-18 Migration 身份边界复核与文档校正
+
+### 19.1 最新隔离 CI 证据
+
+- PR HEAD：`b6f51ce63595250b120a09bc0a21d39c460e2f84`。
+- Run ID：`44233598397`，Backend / Frontend 均 completed / success。
+- Backend：**730 passed、1 skipped、1 warning**；其中真实隔离 MySQL 的 Migration Runner 测试、Runtime 权限测试均实际执行并通过。
+- Migration Runner 集成测试覆盖：顺序执行与重复 apply 幂等、GET_LOCK 互斥、部分 DDL 失败后拒绝自动重跑、错误同名 ledger 拒绝执行、迁移/应用 DSN 用户名分离检查、目标数据库与 endpoint 检查、只读 status、身份作用域 CHECK 约束真实执行。
+- Runtime 权限测试当前代码已经覆盖：SHOW GRANTS 快照、CURRENT_ROLE()、CREATE DATABASE 拒绝，以及 CREATE TABLE / ALTER / CREATE INDEX / DROP 拒绝。早期第 16.2 节关于“尚未直接测试 CREATE DATABASE”的描述已过时，应以第 17 节和当前测试源码为准。
+- CI 运行链接：https://github.com/Helong0511/Platform/actions/runs/44233598397
+- 本次仅复核隔离 CI 与 GitHub 源码；未连接生产数据库、未执行生产授权或 DDL。
+
+### 19.2 新发现：DSN 用户名不同不等于 MySQL 有效身份不同
+
+当前 `_ensure_distinct_database_account()` 比较 migration DSN 与 application DSN 的用户名、数据库名和 endpoint；它没有在两条实际连接上读取并比较 `CURRENT_USER()`，也没有核验代理认证后的有效授权身份。
+
+MySQL 官方手册说明，Proxy User 认证可以让外部连接用户以另一个被代理用户的权限执行操作；`USER()` 与 `CURRENT_USER()` 可能不同，后者反映服务器用于权限检查的账号：
+- https://dev.mysql.com/doc/refman/8.0/en/proxy-users.html
+- https://dev.mysql.com/doc/refman/8.0/en/information-functions.html
+
+因此，两个 DSN 即使配置了不同的用户名，也不能单凭字符串比较证明最终生效的 MySQL 权限主体不同。若部署启用了 Proxy User / 外部认证映射，可能出现两个连接身份映射到同一有效授权账号的情况。
+
+**风险等级：P2（部署身份隔离强化项；在使用代理认证的环境中升级为部署阻断项）。**
+
+建议后续改进：
+1. Runner 分别建立 migration 与 application DSN 的实际连接，读取 `USER()`、`CURRENT_USER()`、`CURRENT_ROLE()` 和 `@@proxy_user`，拒绝两个连接的有效 `CURRENT_USER()` 相同或代理身份不符合部署策略。
+2. 对两个账号分别留存脱敏后的 `SHOW GRANTS` / 角色快照；明确区分账号身份校验与权限最小化校验。
+3. 增加隔离 MySQL 代理映射测试（若 CI MySQL 未启用所需认证插件，则将其列为专项测试环境，而不能假称现有 CI 已覆盖）。
+4. Migration 账号仍须由部署流程证明仅具备目标 schema 所需 DDL/DML 权限；Runtime 账号须在完整 schema 上通过关键业务读写路径并拒绝全部不需要的 DDL 权限。
+
+当前不应将此发现描述为已被利用或已造成越权；它是 Runner 现有 DSN 身份检查的覆盖边界。第 15.4 节关于 Runner 不验证实际 GRANT 的说明继续有效。
+
+### 19.3 Runner / Manifest 静态复核结论
+
+- Manifest 当前登记 **14 条**迁移；校验 revision 顺序、文件路径、文件集合、SHA-256、依赖前置关系，并拒绝未登记 SQL 文件。
+- Ledger 校验拒绝重复 revision、重复/不连续 execution_order、未知 revision、非 applied 状态、checksum 漂移及非 manifest 前缀历史。
+- Runner 使用单一物理连接持有 GET_LOCK 至 RELEASE_LOCK；每条 migration 先持久化 running，再逐条执行 SQL，失败时记录 failed 或保留 running 墓碑，禁止对部分 DDL 自动猜测重试。
+- MySQL 真实集成测试证明了上述若干核心路径在 CI 临时 MySQL 上工作；不代表已完成目标环境的完整 migration / backup / restore / rollback 演练。
+- Runner 对 ledger CHECK 表达式目前采用关键片段核验，而不是对规范化后的完整表达式做严格等价比较。Python ledger 校验仍对 revision、checksum、status 和 execution_order 执行独立检查；但物理 CHECK 表达式完整性仍可进一步加强，建议后续增加“同名但逻辑被放宽”的错误 ledger 结构测试。
+
+### 19.4 仍然阻断生产迁移的事项
+
+1. 逐条高风险 DDL 在目标 MySQL 精确版本、接近生产数据量的隔离副本中实测算法、metadata lock、耗时、redo/undo、磁盘峰值和复制延迟。
+2. 完整备份恢复、逐 DDL 中断重跑、应用兼容回滚、schema/data diff 演练。
+3. Runtime 账号在完整 schema 上的 API、Scheduler、Telegram、CAP、点击队列、Outbox 等关键路径权限矩阵。
+4. Migration / Runtime 实际账号的脱敏 GRANT、默认角色、mandatory roles、代理映射审计。
+5. 全仓库调用点与外部部署脚本核查；旧 `create_database()` 已 fail-closed，但尚不能声称所有外部/动态调用点均已排除。
+
+PR #1 继续 Open / Draft；本轮没有合并 main、没有部署，也没有连接生产资源。
