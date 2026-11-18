@@ -103,7 +103,7 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     Migration(
         revision="20261116_third_party_report_random_lease_token",
         path="sql/migrations/20261116_third_party_report_random_lease_token.sql",
-        sha256="b7f57594cb6cf7ea15e22f81cfb1fc155c54a8bf6746b3204bc7a39577bc4266",
+        sha256="196a071e46e4dcd3a6d7e09c5ac64a2c9ed1040b522252134dee8a7c2bde0906",
         depends_on=("20261114_third_party_report_manual_retry_budget", "20261114_third_party_report_platform_binary_collation"),
     ),
 
