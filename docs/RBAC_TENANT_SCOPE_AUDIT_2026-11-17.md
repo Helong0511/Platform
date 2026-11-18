@@ -143,3 +143,15 @@
 - CI 使用隔离 MySQL 8.0 / Redis 7.4、合成数据和 Mock API，不证明生产数据库权限、生产代理或第三方真实网络已验收。
 
 本节为静态代码审查与当前 CI 证据记录；重放保护和查询资源限额仍未修复，不得标记为关闭。
+
+### 2026-11-18 请求重放防护修复（PR 验收中）
+
+- `verify_client_request()` 在时间戳与签名验证通过后，新增 Redis 原子 `SET key value NX EX` 请求认领；指纹由 `client_id`、`req_time` 和签名 SHA-256 组成，不把原始签名写入 Redis key。
+- TTL 为 `2 * time_tolerance + 1` 秒，覆盖请求时间戳 ±15 秒的完整有效窗口；同一签名请求第二次提交返回 HTTP 409。
+- 仅在签名验证通过后写入防重放键，非法签名不会占用 Redis 键。
+- Redis 未配置、不可连接或写入失败时返回 HTTP 503，拒绝请求；不降级为进程内集合，避免多 worker / 多实例间出现重放窗口。
+- 新增测试覆盖同一请求只能认领一次、Client 维度隔离、Redis 不可用/写入异常 fail-closed、非法签名不消耗防重放键；现有 IP 白名单认证测试改用隔离的 Redis 替身。
+- **运行条件限制：** Redis key 若被 maxmemory 淘汰策略提前驱逐，短期重放键可能消失。生产必须为该 Redis 实例/专用实例保留足够内存，并采用 `maxmemory-policy noeviction`（内存耗尽时写入失败并触发 503）；部署前需核验真实 Redis 配置与监控告警。当前 CI 只证明 Redis `SET NX EX` 语义与故障 fail-closed，不证明生产 Redis 的内存策略、持久化或 HA 配置。
+- 此方案不增加客户端请求字段，兼容现有签名格式；合法客户端的重试必须重新生成 `req_time` 和签名。若客户端在网络超时后原样重放同一请求，将收到 409，应在客户端按当前时间重新签名后重试。
+
+本修复仅覆盖 `/client_products` 和 `/client_data` 当前共享的 `verify_client_request()` 认证路径；不等同于全系统 API nonce / webhook 重放保护。日期跨度与大偏移分页资源限制仍需单独评估。
