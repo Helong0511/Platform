@@ -1226,3 +1226,15 @@ PR #1 继续 Open / Draft；本轮不合并 main、不部署、不连接生产�
 - 当前 Git tree 仍跟踪两份 GAM JSON、JWT RSA 私钥和 Nginx TLS 私钥。不得直接删除：先由密钥所有者轮换/吊销，配置生产外部密钥目录、完成 GAM 任务和 JWT 登录验证、核对线上 TLS 证书指纹后再移除 Git 跟踪。
 - 公开 Git 历史中的旧凭据仍需单独扫描和重写；历史重写不能替代凭据吊销。
 - main 分支保护尚未配置/验证；上线前要求保护 main、必须 PR、Full Audit CI 与 Emergency Security CI 通过，禁止 force push 与删除。
+
+
+## 2026-11-18 补充：Client API 日期跨度限制（PR #24）
+
+- PR #24 已 squash 合并，main merge commit：`bccd03ccedf6c001e4a37a5c6c499b043a3aa13d`。
+- `/client_data` 单次请求最多查询 90 个自然日，首尾日期均计入；超过限制在进入 `ClientAdDataQuery.fetch()` 前返回统一参数错误。
+- 回归测试覆盖 91 天拒绝及 90 天边界成功进入查询层。
+- PR HEAD `e9868c463053aa49b78d48a021e4d36d911220b2` 的 Full Audit CI #79：Backend 764 passed、1 skipped、1 warning；Frontend lint/build/Browser E2E 全部通过。
+- Emergency Security CI #2069 通过。
+- 首次 Full Audit CI #78 的失败原因是新测试错误断言 HTTP 400；项目统一 `raise_api_exception()` 错误包装实际使用 HTTP 200 并在响应体携带业务错误码。已修正断言，后续 CI #79 完整通过。
+- 合并后 main SHA 已核实为 `bccd03ccedf6c001e4a37a5c6c499b043a3aa13d`。合并后 SHA 的 main 专属 CI 仍需单独检查，不能用 PR 分支 CI 替代。
+- 该限制控制单次时间范围，不等于完全解决深分页/超大 offset 风险；`CLIENT_API_MAX_PAGE=100000` 与最大 page_size 5000 的组合仍允许很大的 offset。后续应结合真实数据规模、查询计划与兼容性评估，确定安全的最大 offset 或游标分页策略。
