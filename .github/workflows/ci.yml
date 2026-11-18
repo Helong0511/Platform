@@ -37,6 +37,8 @@ jobs:
         env:
           MYSQL_ROOT_PASSWORD: ci-root-password
           MYSQL_DATABASE: platform_ci
+          MYSQL_USER: platform_application_runtime
+          MYSQL_PASSWORD: runtime-only
         ports:
           - 3306:3306
         options: >-
