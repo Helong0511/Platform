@@ -27,6 +27,7 @@ from app.core.constants import (
     CLIENT_API_DEFAULT_PAGE_SIZE,
     CLIENT_API_MAX_PAGE,
     CLIENT_API_MAX_PAGE_SIZE,
+    CLIENT_API_MAX_DATE_RANGE_DAYS,
 )
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.errors import ErrorCode
@@ -444,6 +445,13 @@ async def get_client_data(
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
                 detail="起始日期不能大于终止日期"
+            )
+
+        # 日期跨度按首尾日期均包含计算，防止开放 API 被用于无界历史数据扫描。
+        if (end_date_obj - start_date_obj).days + 1 > CLIENT_API_MAX_DATE_RANGE_DAYS:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail=f"单次查询日期范围不能超过 {CLIENT_API_MAX_DATE_RANGE_DAYS} 天",
             )
 
         data_type = api_request.data_type or "all"
