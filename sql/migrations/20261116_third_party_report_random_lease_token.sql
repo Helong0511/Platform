@@ -70,11 +70,6 @@ SET @lease_token_check_valid = (
               'andreport_start_timeisnotnull'
           )
 );
-PREPARE lease_token_verify_stmt FROM @lease_token_verify_sql;
-EXECUTE lease_token_verify_stmt;
-DEALLOCATE PREPARE lease_token_verify_stmt;
-'andreport_start_timeisnotnull'
-);
 SET @lease_token_verify_sql = IF(
     @lease_token_schema_valid = 1 AND @lease_token_check_valid = 1,
     'SELECT 1',
