@@ -69,6 +69,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _admin_connection():
+    # 集成测试的管理连接必须有网络超时，避免 DROP DATABASE 在 CI 中无限等待。
     return pymysql.connect(
         host=MYSQL_HOST,
         port=MYSQL_PORT,
@@ -76,6 +77,9 @@ def _admin_connection():
         password=MYSQL_PASSWORD,
         autocommit=True,
         charset="utf8mb4",
+        connect_timeout=5,
+        read_timeout=20,
+        write_timeout=10,
     )
 
 
@@ -95,10 +99,37 @@ def _create_isolated_database() -> str:
 
 def _drop_isolated_database(database: str) -> None:
     # database 由 UUID 生成，不接受外部输入。
+    # DROP DATABASE 可能等待其它连接释放 metadata lock；限制等待时间并输出
+    # 当前连接概况，避免 CI 只在 45 分钟总超时后被动取消。
     connection = _admin_connection()
     try:
         with connection.cursor() as cursor:
-            cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
+            cursor.execute("SET SESSION lock_wait_timeout = 10")
+            try:
+                cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
+            except Exception as exc:
+                processlist = []
+                try:
+                    cursor.execute("SHOW FULL PROCESSLIST")
+                    processlist = [
+                        {
+                            "id": row[0],
+                            "user": row[1],
+                            "db": row[3],
+                            "command": row[4],
+                            "time": row[5],
+                            "state": row[6],
+                        }
+                        for row in cursor.fetchall()
+                        if row[3] == database or row[0] == connection.thread_id()
+                    ]
+                except Exception:
+                    # 保留 DROP 原始异常；诊断查询失败不能覆盖根因。
+                    pass
+                raise RuntimeError(
+                    f"清理隔离 MySQL 数据库失败：database={database}, "
+                    f"processlist={processlist}, error_type={type(exc).__name__}"
+                ) from exc
     finally:
         connection.close()
 
