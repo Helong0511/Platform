@@ -196,6 +196,9 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         # CHECK 约束不只核对名称：同名但表达式被放宽（例如 OR 1=1）同样属于 schema drift。
         def normalize_check_expression(expression) -> str:
             normalized = " ".join(str(expression if expression is not None else "").replace("`", "").split()).casefold()
+            # MySQL Inspector 会为字符串字面量补充字符集 introducer（如 _utf8mb4''）；
+            # 该标记不改变字面量值，比较 ORM 与数据库表达式前应移除。
+            normalized = re.sub(r"(?<![a-z0-9_$])_[a-z0-9]+(?=['\\\"])", "", normalized)
             # MySQL Inspector 可能为表达式增加一层括号；仅剥离完整包裹表达式的括号。
             while normalized.startswith("(") and normalized.endswith(")"):
                 depth = 0
