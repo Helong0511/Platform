@@ -9,6 +9,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 
 from app.models.models import ConversionDeductionConfig, Offer
+from app.core.pagination import calculate_pagination_offset
 
 
 class DeductionConfigListQuery:
@@ -26,6 +27,7 @@ class DeductionConfigListQuery:
         keyword: Optional[str] = None,
         advertiser_id: Optional[int] = None,
     ) -> Tuple[List[ConversionDeductionConfig], int]:
+        offset = calculate_pagination_offset(page, page_size, resource_name="扣减配置列表")
         conditions = self._build_conditions(level, is_active, advertiser_id)
 
         count_query = select(func.count()).select_from(ConversionDeductionConfig)
@@ -41,7 +43,7 @@ class DeductionConfigListQuery:
                 ConversionDeductionConfig.priority.desc(),
                 ConversionDeductionConfig.created_at.desc(),
             )
-            .offset((page - 1) * page_size)
+            .offset(offset)
             .limit(page_size)
             .options(
                 joinedload(ConversionDeductionConfig.advertiser),
