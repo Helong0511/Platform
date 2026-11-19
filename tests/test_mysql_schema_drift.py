@@ -10,6 +10,7 @@ import pymysql
 from sqlalchemy import (
     Column,
     DateTime,
+    FetchedValue,
     CheckConstraint,
     ForeignKey,
     Index,
@@ -381,7 +382,8 @@ def test_mysql_schema_drift_checks_explicit_server_defaults_only():
                 "count_value INT NOT NULL DEFAULT 0, "
                 "label VARCHAR(32) NOT NULL DEFAULT 'legacy', "
                 "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
-                "python_only INT NOT NULL"
+                "python_only INT NOT NULL, "
+                "fetched_only INT NOT NULL"
                 ") ENGINE=InnoDB"
             )
 
@@ -400,6 +402,7 @@ def test_mysql_schema_drift_checks_explicit_server_defaults_only():
             ),
             # Python 端默认值不生成数据库 DEFAULT，不应触发 drift。
             Column("python_only", Integer, nullable=False, default=7),
+            Column("fetched_only", Integer, nullable=False, server_default=FetchedValue()),
         )
         url = URL.create(
             "mysql+pymysql",
