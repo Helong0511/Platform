@@ -203,6 +203,22 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                 )
             )
 
+        def normalize_generated_expression(expression):
+            # 只比较不含字符串/双引号字面量的简单表达式；复杂表达式宁可告警也不误报。
+            raw = str(expression if expression is not None else "").strip()
+            if not raw or chr(39) in raw or chr(34) in raw:
+                return None
+            raw = raw.replace(chr(96), "")
+            raw = re.sub(r"\s+", " ", raw)
+            raw = re.sub(r"\s*([(),+\-*/%<>=!|&^])\s*", r"\1", raw)
+            return raw.casefold()
+
+        def expected_generated_expression(column):
+            computed = column.computed
+            if not isinstance(computed, Computed):
+                return None
+            return str(computed.sqltext).strip()
+
         def defaults_equal(column, expected, actual_value, actual_extra):
             expected_kind, expected_value = expected
             if actual_value is None:
