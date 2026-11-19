@@ -95,10 +95,11 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             return True
         return False
 
-    def foreign_key_signature(item):
+    def foreign_key_signature(item, schema_fallback=None):
         options = item.get("options") or {}
         return (
             tuple(item.get("constrained_columns") or ()),
+            (item.get("referred_schema") or schema_fallback or ""),
             item.get("referred_table"),
             tuple(item.get("referred_columns") or ()),
             (options.get("ondelete") or "").upper(),
@@ -608,6 +609,11 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         expected_fks = sorted(
             (
                 tuple(element.parent.name for element in fk.elements),
+                (
+                    fk.elements[0].column.table.schema
+                    or (default_schema if dialect_name == "mysql" else None)
+                    or ""
+                ),
                 fk.elements[0].column.table.name,
                 tuple(element.column.name for element in fk.elements),
                 (fk.ondelete or "").upper(),
@@ -616,7 +622,10 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             for fk in table.foreign_key_constraints
         )
         actual_fks = sorted(
-            foreign_key_signature(item)
+            foreign_key_signature(
+                item,
+                default_schema if dialect_name == "mysql" else None,
+            )
             for item in inspector.get_foreign_keys(table.name, schema=table.schema)
         )
         if expected_fks != actual_fks:
