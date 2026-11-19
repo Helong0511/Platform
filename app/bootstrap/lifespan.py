@@ -26,6 +26,7 @@ from app.core.telegram.service_notify import (
 from app.core.telegram.shared_state import cleanup_stale_shared_state
 from app.core.timezone_utils import check_and_validate_timezone, log_timezone_info
 from app.db.migrations.gate import verify_schema_revision
+from app.db.schema_contract import BASELINE_MYSQL_TABLE_OPTIONS
 from app.models import Base
 from app.scheduler_module import init_scheduled_tasks, shutdown_scheduler, start_scheduler
 from app.scheduler_module.task_init import init_scheduled_tasks_in_db
@@ -103,8 +104,10 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
     dialect_name = sync_connection.dialect.name
     sorted_tables = target_metadata.sorted_tables
 
-    # MySQL 列属性按 schema 批量读取，避免每张 ORM 表单独往返数据库。
+    # MySQL 列属性和表级字符集规则按 schema 批量读取，避免逐列/逐表往返。
     mysql_column_extras_by_table = {}
+    mysql_table_options_by_table = {}
+    default_schema = None
     if dialect_name == "mysql":
         default_schema = sync_connection.execute(text("SELECT DATABASE()")).scalar_one_or_none()
         tables_by_schema = {}
@@ -112,6 +115,33 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             schema_name = metadata_table.schema or default_schema
             if schema_name:
                 tables_by_schema.setdefault(schema_name, []).append(metadata_table.name)
+        # 正式 SQL 基线的表级规则与 ORM 显式选项共同构成可核验契约。
+        expected_table_names = set(BASELINE_MYSQL_TABLE_OPTIONS)
+        for metadata_table in sorted_tables:
+            mysql_options = metadata_table.dialect_options["mysql"]
+            if mysql_options.get("charset") or mysql_options.get("collate"):
+                expected_table_names.add(metadata_table.name)
+        table_options_statement = text(
+            "SELECT t.TABLE_NAME, t.TABLE_COLLATION, c.CHARACTER_SET_NAME "
+            "FROM information_schema.TABLES AS t "
+            "LEFT JOIN information_schema.COLLATIONS AS c "
+            "ON c.COLLATION_NAME = t.TABLE_COLLATION "
+            "WHERE t.TABLE_SCHEMA = :schema_name AND t.TABLE_NAME IN :table_names"
+        ).bindparams(bindparam("table_names", expanding=True))
+        for schema_name, table_names in tables_by_schema.items():
+            requested_tables = sorted(set(table_names) & expected_table_names)
+            if not requested_tables:
+                continue
+            option_rows = sync_connection.execute(
+                table_options_statement,
+                {"schema_name": schema_name, "table_names": requested_tables},
+            ).mappings().all()
+            for row in option_rows:
+                mysql_table_options_by_table[(schema_name, row["TABLE_NAME"])] = {
+                    "mysql_charset": row.get("CHARACTER_SET_NAME"),
+                    "mysql_collate": row.get("TABLE_COLLATION"),
+                }
+
         column_extras_statement = text(
             "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_DEFAULT, EXTRA, GENERATION_EXPRESSION, "
             "CHARACTER_SET_NAME, COLLATION_NAME "
@@ -545,49 +575,23 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             check_constraint_mismatches[table.fullname] = check_mismatches
 
         if dialect_name == "mysql":
-            expected_options = {}
+            expected_options = dict(BASELINE_MYSQL_TABLE_OPTIONS.get(table.name, {}))
             mysql_options = table.dialect_options["mysql"]
-            for option, inspector_key in (
-                ("charset", "mysql_charset"),
-                ("collate", "mysql_collate"),
-            ):
+            for option in ("charset", "collate"):
                 expected_value = mysql_options.get(option)
                 if expected_value:
-                    expected_options[inspector_key] = expected_value
+                    expected_options[option] = expected_value
             if expected_options:
-                # MySQL Inspector.get_table_options() 在部分驱动版本中不返回 charset/collation；
-                # 从 information_schema 读取服务器实际记录，不能把 None 当作真实值。
                 schema_name = table.schema or default_schema
-                actual_collation = None
-                actual_charset = None
-                if schema_name:
-                    actual_collation = sync_connection.execute(
-                        text(
-                            "SELECT TABLE_COLLATION FROM information_schema.TABLES "
-                            "WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME = :table_name"
-                        ),
-                        {"schema_name": schema_name, "table_name": table.name},
-                    ).scalar_one_or_none()
-                    if actual_collation:
-                        actual_charset = sync_connection.execute(
-                            text(
-                                "SELECT CHARACTER_SET_NAME FROM information_schema.COLLATIONS "
-                                "WHERE COLLATION_NAME = :collation_name"
-                            ),
-                            {"collation_name": actual_collation},
-                        ).scalar_one_or_none()
-                actual_options = {
-                    "mysql_charset": actual_charset,
-                    "mysql_collate": actual_collation,
-                }
-                mismatches = {
-                    key: {
-                        "expected": value,
-                        "actual": actual_options.get(key),
-                    }
-                    for key, value in expected_options.items()
-                    if (actual_options.get(key) or "").lower() != value.lower()
-                }
+                actual_options = mysql_table_options_by_table.get(
+                    (schema_name, table.name), {}
+                )
+                mismatches = {}
+                for option, expected_value in expected_options.items():
+                    actual_key = "mysql_charset" if option == "charset" else "mysql_collate"
+                    actual_value = actual_options.get(actual_key)
+                    if (actual_value or "").casefold() != expected_value.casefold():
+                        mismatches[actual_key] = {"expected": expected_value, "actual": actual_value}
                 if mismatches:
                     table_option_mismatches[table.fullname] = mismatches
 
