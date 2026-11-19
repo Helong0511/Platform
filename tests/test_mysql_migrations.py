@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import os
+import secrets
 from pathlib import Path
 
 import pytest
@@ -1959,3 +1960,65 @@ def test_report_random_lease_migration_rejects_not_enforced_check_constraint():
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS third_party_report_logs")
         connection.close()
+
+
+def test_password_hash_column_migration_widens_existing_users_without_data_loss():
+    """真实 MySQL 验证旧 VARCHAR(100) 用户表可安全扩展至正式基线的 191。"""
+    database = f"platform_ci_password_{secrets.token_hex(5)}"
+    root = pymysql.connect(
+        host=HOST,
+        port=int(os.getenv("MYSQL_INTEGRATION_PORT", "3306")),
+        user=os.getenv("MYSQL_INTEGRATION_USER", "root"),
+        password=os.getenv("MYSQL_INTEGRATION_PASSWORD", ""),
+        charset="utf8mb4",
+        autocommit=True,
+        connect_timeout=5,
+        read_timeout=10,
+        write_timeout=10,
+    )
+    target = None
+    try:
+        with root.cursor() as cursor:
+            cursor.execute(
+                f"CREATE DATABASE `{database}` "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
+            )
+        target = pymysql.connect(
+            host=HOST,
+            port=int(os.getenv("MYSQL_INTEGRATION_PORT", "3306")),
+            user=os.getenv("MYSQL_INTEGRATION_USER", "root"),
+            password=os.getenv("MYSQL_INTEGRATION_PASSWORD", ""),
+            database=database,
+            charset="utf8mb4",
+            autocommit=True,
+            connect_timeout=5,
+            read_timeout=10,
+            write_timeout=10,
+        )
+        existing_hash = "$2b$12$synthetic-existing-password-hash-preserved"
+        with target.cursor() as cursor:
+            cursor.execute(
+                "CREATE TABLE users ("
+                "id INT NOT NULL PRIMARY KEY, "
+                "hashed_password VARCHAR(100) NOT NULL COMMENT '用户Hash密码'"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            cursor.execute(
+                "INSERT INTO users (id, hashed_password) VALUES (1, %s)",
+                (existing_hash,),
+            )
+            _run_sql_file(
+                cursor,
+                "sql/migrations/20261119_users_password_hash_length.sql",
+            )
+            cursor.execute("SHOW COLUMNS FROM users LIKE 'hashed_password'")
+            column = cursor.fetchone()
+            assert column[1].upper() == "VARCHAR(191)"
+            cursor.execute("SELECT hashed_password FROM users WHERE id = 1")
+            assert cursor.fetchone()[0] == existing_hash
+    finally:
+        if target is not None:
+            target.close()
+        with root.cursor() as cursor:
+            cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
+        root.close()
