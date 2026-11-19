@@ -17,6 +17,10 @@ from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.constants import AD_DATA_MAX_OFFSET_ROWS, MAX_PAGE_SIZE
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
+
 from app.core.ad_data_metadata import format_data_source_label, format_report_type_label
 from app.core.country_code import resolve_country_name
 from app.core.query_utils import (
@@ -72,6 +76,19 @@ class AdDataListQuery:
     ) -> Tuple[List[Dict[str, Any]], int]:
         from app.api_v1.excel.utils import normalize_date_key
 
+        # 路由层限制 page_size；服务层仍需防止内部调用绕过深分页预算。
+        if page < 1 or page_size < 1 or page_size > MAX_PAGE_SIZE:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail=f"广告数据分页参数无效，每页条数必须在 1 到 {MAX_PAGE_SIZE} 之间",
+            )
+        offset = (page - 1) * page_size
+        if offset > AD_DATA_MAX_OFFSET_ROWS:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail=f"广告数据分页偏移量不能超过 {AD_DATA_MAX_OFFSET_ROWS} 条",
+            )
+
         use_assignment_table = await check_use_assignment_table(self.db)
         validate_ad_data_scope_filter_params(
             current_user=current_user,
@@ -113,7 +130,6 @@ class AdDataListQuery:
             report_type=report_type,
         )
 
-        offset = (page - 1) * page_size
         result = await self.db.execute(query.offset(offset).limit(page_size))
         data = result.unique().all()
 
