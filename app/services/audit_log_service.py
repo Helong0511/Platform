@@ -157,7 +157,7 @@ class AuditLogService:
         total = total_result.scalar() or 0
 
         # 排序和分页
-        query = query.order_by(UserAuditLog.created_at.desc())
+        query = query.order_by(UserAuditLog.created_at.desc(), UserAuditLog.id.desc())
         query = query.offset(offset).limit(page_size)
 
         # 执行查询
