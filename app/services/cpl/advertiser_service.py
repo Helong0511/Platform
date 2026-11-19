@@ -198,7 +198,7 @@ class AdvertiserService(BaseService[Advertiser]):
         total = total_result.scalar() or 0
 
         # 分页查询
-        query = query.order_by(Advertiser.created_at.desc())
+        query = query.order_by(Advertiser.created_at.desc(), Advertiser.id.desc())
         query = query.offset(offset).limit(page_size)
 
         result = await self.db.execute(query)
