@@ -25,6 +25,7 @@ from app.api_v1.system.sensitive_path_probes import (
 )
 from app.api_v1.system.third_party_reports import get_third_party_reports
 from app.api_v1.system.ad_data_health import get_alerts, get_baselines
+from app.services.ad_data import baseline_service
 
 
 class _NoDB:
@@ -183,4 +184,22 @@ async def test_system_list_routes_reject_excessive_offsets_before_db(handler, kw
     db = _NoDB()
     with pytest.raises(HTTPException):
         await handler(db=db, **kwargs)
+    assert db.statements == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("service_method", "kwargs"),
+    [
+        (baseline_service.list_alerts, {"limit": 500, "offset": 100001}),
+        (baseline_service.list_baselines, {"limit": 1000, "offset": 100001}),
+    ],
+)
+async def test_health_data_services_reject_excessive_offsets_before_db(
+    service_method,
+    kwargs,
+):
+    db = _NoDB()
+    with pytest.raises(HTTPException):
+        await service_method(db, **kwargs)
     assert db.statements == []
