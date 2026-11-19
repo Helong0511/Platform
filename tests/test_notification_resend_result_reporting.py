@@ -186,3 +186,24 @@ async def test_batch_resend_counts_only_confirmed_forward_logs_as_success(monkey
     assert result["failed_count"] == 2
     assert result["failed_items"][0]["forward_log_id"] == 902
     assert result["failed_items"][1]["conversion_id"] == 3
+
+
+@pytest.mark.asyncio
+async def test_forward_log_resend_reports_actual_downstream_failure(monkeypatch):
+    original_log = SimpleNamespace(id=55, conversion_id=101)
+    db = _DB([original_log, _conversion()])
+    failed_log = SimpleNamespace(id=903, success=False)
+
+    async def forward(**kwargs):
+        return failed_log
+
+    monkeypatch.setattr(resend_command.PostbackForwarder, "forward_to_publisher", forward)
+
+    result = await resend_command.ResendNotificationCommand(db).resend_from_forward_log(
+        55,
+        _admin(),
+    )
+
+    assert result["success"] is False
+    assert result["new_forward_log_id"] == 903
+    assert result["forward_log_id"] == 55
