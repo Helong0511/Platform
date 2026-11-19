@@ -477,26 +477,35 @@ PR #1 继续 Open / Draft；本轮没有合并 main、没有部署，也没有�
 4. 新增真实 MySQL 回归测试：预先创建同名但逻辑被放宽的 CHECK、以及未强制约束场景，确认 verifier 在执行任何业务迁移前拒绝继续。
 5. 当前 CI 的身份作用域 CHECK 测试确实插入非法行并确认错误码 3819；它不覆盖上述两条租约 CHECK 的同名错误结构场景。
 
-## 21. Outbox 串行批次与 Scheduler 租约时长复核
+## 21. 2026-11-19：Outbox 串行批次与 Scheduler 锁预算复核（更新旧结论）
 
-当前 `process_postback_report_outbox()` 以顺序 `for` 循环处理最多 20 条事件；调度任务 `process_third_party_report_outbox_task()` 固定传入 `batch_size=20`。
+> 本节替代本文件早期关于 Outbox 每批 20 条、调度锁 300/360 秒的历史结论。应以当前 `main` 源码为准。
 
-每条事件的 HTTP 请求总 deadline 为 60 秒，最多 3 次请求，失败退避还会等待（当前指数退避）。因此单条事件的理论网络阶段耗时可接近 180 秒，20 条串行批次可能超过 3,600 秒；实际耗时取决于响应、失败次数和配置解析时间。
+### 21.1 当前实现
 
-但 Scheduler 的 `_task_lock_timeout_seconds()` 目前只对“点击记录队列批量处理”设置 900 秒，其它任务默认 300 秒。第三方 Outbox 任务没有专属超时配置；Redis Scheduler lock TTL 由该超时加 60 秒计算，默认约 360 秒。
+- `process_third_party_report_outbox_task()` 明确调用 `process_postback_report_outbox(batch_size=3)`，不是 20 条。
+- `send_third_party_report()` 默认每轮最多 3 次请求，单次请求由 `asyncio.wait_for` 限制总墙钟时长为 60 秒；指数退避为 1 秒和 2 秒。
+- 单条事件纯网络预算为 3 × 60 + 1 + 2 = 183 秒；每批 3 条串行处理，纯网络预算为 549 秒。此值不包括数据库操作、凭据解析、状态持久化、通知和调度开销，不是实测总耗时上界。
+- 单条 Outbox 发送租约为 300 秒；每次请求前校验/续租随机 fencing token 和数据库时钟，旧 Worker 不能覆盖新 Worker 的持久化状态。
+- `_task_lock_timeout_seconds()` 对第三方 Report Outbox 设置 900 秒；`_execute_task_with_lock_internal()` 将 Redis TTL 设置为该值加 60 秒，即 960 秒。
+- Redis 不可用时当前锁模块会回退为仅依赖 MySQL 行锁；该降级路径仍需多实例故障注入验证。
 
-这形成明确的**调度锁时长与批次最坏执行时间不匹配**。单条事件的数据库租约与 fencing 能限制旧 Worker 更新记录，但不能阻止过期 Scheduler 锁被新批次接管，也不能撤回已发出的外部 HTTP 请求。
+### 21.2 当前审计结论
 
-**风险等级：P2（积压/调度重叠/重复外部投递风险，非已证实的数据破坏）。**
+当前已配置纯网络预算 549 秒、MySQL 调度锁 900 秒、Redis 锁 960 秒，未发现确定性的固定 TTL 小于预设 HTTP 网络预算这一配置错误。与旧版每批 20 条/默认 300 秒的结论相比，当前实现已经降低批次大小并为 Outbox 设置专属锁预算。
 
-本轮未直接调高锁 TTL 或增加并发，原因是必须先核实数据库连接池容量、第三方 API 限流、HTTP 请求总 deadline、任务队列并发和进程停机行为。后续改进顺序：
-1. 为 Outbox 增加独立的批次 wall-clock deadline / 剩余预算，批次耗时达到阈值时停止领取新事件。
-2. 将 Scheduler 任务锁超时和 Redis TTL 设为与批次 deadline 一致，并确保 DB 锁 stale 判定、Redis 锁 TTL、APScheduler max_instances 的关系一致。
-3. 考虑较小批次或受控并发；并发上限必须由 DB pool、第三方 rate limit 和单条租约 fencing 共同约束。
-4. 增加测试覆盖“批次耗时逼近锁超时、Redis TTL 过期、旧批次仍运行、新批次启动”的交错时序，并验证旧批次不会覆盖新租约状态。
-5. 监控 batch duration、oldest due age、selected/success/retryable/failed、lock contention 与租约丢失率。
+原测试注释中的 540 秒漏算了每条事件的 1+2 秒重试退避；精确纯网络预算应为 549 秒。900 秒与 549 秒之间有 351 秒配置余量，但不能据此证明数据库或运行时开销一定小于该余量。
 
-PR #1 继续 Open / Draft；以上是代码证据支持的审计发现，不代表已在生产发生调度重叠或重复发送。
+### 21.3 仍需生产前验证
+
+1. Redis 故障/恢复时多 Scheduler 实例并发触发，以及 Redis 锁 TTL 到期、旧任务仍运行时的交错故障注入。
+2. Worker 被 SIGKILL、事件循环阻塞、数据库连接池耗尽、数据库锁等待等情况下的批次时长与租约接管行为。
+3. 生产 MySQL/Redis 版本、连接池容量和真实流量下的任务 P95/P99、Outbox oldest-due age、租约丢失率和积压恢复时间。
+4. 如未来增加批次大小、请求次数或 HTTP deadline，必须重新计算总预算；必要时引入批次 wall-clock deadline 和带 fencing token 的可续租调度锁。
+
+现有 `test_outbox_scheduler_lock_budget_exceeds_bounded_batch_http_budget` 验证 MySQL 锁预算为 900 秒；`test_http_total_deadline_is_shorter_than_report_lease` 和慢速持续回包取消测试验证单次 HTTP 总时限。现有测试尚未直接验证 Redis 锁 960 秒的真实多实例过期交错场景。
+
+本节为源码与现有测试的静态复核，不代表已完成生产压力测试、真实第三方 API 验证或生产故障演练。
 
 ## 22. 2026-11-18：Migration Runner 实际认证身份复核已实现
 
