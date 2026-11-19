@@ -51,7 +51,7 @@ class DeductionLogsQuery:
         if conditions:
             query = query.where(and_(*conditions))
         query = (
-            query.order_by(ConversionDeductionLog.created_at.desc())
+            query.order_by(ConversionDeductionLog.created_at.desc(), ConversionDeductionLog.id.desc())
             .offset(offset)
             .limit(page_size)
             .options(
