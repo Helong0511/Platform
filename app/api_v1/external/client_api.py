@@ -411,7 +411,7 @@ async def get_client_data(
                 ErrorCode.INVALID_PARAMETER,
                 detail=(
                     f"分页偏移量不能超过 {CLIENT_API_MAX_OFFSET_ROWS} 条，"
-                    "请缩小日期范围后分段查询",
+                    "请缩小日期范围后分段查询"
                 ),
             )
 
