@@ -131,8 +131,7 @@ class DiscountService(BaseService[OfferDiscount]):
             await self.db.refresh(discount)
 
             # 重新加载关联信息（使用joinedload优化）
-            offset = calculate_pagination_offset(page, page_size, resource_name="扣量配置列表")
-        query = select(OfferDiscount).where(OfferDiscount.id == discount.id).options(
+            query = select(OfferDiscount).where(OfferDiscount.id == discount.id).options(
                 joinedload(OfferDiscount.publisher),
                 joinedload(OfferDiscount.offer)
             )
@@ -173,6 +172,7 @@ class DiscountService(BaseService[OfferDiscount]):
         Returns:
             tuple[List[OfferDiscount], int]: (当前页列表, 总条数)
         """
+        offset = calculate_pagination_offset(page, page_size, resource_name="扣量配置列表")
         query = select(OfferDiscount)
 
         if discount_type:
