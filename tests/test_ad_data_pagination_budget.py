@@ -119,7 +119,7 @@ async def test_ad_data_list_allows_exact_offset_boundary(monkeypatch):
             compile_kwargs={"literal_binds": True},
         )
     )
-    assert "OFFSET 100000" in sql
+    assert "LIMIT 100000, 100" in sql
 
 
 @pytest.mark.asyncio
