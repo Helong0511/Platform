@@ -90,7 +90,6 @@ class PublisherService(BaseService[Publisher]):
         Raises:
             APIException: 记录不存在或无权访问
         """
-        offset = calculate_pagination_offset(page, page_size, resource_name="渠道列表")
         query = select(Publisher).where(Publisher.id == publisher_id)
 
         # 如果需要客户信息，使用selectinload优化查询
@@ -141,6 +140,7 @@ class PublisherService(BaseService[Publisher]):
         Returns:
             tuple[List[Publisher], int]: (当前页列表, 总条数)
         """
+        offset = calculate_pagination_offset(page, page_size, resource_name="渠道列表")
         query = select(Publisher)
 
         # 筛选条件
