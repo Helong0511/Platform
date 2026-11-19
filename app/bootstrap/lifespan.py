@@ -35,7 +35,10 @@ logger = logging.getLogger(__name__)
 
 def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
     """只读核验 ORM 表、列、类型、NULL、主键、索引、外键及显式表字符集规则；绝不执行 DDL。"""
+    from decimal import Decimal, InvalidOperation
+
     from sqlalchemy import Boolean, Integer, Numeric, String
+    from sqlalchemy.schema import DefaultClause
 
     target_metadata = metadata or Base.metadata
     inspector = inspect(sync_connection)
@@ -44,6 +47,8 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
     column_type_mismatches = {}
     nullable_mismatches = {}
     column_attribute_mismatches = {}
+    column_default_mismatches = {}
+    column_default_unverifiable = {}
     primary_key_mismatches = {}
     index_mismatches = {}
     unique_constraint_mismatches = {}
@@ -103,7 +108,8 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             if schema_name:
                 tables_by_schema.setdefault(schema_name, []).append(metadata_table.name)
         column_extras_statement = text(
-            "SELECT TABLE_NAME, COLUMN_NAME, EXTRA FROM information_schema.COLUMNS "
+            "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_DEFAULT, EXTRA "
+            "FROM information_schema.COLUMNS "
             "WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME IN :table_names"
         ).bindparams(bindparam("table_names", expanding=True))
         for schema_name, table_names in tables_by_schema.items():
@@ -112,9 +118,12 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                 {"schema_name": schema_name, "table_names": sorted(set(table_names))},
             ).mappings().all()
             for row in extra_rows:
-                mysql_column_extras_by_table.setdefault(
-                    (schema_name, row["TABLE_NAME"]), {}
-                )[row["COLUMN_NAME"]] = (row.get("EXTRA") or "").casefold()
+                table_key = (schema_name, row["TABLE_NAME"])
+                column_key = row["COLUMN_NAME"]
+                mysql_column_extras_by_table.setdefault(table_key, {})[column_key] = {
+                    "extra": (row.get("EXTRA") or "").casefold(),
+                    "default": row.get("COLUMN_DEFAULT"),
+                }
 
     for table in sorted_tables:
         if not inspector.has_table(table.name, schema=table.schema):
@@ -138,6 +147,43 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         mysql_column_extras = mysql_column_extras_by_table.get(
             (mysql_schema_name, table.name), {}
         )
+
+        def expected_server_default(column):
+            # FetchedValue 只是“数据库会生成值”的标记；只有 DefaultClause 才代表 DDL DEFAULT。
+            server_default = column.server_default
+            if not isinstance(server_default, DefaultClause):
+                return None
+            argument = server_default.arg
+            raw = argument if isinstance(argument, str) else str(argument)
+            raw = raw.strip()
+            # text("'literal'") 是显式 SQL 字符串常量；处理 SQL 单引号转义。
+            quoted = re.fullmatch(r"'((?:''|[^'])*)'", raw)
+            if quoted:
+                return ("literal", quoted.group(1).replace("''", "'"))
+            if re.fullmatch(r"[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)", raw):
+                return ("literal", raw)
+            if re.fullmatch(r"(?i)CURRENT_TIMESTAMP(?:\\(\\d+\\))?", raw):
+                return ("expression", re.sub(r"\\s+", "", raw).casefold())
+            # 不猜测函数、运算符或厂商扩展表达式的语义。
+            return ("unverifiable", raw)
+
+        def defaults_equal(column, expected, actual_value, actual_extra):
+            expected_kind, expected_value = expected
+            if actual_value is None:
+                return False
+            actual_text = str(actual_value).strip()
+            is_generated_expression = "default_generated" in actual_extra
+            if expected_kind == "expression":
+                actual_expression = re.sub(r"\\s+", "", actual_text).casefold()
+                return is_generated_expression and actual_expression == expected_value
+            if is_generated_expression:
+                return False
+            if isinstance(column.type, (Integer, Numeric, Boolean)):
+                try:
+                    return Decimal(actual_text) == Decimal(str(expected_value))
+                except (InvalidOperation, ValueError):
+                    return False
+            return actual_text == str(expected_value)
 
         for column in table.columns:
             actual = actual_columns.get(column.name)
@@ -165,9 +211,9 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                 # autoincrement="auto" 是方言生成 DDL 的默认策略，不足以证明
                 # 现有迁移/外部建表必须具备 AUTO_INCREMENT。
                 expected_autoincrement = column.autoincrement is True
-                actual_autoincrement = (
-                    "auto_increment" in mysql_column_extras.get(column.name, "")
-                )
+                column_extra = mysql_column_extras.get(column.name, {})
+                actual_extra = column_extra.get("extra", "")
+                actual_autoincrement = "auto_increment" in actual_extra
                 if expected_autoincrement != actual_autoincrement:
                     column_attribute_mismatches.setdefault(
                         table.fullname, {}
@@ -177,6 +223,25 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                             "actual": actual_autoincrement,
                         }
                     }
+
+                expected_default = expected_server_default(column)
+                if expected_default:
+                    if expected_default[0] == "unverifiable":
+                        column_default_unverifiable.setdefault(
+                            table.fullname, {}
+                        )[column.name] = expected_default[1]
+                    elif not defaults_equal(
+                        column,
+                        expected_default,
+                        column_extra.get("default"),
+                        actual_extra,
+                    ):
+                        column_default_mismatches.setdefault(
+                            table.fullname, {}
+                        )[column.name] = {
+                            "expected": expected_default[1],
+                            "actual": column_extra.get("default"),
+                        }
 
         expected_pk = sorted(column.name for column in table.primary_key.columns)
         actual_pk = sorted(
@@ -374,6 +439,8 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         "column_type_mismatches": column_type_mismatches,
         "nullable_mismatches": nullable_mismatches,
         "column_attribute_mismatches": column_attribute_mismatches,
+        "column_default_mismatches": column_default_mismatches,
+        "column_default_unverifiable": column_default_unverifiable,
         "primary_key_mismatches": primary_key_mismatches,
         "index_mismatches": index_mismatches,
         "unique_constraint_mismatches": unique_constraint_mismatches,
@@ -396,6 +463,8 @@ async def _verify_database_schema() -> str | None:
                 f"column_type_mismatches={drift['column_type_mismatches']}; "
                 f"nullable_mismatches={drift['nullable_mismatches']}; "
                 f"column_attribute_mismatches={drift['column_attribute_mismatches']}; "
+                f"column_default_mismatches={drift['column_default_mismatches']}; "
+                f"column_default_unverifiable={drift['column_default_unverifiable']}; "
                 f"primary_key_mismatches={drift['primary_key_mismatches']}; "
                 f"index_mismatches={drift['index_mismatches']}; "
                 f"unique_constraint_mismatches={drift['unique_constraint_mismatches']}; "
