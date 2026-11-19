@@ -423,8 +423,12 @@ def test_mysql_schema_drift_checks_explicit_server_defaults_only():
             cursor.execute(
                 f"ALTER TABLE `{database}`.default_probe "
                 "ALTER COLUMN count_value SET DEFAULT 9, "
-                "ALTER COLUMN label SET DEFAULT 'changed', "
-                "ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP(3)"
+                "ALTER COLUMN label SET DEFAULT 'changed'"
+            )
+            # MySQL 8.0 对函数表达式默认值通过 MODIFY COLUMN 变更更兼容。
+            cursor.execute(
+                f"ALTER TABLE `{database}`.default_probe "
+                "MODIFY COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP(3)"
             )
         with engine.connect() as connection:
             drift = _schema_metadata_drift(connection, metadata)
@@ -444,8 +448,11 @@ def test_mysql_schema_drift_checks_explicit_server_defaults_only():
             cursor.execute(
                 f"ALTER TABLE `{database}`.default_probe "
                 "ALTER COLUMN count_value SET DEFAULT 0, "
-                "ALTER COLUMN label SET DEFAULT 'legacy', "
-                "ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP"
+                "ALTER COLUMN label SET DEFAULT 'legacy'"
+            )
+            cursor.execute(
+                f"ALTER TABLE `{database}`.default_probe "
+                "MODIFY COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
             )
         with engine.connect() as connection:
             corrected = _schema_metadata_drift(connection, metadata)
