@@ -11,6 +11,7 @@ from sqlalchemy.orm import joinedload
 from app.models.models import Offer, OfferPublisherAssignment, Publisher, User, UserRole
 from app.services.cpl.offer.helpers import get_client_ids_for_user
 from app.services.cpl.offer.queries.assignments_query import OfferAssignmentsQuery
+from app.core.pagination import calculate_pagination_offset
 
 
 class OfferListQuery:
@@ -31,6 +32,7 @@ class OfferListQuery:
         country: Optional[str] = None,
         is_active: Optional[bool] = None,
     ) -> Tuple[List[Offer], int, Dict[int, List[Dict[str, Any]]]]:
+        offset = calculate_pagination_offset(page, page_size, resource_name="Offer 列表")
         query = select(Offer)
         has_join = False
 
@@ -86,7 +88,6 @@ class OfferListQuery:
             await self.db.execute(select(func.count()).select_from(query.subquery()))
         ).scalar() or 0
 
-        offset = (page - 1) * page_size
         query = (
             query.options(joinedload(Offer.advertiser))
             .order_by(Offer.created_at.desc())
