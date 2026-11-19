@@ -26,6 +26,7 @@ from app.api_v1.system.sensitive_path_probes import (
 from app.api_v1.system.third_party_reports import get_third_party_reports
 from app.api_v1.system.ad_data_health import get_alerts, get_baselines
 from app.services.ad_data import baseline_service
+from app.api_v1.cpl.affiliate_debug.affiliate_tests import get_affiliate_tests
 
 
 class _NoDB:
@@ -202,4 +203,19 @@ async def test_health_data_services_reject_excessive_offsets_before_db(
     db = _NoDB()
     with pytest.raises(HTTPException):
         await service_method(db, **kwargs)
+    assert db.statements == []
+
+
+@pytest.mark.asyncio
+async def test_affiliate_test_list_rejects_deep_pagination_before_db():
+    db = _NoDB()
+
+    with pytest.raises(HTTPException):
+        await get_affiliate_tests(
+            page=1002,
+            page_size=100,
+            db=db,
+            current_user=_admin(),
+        )
+
     assert db.statements == []
