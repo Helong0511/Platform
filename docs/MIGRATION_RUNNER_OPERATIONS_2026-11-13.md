@@ -651,3 +651,17 @@ PR #47 在现有批量 `information_schema.COLUMNS` 查询中增加 `CHARACTER_S
 - 表级差异进入 `table_option_mismatches` 并阻止启动；此检查只读，不执行 ALTER。真实 MySQL 回归测试覆盖错误排序规则被拒绝、修正后漂移清零。
 - 更新 `sql/platform.sql` 的表级选项时，必须同步更新 `app/db/schema_contract.py` 并运行真实 MySQL Schema Gate 测试。对未显式声明的规则继续保持不推断原则。
 - `cap_reservations` 与 `short_link_click_sync_batches` 是迁移创建的 ORM 表，不在当前完整 SQL 基线 43 张表中；`ad_data_archive` 与 `clicks_archive` 在 SQL 基线中但没有 ORM 映射。后续需单独决定是否把迁移创建表纳入完整基线，不得在本项检查中误报。
+
+
+## 31. 2026-11-19：独立增量 migration 表的 MySQL 字符集/排序规则契约
+
+PR #48 后续补齐了两张未纳入 `sql/platform.sql` 完整基线、但由 ORM 映射且有明确建表 migration 的账本表：
+
+- `cap_reservations`：`sql/migrations/20261111_cap_reservation_ledger.sql` 明确声明 `ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`。
+- `short_link_click_sync_batches`：`sql/migrations/20261110_short_link_click_sync_idempotency.sql` 明确声明相同的表级字符集与排序规则。
+
+实现采用独立的 `MIGRATION_MYSQL_TABLE_OPTIONS`，不把增量 migration 的表伪装成完整 SQL 基线表，也不改变原有 `BASELINE_MYSQL_TABLE_OPTIONS` 的语义。Schema Gate 将两份显式契约合并进入同一批量 `information_schema.TABLES` 查询；只报告漂移，不自动执行 DDL。
+
+真实 MySQL 集成测试分别创建两张错误排序规则的临时表，验证两张表均报告 `utf8mb4_unicode_ci` 与实际 `utf8mb4_0900_ai_ci` 的差异；ALTER 修正后必须清零。测试仅允许 GitHub Actions loopback 临时 MySQL，并在 finally 清理随机测试库。
+
+维护规则：新增由 migration 创建的 ORM 表时，如 DDL 明确声明表级 charset/collation，应同步登记到 `MIGRATION_MYSQL_TABLE_OPTIONS`；未显式声明时继续不推断。若未来将这些表并入 `sql/platform.sql`，应迁移契约归属并保持实际排序规则不变。
