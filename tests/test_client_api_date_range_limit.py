@@ -92,3 +92,53 @@ async def test_client_data_accepts_exactly_90_inclusive_days(monkeypatch):
     assert response.total == 0
     assert captured["start_date"].isoformat() == "2026-01-01"
     assert captured["end_date"].isoformat() == "2026-03-31"
+
+
+@pytest.mark.asyncio
+async def test_client_data_rejects_deep_offset_before_query(monkeypatch):
+    async def verify(*args, **kwargs):
+        return SimpleNamespace(id=17, user_id=7, company_name="isolated")
+
+    monkeypatch.setattr(client_api, "verify_client_request", verify)
+    monkeypatch.setattr(client_api, "get_client_ip", lambda request: "192.0.2.10")
+
+    request = SimpleNamespace(
+        method="POST",
+        url=SimpleNamespace(path="/client_data"),
+        headers={"user-agent": "isolated-test"},
+    )
+    payload = client_api.ClientDataRequest(
+        client_id=17,
+        req_time=int(datetime.now(timezone.utc).timestamp()),
+        sign="isolated-signature",
+        page=102,
+    )
+
+    with pytest.raises(HTTPException) as caught:
+        await client_api.get_client_data(
+            request=request,
+            background_tasks=_BackgroundTasks(),
+            api_request=payload,
+            db=SimpleNamespace(),
+        )
+
+    assert caught.value.status_code == 200
+    assert caught.value.detail["code"] == client_api.ErrorCode.INVALID_PARAMETER
+    assert "分页偏移量不能超过" in caught.value.detail["detail"]
+
+
+@pytest.mark.asyncio
+async def test_client_query_service_rejects_deep_offset_without_database_access():
+    from datetime import date
+    from app.services.ad_data.queries.client_api_query import ClientAdDataQuery
+
+    query = ClientAdDataQuery(SimpleNamespace())
+    with pytest.raises(ValueError, match="分页偏移量超过安全上限"):
+        await query.fetch(
+            client=SimpleNamespace(id=17),
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 3, 31),
+            data_type="all",
+            page=102,
+            page_size=1000,
+        )
