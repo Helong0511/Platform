@@ -588,7 +588,7 @@ def test_mysql_schema_drift_detects_generated_columns_and_expression_changes():
             cursor.execute(f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4")
             cursor.execute(
                 f"CREATE TABLE `{database}`.generated_probe ("
-                "base_value INT NOT NULL, "
+                "base_value INT NOT NULL, ordinary_value INT NOT NULL, "
                 "generated_virtual INT GENERATED ALWAYS AS (base_value + 1) VIRTUAL, "
                 "generated_stored INT GENERATED ALWAYS AS (base_value * 2) STORED"
                 ") ENGINE=InnoDB"
@@ -603,6 +603,7 @@ def test_mysql_schema_drift_detects_generated_columns_and_expression_changes():
         Table(
             "generated_probe", plain_metadata,
             Column("base_value", Integer, nullable=False),
+            Column("ordinary_value", Integer, nullable=False),
             Column("generated_virtual", Integer),
             Column("generated_stored", Integer),
         )
@@ -616,6 +617,7 @@ def test_mysql_schema_drift_detects_generated_columns_and_expression_changes():
         Table(
             "generated_probe", matching_metadata,
             Column("base_value", Integer, nullable=False),
+            Column("ordinary_value", Integer, nullable=False),
             Column("generated_virtual", Integer, Computed("base_value + 1", persisted=False)),
             Column("generated_stored", Integer, Computed("base_value * 2", persisted=True)),
         )
@@ -628,11 +630,15 @@ def test_mysql_schema_drift_detects_generated_columns_and_expression_changes():
         Table(
             "generated_probe", changed_metadata,
             Column("base_value", Integer, nullable=False),
+            Column("ordinary_value", Integer, Computed("base_value + 5", persisted=False)),
             Column("generated_virtual", Integer, Computed("base_value + 2", persisted=True)),
             Column("generated_stored", Integer, Computed("base_value * 2", persisted=True)),
         )
         with engine.connect() as connection:
             changed = _schema_metadata_drift(connection, changed_metadata)
+        missing_generated = changed["column_generated_mismatches"]["generated_probe"]["ordinary_value"]
+        assert missing_generated["expected"]["expression"] == "base_value + 5"
+        assert missing_generated["actual"] is None
         generated_change = changed["column_generated_mismatches"]["generated_probe"]["generated_virtual"]
         assert generated_change["expression"]["expected"] == "base_value + 2"
         assert generated_change["expression"]["actual"]
