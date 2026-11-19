@@ -1,7 +1,7 @@
 """密码哈希渐进升级服务。"""
 from __future__ import annotations
 
-from sqlalchemy import update
+from sqlalchemy import LargeBinary, cast, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
@@ -26,7 +26,7 @@ async def upgrade_password_hash_after_login(
         update(User)
         .where(
             User.id == user.id,
-            User.hashed_password == previous_hash,
+            cast(User.hashed_password, LargeBinary) == previous_hash.encode("utf-8"),
         )
         .values(hashed_password=replacement_hash)
         .execution_options(synchronize_session=False)
