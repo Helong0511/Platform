@@ -69,7 +69,6 @@ class ProductService(BaseService[Product]):
         Returns:
             Product 对象
         """
-        offset = calculate_pagination_offset(page, page_size, resource_name="产品列表")
         # 构建查询 - 使用JOIN优化，避免N+1查询
         query = select(Product).where(Product.id == product_id)
 
@@ -130,6 +129,7 @@ class ProductService(BaseService[Product]):
         Returns:
             (产品列表, 总条数)
         """
+        offset = calculate_pagination_offset(page, page_size, resource_name="产品列表")
         # 构建查询 - 使用JOIN优化
         query = select(Product)
 
