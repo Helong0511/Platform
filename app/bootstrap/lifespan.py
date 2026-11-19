@@ -4,6 +4,7 @@ FastAPI 应用 lifespan（启动 / 关闭）。
 import asyncio
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -193,22 +194,81 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                 "actual": actual_fks,
             }
 
-        # CHECK 约束属于数据库完整性边界；名称由 ORM 与版本化 migration 共同维护。
-        expected_checks = sorted(
-            constraint.name
+        # CHECK 约束不只核对名称：同名但表达式被放宽（例如 OR 1=1）同样属于 schema drift。
+        def normalize_check_expression(expression) -> str:
+            normalized = " ".join(str(expression if expression is not None else "").replace("`", "").split()).casefold()
+            # MySQL Inspector 会为字符串字面量补充字符集 introducer（如 _utf8mb4''）；
+            # 该标记不改变字面量值，比较 ORM 与数据库表达式前应移除。
+            normalized = re.sub(r"(?<![a-z0-9_$])_[a-z0-9]+(?=\')", "", normalized)
+            # MySQL Inspector 可能为表达式增加一层括号；仅剥离完整包裹表达式的括号。
+            while normalized.startswith("(") and normalized.endswith(")"):
+                depth = 0
+                wraps_expression = True
+                quote = None
+                for position, char in enumerate(normalized):
+                    if quote:
+                        if char == quote:
+                            quote = None
+                        continue
+                    if char in {"'", '"'}:
+                        quote = char
+                    elif char == "(":
+                        depth += 1
+                    elif char == ")":
+                        depth -= 1
+                        if depth == 0 and position != len(normalized) - 1:
+                            wraps_expression = False
+                            break
+                if not wraps_expression or depth != 0:
+                    break
+                normalized = normalized[1:-1].strip()
+            return normalized
+
+        expected_checks = {
+            constraint.name: normalize_check_expression(constraint.sqltext)
             for constraint in table.constraints
             if constraint.__class__.__name__ == "CheckConstraint" and constraint.name
-        )
-        actual_checks = sorted(
-            item.get("name")
+        }
+        actual_check_rows = [
+            item
             for item in inspector.get_check_constraints(table.name, schema=table.schema)
             if item.get("name")
-        )
+        ]
+        actual_checks = {
+            item["name"]: normalize_check_expression(item.get("sqltext"))
+            for item in actual_check_rows
+        }
+        check_mismatches = {}
         if expected_checks != actual_checks:
-            check_constraint_mismatches[table.fullname] = {
+            check_mismatches["expressions"] = {
                 "expected": expected_checks,
                 "actual": actual_checks,
             }
+
+        if dialect_name == "mysql" and expected_checks:
+            schema_name = table.schema or sync_connection.execute(
+                text("SELECT DATABASE()")
+            ).scalar_one_or_none()
+            if schema_name:
+                enforced_rows = sync_connection.execute(
+                    text(
+                        "SELECT CONSTRAINT_NAME, ENFORCED "
+                        "FROM information_schema.TABLE_CONSTRAINTS "
+                        "WHERE CONSTRAINT_SCHEMA = :schema_name "
+                        "AND TABLE_NAME = :table_name AND CONSTRAINT_TYPE = 'CHECK'"
+                    ),
+                    {"schema_name": schema_name, "table_name": table.name},
+                ).mappings().all()
+                enforced = {row["CONSTRAINT_NAME"]: row["ENFORCED"] for row in enforced_rows}
+                unenforced = sorted(
+                    name for name in expected_checks
+                    if enforced.get(name) != "YES"
+                )
+                if unenforced:
+                    check_mismatches["unenforced"] = unenforced
+
+        if check_mismatches:
+            check_constraint_mismatches[table.fullname] = check_mismatches
 
         if dialect_name == "mysql":
             expected_options = {}

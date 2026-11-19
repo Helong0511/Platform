@@ -572,3 +572,27 @@ CI 证明的是隔离测试正确性；生产放行还需要真实规模 DDL 演
 - 每个探针均回滚到 SAVEPOINT，不留下账本记录；执行序号接近 UNSIGNED INT 上限、无法安全分配探针序号时拒绝继续。
 - 新增真实 MySQL 回归测试：构造字段、索引和 CHECK 名称均匹配，但每个 CHECK 都通过 OR 1=1 变成恒真的账本表；Runner 必须拒绝该表且不能执行后续 migration SQL。
 - 该验证仅证明 ledger CHECK 约束实际拒绝本组非法状态；不替代对 ledger 之外业务表的 schema drift、外键、触发器、数据一致性和真实生产备份恢复演练。
+
+## 26. 2026-11-19：应用启动 Schema Drift 的 CHECK 语义核验
+
+### 26.1 已修复的问题
+
+此前 `_schema_metadata_drift()` 对 ORM CHECK 约束只比较名称。若数据库存在同名但表达式被放宽的约束（例如 `CHECK (value <> '' OR 1=1)`），名称集合仍相同，启动 gate 会误判为一致。
+
+当前修复：
+- 将 ORM CheckConstraint 的名称和表达式与数据库 Inspector 返回值逐项比较。
+- 规范化表达式中的空白、大小写和标识符反引号，并仅移除完整包裹表达式的冗余外层括号。
+- MySQL Inspector 可能为字符串字面量补充 `_utf8mb4` 等字符集 introducer；该标记不改变字面量值，规范化时会在单引号字面量前移除，避免把 `label <> ''` 与 `label <> _utf8mb4''` 误判为 drift。真正的表达式差异（例如 `OR 1=1`）仍会保留并被检测。
+- MySQL 下额外读取 `information_schema.TABLE_CONSTRAINTS.ENFORCED`；预期约束不存在或不是 `YES` 时，报告 drift 并阻止应用启动。
+- 新增 SQLite 单元回归：同名 CHECK 被 `OR 1=1` 放宽必须检测为 drift。
+- 新增真实 MySQL 集成回归：同名、被放宽且 `NOT ENFORCED` 的 CHECK 必须同时报告表达式不一致和未强制执行；修复为正确表达式并 ENFORCED 后 drift 清零。
+
+### 26.2 边界与后续工作
+
+此修复只增强 CHECK 表达式及 MySQL 强制执行状态检查，不代表完整 schema diff 已完成。当前 ORM drift gate 仍需继续评估：
+- 列 DEFAULT / ON UPDATE、AUTO_INCREMENT、生成列及其表达式；
+- 列级字符集/排序规则（当前主要检查 ORM 显式定义的表级 charset/collation 和 String 类型显式 collation）；
+- 表 ENGINE、分区、索引前缀长度、索引排序方向、可见性及表达式索引；
+- CHECK 表达式的语义等价形式可能因 MySQL/SQLAlchemy 反射格式不同而出现保守误报；遇到误报应补充明确的规范化/版本适配，不得简单退回名称匹配。
+
+本次没有自动修改数据库约束，也没有执行生产 DDL。真实 MySQL 测试仅在 GitHub Actions loopback 临时实例运行；最新 PR HEAD CI 通过后再验收。

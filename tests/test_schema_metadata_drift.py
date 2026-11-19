@@ -148,3 +148,39 @@ def test_schema_metadata_drift_detects_type_nullability_and_primary_key_changes(
         }
     finally:
         engine.dispose()
+
+
+def test_schema_metadata_drift_detects_weakened_same_name_check_expression():
+    from sqlalchemy import CheckConstraint
+
+    metadata = MetaData()
+    Table(
+        "required_table",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("value", String(32), nullable=False),
+        CheckConstraint("value <> ''", name="ck_required_value_nonempty"),
+    )
+
+    engine = create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE required_table ("
+                "id INTEGER PRIMARY KEY, value VARCHAR(32) NOT NULL, "
+                "CONSTRAINT ck_required_value_nonempty "
+                "CHECK (value <> '' OR 1=1))"
+            )
+        with engine.connect() as connection:
+            drift = _schema_metadata_drift(connection, metadata)
+
+        assert drift["check_constraint_mismatches"] == {
+            "required_table": {
+                "expressions": {
+                    "expected": {"ck_required_value_nonempty": "value <> ''"},
+                    "actual": {"ck_required_value_nonempty": "value <> '' or 1=1"},
+                }
+            }
+        }
+    finally:
+        engine.dispose()
