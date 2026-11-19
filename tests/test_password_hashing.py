@@ -77,13 +77,18 @@ class _UpdateResult:
     rowcount = 1
 
 
+class _ConflictResult:
+    rowcount = 0
+
+
 class _DB:
-    def __init__(self):
+    def __init__(self, result=None):
         self.statement = None
+        self.result = result or _UpdateResult()
 
     async def execute(self, statement):
         self.statement = statement
-        return _UpdateResult()
+        return self.result
 
 
 @pytest.mark.asyncio
@@ -114,3 +119,20 @@ async def test_successful_login_does_not_upgrade_long_legacy_bcrypt_password():
 
     assert upgraded is False
     assert db.statement is None
+
+
+@pytest.mark.asyncio
+async def test_compare_and_swap_does_not_overwrite_a_concurrently_changed_password():
+    legacy_hash = _legacy_hash("LegacyPassword123!")
+    user = User(id=44, username="concurrent-user", hashed_password=legacy_hash)
+    db = _DB(_ConflictResult())
+
+    upgraded = await upgrade_password_hash_after_login(
+        db,
+        user,
+        "LegacyPassword123!",
+    )
+
+    assert upgraded is False
+    assert user.hashed_password == legacy_hash
+    assert db.statement is not None
