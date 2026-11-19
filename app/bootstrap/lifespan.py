@@ -49,6 +49,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
     column_attribute_mismatches = {}
     column_default_mismatches = {}
     column_default_unverifiable = {}
+    column_onupdate_mismatches = {}
     primary_key_mismatches = {}
     index_mismatches = {}
     unique_constraint_mismatches = {}
@@ -158,6 +159,18 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             if isinstance(argument, str):
                 return ("literal", argument)
             raw = str(argument).strip()
+            # MySQL 可在同一 DEFAULT 子句中声明 ON UPDATE CURRENT_TIMESTAMP。
+            timestamp_with_onupdate = re.fullmatch(
+                r"(CURRENT_TIMESTAMP(?:\\(\\d+\\))?)\\s+ON\\s+UPDATE\\s+"
+                r"CURRENT_TIMESTAMP(?:\\(\\d+\\))?",
+                raw,
+                flags=re.IGNORECASE,
+            )
+            if timestamp_with_onupdate:
+                return (
+                    "expression",
+                    re.sub(r"\\s+", "", timestamp_with_onupdate.group(1)).casefold(),
+                )
             # text("'literal'") 是显式 SQL 字符串常量；处理 SQL 单引号转义。
             quoted = re.fullmatch(r"'((?:''|[^'])*)'", raw)
             if quoted:
@@ -168,6 +181,27 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                 return ("expression", re.sub(r"\s+", "", raw).casefold())
             # 不猜测函数、运算符或厂商扩展表达式的语义。
             return ("unverifiable", raw)
+
+        def expected_mysql_onupdate(column):
+            # server_onupdate/FetchedValue 是数据库生成值标记，不等于具体的 MySQL DDL。
+            # 只有 server_default 明确写出 ON UPDATE 子句时才把它视为可核验要求。
+            if column.server_onupdate is not None:
+                return None
+            server_default = column.server_default
+            if not isinstance(server_default, DefaultClause):
+                return False
+            argument = server_default.arg
+            if isinstance(argument, str):
+                return False
+            raw = str(argument).strip()
+            return bool(
+                re.fullmatch(
+                    r"CURRENT_TIMESTAMP(?:\\(\\d+\\))?\\s+ON\\s+UPDATE\\s+"
+                    r"CURRENT_TIMESTAMP(?:\\(\\d+\\))?",
+                    raw,
+                    flags=re.IGNORECASE,
+                )
+            )
 
         def defaults_equal(column, expected, actual_value, actual_extra):
             expected_kind, expected_value = expected
@@ -224,6 +258,24 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                             "expected": expected_autoincrement,
                             "actual": actual_autoincrement,
                         }
+                    }
+
+                actual_onupdate = bool(
+                    re.search(
+                        r"\\bon\\s+update\\s+current_timestamp(?:\\(\\d+\\))?",
+                        actual_extra,
+                    )
+                )
+                expected_onupdate = expected_mysql_onupdate(column)
+                if (
+                    expected_onupdate is not None
+                    and actual_onupdate != expected_onupdate
+                ):
+                    column_onupdate_mismatches.setdefault(
+                        table.fullname, {}
+                    )[column.name] = {
+                        "expected": expected_onupdate,
+                        "actual": actual_onupdate,
                     }
 
                 expected_default = expected_server_default(column)
@@ -443,6 +495,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         "column_attribute_mismatches": column_attribute_mismatches,
         "column_default_mismatches": column_default_mismatches,
         "column_default_unverifiable": column_default_unverifiable,
+        "column_onupdate_mismatches": column_onupdate_mismatches,
         "primary_key_mismatches": primary_key_mismatches,
         "index_mismatches": index_mismatches,
         "unique_constraint_mismatches": unique_constraint_mismatches,
@@ -479,6 +532,7 @@ async def _verify_database_schema() -> str | None:
                 f"column_attribute_mismatches={drift['column_attribute_mismatches']}; "
                 f"column_default_mismatches={drift['column_default_mismatches']}; "
                 f"column_default_unverifiable={drift['column_default_unverifiable']}; "
+                f"column_onupdate_mismatches={drift['column_onupdate_mismatches']}; "
                 f"primary_key_mismatches={drift['primary_key_mismatches']}; "
                 f"index_mismatches={drift['index_mismatches']}; "
                 f"unique_constraint_mismatches={drift['unique_constraint_mismatches']}; "
