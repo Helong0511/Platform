@@ -46,7 +46,7 @@ async def test_click_list_uses_click_time_then_unique_id():
     db = _RecordingDB()
     await ClickService(db).get_clicks(page=1, page_size=10)
 
-    list_queries = [statement for statement in db.statements if "click_time" in str(statement)]
+    list_queries = [statement for statement in db.statements if "ORDER BY" in str(statement) and "click_time" in str(statement)]
     assert len(list_queries) == 1
     _assert_unique_id_tiebreaker(list_queries[0], "click_time DESC")
 
@@ -60,7 +60,7 @@ async def test_short_link_list_uses_created_at_then_unique_id():
         page_size=10,
     )
 
-    list_queries = [statement for statement in db.statements if "short_links" in str(statement)]
+    list_queries = [statement for statement in db.statements if "ORDER BY" in str(statement) and "short_links" in str(statement)]
     assert len(list_queries) == 1
     _assert_unique_id_tiebreaker(list_queries[0], "created_at DESC")
 
@@ -81,6 +81,6 @@ async def test_postback_forward_logs_use_created_at_then_unique_id():
         current_user=_admin(),
     )
 
-    list_queries = [statement for statement in db.statements if "postback_forward_logs" in str(statement)]
+    list_queries = [statement for statement in db.statements if "ORDER BY" in str(statement) and "postback_forward_logs" in str(statement)]
     assert len(list_queries) == 1
     _assert_unique_id_tiebreaker(list_queries[0], "created_at DESC")
