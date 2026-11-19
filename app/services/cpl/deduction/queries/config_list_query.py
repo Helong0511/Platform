@@ -42,6 +42,7 @@ class DeductionConfigListQuery:
             query.order_by(
                 ConversionDeductionConfig.priority.desc(),
                 ConversionDeductionConfig.created_at.desc(),
+                ConversionDeductionConfig.id.desc(),
             )
             .offset(offset)
             .limit(page_size)

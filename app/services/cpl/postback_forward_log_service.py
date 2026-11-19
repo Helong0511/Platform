@@ -144,7 +144,7 @@ class PostbackForwardLogService:
             query = select(PostbackForwardLog)
             if conditions:
                 query = query.where(and_(*conditions))
-            query = query.order_by(PostbackForwardLog.created_at.desc())
+            query = query.order_by(PostbackForwardLog.created_at.desc(), PostbackForwardLog.id.desc())
             query = query.offset(offset).limit(page_size)
 
             result = await db.execute(query)

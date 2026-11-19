@@ -204,7 +204,7 @@ class ShortLinkService(BaseService[ShortLink]):
         total = total_result.scalar() or 0
 
         # 排序：最新的在前
-        query = query.order_by(ShortLink.created_at.desc())
+        query = query.order_by(ShortLink.created_at.desc(), ShortLink.id.desc())
 
         # 分页
         query = query.offset(offset).limit(page_size)

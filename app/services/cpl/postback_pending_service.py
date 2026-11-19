@@ -289,7 +289,7 @@ class PostbackPendingService:
             total = total_result.scalar() or 0
 
             # 分页查询
-            query = query.order_by(PendingPostbackConversion.created_at.desc())
+            query = query.order_by(PendingPostbackConversion.created_at.desc(), PendingPostbackConversion.id.desc())
             query = query.offset(offset).limit(page_size)
 
             result = await db.execute(query)

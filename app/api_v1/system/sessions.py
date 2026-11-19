@@ -352,7 +352,7 @@ async def get_blacklist(
         query = query.where(TokenBlacklist.user_id == user_id)
     
     # 按撤销时间倒序排列
-    query = query.order_by(TokenBlacklist.revoked_at.desc())
+    query = query.order_by(TokenBlacklist.revoked_at.desc(), TokenBlacklist.id.desc())
     
     # 获取总数
     count_query = select(func.count()).select_from(TokenBlacklist)

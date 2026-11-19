@@ -90,7 +90,7 @@ class OfferListQuery:
 
         query = (
             query.options(joinedload(Offer.advertiser))
-            .order_by(Offer.created_at.desc())
+            .order_by(Offer.created_at.desc(), Offer.id.desc())
             .offset(offset)
             .limit(page_size)
         )

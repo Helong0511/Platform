@@ -295,7 +295,7 @@ class CapService(BaseService[OfferCap]):
         total = total_result.scalar() or 0
 
         # 分页
-        query = query.order_by(OfferCap.created_at.desc())
+        query = query.order_by(OfferCap.created_at.desc(), OfferCap.id.desc())
         query = query.offset(offset).limit(page_size)
 
         # 使用joinedload优化关联查询，减少N+1查询问题

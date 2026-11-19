@@ -169,7 +169,7 @@ class PostbackConversionService:
             count_elapsed_ms = int((perf_counter() - count_started_at) * 1000)
 
             # 分页查询
-            query = query.order_by(PostbackConversion.created_at.desc())
+            query = query.order_by(PostbackConversion.created_at.desc(), PostbackConversion.id.desc())
             query = query.offset(offset).limit(page_size)
 
             list_started_at = perf_counter()
@@ -195,7 +195,7 @@ class PostbackConversionService:
                         deduction_query = deduction_query.where(ConversionDeductionLog.created_at <= end_datetime)
                     except ValueError:
                         pass
-                deduction_query = deduction_query.order_by(ConversionDeductionLog.created_at.desc())
+                deduction_query = deduction_query.order_by(ConversionDeductionLog.created_at.desc(), ConversionDeductionLog.id.desc())
                 deduction_result = await db.execute(deduction_query)
                 deduction_logs = deduction_result.scalars().all()
 

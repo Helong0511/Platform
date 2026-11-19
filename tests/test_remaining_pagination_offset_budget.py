@@ -262,8 +262,15 @@ async def test_query_builder_rejects_deep_offset_before_db():
     assert db.statements == []
 
 
-def test_query_builder_preserves_bounded_internal_export_page_size():
-    builder = QueryBuilder(_NoDB(), User).base().paginate(page=1, page_size=10000)
+def test_query_builder_preserves_bounded_internal_export_page_size_and_stable_order():
+    builder = (
+        QueryBuilder(_NoDB(), User)
+        .base()
+        .order_by("username", desc_order=True)
+        .paginate(page=1, page_size=10000)
+    )
 
     assert builder._query._limit_clause.value == 10000
     assert builder._query._offset_clause.value == 0
+    sql = str(builder._query)
+    assert "ORDER BY users.username DESC, users.id DESC" in sql
