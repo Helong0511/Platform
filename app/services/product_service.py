@@ -27,13 +27,13 @@ from app.core.errors import ErrorCode
 from app.core.utils import get_app_now_naive, find_or_create_default_client
 from app.core.product_assignment import initialize_product_assignment, transfer_product_assignment
 from app.core.product_name import (
-from app.core.pagination import calculate_pagination_offset
     duplicate_name_detail,
     fetch_products_by_name,
     insert_unique_product,
     is_duplicate_product_name_error,
     normalize_product_name,
 )
+from app.core.pagination import calculate_pagination_offset
 import logging
 
 logger = logging.getLogger(__name__)
