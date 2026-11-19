@@ -23,6 +23,7 @@ from sqlalchemy.orm import object_session
 from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
+from app.core.pagination import calculate_pagination_offset
 from app.core.infrastructure.cache import CacheInvalidator
 from app.models.models import (
     Advertiser,
@@ -159,6 +160,7 @@ class AdvertiserService(BaseService[Advertiser]):
         Returns:
             tuple[List[Advertiser], int]: (当前页列表, 符合条件的总条数)
         """
+        offset = calculate_pagination_offset(page, page_size, resource_name="广告主列表")
         query = select(Advertiser)
 
         # 筛选条件
@@ -196,7 +198,6 @@ class AdvertiserService(BaseService[Advertiser]):
         total = total_result.scalar() or 0
 
         # 分页查询
-        offset = (page - 1) * page_size
         query = query.order_by(Advertiser.created_at.desc())
         query = query.offset(offset).limit(page_size)
 
