@@ -381,7 +381,7 @@ def test_mysql_schema_drift_checks_explicit_server_defaults_only():
                 "id INT NOT NULL PRIMARY KEY, "
                 "count_value INT NOT NULL DEFAULT 0, "
                 "label VARCHAR(32) NOT NULL DEFAULT 'legacy', "
-                "created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), "
                 "python_only INT NOT NULL, "
                 "fetched_only INT NOT NULL"
                 ") ENGINE=InnoDB"
@@ -398,7 +398,7 @@ def test_mysql_schema_drift_checks_explicit_server_defaults_only():
                 "created_at",
                 DateTime(3),
                 nullable=False,
-                server_default=text("CURRENT_TIMESTAMP"),
+                server_default=text("CURRENT_TIMESTAMP(3)"),
             ),
             # Python 端默认值不生成数据库 DEFAULT，不应触发 drift。
             Column("python_only", Integer, nullable=False, default=7),
@@ -425,10 +425,10 @@ def test_mysql_schema_drift_checks_explicit_server_defaults_only():
                 "ALTER COLUMN count_value SET DEFAULT 9, "
                 "ALTER COLUMN label SET DEFAULT 'changed'"
             )
-            # MySQL 8.0 对函数表达式默认值通过 MODIFY COLUMN 变更更兼容。
+            # 移除时间表达式默认值，验证 MySQL 元数据能检测到默认值缺失。
             cursor.execute(
                 f"ALTER TABLE `{database}`.default_probe "
-                "MODIFY COLUMN created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)"
+                "ALTER COLUMN created_at DROP DEFAULT"
             )
         with engine.connect() as connection:
             drift = _schema_metadata_drift(connection, metadata)
@@ -437,8 +437,8 @@ def test_mysql_schema_drift_checks_explicit_server_defaults_only():
                 "count_value": {"expected": "0", "actual": "9"},
                 "label": {"expected": "legacy", "actual": "changed"},
                 "created_at": {
-                    "expected": "current_timestamp",
-                    "actual": "CURRENT_TIMESTAMP(3)",
+                    "expected": "current_timestamp(3)",
+                    "actual": null,
                 },
             }
         }
@@ -452,7 +452,7 @@ def test_mysql_schema_drift_checks_explicit_server_defaults_only():
             )
             cursor.execute(
                 f"ALTER TABLE `{database}`.default_probe "
-                "MODIFY COLUMN created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                "MODIFY COLUMN created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)"
             )
         with engine.connect() as connection:
             corrected = _schema_metadata_drift(connection, metadata)
