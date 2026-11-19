@@ -52,7 +52,7 @@ async def test_get_user_client_ids_returns_all_active_clients_in_stable_order():
     client_ids = await get_user_client_ids(db, _client_user())
 
     assert client_ids == [101, 202]
-    sql = str(db.statements[0].compile(dialect=mysql.dialect()))
+    sql = str(db.statements[0].compile(dialect=mysql.dialect(), compile_kwargs={"literal_binds": True}))
     assert "clients.user_id = 77" in sql
     assert "clients.is_active IS true" in sql
     assert "ORDER BY clients.id ASC" in sql
@@ -111,7 +111,7 @@ async def test_notification_record_list_scopes_to_all_linked_client_ids():
 
     assert notifications == []
     assert total == 3
-    sql = str(db.statements[2].compile(dialect=mysql.dialect()))
+    sql = str(db.statements[2].compile(dialect=mysql.dialect(), compile_kwargs={"literal_binds": True}))
     assert "postback_notifications.client_id IN (101, 202)" in sql
 
 
