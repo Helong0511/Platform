@@ -1246,36 +1246,46 @@ PR #1 继续 Open / Draft；本轮不合并 main、不部署、不连接生产�
 - 批量补发在循环外读取一次 Client 范围，避免逐条查询。
 - PR #27 与合并后 main 的 Full Audit CI / Emergency Security CI 均通过；合并提交为 `a554a79df7cec91819034199448eb891fccd9786`。
 
-## 2026-11-19 补充：通知记录分页预算与稳定排序（PR 待验收）
+## 2026-11-19 补充：通知记录分页预算与稳定排序（PR #28 已合并）
 
 - 通知记录列表新增 100000 行 OFFSET 服务层硬上限；页码/每页条数也在服务层复核。
 - 记录列表排序增加 ID 降序 tie-breaker，避免相同 created_at 时间戳造成 OFFSET 翻页不稳定。
-- 该项等待 PR Full Audit CI 与 Emergency Security CI，未合并前不得视为已上线。
+- 该项PR #28 已合并，Full Audit CI 与 Emergency Security CI 均通过。
 
 
-## 2026-11-19 补充：广告数据主列表/每日汇总分页资源预算（PR #31 待验收）
+## 2026-11-19 补充：广告数据主列表/每日汇总分页资源预算（PR #31 已合并）
 
 - `/api/v1/ad-data/` 与 `/api/v1/ad-data/daily-summary` 的查询服务新增 100000 行 OFFSET 硬上限，并在数据库/缓存查询前复核页码与页大小。
 - 超限请求返回参数错误；100000 行边界仍允许，以保持既定分页兼容性。
-- PR #31 增加服务层拒绝和边界允许测试；等待 PR Full Audit CI 与 Emergency Security CI。合并前不得视为已上线。
+- PR #31 已合并，PR Full Audit CI 与 Emergency Security CI 均通过；后续 main CI 继续覆盖。
 - 合并后仍需结合真实数据量、MySQL 慢查询和 EXPLAIN 计划观察该预算是否需要进一步收紧或改为游标分页。
 
 
-## 2026-11-19 补充：高流量列表通用分页预算（PR 待验收）
+## 2026-11-19 补充：高流量列表通用分页预算（PR #32 已合并）
 
 - 通用分页工具新增 100000 行 OFFSET 硬上限。
 - 点击记录、Postback 转发日志、待确认 Postback、短链接与 TB 搜索列表在数据库查询前执行分页预算校验。
 - Postback 日志列表每页 1000 条的既有上限保留，其他接口沿用 MAX_PAGE_SIZE。
-- PR 测试覆盖边界值和超限前零数据库访问。等待 Full Audit CI 与 Emergency Security CI。
+- PR #32 已合并，Backend 811 passed、1 skipped、1 warning；Frontend Lint/Build/E2E 与 Emergency Security CI 通过。
 - Client/Product/Publisher/Offer/User、审计日志、会话、扣减等其他分页入口仍需继续逐项核查，不得因本 PR 合并而视为全仓分页问题已全部关闭。
 
 
-## 2026-11-19 补充：管理端核心资源列表分页预算（PR 待验收）
+## 2026-11-19 补充：管理端核心资源列表分页预算（PR #33 已合并）
 
 - 审计日志、客户、产品、渠道、广告主、Offer、Cap 配置、扣减配置/日志、定时任务、Token 黑名单、国家列表、斗篷配置、敏感路径探测日志/黑名单、第三方上报日志、广告健康告警/基线、下游联调测试记录、扣量配置、Postback 转化记录和两类会话列表均增加 100000 行 OFFSET 上限，并在数据库查询前校验。
-- 新增十二个服务入口及八个路由入口的拒绝测试，并覆盖健康告警/基线服务的显式 OFFSET，确保超限分页不会先执行 count 或其他数据库查询。
+- 新增服务入口及路由入口的拒绝测试，并覆盖健康告警/基线服务的显式 OFFSET，确保超限分页不会先执行 count 或其他数据库查询。PR #33 已合并，Backend 841 passed、1 skipped、1 warning；Frontend Lint/Build/E2E 与 Emergency Security CI 通过。
 - 该保护降低超深页扫描风险，但不替代对高频数据列表的索引、排序稳定性、EXPLAIN 与慢查询验收。等待 PR Full Audit CI 和 Emergency Security CI。
 
 - 修复每日统计 Excel 导出的分页兼容：普通每日汇总列表仍限制每页 100 条；导出调用可显式使用最多 50000 条的内部批量上限，并跳过大结果缓存，同时继续受 100000 行 OFFSET 预算约束。新增测试确认普通列表超限仍拒绝、受控导出大页可用。
 
 - 通用 QueryBuilder 分页也增加 100000 行 OFFSET 预算和 50000 条内部页大小上限；保留用户 Excel 导出等受控内部批量读取（如 10000 条），不将内部导出上限暴露给普通 API。
+
+
+## 2026-11-19 合并后验收记录：分页治理
+
+- PR #28–#33 已全部合并 main；其中 PR #33 合并提交为 `14d1f968d062b466fba29e1b331b06df4b9c446e`。
+- 合并后 main Full Audit CI #44456705880：Backend 841 passed、1 skipped、1 warning；Frontend Lint/Build/Browser E2E 全部通过。
+- 合并后 main Emergency Security CI #44456705863：通过。
+- 当前 Open PR 为 0。分页治理已进入 main，但生产 MySQL 执行计划、真实数据规模下的慢查询与索引验证仍未完成。
+- 本轮仍发现 main 跟踪 GAM JSON 私钥、JWT RSA 私钥和 Nginx TLS 私钥；凭据轮换、外部密钥迁移、历史清理与生产验证未完成，仍属于上线阻断项。
+- main 分支保护状态仍未建立可靠证据；上线前必须确认 PR 审核、Full Audit CI、Emergency Security CI、禁止 force-push 与禁止删除规则。
