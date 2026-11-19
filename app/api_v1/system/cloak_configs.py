@@ -36,6 +36,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
+from app.core.pagination import calculate_pagination_offset
 from app.core.security import require_admin
 from app.core.audit_log import (
     log_create,
@@ -381,6 +382,7 @@ async def list_cloak_configs(
 
     支持 cloak_name 模糊搜索；每条记录合并磁盘桥页存在性（bridge_html_present / is_usable）。
     """
+    offset = calculate_pagination_offset(page, page_size, resource_name="斗篷配置列表")
     query = select(CloakConfig)
     count_query = select(func.count(CloakConfig.id))
     if cloak_name:
@@ -388,7 +390,7 @@ async def list_cloak_configs(
         query = query.where(CloakConfig.cloak_name.like(like_value))
         count_query = count_query.where(CloakConfig.cloak_name.like(like_value))
 
-    result = await db.execute(query.order_by(CloakConfig.id.desc()).offset((page - 1) * page_size).limit(page_size))
+    result = await db.execute(query.order_by(CloakConfig.id.desc()).offset(offset).limit(page_size))
     items = result.scalars().all()
     total_result = await db.execute(count_query)
     total = total_result.scalar_one() or 0
