@@ -52,6 +52,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
     column_onupdate_mismatches = {}
     column_generated_mismatches = {}
     column_generated_unverifiable = {}
+    column_visibility_mismatches = {}
     primary_key_mismatches = {}
     index_mismatches = {}
     unique_constraint_mismatches = {}
@@ -283,6 +284,13 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                 expected_autoincrement = column.autoincrement is True
                 column_extra = mysql_column_extras.get(column.name, {})
                 actual_extra = column_extra.get("extra", "")
+                # ORM 映射列默认可见；数据库意外设为 INVISIBLE 会改变 SELECT * 的结果。
+                actual_invisible = "invisible" in actual_extra.split()
+                if actual_invisible:
+                    column_visibility_mismatches.setdefault(table.fullname, {})[column.name] = {
+                        "expected": "visible",
+                        "actual": "invisible",
+                    }
                 actual_autoincrement = "auto_increment" in actual_extra
                 if expected_autoincrement != actual_autoincrement:
                     column_attribute_mismatches.setdefault(
@@ -568,6 +576,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         "column_onupdate_mismatches": column_onupdate_mismatches,
         "column_generated_mismatches": column_generated_mismatches,
         "column_generated_unverifiable": column_generated_unverifiable,
+        "column_visibility_mismatches": column_visibility_mismatches,
         "primary_key_mismatches": primary_key_mismatches,
         "index_mismatches": index_mismatches,
         "unique_constraint_mismatches": unique_constraint_mismatches,
@@ -610,6 +619,7 @@ async def _verify_database_schema() -> str | None:
                 f"column_onupdate_mismatches={drift['column_onupdate_mismatches']}; "
                 f"column_generated_mismatches={drift['column_generated_mismatches']}; "
                 f"column_generated_unverifiable={drift['column_generated_unverifiable']}; "
+                f"column_visibility_mismatches={drift['column_visibility_mismatches']}; "
                 f"primary_key_mismatches={drift['primary_key_mismatches']}; "
                 f"index_mismatches={drift['index_mismatches']}; "
                 f"unique_constraint_mismatches={drift['unique_constraint_mismatches']}; "
