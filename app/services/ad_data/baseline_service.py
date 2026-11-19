@@ -529,6 +529,7 @@ async def list_baselines(
             AdDataDayBaseline.stat_date.desc(),
             AdDataDayBaseline.data_source,
             Product.name,
+            AdDataDayBaseline.id.desc(),
         )
         .limit(limit)
         .offset(offset)
