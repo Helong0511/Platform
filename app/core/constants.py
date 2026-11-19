@@ -32,6 +32,8 @@ REDIS_MAX_CONNECTIONS_DEFAULT = 20
 DEFAULT_PAGE_SIZE = 20
 # 最大每页大小
 MAX_PAGE_SIZE = 100
+# 全局分页最大 OFFSET（行数），高频/大表列表统一使用该预算。
+MAX_OFFSET_ROWS = 100000
 # 广告数据列表/每日汇总最大 OFFSET（行数），避免任意大页码触发深分页扫描。
 AD_DATA_MAX_OFFSET_ROWS = 100000
 # 通知记录列表最大 OFFSET（行数），防止大页码触发深分页扫描。

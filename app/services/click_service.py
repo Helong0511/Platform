@@ -27,6 +27,7 @@ from sqlalchemy.orm import joinedload, load_only
 from app.core.config import settings
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
+from app.core.pagination import calculate_pagination_offset
 from app.core.third_party_report import send_third_party_report
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from app.core.url.url_params_util import (
@@ -208,6 +209,9 @@ class ClickService:
         Returns:
             (序列化后的点击字典列表, 总条数)
         """
+        offset = calculate_pagination_offset(
+            page, page_size, resource_name="点击记录"
+        )
         started_at = perf_counter()
 
         # --- 时间范围：默认 7 天 / 解析入参 / 90 天上限 ---
@@ -331,7 +335,7 @@ class ClickService:
 
         # 分页和排序
         query = query.order_by(Click.click_time.desc())
-        query = query.offset((page - 1) * page_size).limit(page_size)
+        query = query.offset(offset).limit(page_size)
 
         list_started_at = perf_counter()
         result = await self.db.execute(query)

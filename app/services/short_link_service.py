@@ -30,6 +30,7 @@ from app.services.base_service import BaseService
 from fastapi import HTTPException
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.pagination import calculate_pagination_offset
 from app.core.short_link.generator import (
     generate_short_code_from_id,
     generate_unique_short_code
@@ -193,6 +194,10 @@ class ShortLinkService(BaseService[ShortLink]):
         if conditions:
             query = query.where(and_(*conditions))
 
+        offset = calculate_pagination_offset(
+            page, page_size, resource_name="短链接列表"
+        )
+
         # 计算总数（在加载关联之前）
         count_query = select(func.count()).select_from(query.subquery())
         total_result = await self.db.execute(count_query)
@@ -202,7 +207,6 @@ class ShortLinkService(BaseService[ShortLink]):
         query = query.order_by(ShortLink.created_at.desc())
 
         # 分页
-        offset = (page - 1) * page_size
         query = query.offset(offset).limit(page_size)
 
         # 加载关联信息（在分页之后）

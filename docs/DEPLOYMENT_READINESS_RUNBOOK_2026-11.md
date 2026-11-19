@@ -1259,3 +1259,12 @@ PR #1 继续 Open / Draft；本轮不合并 main、不部署、不连接生产�
 - 超限请求返回参数错误；100000 行边界仍允许，以保持既定分页兼容性。
 - PR #31 增加服务层拒绝和边界允许测试；等待 PR Full Audit CI 与 Emergency Security CI。合并前不得视为已上线。
 - 合并后仍需结合真实数据量、MySQL 慢查询和 EXPLAIN 计划观察该预算是否需要进一步收紧或改为游标分页。
+
+
+## 2026-11-19 补充：高流量列表通用分页预算（PR 待验收）
+
+- 通用分页工具新增 100000 行 OFFSET 硬上限。
+- 点击记录、Postback 转发日志、待确认 Postback、短链接与 TB 搜索列表在数据库查询前执行分页预算校验。
+- Postback 日志列表每页 1000 条的既有上限保留，其他接口沿用 MAX_PAGE_SIZE。
+- PR 测试覆盖边界值和超限前零数据库访问。等待 Full Audit CI 与 Emergency Security CI。
+- Client/Product/Publisher/Offer/User、审计日志、会话、扣减等其他分页入口仍需继续逐项核查，不得因本 PR 合并而视为全仓分页问题已全部关闭。

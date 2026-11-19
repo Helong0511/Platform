@@ -21,6 +21,7 @@ from sqlalchemy.future import select
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
+from app.core.pagination import calculate_pagination_offset
 from app.core.postback.transformers.click_associator import ClickAssociator
 from app.core.tracking.click_token import resolve_click_from_token
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
@@ -237,6 +238,12 @@ class PostbackPendingService:
         Returns:
             PaginatedResponseBaseSchema: 待确认列表及 total
         """
+        offset = calculate_pagination_offset(
+            page,
+            page_size,
+            resource_name="待确认 Postback 转化",
+            max_page_size=1000,
+        )
         try:
             query = select(PendingPostbackConversion)
             conditions = []
@@ -283,7 +290,7 @@ class PostbackPendingService:
 
             # 分页查询
             query = query.order_by(PendingPostbackConversion.created_at.desc())
-            query = query.offset((page - 1) * page_size).limit(page_size)
+            query = query.offset(offset).limit(page_size)
 
             result = await db.execute(query)
             pending_conversions = result.scalars().all()

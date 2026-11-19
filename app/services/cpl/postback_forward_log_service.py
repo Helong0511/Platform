@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.errors import ErrorCode
+from app.core.pagination import calculate_pagination_offset
 from app.core.exceptions import raise_api_exception
 from app.core.postback.forwarder import _lock_conversion_for_queue_enqueue
 from app.core.utils import get_app_now_naive, parse_date_to_app_timezone
@@ -101,6 +102,12 @@ class PostbackForwardLogService:
         Returns:
             PaginatedResponseBaseSchema，data 为 PostbackForwardLogResponse 列表。
         """
+        offset = calculate_pagination_offset(
+            page,
+            page_size,
+            resource_name="Postback 转发日志",
+            max_page_size=1000,
+        )
         try:
             conditions = []
             if conversion_id:
@@ -138,7 +145,7 @@ class PostbackForwardLogService:
             if conditions:
                 query = query.where(and_(*conditions))
             query = query.order_by(PostbackForwardLog.created_at.desc())
-            query = query.offset((page - 1) * page_size).limit(page_size)
+            query = query.offset(offset).limit(page_size)
 
             result = await db.execute(query)
             logs = result.scalars().all()
