@@ -1237,4 +1237,17 @@ PR #1 继续 Open / Draft；本轮不合并 main、不部署、不连接生产�
 - Emergency Security CI #2069 通过。
 - 首次 Full Audit CI #78 的失败原因是新测试错误断言 HTTP 400；项目统一 `raise_api_exception()` 错误包装实际使用 HTTP 200 并在响应体携带业务错误码。已修正断言，后续 CI #79 完整通过。
 - 合并后 main SHA 已核实为 `bccd03ccedf6c001e4a37a5c6c499b043a3aa13d`。合并后 SHA 的 main 专属 CI 仍需单独检查，不能用 PR 分支 CI 替代。
-- 该限制控制单次时间范围，不等于自动解决深分页风险。PR #26 已新增 `CLIENT_API_MAX_OFFSET_ROWS=100000`，按实际 page_size 计算 OFFSET，API 入口和查询服务层双重拒绝超限请求，并覆盖边界测试；PR #26 最新 CI 尚待验收，合并前不得将其视为已上线。合并后继续结合真实数据规模、查询计划和客户调用日志评估是否需要游标分页。
+- 该限制控制单次时间范围，不等于自动解决深分页风险。PR #26 已新增 `CLIENT_API_MAX_OFFSET_ROWS=100000`，按实际 page_size 计算 OFFSET，API 入口和查询服务层双重拒绝超限请求，并覆盖边界测试。PR #26 已合并至 main（`436dfc9163423384b5722453072e8beb92d7b5a4`），PR 与合并后 main 的 Full Audit CI、Emergency Security CI 均通过；main 后验 Backend 为 767 passed、1 skipped、1 warning。合并后继续结合真实数据规模、查询计划和客户调用日志评估是否需要游标分页。
+
+
+## 2026-11-19 补充：通知模块多 Client 范围修复（PR #27）
+
+- 客户通知配置、通知列表/详情、单条与批量补发现已按用户全部启用 Client ID 授权，不再只读取第一条关联 Client。
+- 批量补发在循环外读取一次 Client 范围，避免逐条查询。
+- PR #27 与合并后 main 的 Full Audit CI / Emergency Security CI 均通过；合并提交为 `a554a79df7cec91819034199448eb891fccd9786`。
+
+## 2026-11-19 补充：通知记录分页预算与稳定排序（PR 待验收）
+
+- 通知记录列表新增 100000 行 OFFSET 服务层硬上限；页码/每页条数也在服务层复核。
+- 记录列表排序增加 ID 降序 tie-breaker，避免相同 created_at 时间戳造成 OFFSET 翻页不稳定。
+- 该项等待 PR Full Audit CI 与 Emergency Security CI，未合并前不得视为已上线。
