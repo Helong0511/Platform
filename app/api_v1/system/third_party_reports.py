@@ -273,7 +273,7 @@ async def get_third_party_reports(
             count_query = count_query.where(and_(*filters))
 
         # 排序（按创建时间倒序）
-        query = query.order_by(ThirdPartyReportLog.created_at.desc())
+        query = query.order_by(ThirdPartyReportLog.created_at.desc(), ThirdPartyReportLog.id.desc())
 
         # 分页
         query = query.offset(offset).limit(page_size)
