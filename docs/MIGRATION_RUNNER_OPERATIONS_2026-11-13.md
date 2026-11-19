@@ -613,7 +613,7 @@ CI 证明的是隔离测试正确性；生产放行还需要真实规模 DDL 演
 
 ## 28. 2026-11-19：Schema Drift 补充核验 MySQL AUTO_INCREMENT
 
-启动时只读 schema drift 检查新增 MySQL 列属性核验：对 SQLAlchemy 明确声明自增、或采用 SQLAlchemy 默认规则的单列整数主键，读取 `information_schema.COLUMNS.EXTRA` 并确认实际列是否具有 `AUTO_INCREMENT`。缺失或多出的自增属性会进入 `column_attribute_mismatches`，使应用启动门禁拒绝不一致的 schema。
+启动时只读 schema drift 检查新增 MySQL 列属性核验：通过 SQLAlchemy `Table.autoincrement_column` 解析真实自增列（覆盖默认规则、显式配置、外键列及组合主键边界），再读取 `information_schema.COLUMNS.EXTRA` 确认实际列是否具有 `AUTO_INCREMENT`。缺失或多出的自增属性会进入 `column_attribute_mismatches`，使应用启动门禁拒绝不一致的 schema。
 
 边界说明：
 
