@@ -1251,3 +1251,11 @@ PR #1 继续 Open / Draft；本轮不合并 main、不部署、不连接生产�
 - 通知记录列表新增 100000 行 OFFSET 服务层硬上限；页码/每页条数也在服务层复核。
 - 记录列表排序增加 ID 降序 tie-breaker，避免相同 created_at 时间戳造成 OFFSET 翻页不稳定。
 - 该项等待 PR Full Audit CI 与 Emergency Security CI，未合并前不得视为已上线。
+
+
+## 2026-11-19 补充：广告数据主列表/每日汇总分页资源预算（PR #31 待验收）
+
+- `/api/v1/ad-data/` 与 `/api/v1/ad-data/daily-summary` 的查询服务新增 100000 行 OFFSET 硬上限，并在数据库/缓存查询前复核页码与页大小。
+- 超限请求返回参数错误；100000 行边界仍允许，以保持既定分页兼容性。
+- PR #31 增加服务层拒绝和边界允许测试；等待 PR Full Audit CI 与 Emergency Security CI。合并前不得视为已上线。
+- 合并后仍需结合真实数据量、MySQL 慢查询和 EXPLAIN 计划观察该预算是否需要进一步收紧或改为游标分页。
