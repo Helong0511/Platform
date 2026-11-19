@@ -1289,3 +1289,12 @@ PR #1 继续 Open / Draft；本轮不合并 main、不部署、不连接生产�
 - 当前 Open PR 为 0。分页治理已进入 main，但生产 MySQL 执行计划、真实数据规模下的慢查询与索引验证仍未完成。
 - 本轮仍发现 main 跟踪 GAM JSON 私钥、JWT RSA 私钥和 Nginx TLS 私钥；凭据轮换、外部密钥迁移、历史清理与生产验证未完成，仍属于上线阻断项。
 - main 分支保护状态仍未建立可靠证据；上线前必须确认 PR 审核、Full Audit CI、Emergency Security CI、禁止 force-push 与禁止删除规则。
+
+
+## 2026-11-19 补充：OFFSET 分页稳定排序（PR 待验收）
+
+- 复核发现多个列表只按 created_at/click_time/last_activity 等非唯一字段排序；相同时间戳记录的相对顺序不确定，数据插入或并发写入时可能导致 OFFSET 翻页重复/遗漏。
+- 已为点击记录、Postback 转发/待确认/转化记录、短链接、广告主、渠道、产品、Offer、扣量、审计日志、会话、Cap、广告健康告警/基线、敏感路径探测、第三方上报和联调测试等列表增加唯一主键 ID 次级排序。
+- QueryBuilder 通用分页在现有业务排序后追加主键降序，覆盖基于仓储分页的列表，同时保留受控内部导出页大小。
+- 每日汇总 SQL 和内存排序路径此前已有分组维度稳定键；国家列表按唯一国家代码排序，斗篷配置与定时任务按主键排序，保持现有确定性排序。
+- 新增 QueryBuilder SQL 排序回归断言；等待 PR Full Audit CI 与 Emergency Security CI。
