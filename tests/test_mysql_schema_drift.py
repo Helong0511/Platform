@@ -208,12 +208,29 @@ def test_mysql_schema_drift_detects_missing_auto_increment_attribute():
                 "id INT NOT NULL PRIMARY KEY"
                 ") ENGINE=InnoDB"
             )
+            cursor.execute(
+                f"CREATE TABLE `{database}`.drift_fk_child ("
+                "id INT NOT NULL PRIMARY KEY, "
+                "CONSTRAINT fk_drift_fk_child_parent FOREIGN KEY (id) "
+                f"REFERENCES `{database}`.drift_auto_increment (id)"
+                ") ENGINE=InnoDB"
+            )
 
         metadata = MetaData()
         Table(
             "drift_auto_increment",
             metadata,
             Column("id", Integer, primary_key=True, autoincrement=True),
+        )
+        Table(
+            "drift_fk_child",
+            metadata,
+            Column(
+                "id",
+                Integer,
+                ForeignKey("drift_auto_increment.id"),
+                primary_key=True,
+            ),
         )
         url = URL.create(
             "mysql+pymysql",
