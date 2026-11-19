@@ -18,6 +18,7 @@ from sqlalchemy import (
     Table,
     URL,
     create_engine,
+    event,
 )
 
 from app.bootstrap.lifespan import _schema_metadata_drift
@@ -128,8 +129,18 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
             query={"charset": "utf8mb4"},
         )
         engine = create_engine(url, pool_pre_ping=True)
+        observed_queries = []
+        def record_metadata_queries(_conn, _cursor, statement, _parameters, _context, _executemany):
+            normalized = " ".join(statement.casefold().split())
+            if "information_schema.columns" in normalized or "select database()" in normalized:
+                observed_queries.append(normalized)
+
+        event.listen(engine, "before_cursor_execute", record_metadata_queries)
         with engine.connect() as connection:
             drift = _schema_metadata_drift(connection, metadata)
+        # 两张表只触发一次 schema 解析和一次批量 COLUMNS 查询，避免逐表 N+1。
+        assert sum("select database()" in query for query in observed_queries) == 1
+        assert sum("information_schema.columns" in query for query in observed_queries) == 1
         assert "drift_child" in drift["index_mismatches"]
         assert "drift_child" in drift["foreign_key_mismatches"]
         check_drift = drift["check_constraint_mismatches"]["drift_child"]
@@ -182,6 +193,70 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
             engine.dispose()
         with root.cursor() as cursor:
             cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
+        root.close()
+
+
+def test_mysql_schema_drift_scopes_batched_column_metadata_by_schema():
+    """不同 schema 的同名表必须使用各自的列属性，不能交叉污染。"""
+    auto_database = f"platform_ci_auto_{secrets.token_hex(4)}"
+    plain_database = f"platform_ci_plain_{secrets.token_hex(4)}"
+    root = pymysql.connect(
+        host=HOST,
+        port=PORT,
+        user=ROOT_USER,
+        password=ROOT_PASSWORD,
+        charset="utf8mb4",
+        autocommit=True,
+        connect_timeout=5,
+        read_timeout=10,
+        write_timeout=10,
+    )
+    engine = None
+    try:
+        with root.cursor() as cursor:
+            cursor.execute(f"CREATE DATABASE `{auto_database}` CHARACTER SET utf8mb4")
+            cursor.execute(f"CREATE DATABASE `{plain_database}` CHARACTER SET utf8mb4")
+            cursor.execute(
+                f"CREATE TABLE `{auto_database}`.same_name "
+                "(id INT NOT NULL AUTO_INCREMENT PRIMARY KEY) ENGINE=InnoDB"
+            )
+            cursor.execute(
+                f"CREATE TABLE `{plain_database}`.same_name "
+                "(id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
+            )
+
+        metadata = MetaData()
+        Table(
+            "same_name",
+            metadata,
+            Column("id", Integer, primary_key=True, autoincrement=True),
+            schema=auto_database,
+        )
+        Table(
+            "same_name",
+            metadata,
+            Column("id", Integer, primary_key=True, autoincrement=False),
+            schema=plain_database,
+        )
+        url = URL.create(
+            "mysql+pymysql",
+            username=ROOT_USER,
+            password=ROOT_PASSWORD,
+            host=HOST,
+            port=PORT,
+            database=auto_database,
+            query={"charset": "utf8mb4"},
+        )
+        engine = create_engine(url, pool_pre_ping=True)
+        with engine.connect() as connection:
+            drift = _schema_metadata_drift(connection, metadata)
+        assert drift["column_attribute_mismatches"] == {}
+    finally:
+        if engine is not None:
+            engine.dispose()
+        with root.cursor() as cursor:
+            cursor.execute(f"DROP DATABASE IF EXISTS `{auto_database}`")
+            cursor.execute(f"DROP DATABASE IF EXISTS `{plain_database}`")
         root.close()
 
 
