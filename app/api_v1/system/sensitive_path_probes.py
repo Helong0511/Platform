@@ -343,7 +343,7 @@ async def get_blocked_ips(
             where_clause = and_(*filters)
             query = query.where(where_clause)
             count_query = count_query.where(where_clause)
-        query = query.order_by(SensitiveBlockedIP.created_at.desc())
+        query = query.order_by(SensitiveBlockedIP.created_at.desc(), SensitiveBlockedIP.id.desc())
         query = query.offset(offset).limit(page_size)
 
         rows = (await db.execute(query)).scalars().all()
