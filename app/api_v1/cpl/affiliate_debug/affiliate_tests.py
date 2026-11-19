@@ -233,7 +233,7 @@ async def get_affiliate_tests(
     total = total_result.scalar() or 0
 
     # 分页
-    query = query.order_by(AffiliateTest.postback_time.desc())
+    query = query.order_by(AffiliateTest.postback_time.desc(), AffiliateTest.id.desc())
     query = query.offset(offset).limit(page_size)
 
     result = await db.execute(query)
