@@ -12,7 +12,10 @@ from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.postback.forwarder import PostbackForwarder
 from app.models.models import PostbackConversion, PostbackForwardLog, User, UserRole
-from app.services.notification.helpers import assert_conversion_resend_access
+from app.services.notification.helpers import (
+    assert_conversion_resend_access,
+    get_user_client_ids,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +146,11 @@ class ResendNotificationCommand:
         failed_count = 0
         failed_items = []
 
+        # 一次读取用户全部启用 Client，避免逐条补发重复查询并漏掉多主体。
+        user_client_ids = None
+        if current_user.role != UserRole.ADMIN:
+            user_client_ids = set(await get_user_client_ids(self.db, current_user))
+
         conversions_by_id = {
             c.id: c
             for c in (
@@ -165,20 +173,16 @@ class ResendNotificationCommand:
                     failed_count += 1
                     continue
 
-                if current_user.role != UserRole.ADMIN:
-                    from app.services.notification.helpers import get_user_client_id
-
-                    user_client_id = await get_user_client_id(self.db, current_user)
-                    if (
-                        not user_client_id
-                        or conversion.client_id != user_client_id
-                    ):
-                        failed_items.append({
-                            "conversion_id": conversion_id,
-                            "error": "无权补发该转化记录的通知",
-                        })
-                        failed_count += 1
-                        continue
+                if (
+                    user_client_ids is not None
+                    and conversion.client_id not in user_client_ids
+                ):
+                    failed_items.append({
+                        "conversion_id": conversion_id,
+                        "error": "无权补发该转化记录的通知",
+                    })
+                    failed_count += 1
+                    continue
 
                 await PostbackForwarder.forward_to_publisher(
                     conversion=conversion, db=self.db
