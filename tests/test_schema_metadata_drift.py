@@ -74,6 +74,7 @@ def test_schema_metadata_drift_accepts_complete_existing_schema():
             "column_onupdate_mismatches": {},
             "column_generated_mismatches": {},
             "column_generated_unverifiable": {},
+            "column_visibility_mismatches": {},
             "primary_key_mismatches": {},
             "index_mismatches": {},
             "unique_constraint_mismatches": {},
