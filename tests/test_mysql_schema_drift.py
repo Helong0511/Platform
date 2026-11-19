@@ -132,13 +132,17 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
             drift = _schema_metadata_drift(connection, metadata)
         assert "drift_child" in drift["index_mismatches"]
         assert "drift_child" in drift["foreign_key_mismatches"]
-        assert drift["check_constraint_mismatches"]["drift_child"] == {
-            "expressions": {
-                "expected": {"ck_drift_child_label_nonempty": "label <> ''"},
-                "actual": {"ck_drift_child_label_nonempty": "label <> '' or 1=1"},
-            },
-            "unenforced": ["ck_drift_child_label_nonempty"],
+        check_drift = drift["check_constraint_mismatches"]["drift_child"]
+        assert check_drift["expressions"]["expected"] == {
+            "ck_drift_child_label_nonempty": "label <> ''"
         }
+        actual_check = check_drift["expressions"]["actual"][
+            "ck_drift_child_label_nonempty"
+        ]
+        # MySQL Inspector 会规范化引号字符集、括号和空格；只验证危险表达式未被误判为一致。
+        assert "or" in actual_check.casefold()
+        assert "1 = 1" in actual_check.casefold()
+        assert check_drift["unenforced"] == ["ck_drift_child_label_nonempty"]
         assert drift["table_option_mismatches"]["drift_child"] == {
             "mysql_charset": {"expected": "utf8mb4", "actual": "latin1"},
             "mysql_collate": {
