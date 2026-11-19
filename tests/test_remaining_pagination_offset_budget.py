@@ -17,6 +17,7 @@ from app.services.cpl.deduction.queries.config_list_query import DeductionConfig
 from app.services.cpl.deduction.queries.logs_query import DeductionLogsQuery
 from app.services.session_service import SessionService
 from app.api_v1.system.sessions import get_blacklist
+from app.api_v1.system.countries import list_countries
 
 
 class _NoDB:
@@ -128,6 +129,23 @@ async def test_token_blacklist_route_rejects_deep_pagination_before_db():
             page=1002,
             page_size=100,
             user_id=None,
+        )
+
+    assert db.statements == []
+
+
+@pytest.mark.asyncio
+async def test_country_list_route_rejects_deep_pagination_before_db():
+    db = _NoDB()
+
+    with pytest.raises(HTTPException):
+        await list_countries(
+            page=1002,
+            page_size=100,
+            keyword=None,
+            continent=None,
+            db=db,
+            _current_user=_admin(),
         )
 
     assert db.statements == []
