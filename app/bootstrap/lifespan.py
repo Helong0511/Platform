@@ -148,13 +148,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             if dialect_name == "mysql":
                 # SQLAlchemy 的 auto 表示单列整数主键采用方言默认自增规则；
                 # Python default/onupdate 不属于数据库列属性，不在此处推断。
-                expected_autoincrement = column.autoincrement is True or (
-                    column.autoincrement == "auto"
-                    and column.primary_key
-                    and len(table.primary_key.columns) == 1
-                    and isinstance(column.type, Integer)
-                    and not isinstance(column.type, Boolean)
-                )
+                expected_autoincrement = table.autoincrement_column is column
                 actual_autoincrement = (
                     "auto_increment" in mysql_column_extras.get(column.name, "")
                 )
