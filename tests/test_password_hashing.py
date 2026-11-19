@@ -44,13 +44,20 @@ def test_legacy_bcrypt_hash_remains_verifiable_and_is_upgradeable():
     assert password_hash_needs_upgrade(password, encoded)
 
 
-def test_legacy_bcrypt_unicode_boundary_preserves_historical_truncation():
-    # 第 72 字节落在中文字符中间；旧写入逻辑会忽略不完整字符。
+def test_legacy_bcrypt_unicode_boundary_does_not_expand_old_verification_semantics():
+    # 第 72 字节落在中文字符中间；旧写入与旧验证截断结果不同，原密码本来就无法通过旧验证。
     password = "A" * 71 + "中" + "suffix123"
     encoded = _legacy_hash(password)
+    assert not verify_password(password, encoded)
+    assert not verify_password("A" * 71 + "other-suffix", encoded)
+    assert not password_hash_needs_upgrade(password, encoded)
+
+
+def test_legacy_bcrypt_long_password_with_complete_utf8_boundary_remains_compatible():
+    password = "A" * 72 + "suffix123"
+    encoded = _legacy_hash(password)
     assert verify_password(password, encoded)
-    assert verify_password("A" * 71 + "other-suffix", encoded)
-    assert not verify_password("A" * 70 + "B" + "other-suffix", encoded)
+    assert verify_password("A" * 72 + "different-suffix", encoded)
     assert not password_hash_needs_upgrade(password, encoded)
 
 
