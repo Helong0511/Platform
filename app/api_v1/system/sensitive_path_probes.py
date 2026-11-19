@@ -31,6 +31,7 @@ from app.core.constants import MAX_PAGE_SIZE
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
+from app.core.pagination import calculate_pagination_offset
 from app.core.security import require_admin
 from app.core.sensitive_path_guard import bust_sensitive_blocked_ip_cache
 from app.core.utils import get_app_now_naive
@@ -202,6 +203,7 @@ async def get_sensitive_path_probe_logs(
     del current_user  # 仅用于权限校验
     # ---------- 异常处理 ----------
     try:
+        offset = calculate_pagination_offset(page, page_size, resource_name="敏感路径探测日志")
         query = select(SensitivePathProbeLog)
         count_query = select(func.count(SensitivePathProbeLog.id))
 
@@ -232,7 +234,7 @@ async def get_sensitive_path_probe_logs(
             count_query = count_query.where(where_clause)
 
         query = query.order_by(SensitivePathProbeLog.created_at.desc())
-        query = query.offset((page - 1) * page_size).limit(page_size)
+        query = query.offset(offset).limit(page_size)
 
         result = await db.execute(query)
         rows = result.scalars().all()
@@ -326,6 +328,7 @@ async def get_blocked_ips(
     del current_user
     # ---------- 异常处理 ----------
     try:
+        offset = calculate_pagination_offset(page, page_size, resource_name="敏感路径黑名单")
         query = select(SensitiveBlockedIP)
         count_query = select(func.count(SensitiveBlockedIP.id))
         filters = []
@@ -341,7 +344,7 @@ async def get_blocked_ips(
             query = query.where(where_clause)
             count_query = count_query.where(where_clause)
         query = query.order_by(SensitiveBlockedIP.created_at.desc())
-        query = query.offset((page - 1) * page_size).limit(page_size)
+        query = query.offset(offset).limit(page_size)
 
         rows = (await db.execute(query)).scalars().all()
         total = (await db.execute(count_query)).scalar() or 0
