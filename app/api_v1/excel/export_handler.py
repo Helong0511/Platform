@@ -184,6 +184,8 @@ async def _export_daily_summary_excel(
         split_by_country=split_by_country,
         sort_by=sort_by or "date",
         sort_order=sort_order or "desc",
+        max_page_size=MAX_DAILY_SUMMARY_EXPORT_ROWS,
+        skip_cache=True,
     )
 
     is_admin_user = current_user.role == UserRole.ADMIN
