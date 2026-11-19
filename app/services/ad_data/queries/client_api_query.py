@@ -23,6 +23,7 @@ from app.core.constants import (
     CLIENT_API_DEFAULT_PAGE_SIZE,
     CLIENT_API_MAX_PAGE,
     CLIENT_API_MAX_PAGE_SIZE,
+    CLIENT_API_MAX_OFFSET_ROWS,
 )
 from app.core.country_code import ALL_REGIONS_COUNTRY_CODE, resolve_country_name
 from app.core.query_utils import check_use_assignment_table, date_range_condition
@@ -74,6 +75,10 @@ class ClientAdDataQuery:
         page_size = min(max(1, page_size), CLIENT_API_MAX_PAGE_SIZE)
         page = min(max(1, page), CLIENT_API_MAX_PAGE)
         offset = (page - 1) * page_size
+        if offset > CLIENT_API_MAX_OFFSET_ROWS:
+            raise ValueError(
+                f"客户 API 分页偏移量超过安全上限 {CLIENT_API_MAX_OFFSET_ROWS} 条"
+            )
 
         use_assignment_table = await check_use_assignment_table(self.db)
         dim = parse_optional_dimension(dimension)
