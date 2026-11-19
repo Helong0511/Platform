@@ -548,7 +548,9 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                             "expected": prefix_length,
                             "actual": actual_prefix,
                         }
-                    if actual_direction != direction:
+                    # FULLTEXT 等非有序索引的 COLLATION 可能为 NULL；此时方向不适用，
+                    # 不能把 MySQL 的“不适用”误报成 ASC/DESC 漂移。
+                    if actual_direction is not None and actual_direction != direction:
                         differences["direction"] = {
                             "expected": direction,
                             "actual": actual_direction,
