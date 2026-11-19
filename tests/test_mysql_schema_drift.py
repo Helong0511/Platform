@@ -18,6 +18,7 @@ from sqlalchemy import (
     Table,
     URL,
     create_engine,
+    event,
 )
 
 from app.bootstrap.lifespan import _schema_metadata_drift
@@ -128,8 +129,18 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
             query={"charset": "utf8mb4"},
         )
         engine = create_engine(url, pool_pre_ping=True)
+        observed_queries = []
+        def record_metadata_queries(_conn, _cursor, statement, _parameters, _context, _executemany):
+            normalized = " ".join(statement.casefold().split())
+            if "information_schema.columns" in normalized or "select database()" in normalized:
+                observed_queries.append(normalized)
+
+        event.listen(engine, "before_cursor_execute", record_metadata_queries)
         with engine.connect() as connection:
             drift = _schema_metadata_drift(connection, metadata)
+        # 两张表只触发一次 schema 解析和一次批量 COLUMNS 查询，避免逐表 N+1。
+        assert sum("select database()" in query for query in observed_queries) == 1
+        assert sum("information_schema.columns" in query for query in observed_queries) == 1
         assert "drift_child" in drift["index_mismatches"]
         assert "drift_child" in drift["foreign_key_mismatches"]
         check_drift = drift["check_constraint_mismatches"]["drift_child"]
