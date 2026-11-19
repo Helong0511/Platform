@@ -1268,3 +1268,10 @@ PR #1 继续 Open / Draft；本轮不合并 main、不部署、不连接生产�
 - Postback 日志列表每页 1000 条的既有上限保留，其他接口沿用 MAX_PAGE_SIZE。
 - PR 测试覆盖边界值和超限前零数据库访问。等待 Full Audit CI 与 Emergency Security CI。
 - Client/Product/Publisher/Offer/User、审计日志、会话、扣减等其他分页入口仍需继续逐项核查，不得因本 PR 合并而视为全仓分页问题已全部关闭。
+
+
+## 2026-11-19 补充：管理端核心资源列表分页预算（PR 待验收）
+
+- 审计日志、客户、产品、渠道、Offer、扣减配置/日志和两类会话列表均增加 100000 行 OFFSET 上限，并在数据库查询前校验。
+- 新增九入口服务级拒绝测试，确保超限分页不会先执行 count 或其他数据库查询。
+- 该保护降低超深页扫描风险，但不替代对高频数据列表的索引、排序稳定性、EXPLAIN 与慢查询验收。等待 PR Full Audit CI 和 Emergency Security CI。
