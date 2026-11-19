@@ -180,7 +180,7 @@ class PublisherService(BaseService[Publisher]):
         query = query.options(
             selectinload(Publisher.client).selectinload(Client.user)
         )
-        query = query.order_by(Publisher.created_at.desc())
+        query = query.order_by(Publisher.created_at.desc(), Publisher.id.desc())
         query = query.offset(offset).limit(page_size)
 
         result = await self.db.execute(query)
