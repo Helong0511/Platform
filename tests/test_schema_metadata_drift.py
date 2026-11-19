@@ -78,6 +78,7 @@ def test_schema_metadata_drift_accepts_complete_existing_schema():
             "column_collation_mismatches": {},
             "primary_key_mismatches": {},
             "index_mismatches": {},
+            "index_attribute_mismatches": {},
             "unique_constraint_mismatches": {},
             "foreign_key_mismatches": {},
             "check_constraint_mismatches": {},

@@ -195,6 +195,7 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
             "column_collation_mismatches": {},
             "primary_key_mismatches": {},
             "index_mismatches": {},
+            "index_attribute_mismatches": {},
             "unique_constraint_mismatches": {},
             "foreign_key_mismatches": {},
             "check_constraint_mismatches": {},
@@ -877,6 +878,108 @@ def test_mysql_schema_drift_detects_migration_table_collation_mismatches():
         with engine.connect() as connection:
             corrected = _schema_metadata_drift(connection, metadata)
         assert corrected["table_option_mismatches"] == {}
+    finally:
+        if engine is not None:
+            engine.dispose()
+        with root.cursor() as cursor:
+            cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
+        root.close()
+
+
+def test_mysql_schema_drift_detects_mysql_index_attribute_drift():
+    """同名同列索引仍须核验前缀、方向、方法、函数 key part 与可见性。"""
+    database = f"platform_ci_index_attrs_{secrets.token_hex(5)}"
+    root = pymysql.connect(
+        host=HOST,
+        port=PORT,
+        user=ROOT_USER,
+        password=ROOT_PASSWORD,
+        charset="utf8mb4",
+        autocommit=True,
+        connect_timeout=5,
+        read_timeout=10,
+        write_timeout=10,
+    )
+    engine = None
+    try:
+        with root.cursor() as cursor:
+            cursor.execute(f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4")
+            cursor.execute(
+                f"CREATE TABLE `{database}`.index_probe ("
+                "id INT NOT NULL PRIMARY KEY, label VARCHAR(40) NOT NULL"
+                ") ENGINE=InnoDB"
+            )
+            cursor.execute(
+                f"CREATE INDEX ix_index_probe_label ON `{database}`.index_probe (label(8))"
+            )
+            cursor.execute(
+                f"CREATE INDEX ix_index_probe_id ON `{database}`.index_probe (id DESC)"
+            )
+            cursor.execute(
+                f"ALTER TABLE `{database}`.index_probe ALTER INDEX ix_index_probe_id INVISIBLE"
+            )
+            cursor.execute(
+                f"CREATE FULLTEXT INDEX ix_index_probe_fulltext ON `{database}`.index_probe (label)"
+            )
+
+        metadata = MetaData()
+        table = Table(
+            "index_probe",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("label", String(40), nullable=False),
+        )
+        Index("ix_index_probe_label", table.c.label)
+        Index("ix_index_probe_id", table.c.id)
+        Index("ix_index_probe_fulltext", table.c.label)
+
+        url = URL.create(
+            "mysql+pymysql",
+            username=ROOT_USER,
+            password=ROOT_PASSWORD,
+            host=HOST,
+            port=PORT,
+            database=database,
+            query={"charset": "utf8mb4"},
+        )
+        engine = create_engine(url, pool_pre_ping=True)
+        with engine.connect() as connection:
+            drift = _schema_metadata_drift(connection, metadata)
+        assert drift["index_mismatches"] == {}
+        assert drift["index_attribute_mismatches"]["index_probe"] == {
+            "ix_index_probe_label": [{
+                "position": 1,
+                "differences": {
+                    "prefix_length": {"expected": None, "actual": 8}
+                },
+            }],
+            "ix_index_probe_id": [{
+                "position": 1,
+                "differences": {
+                    "direction": {"expected": "A", "actual": "D"},
+                    "visibility": {"expected": "YES", "actual": "NO"},
+                },
+            }],
+            "ix_index_probe_fulltext": [{
+                "position": 1,
+                "differences": {
+                    "index_type": {"expected": "BTREE", "actual": "FULLTEXT"},
+                },
+            }],
+        }
+
+        with root.cursor() as cursor:
+            cursor.execute(
+                f"ALTER TABLE `{database}`.index_probe "
+                "DROP INDEX ix_index_probe_label, DROP INDEX ix_index_probe_id, "
+                "DROP INDEX ix_index_probe_fulltext, "
+                "ADD INDEX ix_index_probe_label (label), "
+                "ADD INDEX ix_index_probe_id (id), "
+                "ADD INDEX ix_index_probe_fulltext (label)"
+            )
+        with engine.connect() as connection:
+            corrected = _schema_metadata_drift(connection, metadata)
+        assert corrected["index_attribute_mismatches"] == {}
     finally:
         if engine is not None:
             engine.dispose()

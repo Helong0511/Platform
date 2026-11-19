@@ -672,3 +672,12 @@ PR #48 后续补齐了两张未纳入 `sql/platform.sql` 完整基线、但由 O
 `short_link_click_sync_batches.created_at` 的增量 migration 明确声明 `DEFAULT CURRENT_TIMESTAMP`。ORM 保留应用层 `default=get_app_now_naive`，并同步声明 `server_default=text("CURRENT_TIMESTAMP")`，使数据库直接写入与 ORM metadata 对服务器默认值的描述一致。Schema Gate 因此能够核验该列的服务器默认值，而不再因 ORM 未声明 server default 而跳过此项检查。
 
 新增回归测试核验账本 5 个字段、`batch_id` 主键、两个复合索引及 `created_at` 的 server default。该变更不修改 migration DDL、不执行数据库变更；既有数据不受影响。
+
+
+## 33. 2026-11-19：MySQL 索引属性漂移检查
+
+Schema Gate 除索引名称和列顺序外，额外读取 MySQL `information_schema.STATISTICS` 的 key-part 元数据，核验 ORM 显式声明的普通列索引是否出现前缀索引、降序 key part、非预期索引方法、函数 key part 或不可见索引。元数据按 schema 和表集合批量读取，避免为每个索引单独查询。
+
+当前 ORM 中的索引均为普通列索引；对于尚未支持安全等价判断的 ORM 函数表达式，不推断其语义一致，而是报告为不可自动验证。该检查只读，不会自动修改索引。真实 MySQL 集成测试覆盖同名同列但前缀长度不同、降序及 invisible 的漂移，并验证修正后告警清除。
+
+官方字段语义以 MySQL 8.0 `INFORMATION_SCHEMA.STATISTICS` 为准；后续新增索引选项时，必须同步扩展 ORM 期望值解析和真实 MySQL 测试。
