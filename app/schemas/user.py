@@ -8,7 +8,7 @@ from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
-from app.core.constants import BCRYPT_MAX_PASSWORD_LENGTH, PASSWORD_MIN_LENGTH
+from app.core.constants import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH
 
 
 class UserBase(BaseModel):
@@ -36,7 +36,7 @@ class UserCreate(UserBase):
     password: str = Field(
         ...,
         min_length=PASSWORD_MIN_LENGTH,
-        max_length=BCRYPT_MAX_PASSWORD_LENGTH,
+        max_length=PASSWORD_MAX_LENGTH,
         description=f"密码（{PASSWORD_MIN_LENGTH}-{BCRYPT_MAX_PASSWORD_LENGTH}个字符，建议包含大小写字母、数字和特殊字符）",
     )
     full_name: str | None = None  # 全名（可选）
