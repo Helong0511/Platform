@@ -18,6 +18,13 @@ from app.services.cpl.deduction.queries.logs_query import DeductionLogsQuery
 from app.services.session_service import SessionService
 from app.api_v1.system.sessions import get_blacklist
 from app.api_v1.system.countries import list_countries
+from app.api_v1.system.cloak_configs import list_cloak_configs
+from app.api_v1.system.sensitive_path_probes import (
+    get_sensitive_path_probe_logs,
+    get_blocked_ips,
+)
+from app.api_v1.system.third_party_reports import get_third_party_reports
+from app.api_v1.system.ad_data_health import get_alerts, get_baselines
 
 
 class _NoDB:
@@ -148,4 +155,32 @@ async def test_country_list_route_rejects_deep_pagination_before_db():
             _current_user=_admin(),
         )
 
+    assert db.statements == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("handler", "kwargs"),
+    [
+        (list_cloak_configs, {"page": 1002, "page_size": 100}),
+        (
+            get_sensitive_path_probe_logs,
+            {"page": 1002, "page_size": 100, "current_user": _admin()},
+        ),
+        (
+            get_blocked_ips,
+            {"page": 1002, "page_size": 100, "current_user": _admin()},
+        ),
+        (
+            get_third_party_reports,
+            {"page": 1002, "page_size": 100, "current_user": _admin()},
+        ),
+        (get_alerts, {"limit": 500, "offset": 100001}),
+        (get_baselines, {"limit": 1000, "offset": 100001}),
+    ],
+)
+async def test_system_list_routes_reject_excessive_offsets_before_db(handler, kwargs):
+    db = _NoDB()
+    with pytest.raises(HTTPException):
+        await handler(db=db, **kwargs)
     assert db.statements == []
