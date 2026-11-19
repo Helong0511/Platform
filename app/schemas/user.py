@@ -37,7 +37,7 @@ class UserCreate(UserBase):
         ...,
         min_length=PASSWORD_MIN_LENGTH,
         max_length=PASSWORD_MAX_LENGTH,
-        description=f"密码（{PASSWORD_MIN_LENGTH}-{BCRYPT_MAX_PASSWORD_LENGTH}个字符，建议包含大小写字母、数字和特殊字符）",
+        description=f"密码（{PASSWORD_MIN_LENGTH}-{PASSWORD_MAX_LENGTH}个字符，建议包含大小写字母、数字和特殊字符）",
     )
     full_name: str | None = None  # 全名（可选）
     role: str | None = "client"  # 角色，默认为客户
@@ -69,14 +69,14 @@ class PasswordChange(BaseModel):
     old_password: str = Field(
         ...,
         min_length=PASSWORD_MIN_LENGTH,
-        max_length=BCRYPT_MAX_PASSWORD_LENGTH,
+        max_length=PASSWORD_MAX_LENGTH,
         description="当前密码",
     )
     new_password: str = Field(
         ...,
         min_length=PASSWORD_MIN_LENGTH,
-        max_length=BCRYPT_MAX_PASSWORD_LENGTH,
-        description=f"新密码（{PASSWORD_MIN_LENGTH}-{BCRYPT_MAX_PASSWORD_LENGTH}个字符）",
+        max_length=PASSWORD_MAX_LENGTH,
+        description=f"新密码（{PASSWORD_MIN_LENGTH}-{PASSWORD_MAX_LENGTH}个字符）",
     )
 
 
