@@ -692,18 +692,18 @@ async def test_runner_executes_with_database_scoped_migration_least_privileges(
             tmp_path,
             [
                 (
-                    "20261119_least_privilege_create",
+                    "20261119_least_privilege_01_create",
                     "CREATE TABLE migration_privilege_probe ("
                     "id INT NOT NULL PRIMARY KEY, value INT NOT NULL"
                     ") ENGINE=InnoDB;",
                 ),
                 (
-                    "20261119_least_privilege_dml",
+                    "20261119_least_privilege_02_dml",
                     "INSERT INTO migration_privilege_probe (id, value) VALUES (1, 10); "
                     "UPDATE migration_privilege_probe SET value = value + 5 WHERE id = 1;",
                 ),
                 (
-                    "20261119_least_privilege_alter_index",
+                    "20261119_least_privilege_03_alter_index",
                     "ALTER TABLE migration_privilege_probe "
                     "ADD COLUMN note VARCHAR(32) NULL; "
                     "CREATE INDEX ix_migration_privilege_value "
