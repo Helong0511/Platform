@@ -3,7 +3,7 @@ ORM 模型重导出垫片（兼容 ``from app.models.models import X``）。
 
 实际定义已按域拆分至 app.models.* 子模块。
 """
-from app.models.base import Base, pwd_context, UserRole
+from app.models.base import Base, UserRole
 from app.models.user import User
 from app.models.client_product import Client, Product, AdData, TBSearchData, ProductAssignment
 from app.models.ad_data_health import AdDataDayBaseline, AdDataHealthAlert, AdDataHealthSettings
@@ -16,7 +16,7 @@ from app.models.security import SensitivePathProbeLog, SensitiveBlockedIP, Postb
 from app.models.third_party import ThirdPartyReportLog, ThirdPartyReportIdentityLock
 
 __all__ = [
-    "Base", "pwd_context", "UserRole",
+    "Base", "UserRole",
     "User",
     "Client",
     "Product",
