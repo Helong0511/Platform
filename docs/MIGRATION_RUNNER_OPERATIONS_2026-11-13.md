@@ -596,3 +596,16 @@ CI 证明的是隔离测试正确性；生产放行还需要真实规模 DDL 演
 - CHECK 表达式的语义等价形式可能因 MySQL/SQLAlchemy 反射格式不同而出现保守误报；遇到误报应补充明确的规范化/版本适配，不得简单退回名称匹配。
 
 本次没有自动修改数据库约束，也没有执行生产 DDL。真实 MySQL 测试仅在 GitHub Actions loopback 临时实例运行；最新 PR HEAD CI 通过后再验收。
+
+## 27. 2026-11-19：Migration Runner 独立迁移账号最小权限真实 MySQL 验证
+
+新增真实 MySQL 集成测试，使用随机临时迁移账号和随机目标 schema，账号授权严格限定在 `目标库.*`：
+
+- 允许权限：`SELECT`、`INSERT`、`UPDATE`、`CREATE`、`ALTER`、`INDEX`。
+- 使用真正的 `apply_migrations()` 和独立 application DSN 执行三条自定义迁移，覆盖建表、ledger 写入/更新、业务 INSERT/UPDATE、ALTER TABLE ADD COLUMN、CREATE INDEX 和 ALTER TABLE DROP INDEX。
+- 第二次执行必须返回空计划，验证 ledger 读取和幂等路径同样可用。
+- 通过 `SHOW GRANTS` 和 `CURRENT_ROLE()` 检查实际授权：不允许全局权限、额外 schema 授权、活动角色或 GRANT OPTION。
+- 负向验证拒绝 `DELETE`、`DROP TABLE`、`CREATE DATABASE`、修改目标 schema 外表，以及自行执行 `GRANT`。
+- 测试使用 GitHub Actions loopback 临时 MySQL；随机迁移账号、随机 schema 和跨 schema 探针均在 `finally` 清理，不连接或修改生产授权。
+
+**权限边界说明：** 这是当前 manifest SQL 操作集合推导出的候选最小权限，并由隔离 MySQL 测试验证 Runner 现有路径所需权限。它不代表所有未来 migration 都天然兼容；每新增一种 SQL 操作，都必须重新审查权限需求。生产部署仍需核验真实 `SHOW GRANTS`、mandatory roles、proxy user/外部认证映射及目标 MySQL 版本行为。不得给迁移账号授予全局 `ALL PRIVILEGES`、`DROP`、`DELETE`、`GRANT OPTION` 或用户管理权限来绕过失败。

@@ -657,3 +657,176 @@ async def test_runner_rejects_ledger_checks_that_are_present_but_semantically_in
                 assert cursor.fetchone()[0] == 0
     finally:
         _drop_database(database)
+
+@pytest.mark.asyncio
+async def test_runner_executes_with_database_scoped_migration_least_privileges(
+    tmp_path: Path,
+):
+    """真实 MySQL 验证 Runner 仅凭目标 schema 最小 DDL/DML 权限完成迁移。"""
+    database = _create_database()
+    external_database = f"platform_ci_mr_ext_{secrets.token_hex(5)}"
+    migration_username = f"platform_mr_{secrets.token_hex(8)}"
+    migration_password = secrets.token_hex(24)
+    root = _root_connect()
+    try:
+        with root.cursor() as cursor:
+            cursor.execute(
+                f"CREATE DATABASE `{external_database}` "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
+            )
+            cursor.execute(
+                f"CREATE TABLE `{external_database}`.outside_probe "
+                "(id INT NOT NULL PRIMARY KEY, value INT NOT NULL) ENGINE=InnoDB"
+            )
+            cursor.execute(
+                f"CREATE USER '{migration_username}'@'%' "
+                f"IDENTIFIED BY '{migration_password}'"
+            )
+            # MySQL ALTER TABLE 还要求 CREATE 和 INSERT；INDEX 单独覆盖索引操作。
+            cursor.execute(
+                f"GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX "
+                f"ON `{database}`.* TO '{migration_username}'@'%'"
+            )
+
+        migrations = _write_migrations(
+            tmp_path,
+            [
+                (
+                    "20261119_least_privilege_01_create",
+                    "CREATE TABLE migration_privilege_probe ("
+                    "id INT NOT NULL PRIMARY KEY, value INT NOT NULL"
+                    ") ENGINE=InnoDB;",
+                ),
+                (
+                    "20261119_least_privilege_02_dml",
+                    "INSERT INTO migration_privilege_probe (id, value) VALUES (1, 10); "
+                    "UPDATE migration_privilege_probe SET value = value + 5 WHERE id = 1;",
+                ),
+                (
+                    "20261119_least_privilege_03_alter_index",
+                    "ALTER TABLE migration_privilege_probe "
+                    "ADD COLUMN note VARCHAR(32) NULL; "
+                    "CREATE INDEX ix_migration_privilege_value "
+                    "ON migration_privilege_probe (value); "
+                    "ALTER TABLE migration_privilege_probe "
+                    "DROP INDEX ix_migration_privilege_value;",
+                ),
+            ],
+        )
+        migration_url = URL.create(
+            "mysql+aiomysql",
+            username=migration_username,
+            password=migration_password,
+            host=HOST,
+            port=PORT,
+            database=database,
+            query={"charset": "utf8mb4"},
+        ).render_as_string(hide_password=False)
+        application_url = _application_database_url(database)
+
+        applied = await apply_migrations(
+            migration_url,
+            application_database_url=application_url,
+            repository_root=tmp_path,
+            migrations=migrations,
+        )
+        assert applied == tuple(item.revision for item in migrations)
+        assert await apply_migrations(
+            migration_url,
+            application_database_url=application_url,
+            repository_root=tmp_path,
+            migrations=migrations,
+        ) == ()
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT id, value, note FROM migration_privilege_probe"
+                )
+                assert cursor.fetchall() == ((1, 15, None),)
+                cursor.execute(
+                    "SELECT COUNT(*) FROM information_schema.STATISTICS "
+                    "WHERE TABLE_SCHEMA = %s "
+                    "AND TABLE_NAME = 'migration_privilege_probe' "
+                    "AND INDEX_NAME = 'ix_migration_privilege_value'",
+                    (database,),
+                )
+                assert cursor.fetchone()[0] == 0
+                cursor.execute(
+                    "SELECT revision, status, execution_order "
+                    "FROM platform_schema_migrations ORDER BY execution_order"
+                )
+                assert cursor.fetchall() == tuple(
+                    (item.revision, "applied", index)
+                    for index, item in enumerate(migrations, start=1)
+                )
+
+        migration_account = pymysql.connect(
+            host=HOST,
+            port=PORT,
+            user=migration_username,
+            password=migration_password,
+            database=database,
+            charset="utf8mb4",
+            autocommit=True,
+            connect_timeout=5,
+        )
+        try:
+            with migration_account.cursor() as cursor:
+                cursor.execute("SELECT CURRENT_USER(), DATABASE(), CURRENT_ROLE()")
+                identity, selected_database, active_roles = cursor.fetchone()
+                assert identity.casefold().startswith(
+                    f"{migration_username}@".casefold()
+                )
+                assert selected_database == database
+                assert active_roles == "NONE"
+
+                cursor.execute("SHOW GRANTS")
+                grants = [str(row[0]).upper() for row in cursor.fetchall()]
+                assert len(grants) == 2, grants
+                scoped = [
+                    grant
+                    for grant in grants
+                    if f"`{database}`.*".upper() in grant
+                ]
+                assert len(scoped) == 1, grants
+                privilege_clause = scoped[0].split(" ON ", 1)[0].removeprefix(
+                    "GRANT "
+                )
+                actual_privileges = {
+                    item.strip() for item in privilege_clause.split(",")
+                }
+                assert actual_privileges == {
+                    "SELECT",
+                    "INSERT",
+                    "UPDATE",
+                    "CREATE",
+                    "ALTER",
+                    "INDEX",
+                }, grants
+                assert "GRANT OPTION" not in " ".join(grants)
+
+                denied_statements = (
+                    "DELETE FROM migration_privilege_probe WHERE id = 1",
+                    "DROP TABLE migration_privilege_probe",
+                    "CREATE DATABASE migration_privilege_database_must_be_denied",
+                    f"UPDATE `{external_database}`.outside_probe SET value = value + 1",
+                    f"GRANT SELECT ON `{database}`.* "
+                    f"TO '{migration_username}'@'%'",
+                )
+                for statement in denied_statements:
+                    with pytest.raises(pymysql.err.OperationalError) as denied:
+                        cursor.execute(statement)
+                    assert denied.value.args[0] in (1044, 1142), (
+                        statement,
+                        denied.value.args,
+                    )
+        finally:
+            migration_account.close()
+    finally:
+        with root.cursor() as cursor:
+            cursor.execute(f"DROP USER IF EXISTS '{migration_username}'@'%'")
+            cursor.execute(f"DROP DATABASE IF EXISTS `{external_database}`")
+            cursor.execute("DROP DATABASE IF EXISTS migration_privilege_database_must_be_denied")
+        root.close()
+        _drop_database(database)
