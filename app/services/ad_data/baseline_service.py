@@ -587,7 +587,7 @@ async def list_alerts(
         count_q = count_q.where(*filters)
     total = int((await db.execute(count_q)).scalar() or 0)
 
-    q = select(AdDataHealthAlert).order_by(AdDataHealthAlert.created_at.desc())
+    q = select(AdDataHealthAlert).order_by(AdDataHealthAlert.created_at.desc(), AdDataHealthAlert.id.desc())
     if filters:
         q = q.where(*filters)
     q = q.limit(limit).offset(offset)
