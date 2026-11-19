@@ -438,7 +438,7 @@ def test_mysql_schema_drift_checks_explicit_server_defaults_only():
                 "label": {"expected": "legacy", "actual": "changed"},
                 "created_at": {
                     "expected": "current_timestamp(3)",
-                    "actual": null,
+                    "actual": None,
                 },
             }
         }
