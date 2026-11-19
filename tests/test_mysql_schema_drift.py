@@ -381,7 +381,7 @@ def test_mysql_schema_drift_checks_explicit_server_defaults_only():
                 "id INT NOT NULL PRIMARY KEY, "
                 "count_value INT NOT NULL DEFAULT 0, "
                 "label VARCHAR(32) NOT NULL DEFAULT 'legacy', "
-                "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "
                 "python_only INT NOT NULL, "
                 "fetched_only INT NOT NULL"
                 ") ENGINE=InnoDB"
@@ -396,7 +396,7 @@ def test_mysql_schema_drift_checks_explicit_server_defaults_only():
             Column("label", String(32), nullable=False, server_default="legacy"),
             Column(
                 "created_at",
-                DateTime,
+                DateTime(3),
                 nullable=False,
                 server_default=text("CURRENT_TIMESTAMP"),
             ),
@@ -428,7 +428,7 @@ def test_mysql_schema_drift_checks_explicit_server_defaults_only():
             # MySQL 8.0 对函数表达式默认值通过 MODIFY COLUMN 变更更兼容。
             cursor.execute(
                 f"ALTER TABLE `{database}`.default_probe "
-                "MODIFY COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP(3)"
+                "MODIFY COLUMN created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)"
             )
         with engine.connect() as connection:
             drift = _schema_metadata_drift(connection, metadata)
@@ -452,7 +452,7 @@ def test_mysql_schema_drift_checks_explicit_server_defaults_only():
             )
             cursor.execute(
                 f"ALTER TABLE `{database}`.default_probe "
-                "MODIFY COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                "MODIFY COLUMN created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP"
             )
         with engine.connect() as connection:
             corrected = _schema_metadata_drift(connection, metadata)
