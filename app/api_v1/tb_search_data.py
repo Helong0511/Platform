@@ -42,6 +42,7 @@ from app.schemas.tb_search_data import (
 )
 from app.schemas.base import ResponseBaseSchema, ListResponseBaseSchema, PaginatedResponseBaseSchema
 from app.core.exceptions import raise_api_exception
+from app.core.pagination import calculate_pagination_offset
 from app.core.errors import ErrorCode
 from app.core.query_utils import (
     check_use_assignment_table, 
@@ -98,6 +99,7 @@ async def get_tb_search_data(
     """
     # ---------- 入口：参数与依赖准备 ----------
     page_size = optimize_page_size_for_device(request, page_size, default_page_size=10)
+    offset = calculate_pagination_offset(page, page_size, resource_name="TB 搜索数据")
 
     # 检查是否使用产品分配历史表
     use_assignment_table = await check_use_assignment_table(db)
@@ -265,7 +267,6 @@ async def get_tb_search_data(
     total = (await db.execute(count_query)).scalar() or 0
 
     # 分页
-    offset = (page - 1) * page_size
     query = query.offset(offset).limit(page_size)
     result = await db.execute(query)
     data = result.unique().all()
