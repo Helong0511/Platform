@@ -8,6 +8,7 @@ import secrets
 import pytest
 import pymysql
 from sqlalchemy import (
+    CHAR,
     Column,
     Computed,
     DateTime,
@@ -191,6 +192,7 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
             "column_generated_mismatches": {},
             "column_generated_unverifiable": {},
             "column_visibility_mismatches": {},
+            "column_collation_mismatches": {},
             "primary_key_mismatches": {},
             "index_mismatches": {},
             "unique_constraint_mismatches": {},
@@ -663,6 +665,101 @@ def test_mysql_schema_drift_detects_generated_columns_and_expression_changes():
         assert generated_change["expression"]["expected"] == "base_value + 2"
         assert generated_change["expression"]["actual"]
         assert generated_change["persisted"] == {"expected": "stored", "actual": "virtual"}
+    finally:
+        if engine is not None:
+            engine.dispose()
+        with root.cursor() as cursor:
+            cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
+        root.close()
+
+
+def test_mysql_schema_drift_detects_explicit_column_collation_mismatch():
+    """显式列级字符集/排序规则漂移必须被发现，修正后通过。"""
+    database = f"platform_ci_column_collation_{secrets.token_hex(5)}"
+    root = pymysql.connect(
+        host=HOST,
+        port=PORT,
+        user=ROOT_USER,
+        password=ROOT_PASSWORD,
+        charset="utf8mb4",
+        autocommit=True,
+        connect_timeout=5,
+        read_timeout=10,
+        write_timeout=10,
+    )
+    engine = None
+    try:
+        with root.cursor() as cursor:
+            cursor.execute(
+                f"CREATE DATABASE `{database}` "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
+            )
+            cursor.execute(
+                f"CREATE TABLE `{database}`.collation_probe ("
+                "id INT NOT NULL PRIMARY KEY, "
+                "binary_value VARCHAR(100) CHARACTER SET utf8mb4 "
+                "COLLATE utf8mb4_general_ci NOT NULL, "
+                "ascii_token CHAR(32) CHARACTER SET ascii "
+                "COLLATE ascii_general_ci NOT NULL"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+        url = URL.create(
+            "mysql+pymysql",
+            username=ROOT_USER,
+            password=ROOT_PASSWORD,
+            host=HOST,
+            port=PORT,
+            database=database,
+            query={"charset": "utf8mb4"},
+        )
+        engine = create_engine(url, pool_pre_ping=True)
+        metadata = MetaData()
+        Table(
+            "collation_probe",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("binary_value", String(100, collation="utf8mb4_bin"), nullable=False),
+            Column("ascii_token", CHAR(32, collation="ascii_bin"), nullable=False),
+        )
+
+        with engine.connect() as connection:
+            drift = _schema_metadata_drift(connection, metadata)
+        assert drift["column_collation_mismatches"] == {
+            "collation_probe": {
+                "binary_value": {
+                    "expected": {
+                        "character_set": "utf8mb4",
+                        "collation": "utf8mb4_bin",
+                    },
+                    "actual": {
+                        "character_set": "utf8mb4",
+                        "collation": "utf8mb4_general_ci",
+                    },
+                },
+                "ascii_token": {
+                    "expected": {
+                        "character_set": "ascii",
+                        "collation": "ascii_bin",
+                    },
+                    "actual": {
+                        "character_set": "ascii",
+                        "collation": "ascii_general_ci",
+                    },
+                },
+            }
+        }
+
+        with root.cursor() as cursor:
+            cursor.execute(
+                f"ALTER TABLE `{database}`.collation_probe "
+                "MODIFY binary_value VARCHAR(100) CHARACTER SET utf8mb4 "
+                "COLLATE utf8mb4_bin NOT NULL, "
+                "MODIFY ascii_token CHAR(32) CHARACTER SET ascii "
+                "COLLATE ascii_bin NOT NULL"
+            )
+        with engine.connect() as connection:
+            corrected = _schema_metadata_drift(connection, metadata)
+        assert corrected["column_collation_mismatches"] == {}
     finally:
         if engine is not None:
             engine.dispose()
