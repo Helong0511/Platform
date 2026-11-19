@@ -111,7 +111,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             if schema_name:
                 tables_by_schema.setdefault(schema_name, []).append(metadata_table.name)
         column_extras_statement = text(
-            SELECT TABLE_NAME, COLUMN_NAME, COLUMN_DEFAULT, EXTRA, GENERATION_EXPRESSION "
+            "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_DEFAULT, EXTRA, GENERATION_EXPRESSION "
             "FROM information_schema.COLUMNS "
             "WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME IN :table_names"
         ).bindparams(bindparam("table_names", expanding=True))
