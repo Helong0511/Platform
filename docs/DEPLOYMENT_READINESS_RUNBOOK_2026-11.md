@@ -1164,22 +1164,20 @@ PR #1 仍保持 Open / Draft；不合并 main、不部署。凭据安全专项�
 - Backend：**532 passed、1 skipped、1 warning**；Frontend Lint、Build、Playwright Mock API Browser E2E 全通过。
 - 唯一 skip 为未提交的本机核对脚本；warning 为 passlib / Python 3.11 `crypt` 弃用提示。
 
-### 启动 Schema Drift 行为复核
+### 启动 Schema Drift 行为复核（2026-11-19 当前状态）
 
-- 当前 `app/bootstrap/lifespan.py` 已在启动阶段获取 MySQL session advisory lock，执行 `Base.metadata.create_all`，随后通过 `_schema_metadata_drift()` 检查 ORM 声明的所有表及列是否存在。
-- Schema 初始化或表/列核验失败时，lifespan 会抛出启动异常，不再吞掉异常后继续提供服务；这与本文件第 9.3 节早期观察到的“失败后继续启动”历史行为不同，后续记录以当前代码为准。
-- 新增 `tests/test_schema_metadata_drift.py`，覆盖缺表、缺列被准确报告，以及 schema 完整时无 drift。
-- 该测试提交：`6a0139bdc4254c678f61adbd3fc8fa963a0a9427`；其后续 CI 尚未完成，因此目前只是已提交、待 CI 验收，不能宣称测试已通过。
+- 应用 Worker 启动阶段执行 migration revision 核验和只读 `_schema_metadata_drift()`；不再调用 `create_database()` 或 `Base.metadata.create_all`。旧 `create_tables()` 入口 fail-closed，不执行隐式 DDL。
+- 当前 drift gate 检查缺失表/列、列类型与长度、NULL、显式 server DEFAULT / ON UPDATE、AUTO_INCREMENT、generated column、INVISIBLE 列、主键、索引、唯一约束、外键、CHECK 约束及其 MySQL ENFORCED 状态。
+- MySQL 列元数据通过批量 `information_schema.COLUMNS` 查询读取，不按列逐次往返；对 ORM 显式声明的列级 collation，核验实际 `CHARACTER_SET_NAME` / `COLLATION_NAME`，差异进入 `column_collation_mismatches` 并阻止启动。
+- 表级 charset/collation 仅在 ORM 显式设置 MySQL table options 时核验；列级 collation 未显式声明时不猜测表/库默认值。当前 gate 不执行自动修复或 DDL。
+- PR #46 已合并 main：密码新哈希使用 Argon2id，旧 bcrypt 兼容验证并安全渐进升级；main Full Audit 为 862 passed、1 skipped，Python 3.13 密码兼容和 Emergency Security 均通过。
+- PR #47 正在验收列级 charset/collation 漂移检测；其分支 Full Audit 为 864 passed、1 skipped，真实 MySQL `utf8mb4_bin` / `ascii_bin` 漂移检测与修复后清零均通过，合并后仍需重新验收 main。
 
-### 仍然阻断部署的 Migration / Schema 问题
+### 当前仍需完成的部署验证
 
-- 当前应用启动仍会调用 `create_database()` 与 `Base.metadata.create_all`；`create_all` 只创建缺失表，不会将已有表升级到新列/索引/约束。
-- `_schema_metadata_drift()` 目前只核验表和列是否存在，不核验列类型、长度、NULL/default、唯一约束、CHECK、索引列顺序及 collation。
-- 仓库仍缺少统一有序 migration runner、revision ledger/manifest、checksum、并发执行锁与发布记录；SQL migrations 仍需按人工流程执行。
-- MySQL DDL 隐式提交，不能用事务 rollback 作为迁移回滚方案。完整备份恢复、代表性历史数据升级、每个 DDL 边界中断重跑、旧应用兼容回滚和 schema/data diff 仍未完成。
-- 第 9.3 节中关于“schema bootstrap 异常被吞掉并继续启动”的观察属于旧代码状态，已由当前 fail-closed 启动逻辑修复；但 runner 与完整结构核验缺口仍是上线阻断项。
-
-PR #1 继续 Open / Draft；本轮不合并 main、不部署、不连接生产服务器、生产数据库、Redis、队列或真实第三方 API。凭据安全专项继续按用户要求暂缓。
+- 目标环境发布前仍需执行可恢复备份与恢复演练、代表性历史数据迁移、DDL 边界中断/重跑、迁移失败人工恢复及旧应用兼容回滚验证；CI 临时 MySQL 通过不等于生产数据恢复演练完成。
+- 上线前仍需核实目标 MySQL 版本、字符集/排序规则、sql_mode、迁移账号权限和实际 schema revision；不得将 CI 临时库状态当成生产环境证据。
+- P0 凭据暴露专项按用户此前要求暂缓，本轮不宣称该专项已解决。
 
 ### Schema Drift 单元测试 CI 结果补录
 
