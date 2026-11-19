@@ -641,3 +641,13 @@ PR #47 在现有批量 `information_schema.COLUMNS` 查询中增加 `CHARACTER_S
 - MySQL `INFORMATION_SCHEMA.COLUMNS` 提供字符列的 `CHARACTER_SET_NAME` 和 `COLLATION_NAME`：https://dev.mysql.com/doc/refman/8.0/en/information-schema-columns-table.html
 - MySQL collation 名称通常以其字符集名称开头，`_ci` 表示大小写不敏感、`_bin` 表示二进制排序规则：https://dev.mysql.com/doc/refman/8.0/en/charset-collation-names.html
 - 列级 CHARACTER SET / COLLATE 的定义语义：https://dev.mysql.com/doc/refman/8.0/en/charset-column.html
+
+
+## 30. 2026-11-19：正式 SQL 基线的 MySQL 表级字符集/排序规则契约
+
+- `sql/platform.sql` 中 41 张表显式声明表级字符集或排序规则；其中 `utf8mb4_0900_ai_ci` 与 `utf8mb4_unicode_ci` 必须分别保留。两个未显式声明表级选项的安全日志表继续继承数据库默认值，不作推断。
+- 新增 `app/db/schema_contract.py`，只登记同时存在于完整 SQL 基线且由 ORM 映射的表。迁移创建但不在完整基线中的表不猜测默认规则；SQL 基线中未被 ORM 映射的归档表也不进入 ORM Schema Gate。
+- 启动 Schema Gate 将正式基线契约与 ORM 显式 `mysql_charset` / `mysql_collate` 合并核验；表级字符集/排序规则读取通过 `information_schema.TABLES` 与 `information_schema.COLLATIONS` 按 schema 批量完成，不再对每张表单独查询。
+- 表级差异进入 `table_option_mismatches` 并阻止启动；此检查只读，不执行 ALTER。真实 MySQL 回归测试覆盖错误排序规则被拒绝、修正后漂移清零。
+- 更新 `sql/platform.sql` 的表级选项时，必须同步更新 `app/db/schema_contract.py` 并运行真实 MySQL Schema Gate 测试。对未显式声明的规则继续保持不推断原则。
+- `cap_reservations` 与 `short_link_click_sync_batches` 是迁移创建的 ORM 表，不在当前完整 SQL 基线 43 张表中；`ad_data_archive` 与 `clicks_archive` 在 SQL 基线中但没有 ORM 映射。后续需单独决定是否把迁移创建表纳入完整基线，不得在本项检查中误报。

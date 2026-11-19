@@ -766,3 +766,55 @@ def test_mysql_schema_drift_detects_explicit_column_collation_mismatch():
         with root.cursor() as cursor:
             cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
         root.close()
+
+
+def test_mysql_schema_drift_detects_sql_baseline_table_collation_mismatch():
+    """正式 SQL 基线显式声明的表级排序规则必须进入启动 Schema Gate。"""
+    database = f"platform_ci_table_collation_{secrets.token_hex(5)}"
+    root = pymysql.connect(
+        host=HOST, port=PORT, user=ROOT_USER, password=ROOT_PASSWORD,
+        charset="utf8mb4", autocommit=True, connect_timeout=5,
+        read_timeout=10, write_timeout=10,
+    )
+    engine = None
+    try:
+        with root.cursor() as cursor:
+            cursor.execute(f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4")
+            cursor.execute(
+                f"CREATE TABLE `{database}`.countries ("
+                "id INT NOT NULL PRIMARY KEY"
+                ") ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 "
+                "COLLATE utf8mb4_0900_ai_ci"
+            )
+        metadata = MetaData()
+        Table("countries", metadata, Column("id", Integer, primary_key=True), schema=database)
+        url = URL.create(
+            "mysql+pymysql", username=ROOT_USER, password=ROOT_PASSWORD,
+            host=HOST, port=PORT, database=database, query={"charset": "utf8mb4"},
+        )
+        engine = create_engine(url, pool_pre_ping=True)
+        with engine.connect() as connection:
+            drift = _schema_metadata_drift(connection, metadata)
+        assert drift["table_option_mismatches"] == {
+            f"{database}.countries": {
+                "mysql_collate": {
+                    "expected": "utf8mb4_unicode_ci",
+                    "actual": "utf8mb4_0900_ai_ci",
+                }
+            }
+        }
+
+        with root.cursor() as cursor:
+            cursor.execute(
+                f"ALTER TABLE `{database}`.countries "
+                "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+            )
+        with engine.connect() as connection:
+            corrected = _schema_metadata_drift(connection, metadata)
+        assert corrected["table_option_mismatches"] == {}
+    finally:
+        if engine is not None:
+            engine.dispose()
+        with root.cursor() as cursor:
+            cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
+        root.close()
