@@ -27,6 +27,7 @@ from app.core.errors import ErrorCode
 from app.core.utils import get_app_now_naive, find_or_create_default_client
 from app.core.product_assignment import initialize_product_assignment, transfer_product_assignment
 from app.core.product_name import (
+from app.core.pagination import calculate_pagination_offset
     duplicate_name_detail,
     fetch_products_by_name,
     insert_unique_product,
@@ -68,6 +69,7 @@ class ProductService(BaseService[Product]):
         Returns:
             Product 对象
         """
+        offset = calculate_pagination_offset(page, page_size, resource_name="产品列表")
         # 构建查询 - 使用JOIN优化，避免N+1查询
         query = select(Product).where(Product.id == product_id)
 
@@ -199,7 +201,6 @@ class ProductService(BaseService[Product]):
         total = total_result.scalar() or 0
 
         # 分页查询（使用selectinload优化客户信息加载）
-        offset = (page - 1) * page_size
         query = query.options(selectinload(Product.client))
         query = query.order_by(Product.created_at.desc())
         query = query.offset(offset).limit(page_size)
