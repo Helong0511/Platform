@@ -226,8 +226,7 @@ class CapService(BaseService[OfferCap]):
             await self.db.refresh(cap)
 
             # 重新加载关联信息（使用joinedload优化）
-            offset = calculate_pagination_offset(page, page_size, resource_name="Cap 配置列表")
-        query = select(OfferCap).where(OfferCap.id == cap.id).options(
+            query = select(OfferCap).where(OfferCap.id == cap.id).options(
                 joinedload(OfferCap.offer),
                 joinedload(OfferCap.advertiser),
                 joinedload(OfferCap.publisher)
@@ -273,6 +272,7 @@ class CapService(BaseService[OfferCap]):
         Returns:
             tuple[List[OfferCap], int]: (当前页列表, 总条数)
         """
+        offset = calculate_pagination_offset(page, page_size, resource_name="Cap 配置列表")
         query = select(OfferCap)
 
         if cap_type:
