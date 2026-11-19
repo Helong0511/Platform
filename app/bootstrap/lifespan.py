@@ -329,9 +329,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             if expected_options:
                 # MySQL Inspector.get_table_options() 在部分驱动版本中不返回 charset/collation；
                 # 从 information_schema 读取服务器实际记录，不能把 None 当作真实值。
-                schema_name = table.schema or sync_connection.execute(
-                    text("SELECT DATABASE()")
-                ).scalar_one_or_none()
+                schema_name = table.schema or default_schema
                 actual_collation = None
                 actual_charset = None
                 if schema_name:
