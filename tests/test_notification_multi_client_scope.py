@@ -117,7 +117,6 @@ async def test_notification_record_list_scopes_to_all_linked_client_ids():
 
 @pytest.mark.asyncio
 async def test_batch_resend_allows_any_linked_client_and_loads_scope_once(monkeypatch):
-    from app.services.notification import commands
     from app.services.notification.commands import resend_command
 
     conversion = SimpleNamespace(id=505, client_id=202)
