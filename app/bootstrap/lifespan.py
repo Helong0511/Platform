@@ -38,7 +38,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
     from decimal import Decimal, InvalidOperation
 
     from sqlalchemy import Boolean, Integer, Numeric, String
-    from sqlalchemy.schema import DefaultClause
+    from sqlalchemy.schema import Computed, DefaultClause
 
     target_metadata = metadata or Base.metadata
     inspector = inspect(sync_connection)
@@ -50,6 +50,8 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
     column_default_mismatches = {}
     column_default_unverifiable = {}
     column_onupdate_mismatches = {}
+    column_generated_mismatches = {}
+    column_generated_unverifiable = {}
     primary_key_mismatches = {}
     index_mismatches = {}
     unique_constraint_mismatches = {}
@@ -109,7 +111,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             if schema_name:
                 tables_by_schema.setdefault(schema_name, []).append(metadata_table.name)
         column_extras_statement = text(
-            "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_DEFAULT, EXTRA "
+            SELECT TABLE_NAME, COLUMN_NAME, COLUMN_DEFAULT, EXTRA, GENERATION_EXPRESSION "
             "FROM information_schema.COLUMNS "
             "WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME IN :table_names"
         ).bindparams(bindparam("table_names", expanding=True))
@@ -124,6 +126,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                 mysql_column_extras_by_table.setdefault(table_key, {})[column_key] = {
                     "extra": (row.get("EXTRA") or "").casefold(),
                     "default": row.get("COLUMN_DEFAULT"),
+                    "generation_expression": row.get("GENERATION_EXPRESSION"),
                 }
 
     for table in sorted_tables:
@@ -294,6 +297,42 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                         "actual": actual_onupdate,
                     }
 
+                actual_generated_kind = (
+                    "stored" if "stored generated" in actual_extra
+                    else "virtual" if "virtual generated" in actual_extra
+                    else None
+                )
+                expected_computed = column.computed
+                actual_generation_expression = column_extra.get("generation_expression")
+                if isinstance(expected_computed, Computed):
+                    expected_expression = expected_generated_expression(column)
+                    expected_normalized = normalize_generated_expression(expected_expression)
+                    if actual_generated_kind is None:
+                        column_generated_mismatches.setdefault(table.fullname, {})[column.name] = {
+                            "expected": {"expression": expected_expression, "persisted": expected_computed.persisted},
+                            "actual": None,
+                        }
+                    else:
+                        actual_normalized = normalize_generated_expression(actual_generation_expression)
+                        if expected_normalized is None or actual_normalized is None:
+                            column_generated_unverifiable.setdefault(table.fullname, {})[column.name] = {
+                                "expected": expected_expression, "actual": actual_generation_expression
+                            }
+                        else:
+                            generated_difference = {}
+                            if expected_normalized != actual_normalized:
+                                generated_difference["expression"] = {"expected": expected_expression, "actual": actual_generation_expression}
+                            if expected_computed.persisted is not None:
+                                expected_kind = "stored" if expected_computed.persisted else "virtual"
+                                if actual_generated_kind != expected_kind:
+                                    generated_difference["persisted"] = {"expected": expected_kind, "actual": actual_generated_kind}
+                            if generated_difference:
+                                column_generated_mismatches.setdefault(table.fullname, {})[column.name] = generated_difference
+                elif actual_generated_kind is not None:
+                    column_generated_mismatches.setdefault(table.fullname, {})[column.name] = {
+                        "expected": None,
+                        "actual": {"expression": actual_generation_expression, "persisted": actual_generated_kind},
+                    }
                 expected_default = expected_server_default(column)
                 if expected_default:
                     if expected_default[0] == "unverifiable":
@@ -512,6 +551,8 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         "column_default_mismatches": column_default_mismatches,
         "column_default_unverifiable": column_default_unverifiable,
         "column_onupdate_mismatches": column_onupdate_mismatches,
+        "column_generated_mismatches": column_generated_mismatches,
+        "column_generated_unverifiable": column_generated_unverifiable,
         "primary_key_mismatches": primary_key_mismatches,
         "index_mismatches": index_mismatches,
         "unique_constraint_mismatches": unique_constraint_mismatches,
@@ -533,10 +574,13 @@ async def _verify_database_schema() -> str | None:
                 "以下 MySQL server_default 表达式暂不支持自动比较：%s",
                 unverifiable_defaults,
             )
+        unverifiable_generated = drift.get("column_generated_unverifiable") or {}
+        if unverifiable_generated:
+            logger.warning("以下 MySQL generated column 表达式暂不支持安全自动比较：%s", unverifiable_generated)
         confirmed_drift = any(
             value
             for key, value in drift.items()
-            if key != "column_default_unverifiable"
+            if key not in {"column_default_unverifiable", "column_generated_unverifiable"}
         )
         if confirmed_drift:
             raise RuntimeError(
@@ -549,6 +593,8 @@ async def _verify_database_schema() -> str | None:
                 f"column_default_mismatches={drift['column_default_mismatches']}; "
                 f"column_default_unverifiable={drift['column_default_unverifiable']}; "
                 f"column_onupdate_mismatches={drift['column_onupdate_mismatches']}; "
+                f"column_generated_mismatches={drift['column_generated_mismatches']}; "
+                f"column_generated_unverifiable={drift['column_generated_unverifiable']}; "
                 f"primary_key_mismatches={drift['primary_key_mismatches']}; "
                 f"index_mismatches={drift['index_mismatches']}; "
                 f"unique_constraint_mismatches={drift['unique_constraint_mismatches']}; "
