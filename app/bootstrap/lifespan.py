@@ -329,20 +329,20 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                         }
                     else:
                         actual_normalized = normalize_generated_expression(actual_generation_expression)
+                        generated_difference = {}
                         if expected_normalized is None or actual_normalized is None:
                             column_generated_unverifiable.setdefault(table.fullname, {})[column.name] = {
                                 "expected": expected_expression, "actual": actual_generation_expression
                             }
-                        else:
-                            generated_difference = {}
-                            if expected_normalized != actual_normalized:
-                                generated_difference["expression"] = {"expected": expected_expression, "actual": actual_generation_expression}
-                            if expected_computed.persisted is not None:
-                                expected_kind = "stored" if expected_computed.persisted else "virtual"
-                                if actual_generated_kind != expected_kind:
-                                    generated_difference["persisted"] = {"expected": expected_kind, "actual": actual_generated_kind}
-                            if generated_difference:
-                                column_generated_mismatches.setdefault(table.fullname, {})[column.name] = generated_difference
+                        elif expected_normalized != actual_normalized:
+                            generated_difference["expression"] = {"expected": expected_expression, "actual": actual_generation_expression}
+                        # 存储模式不依赖表达式解析结果，可以独立安全核验。
+                        if expected_computed.persisted is not None:
+                            expected_kind = "stored" if expected_computed.persisted else "virtual"
+                            if actual_generated_kind != expected_kind:
+                                generated_difference["persisted"] = {"expected": expected_kind, "actual": actual_generated_kind}
+                        if generated_difference:
+                            column_generated_mismatches.setdefault(table.fullname, {})[column.name] = generated_difference
                 elif actual_generated_kind is not None:
                     column_generated_mismatches.setdefault(table.fullname, {})[column.name] = {
                         "expected": None,
