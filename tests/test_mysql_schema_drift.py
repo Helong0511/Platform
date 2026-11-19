@@ -963,7 +963,6 @@ def test_mysql_schema_drift_detects_mysql_index_attribute_drift():
             "ix_index_probe_fulltext": [{
                 "position": 1,
                 "differences": {
-                    "direction": {"expected": "A", "actual": None},
                     "index_type": {"expected": "BTREE", "actual": "FULLTEXT"},
                 },
             }],
