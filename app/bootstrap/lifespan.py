@@ -8,7 +8,7 @@ import re
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from sqlalchemy import inspect, text
+from sqlalchemy import bindparam, inspect, text
 
 from app.core.cache_manager import CacheManager
 from app.core.config import settings
@@ -91,7 +91,32 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         )
 
     dialect_name = sync_connection.dialect.name
-    for table in target_metadata.sorted_tables:
+    sorted_tables = target_metadata.sorted_tables
+
+    # MySQL 列属性按 schema 批量读取，避免每张 ORM 表单独往返数据库。
+    mysql_column_extras_by_table = {}
+    if dialect_name == "mysql":
+        default_schema = sync_connection.execute(text("SELECT DATABASE()")).scalar_one_or_none()
+        tables_by_schema = {}
+        for metadata_table in sorted_tables:
+            schema_name = metadata_table.schema or default_schema
+            if schema_name:
+                tables_by_schema.setdefault(schema_name, []).append(metadata_table.name)
+        column_extras_statement = text(
+            "SELECT TABLE_NAME, COLUMN_NAME, EXTRA FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME IN :table_names"
+        ).bindparams(bindparam("table_names", expanding=True))
+        for schema_name, table_names in tables_by_schema.items():
+            extra_rows = sync_connection.execute(
+                column_extras_statement,
+                {"schema_name": schema_name, "table_names": sorted(set(table_names))},
+            ).mappings().all()
+            for row in extra_rows:
+                mysql_column_extras_by_table.setdefault(row["TABLE_NAME"], {})[
+                    row["COLUMN_NAME"]
+                ] = (row.get("EXTRA") or "").casefold()
+
+    for table in sorted_tables:
         if not inspector.has_table(table.name, schema=table.schema):
             missing_tables.append(table.fullname)
             continue
@@ -107,24 +132,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         if absent:
             missing_columns[table.fullname] = absent
 
-        mysql_column_extras = {}
-        if dialect_name == "mysql":
-            # AUTO_INCREMENT 不属于普通类型/NULL 反射信息；从数据字典读取实际属性。
-            schema_name = table.schema or sync_connection.execute(
-                text("SELECT DATABASE()")
-            ).scalar_one_or_none()
-            if schema_name:
-                extra_rows = sync_connection.execute(
-                    text(
-                        "SELECT COLUMN_NAME, EXTRA FROM information_schema.COLUMNS "
-                        "WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME = :table_name"
-                    ),
-                    {"schema_name": schema_name, "table_name": table.name},
-                ).mappings().all()
-                mysql_column_extras = {
-                    row["COLUMN_NAME"]: (row.get("EXTRA") or "").casefold()
-                    for row in extra_rows
-                }
+        mysql_column_extras = mysql_column_extras_by_table.get(table.name, {})
 
         for column in table.columns:
             actual = actual_columns.get(column.name)
