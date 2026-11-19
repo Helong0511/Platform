@@ -162,10 +162,10 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             quoted = re.fullmatch(r"'((?:''|[^'])*)'", raw)
             if quoted:
                 return ("literal", quoted.group(1).replace("''", "'"))
-            if re.fullmatch(r"[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)", raw):
+            if re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)", raw):
                 return ("literal", raw)
-            if re.fullmatch(r"(?i)CURRENT_TIMESTAMP(?:\\(\\d+\\))?", raw):
-                return ("expression", re.sub(r"\\s+", "", raw).casefold())
+            if re.fullmatch(r"(?i)CURRENT_TIMESTAMP(?:\(\d+\))?", raw):
+                return ("expression", re.sub(r"\s+", "", raw).casefold())
             # 不猜测函数、运算符或厂商扩展表达式的语义。
             return ("unverifiable", raw)
 
@@ -176,7 +176,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             actual_text = str(actual_value).strip()
             is_generated_expression = "default_generated" in actual_extra
             if expected_kind == "expression":
-                actual_expression = re.sub(r"\\s+", "", actual_text).casefold()
+                actual_expression = re.sub(r"\s+", "", actual_text).casefold()
                 return is_generated_expression and actual_expression == expected_value
             if is_generated_expression:
                 return False
