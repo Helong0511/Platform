@@ -665,3 +665,10 @@ PR #48 后续补齐了两张未纳入 `sql/platform.sql` 完整基线、但由 O
 真实 MySQL 集成测试分别创建两张错误排序规则的临时表，验证两张表均报告 `utf8mb4_unicode_ci` 与实际 `utf8mb4_0900_ai_ci` 的差异；ALTER 修正后必须清零。测试仅允许 GitHub Actions loopback 临时 MySQL，并在 finally 清理随机测试库。
 
 维护规则：新增由 migration 创建的 ORM 表时，如 DDL 明确声明表级 charset/collation，应同步登记到 `MIGRATION_MYSQL_TABLE_OPTIONS`；未显式声明时继续不推断。若未来将这些表并入 `sql/platform.sql`，应迁移契约归属并保持实际排序规则不变。
+
+
+## 32. 2026-11-19：短链接点击刷盘账本的服务器默认时间契约
+
+`short_link_click_sync_batches.created_at` 的增量 migration 明确声明 `DEFAULT CURRENT_TIMESTAMP`。ORM 保留应用层 `default=get_app_now_naive`，并同步声明 `server_default=text("CURRENT_TIMESTAMP")`，使数据库直接写入与 ORM metadata 对服务器默认值的描述一致。Schema Gate 因此能够核验该列的服务器默认值，而不再因 ORM 未声明 server default 而跳过此项检查。
+
+新增回归测试核验账本 5 个字段、`batch_id` 主键、两个复合索引及 `created_at` 的 server default。该变更不修改 migration DDL、不执行数据库变更；既有数据不受影响。
