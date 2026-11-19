@@ -212,6 +212,21 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             if not raw or chr(39) in raw or chr(34) in raw:
                 return None
             raw = raw.replace(chr(96), "")
+            # MySQL 元数据可能为表达式额外包裹括号；仅剥离完整包裹表达式的括号。
+            while raw.startswith("(") and raw.endswith(")"):
+                depth = 0
+                wraps_expression = True
+                for position, char in enumerate(raw):
+                    if char == "(":
+                        depth += 1
+                    elif char == ")":
+                        depth -= 1
+                        if depth == 0 and position != len(raw) - 1:
+                            wraps_expression = False
+                            break
+                if not wraps_expression or depth != 0:
+                    break
+                raw = raw[1:-1].strip()
             raw = re.sub(r"\s+", " ", raw)
             raw = re.sub(r"\s*([(),+\-*/%<>=!|&^])\s*", r"\1", raw)
             return raw.casefold()
