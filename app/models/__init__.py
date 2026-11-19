@@ -3,7 +3,7 @@
 
 聚合各域 ORM 子模块，确保 Alembic 与 SQLAlchemy 能发现全部表。
 """
-from app.models.base import Base, pwd_context, UserRole
+from app.models.base import Base, UserRole
 from app.models.user import User
 from app.models.client_product import (
     Client,
@@ -53,7 +53,6 @@ from app.models.session import UserSession, TokenBlacklist
 
 __all__ = [
     "Base",
-    "pwd_context",
     "UserRole",
     "User",
     "Client",
