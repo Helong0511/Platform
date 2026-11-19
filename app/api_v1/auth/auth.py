@@ -59,6 +59,7 @@ from app.core.security import JWTUtils, get_current_user
 from app.core.utils import get_client_ip
 from app.models.models import User, UserRole, Publisher
 from app.services.session_service import record_access_token_session, revoke_tokens_from_request
+from app.services.password_service import upgrade_password_hash_after_login
 from app.schemas.auth import LoginResponse
 from app.schemas.base import ResponseBaseSchema
 
@@ -285,6 +286,10 @@ async def login(
                 "当前来源 IP 不在客户允许列表中，请联系管理员",
                 http_status=status.HTTP_403_FORBIDDEN,
             )
+
+    # 登录成功后渐进升级旧密码哈希；CAS 条件避免覆盖并发修改的新密码。
+    if await upgrade_password_hash_after_login(db, user, form_data.password):
+        logger.info("用户密码哈希已安全升级为当前算法 user_id=%s", user.id)
 
     # ====== 生成访问令牌和刷新令牌 ======
     # 创建JWT访问令牌，设置过期时间（从配置中读取）
