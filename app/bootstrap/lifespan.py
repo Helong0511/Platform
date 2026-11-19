@@ -112,9 +112,9 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                 {"schema_name": schema_name, "table_names": sorted(set(table_names))},
             ).mappings().all()
             for row in extra_rows:
-                mysql_column_extras_by_table.setdefault(row["TABLE_NAME"], {})[
-                    row["COLUMN_NAME"]
-                ] = (row.get("EXTRA") or "").casefold()
+                mysql_column_extras_by_table.setdefault(
+                    (schema_name, row["TABLE_NAME"]), {}
+                )[row["COLUMN_NAME"]] = (row.get("EXTRA") or "").casefold()
 
     for table in sorted_tables:
         if not inspector.has_table(table.name, schema=table.schema):
@@ -132,7 +132,12 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         if absent:
             missing_columns[table.fullname] = absent
 
-        mysql_column_extras = mysql_column_extras_by_table.get(table.name, {})
+        mysql_schema_name = (
+            (table.schema or default_schema) if dialect_name == "mysql" else None
+        )
+        mysql_column_extras = mysql_column_extras_by_table.get(
+            (mysql_schema_name, table.name), {}
+        )
 
         for column in table.columns:
             actual = actual_columns.get(column.name)
