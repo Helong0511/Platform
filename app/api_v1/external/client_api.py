@@ -27,6 +27,7 @@ from app.core.constants import (
     CLIENT_API_DEFAULT_PAGE_SIZE,
     CLIENT_API_MAX_PAGE,
     CLIENT_API_MAX_PAGE_SIZE,
+    CLIENT_API_MAX_OFFSET_ROWS,
     CLIENT_API_MAX_DATE_RANGE_DAYS,
 )
 from app.core.database import AsyncSessionLocal, get_db
@@ -404,6 +405,15 @@ async def get_client_data(
             api_request.page_size or CLIENT_API_DEFAULT_PAGE_SIZE,
             CLIENT_API_MAX_PAGE_SIZE,
         )
+        # 页码上限不能单独防止深分页；按实际 page_size 计算 OFFSET 并设置硬预算。
+        if (page - 1) * page_size > CLIENT_API_MAX_OFFSET_ROWS:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail=(
+                    f"分页偏移量不能超过 {CLIENT_API_MAX_OFFSET_ROWS} 条，"
+                    "请缩小日期范围后分段查询"
+                ),
+            )
 
         # 确定日期范围
         today = date.today()

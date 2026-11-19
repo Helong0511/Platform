@@ -1237,4 +1237,4 @@ PR #1 继续 Open / Draft；本轮不合并 main、不部署、不连接生产�
 - Emergency Security CI #2069 通过。
 - 首次 Full Audit CI #78 的失败原因是新测试错误断言 HTTP 400；项目统一 `raise_api_exception()` 错误包装实际使用 HTTP 200 并在响应体携带业务错误码。已修正断言，后续 CI #79 完整通过。
 - 合并后 main SHA 已核实为 `bccd03ccedf6c001e4a37a5c6c499b043a3aa13d`。合并后 SHA 的 main 专属 CI 仍需单独检查，不能用 PR 分支 CI 替代。
-- 该限制控制单次时间范围，不等于完全解决深分页/超大 offset 风险；`CLIENT_API_MAX_PAGE=100000` 与最大 page_size 5000 的组合仍允许很大的 offset。后续应结合真实数据规模、查询计划与兼容性评估，确定安全的最大 offset 或游标分页策略。
+- 该限制控制单次时间范围，不等于自动解决深分页风险。PR #26 已新增 `CLIENT_API_MAX_OFFSET_ROWS=100000`，按实际 page_size 计算 OFFSET，API 入口和查询服务层双重拒绝超限请求，并覆盖边界测试；PR #26 最新 CI 尚待验收，合并前不得将其视为已上线。合并后继续结合真实数据规模、查询计划和客户调用日志评估是否需要游标分页。
