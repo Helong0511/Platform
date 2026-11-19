@@ -154,6 +154,9 @@ class QueryBuilder:
         if self._query is None:
             self.base()
 
+        # 为非唯一业务排序键追加主键，确保相同排序值跨页时顺序确定。
+        if hasattr(self.model, "id"):
+            self._query = self._query.order_by(self.model.id.desc())
         self._query = self._query.offset(offset).limit(page_size)
         
         return self
