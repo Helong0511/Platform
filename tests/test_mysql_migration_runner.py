@@ -827,5 +827,6 @@ async def test_runner_executes_with_database_scoped_migration_least_privileges(
         with root.cursor() as cursor:
             cursor.execute(f"DROP USER IF EXISTS '{migration_username}'@'%'")
             cursor.execute(f"DROP DATABASE IF EXISTS `{external_database}`")
+            cursor.execute("DROP DATABASE IF EXISTS migration_privilege_database_must_be_denied")
         root.close()
         _drop_database(database)
