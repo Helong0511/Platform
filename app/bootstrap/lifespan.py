@@ -154,8 +154,10 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             if not isinstance(server_default, DefaultClause):
                 return None
             argument = server_default.arg
-            raw = argument if isinstance(argument, str) else str(argument)
-            raw = raw.strip()
+            # SQLAlchemy 的普通字符串参数按列类型编译为字面量，不是 SQL 表达式。
+            if isinstance(argument, str):
+                return ("literal", argument)
+            raw = str(argument).strip()
             # text("'literal'") 是显式 SQL 字符串常量；处理 SQL 单引号转义。
             quoted = re.fullmatch(r"'((?:''|[^'])*)'", raw)
             if quoted:
