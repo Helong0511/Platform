@@ -233,7 +233,7 @@ async def get_sensitive_path_probe_logs(
             query = query.where(where_clause)
             count_query = count_query.where(where_clause)
 
-        query = query.order_by(SensitivePathProbeLog.created_at.desc())
+        query = query.order_by(SensitivePathProbeLog.created_at.desc(), SensitivePathProbeLog.id.desc())
         query = query.offset(offset).limit(page_size)
 
         result = await db.execute(query)
