@@ -18,6 +18,7 @@ from app.core.constants import MAX_PAGE_SIZE
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
+from app.core.pagination import calculate_pagination_offset
 from app.core.security import require_admin
 from app.models.models import CountryInfo, CountryAlias, User
 from app.schemas.base import ListResponseBaseSchema, PaginatedResponseBaseSchema, ResponseBaseSchema
@@ -103,6 +104,7 @@ async def list_countries(
     _current_user: User = Depends(require_admin),
 ):
     """分页查询国家列表，支持按名称/代码关键字及大洲筛选。"""
+    offset = calculate_pagination_offset(page, page_size, resource_name="国家列表")
     query = select(CountryInfo)
     count_query = select(func.count(CountryInfo.id))
 
@@ -116,7 +118,7 @@ async def list_countries(
 
     result = await db.execute(
         query.order_by(CountryInfo.alpha_2_code.asc())
-        .offset((page - 1) * page_size)
+        .offset(offset)
         .limit(page_size)
     )
     items = result.scalars().all()
