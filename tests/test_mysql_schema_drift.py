@@ -464,3 +464,108 @@ def test_mysql_schema_drift_checks_explicit_server_defaults_only():
         with root.cursor() as cursor:
             cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
         root.close()
+
+
+def test_mysql_schema_drift_detects_unmodeled_on_update_clause():
+    """MySQL 隐式 ON UPDATE 不能被 Python onupdate 或普通 server_default 掩盖。"""
+    database = f"platform_ci_onupdate_{secrets.token_hex(5)}"
+    root = pymysql.connect(
+        host=HOST,
+        port=PORT,
+        user=ROOT_USER,
+        password=ROOT_PASSWORD,
+        charset="utf8mb4",
+        autocommit=True,
+        connect_timeout=5,
+        read_timeout=10,
+        write_timeout=10,
+    )
+    engine = None
+    try:
+        with root.cursor() as cursor:
+            cursor.execute(f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4")
+            cursor.execute(
+                f"CREATE TABLE `{database}`.update_probe ("
+                "id INT NOT NULL PRIMARY KEY, "
+                "updated_at DATETIME(3) NOT NULL "
+                "DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)"
+                ") ENGINE=InnoDB"
+            )
+
+        url = URL.create(
+            "mysql+pymysql",
+            username=ROOT_USER,
+            password=ROOT_PASSWORD,
+            host=HOST,
+            port=PORT,
+            database=database,
+            query={"charset": "utf8mb4"},
+        )
+        engine = create_engine(url, pool_pre_ping=True)
+
+        python_update_metadata = MetaData()
+        Table(
+            "update_probe",
+            python_update_metadata,
+            Column("id", Integer, primary_key=True),
+            Column(
+                "updated_at",
+                DateTime(3),
+                nullable=False,
+                server_default=text("CURRENT_TIMESTAMP(3)"),
+                # Python/SQLAlchemy 端 onupdate 不会声明 MySQL 的 ON UPDATE DDL。
+                onupdate=text("CURRENT_TIMESTAMP(3)"),
+            ),
+        )
+        with engine.connect() as connection:
+            drift = _schema_metadata_drift(connection, python_update_metadata)
+        assert drift["column_default_mismatches"] == {}
+        assert drift["column_onupdate_mismatches"] == {
+            "update_probe": {
+                "updated_at": {"expected": False, "actual": True}
+            }
+        }
+
+        explicit_server_metadata = MetaData()
+        Table(
+            "update_probe",
+            explicit_server_metadata,
+            Column("id", Integer, primary_key=True),
+            Column(
+                "updated_at",
+                DateTime(3),
+                nullable=False,
+                server_default=text(
+                    "CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)"
+                ),
+            ),
+        )
+        with engine.connect() as connection:
+            declared = _schema_metadata_drift(connection, explicit_server_metadata)
+        assert declared["column_default_mismatches"] == {}
+        assert declared["column_default_unverifiable"] == {}
+        assert declared["column_onupdate_mismatches"] == {}
+
+        fetched_value_metadata = MetaData()
+        Table(
+            "update_probe",
+            fetched_value_metadata,
+            Column("id", Integer, primary_key=True),
+            Column(
+                "updated_at",
+                DateTime(3),
+                nullable=False,
+                server_default=text("CURRENT_TIMESTAMP(3)"),
+                server_onupdate=FetchedValue(),
+            ),
+        )
+        with engine.connect() as connection:
+            fetched = _schema_metadata_drift(connection, fetched_value_metadata)
+        # FetchedValue 可能代表触发器，不可推断它必须使用 MySQL 列级 ON UPDATE。
+        assert fetched["column_onupdate_mismatches"] == {}
+    finally:
+        if engine is not None:
+            engine.dispose()
+        with root.cursor() as cursor:
+            cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
+        root.close()
