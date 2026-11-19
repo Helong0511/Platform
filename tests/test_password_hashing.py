@@ -114,6 +114,10 @@ async def test_successful_login_upgrade_uses_compare_and_swap_without_mutating_i
     assert user.hashed_password == legacy_hash
     assert "users" in str(db.statement).lower()
     assert "hashed_password" in str(db.statement).lower()
+    from sqlalchemy.dialects import mysql
+    compiled = db.statement.compile(dialect=mysql.dialect())
+    assert "CAST(users.hashed_password AS BINARY)" in str(compiled)
+    assert legacy_hash.encode("utf-8") in compiled.params.values()
 
 
 @pytest.mark.asyncio
