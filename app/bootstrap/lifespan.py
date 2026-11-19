@@ -196,7 +196,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             raw = str(argument).strip()
             return bool(
                 re.fullmatch(
-                    r"CURRENT_TIMESTAMP(?:\\(\\d+\\))?\\s+ON\\s+UPDATE\\s+"
+                    r"CURRENT_TIMESTAMP(?:\(\d+\))?\s+ON\s+UPDATE\s+"
                     r"CURRENT_TIMESTAMP(?:\(\d+\))?",
                     raw,
                     flags=re.IGNORECASE,
