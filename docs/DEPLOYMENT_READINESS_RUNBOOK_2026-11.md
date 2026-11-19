@@ -1279,3 +1279,13 @@ PR #1 继续 Open / Draft；本轮不合并 main、不部署、不连接生产�
 - 修复每日统计 Excel 导出的分页兼容：普通每日汇总列表仍限制每页 100 条；导出调用可显式使用最多 50000 条的内部批量上限，并跳过大结果缓存，同时继续受 100000 行 OFFSET 预算约束。新增测试确认普通列表超限仍拒绝、受控导出大页可用。
 
 - 通用 QueryBuilder 分页也增加 100000 行 OFFSET 预算和 50000 条内部页大小上限；保留用户 Excel 导出等受控内部批量读取（如 10000 条），不将内部导出上限暴露给普通 API。
+
+
+## 2026-11-19 合并后验收记录：分页治理
+
+- PR #28–#33 已全部合并 main；其中 PR #33 合并提交为 `14d1f968d062b466fba29e1b331b06df4b9c446e`。
+- 合并后 main Full Audit CI #44456705880：Backend 841 passed、1 skipped、1 warning；Frontend Lint/Build/Browser E2E 全部通过。
+- 合并后 main Emergency Security CI #44456705863：通过。
+- 当前 Open PR 为 0。分页治理已进入 main，但生产 MySQL 执行计划、真实数据规模下的慢查询与索引验证仍未完成。
+- 本轮仍发现 main 跟踪 GAM JSON 私钥、JWT RSA 私钥和 Nginx TLS 私钥；凭据轮换、外部密钥迁移、历史清理与生产验证未完成，仍属于上线阻断项。
+- main 分支保护状态仍未建立可靠证据；上线前必须确认 PR 审核、Full Audit CI、Emergency Security CI、禁止 force-push 与禁止删除规则。
