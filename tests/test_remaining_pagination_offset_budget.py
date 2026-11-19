@@ -16,6 +16,7 @@ from app.services.cpl.offer.queries.list_query import OfferListQuery
 from app.services.cpl.deduction.queries.config_list_query import DeductionConfigListQuery
 from app.services.cpl.deduction.queries.logs_query import DeductionLogsQuery
 from app.services.session_service import SessionService
+from app.api_v1.system.sessions import get_blacklist
 
 
 class _NoDB:
@@ -110,6 +111,23 @@ async def test_session_service_rejects_invalid_page_before_user_lookup():
             user_id=1,
             page=0,
             page_size=10,
+        )
+
+    assert db.statements == []
+
+
+@pytest.mark.asyncio
+async def test_token_blacklist_route_rejects_deep_pagination_before_db():
+    db = _NoDB()
+
+    with pytest.raises(HTTPException):
+        await get_blacklist(
+            request=SimpleNamespace(),
+            db=db,
+            current_user=_admin(),
+            page=1002,
+            page_size=100,
+            user_id=None,
         )
 
     assert db.statements == []
