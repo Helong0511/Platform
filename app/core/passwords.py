@@ -31,13 +31,19 @@ def hash_password(password: str) -> str:
     return PASSWORD_HASHER.hash(password)
 
 
-def _legacy_bcrypt_password(password: str) -> bytes:
-    """复现历史模型写入 bcrypt 前的 72 字节 UTF-8 截断规则。
+def _legacy_bcrypt_password(password: str) -> bytes | None:
+    """复现历史 bcrypt 的输入规则，并拒绝无法匹配的 UTF-8 边界情况。
 
-    历史代码先截取 72 字节，再忽略被截断的 UTF-8 尾部残字节。
-    这里必须保持相同规范化方式，才能验证所有历史哈希。
+    历史写入先截取 72 字节，再忽略不完整 UTF-8 尾部；旧验证则把原始 UTF-8
+    字节交给 bcrypt 截断。若截断点切开多字节字符，历史写入值与验证值不同，
+    该密码原本就无法通过旧验证，不能在迁移时悄悄扩大其可接受密码集合。
     """
-    return password.encode("utf-8")[:72].decode("utf-8", errors="ignore").encode("utf-8")
+    raw_password = password.encode("utf-8")
+    truncated = raw_password[:72]
+    normalized = truncated.decode("utf-8", errors="ignore").encode("utf-8")
+    if len(raw_password) > 72 and normalized != truncated:
+        return None
+    return normalized
 
 
 def verify_password(password: str, encoded_hash: str) -> bool:
@@ -50,8 +56,11 @@ def verify_password(password: str, encoded_hash: str) -> bool:
             return bool(PASSWORD_HASHER.verify(encoded_hash, password))
 
         if encoded_hash.startswith(("$2a$", "$2b$", "$2y$")):
+            legacy_password = _legacy_bcrypt_password(password)
+            if legacy_password is None:
+                return False
             return bcrypt.checkpw(
-                _legacy_bcrypt_password(password),
+                legacy_password,
                 encoded_hash.encode("ascii"),
             )
     except (
@@ -71,8 +80,8 @@ def verify_password(password: str, encoded_hash: str) -> bool:
 def password_hash_needs_upgrade(password: str, encoded_hash: str) -> bool:
     """判断已验证密码是否可以安全升级为当前 Argon2id 参数。
 
-    历史 bcrypt 的语义是最多比较前 72 字节。若输入超过 72 字节，
-    自动迁移会把原本可登录的一组密码收窄为单一完整字符串，因此暂不自动升级；
+    历史 bcrypt 最多比较前 72 字节。若输入超过 72 字节，
+    自动迁移会改变旧密码的等价输入集合，因此暂不自动升级；
     用户主动修改密码时会使用完整密码生成新的 Argon2id 哈希。
     """
     if not isinstance(password, str) or not isinstance(encoded_hash, str):
