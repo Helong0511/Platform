@@ -54,6 +54,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
     column_generated_unverifiable = {}
     column_visibility_mismatches = {}
     column_collation_mismatches = {}
+    table_engine_mismatches = {}
     primary_key_mismatches = {}
     index_mismatches = {}
     unique_constraint_mismatches = {}
@@ -105,6 +106,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
 
     # MySQL 列属性按 schema 批量读取，避免每张 ORM 表单独往返数据库。
     mysql_column_extras_by_table = {}
+    mysql_table_metadata_by_table = {}
     if dialect_name == "mysql":
         default_schema = sync_connection.execute(text("SELECT DATABASE()")).scalar_one_or_none()
         tables_by_schema = {}
@@ -113,10 +115,13 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             if schema_name:
                 tables_by_schema.setdefault(schema_name, []).append(metadata_table.name)
         column_extras_statement = text(
-            "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_DEFAULT, EXTRA, GENERATION_EXPRESSION, "
-            "CHARACTER_SET_NAME, COLLATION_NAME "
-            "FROM information_schema.COLUMNS "
-            "WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME IN :table_names"
+            "SELECT C.TABLE_NAME, C.COLUMN_NAME, C.COLUMN_DEFAULT, C.EXTRA, C.GENERATION_EXPRESSION, "
+            "C.CHARACTER_SET_NAME, C.COLLATION_NAME, T.ENGINE AS TABLE_ENGINE, "
+            "T.TABLE_TYPE AS TABLE_TYPE "
+            "FROM information_schema.COLUMNS AS C "
+            "LEFT JOIN information_schema.TABLES AS T "
+            "ON T.TABLE_SCHEMA = C.TABLE_SCHEMA AND T.TABLE_NAME = C.TABLE_NAME "
+            "WHERE C.TABLE_SCHEMA = :schema_name AND C.TABLE_NAME IN :table_names"
         ).bindparams(bindparam("table_names", expanding=True))
         for schema_name, table_names in tables_by_schema.items():
             extra_rows = sync_connection.execute(
@@ -125,6 +130,10 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             ).mappings().all()
             for row in extra_rows:
                 table_key = (schema_name, row["TABLE_NAME"])
+                mysql_table_metadata_by_table[table_key] = {
+                    "engine": row.get("TABLE_ENGINE"),
+                    "table_type": row.get("TABLE_TYPE"),
+                }
                 column_key = row["COLUMN_NAME"]
                 mysql_column_extras_by_table.setdefault(table_key, {})[column_key] = {
                     "extra": (row.get("EXTRA") or "").casefold(),
@@ -156,6 +165,24 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         mysql_column_extras = mysql_column_extras_by_table.get(
             (mysql_schema_name, table.name), {}
         )
+        if dialect_name == "mysql":
+            mysql_table_metadata = mysql_table_metadata_by_table.get(
+                (mysql_schema_name, table.name), {}
+            )
+            expected_engine = str(
+                table.dialect_options["mysql"].get("engine") or "InnoDB"
+            )
+            actual_engine = mysql_table_metadata.get("engine")
+            actual_table_type = mysql_table_metadata.get("table_type")
+            if (
+                (actual_engine or "").casefold() != expected_engine.casefold()
+                or actual_table_type != "BASE TABLE"
+            ):
+                table_engine_mismatches[table.fullname] = {
+                    "expected": expected_engine,
+                    "actual": actual_engine,
+                    "table_type": actual_table_type,
+                }
 
         def expected_server_default(column):
             # FetchedValue 只是“数据库会生成值”的标记；只有 DefaultClause 才代表 DDL DEFAULT。
@@ -604,6 +631,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         "column_generated_unverifiable": column_generated_unverifiable,
         "column_visibility_mismatches": column_visibility_mismatches,
         "column_collation_mismatches": column_collation_mismatches,
+        "table_engine_mismatches": table_engine_mismatches,
         "primary_key_mismatches": primary_key_mismatches,
         "index_mismatches": index_mismatches,
         "unique_constraint_mismatches": unique_constraint_mismatches,
@@ -648,6 +676,7 @@ async def _verify_database_schema() -> str | None:
                 f"column_generated_unverifiable={drift['column_generated_unverifiable']}; "
                 f"column_visibility_mismatches={drift['column_visibility_mismatches']}; "
                 f"column_collation_mismatches={drift['column_collation_mismatches']}; "
+                f"table_engine_mismatches={drift['table_engine_mismatches']}; "
                 f"primary_key_mismatches={drift['primary_key_mismatches']}; "
                 f"index_mismatches={drift['index_mismatches']}; "
                 f"unique_constraint_mismatches={drift['unique_constraint_mismatches']}; "
