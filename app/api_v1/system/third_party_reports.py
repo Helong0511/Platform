@@ -30,6 +30,7 @@ from app.core.security import require_admin, get_current_user
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.pagination import calculate_pagination_offset
 from app.models.models import ThirdPartyReportLog, User
 from app.schemas.third_party_report import (
     ThirdPartyReportLogResponse,
@@ -235,6 +236,7 @@ async def get_third_party_reports(
     - 时间范围
     """
     # ---------- 入口：参数与依赖准备 ----------
+    offset = calculate_pagination_offset(page, page_size, resource_name="第三方上报日志")
     started_at = perf_counter()
     # ---------- 异常处理 ----------
     try:
@@ -274,7 +276,6 @@ async def get_third_party_reports(
         query = query.order_by(ThirdPartyReportLog.created_at.desc())
 
         # 分页
-        offset = (page - 1) * page_size
         query = query.offset(offset).limit(page_size)
 
         # 执行查询
