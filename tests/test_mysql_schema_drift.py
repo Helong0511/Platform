@@ -9,6 +9,8 @@ import pytest
 import pymysql
 from sqlalchemy import (
     Column,
+    DateTime,
+    FetchedValue,
     CheckConstraint,
     ForeignKey,
     Index,
@@ -16,6 +18,7 @@ from sqlalchemy import (
     MetaData,
     String,
     Table,
+    text,
     URL,
     create_engine,
     event,
@@ -181,6 +184,8 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
             "column_type_mismatches": {},
             "nullable_mismatches": {},
             "column_attribute_mismatches": {},
+            "column_default_mismatches": {},
+            "column_default_unverifiable": {},
             "primary_key_mismatches": {},
             "index_mismatches": {},
             "unique_constraint_mismatches": {},
@@ -345,6 +350,113 @@ def test_mysql_schema_drift_detects_missing_auto_increment_attribute():
         with engine.connect() as connection:
             corrected = _schema_metadata_drift(connection, metadata)
         assert corrected["column_attribute_mismatches"] == {}
+    finally:
+        if engine is not None:
+            engine.dispose()
+        with root.cursor() as cursor:
+            cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
+        root.close()
+
+
+def test_mysql_schema_drift_checks_explicit_server_defaults_only():
+    """核验数据库 DEFAULT；不把 Python default 误认为数据库 DDL。"""
+    database = f"platform_ci_defaults_{secrets.token_hex(5)}"
+    root = pymysql.connect(
+        host=HOST,
+        port=PORT,
+        user=ROOT_USER,
+        password=ROOT_PASSWORD,
+        charset="utf8mb4",
+        autocommit=True,
+        connect_timeout=5,
+        read_timeout=10,
+        write_timeout=10,
+    )
+    engine = None
+    try:
+        with root.cursor() as cursor:
+            cursor.execute(f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4")
+            cursor.execute(
+                f"CREATE TABLE `{database}`.default_probe ("
+                "id INT NOT NULL PRIMARY KEY, "
+                "count_value INT NOT NULL DEFAULT 0, "
+                "label VARCHAR(32) NOT NULL DEFAULT 'legacy', "
+                "created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), "
+                "python_only INT NOT NULL, "
+                "fetched_only INT NOT NULL"
+                ") ENGINE=InnoDB"
+            )
+
+        metadata = MetaData()
+        Table(
+            "default_probe",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("count_value", Integer, nullable=False, server_default="0"),
+            Column("label", String(32), nullable=False, server_default="legacy"),
+            Column(
+                "created_at",
+                DateTime(3),
+                nullable=False,
+                server_default=text("CURRENT_TIMESTAMP(3)"),
+            ),
+            # Python 端默认值不生成数据库 DEFAULT，不应触发 drift。
+            Column("python_only", Integer, nullable=False, default=7),
+            Column("fetched_only", Integer, nullable=False, server_default=FetchedValue()),
+        )
+        url = URL.create(
+            "mysql+pymysql",
+            username=ROOT_USER,
+            password=ROOT_PASSWORD,
+            host=HOST,
+            port=PORT,
+            database=database,
+            query={"charset": "utf8mb4"},
+        )
+        engine = create_engine(url, pool_pre_ping=True)
+        with engine.connect() as connection:
+            aligned = _schema_metadata_drift(connection, metadata)
+        assert aligned["column_default_mismatches"] == {}
+        assert aligned["column_default_unverifiable"] == {}
+
+        with root.cursor() as cursor:
+            cursor.execute(
+                f"ALTER TABLE `{database}`.default_probe "
+                "ALTER COLUMN count_value SET DEFAULT 9, "
+                "ALTER COLUMN label SET DEFAULT 'changed'"
+            )
+            # 移除时间表达式默认值，验证 MySQL 元数据能检测到默认值缺失。
+            cursor.execute(
+                f"ALTER TABLE `{database}`.default_probe "
+                "ALTER COLUMN created_at DROP DEFAULT"
+            )
+        with engine.connect() as connection:
+            drift = _schema_metadata_drift(connection, metadata)
+        assert drift["column_default_mismatches"] == {
+            "default_probe": {
+                "count_value": {"expected": "0", "actual": "9"},
+                "label": {"expected": "legacy", "actual": "changed"},
+                "created_at": {
+                    "expected": "current_timestamp(3)",
+                    "actual": None,
+                },
+            }
+        }
+        assert drift["column_default_unverifiable"] == {}
+
+        with root.cursor() as cursor:
+            cursor.execute(
+                f"ALTER TABLE `{database}`.default_probe "
+                "ALTER COLUMN count_value SET DEFAULT 0, "
+                "ALTER COLUMN label SET DEFAULT 'legacy'"
+            )
+            cursor.execute(
+                f"ALTER TABLE `{database}`.default_probe "
+                "MODIFY COLUMN created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)"
+            )
+        with engine.connect() as connection:
+            corrected = _schema_metadata_drift(connection, metadata)
+        assert corrected["column_default_mismatches"] == {}
     finally:
         if engine is not None:
             engine.dispose()
