@@ -163,7 +163,7 @@
 - `ClientAdDataQuery.fetch()` 同时执行服务层防线，避免内部调用绕过 API 层约束。
 - 回归测试覆盖超限拒绝、恰好 100000 行 OFFSET 的边界允许，以及服务层在数据库访问前拒绝。
 - PR #26 首轮 Full Audit CI 曾发现错误响应 detail 被误写成单元素 tuple；已修正为字符串并触发新一轮 CI。该问题会影响错误响应结构。
-- PR #26 已 squash 合并，main commit `436dfc9163423384b5722453072e8beb92d7b5a4`；PR Full Audit CI #44447565948 与 Emergency Security CI #44447566036 均通过。合并后 main Full Audit CI #44447795340（772? 该次为 767 passed、1 skipped、1 warning）与 Security CI #44447795332 均通过。仍需观察真实客户分页调用与慢查询指标，必要时进一步采用游标分页。
+- PR #26 已 squash 合并，main commit `436dfc9163423384b5722453072e8beb92d7b5a4`；PR Full Audit CI #44447565948 与 Emergency Security CI #44447566036 均通过。合并后 main Full Audit CI #44447795340（767 passed、1 skipped、1 warning）与 Security CI #44447795332 均通过。仍需观察真实客户分页调用与慢查询指标，必要时进一步采用游标分页。
 
 
 ## 2026-11-19 补充：通知模块多 Client 用户范围修复（PR #27 已合并）
