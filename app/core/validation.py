@@ -50,6 +50,7 @@ import re
 from apscheduler.triggers.cron import CronTrigger
 
 from app.core.config import settings
+from app.core.constants import PASSWORD_MAX_LENGTH
 # Python 3.10+ 使用内置类型注解
 from html import escape
 import logging
@@ -306,8 +307,8 @@ def validate_password_strength(password: str) -> tuple[bool, str | None]:
     if len(password) < 6:
         return False, "密码至少需要6个字符"
 
-    if len(password) > 72:
-        return False, "密码不能超过72个字符"
+    if len(password) > PASSWORD_MAX_LENGTH:
+        return False, f"密码不能超过{PASSWORD_MAX_LENGTH}个字符"
 
     # 检查是否包含字母和数字
     has_letter = re.search(r'[a-zA-Z]', password)
