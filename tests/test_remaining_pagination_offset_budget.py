@@ -9,6 +9,9 @@ from app.services.audit_log_service import AuditLogService
 from app.services.client_service import ClientService
 from app.services.product_service import ProductService
 from app.services.cpl.publisher_service import PublisherService
+from app.services.cpl.advertiser_service import AdvertiserService
+from app.services.cpl.cap_service import CapService
+from app.services.scheduled_task_service import ScheduledTaskService
 from app.services.cpl.offer.queries.list_query import OfferListQuery
 from app.services.cpl.deduction.queries.config_list_query import DeductionConfigListQuery
 from app.services.cpl.deduction.queries.logs_query import DeductionLogsQuery
@@ -43,6 +46,17 @@ def _admin():
             PublisherService,
             "get_publishers",
             {"current_user": _admin(), "page": 1002, "page_size": 100},
+        ),
+        (
+            AdvertiserService,
+            "get_advertisers",
+            {"current_user": _admin(), "page": 1002, "page_size": 100},
+        ),
+        (CapService, "get_caps", {"page": 1002, "page_size": 100}),
+        (
+            ScheduledTaskService,
+            "get_scheduled_tasks",
+            {"page": 1002, "page_size": 100},
         ),
         (
             OfferListQuery,
