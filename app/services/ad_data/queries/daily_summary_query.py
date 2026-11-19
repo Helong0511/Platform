@@ -23,7 +23,14 @@ from sqlalchemy import and_, case, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.constants import ECPM_MULTIPLIER, PERCENTAGE_MULTIPLIER
+from app.core.constants import (
+    AD_DATA_MAX_OFFSET_ROWS,
+    MAX_PAGE_SIZE,
+    ECPM_MULTIPLIER,
+    PERCENTAGE_MULTIPLIER,
+)
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
 from app.core.database import AsyncSessionLocal
 from app.core.utils import normalize_date_for_ad_data
 from app.core.country_code import resolve_country_name
@@ -140,6 +147,19 @@ class DailySummaryQuery:
         Returns:
             (汇总行字典列表, 分组总数, 全量合计指标)
         """
+        # 在缓存查询和数据库查询之前校验，防止服务层被直接调用时触发深分页。
+        if page < 1 or page_size < 1 or page_size > MAX_PAGE_SIZE:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail=f"每日汇总分页参数无效，每页条数必须在 1 到 {MAX_PAGE_SIZE} 之间",
+            )
+        offset = (page - 1) * page_size
+        if offset > AD_DATA_MAX_OFFSET_ROWS:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail=f"每日汇总分页偏移量不能超过 {AD_DATA_MAX_OFFSET_ROWS} 条",
+            )
+
         dim = normalize_dimension(dimension)
         dim_start, dim_end = _effective_summary_date_range(start_date, end_date)
 
