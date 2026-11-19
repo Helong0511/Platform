@@ -59,7 +59,6 @@ def verify_password(password: str, encoded_hash: str) -> bool:
         UnicodeDecodeError,
         ValueError,
         TypeError,
-        bcrypt.Error,
         VerifyMismatchError,
         VerificationError,
         InvalidHashError,
