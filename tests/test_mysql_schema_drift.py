@@ -918,6 +918,9 @@ def test_mysql_schema_drift_detects_mysql_index_attribute_drift():
             cursor.execute(
                 f"ALTER TABLE `{database}`.index_probe ALTER INDEX ix_index_probe_id INVISIBLE"
             )
+            cursor.execute(
+                f"CREATE FULLTEXT INDEX ix_index_probe_fulltext ON `{database}`.index_probe (label)"
+            )
 
         metadata = MetaData()
         table = Table(
@@ -928,6 +931,7 @@ def test_mysql_schema_drift_detects_mysql_index_attribute_drift():
         )
         Index("ix_index_probe_label", table.c.label)
         Index("ix_index_probe_id", table.c.id)
+        Index("ix_index_probe_fulltext", table.c.label)
 
         url = URL.create(
             "mysql+pymysql",
@@ -956,14 +960,23 @@ def test_mysql_schema_drift_detects_mysql_index_attribute_drift():
                     "visibility": {"expected": "YES", "actual": "NO"},
                 },
             }],
+            "ix_index_probe_fulltext": [{
+                "position": 1,
+                "differences": {
+                    "direction": {"expected": "A", "actual": null},
+                    "index_type": {"expected": "BTREE", "actual": "FULLTEXT"},
+                },
+            }],
         }
 
         with root.cursor() as cursor:
             cursor.execute(
                 f"ALTER TABLE `{database}`.index_probe "
                 "DROP INDEX ix_index_probe_label, DROP INDEX ix_index_probe_id, "
+                "DROP INDEX ix_index_probe_fulltext, "
                 "ADD INDEX ix_index_probe_label (label), "
-                "ADD INDEX ix_index_probe_id (id)"
+                "ADD INDEX ix_index_probe_id (id), "
+                "ADD INDEX ix_index_probe_fulltext (label)"
             )
         with engine.connect() as connection:
             corrected = _schema_metadata_drift(connection, metadata)
