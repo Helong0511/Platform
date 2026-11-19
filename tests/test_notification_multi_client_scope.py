@@ -113,3 +113,38 @@ async def test_notification_record_list_scopes_to_all_linked_client_ids():
     assert total == 3
     sql = str(db.statements[2].compile(dialect=mysql.dialect()))
     assert "postback_notifications.client_id IN (101, 202)" in sql
+
+
+@pytest.mark.asyncio
+async def test_batch_resend_allows_any_linked_client_and_loads_scope_once(monkeypatch):
+    from app.services.notification import commands
+    from app.services.notification.commands import resend_command
+
+    conversion = SimpleNamespace(id=505, client_id=202)
+    db = _DB([_Result([conversion])])
+    scope_calls = []
+    forwarded = []
+
+    async def get_client_ids(_db, user):
+        scope_calls.append(user.id)
+        return [101, 202]
+
+    async def forward_to_publisher(*, conversion, db):
+        forwarded.append(conversion.id)
+
+    monkeypatch.setattr(resend_command, "get_user_client_ids", get_client_ids)
+    monkeypatch.setattr(
+        resend_command.PostbackForwarder,
+        "forward_to_publisher",
+        forward_to_publisher,
+    )
+
+    result = await resend_command.ResendNotificationCommand(db).batch_resend_conversions(
+        [505],
+        _client_user(),
+    )
+
+    assert result["success_count"] == 1
+    assert result["failed_count"] == 0
+    assert forwarded == [505]
+    assert scope_calls == [77]
