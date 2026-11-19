@@ -289,7 +289,7 @@ class SessionService:
         total = total_result.scalar() or 0
 
         # 应用分页和排序
-        query = query.order_by(UserSession.last_activity.desc())
+        query = query.order_by(UserSession.last_activity.desc(), UserSession.id.desc())
         query = query.offset(offset).limit(page_size)
 
         # 执行查询
