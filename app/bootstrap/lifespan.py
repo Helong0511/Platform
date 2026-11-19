@@ -26,7 +26,10 @@ from app.core.telegram.service_notify import (
 from app.core.telegram.shared_state import cleanup_stale_shared_state
 from app.core.timezone_utils import check_and_validate_timezone, log_timezone_info
 from app.db.migrations.gate import verify_schema_revision
-from app.db.schema_contract import BASELINE_MYSQL_TABLE_OPTIONS
+from app.db.schema_contract import (
+    BASELINE_MYSQL_TABLE_OPTIONS,
+    MIGRATION_MYSQL_TABLE_OPTIONS,
+)
 from app.models import Base
 from app.scheduler_module import init_scheduled_tasks, shutdown_scheduler, start_scheduler
 from app.scheduler_module.task_init import init_scheduled_tasks_in_db
@@ -116,7 +119,10 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             if schema_name:
                 tables_by_schema.setdefault(schema_name, []).append(metadata_table.name)
         # 正式 SQL 基线的表级规则与 ORM 显式选项共同构成可核验契约。
-        expected_table_names = set(BASELINE_MYSQL_TABLE_OPTIONS)
+        expected_table_names = (
+            set(BASELINE_MYSQL_TABLE_OPTIONS)
+            | set(MIGRATION_MYSQL_TABLE_OPTIONS)
+        )
         for metadata_table in sorted_tables:
             mysql_options = metadata_table.dialect_options["mysql"]
             if mysql_options.get("charset") or mysql_options.get("collate"):
@@ -575,7 +581,10 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             check_constraint_mismatches[table.fullname] = check_mismatches
 
         if dialect_name == "mysql":
-            expected_options = dict(BASELINE_MYSQL_TABLE_OPTIONS.get(table.name, {}))
+            expected_options = dict(
+                BASELINE_MYSQL_TABLE_OPTIONS.get(table.name)
+                or MIGRATION_MYSQL_TABLE_OPTIONS.get(table.name, {})
+            )
             mysql_options = table.dialect_options["mysql"]
             for option in ("charset", "collate"):
                 expected_value = mysql_options.get(option)
