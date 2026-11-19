@@ -238,7 +238,7 @@ def test_mysql_schema_drift_detects_missing_auto_increment_attribute():
             Column(
                 "id",
                 Integer,
-                ForeignKey("drift_auto_increment.id"),
+                ForeignKey("drift_fk_parent.id"),
                 primary_key=True,
             ),
         )
