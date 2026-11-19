@@ -140,6 +140,7 @@ class DailySummaryQuery:
         sort_by: str = "date",
         sort_order: str = "desc",
         skip_cache: bool = False,
+        max_page_size: int = MAX_PAGE_SIZE,
     ) -> Tuple[List[Dict[str, Any]], int, Dict[str, Any]]:
         """
         获取按统计维度分组的每日汇总列表（分页）。
@@ -148,10 +149,16 @@ class DailySummaryQuery:
             (汇总行字典列表, 分组总数, 全量合计指标)
         """
         # 在缓存查询和数据库查询之前校验，防止服务层被直接调用时触发深分页。
-        if page < 1 or page_size < 1 or page_size > MAX_PAGE_SIZE:
+        if (
+            page < 1
+            or page_size < 1
+            or max_page_size < MAX_PAGE_SIZE
+            or max_page_size > AD_DATA_MAX_OFFSET_ROWS
+            or page_size > max_page_size
+        ):
             raise_api_exception(
                 ErrorCode.INVALID_PARAMETER,
-                detail=f"每日汇总分页参数无效，每页条数必须在 1 到 {MAX_PAGE_SIZE} 之间",
+                detail=f"每日汇总分页参数无效，每页条数必须在 1 到 {max_page_size} 之间",
             )
         offset = (page - 1) * page_size
         if offset > AD_DATA_MAX_OFFSET_ROWS:
