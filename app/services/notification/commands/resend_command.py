@@ -177,12 +177,12 @@ class ResendNotificationCommand:
                     user_client_ids is not None
                     and conversion.client_id not in user_client_ids
                 ):
-                        failed_items.append({
-                            "conversion_id": conversion_id,
-                            "error": "无权补发该转化记录的通知",
-                        })
-                        failed_count += 1
-                        continue
+                    failed_items.append({
+                        "conversion_id": conversion_id,
+                        "error": "无权补发该转化记录的通知",
+                    })
+                    failed_count += 1
+                    continue
 
                 await PostbackForwarder.forward_to_publisher(
                     conversion=conversion, db=self.db
