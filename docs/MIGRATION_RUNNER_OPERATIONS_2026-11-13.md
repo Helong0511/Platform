@@ -582,6 +582,7 @@ CI 证明的是隔离测试正确性；生产放行还需要真实规模 DDL 演
 当前修复：
 - 将 ORM CheckConstraint 的名称和表达式与数据库 Inspector 返回值逐项比较。
 - 规范化表达式中的空白、大小写和标识符反引号，并仅移除完整包裹表达式的冗余外层括号。
+- MySQL Inspector 可能为字符串字面量补充 `_utf8mb4` 等字符集 introducer；该标记不改变字面量值，规范化时会在单引号字面量前移除，避免把 `label <> ''` 与 `label <> _utf8mb4''` 误判为 drift。真正的表达式差异（例如 `OR 1=1`）仍会保留并被检测。
 - MySQL 下额外读取 `information_schema.TABLE_CONSTRAINTS.ENFORCED`；预期约束不存在或不是 `YES` 时，报告 drift 并阻止应用启动。
 - 新增 SQLite 单元回归：同名 CHECK 被 `OR 1=1` 放宽必须检测为 drift。
 - 新增真实 MySQL 集成回归：同名、被放宽且 `NOT ENFORCED` 的 CHECK 必须同时报告表达式不一致和未强制执行；修复为正确表达式并 ENFORCED 后 drift 清零。
