@@ -106,6 +106,11 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         sha256="7728278d87ffbc42e6f6e6b1c6a1d09ab303c62aa6ea0e7778e33a8333f79121",
         depends_on=("20261114_third_party_report_manual_retry_budget", "20261114_third_party_report_platform_binary_collation"),
     ),
+    Migration(
+        revision="20261119_users_password_hash_length",
+        path="sql/migrations/20261119_users_password_hash_length.sql",
+        sha256="28bae4c3bf2559b28ee4810ef43009dcd8b8828fdc2b325c9f69172ae91158a6",
+    ),
 
 )
 
