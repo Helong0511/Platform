@@ -97,6 +97,51 @@ jobs:
           # 卡住时定期输出 Python 线程栈；同时记录最慢测试，避免 45 分钟后只剩取消信息。
           pytest "${TEST_FILES[@]}" -v -rs --tb=short -o faulthandler_timeout=120 --durations=30
 
+
+  password-runtime-compatibility:
+    name: Python 3.13 password hash compatibility
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install pinned password hashing dependencies
+        run: python -m pip install --only-binary=:all: argon2-cffi==25.1.0 bcrypt==5.0.0
+      - name: Verify Argon2id and legacy bcrypt without Passlib or crypt
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import bcrypt
+
+          from app.core.passwords import (
+              hash_password,
+              password_hash_needs_upgrade,
+              verify_password,
+          )
+
+          # Python 3.13 已移除 stdlib crypt；此路径不得依赖 Passlib 或 crypt。
+          assert importlib.util.find_spec("passlib") is None
+          assert importlib.util.find_spec("crypt") is None
+
+          current_password = "Argon2id-Compatibility-123!"
+          current_hash = hash_password(current_password)
+          assert current_hash.startswith("$argon2id$")
+          assert verify_password(current_password, current_hash)
+          assert not verify_password(current_password + "wrong", current_hash)
+
+          legacy_password = "LegacyBcrypt-Compatibility-123!"
+          legacy_hash = bcrypt.hashpw(
+              legacy_password.encode("utf-8"),
+              bcrypt.gensalt(rounds=4),
+          ).decode("ascii")
+          assert verify_password(legacy_password, legacy_hash)
+          assert password_hash_needs_upgrade(legacy_password, legacy_hash)
+
+          print("Python 3.13 Argon2id and legacy bcrypt compatibility passed.")
+          PY
+
   frontend:
     timeout-minutes: 20
     runs-on: ubuntu-latest
