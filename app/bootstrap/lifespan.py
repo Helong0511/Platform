@@ -43,6 +43,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
     missing_columns = {}
     column_type_mismatches = {}
     nullable_mismatches = {}
+    column_attribute_mismatches = {}
     primary_key_mismatches = {}
     index_mismatches = {}
     unique_constraint_mismatches = {}
@@ -106,6 +107,25 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         if absent:
             missing_columns[table.fullname] = absent
 
+        mysql_column_extras = {}
+        if dialect_name == "mysql":
+            # AUTO_INCREMENT 不属于普通类型/NULL 反射信息；从数据字典读取实际属性。
+            schema_name = table.schema or sync_connection.execute(
+                text("SELECT DATABASE()")
+            ).scalar_one_or_none()
+            if schema_name:
+                extra_rows = sync_connection.execute(
+                    text(
+                        "SELECT COLUMN_NAME, EXTRA FROM information_schema.COLUMNS "
+                        "WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME = :table_name"
+                    ),
+                    {"schema_name": schema_name, "table_name": table.name},
+                ).mappings().all()
+                mysql_column_extras = {
+                    row["COLUMN_NAME"]: (row.get("EXTRA") or "").casefold()
+                    for row in extra_rows
+                }
+
         for column in table.columns:
             actual = actual_columns.get(column.name)
             if actual is None:
@@ -124,6 +144,29 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                     "expected": bool(column.nullable),
                     "actual": bool(actual["nullable"]),
                 }
+
+            if dialect_name == "mysql":
+                # SQLAlchemy 的 auto 表示单列整数主键采用方言默认自增规则；
+                # Python default/onupdate 不属于数据库列属性，不在此处推断。
+                expected_autoincrement = column.autoincrement is True or (
+                    column.autoincrement == "auto"
+                    and column.primary_key
+                    and len(table.primary_key.columns) == 1
+                    and isinstance(column.type, Integer)
+                    and not isinstance(column.type, Boolean)
+                )
+                actual_autoincrement = (
+                    "auto_increment" in mysql_column_extras.get(column.name, "")
+                )
+                if expected_autoincrement != actual_autoincrement:
+                    column_attribute_mismatches.setdefault(
+                        table.fullname, {}
+                    )[column.name] = {
+                        "autoincrement": {
+                            "expected": expected_autoincrement,
+                            "actual": actual_autoincrement,
+                        }
+                    }
 
         expected_pk = sorted(column.name for column in table.primary_key.columns)
         actual_pk = sorted(
@@ -324,6 +367,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         "missing_columns": missing_columns,
         "column_type_mismatches": column_type_mismatches,
         "nullable_mismatches": nullable_mismatches,
+        "column_attribute_mismatches": column_attribute_mismatches,
         "primary_key_mismatches": primary_key_mismatches,
         "index_mismatches": index_mismatches,
         "unique_constraint_mismatches": unique_constraint_mismatches,
@@ -345,6 +389,7 @@ async def _verify_database_schema() -> str | None:
                 f"missing_columns={drift['missing_columns']}; "
                 f"column_type_mismatches={drift['column_type_mismatches']}; "
                 f"nullable_mismatches={drift['nullable_mismatches']}; "
+                f"column_attribute_mismatches={drift['column_attribute_mismatches']}; "
                 f"primary_key_mismatches={drift['primary_key_mismatches']}; "
                 f"index_mismatches={drift['index_mismatches']}; "
                 f"unique_constraint_mismatches={drift['unique_constraint_mismatches']}; "
