@@ -23,14 +23,19 @@ logger = logging.getLogger(__name__)
 ConfigModel = TypeVar("ConfigModel")
 
 
-async def get_user_client_id(db: AsyncSession, user: User) -> Optional[int]:
-    """解析客户用户关联的 Client.id（User 本身无 client_id 字段）。"""
+async def get_user_client_ids(db: AsyncSession, user: User) -> list[int]:
+    """解析客户用户关联的全部启用 Client ID，并按 ID 稳定排序。"""
     if user.role != UserRole.CLIENT:
-        return None
+        return []
     result = await db.execute(
-        select(Client.id).where(Client.user_id == user.id).limit(1)
+        select(Client.id)
+        .where(
+            Client.user_id == user.id,
+            Client.is_active.is_(True),
+        )
+        .order_by(Client.id.asc())
     )
-    return result.scalar_one_or_none()
+    return [int(client_id) for client_id in result.scalars().all() if client_id is not None]
 
 
 async def assert_client_config_access(
@@ -41,8 +46,8 @@ async def assert_client_config_access(
     """管理员或客户本人可访问客户通知配置。"""
     if current_user.role == UserRole.ADMIN:
         return
-    user_client_id = await get_user_client_id(db, current_user)
-    if not user_client_id or user_client_id != client_id:
+    user_client_ids = await get_user_client_ids(db, current_user)
+    if client_id not in user_client_ids:
         raise_api_exception(
             ErrorCode.ACCESS_DENIED,
             detail="无权访问该客户的通知配置",
@@ -57,8 +62,8 @@ async def assert_product_config_access(
     """管理员或产品所属客户可访问产品通知配置。"""
     if current_user.role == UserRole.ADMIN:
         return
-    user_client_id = await get_user_client_id(db, current_user)
-    if not user_client_id or user_client_id != product.client_id:
+    user_client_ids = await get_user_client_ids(db, current_user)
+    if product.client_id not in user_client_ids:
         raise_api_exception(
             ErrorCode.ACCESS_DENIED,
             detail="无权访问该产品的通知配置",
@@ -73,8 +78,8 @@ async def assert_notification_record_access(
     """客户仅能访问本 client_id 的通知记录。"""
     if current_user.role == UserRole.ADMIN:
         return
-    user_client_id = await get_user_client_id(db, current_user)
-    if not user_client_id or notification.client_id != user_client_id:
+    user_client_ids = await get_user_client_ids(db, current_user)
+    if notification.client_id not in user_client_ids:
         raise_api_exception(
             ErrorCode.ACCESS_DENIED,
             detail="无权访问该通知记录",
@@ -89,8 +94,8 @@ async def assert_conversion_resend_access(
     """补发权限：管理员或转化所属客户。"""
     if current_user.role == UserRole.ADMIN:
         return
-    user_client_id = await get_user_client_id(db, current_user)
-    if not user_client_id or conversion.client_id != user_client_id:
+    user_client_ids = await get_user_client_ids(db, current_user)
+    if conversion.client_id not in user_client_ids:
         raise_api_exception(
             ErrorCode.ACCESS_DENIED,
             detail="无权补发该转化记录的通知",
