@@ -187,6 +187,8 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
             "column_default_mismatches": {},
             "column_default_unverifiable": {},
             "column_onupdate_mismatches": {},
+            "column_generated_mismatches": {},
+            "column_generated_unverifiable": {},
             "primary_key_mismatches": {},
             "index_mismatches": {},
             "unique_constraint_mismatches": {},
