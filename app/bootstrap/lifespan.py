@@ -161,15 +161,15 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             raw = str(argument).strip()
             # MySQL 可在同一 DEFAULT 子句中声明 ON UPDATE CURRENT_TIMESTAMP。
             timestamp_with_onupdate = re.fullmatch(
-                r"(CURRENT_TIMESTAMP(?:\\(\\d+\\))?)\\s+ON\\s+UPDATE\\s+"
-                r"CURRENT_TIMESTAMP(?:\\(\\d+\\))?",
+                r"(CURRENT_TIMESTAMP(?:\(\d+\))?)\s+ON\s+UPDATE\s+"
+                r"CURRENT_TIMESTAMP(?:\(\d+\))?",
                 raw,
                 flags=re.IGNORECASE,
             )
             if timestamp_with_onupdate:
                 return (
                     "expression",
-                    re.sub(r"\\s+", "", timestamp_with_onupdate.group(1)).casefold(),
+                    re.sub(r"\s+", "", timestamp_with_onupdate.group(1)).casefold(),
                 )
             # text("'literal'") 是显式 SQL 字符串常量；处理 SQL 单引号转义。
             quoted = re.fullmatch(r"'((?:''|[^'])*)'", raw)
@@ -197,7 +197,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             return bool(
                 re.fullmatch(
                     r"CURRENT_TIMESTAMP(?:\\(\\d+\\))?\\s+ON\\s+UPDATE\\s+"
-                    r"CURRENT_TIMESTAMP(?:\\(\\d+\\))?",
+                    r"CURRENT_TIMESTAMP(?:\(\d+\))?",
                     raw,
                     flags=re.IGNORECASE,
                 )
@@ -262,7 +262,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
 
                 actual_onupdate = bool(
                     re.search(
-                        r"\\bon\\s+update\\s+current_timestamp(?:\\(\\d+\\))?",
+                        r"\bon\s+update\s+current_timestamp(?:\(\d+\))?",
                         actual_extra,
                     )
                 )
