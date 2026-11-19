@@ -131,10 +131,30 @@ class ResendNotificationCommand:
         conversion_ids: List[int],
         current_user: User,
     ) -> Dict[str, Any]:
+        if not isinstance(conversion_ids, list):
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="conversion_ids 必须是数组格式",
+            )
         if not conversion_ids:
             raise_api_exception(
                 ErrorCode.VALIDATION_ERROR,
                 detail="转化记录ID列表不能为空",
+            )
+        if any(
+            not isinstance(conversion_id, int)
+            or isinstance(conversion_id, bool)
+            or conversion_id < 1
+            for conversion_id in conversion_ids
+        ):
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="conversion_ids 只能包含正整数",
+            )
+        if len(set(conversion_ids)) != len(conversion_ids):
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="conversion_ids 不能包含重复的转化记录ID",
             )
         if len(conversion_ids) > 50:
             raise_api_exception(
