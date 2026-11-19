@@ -1,8 +1,8 @@
-"""正式 SQL 基线中显式声明的 MySQL 表级字符集/排序规则契约。
+"""MySQL 表级字符集/排序规则契约。
 
-本清单只覆盖 sql/platform.sql 中存在且由 ORM 映射的表。
-未显式声明的表继续继承数据库默认值；迁移创建但不在完整基线中的表不在此猜测。
-更新 sql/platform.sql 的表级选项时，必须同步更新本清单并运行真实 MySQL drift 测试。
+BASELINE_MYSQL_TABLE_OPTIONS 对应 sql/platform.sql 中显式声明且由 ORM 映射的表。
+MIGRATION_MYSQL_TABLE_OPTIONS 对应独立增量 migration 创建、未纳入完整 SQL 基线的 ORM 表。
+未显式声明的表继续继承数据库默认值，不在此猜测。变更 DDL 时必须同步更新契约并运行真实 MySQL drift 测试。
 """
 
 BASELINE_MYSQL_TABLE_OPTIONS: dict[str, dict[str, str]] = {
@@ -45,4 +45,11 @@ BASELINE_MYSQL_TABLE_OPTIONS: dict[str, dict[str, str]] = {
     "user_audit_logs": {"charset": "utf8mb4", "collation": "utf8mb4_0900_ai_ci"},
     "user_sessions": {"charset": "utf8mb4", "collation": "utf8mb4_0900_ai_ci"},
     "users": {"charset": "utf8mb4", "collation": "utf8mb4_0900_ai_ci"},
+}
+
+
+# 独立增量 migration 创建的账本表：保留各自 DDL 明确声明的排序规则。
+MIGRATION_MYSQL_TABLE_OPTIONS: dict[str, dict[str, str]] = {
+    "cap_reservations": {"charset": "utf8mb4", "collation": "utf8mb4_unicode_ci"},
+    "short_link_click_sync_batches": {"charset": "utf8mb4", "collation": "utf8mb4_unicode_ci"},
 }
