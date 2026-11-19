@@ -169,6 +169,7 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
             "missing_columns": {},
             "column_type_mismatches": {},
             "nullable_mismatches": {},
+            "column_attribute_mismatches": {},
             "primary_key_mismatches": {},
             "index_mismatches": {},
             "unique_constraint_mismatches": {},
@@ -176,6 +177,99 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
             "check_constraint_mismatches": {},
             "table_option_mismatches": {},
         }
+    finally:
+        if engine is not None:
+            engine.dispose()
+        with root.cursor() as cursor:
+            cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
+        root.close()
+
+
+def test_mysql_schema_drift_detects_missing_auto_increment_attribute():
+    """AUTO_INCREMENT 是 MySQL 列属性，必须与 ORM 单列整数主键定义一致。"""
+    database = f"platform_ci_drift_{secrets.token_hex(5)}"
+    root = pymysql.connect(
+        host=HOST,
+        port=PORT,
+        user=ROOT_USER,
+        password=ROOT_PASSWORD,
+        charset="utf8mb4",
+        autocommit=True,
+        connect_timeout=5,
+        read_timeout=10,
+        write_timeout=10,
+    )
+    engine = None
+    try:
+        with root.cursor() as cursor:
+            cursor.execute(f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4")
+            cursor.execute(
+                f"CREATE TABLE `{database}`.drift_auto_increment ("
+                "id INT NOT NULL PRIMARY KEY"
+                ") ENGINE=InnoDB"
+            )
+            cursor.execute(
+                f"CREATE TABLE `{database}`.drift_fk_parent ("
+                "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY"
+                ") ENGINE=InnoDB"
+            )
+            cursor.execute(
+                f"CREATE TABLE `{database}`.drift_fk_child ("
+                "id INT NOT NULL PRIMARY KEY, "
+                "CONSTRAINT fk_drift_fk_child_parent FOREIGN KEY (id) "
+                f"REFERENCES `{database}`.drift_fk_parent (id)"
+                ") ENGINE=InnoDB"
+            )
+
+        metadata = MetaData()
+        Table(
+            "drift_auto_increment",
+            metadata,
+            Column("id", Integer, primary_key=True, autoincrement=True),
+        )
+        Table(
+            "drift_fk_parent",
+            metadata,
+            Column("id", Integer, primary_key=True, autoincrement=True),
+        )
+        Table(
+            "drift_fk_child",
+            metadata,
+            Column(
+                "id",
+                Integer,
+                ForeignKey("drift_fk_parent.id"),
+                primary_key=True,
+            ),
+        )
+        url = URL.create(
+            "mysql+pymysql",
+            username=ROOT_USER,
+            password=ROOT_PASSWORD,
+            host=HOST,
+            port=PORT,
+            database=database,
+            query={"charset": "utf8mb4"},
+        )
+        engine = create_engine(url, pool_pre_ping=True)
+        with engine.connect() as connection:
+            drift = _schema_metadata_drift(connection, metadata)
+        assert drift["column_attribute_mismatches"] == {
+            "drift_auto_increment": {
+                "id": {
+                    "autoincrement": {"expected": True, "actual": False}
+                }
+            }
+        }
+
+        with root.cursor() as cursor:
+            cursor.execute(
+                f"ALTER TABLE `{database}`.drift_auto_increment "
+                "MODIFY id INT NOT NULL AUTO_INCREMENT"
+            )
+        with engine.connect() as connection:
+            corrected = _schema_metadata_drift(connection, metadata)
+        assert corrected["column_attribute_mismatches"] == {}
     finally:
         if engine is not None:
             engine.dispose()

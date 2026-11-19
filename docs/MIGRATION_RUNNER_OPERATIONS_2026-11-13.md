@@ -609,3 +609,17 @@ CI 证明的是隔离测试正确性；生产放行还需要真实规模 DDL 演
 - 测试使用 GitHub Actions loopback 临时 MySQL；随机迁移账号、随机 schema 和跨 schema 探针均在 `finally` 清理，不连接或修改生产授权。
 
 **权限边界说明：** 这是当前 manifest SQL 操作集合推导出的候选最小权限，并由隔离 MySQL 测试验证 Runner 现有路径所需权限。它不代表所有未来 migration 都天然兼容；每新增一种 SQL 操作，都必须重新审查权限需求。生产部署仍需核验真实 `SHOW GRANTS`、mandatory roles、proxy user/外部认证映射及目标 MySQL 版本行为。不得给迁移账号授予全局 `ALL PRIVILEGES`、`DROP`、`DELETE`、`GRANT OPTION` 或用户管理权限来绕过失败。
+
+
+## 28. 2026-11-19：Schema Drift 补充核验 MySQL AUTO_INCREMENT
+
+启动时只读 schema drift 检查新增 MySQL 列属性核验：仅对 ORM 明确声明 `Column.autoincrement=True` 的列，读取 `information_schema.COLUMNS.EXTRA` 并核验实际列是否具有 `AUTO_INCREMENT`。SQLAlchemy 的 `autoincrement='auto'` 是方言 DDL 默认策略，不能单独证明既有迁移或外部建表必须具备该属性；因此不把默认推断升级为启动阻断条件。缺失或多出的自增属性会进入 `column_attribute_mismatches`，使应用启动门禁拒绝不一致的 schema。
+
+边界说明：
+
+- 仅 MySQL 方言执行该项检查；SQLite 等测试方言返回空的列属性差异。
+- SQLAlchemy 的 Python 端 `default` / `onupdate` 不等同于数据库列属性，不能据此推断服务器 DEFAULT 或 ON UPDATE。
+- 本项不自动修复数据库，不执行 DDL；真实 MySQL 集成测试只在 GitHub Actions loopback 临时实例中创建和清理随机测试库。
+- DEFAULT、ON UPDATE、生成列、索引前缀/排序方向/可见性/表达式、ENGINE 和分区仍需单独设计并验证，不能因为 AUTO_INCREMENT 检查通过而认为 Schema Drift 已完整覆盖。
+
+官方依据：MySQL 8.0 `INFORMATION_SCHEMA.COLUMNS.EXTRA` 对 `auto_increment`、`on update CURRENT_TIMESTAMP` 和生成列属性提供可查询信息；SQLAlchemy 的 MySQL 方言文档明确说明 `Column.server_onupdate` 本身不会生成 MySQL 的 `ON UPDATE CURRENT_TIMESTAMP` 子句。
