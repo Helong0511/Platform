@@ -867,3 +867,27 @@ async def test_db_fallback_commit_response_loss_is_verified_by_event_ledger(monk
     assert state["commits"] == 1
     assert len(state["ledger"]) == 1
     assert invalidated == ["db-ambiguous-code"]
+
+
+def test_short_link_click_sync_batch_matches_migration_contract():
+    """点击刷盘账本 ORM 必须覆盖 migration 的字段、主键、索引和服务器默认值。"""
+    from app.models import Base, ShortLinkClickSyncBatch
+
+    table = Base.metadata.tables.get("short_link_click_sync_batches")
+    assert table is ShortLinkClickSyncBatch.__table__
+    assert len(table.columns) == 5
+    assert [column.name for column in table.primary_key.columns] == ["batch_id"]
+    assert table.c.batch_id.type.length == 64
+    assert table.c.short_code.type.length == 20
+    assert table.c.created_at.nullable is False
+    assert table.c.created_at.server_default is not None
+    assert str(table.c.created_at.server_default.arg).upper() == "CURRENT_TIMESTAMP"
+
+    indexes = {
+        index.name: tuple(column.name for column in index.columns)
+        for index in table.indexes
+    }
+    assert indexes == {
+        "idx_short_click_batch_code_created": ("short_code", "created_at"),
+        "idx_short_click_batch_ack_created": ("acknowledged_at", "created_at"),
+    }
