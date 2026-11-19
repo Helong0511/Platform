@@ -131,7 +131,7 @@
 ### 已确认的缺口与风险边界
 
 1. `verify_client_request()` 只验证时间戳窗口（默认 ±15 秒）和签名，没有 nonce 或服务端已用签名记录。因此，同一份合法签名请求可在窗口内被重复提交。当前两个客户开放端点（`/client_products`、`/client_data`）均为查询型接口，本轮没有发现该鉴权器被用于扣款、转化写入等非幂等操作；故目前应定性为**查询重放 / 资源放大风险**，不能夸大为已证实的资金或业务状态篡改漏洞。
-2. （历史发现，2026-11-17）客户广告数据 API 当时未限制日期跨度，且页码/页大小组合可能产生极大 OFFSET。日期跨度已由 PR #24 限制为 90 天；深分页预算由 PR #26 增加 100000 行 OFFSET 硬上限，当前等待 CI 验收，不能提前视为已合并。
+2. （历史发现，2026-11-17）客户广告数据 API 当时未限制日期跨度，且页码/页大小组合可能产生极大 OFFSET。日期跨度已由 PR #24 限制为 90 天；深分页预算已由 PR #26 增加 100000 行 OFFSET 硬上限并合并 main（`436dfc9163423384b5722453072e8beb92d7b5a4`），PR 与合并后 main CI 均通过。
 3. 增加强制 nonce 或请求去重会改变客户重试行为；若直接按签名拒绝重复请求，合法网络重试也会被拒绝。实施前应确定协议升级方案（例如可选 nonce 的过渡期、幂等响应缓存/请求 ID、Redis 不可用时的安全策略），并为旧版客户端制定明确兼容期限。当前没有贸然改变开放 API 协议。
 
 ### 当前 CI 证据更新
@@ -142,7 +142,7 @@
 - Frontend：依赖安装/审计、Lint、Build、Playwright Mock API E2E 全通过。
 - CI 使用隔离 MySQL 8.0 / Redis 7.4、合成数据和 Mock API，不证明生产数据库权限、生产代理或第三方真实网络已验收。
 
-本节为 2026-11-17 的历史审查记录；请求重放保护随后已补充 Redis 原子认领。查询资源限额的深分页部分由 PR #26 继续处理，等待 CI 验收。
+本节为 2026-11-17 的历史审查记录；请求重放保护随后已补充 Redis 原子认领，查询资源限额的深分页部分已由 PR #26 修复并合并 main。
 
 ### 2026-11-18 请求重放防护修复（PR 验收中）
 
@@ -154,23 +154,32 @@
 - **运行条件限制：** Redis key 若被 maxmemory 淘汰策略提前驱逐，短期重放键可能消失。生产必须为该 Redis 实例/专用实例保留足够内存，并采用 `maxmemory-policy noeviction`（内存耗尽时写入失败并触发 503）；部署前需核验真实 Redis 配置与监控告警。当前 CI 只证明 Redis `SET NX EX` 语义与故障 fail-closed，不证明生产 Redis 的内存策略、持久化或 HA 配置。
 - 此方案不增加客户端请求字段，兼容现有签名格式；合法客户端的重试必须重新生成 `req_time` 和签名。若客户端在网络超时后原样重放同一请求，将收到 409，应在客户端按当前时间重新签名后重试。
 
-本修复仅覆盖 `/client_products` 和 `/client_data` 当前共享的 `verify_client_request()` 认证路径；不等同于全系统 API nonce / webhook 重放保护。日期跨度已由 PR #24 限制；大偏移分页由 PR #26 增加 100000 行 OFFSET 上限，仍待 CI 验收和合并。
+本修复仅覆盖 `/client_products` 和 `/client_data` 当前共享的 `verify_client_request()` 认证路径；不等同于全系统 API nonce / webhook 重放保护。日期跨度已由 PR #24 限制；大偏移分页已由 PR #26 增加 100000 行 OFFSET 上限并合并 main。
 
 
-## 2026-11-19 补充：Client API 深分页资源预算（PR #26，待验收）
+## 2026-11-19 补充：Client API 深分页资源预算（PR #26 已合并）
 
 - 新增 `CLIENT_API_MAX_OFFSET_ROWS=100000`，API 入口按实际页大小计算 `(page - 1) * page_size`，超过预算时在执行广告数据查询前拒绝。
 - `ClientAdDataQuery.fetch()` 同时执行服务层防线，避免内部调用绕过 API 层约束。
 - 回归测试覆盖超限拒绝、恰好 100000 行 OFFSET 的边界允许，以及服务层在数据库访问前拒绝。
 - PR #26 首轮 Full Audit CI 曾发现错误响应 detail 被误写成单元素 tuple；已修正为字符串并触发新一轮 CI。该问题会影响错误响应结构。
-- 在 PR #26 最新 HEAD 的 Full Audit CI 与 Emergency Security CI 均通过前，不将此项标记为完成；合并后仍需观察真实客户分页调用与慢查询指标，必要时进一步采用游标分页。
+- PR #26 已 squash 合并，main commit `436dfc9163423384b5722453072e8beb92d7b5a4`；PR Full Audit CI #44447565948 与 Emergency Security CI #44447566036 均通过。合并后 main Full Audit CI #44447795340（767 passed、1 skipped、1 warning）与 Security CI #44447795332 均通过。仍需观察真实客户分页调用与慢查询指标，必要时进一步采用游标分页。
 
 
-## 2026-11-19 补充：通知模块多 Client 用户范围修复（待 CI 验收）
+## 2026-11-19 补充：通知模块多 Client 用户范围修复（PR #27 已合并）
 
 - 复核发现通知模块的 `get_user_client_id()` 仅取用户关联的第一条 Client，且未限定 `Client.is_active`；这与项目已支持同一客户用户关联多个 Client 的模型不一致。
 - 影响范围包括客户/产品通知配置读取、通知记录列表与详情、单条通知补发、批量通知补发，以及按 conversion_id 自动补建通知记录的归属检查。
 - 已改为 `get_user_client_ids()`：只查询当前用户全部启用 Client，按 ID 稳定排序；客户数据访问统一使用集合成员校验或 SQL `IN (...)` 条件。
 - 批量补发在循环外一次读取 Client 范围，避免每条 conversion 重复查询权限范围。
 - 新增测试覆盖多 Client ID 收集、启用状态过滤、通知配置/详情/补发权限、列表 SQL 范围和批量补发第二个 Client 的成功路径。
-- 此修复是修正合法客户用户的范围过度收窄；当前没有证据表明此前存在跨客户数据泄露。等待 Full Audit CI 与 Emergency Security CI 验收后再合并。
+- 此修复是修正合法客户用户的范围过度收窄；当前没有证据表明此前存在跨客户数据泄露。PR #27 已 squash 合并，main commit `a554a79df7cec91819034199448eb891fccd9786`；PR Full Audit CI #44448656568 与 Emergency Security CI #44448656600 均通过，合并后 main Full Audit CI #44448917902（772 passed、1 skipped、1 warning）与 Security CI #44448917757 均通过。
+
+
+## 2026-11-19 补充：通知记录列表分页预算与稳定排序（PR 待验收）
+
+- 复核发现通知记录列表此前仅按 `created_at DESC` 排序；相同时间戳的记录没有唯一 tie-breaker，OFFSET 翻页可能出现重复或遗漏。
+- 同时服务层没有最大 OFFSET 限制，虽路由限制 page_size 不超过 100，但任意大的 page 仍可能触发深分页。
+- 本次增加 `NOTIFICATION_MAX_OFFSET_ROWS=100000`，服务层校验 page/page_size 与 OFFSET，超过预算在执行数据库查询前拒绝。
+- 排序改为 `created_at DESC, id DESC`，为相同时间戳提供确定性顺序。
+- 新增测试覆盖非法分页/超限拒绝、100000 行边界允许和稳定排序 SQL。等待 PR CI 验收。
