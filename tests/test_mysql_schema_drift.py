@@ -9,6 +9,7 @@ import pytest
 import pymysql
 from sqlalchemy import (
     Column,
+    Computed,
     DateTime,
     FetchedValue,
     CheckConstraint,
@@ -565,6 +566,77 @@ def test_mysql_schema_drift_detects_unmodeled_on_update_clause():
             fetched = _schema_metadata_drift(connection, fetched_value_metadata)
         # FetchedValue 可能代表触发器，不可推断它必须使用 MySQL 列级 ON UPDATE。
         assert fetched["column_onupdate_mismatches"] == {}
+    finally:
+        if engine is not None:
+            engine.dispose()
+        with root.cursor() as cursor:
+            cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
+        root.close()
+
+
+def test_mysql_schema_drift_detects_generated_columns_and_expression_changes():
+    """检测意外生成列、表达式漂移及显式 VIRTUAL/STORED 属性。"""
+    database = f"platform_ci_generated_{secrets.token_hex(5)}"
+    root = pymysql.connect(
+        host=HOST, port=PORT, user=ROOT_USER, password=ROOT_PASSWORD,
+        charset="utf8mb4", autocommit=True, connect_timeout=5,
+        read_timeout=10, write_timeout=10,
+    )
+    engine = None
+    try:
+        with root.cursor() as cursor:
+            cursor.execute(f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4")
+            cursor.execute(
+                f"CREATE TABLE `{database}`.generated_probe ("
+                "base_value INT NOT NULL, "
+                "generated_virtual INT GENERATED ALWAYS AS (base_value + 1) VIRTUAL, "
+                "generated_stored INT GENERATED ALWAYS AS (base_value * 2) STORED"
+                ") ENGINE=InnoDB"
+            )
+        url = URL.create(
+            "mysql+pymysql", username=ROOT_USER, password=ROOT_PASSWORD,
+            host=HOST, port=PORT, database=database, query={"charset": "utf8mb4"},
+        )
+        engine = create_engine(url, pool_pre_ping=True)
+
+        plain_metadata = MetaData()
+        Table(
+            "generated_probe", plain_metadata,
+            Column("base_value", Integer, nullable=False),
+            Column("generated_virtual", Integer),
+            Column("generated_stored", Integer),
+        )
+        with engine.connect() as connection:
+            unexpected = _schema_metadata_drift(connection, plain_metadata)
+        assert set(unexpected["column_generated_mismatches"]["generated_probe"]) == {
+            "generated_virtual", "generated_stored"
+        }
+
+        matching_metadata = MetaData()
+        Table(
+            "generated_probe", matching_metadata,
+            Column("base_value", Integer, nullable=False),
+            Column("generated_virtual", Integer, Computed("base_value + 1", persisted=False)),
+            Column("generated_stored", Integer, Computed("base_value * 2", persisted=True)),
+        )
+        with engine.connect() as connection:
+            aligned = _schema_metadata_drift(connection, matching_metadata)
+        assert aligned["column_generated_mismatches"] == {}
+        assert aligned["column_generated_unverifiable"] == {}
+
+        changed_metadata = MetaData()
+        Table(
+            "generated_probe", changed_metadata,
+            Column("base_value", Integer, nullable=False),
+            Column("generated_virtual", Integer, Computed("base_value + 2", persisted=True)),
+            Column("generated_stored", Integer, Computed("base_value * 2", persisted=True)),
+        )
+        with engine.connect() as connection:
+            changed = _schema_metadata_drift(connection, changed_metadata)
+        assert changed["column_generated_mismatches"]["generated_probe"]["generated_virtual"] == {
+            "expression": {"expected": "base_value + 2", "actual": "(`base_value` + 1)"},
+            "persisted": {"expected": "stored", "actual": "virtual"},
+        }
     finally:
         if engine is not None:
             engine.dispose()
