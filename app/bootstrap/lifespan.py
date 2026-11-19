@@ -60,6 +60,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
     column_collation_mismatches = {}
     primary_key_mismatches = {}
     index_mismatches = {}
+    index_attribute_mismatches = {}
     unique_constraint_mismatches = {}
     foreign_key_mismatches = {}
     check_constraint_mismatches = {}
@@ -110,6 +111,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
     # MySQL 列属性和表级字符集规则按 schema 批量读取，避免逐列/逐表往返。
     mysql_column_extras_by_table = {}
     mysql_table_options_by_table = {}
+    mysql_index_parts_by_table = {}
     default_schema = None
     if dialect_name == "mysql":
         default_schema = sync_connection.execute(text("SELECT DATABASE()")).scalar_one_or_none()
@@ -154,6 +156,25 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             "FROM information_schema.COLUMNS "
             "WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME IN :table_names"
         ).bindparams(bindparam("table_names", expanding=True))
+        # 索引结构同样按 schema 批量读取；Inspector 的列名列表不包含 MySQL 前缀、
+        # 方向、索引方法、函数 key part 和可见性等完整属性。
+        index_parts_statement = text(
+            "SELECT TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX, COLUMN_NAME, EXPRESSION, "
+            "COLLATION, SUB_PART, INDEX_TYPE, IS_VISIBLE "
+            "FROM information_schema.STATISTICS "
+            "WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME IN :table_names "
+            "ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX"
+        ).bindparams(bindparam("table_names", expanding=True))
+        for schema_name, table_names in tables_by_schema.items():
+            index_rows = sync_connection.execute(
+                index_parts_statement,
+                {"schema_name": schema_name, "table_names": sorted(set(table_names))},
+            ).mappings().all()
+            for row in index_rows:
+                table_key = (schema_name, row["TABLE_NAME"])
+                mysql_index_parts_by_table.setdefault(table_key, {}).setdefault(
+                    row["INDEX_NAME"], []
+                ).append(row)
         for schema_name, table_names in tables_by_schema.items():
             extra_rows = sync_connection.execute(
                 column_extras_statement,
@@ -463,6 +484,102 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                 "actual": actual_indexes,
             }
 
+        if dialect_name == "mysql":
+            actual_index_parts = mysql_index_parts_by_table.get(
+                (mysql_schema_name, table.name), {}
+            )
+            attribute_mismatches = {}
+            for expected_index in table.indexes:
+                if not expected_index.name:
+                    continue
+                expected_columns = list(expected_index.expressions)
+                expected_using = (
+                    expected_index.dialect_options["mysql"].get("using") or "BTREE"
+                ).upper()
+                expected_length = expected_index.dialect_options["mysql"].get("length")
+                actual_parts = actual_index_parts.get(expected_index.name, [])
+                if not actual_parts:
+                    # 名称/列集合缺失已由 index_mismatches 报告，不重复生成属性告警。
+                    continue
+                part_mismatches = []
+                for position, expression in enumerate(expected_columns):
+                    if position >= len(actual_parts):
+                        part_mismatches.append({
+                            "position": position + 1,
+                            "expected": "index key part",
+                            "actual": None,
+                        })
+                        continue
+                    actual_part = actual_parts[position]
+                    modifier = getattr(expression, "modifier", None)
+                    direction = "D" if getattr(modifier, "__name__", "") == "desc_op" else "A"
+                    base_expression = getattr(expression, "element", expression)
+                    expected_column = getattr(base_expression, "name", None)
+                    if isinstance(expected_length, dict):
+                        prefix_length = expected_length.get(expected_column)
+                    else:
+                        prefix_length = expected_length
+                    actual_expression = actual_part.get("EXPRESSION")
+                    actual_column = actual_part.get("COLUMN_NAME")
+                    actual_direction = actual_part.get("COLLATION")
+                    actual_prefix = actual_part.get("SUB_PART")
+                    actual_type = str(actual_part.get("INDEX_TYPE") or "").upper()
+                    actual_visibility = str(actual_part.get("IS_VISIBLE") or "").upper()
+                    differences = {}
+                    if expected_column is not None and (
+                        actual_column != expected_column or actual_expression is not None
+                    ):
+                        differences["column_or_expression"] = {
+                            "expected_column": expected_column,
+                            "actual_column": actual_column,
+                            "actual_expression": actual_expression,
+                        }
+                    elif expected_column is None:
+                        # 非简单列表达式目前不做文本等价推断，避免错误地宣称已核验。
+                        differences["expression"] = {
+                            "expected": str(expression),
+                            "actual": actual_expression,
+                            "verification": "unsupported_expression_metadata",
+                        }
+                    if (int(actual_prefix) if actual_prefix is not None else None) != (
+                        int(prefix_length) if prefix_length is not None else None
+                    ):
+                        differences["prefix_length"] = {
+                            "expected": prefix_length,
+                            "actual": actual_prefix,
+                        }
+                    if actual_direction != direction:
+                        differences["direction"] = {
+                            "expected": direction,
+                            "actual": actual_direction,
+                        }
+                    if actual_type != expected_using:
+                        differences["index_type"] = {
+                            "expected": expected_using,
+                            "actual": actual_type,
+                        }
+                    if actual_visibility != "YES":
+                        differences["visibility"] = {
+                            "expected": "YES",
+                            "actual": actual_visibility,
+                        }
+                    if differences:
+                        part_mismatches.append({
+                            "position": position + 1,
+                            "differences": differences,
+                        })
+                if len(actual_parts) != len(expected_columns):
+                    part_mismatches.append({
+                        "key_part_count": {
+                            "expected": len(expected_columns),
+                            "actual": len(actual_parts),
+                        }
+                    })
+                if part_mismatches:
+                    attribute_mismatches[expected_index.name] = part_mismatches
+            if attribute_mismatches:
+                index_attribute_mismatches[table.fullname] = attribute_mismatches
+
         expected_unique = sorted({
             tuple(column.name for column in constraint.columns)
             for constraint in table.constraints
@@ -619,6 +736,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         "column_collation_mismatches": column_collation_mismatches,
         "primary_key_mismatches": primary_key_mismatches,
         "index_mismatches": index_mismatches,
+        "index_attribute_mismatches": index_attribute_mismatches,
         "unique_constraint_mismatches": unique_constraint_mismatches,
         "foreign_key_mismatches": foreign_key_mismatches,
         "check_constraint_mismatches": check_constraint_mismatches,
