@@ -9,7 +9,7 @@ import enum
 import uuid
 
 from app.core.utils import get_app_now_naive
-from app.models.base import Base, pwd_context, UserRole
+from app.models.base import Base, UserRole
 
 class SensitivePathProbeLog(Base):
     """

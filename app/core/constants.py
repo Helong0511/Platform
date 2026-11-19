@@ -4,8 +4,10 @@
 """
 
 # ====== 密码相关常量 ======
-# bcrypt算法限制：密码最大72字节
-BCRYPT_MAX_PASSWORD_LENGTH = 72
+# 密码 API 当前最大字符数；Argon2id 本身不受 bcrypt 的 72 字节限制。
+PASSWORD_MAX_LENGTH = 72
+# 兼容旧模块导入；新代码统一使用 PASSWORD_MAX_LENGTH。
+BCRYPT_MAX_PASSWORD_LENGTH = PASSWORD_MAX_LENGTH
 # 密码最小长度
 PASSWORD_MIN_LENGTH = 6
 

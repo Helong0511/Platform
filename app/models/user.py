@@ -9,7 +9,8 @@ import enum
 import uuid
 
 from app.core.utils import get_app_now_naive
-from app.models.base import Base, pwd_context, UserRole
+from app.models.base import Base, UserRole
+from app.core.passwords import hash_password, verify_password, password_hash_needs_upgrade
 
 class User(Base):
     """
@@ -23,7 +24,7 @@ class User(Base):
     字段说明：
     - id: 用户唯一标识，自增主键
     - username: 登录用户名，唯一且必填，最大50字符
-    - hashed_password: 加密后的密码，使用bcrypt算法，最大191字符（MySQL限制）
+    - hashed_password: 密码哈希（新密码使用 Argon2id，兼容历史 bcrypt）
     - full_name: 用户全名，可选
     - email: 用户邮箱，唯一且可选，用于找回密码等
     - role: 用户角色，枚举类型（ADMIN/CLIENT），默认CLIENT
@@ -45,7 +46,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='用户ID')
     username = Column(String(50), unique=True, nullable=False, comment='用户名称(登录名称)')
-    hashed_password = Column('hashed_password', String(100), nullable=False, comment='用户Hash密码')
+    hashed_password = Column('hashed_password', String(191), nullable=False, comment='用户Hash密码')
     full_name = Column(String(100), comment='用户全名')
     email = Column(String(100), unique=True, comment='用户邮箱')
     role = Column(Enum(UserRole, values_callable=lambda obj: [e.value for e in UserRole], create_constraint=True), 
@@ -76,14 +77,17 @@ class User(Base):
                 # 密码验证成功
                 pass
         """
-        return pwd_context.verify(password, self.hashed_password)
+        return verify_password(password, self.hashed_password)
+
+    def needs_password_rehash(self, password: str) -> bool:
+        """判断当前已验证密码哈希是否需要并且可以安全升级。"""
+        return password_hash_needs_upgrade(password, self.hashed_password)
 
     def get_password_hash(self, password: str) -> str:
         """
-        获取密码的bcrypt哈希值
+        生成当前密码哈希（Argon2id）。
         
-        注意：bcrypt算法最大支持72字节的密码，超过部分会被截断
-        这是bcrypt算法的限制，不是bug
+        历史 bcrypt 哈希仅用于兼容验证；新密码不再受 bcrypt 72 字节限制。
         
         Args:
             password: 明文密码
@@ -94,10 +98,7 @@ class User(Base):
         示例:
             hashed = user.get_password_hash("my_password")
         """
-        # bcrypt算法限制：密码最大72字节，超过部分会被截断
-        from app.core.constants import BCRYPT_MAX_PASSWORD_LENGTH
-        truncated_password = password.encode('utf-8')[:BCRYPT_MAX_PASSWORD_LENGTH].decode('utf-8', errors='ignore')
-        return pwd_context.hash(truncated_password)
+        return hash_password(password)
     
     def set_password(self, password: str) -> None:
         """

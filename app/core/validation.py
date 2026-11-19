@@ -42,7 +42,7 @@
 
 注意事项：
 1. 所有用户输入都应该经过验证和清理
-2. 密码验证遵循bcrypt限制（最大72字节）
+2. 密码 API 当前限制为最多72个字符；密码哈希由 Argon2id 负责。
 3. SQL注入和XSS检测仅用于警告，实际防护依赖参数化查询和HTML转义
 4. Postback URL占位符验证确保只使用系统支持的变量
 """
@@ -50,6 +50,7 @@ import re
 from apscheduler.triggers.cron import CronTrigger
 
 from app.core.config import settings
+from app.core.constants import PASSWORD_MAX_LENGTH
 # Python 3.10+ 使用内置类型注解
 from html import escape
 import logging
@@ -306,8 +307,8 @@ def validate_password_strength(password: str) -> tuple[bool, str | None]:
     if len(password) < 6:
         return False, "密码至少需要6个字符"
 
-    if len(password) > 72:
-        return False, "密码不能超过72个字符（bcrypt限制）"
+    if len(password) > PASSWORD_MAX_LENGTH:
+        return False, f"密码不能超过{PASSWORD_MAX_LENGTH}个字符"
 
     # 检查是否包含字母和数字
     has_letter = re.search(r'[a-zA-Z]', password)

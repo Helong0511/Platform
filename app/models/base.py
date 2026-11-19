@@ -8,10 +8,8 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
 import uuid
-from passlib.context import CryptContext
 from app.core.utils import get_app_now_naive
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 Base = declarative_base()
 
 
