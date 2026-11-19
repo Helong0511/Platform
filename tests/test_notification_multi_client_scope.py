@@ -140,6 +140,7 @@ async def test_batch_resend_allows_any_linked_client_and_loads_scope_once(monkey
 
     async def forward_to_publisher(*, conversion, db):
         forwarded.append(conversion.id)
+        return SimpleNamespace(id=900 + conversion.id, success=True)
 
     monkeypatch.setattr(resend_command, "get_user_client_ids", get_client_ids)
     monkeypatch.setattr(

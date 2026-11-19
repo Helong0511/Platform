@@ -46,9 +46,22 @@ class ResendNotificationCommand:
         await assert_conversion_resend_access(self.db, current_user, conversion)
 
         try:
-            await PostbackForwarder.forward_to_publisher(conversion=conversion, db=self.db)
+            forward_log = await PostbackForwarder.forward_to_publisher(
+                conversion=conversion,
+                db=self.db,
+            )
+            if forward_log is None:
+                raise_api_exception(
+                    ErrorCode.OPERATION_FAILED,
+                    detail="未找到可用渠道或有效的 Postback 配置，未执行补发",
+                )
             logger.info("用户 %s 补发转化通知: conversion_id=%s", current_user.id, conversion_id)
-            return {"message": "通知已补发", "conversion_id": conversion_id}
+            return {
+                "message": "通知已补发" if forward_log.success else "下游未确认成功，已记录失败结果",
+                "conversion_id": conversion_id,
+                "success": bool(forward_log.success),
+                "forward_log_id": forward_log.id,
+            }
         except HTTPException:
             raise
         except Exception as e:
@@ -100,7 +113,15 @@ class ResendNotificationCommand:
                     detail=f"转化记录ID {forward_log.conversion_id} 不存在",
                 )
 
-            await PostbackForwarder.forward_to_publisher(conversion=conversion, db=self.db)
+            new_forward_log = await PostbackForwarder.forward_to_publisher(
+                conversion=conversion,
+                db=self.db,
+            )
+            if new_forward_log is None:
+                raise_api_exception(
+                    ErrorCode.OPERATION_FAILED,
+                    detail="未找到可用渠道或有效的 Postback 配置，未执行补发",
+                )
             logger.info(
                 "用户 %s 基于转发日志补发通知: forward_log_id=%s, conversion_id=%s",
                 current_user.id,
@@ -108,9 +129,15 @@ class ResendNotificationCommand:
                 forward_log.conversion_id,
             )
             return {
-                "message": "通知已补发",
+                "message": (
+                    "通知已补发"
+                    if new_forward_log.success
+                    else "下游未确认成功，已记录失败结果"
+                ),
                 "forward_log_id": forward_log_id,
                 "conversion_id": forward_log.conversion_id,
+                "success": bool(new_forward_log.success),
+                "new_forward_log_id": new_forward_log.id,
             }
         except HTTPException:
             raise
@@ -204,9 +231,25 @@ class ResendNotificationCommand:
                     failed_count += 1
                     continue
 
-                await PostbackForwarder.forward_to_publisher(
-                    conversion=conversion, db=self.db
+                forward_log = await PostbackForwarder.forward_to_publisher(
+                    conversion=conversion,
+                    db=self.db,
                 )
+                if forward_log is None:
+                    failed_items.append({
+                        "conversion_id": conversion_id,
+                        "error": "未找到可用渠道或有效的 Postback 配置，未执行补发",
+                    })
+                    failed_count += 1
+                    continue
+                if not forward_log.success:
+                    failed_items.append({
+                        "conversion_id": conversion_id,
+                        "error": "下游未确认成功，已记录失败结果",
+                        "forward_log_id": forward_log.id,
+                    })
+                    failed_count += 1
+                    continue
                 logger.info(
                     "用户 %s 批量补发转化通知: conversion_id=%s",
                     current_user.id,
