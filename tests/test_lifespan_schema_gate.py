@@ -131,3 +131,44 @@ async def test_legacy_create_tables_helper_fails_closed_without_ddl():
     """旧入口保留兼容名称，但不得再绕过 Migration Runner 创建表。"""
     with pytest.raises(RuntimeError, match="独立 MIGRATION_DATABASE_URL"):
         await create_tables()
+
+
+@pytest.mark.asyncio
+async def test_lifespan_schema_verification_fails_on_explicit_column_collation_drift(monkeypatch):
+    drift = {
+        "missing_tables": [],
+        "missing_columns": {},
+        "column_type_mismatches": {},
+        "nullable_mismatches": {},
+        "column_attribute_mismatches": {},
+        "column_default_mismatches": {},
+        "column_default_unverifiable": {},
+        "column_onupdate_mismatches": {},
+        "column_generated_mismatches": {},
+        "column_generated_unverifiable": {},
+        "column_visibility_mismatches": {},
+        "column_collation_mismatches": {
+            "third_party_report_logs": {
+                "lease_token": {
+                    "expected": {"character_set": "ascii", "collation": "ascii_bin"},
+                    "actual": {"character_set": "ascii", "collation": "ascii_general_ci"},
+                }
+            }
+        },
+        "primary_key_mismatches": {},
+        "index_mismatches": {},
+        "unique_constraint_mismatches": {},
+        "foreign_key_mismatches": {},
+        "check_constraint_mismatches": {},
+        "table_option_mismatches": {},
+    }
+    connection = _FakeConnection(drift)
+
+    async def fake_gate(_connection):
+        return "20261113_latest"
+
+    monkeypatch.setattr(lifespan, "engine", _FakeEngine(connection))
+    monkeypatch.setattr(lifespan, "verify_schema_revision", fake_gate)
+
+    with pytest.raises(RuntimeError, match="column_collation_mismatches"):
+        await lifespan._verify_database_schema()
