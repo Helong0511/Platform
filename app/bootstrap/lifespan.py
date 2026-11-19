@@ -457,7 +457,19 @@ async def _verify_database_schema() -> str | None:
     async with engine.connect() as connection:
         current_revision = await verify_schema_revision(connection)
         drift = await connection.run_sync(_schema_metadata_drift)
-        if any(drift.values()):
+        unverifiable_defaults = drift.get("column_default_unverifiable") or {}
+        if unverifiable_defaults:
+            # 无法安全解释的 DEFAULT 表达式只告警，不伪装成已确认的结构差异。
+            logger.warning(
+                "以下 MySQL server_default 表达式暂不支持自动比较：%s",
+                unverifiable_defaults,
+            )
+        confirmed_drift = any(
+            value
+            for key, value in drift.items()
+            if key != "column_default_unverifiable"
+        )
+        if confirmed_drift:
             raise RuntimeError(
                 "数据库 schema 与 ORM 不一致："
                 f"missing_tables={drift['missing_tables']}; "
