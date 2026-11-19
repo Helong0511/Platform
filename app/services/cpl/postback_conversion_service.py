@@ -195,7 +195,7 @@ class PostbackConversionService:
                         deduction_query = deduction_query.where(ConversionDeductionLog.created_at <= end_datetime)
                     except ValueError:
                         pass
-                deduction_query = deduction_query.order_by(ConversionDeductionLog.created_at.desc())
+                deduction_query = deduction_query.order_by(ConversionDeductionLog.created_at.desc(), ConversionDeductionLog.id.desc())
                 deduction_result = await db.execute(deduction_query)
                 deduction_logs = deduction_result.scalars().all()
 
