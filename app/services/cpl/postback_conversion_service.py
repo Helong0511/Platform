@@ -169,7 +169,7 @@ class PostbackConversionService:
             count_elapsed_ms = int((perf_counter() - count_started_at) * 1000)
 
             # 分页查询
-            query = query.order_by(PostbackConversion.created_at.desc())
+            query = query.order_by(PostbackConversion.created_at.desc(), PostbackConversion.id.desc())
             query = query.offset(offset).limit(page_size)
 
             list_started_at = perf_counter()
