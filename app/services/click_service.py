@@ -334,7 +334,7 @@ class ClickService:
         count_elapsed_ms = int((perf_counter() - count_started_at) * 1000)
 
         # 分页和排序
-        query = query.order_by(Click.click_time.desc())
+        query = query.order_by(Click.click_time.desc(), Click.id.desc())
         query = query.offset(offset).limit(page_size)
 
         list_started_at = perf_counter()
