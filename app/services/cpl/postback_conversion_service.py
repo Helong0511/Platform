@@ -26,6 +26,7 @@ from sqlalchemy.future import select
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
+from app.core.pagination import calculate_pagination_offset
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from app.models.models import (
     OfferPublisherAssignment,
@@ -89,6 +90,9 @@ class PostbackConversionService:
         Returns:
             PaginatedResponseBaseSchema: 含转化列表、total、分页元数据
         """
+        offset = calculate_pagination_offset(
+            page, page_size, resource_name="Postback 转化列表", max_page_size=1000
+        )
         started_at = perf_counter()
         try:
             attr_filter = (
@@ -166,7 +170,7 @@ class PostbackConversionService:
 
             # 分页查询
             query = query.order_by(PostbackConversion.created_at.desc())
-            query = query.offset((page - 1) * page_size).limit(page_size)
+            query = query.offset(offset).limit(page_size)
 
             list_started_at = perf_counter()
             result = await db.execute(query)

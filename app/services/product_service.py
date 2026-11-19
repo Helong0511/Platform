@@ -33,6 +33,7 @@ from app.core.product_name import (
     is_duplicate_product_name_error,
     normalize_product_name,
 )
+from app.core.pagination import calculate_pagination_offset
 import logging
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,7 @@ class ProductService(BaseService[Product]):
         Returns:
             (产品列表, 总条数)
         """
+        offset = calculate_pagination_offset(page, page_size, resource_name="产品列表")
         # 构建查询 - 使用JOIN优化
         query = select(Product)
 
@@ -199,7 +201,6 @@ class ProductService(BaseService[Product]):
         total = total_result.scalar() or 0
 
         # 分页查询（使用selectinload优化客户信息加载）
-        offset = (page - 1) * page_size
         query = query.options(selectinload(Product.client))
         query = query.order_by(Product.created_at.desc())
         query = query.offset(offset).limit(page_size)

@@ -23,6 +23,7 @@ from app.core.constants import MAX_PAGE_SIZE
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
+from app.core.pagination import calculate_pagination_offset
 from app.core.security import get_current_user, require_admin
 from app.core.utils import get_app_now_naive
 from app.models.models import User, AffiliateTest, Publisher, Offer, OfferPublisherAssignment
@@ -212,6 +213,7 @@ async def get_affiliate_tests(
     权限：仅管理员；用于排查下游对接问题。
     """
     # ---------- 入口：参数与依赖准备 ----------
+    offset = calculate_pagination_offset(page, page_size, resource_name="下游联调测试记录")
     query = select(AffiliateTest)
 
     # ---------- 条件分支 ----------
@@ -232,7 +234,7 @@ async def get_affiliate_tests(
 
     # 分页
     query = query.order_by(AffiliateTest.postback_time.desc())
-    query = query.offset((page - 1) * page_size).limit(page_size)
+    query = query.offset(offset).limit(page_size)
 
     result = await db.execute(query)
     tests = result.scalars().all()

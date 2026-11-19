@@ -12,6 +12,9 @@ from sqlalchemy import func, and_, or_, desc, asc
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.sql import Select
 
+from app.core.constants import MAX_INTERNAL_PAGE_SIZE
+from app.core.pagination import calculate_pagination_offset
+
 T = TypeVar('T')
 
 
@@ -141,10 +144,16 @@ class QueryBuilder:
         Returns:
             QueryBuilder实例
         """
+        # 通用构建器允许受控内部导出批量读取，但页大小与 OFFSET 仍必须有硬上限。
+        offset = calculate_pagination_offset(
+            page,
+            page_size,
+            resource_name="通用查询列表",
+            max_page_size=MAX_INTERNAL_PAGE_SIZE,
+        )
         if self._query is None:
             self.base()
-        
-        offset = (page - 1) * page_size
+
         self._query = self._query.offset(offset).limit(page_size)
         
         return self

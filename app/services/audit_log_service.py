@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.audit_log import log_user_action, commit_audit_log
+from app.core.pagination import calculate_pagination_offset
 from app.core.infrastructure.cache_compat import (
     generate_cache_key,
     invalidate_cache,
@@ -115,6 +116,7 @@ class AuditLogService:
         Returns:
             (日志列表, 总条数)
         """
+        offset = calculate_pagination_offset(page, page_size, resource_name="审计日志")
         query = select(UserAuditLog)
         count_query = select(func.count(UserAuditLog.id))
 
@@ -156,7 +158,7 @@ class AuditLogService:
 
         # 排序和分页
         query = query.order_by(UserAuditLog.created_at.desc())
-        query = query.offset((page - 1) * page_size).limit(page_size)
+        query = query.offset(offset).limit(page_size)
 
         # 执行查询
         result = await self.db.execute(query)

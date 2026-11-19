@@ -24,6 +24,7 @@ from sqlalchemy.orm import selectinload
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.fulltext_search import search_with_fulltext
+from app.core.pagination import calculate_pagination_offset
 from app.models.models import Client, User, UserRole, Product, Publisher
 from app.services.base_service import BaseService
 
@@ -62,6 +63,7 @@ class ClientService(BaseService[Client]):
         Returns:
             (客户列表, 总条数)；默认按 id 降序
         """
+        offset = calculate_pagination_offset(page, page_size, resource_name="客户列表")
         query = select(Client).options(selectinload(Client.user))
         count_query = select(func.count(Client.id))
 
@@ -88,7 +90,7 @@ class ClientService(BaseService[Client]):
             count_query = count_query.where(Client.is_active == is_active)
 
         total = (await self.db.execute(count_query)).scalar() or 0
-        query = query.order_by(Client.id.desc()).offset((page - 1) * page_size).limit(page_size)
+        query = query.order_by(Client.id.desc()).offset(offset).limit(page_size)
         result = await self.db.execute(query)
         return list(result.scalars().all()), int(total)
 

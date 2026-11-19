@@ -17,6 +17,36 @@ from app.core.exceptions import raise_api_exception
 
 
 
+def validate_pagination_offset(
+    offset: int,
+    page_size: int,
+    *,
+    resource_name: str = "数据列表",
+    max_page_size: int = MAX_PAGE_SIZE,
+    max_offset_rows: int = MAX_OFFSET_ROWS,
+) -> int:
+    """校验显式 OFFSET/LIMIT，必须在数据库/缓存访问前调用。"""
+    if (
+        not isinstance(offset, int)
+        or isinstance(offset, bool)
+        or offset < 0
+        or not isinstance(page_size, int)
+        or isinstance(page_size, bool)
+        or page_size < 1
+        or page_size > max_page_size
+    ):
+        raise_api_exception(
+            ErrorCode.INVALID_PARAMETER,
+            detail=f"{resource_name}分页参数无效，偏移量必须为非负整数且每页条数在 1 到 {max_page_size} 之间",
+        )
+    if offset > max_offset_rows:
+        raise_api_exception(
+            ErrorCode.INVALID_PARAMETER,
+            detail=f"{resource_name}分页偏移量不能超过 {max_offset_rows} 条",
+        )
+    return offset
+
+
 def calculate_pagination_offset(
     page: int,
     page_size: int,
@@ -25,7 +55,7 @@ def calculate_pagination_offset(
     max_page_size: int = MAX_PAGE_SIZE,
     max_offset_rows: int = MAX_OFFSET_ROWS,
 ) -> int:
-    """校验分页参数并返回安全 OFFSET，必须在数据库/缓存访问前调用。"""
+    """校验页码并返回安全 OFFSET，必须在数据库/缓存访问前调用。"""
     if (
         not isinstance(page, int)
         or isinstance(page, bool)
@@ -39,14 +69,13 @@ def calculate_pagination_offset(
             ErrorCode.INVALID_PARAMETER,
             detail=f"{resource_name}分页参数无效，每页条数必须在 1 到 {max_page_size} 之间",
         )
-
-    offset = (page - 1) * page_size
-    if offset > max_offset_rows:
-        raise_api_exception(
-            ErrorCode.INVALID_PARAMETER,
-            detail=f"{resource_name}分页偏移量不能超过 {max_offset_rows} 条",
-        )
-    return offset
+    return validate_pagination_offset(
+        (page - 1) * page_size,
+        page_size,
+        resource_name=resource_name,
+        max_page_size=max_page_size,
+        max_offset_rows=max_offset_rows,
+    )
 
 
 # 泛型类型变量

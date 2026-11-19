@@ -26,6 +26,7 @@ from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import get_app_now_naive
+from app.core.pagination import calculate_pagination_offset
 from app.core.dependencies import get_session_service
 from app.services.session_service import SessionService
 from app.core.audit_log import log_user_action, commit_audit_log
@@ -336,6 +337,8 @@ async def get_blacklist(
     - 支持按用户ID筛选
     - 返回分页结果
     """
+    # 分页预算必须在 count 查询前执行，防止超深分页消耗数据库资源。
+    offset = calculate_pagination_offset(page, page_size, resource_name="Token 黑名单列表")
     # ---------- 入口：参数与依赖准备 ----------
     # 构建查询，关联用户表获取用户名
     
@@ -361,7 +364,6 @@ async def get_blacklist(
     total = total_result.scalar() or 0
     
     # 分页查询
-    offset = (page - 1) * page_size
     query = query.offset(offset).limit(page_size)
     
     result = await db.execute(query)

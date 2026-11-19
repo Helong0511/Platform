@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utils import get_app_now_naive
+from app.core.pagination import validate_pagination_offset
 from app.models.ad_data_health import (
     AdDataDayBaseline,
     AdDataHealthAlert,
@@ -502,6 +503,12 @@ async def list_baselines(
     limit: int = 200,
     offset: int = 0,
 ) -> tuple[list[dict[str, Any]], int]:
+    validate_pagination_offset(
+        offset,
+        limit,
+        resource_name="广告数据健康基线",
+        max_page_size=1000,
+    )
     filters = []
     if stat_date:
         filters.append(AdDataDayBaseline.stat_date == stat_date)
@@ -558,6 +565,12 @@ async def list_alerts(
     limit: int = 100,
     offset: int = 0,
 ) -> tuple[list[dict[str, Any]], int]:
+    validate_pagination_offset(
+        offset,
+        limit,
+        resource_name="广告数据健康告警",
+        max_page_size=500,
+    )
     filters = []
     if stat_date:
         filters.append(AdDataHealthAlert.stat_date == stat_date)

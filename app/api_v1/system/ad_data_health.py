@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.pagination import validate_pagination_offset
 from app.core.security import require_admin
 from app.core.utils import get_app_now
 from app.models.models import User
@@ -169,6 +170,12 @@ async def get_alerts(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_admin),
 ):
+    validate_pagination_offset(
+        offset,
+        limit,
+        resource_name="广告数据健康告警",
+        max_page_size=500,
+    )
     items, total = await bs.list_alerts(
         db,
         stat_date=_parse_date(stat_date),
@@ -193,6 +200,12 @@ async def get_baselines(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_admin),
 ):
+    validate_pagination_offset(
+        offset,
+        limit,
+        resource_name="广告数据健康基线",
+        max_page_size=1000,
+    )
     items, total = await bs.list_baselines(
         db,
         stat_date=_parse_date(stat_date),

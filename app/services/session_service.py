@@ -28,6 +28,7 @@ from sqlalchemy.future import select
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.utils import get_app_now_naive
+from app.core.pagination import calculate_pagination_offset
 from app.models.models import User
 from app.models.session import UserSession, TokenBlacklist
 
@@ -96,6 +97,7 @@ class SessionService:
         Returns:
             (会话列表, 总条数)；按 last_activity 降序
         """
+        offset = calculate_pagination_offset(page, page_size, resource_name="我的会话列表")
         # 活跃会话：expires_at 存应用时区 naive 时间
         now = get_app_now_naive()
         query = select(UserSession).where(
@@ -115,7 +117,7 @@ class SessionService:
 
         # 应用分页和排序
         query = query.order_by(UserSession.last_activity.desc())
-        query = query.offset((page - 1) * page_size).limit(page_size)
+        query = query.offset(offset).limit(page_size)
 
         # 执行查询
         result = await self.db.execute(query)
@@ -260,6 +262,8 @@ class SessionService:
         Returns:
             (会话列表, 总条数)
         """
+        # 分页预算必须先于用户存在性查询执行，避免无效深分页仍访问数据库。
+        offset = calculate_pagination_offset(page, page_size, resource_name="用户会话列表")
         # 前置校验：避免对无效 user_id 做无意义分页查询
         user_result = await self.db.execute(select(User.id).where(User.id == user_id))
         user_exists = user_result.scalar() is not None
@@ -286,7 +290,7 @@ class SessionService:
 
         # 应用分页和排序
         query = query.order_by(UserSession.last_activity.desc())
-        query = query.offset((page - 1) * page_size).limit(page_size)
+        query = query.offset(offset).limit(page_size)
 
         # 执行查询
         result = await self.db.execute(query)

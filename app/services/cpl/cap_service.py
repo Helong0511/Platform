@@ -22,6 +22,7 @@ from sqlalchemy.orm import joinedload
 
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
+from app.core.pagination import calculate_pagination_offset
 from app.core.utils import get_app_now_naive
 from app.models.models import OfferCap, Offer, Publisher, User
 from app.schemas.cpl.cap import OfferCapResponse
@@ -271,6 +272,7 @@ class CapService(BaseService[OfferCap]):
         Returns:
             tuple[List[OfferCap], int]: (当前页列表, 总条数)
         """
+        offset = calculate_pagination_offset(page, page_size, resource_name="Cap 配置列表")
         query = select(OfferCap)
 
         if cap_type:
@@ -294,7 +296,7 @@ class CapService(BaseService[OfferCap]):
 
         # 分页
         query = query.order_by(OfferCap.created_at.desc())
-        query = query.offset((page - 1) * page_size).limit(page_size)
+        query = query.offset(offset).limit(page_size)
 
         # 使用joinedload优化关联查询，减少N+1查询问题
         query = query.options(

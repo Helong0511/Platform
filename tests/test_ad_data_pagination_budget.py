@@ -146,3 +146,30 @@ async def test_daily_summary_allows_exact_offset_boundary(monkeypatch):
     assert total == 100001
     assert grand_total == {"total_revenue": 1}
     assert db.statements == []
+
+
+@pytest.mark.asyncio
+async def test_daily_summary_allows_explicit_bounded_export_page_size(monkeypatch):
+    db = _DB()
+    query = DailySummaryQuery(db)
+    expected_items = [{"date": "2026-11-19"}]
+
+    async def fetch_uncached(**kwargs):
+        assert kwargs["page"] == 1
+        assert kwargs["page_size"] == 50000
+        return expected_items, 50000, {"total_revenue": 1}
+
+    monkeypatch.setattr(query, "_fetch_uncached", fetch_uncached)
+
+    items, total, grand_total = await query.fetch(
+        current_user=_admin(),
+        page=1,
+        page_size=50000,
+        max_page_size=50000,
+        skip_cache=True,
+    )
+
+    assert items == expected_items
+    assert total == 50000
+    assert grand_total == {"total_revenue": 1}
+    assert db.statements == []

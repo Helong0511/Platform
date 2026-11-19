@@ -32,6 +32,8 @@ REDIS_MAX_CONNECTIONS_DEFAULT = 20
 DEFAULT_PAGE_SIZE = 20
 # 最大每页大小
 MAX_PAGE_SIZE = 100
+# 通用 QueryBuilder 内部批量读取上限（例如用户 Excel 导出），不对外部 API 放开。
+MAX_INTERNAL_PAGE_SIZE = 50000
 # 全局分页最大 OFFSET（行数），高频/大表列表统一使用该预算。
 MAX_OFFSET_ROWS = 100000
 # 广告数据列表/每日汇总最大 OFFSET（行数），避免任意大页码触发深分页扫描。

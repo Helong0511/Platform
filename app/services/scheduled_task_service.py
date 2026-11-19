@@ -27,6 +27,7 @@ from app.core.constants import MAX_TASK_NAME_LENGTH, QUERY_TIMEOUT, SCHEDULED_TA
 from app.core.errors import ErrorCode
 from fastapi import HTTPException
 from app.core.exceptions import raise_api_exception
+from app.core.pagination import calculate_pagination_offset
 from app.core.fulltext_search import search_with_fulltext
 from app.core.utils import get_app_now_naive
 from app.core.validation import sanitize_input
@@ -75,6 +76,7 @@ class ScheduledTaskService:
         Returns:
             (任务列表, 总条数)
         """
+        offset = calculate_pagination_offset(page, page_size, resource_name="定时任务列表")
         # 构建查询条件
         conditions = []
         if is_active is not None:
@@ -139,7 +141,6 @@ class ScheduledTaskService:
             )
 
         # 分页
-        offset = (page - 1) * page_size
         query = query.offset(offset).limit(page_size)
 
         # 执行查询（添加超时保护，避免长时间阻塞）

@@ -10,6 +10,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 
 from app.models.models import ConversionDeductionLog
+from app.core.pagination import calculate_pagination_offset
 
 
 class DeductionLogsQuery:
@@ -30,6 +31,7 @@ class DeductionLogsQuery:
         conversion_id: Optional[int] = None,
         click_id: Optional[str] = None,
     ) -> Tuple[List[ConversionDeductionLog], int]:
+        offset = calculate_pagination_offset(page, page_size, resource_name="扣减执行日志")
         conditions = self._build_conditions(
             start_date,
             end_date,
@@ -50,7 +52,7 @@ class DeductionLogsQuery:
             query = query.where(and_(*conditions))
         query = (
             query.order_by(ConversionDeductionLog.created_at.desc())
-            .offset((page - 1) * page_size)
+            .offset(offset)
             .limit(page_size)
             .options(
                 joinedload(ConversionDeductionLog.advertiser),
