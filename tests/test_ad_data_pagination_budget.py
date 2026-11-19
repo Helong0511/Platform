@@ -69,7 +69,11 @@ async def test_daily_summary_rejects_invalid_or_deep_pagination_before_cache_or_
     async def unexpected_fetch(**kwargs):
         raise AssertionError("deep pagination must be rejected before cache/DB work")
 
+    async def unexpected_cache(*args, **kwargs):
+        raise AssertionError("deep pagination must be rejected before cache/DB work")
+
     monkeypatch.setattr(DailySummaryQuery, "_fetch_uncached", unexpected_fetch)
+    monkeypatch.setattr(daily_summary_query, "ad_data_get_or_set", unexpected_cache)
 
     with pytest.raises(HTTPException):
         await DailySummaryQuery(db).fetch(
