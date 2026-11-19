@@ -647,6 +647,7 @@ async def _verify_database_schema() -> str | None:
                 f"column_generated_mismatches={drift['column_generated_mismatches']}; "
                 f"column_generated_unverifiable={drift['column_generated_unverifiable']}; "
                 f"column_visibility_mismatches={drift['column_visibility_mismatches']}; "
+                f"column_collation_mismatches={drift['column_collation_mismatches']}; "
                 f"primary_key_mismatches={drift['primary_key_mismatches']}; "
                 f"index_mismatches={drift['index_mismatches']}; "
                 f"unique_constraint_mismatches={drift['unique_constraint_mismatches']}; "
