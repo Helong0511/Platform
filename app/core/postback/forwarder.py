@@ -122,7 +122,7 @@ class PostbackForwarder:
         db: AsyncSession,
         click_association: Optional[Dict[str, Any]] = None,
         target_publisher_id: Optional[int] = None,
-    ) -> None:
+    ) -> Optional[PostbackForwardLog]:
         """
         将转化数据转发给渠道（Publisher）的 Postback URL
         
@@ -194,7 +194,7 @@ class PostbackForwarder:
         # 如果没有找到 publisher_id，跳过转发
         if not publisher_id:
             logger.debug("没有 Publisher ID，跳过转发")
-            return
+            return None
         
         # 从缓存中获取渠道信息
         logger.info(f"获取渠道信息：publisher_id={publisher_id}")
@@ -203,12 +203,12 @@ class PostbackForwarder:
         # 检查渠道是否存在且有 postback_url
         if not publisher or not publisher.postback_url:
             logger.warning(f"渠道无 Postback URL：publisher_id={publisher_id}")
-            return
+            return None
         
         # 检查渠道是否激活
         if not publisher.is_active:
             logger.warning(f"渠道未激活：publisher_id={publisher_id}")
-            return
+            return None
         
         # 详细日志：渠道信息
         logger.info(f"=== 渠道信息 ===")
@@ -393,6 +393,10 @@ class PostbackForwarder:
                 response_content=response_content,
                 db=db
             )
+
+        # 返回真实转发日志，让手动补发入口区分跳过、成功和下游失败。
+        return forward_log
+
     
     @staticmethod
     async def _send_failure_notification(
