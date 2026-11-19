@@ -871,7 +871,8 @@ async def test_db_fallback_commit_response_loss_is_verified_by_event_ledger(monk
 
 def test_short_link_click_sync_batch_matches_migration_contract():
     """点击刷盘账本 ORM 必须覆盖 migration 的字段、主键、索引和服务器默认值。"""
-    from app.models import Base, ShortLinkClickSyncBatch
+    from app.models import Base
+    from app.models.postback import ShortLinkClickSyncBatch
 
     table = Base.metadata.tables.get("short_link_click_sync_batches")
     assert table is ShortLinkClickSyncBatch.__table__
