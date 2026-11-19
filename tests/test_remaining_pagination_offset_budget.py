@@ -10,6 +10,8 @@ from app.services.client_service import ClientService
 from app.services.product_service import ProductService
 from app.services.cpl.publisher_service import PublisherService
 from app.services.cpl.advertiser_service import AdvertiserService
+from app.services.cpl.discount_service import DiscountService
+from app.services.cpl.postback_conversion_service import PostbackConversionService
 from app.services.cpl.cap_service import CapService
 from app.services.scheduled_task_service import ScheduledTaskService
 from app.services.cpl.offer.queries.list_query import OfferListQuery
@@ -64,6 +66,7 @@ def _admin():
             {"current_user": _admin(), "page": 1002, "page_size": 100},
         ),
         (CapService, "get_caps", {"page": 1002, "page_size": 100}),
+        (DiscountService, "get_discounts", {"page": 1002, "page_size": 100}),
         (
             ScheduledTaskService,
             "get_scheduled_tasks",
@@ -214,6 +217,33 @@ async def test_affiliate_test_list_rejects_deep_pagination_before_db():
         await get_affiliate_tests(
             page=1002,
             page_size=100,
+            db=db,
+            current_user=_admin(),
+        )
+
+    assert db.statements == []
+
+
+@pytest.mark.asyncio
+async def test_postback_conversion_list_rejects_deep_pagination_before_db():
+    db = _NoDB()
+
+    with pytest.raises(HTTPException):
+        await PostbackConversionService().get_postback_conversions(
+            request=SimpleNamespace(),
+            platform=None,
+            product_id=None,
+            client_id=None,
+            conversion_or_click_id=None,
+            click_id=None,
+            offer_id=None,
+            publisher_id=None,
+            advertiser_id=None,
+            conversion_status=None,
+            start_date=None,
+            end_date=None,
+            page=102,
+            page_size=1000,
             db=db,
             current_user=_admin(),
         )
