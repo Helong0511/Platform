@@ -202,7 +202,7 @@ class ProductService(BaseService[Product]):
 
         # 分页查询（使用selectinload优化客户信息加载）
         query = query.options(selectinload(Product.client))
-        query = query.order_by(Product.created_at.desc())
+        query = query.order_by(Product.created_at.desc(), Product.id.desc())
         query = query.offset(offset).limit(page_size)
 
         result = await self.db.execute(query)
