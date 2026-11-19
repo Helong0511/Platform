@@ -294,9 +294,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             }
 
         if dialect_name == "mysql" and expected_checks:
-            schema_name = table.schema or sync_connection.execute(
-                text("SELECT DATABASE()")
-            ).scalar_one_or_none()
+            schema_name = table.schema or default_schema
             if schema_name:
                 enforced_rows = sync_connection.execute(
                     text(
