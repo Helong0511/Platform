@@ -1291,7 +1291,7 @@ PR #1 继续 Open / Draft；本轮不合并 main、不部署、不连接生产�
 - main 分支保护状态仍未建立可靠证据；上线前必须确认 PR 审核、Full Audit CI、Emergency Security CI、禁止 force-push 与禁止删除规则。
 
 
-## 2026-11-19 补充：OFFSET 分页稳定排序（PR 待验收）
+## 2026-11-19 合并验收：OFFSET 分页稳定排序（PR #36 已合并）
 
 - 复核发现多个列表只按 created_at/click_time/last_activity 等非唯一字段排序；相同时间戳记录的相对顺序不确定，数据插入或并发写入时可能导致 OFFSET 翻页重复/遗漏。
 - 已为点击记录、Postback 转发/待确认/转化记录、短链接、广告主、渠道、产品、Offer、扣量、审计日志、会话、Cap、广告健康告警/基线、敏感路径探测、第三方上报和联调测试等列表增加唯一主键 ID 次级排序。
