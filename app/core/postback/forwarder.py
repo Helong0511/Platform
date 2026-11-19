@@ -130,6 +130,10 @@ class PostbackForwarder:
             conversion: 转化记录
             db: 数据库会话
             click_association: Click 关联信息（可选）
+
+        Returns:
+            None：未找到有效渠道或渠道未配置/未启用，未发送请求；
+            PostbackForwardLog：已尝试发送并持久化真实下游结果。
         """
         logger.info(f"开始转发 Postback 到渠道：conversion_id={conversion.id}")
         
