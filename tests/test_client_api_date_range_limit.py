@@ -142,3 +142,47 @@ async def test_client_query_service_rejects_deep_offset_without_database_access(
             page=102,
             page_size=1000,
         )
+
+
+@pytest.mark.asyncio
+async def test_client_data_allows_offset_at_exact_safety_boundary(monkeypatch):
+    async def verify(*args, **kwargs):
+        return SimpleNamespace(id=17, user_id=7, company_name="isolated")
+
+    monkeypatch.setattr(client_api, "verify_client_request", verify)
+    monkeypatch.setattr(client_api, "get_client_ip", lambda request: "192.0.2.10")
+    captured = {}
+
+    async def fetch(self, **kwargs):
+        captured.update(kwargs)
+        return [], 0
+
+    async def get_names(db, user_id):
+        return "isolated-user", "Isolated User"
+
+    monkeypatch.setattr(client_api.ClientAdDataQuery, "fetch", fetch)
+    monkeypatch.setattr(client_api, "_get_client_user_names", get_names)
+
+    request = SimpleNamespace(
+        method="POST",
+        url=SimpleNamespace(path="/client_data"),
+        headers={"user-agent": "isolated-test"},
+    )
+    payload = client_api.ClientDataRequest(
+        client_id=17,
+        req_time=int(datetime.now(timezone.utc).timestamp()),
+        sign="isolated-signature",
+        page=101,
+        page_size=1000,
+    )
+
+    response = await client_api.get_client_data(
+        request=request,
+        background_tasks=_BackgroundTasks(),
+        api_request=payload,
+        db=SimpleNamespace(),
+    )
+
+    assert response.total == 0
+    assert captured["page"] == 101
+    assert captured["page_size"] == 1000
