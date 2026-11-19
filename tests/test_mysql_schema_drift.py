@@ -190,6 +190,7 @@ def test_mysql_schema_drift_detects_and_accepts_index_fk_and_collation_changes()
             "column_onupdate_mismatches": {},
             "column_generated_mismatches": {},
             "column_generated_unverifiable": {},
+            "column_visibility_mismatches": {},
             "primary_key_mismatches": {},
             "index_mismatches": {},
             "unique_constraint_mismatches": {},
@@ -593,6 +594,11 @@ def test_mysql_schema_drift_detects_generated_columns_and_expression_changes():
                 "generated_stored INT GENERATED ALWAYS AS (base_value * 2) STORED"
                 ") ENGINE=InnoDB"
             )
+            cursor.execute(
+                f"CREATE TABLE `{database}`.visibility_probe ("
+                "id INT NOT NULL PRIMARY KEY, hidden_value INT INVISIBLE"
+                ") ENGINE=InnoDB"
+            )
         url = URL.create(
             "mysql+pymysql", username=ROOT_USER, password=ROOT_PASSWORD,
             host=HOST, port=PORT, database=database, query={"charset": "utf8mb4"},
@@ -611,6 +617,20 @@ def test_mysql_schema_drift_detects_generated_columns_and_expression_changes():
             unexpected = _schema_metadata_drift(connection, plain_metadata)
         assert set(unexpected["column_generated_mismatches"]["generated_probe"]) == {
             "generated_virtual", "generated_stored"
+        }
+
+        visibility_metadata = MetaData()
+        Table(
+            "visibility_probe", visibility_metadata,
+            Column("id", Integer, primary_key=True),
+            Column("hidden_value", Integer),
+        )
+        with engine.connect() as connection:
+            visibility = _schema_metadata_drift(connection, visibility_metadata)
+        assert visibility["column_visibility_mismatches"] == {
+            "visibility_probe": {
+                "hidden_value": {"expected": "visible", "actual": "invisible"}
+            }
         }
 
         matching_metadata = MetaData()
