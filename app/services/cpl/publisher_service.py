@@ -24,6 +24,7 @@ from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.validation import validate_postback_url_placeholders
+from app.core.pagination import calculate_pagination_offset
 from app.models.models import Publisher, Client, User, UserRole, OfferPublisherAssignment
 from app.services.base_service import BaseService
 
@@ -89,6 +90,7 @@ class PublisherService(BaseService[Publisher]):
         Raises:
             APIException: 记录不存在或无权访问
         """
+        offset = calculate_pagination_offset(page, page_size, resource_name="渠道列表")
         query = select(Publisher).where(Publisher.id == publisher_id)
 
         # 如果需要客户信息，使用selectinload优化查询
@@ -175,7 +177,6 @@ class PublisherService(BaseService[Publisher]):
         total = total_result.scalar() or 0
 
         # 分页查询（使用selectinload优化客户信息加载）
-        offset = (page - 1) * page_size
         query = query.options(
             selectinload(Publisher.client).selectinload(Client.user)
         )
