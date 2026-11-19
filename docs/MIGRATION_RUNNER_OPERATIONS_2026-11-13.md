@@ -589,13 +589,15 @@ CI 证明的是隔离测试正确性；生产放行还需要真实规模 DDL 演
 
 ### 26.2 边界与后续工作
 
-此修复只增强 CHECK 表达式及 MySQL 强制执行状态检查，不代表完整 schema diff 已完成。当前 ORM drift gate 仍需继续评估：
-- 列 DEFAULT / ON UPDATE、AUTO_INCREMENT、生成列及其表达式；
-- 列级字符集/排序规则（当前主要检查 ORM 显式定义的表级 charset/collation 和 String 类型显式 collation）；
-- 表 ENGINE、分区、索引前缀长度、索引排序方向、可见性及表达式索引；
-- CHECK 表达式的语义等价形式可能因 MySQL/SQLAlchemy 反射格式不同而出现保守误报；遇到误报应补充明确的规范化/版本适配，不得简单退回名称匹配。
+此修复只增强 CHECK 表达式及 MySQL 强制执行状态检查。结合截至 2026-11-19 的后续提交，当前 ORM drift gate 已覆盖列 DEFAULT / ON UPDATE、显式 AUTO_INCREMENT、generated column 及表达式、INVISIBLE 列、显式列级字符集/排序规则，以及主键、索引、唯一约束、外键和 CHECK 约束。
 
-本次没有自动修改数据库约束，也没有执行生产 DDL。真实 MySQL 测试仅在 GitHub Actions loopback 临时实例运行；最新 PR HEAD CI 通过后再验收。
+当前仍需单独评估：
+- 表 ENGINE、分区；
+- 索引前缀长度、索引排序方向、索引级可见性及表达式索引；
+- ORM 未显式声明 charset/collation 时继承的表/库默认值；当前 gate 不猜测默认值；
+- CHECK 表达式语义等价形式可能因 MySQL/SQLAlchemy 反射格式不同而出现保守误报；遇到误报应补充明确的规范化/版本适配，不得简单退回名称匹配。
+
+本次没有自动修改数据库约束，也没有执行生产 DDL。真实 MySQL 测试仅在 GitHub Actions loopback 临时实例运行；发布前仍需对目标环境执行只读结构核验和迁移演练。
 
 ## 27. 2026-11-19：Migration Runner 独立迁移账号最小权限真实 MySQL 验证
 
@@ -623,3 +625,19 @@ CI 证明的是隔离测试正确性；生产放行还需要真实规模 DDL 演
 - DEFAULT、ON UPDATE、生成列、索引前缀/排序方向/可见性/表达式、ENGINE 和分区仍需单独设计并验证，不能因为 AUTO_INCREMENT 检查通过而认为 Schema Drift 已完整覆盖。
 
 官方依据：MySQL 8.0 `INFORMATION_SCHEMA.COLUMNS.EXTRA` 对 `auto_increment`、`on update CURRENT_TIMESTAMP` 和生成列属性提供可查询信息；SQLAlchemy 的 MySQL 方言文档明确说明 `Column.server_onupdate` 本身不会生成 MySQL 的 `ON UPDATE CURRENT_TIMESTAMP` 子句。
+
+
+## 29. 2026-11-19：MySQL 列级字符集与排序规则漂移检查
+
+PR #47 在现有批量 `information_schema.COLUMNS` 查询中增加 `CHARACTER_SET_NAME` 和 `COLLATION_NAME`，不增加逐列查询。
+
+- 仅当 ORM 的字符串列类型显式声明 collation 时才比较；预期字符集依据 MySQL collation 命名规则从名称前缀确定，例如 `utf8mb4_bin` 对应 `utf8mb4`、`ascii_bin` 对应 `ascii`。
+- 真实 MySQL 集成测试分别覆盖 `utf8mb4_bin` 与 `ascii_bin`：数据库被改成大小写/重音不敏感 collation 时必须报告 drift；修正列级定义后差异清零。
+- 列级差异记录在 `column_collation_mismatches`，属于确认的 schema drift，会阻止只读启动 Schema Gate；不会自动 ALTER。
+- ORM 未显式指定 collation 时，不推断数据库/表默认值，避免将继承默认值误报为显式要求。
+- 现有表级 `mysql_charset` / `mysql_collate` 检查保持不变。
+
+官方依据：
+- MySQL `INFORMATION_SCHEMA.COLUMNS` 提供字符列的 `CHARACTER_SET_NAME` 和 `COLLATION_NAME`：https://dev.mysql.com/doc/refman/8.0/en/information-schema-columns-table.html
+- MySQL collation 名称通常以其字符集名称开头，`_ci` 表示大小写不敏感、`_bin` 表示二进制排序规则：https://dev.mysql.com/doc/refman/8.0/en/charset-collation-names.html
+- 列级 CHARACTER SET / COLLATE 的定义语义：https://dev.mysql.com/doc/refman/8.0/en/charset-column.html

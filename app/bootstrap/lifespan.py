@@ -53,6 +53,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
     column_generated_mismatches = {}
     column_generated_unverifiable = {}
     column_visibility_mismatches = {}
+    column_collation_mismatches = {}
     primary_key_mismatches = {}
     index_mismatches = {}
     unique_constraint_mismatches = {}
@@ -112,7 +113,8 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
             if schema_name:
                 tables_by_schema.setdefault(schema_name, []).append(metadata_table.name)
         column_extras_statement = text(
-            "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_DEFAULT, EXTRA, GENERATION_EXPRESSION "
+            "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_DEFAULT, EXTRA, GENERATION_EXPRESSION, "
+            "CHARACTER_SET_NAME, COLLATION_NAME "
             "FROM information_schema.COLUMNS "
             "WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME IN :table_names"
         ).bindparams(bindparam("table_names", expanding=True))
@@ -128,6 +130,8 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                     "extra": (row.get("EXTRA") or "").casefold(),
                     "default": row.get("COLUMN_DEFAULT"),
                     "generation_expression": row.get("GENERATION_EXPRESSION"),
+                    "character_set": row.get("CHARACTER_SET_NAME"),
+                    "collation": row.get("COLLATION_NAME"),
                 }
 
     for table in sorted_tables:
@@ -284,6 +288,28 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
                 expected_autoincrement = column.autoincrement is True
                 column_extra = mysql_column_extras.get(column.name, {})
                 actual_extra = column_extra.get("extra", "")
+                # 仅核验 ORM 显式声明的列级 collation；未指定时遵循表/库默认值，不猜测。
+                expected_collation = getattr(column.type, "collation", None)
+                if expected_collation:
+                    expected_collation = str(expected_collation)
+                    # MySQL collation 名称以字符集名称作为前缀，例如 utf8mb4_bin / ascii_bin。
+                    expected_charset = expected_collation.split("_", 1)[0]
+                    actual_collation = column_extra.get("collation")
+                    actual_charset = column_extra.get("character_set")
+                    if (
+                        (actual_collation or "").casefold() != expected_collation.casefold()
+                        or (actual_charset or "").casefold() != expected_charset.casefold()
+                    ):
+                        column_collation_mismatches.setdefault(table.fullname, {})[column.name] = {
+                            "expected": {
+                                "character_set": expected_charset,
+                                "collation": expected_collation,
+                            },
+                            "actual": {
+                                "character_set": actual_charset,
+                                "collation": actual_collation,
+                            },
+                        }
                 # ORM 映射列默认可见；数据库意外设为 INVISIBLE 会改变 SELECT * 的结果。
                 actual_invisible = "invisible" in actual_extra.split()
                 if actual_invisible:
@@ -577,6 +603,7 @@ def _schema_metadata_drift(sync_connection, metadata=None) -> dict:
         "column_generated_mismatches": column_generated_mismatches,
         "column_generated_unverifiable": column_generated_unverifiable,
         "column_visibility_mismatches": column_visibility_mismatches,
+        "column_collation_mismatches": column_collation_mismatches,
         "primary_key_mismatches": primary_key_mismatches,
         "index_mismatches": index_mismatches,
         "unique_constraint_mismatches": unique_constraint_mismatches,
@@ -620,6 +647,7 @@ async def _verify_database_schema() -> str | None:
                 f"column_generated_mismatches={drift['column_generated_mismatches']}; "
                 f"column_generated_unverifiable={drift['column_generated_unverifiable']}; "
                 f"column_visibility_mismatches={drift['column_visibility_mismatches']}; "
+                f"column_collation_mismatches={drift['column_collation_mismatches']}; "
                 f"primary_key_mismatches={drift['primary_key_mismatches']}; "
                 f"index_mismatches={drift['index_mismatches']}; "
                 f"unique_constraint_mismatches={drift['unique_constraint_mismatches']}; "
