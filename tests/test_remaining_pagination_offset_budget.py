@@ -4,7 +4,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from app.models.models import UserRole
+from app.models.models import User, UserRole
+from app.core.query_builder import QueryBuilder
 from app.services.audit_log_service import AuditLogService
 from app.services.client_service import ClientService
 from app.services.product_service import ProductService
@@ -249,3 +250,20 @@ async def test_postback_conversion_list_rejects_deep_pagination_before_db():
         )
 
     assert db.statements == []
+
+
+@pytest.mark.asyncio
+async def test_query_builder_rejects_deep_offset_before_db():
+    db = _NoDB()
+
+    with pytest.raises(HTTPException):
+        await QueryBuilder(db, User).base().paginated(page=1002, page_size=100)
+
+    assert db.statements == []
+
+
+def test_query_builder_preserves_bounded_internal_export_page_size():
+    builder = QueryBuilder(_NoDB(), User).base().paginate(page=1, page_size=10000)
+
+    assert builder._query._limit_clause.value == 10000
+    assert builder._query._offset_clause.value == 0
