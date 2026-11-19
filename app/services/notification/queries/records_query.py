@@ -8,6 +8,7 @@ from sqlalchemy import and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.constants import MAX_PAGE_SIZE, NOTIFICATION_MAX_OFFSET_ROWS
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.postback.notifier import PostbackNotifier
@@ -45,6 +46,19 @@ class NotificationRecordsQuery:
         end_date: Optional[str] = None,
         current_user: User = None,
     ) -> Tuple[List[PostbackNotification], int]:
+        # 路由层已有参数校验；服务层仍需防止内部调用绕过分页预算。
+        if page < 1 or page_size < 1 or page_size > MAX_PAGE_SIZE:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail=f"分页参数无效，每页条数必须在 1 到 {MAX_PAGE_SIZE} 之间",
+            )
+        offset = (page - 1) * page_size
+        if offset > NOTIFICATION_MAX_OFFSET_ROWS:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail=f"通知记录分页偏移量不能超过 {NOTIFICATION_MAX_OFFSET_ROWS} 条",
+            )
+
         query = select(PostbackNotification)
 
         if current_user.role != UserRole.ADMIN:
@@ -69,12 +83,14 @@ class NotificationRecordsQuery:
         if conditions:
             query = query.where(and_(*conditions))
 
-        query = query.order_by(PostbackNotification.created_at.desc())
+        query = query.order_by(
+            PostbackNotification.created_at.desc(),
+            PostbackNotification.id.desc(),
+        )
         total = (
             await self.db.execute(select(func.count()).select_from(query.subquery()))
         ).scalar() or 0
 
-        offset = (page - 1) * page_size
         notifications = (
             await self.db.execute(query.offset(offset).limit(page_size))
         ).scalars().all()
