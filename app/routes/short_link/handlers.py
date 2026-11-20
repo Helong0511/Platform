@@ -4,7 +4,7 @@
 功能说明：
 - ``handle_cached_redirect``：Redis 缓存命中时校验状态/过期、替换占位符、写点击、302 跳转
 - ``handle_database_redirect``：缓存未命中时查库、回写缓存，其余流程与缓存路径一致
-- ``log_redirect_details``：以 WARNING 级别输出完整重定向链路日志，便于线上排查
+- ``log_redirect_details``：仅以 DEBUG 级别输出不含请求参数和跳转 URL 的重定向摘要
 
 处理流程（两条路径共用）：
 1. 校验短链启用与过期 → 2. 解析 Offer/渠道 → 3. 生成 click_id
@@ -60,34 +60,18 @@ def log_redirect_details(
         request: Optional[Request] = None
 ) -> None:
     """
-    记录短链接重定向的详细信息
-    
-    Args:
-        short_code: 短链接代码
-        click_id: 点击ID
-        final_offer_id: 最终Offer ID
-        final_channel_id: 最终渠道ID
-        advertiser_id: 广告主ID
-        request_params: 点击携带的参数
-        original_url_before_replace: 原始URL（替换前）
-        original_url_after_replace: 替换占位符后
-        final_url: 最终跳转URL
-        request: FastAPI请求对象（可选）
-    """
-    original_request_url = str(request.url) if request else "N/A"
-    logger.warning("=" * 180)
-    logger.warning(f"[短链接重定向] 原始点击URL: {original_request_url}")
-    logger.warning(f"[短链接重定向] 短链接代码: {short_code}")
-    logger.warning(f"[短链接重定向] 点击ID: {click_id}")
-    logger.warning(f"[短链接重定向] Offer ID: {final_offer_id}")
-    logger.warning(f"[短链接重定向] 渠道ID: {final_channel_id}")
-    logger.warning(f"[短链接重定向] 广告主ID: {advertiser_id}")
-    logger.warning(f"[短链接重定向] 点击携带的参数: {request_params}")
-    logger.warning(f"[短链接重定向] 原始URL（替换前）: {original_url_before_replace}")
-    logger.warning(f"[短链接重定向] 替换占位符后: {original_url_after_replace}")
-    logger.warning(f"[短链接重定向] 最终跳转URL: {final_url}")
-    logger.warning("=" * 180)
+    记录不含用户参数和跳转地址的短链接摘要。
 
+    注意：点击参数、原始/最终 URL 可能包含用户标识、归因参数或第三方凭据，
+    不得写入应用日志。保留原有参数签名以兼容缓存和数据库两条调用路径。
+    """
+    logger.debug(
+        "短链接重定向完成: short_code=%s offer_id=%s channel_id=%s advertiser_id=%s",
+        short_code,
+        final_offer_id,
+        final_channel_id,
+        advertiser_id,
+    )
 
 async def handle_cached_redirect(
         short_code: str,

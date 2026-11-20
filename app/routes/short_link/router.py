@@ -56,14 +56,8 @@ async def redirect_short_link_public(
     """
     try:
         short_code = validate_route_short_code(short_code)
-        request_url = str(request.url)
+        # 参数值可能包含用户标识、归因信息或第三方凭据，不写入日志。
         request_params = {k.lower(): v for k, v in request.query_params.items()}
-        logger.warning(
-            "[短链接重定向] 收到请求: short_code=%s URL=%s params=%s",
-            short_code,
-            request_url,
-            request_params,
-        )
         cached_data = await get_short_link_from_cache(short_code)
         if cached_data:
             return await handle_cached_redirect(
@@ -88,13 +82,13 @@ async def redirect_short_link_public(
     except HTTPException:
         raise
     except Exception as e:
+        # 不记录异常原文或 traceback，避免数据库连接串、请求数据等进入日志。
         logger.error(
-            "[短链接重定向] 处理异常: short_code=%s error=%s",
+            "[短链接重定向] 处理失败: short_code=%s error_type=%s",
             short_code,
-            e,
-            exc_info=True,
+            type(e).__name__,
         )
-        raise_short_link_bad_config(f"短链接重定向失败: {str(e)}")
+        raise_short_link_bad_config("短链接暂时不可用，请稍后重试")
 
 
 register_cloak_change_routes(router)
