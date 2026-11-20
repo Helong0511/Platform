@@ -214,7 +214,7 @@ def _get_sync_redis():
             return _sync_redis_client
         except Exception as exc:
             _sync_redis_failed_until = time.monotonic() + _SYNC_REDIS_FAIL_BACKOFF
-            logger.debug("Telegram 发送限流：同步 Redis 不可用，降级进程内间隔: %s", exc)
+            logger.debug("Telegram 发送限流：同步 Redis 不可用，降级进程内间隔；error_type=%s", type(exc).__name__)
             return None
 
 
@@ -447,7 +447,8 @@ def _check_bot_available() -> tuple[bool, str]:
             set_bot_state(bot, True, True)
         return True, "Bot 可用"
     except Exception as e:
-        return False, f"Bot 初始化失败: {str(e)}"
+        logger.warning("Telegram 发送 Bot 初始化失败；error_type=%s", type(e).__name__)
+        return False, "Bot 初始化失败"
 
 
 def _get_send_bot():
@@ -520,14 +521,14 @@ def send_telegram_message_result(
 
     bot_available, status_msg = _check_bot_available()
     if not bot_available:
-        logger.warning(f"Bot 不可用，无法发送消息: {status_msg}")
+        logger.warning("Bot 不可用，无法发送消息")
         return False, status_msg
 
     try:
         bot = _get_send_bot()
     except Exception as e:
-        logger.warning(f"获取发送 Bot 失败: {e}")
-        return False, f"获取 Bot 失败: {e}"
+        logger.warning("获取发送 Bot 失败；error_type=%s", type(e).__name__)
+        return False, f"获取 Bot 失败（{type(e).__name__}）"
 
     # 向后兼容：判断是旧方式还是新方式
     if message is None:
@@ -560,8 +561,8 @@ def send_telegram_message_result(
         if cid and validate_chat_id(cid)
     ]
     if not chat_ids:
-        logger.warning(f"无有效的 Telegram Chat ID，无法发送消息: {actual_chat_id!r}")
-        return False, f"无有效的 Telegram Chat ID: {actual_chat_id!r}"
+        logger.warning("无有效的 Telegram Chat ID，无法发送消息")
+        return False, "无效的 Telegram Chat ID"
 
     mutex_token = _acquire_send_mutex()
     if mutex_token is None:
@@ -595,7 +596,7 @@ def send_telegram_message_result(
 
                 except Exception as e:
                     error_msg = str(e)
-                    last_error = f"{chat_id}: {error_msg}"
+                    last_error = f"Telegram API 请求失败（{type(e).__name__}）"
 
                     if _is_rate_limit_error(error_msg) or getattr(e, "retry_after", None) is not None:
                         retry_after = _rate_limit_seconds_from_exc(e) or 60
@@ -611,7 +612,7 @@ def send_telegram_message_result(
                             _sleep_with_jitter(retry_after, max_extra=2.0)
                             continue
                         logger.warning(
-                            f"发送 Telegram 消息到 {chat_id} 限流，已达到最大重试次数，消息丢弃：{e}"
+                            "发送 Telegram 消息触发限流，已达到最大重试次数；error_type=%s", type(e).__name__
                         )
                         all_success = False
                         break
@@ -620,22 +621,21 @@ def send_telegram_message_result(
                         if attempt < MAX_RETRIES - 1:
                             retry_delay = BASE_RETRY_DELAY * (2 ** attempt)
                             logger.warning(
-                                f"发送 Telegram 消息到 {chat_id} 超时/网络错误，"
-                                f"{retry_delay}秒后重试（{attempt + 1}/{MAX_RETRIES}）：{e}"
+                                "发送 Telegram 消息超时/网络错误，%s秒后重试（%s/%s）；error_type=%s",
+                                retry_delay, attempt + 1, MAX_RETRIES, type(e).__name__
                             )
                             _refresh_send_mutex(mutex_token, retry_delay + 60)
                             time.sleep(retry_delay)
                             continue
                         logger.error(
-                            f"发送 Telegram 消息到 {chat_id} 失败，已达到最大重试次数：{e}",
-                            exc_info=True
+                            "发送 Telegram 消息失败，已达到最大重试次数；error_type=%s",
+                            type(e).__name__
                         )
                         all_success = False
                         break
 
                     logger.error(
-                        f"发送 Telegram 消息到 {chat_id} 失败：{e}",
-                        exc_info=True
+                        "发送 Telegram 消息失败；error_type=%s", type(e).__name__
                     )
                     all_success = False
                     break
@@ -779,7 +779,7 @@ def send_telegram_message_with_buttons(
                             _sleep_with_jitter(retry_after, max_extra=2.0)
                             continue
                         logger.warning(
-                            f"发送带按钮的 Telegram 消息限流，已达到最大重试次数，消息丢弃：{e}"
+                            "发送带按钮的 Telegram 消息触发限流，已达到最大重试次数；error_type=%s", type(e).__name__
                         )
                         return False, None
 
@@ -787,28 +787,27 @@ def send_telegram_message_with_buttons(
                         if attempt < MAX_RETRIES - 1:
                             retry_delay = BASE_RETRY_DELAY * (2 ** attempt)
                             logger.warning(
-                                f"发送带按钮的 Telegram 消息超时/网络错误，"
-                                f"{retry_delay}秒后重试（{attempt + 1}/{MAX_RETRIES}）：{e}"
+                                "发送带按钮的 Telegram 消息超时/网络错误，%s秒后重试（%s/%s）；error_type=%s",
+                                retry_delay, attempt + 1, MAX_RETRIES, type(e).__name__
                             )
                             _refresh_send_mutex(mutex_token, retry_delay + 60)
                             time.sleep(retry_delay)
                             continue
                         logger.error(
-                            f"发送带按钮的 Telegram 消息失败，已达到最大重试次数：{e}",
-                            exc_info=True
+                            "发送带按钮的 Telegram 消息失败，已达到最大重试次数；error_type=%s",
+                            type(e).__name__
                         )
                         return False, None
 
                     logger.error(
-                        f"发送带按钮的 Telegram 消息失败：{e}",
-                        exc_info=True
+                        "发送带按钮的 Telegram 消息失败；error_type=%s", type(e).__name__
                     )
                     return False, None
         finally:
             _release_send_mutex(mutex_token)
         
     except Exception as e:
-        logger.error(f"构建带按钮的 Telegram 消息失败：{e}", exc_info=True)
+        logger.error("构建带按钮的 Telegram 消息失败；error_type=%s", type(e).__name__)
         return False, None
 
 
