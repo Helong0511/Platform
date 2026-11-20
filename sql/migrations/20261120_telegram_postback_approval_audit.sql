@@ -17,6 +17,7 @@ CREATE TABLE `telegram_postback_approval_audits` (
     KEY `idx_tg_postback_audit_pending_created` (`pending_conversion_id`, `created_at`),
     KEY `idx_tg_postback_audit_actor_created` (`actor_type`, `actor_id`, `created_at`),
     KEY `idx_tg_postback_audit_action_outcome_created` (`action`, `outcome`, `created_at`),
+    KEY `idx_tg_postback_audit_created_at` (`created_at`),
     CONSTRAINT `chk_tg_postback_audit_actor_type`
         CHECK (`actor_type` IN ('telegram', 'system_user', 'system')),
     CONSTRAINT `chk_tg_postback_audit_source`
