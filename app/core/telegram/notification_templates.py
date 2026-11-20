@@ -4,7 +4,26 @@ Telegram 通知模板模块
 提供各类通知的模板和格式化功能
 """
 from typing import Optional, Dict, Any
+import html
+import ipaddress
 from datetime import datetime
+
+
+def _mask_ip_for_telegram(value: Optional[str]) -> str:
+    """Telegram 待审批通知仅显示网段摘要，避免在群聊暴露完整来源 IP。"""
+    raw_ip = str(value or "").strip()
+    if not raw_ip:
+        return "[未提供]"
+    try:
+        address = ipaddress.ip_address(raw_ip)
+    except ValueError:
+        return "[已隐藏]"
+
+    if address.version == 4:
+        return ".".join(str(address).split(".")[:3]) + ".x"
+
+    network = ipaddress.ip_network(f"{address}/64", strict=False)
+    return f"{network.network_address}/64"
 
 
 class ConversionNotificationTemplate:
