@@ -1,5 +1,7 @@
 # Migration Runner 操作说明（2026-11-13）
 
+> **文档状态说明（2026-11-20）**：本文按日期追加审计记录；第 7、8、14 节中的 PR、分支和 CI 状态是对应审计日期的历史快照，不应作为当前 GitHub 状态使用。PR #1 已于 2026-11-18 合并至 `main`（merge commit `ba972a3f9f6d79bf290b137d71bfb2cb5fd936eb`）。当前迁移执行门禁、部署限制和待办事项，以本文明确标注的持续有效要求及当前代码/CI 为准。
+
 ## 1. 当前功能
 
 仓库提供以下命令：
@@ -76,7 +78,7 @@ python -m app.db.migrations apply
 - PR HEAD：`6394f63976a79ffdbfe414dc46060db4f7773b76`。
 - GitHub Actions Run #43398657923：Backend 669 passed、1 skipped、1 warning；Frontend 依赖审计、Lint、Build、Playwright Mock API E2E 全部通过。
 - 该结果只覆盖 GitHub Actions 临时 MySQL/Redis 与合成数据；不代表空库完整导入、旧库真实规模升级、备份恢复或生产 DDL 风险演练已经完成。
-- PR #1 仍为 Open / Draft；不合并、不部署。
+- **历史状态（2026-11-13）**：当时 PR #1 为 Open / Draft；该状态已于 2026-11-18 结束，PR #1 后续已合并。此条仅保留历史审计背景，不代表当前 PR 状态。
 
 
 ## 8. 第三方上报平台标识二进制排序规则迁移（2026-11-14）
@@ -88,8 +90,8 @@ python -m app.db.migrations apply
 - 迁移通过 `information_schema.COLUMNS` 判断目标结构，已符合时跳过 ALTER；执行后再次核验结构，核验失败必须让 migration 失败，不得写入 applied。
 - 该 ALTER 可能重建关联索引。正式环境执行前，必须在同版本、同结构、相近数据量和索引规模的隔离副本测量 DDL 算法、耗时、metadata lock、复制延迟、磁盘峰值和业务写入影响；未演练前禁止直接生产执行。
 - CI 新增真实 MySQL migration 测试：从旧 `utf8mb4_0900_ai_ci` 列升级，连续执行 migration 两次，并检查精确比较、历史值保留和索引保留。测试只覆盖 CI 临时 MySQL，不代表生产大表在线 DDL 演练或备份恢复已通过。
-- 当前 CI 正在对最新 migration 测试修正进行复验；以最新 PR HEAD 的 Backend / Frontend 全部通过结果为准，不能用此前失败 Run 的结果替代。
-- PR #1 仍为 Open / Draft；此迁移未经生产副本演练前不得合并部署。
+- **历史状态（2026-11-14）**：当时 CI 正在对该 migration 测试修正进行复验；该句仅记录当时的执行状态。当前验证结果应查询对应提交的 GitHub Actions，不得将此历史状态作为当前 CI 状态。
+- **历史状态（2026-11-14）**：当时 PR #1 为 Open / Draft；该状态已于 2026-11-18 结束，PR #1 后续已合并。生产副本 DDL 演练要求仍然有效：未经目标环境等价副本演练，不得将该迁移部署到生产。
 
 MySQL 官方参考：
 - Collation 与大小写敏感比较：https://dev.mysql.com/doc/refman/8.0/en/case-sensitivity.html
@@ -161,7 +163,7 @@ MySQL 官方参考：
 
 ## 14. 全量 Migration DDL 风险盘点（2026-11-16）
 
-本节根据当前分支 `fix/non-credential-hardening-2026-11` 的 `app/db/migrations/manifest.py` 和其中登记的 13 个 SQL 文件逐项静态检查。它是 DDL 风险分级，不代表已在目标 MySQL 版本、目标表规模或生产数据上执行。
+本节是 2026-11-16 的历史静态盘点，依据当时分支 `fix/non-credential-hardening-2026-11` 的 `app/db/migrations/manifest.py` 和其中登记的 13 个 SQL 文件逐项检查。它是 DDL 风险分级，不代表已在目标 MySQL 版本、目标表规模或生产数据上执行；当前 migration 清单以 `main` 的 manifest 为准。
 
 ### 14.1 逐项盘点
 
