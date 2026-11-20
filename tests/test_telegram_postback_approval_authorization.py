@@ -1,4 +1,4 @@
-"""Telegram Postback 审批回调必须验证实际操作者用户 ID。"""
+"""Telegram Postback 审批回调必须验证实际操作者用户 ID，并避免向聊天泄露来源 IP。"""
 from types import SimpleNamespace
 import importlib
 
@@ -6,9 +6,21 @@ import pytest
 
 from app.core.config import Settings, settings
 from app.core.telegram.callback_handlers.postback_approval import (
+    _build_rejection_message,
     _is_authorized_admin,
-    handle_postback_approval,
 )
+
+
+def test_rejection_message_does_not_disclose_request_ip():
+    message = _build_rejection_message(
+        conversion_id="conversion-123",
+        platform="bft",
+    )
+
+    assert "conversion-123" in message
+    assert "bft" in message
+    assert "IP:" not in message
+    assert "request_ip" not in message
 
 
 def test_private_admin_chat_id_is_backward_compatible(monkeypatch):

@@ -53,6 +53,15 @@ def _api(chat_id: int, coro):
     return call_telegram_api_throttled(coro, chat_id=str(chat_id))
 
 
+def _build_rejection_message(conversion_id: str, platform: str) -> str:
+    """构建拒绝审批通知；不向 Telegram 聊天发送来源 IP 等个人信息。"""
+    return (
+        "❌ 已拒绝转化记录\n\n"
+        f"转化 ID: {conversion_id}\n"
+        f"平台：{platform}"
+    )
+
+
 def process_pending_conversion(
     pending_id: int,
     action: str,
@@ -245,11 +254,9 @@ def process_pending_conversion(
                         bot.edit_message_text(
                             chat_id=chat_id,
                             message_id=message_id,
-                            text=(
-                                f"❌ 已拒绝转化记录\n\n"
-                                f"转化 ID: {pending.conversion_id}\n"
-                                f"平台：{pending.platform}\n"
-                                f"IP: {pending.request_ip}"
+                            text=_build_rejection_message(
+                                conversion_id=pending.conversion_id,
+                                platform=pending.platform,
                             ),
                             reply_markup=None,
                         ),
