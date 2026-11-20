@@ -288,45 +288,21 @@ class TelegramNotificationService:
             click_params: Optional[Dict[str, Any]] = None,
             offer: Optional[Offer] = None
     ) -> str:
-        """
-        构建管理员转发失败告警消息
-        
-        Args:
-            conversion: 转化记录
-            publisher: 渠道对象
-            error_message: 错误信息
-            click_params: 点击参数（可选）
-            offer: Offer 对象（可选）
-        
-        Returns:
-            str: 通知消息
-        """
-        msg = "❌ Postback 转发失败告警\n\n"
-        msg += f"转化ID: {conversion.conversion_id}\n"
-        msg += f"平台: {conversion.platform}\n"
-
-        msg += "\n📤 渠道信息\n"
-        msg += f"• 渠道ID: {publisher.id}\n"
-        msg += f"• 渠道名称: {publisher.publisher_name}\n"
-        if publisher.postback_url:
-            url_display = publisher.postback_url[:100] + "..." if len(
-                publisher.postback_url) > 100 else publisher.postback_url
-            msg += f"• Postback URL: {url_display}\n"
-
-        msg += "\n❌ 错误信息\n"
-        error_display = error_message[:300] + "..." if len(error_message) > 300 else error_message
-        msg += f"{error_display}\n"
-
-        if click_params:
-            try:
-                click_params_str = json.dumps(click_params, ensure_ascii=False)
-                msg += f"\n📋 点击参数\n{click_params_str}\n"
-            except Exception:
-                msg += f"\n📋 点击参数\n{str(click_params)}\n"
+        """构建不包含请求密钥、原始异常或点击参数的管理员转发失败告警。"""
+        # Postback URL、异常正文和点击参数都可能含凭据、PII 或用户追踪标识。
+        # Telegram 通知历史也会保存消息正文，因此在构建阶段统一剔除。
+        msg = "❌ Postback 转发失败告警\\n\\n"
+        msg += f"转化ID: {conversion.conversion_id}\\n"
+        msg += f"平台: {conversion.platform}\\n"
+        msg += "\\n📤 渠道信息\\n"
+        msg += f"• 渠道ID: {publisher.id}\\n"
+        msg += f"• 渠道名称: {publisher.publisher_name}\\n"
+        msg += "\\n❌ 转发状态\\n"
+        msg += "• 失败原因：请在受访问控制的转发日志中查看\\n"
 
         if conversion.created_at:
             time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
-            msg += f"\n⏰ 时间: {time_str}\n"
+            msg += f"\\n⏰ 时间: {time_str}\\n"
 
         return msg
 
@@ -338,40 +314,21 @@ class TelegramNotificationService:
             response_body: Optional[str] = None,
             offer: Optional[Offer] = None
     ) -> str:
-        """
-        构建管理员转发成功通知消息
-        
-        Args:
-            conversion: 转化记录
-            publisher: 渠道对象
-            response_status: HTTP 响应状态码
-            response_body: 响应内容（可选）
-            offer: Offer 对象（可选）
-        
-        Returns:
-            str: 通知消息
-        """
-        msg = "✅ Postback 转发成功\n\n"
-        msg += f"转化ID: {conversion.conversion_id}\n"
-        msg += f"平台: {conversion.platform}\n"
-
-        msg += "\n📤 渠道信息\n"
-        msg += f"• 渠道ID: {publisher.id}\n"
-        msg += f"• 渠道名称: {publisher.publisher_name}\n"
-        if publisher.postback_url:
-            url_display = publisher.postback_url[:100] + "..." if len(
-                publisher.postback_url) > 100 else publisher.postback_url
-            msg += f"• Postback URL: {url_display}\n"
-
-        msg += "\n✅ 响应信息\n"
-        msg += f"• 状态码: {response_status}\n"
-        if response_body:
-            body_display = response_body[:200] + "..." if len(response_body) > 200 else response_body
-            msg += f"• 响应: {body_display}\n"
+        """构建不包含目标 URL 或对端响应正文的管理员转发成功通知。"""
+        # URL 查询参数和对端响应正文可能包含令牌、回显请求参数或个人信息。
+        msg = "✅ Postback 转发成功\\n\\n"
+        msg += f"转化ID: {conversion.conversion_id}\\n"
+        msg += f"平台: {conversion.platform}\\n"
+        msg += "\\n📤 渠道信息\\n"
+        msg += f"• 渠道ID: {publisher.id}\\n"
+        msg += f"• 渠道名称: {publisher.publisher_name}\\n"
+        msg += "\\n✅ 响应信息\\n"
+        msg += f"• 状态码: {int(response_status)}\\n"
+        msg += "• 响应正文：已省略\\n"
 
         if conversion.created_at:
             time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
-            msg += f"\n⏰ 时间: {time_str}\n"
+            msg += f"\\n⏰ 时间: {time_str}\\n"
 
         return msg
 
