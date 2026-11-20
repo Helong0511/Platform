@@ -72,7 +72,7 @@ def register_handlers(application) -> None:
         logger.info("处理器已注册，跳过重复注册")
         return
 
-    from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler, filters
+    from telegram.ext import CallbackQueryHandler, CommandHandler
     from app.core.telegram.command_handlers.id_command import get_chat_id
     from app.core.telegram.command_handlers.start_command import cmd_start
     from app.core.telegram.command_handlers.help_command import cmd_help
@@ -80,19 +80,6 @@ def register_handlers(application) -> None:
     from app.core.telegram.callback_handlers.menu_callbacks import handle_menu_callbacks
     from app.core.telegram.callback_handlers.stats_callbacks import handle_stats_callbacks
     from app.core.telegram.callback_handlers.postback_approval import handle_postback_approval
-
-    async def debug_all_messages(update, context):
-        """开发调试用：记录所有入站 Telegram 消息。"""
-        message = update.effective_message
-        user = update.effective_user
-        if not message:
-            return
-        logger.info(
-            "[DEBUG] 收到消息：text=%s, chat_id=%s, from_user=%s",
-            getattr(message, "text", None),
-            message.chat_id if message.chat else None,
-            user.id if user else None,
-        )
 
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("help", cmd_help))
@@ -110,7 +97,6 @@ def register_handlers(application) -> None:
             pattern=r"^postback_(approve|reject)_",
         )
     )
-    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, debug_all_messages))
 
     _handlers_registered = True
     logger.info("消息处理器和回调处理器已成功注册（python-telegram-bot）")
