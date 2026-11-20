@@ -69,20 +69,20 @@ class PostbackPendingService:
 
     async def _pending_conversion_exists(
             self, pending: PendingPostbackConversion, db: AsyncSession
-    ) -> bool:
+    ) -> Optional[int]:
         """
-        检查正式转化表是否已有同 platform + conversion_id + event_name 记录。
+        查询同 platform + conversion_id + event_name 的正式转化记录 ID。
 
-        用于批准前幂等校验，避免重复入库。
+        返回主键而非布尔值，使重复审批审计也能准确关联既有转化记录。
         """
         existing = await db.execute(
-            select(PostbackConversion).where(
+            select(PostbackConversion.id).where(
                 PostbackConversion.platform == pending.platform,
                 PostbackConversion.conversion_id == pending.conversion_id,
                 PostbackConversion.event_name == pending.event_name,
             )
         )
-        return existing.scalars().first() is not None
+        return existing.scalars().first()
 
     async def _create_conversion_from_pending(
             self,
@@ -175,13 +175,14 @@ class PostbackPendingService:
             for pending in pending_list:
                 try:
                     previous_status = pending.status
-                    if await self._pending_conversion_exists(pending, db):
+                    existing_conversion_id = await self._pending_conversion_exists(pending, db)
+                    if existing_conversion_id is not None:
                         pending.status = "approved"
                         pending.approved_at = get_app_now_naive()
                         add_postback_approval_audit(
                             db,
                             pending_conversion_id=pending.id,
-                            conversion_id=None,
+                            conversion_id=existing_conversion_id,
                             actor_type="system_user",
                             actor_id=current_user.id,
                             source="ip_whitelist",
@@ -420,10 +421,11 @@ class PostbackPendingService:
                     detail=f"待确认记录 ID {pending_id} 不存在或已被处理"
                 )
 
-            if await self._pending_conversion_exists(pending, db):
+            existing_conversion_id = await self._pending_conversion_exists(pending, db)
+            if existing_conversion_id is not None:
                 audit_attempt = {
                     "pending_conversion_id": pending_id,
-                    "conversion_id": None,
+                    "conversion_id": existing_conversion_id,
                     "actor_type": "system_user",
                     "actor_id": current_user.id,
                     "source": "web",
