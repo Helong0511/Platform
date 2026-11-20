@@ -29,43 +29,48 @@ def _prepare_sender(monkeypatch):
     )
 
 
-def test_message_send_redacts_exception_from_logs_and_result(monkeypatch, caplog):
+def test_message_send_redacts_exception_from_logs_and_result(monkeypatch):
     _prepare_sender(monkeypatch)
+    logs = []
+    monkeypatch.setattr(message_sender.logger, "error", lambda *args, **_kwargs: logs.append(args))
 
-    with caplog.at_level(logging.ERROR):
-        success, reason = message_sender.send_telegram_message_result("123456", "hello")
+    success, reason = message_sender.send_telegram_message_result("123456", "hello")
+    log_text = repr(logs)
 
     assert success is False
-    assert "_SecretTelegramError" in caplog.text
-    assert "top-secret" not in caplog.text
-    assert "TOPSECRET" not in caplog.text
-    assert "api.telegram.org" not in caplog.text
+    assert "_SecretTelegramError" in log_text
+    assert "top-secret" not in log_text
+    assert "TOPSECRET" not in log_text
+    assert "api.telegram.org" not in log_text
     assert "top-secret" not in reason
     assert "api.telegram.org" not in reason
 
 
-def test_button_send_redacts_exception_from_logs(monkeypatch, caplog):
+def test_button_send_redacts_exception_from_logs(monkeypatch):
     _prepare_sender(monkeypatch)
     from app.core.telegram import ptb_runtime
     monkeypatch.setattr(ptb_runtime, "build_inline_keyboard", lambda _buttons: object())
+    logs = []
+    monkeypatch.setattr(message_sender.logger, "error", lambda *args, **_kwargs: logs.append(args))
 
-    with caplog.at_level(logging.ERROR):
-        success, message_id = message_sender.send_telegram_message_with_buttons(
-            "123456", "hello", [[{"text": "OK", "callback_data": "ok"}]]
-        )
+    success, message_id = message_sender.send_telegram_message_with_buttons(
+        "123456", "hello", [[{"text": "OK", "callback_data": "ok"}]]
+    )
+    log_text = repr(logs)
 
     assert success is False
     assert message_id is None
-    assert "_SecretTelegramError" in caplog.text
-    assert "top-secret" not in caplog.text
-    assert "TOPSECRET" not in caplog.text
-    assert "api.telegram.org" not in caplog.text
+    assert "_SecretTelegramError" in log_text
+    assert "top-secret" not in log_text
+    assert "TOPSECRET" not in log_text
+    assert "api.telegram.org" not in log_text
 
 
-def test_bot_availability_error_returns_only_safe_error_type(monkeypatch, caplog):
+def test_bot_availability_error_returns_only_safe_error_type(monkeypatch):
     from app.core.telegram import ptb_runtime
     from app.core.config import settings
 
+    monkeypatch.setattr(message_sender, "is_telegram_enabled", lambda: True)
     monkeypatch.setattr(settings, "TELEGRAM_TOKEN", "configured-token", raising=False)
     monkeypatch.setattr(
         ptb_runtime,
@@ -75,11 +80,13 @@ def test_bot_availability_error_returns_only_safe_error_type(monkeypatch, caplog
         ),
     )
 
-    with caplog.at_level(logging.WARNING):
-        available, status = message_sender._check_bot_available()
+    logs = []
+    monkeypatch.setattr(message_sender.logger, "warning", lambda *args, **_kwargs: logs.append(args))
+    available, status = message_sender._check_bot_available()
+    log_text = repr(logs)
 
     assert available is False
     assert status == "Bot 初始化失败"
     assert "top-secret" not in status
-    assert "TOPSECRET" not in caplog.text
-    assert "api.telegram.org" not in caplog.text
+    assert "TOPSECRET" not in log_text
+    assert "api.telegram.org" not in log_text
