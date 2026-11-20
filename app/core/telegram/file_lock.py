@@ -381,7 +381,7 @@ def release_bot_lock():
                 if _bot_lock_file:
                     _bot_lock_file.close()
             except Exception as close_error:
-                logger.warning(f"[PID:{current_pid}] 关闭锁文件时发生错误：{close_error}")
+                logger.warning("[PID:%s] 关闭锁文件时发生错误；error_type=%s", current_pid, type(close_error).__name__)
             # 尝试删除锁文件
             if lock_file_path and lock_file_path.exists():
                 try:
@@ -393,7 +393,7 @@ def release_bot_lock():
                         os.chmod(lock_file_path, stat.S_IWRITE)
                         lock_file_path.unlink()
                     except Exception as force_error:
-                        logger.warning(f"[PID:{current_pid}] 强制删除锁文件时发生错误：{force_error}")
+                        logger.warning("[PID:%s] 强制删除锁文件时发生错误；error_type=%s", current_pid, type(force_error).__name__)
             # 重置锁状态
             _bot_lock_file = None
             _bot_lock_acquired = False
