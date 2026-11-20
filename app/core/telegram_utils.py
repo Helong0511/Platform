@@ -530,43 +530,32 @@ def build_alert_message(
     location: Optional[Dict[str, str]] = None,
     error: Optional[Exception] = None
 ) -> str:
-    """
-    构建告警消息
-    
-    Args:
-        alert_type: 告警类型
-        description: 告警描述
-        location: 位置信息（模块、函数、行号等）
-        error: 异常对象（可选）
-    
-    Returns:
-        格式化的告警消息
-    """
-    title = f"🚨 系统告警: {alert_type}"
-    
-    fields = {'描述': description}
-    
+    """构建可安全发送到 Telegram 的告警摘要，不包含异常正文或请求上下文。"""
+    # Telegram 可能是群聊，告警正文、异常和文件路径均视为不可信敏感数据。
+    # 只保留固定描述、异常类型和受限的代码符号定位；详细信息留在服务端日志。
+    safe_alert_type = re.sub(r"[^A-Za-z0-9_.:-]", "_", str(alert_type))[:64]
+    if not safe_alert_type:
+        safe_alert_type = "system_alert"
+
+    fields = {"描述": "发生系统告警，请在受访问控制的服务器日志中查看"}
+    if error is not None:
+        fields["错误类型"] = type(error).__name__
+
     if location:
-        if 'module' in location:
-            fields['模块'] = location['module']
-        if 'function' in location:
-            fields['函数'] = location['function']
-        if 'line' in location:
-            fields['行号'] = location['line']
-        if 'file' in location:
-            fields['文件'] = location['file']
-    
-    if error:
-        fields['错误类型'] = type(error).__name__
-        fields['错误信息'] = str(error)[:200]
-    
-    # 添加时间
+        module = str(location.get("module") or "")
+        function = str(location.get("function") or "")
+        line = str(location.get("line") or "")
+        if module and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", module):
+            fields["模块"] = module
+        if function and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", function):
+            fields["函数"] = function
+        if line.isdigit() and len(line) <= 10:
+            fields["行号"] = line
+
     footer = f"⏰ 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    
     return format_telegram_message(
-        title=title,
+        title=f"🚨 系统告警: {safe_alert_type}",
         fields=fields,
         footer=footer,
-        message_type='alert'
+        message_type="alert",
     )
-
