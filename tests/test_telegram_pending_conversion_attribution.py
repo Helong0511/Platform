@@ -1,4 +1,4 @@
-"""审批待确认 Postback 时必须保留原始 Click 关联字段。"""
+"""Telegram 批准待确认 Postback 时必须保留归因并执行幂等检查。"""
 from contextlib import contextmanager
 from datetime import datetime
 from types import SimpleNamespace
@@ -7,15 +7,8 @@ import importlib
 from app.models.models import PostbackConversion
 
 
-def test_approved_pending_postback_preserves_click_attribution(monkeypatch):
-    handler = importlib.import_module(
-        "app.core.telegram.callback_handlers.postback_approval"
-    )
-    runtime = importlib.import_module("app.core.telegram.ptb_runtime")
-    config = importlib.import_module("app.core.config")
-
-    click_time = datetime(2026, 11, 19, 10, 30, 0)
-    pending = SimpleNamespace(
+def _pending_record(click_time):
+    return SimpleNamespace(
         id=77,
         status="pending",
         platform="test-platform",
@@ -39,17 +32,29 @@ def test_approved_pending_postback_preserves_click_attribution(monkeypatch):
         rejected_at=None,
     )
 
+
+def _install_fake_runtime(monkeypatch, execute_results):
+    handler = importlib.import_module(
+        "app.core.telegram.callback_handlers.postback_approval"
+    )
+    runtime = importlib.import_module("app.core.telegram.ptb_runtime")
+    config = importlib.import_module("app.core.config")
+
     class FakeResult:
+        def __init__(self, value):
+            self.value = value
+
         def scalar_one_or_none(self):
-            return pending
+            return self.value
 
     class FakeSession:
         def __init__(self):
+            self.results = list(execute_results)
             self.added = []
             self.committed = False
 
         def execute(self, _statement):
-            return FakeResult()
+            return FakeResult(self.results.pop(0))
 
         def add(self, value):
             self.added.append(value)
@@ -77,7 +82,23 @@ def test_approved_pending_postback_preserves_click_attribution(monkeypatch):
     monkeypatch.setattr(handler, "_api", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(runtime, "get_send_bot", lambda *_args, **_kwargs: FakeBot())
     monkeypatch.setattr(config.settings, "TELEGRAM_TOKEN", "test-token", raising=False)
+    return fake_db
 
+
+def test_approved_pending_postback_preserves_click_attribution(monkeypatch):
+    click_time = datetime(2026, 11, 19, 10, 30, 0)
+    pending = _pending_record(click_time)
+    click = SimpleNamespace(
+        click_time=click_time,
+        offer_id=11,
+        publisher_id=22,
+        advertiser_id=33,
+    )
+    fake_db = _install_fake_runtime(monkeypatch, [pending, None, click])
+
+    handler = importlib.import_module(
+        "app.core.telegram.callback_handlers.postback_approval"
+    )
     handler.process_pending_conversion(
         pending_id=77,
         action="approve",
@@ -93,3 +114,26 @@ def test_approved_pending_postback_preserves_click_attribution(monkeypatch):
     assert isinstance(conversion, PostbackConversion)
     assert conversion.click_id == "trusted-click-77"
     assert conversion.click_time == click_time
+    assert conversion.offer_id == 11
+    assert conversion.publisher_id == 22
+    assert conversion.advertiser_id == 33
+
+
+def test_telegram_approval_does_not_duplicate_existing_conversion(monkeypatch):
+    pending = _pending_record(datetime(2026, 11, 19, 10, 30, 0))
+    fake_db = _install_fake_runtime(monkeypatch, [pending, 1234])
+
+    handler = importlib.import_module(
+        "app.core.telegram.callback_handlers.postback_approval"
+    )
+    handler.process_pending_conversion(
+        pending_id=77,
+        action="approve",
+        callback_query_id="callback-77",
+        chat_id=100,
+        message_id=200,
+    )
+
+    assert fake_db.committed is True
+    assert pending.status == "approved"
+    assert fake_db.added == []
