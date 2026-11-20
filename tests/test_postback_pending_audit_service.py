@@ -163,3 +163,55 @@ async def test_web_rejection_audit_is_added_to_same_session_transaction():
     assert event.outcome == "rejected"
     assert event.previous_status == "pending"
     assert event.new_status == "rejected"
+
+
+
+@pytest.mark.asyncio
+async def test_web_successful_approval_audit_is_added_before_request_commit(monkeypatch):
+    import importlib
+
+    service_module = importlib.import_module(
+        "app.services.cpl.postback_pending_service"
+    )
+    service = service_module.PostbackPendingService()
+    pending = SimpleNamespace(id=14, status="pending", approved_at=None)
+    db = _FakeAsyncDB(_ScalarResult(pending))
+
+    async def exists(_pending, _db):
+        return False
+
+    async def create(_pending, _db):
+        _pending.status = "approved"
+        _pending.approved_at = object()
+        return SimpleNamespace(id=701)
+
+    monkeypatch.setattr(service, "_pending_conversion_exists", exists)
+    monkeypatch.setattr(service, "_create_conversion_from_pending", create)
+    monkeypatch.setattr(
+        service_module.PostbackConversionResponse,
+        "model_validate",
+        classmethod(lambda _cls, _conversion: object()),
+    )
+    monkeypatch.setattr(
+        service_module.ResponseBaseSchema,
+        "success",
+        staticmethod(lambda **kwargs: kwargs),
+    )
+
+    response = await service.approve_pending_conversion(
+        14,
+        db,
+        SimpleNamespace(id=46, username="admin"),
+    )
+
+    assert response["message"] == "已批准并创建转化记录"
+    assert pending.status == "approved"
+    assert db.flush_count == 1
+    event = db.events[0]
+    assert event.actor_type == "system_user"
+    assert event.actor_id == "46"
+    assert event.source == "web"
+    assert event.action == "approve"
+    assert event.outcome == "approved"
+    assert event.pending_conversion_id == 14
+    assert event.conversion_id == 701
