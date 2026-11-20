@@ -65,6 +65,7 @@ def process_pending_conversion(
     from app.core.telegram.ptb_runtime import get_send_bot
     from sqlalchemy import select as sync_select
     from app.models.models import PendingPostbackConversion, PostbackConversion, Click
+    from app.core.tracking.click_token import resolve_click_from_token
 
     token = getattr(settings, "TELEGRAM_TOKEN", None)
     if not token:
@@ -139,7 +140,12 @@ def process_pending_conversion(
                     )
                     return
 
-                # 历史点击归因快照为空时，从 Click 记录补齐。
+                # 与统一待确认服务保持一致：先解析签名点击令牌，再用数据库点击记录补齐。
+                click_assoc = (
+                    resolve_click_from_token(pending.click_id)
+                    if pending.click_id
+                    else None
+                ) or {}
                 click = None
                 if pending.click_id:
                     click = db.execute(
@@ -147,6 +153,24 @@ def process_pending_conversion(
                         .where(Click.click_id == str(pending.click_id))
                         .limit(1)
                     ).scalar_one_or_none()
+
+                # 令牌中存在有效归因时优先使用；否则回退数据库点击行。
+                offer_id = click_assoc.get("offer_id")
+                publisher_id = click_assoc.get("publisher_id")
+                advertiser_id = click_assoc.get("advertiser_id")
+                if click:
+                    offer_id = offer_id if offer_id is not None else click.offer_id
+                    publisher_id = (
+                        publisher_id if publisher_id is not None else click.publisher_id
+                    )
+                    advertiser_id = (
+                        advertiser_id if advertiser_id is not None else click.advertiser_id
+                    )
+                click_time = (
+                    pending.click_time
+                    or click_assoc.get("click_time")
+                    or (click.click_time if click else None)
+                )
 
                 conversion = PostbackConversion(
                     platform=pending.platform,
@@ -164,10 +188,10 @@ def process_pending_conversion(
                     client_id=pending.client_id,
                     # 审批转正式记录时保留点击关联，并补齐归因快照，避免后续筛选依赖回退查询。
                     click_id=pending.click_id,
-                    click_time=pending.click_time or (click.click_time if click else None),
-                    offer_id=click.offer_id if click else None,
-                    publisher_id=click.publisher_id if click else None,
-                    advertiser_id=click.advertiser_id if click else None,
+                    click_time=click_time,
+                    offer_id=offer_id,
+                    publisher_id=publisher_id,
+                    advertiser_id=advertiser_id,
                     conversion_status="Pending",
                     raw_data=pending.raw_data,
                     created_at=get_app_now_naive(),
