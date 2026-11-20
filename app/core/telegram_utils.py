@@ -533,9 +533,7 @@ def build_alert_message(
     """构建可安全发送到 Telegram 的告警摘要，不包含异常正文或请求上下文。"""
     # Telegram 可能是群聊，告警正文、异常和文件路径均视为不可信敏感数据。
     # 只保留固定描述、异常类型和受限的代码符号定位；详细信息留在服务端日志。
-    safe_alert_type = re.sub(r"[^A-Za-z0-9_.:-]", "_", str(alert_type))[:64]
-    if not safe_alert_type:
-        safe_alert_type = "system_alert"
+    safe_alert_type = "system_alert"
 
     fields = {"描述": "发生系统告警，请在受访问控制的服务器日志中查看"}
     if error is not None:
@@ -545,9 +543,9 @@ def build_alert_message(
         module = str(location.get("module") or "")
         function = str(location.get("function") or "")
         line = str(location.get("line") or "")
-        if module and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", module):
+        if module.startswith("app.") and re.fullmatch(r"app\.[A-Za-z0-9_.]{1,120}", module):
             fields["模块"] = module
-        if function and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", function):
+        if function and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", function):
             fields["函数"] = function
         if line.isdigit() and len(line) <= 10:
             fields["行号"] = line
