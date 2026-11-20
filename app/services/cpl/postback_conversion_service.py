@@ -30,7 +30,7 @@ from app.core.pagination import calculate_pagination_offset
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from app.models.models import (
     OfferPublisherAssignment,
-    PostbackConversion, Product, Client, PostbackNotification,
+    PostbackConversion, Product, Client, PostbackNotification, Click,
     Offer, Publisher, Advertiser, User, ConversionDeductionLog
 )
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -38,6 +38,23 @@ from app.schemas.postback import PostbackConversionResponse
 from app.services.cpl.postback_attribution_helper import collect_attribution_ids
 
 logger = logging.getLogger(__name__)
+
+
+def _snapshot_or_legacy_click_filter(snapshot_column, click_column, value):
+    """优先匹配转化归因快照；快照为空的历史记录回退关联 clicks 表。"""
+    legacy_click_match = (
+        select(1)
+        .select_from(Click)
+        .where(
+            Click.click_id == PostbackConversion.click_id,
+            click_column == value,
+        )
+        .exists()
+    )
+    return or_(
+        snapshot_column == value,
+        and_(snapshot_column.is_(None), legacy_click_match),
+    )
 
 
 class PostbackConversionService:
@@ -95,12 +112,8 @@ class PostbackConversionService:
         )
         started_at = perf_counter()
         try:
-            attr_filter = (
-                offer_id is not None
-                or publisher_id is not None
-                or advertiser_id is not None
-            )
-            # 归因已回填后直接用 postback 快照列筛选，无需 JOIN clicks
+            # 快照字段优先；历史记录快照为空时，通过 click_id 关联 clicks 表补充筛选。
+            # 使用 EXISTS，避免 JOIN 导致分页行和 COUNT 结果重复。
             query = select(PostbackConversion)
 
             # --- 主表筛选条件（快照列优先，无需 JOIN clicks）---
@@ -123,12 +136,24 @@ class PostbackConversionService:
             # 转化日志筛选条件
             if click_id:
                 conditions.append(PostbackConversion.click_id == click_id)
-            if offer_id:
-                conditions.append(PostbackConversion.offer_id == offer_id)
-            if publisher_id:
-                conditions.append(PostbackConversion.publisher_id == publisher_id)
-            if advertiser_id:
-                conditions.append(PostbackConversion.advertiser_id == advertiser_id)
+            if offer_id is not None:
+                conditions.append(
+                    _snapshot_or_legacy_click_filter(
+                        PostbackConversion.offer_id, Click.offer_id, offer_id
+                    )
+                )
+            if publisher_id is not None:
+                conditions.append(
+                    _snapshot_or_legacy_click_filter(
+                        PostbackConversion.publisher_id, Click.publisher_id, publisher_id
+                    )
+                )
+            if advertiser_id is not None:
+                conditions.append(
+                    _snapshot_or_legacy_click_filter(
+                        PostbackConversion.advertiser_id, Click.advertiser_id, advertiser_id
+                    )
+                )
             if conversion_status:
                 if hasattr(PostbackConversion, 'conversion_status'):
                     conditions.append(PostbackConversion.conversion_status == conversion_status)
