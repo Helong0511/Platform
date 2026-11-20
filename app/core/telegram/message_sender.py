@@ -723,7 +723,7 @@ def send_telegram_message_with_buttons(
 
     bot_available, status_msg = _check_bot_available()
     if not bot_available:
-        logger.warning(f"Bot 不可用，无法发送消息: {status_msg}")
+        logger.warning("Bot 不可用，无法发送消息")
         return False, None
 
     if not chat_id or not validate_chat_id(str(chat_id).strip()):
