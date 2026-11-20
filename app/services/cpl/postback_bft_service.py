@@ -14,7 +14,6 @@ BFT S2S Postback 接收服务。
 2. Telegram 通知失败不得影响返回「ok」给上游
 """
 import asyncio
-import json
 import logging
 from typing import Any, Dict
 
@@ -33,6 +32,39 @@ from app.services.cpl.postback_receive_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+_BFT_NOTIFICATION_SAFE_KEYS = frozenset({
+    "platform", "event", "eventname", "eventtype", "status",
+    "conversionstatus", "payout", "originalpayout", "currency",
+    "timestamp", "eventtime", "productid", "clientid",
+    "offerid", "publisherid", "advertiserid",
+})
+_BFT_NOTIFICATION_SENSITIVE_KEY_PARTS = (
+    "token", "secret", "password", "authorization", "apikey",
+    "accesskey", "email", "phone", "mobile", "clickid", "clkid",
+    "fbclid", "gclid", "conversionid", "deviceid", "userid", "subid",
+)
+_BFT_NOTIFICATION_SENSITIVE_IP_KEYS = frozenset({
+    "ip", "ipaddress", "clientip", "requestip", "remoteip",
+})
+
+
+def _format_bft_notification_value(key: str, value: Any) -> str:
+    """仅展示白名单业务字段；敏感和未知回调参数不向 Telegram 转发原值。"""
+    normalized_key = "".join(char for char in key.lower() if char.isalnum())
+    if (
+        normalized_key in _BFT_NOTIFICATION_SENSITIVE_IP_KEYS
+        or any(part in normalized_key for part in _BFT_NOTIFICATION_SENSITIVE_KEY_PARTS)
+    ):
+        return "[已脱敏]"
+    if normalized_key not in _BFT_NOTIFICATION_SAFE_KEYS:
+        return "[非白名单字段已省略]"
+    if value is None:
+        return "None"
+    if isinstance(value, (dict, list, tuple, set)):
+        return "[结构化内容已省略]"
+    value_str = str(value)
+    return value_str[:150] + ("..." if len(value_str) > 150 else "")
 
 
 def _map_bft_click_and_event(raw_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -77,10 +109,6 @@ class PostbackBftService:
         失败仅打 warning，不影响主流程入库。
         """
         try:
-            client_ip = get_client_ip(request)
-            if client_ip == "unknown":
-                client_ip = "未知"
-            clk_id = raw_data.get("clk_id")
             event_name = raw_data.get("event_name")
             current_time = get_app_now_naive().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -88,27 +116,18 @@ class PostbackBftService:
                 f"🔔 BFT PostBack 收到数据\n\n"
                 f"⏰ 时间: {current_time}\n"
                 f"📡 方法: {request.method}\n"
-                f"🌐 IP: {client_ip}\n"
+                f"🌐 来源 IP: 已隐藏\n"
+                f"🆔 Click ID: {'已隐藏' if raw_data.get('clk_id') else '未提供'}\n"
             )
             if event_name:
-                telegram_msg += f"📌 事件: {event_name}\n"
-            if clk_id:
-                telegram_msg += f"🆔 Click ID: {clk_id}\n"
+                telegram_msg += (
+                    f"📌 事件: {_format_bft_notification_value('event_name', event_name)}\n"
+                )
             telegram_msg += f"\n📋 接收到的参数 ({len(raw_data)} 个):\n"
             telegram_msg += "-" * 40 + "\n"
             if raw_data:
                 for key, value in sorted(raw_data.items()):
-                    if value is None:
-                        value_str = "None"
-                    elif isinstance(value, (dict, list)):
-                        try:
-                            value_str = json.dumps(value, ensure_ascii=False)
-                        except Exception:
-                            value_str = str(value)
-                    else:
-                        value_str = str(value)
-                    if len(value_str) > 150:
-                        value_str = value_str[:150] + "..."
+                    value_str = _format_bft_notification_value(str(key), value)
                     telegram_msg += f"• {key}: {value_str}\n"
             else:
                 telegram_msg += "无参数\n"
