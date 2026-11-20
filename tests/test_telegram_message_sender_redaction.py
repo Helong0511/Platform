@@ -1,6 +1,4 @@
 """Telegram 发送异常日志和对外失败原因不得泄露 API 响应正文、Token 或 URL。"""
-import logging
-
 from app.core.telegram import message_sender
 
 
