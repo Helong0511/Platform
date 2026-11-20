@@ -74,7 +74,7 @@ def _is_lock_expired(lock_file_path: Path) -> bool:
         return (time.time() - timestamp) > LOCK_EXPIRE_SECONDS
         
     except Exception as e:
-        logger.warning(f"检查锁文件过期状态时出错：{e}")
+        logger.warning("检查锁文件过期状态时出错；error_type=%s", type(e).__name__)
         return False
 
 
@@ -97,7 +97,7 @@ def _get_lock_pid(lock_file_path: Path) -> Optional[int]:
         
         return None
     except Exception as e:
-        logger.warning(f"读取锁文件PID时出错：{e}")
+        logger.warning("读取锁文件PID时出错；error_type=%s", type(e).__name__)
         return None
 
 
@@ -128,7 +128,7 @@ def _cleanup_expired_lock(lock_file_path: Path):
             lock_file_path.unlink()
             logger.info(f"已清理过期的锁文件：{lock_file_path}")
     except Exception as e:
-        logger.warning(f"清理过期锁文件失败：{e}")
+        logger.warning("清理过期锁文件失败；error_type=%s", type(e).__name__)
 
 
 def _close_lock_file():
@@ -189,7 +189,7 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 1
                 logger.warning(f"[PID:{current_pid}] 锁文件仍然存在，尝试强制清理...")
                 _cleanup_expired_lock(lock_file_path)
         except Exception as e:
-            logger.warning(f"[PID:{current_pid}] 强制清理锁文件失败：{e}")
+            logger.warning("[PID:%s] 强制清理锁文件失败；error_type=%s", current_pid, type(e).__name__)
         
         retry_delay = 0.5  # 初始重试延迟
         for attempt in range(1, max_retries + 1):
@@ -297,11 +297,11 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 1
                             time.sleep(retry_delay)
                             retry_delay *= 1.5
                         else:
-                            logger.info(f"[PID:{current_pid}] 无法获取 Telegram Bot 启动锁（其他进程可能已启动）: {e}")
+                            logger.info("[PID:%s] 无法获取 Telegram Bot 启动锁（其他进程可能已启动）；error_type=%s", current_pid, type(e).__name__)
                         continue
                         
             except Exception as e:
-                logger.warning(f"[PID:{current_pid}] 获取 Telegram Bot 启动锁时发生错误（尝试 {attempt}/{max_retries}）: {e}")
+                logger.warning("[PID:%s] 获取 Telegram Bot 启动锁时发生错误（尝试 %s/%s）；error_type=%s", current_pid, attempt, max_retries, type(e).__name__)
                 _close_lock_file()
                 if attempt < max_retries:
                     time.sleep(retry_delay)
@@ -310,7 +310,7 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 1
                     return False
                     
     except Exception as e:
-        logger.warning(f"[PID:{current_pid}] 获取 Telegram Bot 启动锁时发生错误：{e}")
+        logger.warning("[PID:%s] 获取 Telegram Bot 启动锁时发生错误；error_type=%s", current_pid, type(e).__name__)
         _close_lock_file()
         return False
     
@@ -337,21 +337,21 @@ def release_bot_lock():
                     fcntl.flock(_bot_lock_file.fileno(), fcntl.LOCK_UN)
                     logger.info(f"[PID:{current_pid}] 已释放 fcntl 锁")
                 except Exception as lock_error:
-                    logger.warning(f"[PID:{current_pid}] 释放 fcntl 锁时发生错误：{lock_error}")
+                    logger.warning("[PID:%s] 释放 fcntl 锁时发生错误；error_type=%s", current_pid, type(lock_error).__name__)
             elif HAS_MSVCRT:
                 # Windows: 使用 msvcrt
                 try:
                     msvcrt.locking(_bot_lock_file.fileno(), msvcrt.LK_UNLCK, 1)
                     logger.info(f"[PID:{current_pid}] 已释放 msvcrt 锁")
                 except Exception as lock_error:
-                    logger.warning(f"[PID:{current_pid}] 释放 msvcrt 锁时发生错误：{lock_error}")
+                    logger.warning("[PID:%s] 释放 msvcrt 锁时发生错误；error_type=%s", current_pid, type(lock_error).__name__)
             
             # 关闭锁文件
             try:
                 _bot_lock_file.close()
                 logger.info(f"[PID:{current_pid}] 已关闭锁文件")
             except Exception as close_error:
-                logger.warning(f"[PID:{current_pid}] 关闭锁文件时发生错误：{close_error}")
+                logger.warning("[PID:%s] 关闭锁文件时发生错误；error_type=%s", current_pid, type(close_error).__name__)
             
             # 删除锁文件（如果存在）
             if lock_file_path and lock_file_path.exists():
@@ -359,14 +359,14 @@ def release_bot_lock():
                     lock_file_path.unlink()
                     logger.info(f"[PID:{current_pid}] 已删除锁文件")
                 except Exception as e:
-                    logger.warning(f"[PID:{current_pid}] 删除锁文件时发生错误：{e}")
+                    logger.warning("[PID:%s] 删除锁文件时发生错误；error_type=%s", current_pid, type(e).__name__)
                     # 尝试强制删除
                     try:
                         os.chmod(lock_file_path, stat.S_IWRITE)
                         lock_file_path.unlink()
                         logger.info(f"[PID:{current_pid}] 已强制删除锁文件")
                     except Exception as force_error:
-                        logger.warning(f"[PID:{current_pid}] 强制删除锁文件时发生错误：{force_error}")
+                        logger.warning("[PID:%s] 强制删除锁文件时发生错误；error_type=%s", current_pid, type(force_error).__name__)
             
             # 重置锁状态
             _bot_lock_file = None
@@ -375,7 +375,7 @@ def release_bot_lock():
             logger.info(f"[PID:{current_pid}] 已释放 Telegram Bot 启动锁")
             
         except Exception as e:
-            logger.warning(f"[PID:{current_pid}] 释放 Telegram Bot 启动锁时发生错误：{e}")
+            logger.warning("[PID:%s] 释放 Telegram Bot 启动锁时发生错误；error_type=%s", current_pid, type(e).__name__)
             # 确保文件被关闭
             try:
                 if _bot_lock_file:
@@ -387,7 +387,7 @@ def release_bot_lock():
                 try:
                     lock_file_path.unlink()
                 except Exception as unlink_error:
-                    logger.warning(f"[PID:{current_pid}] 删除锁文件时发生错误：{unlink_error}")
+                    logger.warning("[PID:%s] 删除锁文件时发生错误；error_type=%s", current_pid, type(unlink_error).__name__)
                     # 尝试强制删除
                     try:
                         os.chmod(lock_file_path, stat.S_IWRITE)
