@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import os
 import threading
 import time
 import traceback
@@ -35,7 +34,6 @@ _EXCLUDED_LOGGER_PREFIXES = (
     "telegram",
     "httpx",
     "urllib3",
-    "httpx",
     "httpcore",
 )
 
