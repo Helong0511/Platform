@@ -88,7 +88,12 @@ def process_pending_conversion(
     from app.core.config import settings
     from app.core.telegram.ptb_runtime import get_send_bot
     from sqlalchemy import select as sync_select
-    from app.models.models import PendingPostbackConversion, PostbackConversion, Click
+    from app.models.models import (
+        PendingPostbackConversion,
+        PostbackConversion,
+        Click,
+        TelegramPostbackApprovalAudit,
+    )
     from app.core.tracking.click_token import resolve_click_from_token
 
     token = getattr(settings, "TELEGRAM_TOKEN", None)
@@ -107,20 +112,32 @@ def process_pending_conversion(
             pending = result.scalar_one_or_none()
 
             if not pending:
-                add_postback_approval_audit(
-                    db,
-                    pending_conversion_id=pending_id,
-                    conversion_id=None,
-                    actor_type="telegram",
-                    actor_id=actor_telegram_user_id,
-                    source="telegram",
-                    action=action,
-                    outcome="not_found",
-                    previous_status=None,
-                    new_status=None,
-                    telegram_callback_query_id=callback_query_id,
-                )
-                db.commit()
+                existing_audit_id = db.execute(
+                    sync_select(TelegramPostbackApprovalAudit.id)
+                    .where(
+                        TelegramPostbackApprovalAudit.telegram_callback_query_id
+                        == callback_query_id
+                    )
+                    .limit(1)
+                ).scalar_one_or_none()
+                if existing_audit_id is None:
+                    add_postback_approval_audit(
+                        db,
+                        pending_conversion_id=pending_id,
+                        conversion_id=None,
+                        actor_type="telegram",
+                        actor_id=actor_telegram_user_id,
+                        source="telegram",
+                        action=action,
+                        outcome="not_found",
+                        previous_status=None,
+                        new_status=None,
+                        telegram_callback_query_id=callback_query_id,
+                    )
+                    db.commit()
+                else:
+                    # 同一个 Telegram callback_query_id 已完成过，按幂等重放处理。
+                    db.rollback()
                 try:
                     _api(
                         chat_id,
