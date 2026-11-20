@@ -124,6 +124,8 @@ def test_postback_services_do_not_log_or_return_raw_backend_exceptions():
         "app/services/cpl/postback_bft_service.py"
     ]
     assert "clk_id=%s" not in sources["app/services/cpl/postback_bft_service.py"]
+    assert "Click ID: {clk_id}" not in sources["app/services/cpl/postback_bft_service.py"]
+    assert "IP: {client_ip}" not in sources["app/services/cpl/postback_bft_service.py"]
     assert "conversion_or_click_id=%s" not in sources[
         "app/services/cpl/postback_diagnostic_service.py"
     ]
