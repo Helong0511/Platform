@@ -32,7 +32,7 @@ def test_id_command_redacts_get_me_error(monkeypatch):
 
     update = SimpleNamespace(
         effective_message=SimpleNamespace(
-            chat=SimpleNamespace(type="private", id=123, title=None),
+            chat=SimpleNamespace(type="supergroup", id=-100123, title="test group"),
             text="/id", entities=None, message_id=7,
         ),
         effective_user=SimpleNamespace(username="tester", first_name="Tester", id=456),
@@ -104,9 +104,11 @@ def test_stats_callback_answer_error_is_redacted(monkeypatch):
 def test_stats_service_redacts_database_error(monkeypatch):
     logs = []
     monkeypatch.setattr(stats_service.logger, "error", lambda *args, **_kwargs: logs.append(args))
-    monkeypatch.setattr(stats_service.asyncio, "run", lambda *_args, **_kwargs: (_ for _ in ()).throw(
-        _SecretTelegramError("private-password mysql://root:secret@db/private")
-    ))
+    def fail_run(coro, **_kwargs):
+        coro.close()
+        raise _SecretTelegramError("private-password mysql://root:secret@db/private")
+
+    monkeypatch.setattr(stats_service.asyncio, "run", fail_run)
 
     assert stats_service.fetch_stats_sync("stats_yesterday") is None
     _assert_safe_logs(logs)
