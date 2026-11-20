@@ -61,7 +61,7 @@ def _cleanup_on_polling_conflict(current_pid: int) -> None:
             lock_path.unlink()
             logger.info(f"[PID:{current_pid}] 已删除锁文件，避免锁文件残留")
     except Exception as cleanup_error:
-        logger.warning(f"[PID:{current_pid}] 清理锁文件时出错：{cleanup_error}")
+        logger.warning("[PID:%s] 清理锁文件失败：error_type=%s", current_pid, type(cleanup_error).__name__)
 
 
 def register_handlers(application) -> None:
@@ -124,17 +124,17 @@ async def _on_error(update, context) -> None:
         return
     msg = str(error)
     if is_telegram_conflict_error(msg):
-        logger.error("检测到 Telegram 轮询冲突（409），停止当前实例：%s", msg)
+        logger.error("检测到 Telegram 轮询冲突（409），停止当前实例；error_type=%s", type(error).__name__)
         app = context.application
         try:
             await app.stop()
         except Exception as stop_err:
-            logger.warning("409 冲突时停止 Application 失败：%s", stop_err)
+            logger.warning("409 冲突时停止 Application 失败；error_type=%s", type(stop_err).__name__)
         return
     if is_transient_telegram_network_error(error):
-        logger.warning("Telegram 轮询临时网络错误，将自动重试：%s", msg)
+        logger.warning("Telegram 轮询临时网络错误，将自动重试；error_type=%s", type(error).__name__)
         return
-    logger.error("Telegram Application 未处理错误：%s", msg, exc_info=error)
+    logger.error("Telegram Application 未处理错误；error_type=%s", type(error).__name__)
 
 
 def start_polling():
@@ -231,13 +231,13 @@ def start_polling():
             )
             logger.info(f"[PID:{current_pid}] 已发送 Telegram 机器人启动消息")
         except Exception as msg_err:
-            logger.warning(f"[PID:{current_pid}] 发送启动消息失败：{msg_err}")
+            logger.warning(f"[PID:{current_pid}] 发送启动消息失败；error_type={type(msg_err).__name__}")
     except Exception as e:
         if is_telegram_conflict_error(str(e)):
             logger.error(f"[PID:{current_pid}] 验证失败：检测到其他 Bot 实例正在运行")
             _cleanup_on_polling_conflict(current_pid)
             return False
-        logger.warning(f"[PID:{current_pid}] 验证时发生错误，但继续启动：{e}")
+        logger.warning(f"[PID:{current_pid}] 验证时发生错误，但继续启动；error_type={type(e).__name__}")
 
     request = HTTPXRequest(
         connect_timeout=3.0,
@@ -273,19 +273,19 @@ def start_polling():
         )
     except Exception as e:
         if is_telegram_conflict_error(str(e)):
-            logger.error(f"[PID:{current_pid}] 轮询过程中检测到其他 Bot 实例：{e}")
+            logger.error(f"[PID:{current_pid}] 轮询过程中检测到其他 Bot 实例；error_type={type(e).__name__}")
             _cleanup_on_polling_conflict(current_pid)
             return False
         if is_transient_telegram_network_error(e):
-            logger.warning(f"轮询意外退出，临时网络错误：{e}")
+            logger.warning(f"轮询意外退出，临时网络错误；error_type={type(e).__name__}")
         else:
-            logger.error(f"轮询意外退出：{e}", exc_info=True)
+            logger.error(f"轮询意外退出；error_type={type(e).__name__}")
     finally:
         try:
             release_bot_lock()
             logger.info("Telegram Bot 已停止并释放锁")
         except Exception as e:
-            logger.warning(f"释放锁时发生错误：{e}")
+            logger.warning(f"释放锁时发生错误；error_type={type(e).__name__}")
         _bot_started = False
         _active_application = None
         set_bot_state(None, True, True, new_application=None)
@@ -325,7 +325,7 @@ def start_bot_thread():
         try:
             start_polling()
         except Exception as e:
-            logger.error(f"Telegram Bot 轮询线程出错：{e}", exc_info=True)
+            logger.error(f"Telegram Bot 轮询线程出错；error_type={type(e).__name__}")
         logger.info("Telegram Bot 轮询线程已结束")
 
     thread = threading.Thread(target=run_polling, daemon=True, name="TelegramBot")
@@ -363,7 +363,7 @@ def stop_polling_application(timeout: float = 10.0) -> bool:
         logger.info("Telegram Application 已请求停止")
         return True
     except Exception as exc:
-        logger.warning("停止 Telegram Application 失败：%s", exc)
+        logger.warning("停止 Telegram Application 失败；error_type=%s", type(exc).__name__)
         return False
     finally:
         _bot_started = False
@@ -412,7 +412,7 @@ def restart_bot_thread(
     try:
         release_bot_lock()
     except Exception as exc:
-        logger.debug("重启时兜底释放锁失败（可忽略）: %s", exc)
+        logger.debug("重启时兜底释放锁失败（可忽略）；error_type=%s", type(exc).__name__)
 
     set_shared_state(
         {
