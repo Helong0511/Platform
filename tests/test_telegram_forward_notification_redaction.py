@@ -32,6 +32,9 @@ def test_forward_failure_message_omits_secrets_and_click_params():
         },
     )
 
+    # Telegram 消息必须使用真实换行符，而不是字面量反斜杠+n。
+    assert "\n平台：" in message
+    assert "\\n平台：" not in message
     for secret in (
         "partner.example",
         "private-token",
@@ -55,6 +58,8 @@ def test_forward_success_message_omits_target_url_and_response_body():
         response_body='{"token":"private-token","email":"user@example.com"}',
     )
 
+    assert "\n平台：" in message
+    assert "\\n平台：" not in message
     assert "200" in message
     assert "partner.example" not in message
     assert "private-token" not in message
