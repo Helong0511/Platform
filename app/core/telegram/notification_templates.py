@@ -9,6 +9,11 @@ import ipaddress
 from datetime import datetime
 
 
+def _escape_telegram_text(value: Any) -> str:
+    """转义不可信的 Telegram HTML 文本字段。"""
+    return html.escape(str(value or ""))
+
+
 def _mask_ip_for_telegram(value: Optional[str]) -> str:
     """Telegram 待审批通知仅显示网段摘要，避免在群聊暴露完整来源 IP。"""
     raw_ip = str(value or "").strip()
@@ -57,18 +62,18 @@ class ConversionNotificationTemplate:
         lines = [
             "💰 <b>新转化通知</b>",
             "",
-            f"平台：{platform}",
-            f"转化 ID: {conversion_id}",
-            f"事件：{event_name}",
+            f"平台：{_escape_telegram_text(platform)}",
+            f"转化 ID: {_escape_telegram_text(conversion_id)}",
+            f"事件：{_escape_telegram_text(event_name)}",
             f"金额：${payout:.4f}",
         ]
         
         if product_name:
-            lines.append(f"产品：{product_name}")
+            lines.append(f"产品：{_escape_telegram_text(product_name)}")
         if advertiser_name:
-            lines.append(f"广告主：{advertiser_name}")
+            lines.append(f"广告主：{_escape_telegram_text(advertiser_name)}")
         if publisher_name:
-            lines.append(f"渠道：{publisher_name}")
+            lines.append(f"渠道：{_escape_telegram_text(publisher_name)}")
         
         return '\n'.join(lines)
     
@@ -134,12 +139,14 @@ class SystemNotificationTemplate:
         Returns:
             str: 格式化后的通知消息
         """
+        # 异常正文可能包含目标 URL、Token、响应正文或请求参数；Telegram 可能是群聊。
+        # 详细原因留在受访问控制的服务器转发日志中。
         return (
-            f"❌ <b>Postback 转发失败</b>\n\n"
-            f"平台：{platform}\n"
-            f"转化 ID: {conversion_id}\n"
-            f"渠道：{publisher_name}\n"
-            f"错误：{error_message}"
+            "❌ <b>Postback 转发失败</b>\n\n"
+            f"平台：{_escape_telegram_text(platform)}\n"
+            f"转化 ID: {_escape_telegram_text(conversion_id)}\n"
+            f"渠道：{_escape_telegram_text(publisher_name)}\n"
+            "错误：详细原因请在受访问控制的转发日志中查看"
         )
     
     @staticmethod
@@ -148,31 +155,12 @@ class SystemNotificationTemplate:
         error_message: str,
         context: Optional[Dict[str, Any]] = None
     ) -> str:
-        """
-        格式化系统错误通知
-        
-        Args:
-            error_type: 错误类型
-            error_message: 错误信息
-            context: 上下文信息
-        
-        Returns:
-            str: 格式化后的通知消息
-        """
-        lines = [
-            "🚨 <b>系统错误</b>",
-            "",
-            f"类型：{error_type}",
-            f"错误：{error_message[:200]}",  # 限制长度
-        ]
-        
-        if context:
-            lines.append("")
-            lines.append("上下文:")
-            for key, value in context.items():
-                lines.append(f"  {key}: {value}")
-        
-        return '\n'.join(lines)
+        """构建不含异常正文或上下文的安全系统告警。"""
+        # error_type/context 也可能由调用方传入动态数据；不发送到 Telegram 群聊。
+        return (
+            "🚨 <b>系统错误</b>\n\n"
+            "详情：请在受访问控制的服务器日志中查看"
+        )
 
 
 class StatisticsNotificationTemplate:
