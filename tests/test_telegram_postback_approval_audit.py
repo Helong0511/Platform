@@ -147,3 +147,163 @@ async def test_unauthorized_telegram_callback_persists_denied_audit(monkeypatch)
     assert event.outcome == "denied"
     assert event.pending_conversion_id == 55
     assert event.telegram_callback_query_id == "callback-denied-55"
+
+
+
+class _FakeTelegramSession:
+    def __init__(self, pending, existing_conversion_id=None, fail_commit=False):
+        self.pending = pending
+        self.results = [pending, existing_conversion_id]
+        self.events = []
+        self.fail_commit = fail_commit
+        self.committed = False
+        self.rollback_count = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, _exc, _tb):
+        if exc_type is not None or not self.committed:
+            self.rollback()
+        return False
+
+    def execute(self, _statement):
+        value = self.results.pop(0)
+        return SimpleNamespace(scalar_one_or_none=lambda: value)
+
+    def add(self, event):
+        if event.__class__.__name__ == "PostbackConversion":
+            event.id = 9001
+        self.events.append(event)
+
+    def flush(self):
+        return None
+
+    def commit(self):
+        if self.fail_commit:
+            raise RuntimeError("database transaction failed")
+        self.committed = True
+
+    def refresh(self, _event):
+        return None
+
+    def rollback(self):
+        self.rollback_count += 1
+
+
+def _fake_pending():
+    return SimpleNamespace(
+        id=77,
+        status="pending",
+        platform="bft",
+        conversion_id="conversion-77",
+        event_name="install",
+        event_value=None,
+        original_payout=None,
+        payout=None,
+        devad_id=None,
+        os=None,
+        carrier=None,
+        ip="203.0.113.77",
+        gid=None,
+        product_id=None,
+        client_id=None,
+        click_id=None,
+        click_time=None,
+        raw_data=None,
+        approved_at=None,
+        rejected_at=None,
+    )
+
+
+def _patch_telegram_processor(monkeypatch, fake_session):
+    from app.core.telegram.callback_handlers import postback_approval as handler
+    from app.core.telegram import ptb_runtime
+    from app.core.config import settings
+
+    class FakeBot:
+        def answer_callback_query(self, **_kwargs):
+            return object()
+
+        def edit_message_text(self, **_kwargs):
+            return object()
+
+    monkeypatch.setattr(settings, "TELEGRAM_TOKEN", "configured-token", raising=False)
+    monkeypatch.setattr(ptb_runtime, "get_send_bot", lambda *_args, **_kwargs: FakeBot())
+    monkeypatch.setattr(handler, "get_sync_session_factory", lambda: lambda: fake_session)
+    monkeypatch.setattr(handler, "_api", lambda *_args, **_kwargs: None)
+    return handler
+
+
+def test_telegram_approval_audit_is_committed_with_conversion(monkeypatch):
+    pending = _fake_pending()
+    db = _FakeTelegramSession(pending)
+    handler = _patch_telegram_processor(monkeypatch, db)
+
+    handler.process_pending_conversion(
+        77, "approve", "callback-approve-77", -100123, 8, 555123
+    )
+
+    audits = [event for event in db.events if event.__class__.__name__ == "TelegramPostbackApprovalAudit"]
+    assert db.committed is True
+    assert pending.status == "approved"
+    assert len(audits) == 1
+    audit = audits[0]
+    assert audit.actor_type == "telegram"
+    assert audit.actor_id == "555123"
+    assert audit.action == "approve"
+    assert audit.outcome == "approved"
+    assert audit.conversion_id == 9001
+    assert audit.telegram_callback_query_id == "callback-approve-77"
+
+
+def test_telegram_duplicate_approval_is_audited_without_duplicate_conversion(monkeypatch):
+    pending = _fake_pending()
+    db = _FakeTelegramSession(pending, existing_conversion_id=321)
+    handler = _patch_telegram_processor(monkeypatch, db)
+
+    handler.process_pending_conversion(
+        77, "approve", "callback-duplicate-77", -100123, 8, 555124
+    )
+
+    audits = [event for event in db.events if event.__class__.__name__ == "TelegramPostbackApprovalAudit"]
+    conversions = [event for event in db.events if event.__class__.__name__ == "PostbackConversion"]
+    assert db.committed is True
+    assert pending.status == "approved"
+    assert conversions == []
+    assert len(audits) == 1
+    assert audits[0].outcome == "already_exists"
+    assert audits[0].conversion_id == 321
+
+
+def test_telegram_rejection_is_audited_with_same_transaction(monkeypatch):
+    pending = _fake_pending()
+    db = _FakeTelegramSession(pending)
+    handler = _patch_telegram_processor(monkeypatch, db)
+
+    handler.process_pending_conversion(
+        77, "reject", "callback-reject-77", -100123, 8, 555125
+    )
+
+    audits = [event for event in db.events if event.__class__.__name__ == "TelegramPostbackApprovalAudit"]
+    assert db.committed is True
+    assert pending.status == "rejected"
+    assert len(audits) == 1
+    assert audits[0].actor_id == "555125"
+    assert audits[0].action == "reject"
+    assert audits[0].outcome == "rejected"
+
+
+def test_telegram_audit_is_not_committed_when_business_transaction_fails(monkeypatch):
+    pending = _fake_pending()
+    db = _FakeTelegramSession(pending, fail_commit=True)
+    handler = _patch_telegram_processor(monkeypatch, db)
+
+    handler.process_pending_conversion(
+        77, "reject", "callback-failed-77", -100123, 8, 555126
+    )
+
+    audits = [event for event in db.events if event.__class__.__name__ == "TelegramPostbackApprovalAudit"]
+    assert len(audits) == 1
+    assert db.committed is False
+    assert db.rollback_count >= 1
