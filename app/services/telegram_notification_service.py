@@ -291,18 +291,18 @@ class TelegramNotificationService:
         """构建不包含请求密钥、原始异常或点击参数的管理员转发失败告警。"""
         # Postback URL、异常正文和点击参数都可能含凭据、PII 或用户追踪标识。
         # Telegram 通知历史也会保存消息正文，因此在构建阶段统一剔除。
-        msg = "❌ Postback 转发失败告警\\n\\n"
-        msg += f"转化ID: {conversion.conversion_id}\\n"
-        msg += f"平台: {conversion.platform}\\n"
-        msg += "\\n📤 渠道信息\\n"
-        msg += f"• 渠道ID: {publisher.id}\\n"
-        msg += f"• 渠道名称: {publisher.publisher_name}\\n"
-        msg += "\\n❌ 转发状态\\n"
-        msg += "• 失败原因：请在受访问控制的转发日志中查看\\n"
+        msg = "❌ Postback 转发失败告警\n\n"
+        msg += f"转化ID: {conversion.conversion_id}\n"
+        msg += f"平台: {conversion.platform}\n"
+        msg += "\n📤 渠道信息\n"
+        msg += f"• 渠道ID: {publisher.id}\n"
+        msg += f"• 渠道名称: {publisher.publisher_name}\n"
+        msg += "\n❌ 转发状态\n"
+        msg += "• 失败原因：请在受访问控制的转发日志中查看\n"
 
         if conversion.created_at:
             time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
-            msg += f"\\n⏰ 时间: {time_str}\\n"
+            msg += f"\n⏰ 时间: {time_str}\n"
 
         return msg
 
@@ -316,19 +316,19 @@ class TelegramNotificationService:
     ) -> str:
         """构建不包含目标 URL 或对端响应正文的管理员转发成功通知。"""
         # URL 查询参数和对端响应正文可能包含令牌、回显请求参数或个人信息。
-        msg = "✅ Postback 转发成功\\n\\n"
-        msg += f"转化ID: {conversion.conversion_id}\\n"
-        msg += f"平台: {conversion.platform}\\n"
-        msg += "\\n📤 渠道信息\\n"
-        msg += f"• 渠道ID: {publisher.id}\\n"
-        msg += f"• 渠道名称: {publisher.publisher_name}\\n"
-        msg += "\\n✅ 响应信息\\n"
-        msg += f"• 状态码: {int(response_status)}\\n"
-        msg += "• 响应正文：已省略\\n"
+        msg = "✅ Postback 转发成功\n\n"
+        msg += f"转化ID: {conversion.conversion_id}\n"
+        msg += f"平台: {conversion.platform}\n"
+        msg += "\n📤 渠道信息\n"
+        msg += f"• 渠道ID: {publisher.id}\n"
+        msg += f"• 渠道名称: {publisher.publisher_name}\n"
+        msg += "\n✅ 响应信息\n"
+        msg += f"• 状态码: {int(response_status)}\n"
+        msg += "• 响应正文：已省略\n"
 
         if conversion.created_at:
             time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
-            msg += f"\\n⏰ 时间: {time_str}\\n"
+            msg += f"\n⏰ 时间: {time_str}\n"
 
         return msg
 
