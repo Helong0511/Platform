@@ -588,25 +588,23 @@ class TelegramNotificationService:
                     )
                     await _persist_notification_record(db, notification_record, commit=commit)
                 except Exception as e:
-                    logger.warning(f"记录系统告警通知历史失败: {str(e)}")
+                    logger.warning("记录系统告警通知历史失败；error_type=%s", type(e).__name__)
                     if db:
                         await db.rollback()
 
             if success:
                 logger.warning(
-                    "系统告警已发送: alert_type=%s, description=%s",
+                    "系统告警已发送: alert_type=%s",
                     alert_type,
-                    description,
                 )
             else:
                 logger.warning(
-                    "系统告警发送失败: alert_type=%s, description=%s",
+                    "系统告警发送失败: alert_type=%s",
                     alert_type,
-                    description,
                 )
             return success
         except Exception as e:
-            logger.error(f"发送系统告警通知失败: {str(e)}", exc_info=True)
+            logger.error("发送系统告警通知失败；error_type=%s", type(e).__name__)
             return False
 
     @staticmethod
