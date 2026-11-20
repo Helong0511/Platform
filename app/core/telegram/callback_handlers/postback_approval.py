@@ -78,6 +78,9 @@ def process_pending_conversion(
                     gid=pending.gid,
                     product_id=pending.product_id,
                     client_id=pending.client_id,
+                    # 审批转正式记录时必须保留点击关联，供归因筛选和历史回查使用。
+                    click_id=pending.click_id,
+                    click_time=pending.click_time,
                     conversion_status="Pending",
                     raw_data=pending.raw_data,
                     created_at=get_app_now_naive(),
