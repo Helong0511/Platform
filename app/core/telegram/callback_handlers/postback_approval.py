@@ -4,6 +4,7 @@ Postback 审批回调处理器
 处理管理员对 Postback 待确认转化的批准/拒绝操作（python-telegram-bot）。
 """
 import logging
+import re
 import threading
 
 logger = logging.getLogger(__name__)
@@ -11,6 +12,7 @@ logger = logging.getLogger(__name__)
 from app.core.utils import get_app_now_naive
 from app.core.telegram.sync_db import get_sync_session_factory
 from app.core.postback.pending_lock import build_pending_for_update_statement
+from app.core.postback.approval_audit import add_postback_approval_audit
 
 
 def _is_authorized_admin(user_id: int | None, chat_type: str | None) -> bool:
@@ -47,6 +49,17 @@ def _is_authorized_admin(user_id: int | None, chat_type: str | None) -> bool:
     return str(user_id) in legacy_private_ids
 
 
+def _parse_approval_callback_data(value: str) -> tuple[str, int] | None:
+    """严格解析审批按钮数据，未知前缀不得被误判为拒绝操作。"""
+    match = re.fullmatch(r"postback_(approve|reject)_([1-9][0-9]{0,9})", str(value or ""))
+    if not match:
+        return None
+    pending_id = int(match.group(2))
+    if pending_id > 2_147_483_647:
+        return None
+    return match.group(1), pending_id
+
+
 def _api(chat_id: int, coro):
     """后台线程内走发送互斥。"""
     from app.core.telegram.message_sender import call_telegram_api_throttled
@@ -69,6 +82,7 @@ def process_pending_conversion(
     callback_query_id: str,
     chat_id: int,
     message_id: int,
+    actor_telegram_user_id: int | None = None,
 ):
     """处理待确认转化记录（同步操作，在后台线程执行）。"""
     from app.core.config import settings
@@ -93,6 +107,20 @@ def process_pending_conversion(
             pending = result.scalar_one_or_none()
 
             if not pending:
+                add_postback_approval_audit(
+                    db,
+                    pending_conversion_id=pending_id,
+                    conversion_id=None,
+                    actor_type="telegram",
+                    actor_id=actor_telegram_user_id,
+                    source="telegram",
+                    action=action,
+                    outcome="not_found",
+                    previous_status=None,
+                    new_status=None,
+                    telegram_callback_query_id=callback_query_id,
+                )
+                db.commit()
                 try:
                     _api(
                         chat_id,
@@ -118,8 +146,22 @@ def process_pending_conversion(
                     .limit(1)
                 ).scalar_one_or_none()
                 if existing_conversion_id is not None:
+                    previous_status = pending.status
                     pending.status = "approved"
                     pending.approved_at = get_app_now_naive()
+                    add_postback_approval_audit(
+                        db,
+                        pending_conversion_id=pending.id,
+                        conversion_id=existing_conversion_id,
+                        actor_type="telegram",
+                        actor_id=actor_telegram_user_id,
+                        source="telegram",
+                        action="approve",
+                        outcome="already_exists",
+                        previous_status=previous_status,
+                        new_status=pending.status,
+                        telegram_callback_query_id=callback_query_id,
+                    )
                     db.commit()
                     try:
                         _api(
@@ -203,9 +245,24 @@ def process_pending_conversion(
                     raw_data=pending.raw_data,
                     created_at=get_app_now_naive(),
                 )
+                previous_status = pending.status
                 db.add(conversion)
                 pending.status = "approved"
                 pending.approved_at = get_app_now_naive()
+                db.flush()
+                add_postback_approval_audit(
+                    db,
+                    pending_conversion_id=pending.id,
+                    conversion_id=conversion.id,
+                    actor_type="telegram",
+                    actor_id=actor_telegram_user_id,
+                    source="telegram",
+                    action="approve",
+                    outcome="approved",
+                    previous_status=previous_status,
+                    new_status=pending.status,
+                    telegram_callback_query_id=callback_query_id,
+                )
                 db.commit()
                 db.refresh(conversion)
 
@@ -242,8 +299,22 @@ def process_pending_conversion(
                     f"管理员批准了待确认转化记录：pending_id={pending_id}, conversion_id={conversion.id}"
                 )
             else:
+                previous_status = pending.status
                 pending.status = "rejected"
                 pending.rejected_at = get_app_now_naive()
+                add_postback_approval_audit(
+                    db,
+                    pending_conversion_id=pending.id,
+                    conversion_id=None,
+                    actor_type="telegram",
+                    actor_id=actor_telegram_user_id,
+                    source="telegram",
+                    action="reject",
+                    outcome="rejected",
+                    previous_status=previous_status,
+                    new_status=pending.status,
+                    telegram_callback_query_id=callback_query_id,
+                )
                 db.commit()
 
                 try:
@@ -295,14 +366,47 @@ async def handle_postback_approval(update, context):
     if not query or not query.message or not query.data:
         return
 
+    parsed = _parse_approval_callback_data(query.data)
+    if parsed is None:
+        try:
+            await query.answer(text="无效的审批操作", show_alert=True)
+        except Exception as exc:
+            logger.warning("发送无效回调提示失败：error_type=%s", type(exc).__name__)
+        return
+
+    action, pending_id = parsed
     user = query.from_user
+    user_id = getattr(user, "id", None)
     chat_type = getattr(getattr(query.message, "chat", None), "type", None)
-    if not _is_authorized_admin(getattr(user, "id", None), chat_type):
+    if not _is_authorized_admin(user_id, chat_type):
         logger.warning(
             "拒绝未授权 Telegram Postback 审批操作：user_id=%s chat_type=%s",
-            getattr(user, "id", None),
+            user_id,
             chat_type,
         )
+        # 未授权尝试不改变业务记录，使用独立同步事务持久化拒绝事件。
+        try:
+            SessionLocal = get_sync_session_factory()
+            with SessionLocal() as audit_db:
+                add_postback_approval_audit(
+                    audit_db,
+                    pending_conversion_id=pending_id,
+                    conversion_id=None,
+                    actor_type="telegram",
+                    actor_id=user_id,
+                    source="telegram",
+                    action=action,
+                    outcome="denied",
+                    previous_status=None,
+                    new_status=None,
+                    telegram_callback_query_id=query.id,
+                )
+                audit_db.commit()
+        except Exception as audit_exc:
+            logger.warning(
+                "记录未授权 Telegram 审批审计失败；error_type=%s",
+                type(audit_exc).__name__,
+            )
         try:
             await query.answer(text="无权限执行此操作", show_alert=True)
         except Exception as exc:
@@ -310,27 +414,24 @@ async def handle_postback_approval(update, context):
         return
 
     logger.info(
-        f"[回调查询处理器] 收到管理员回调：callback_data='{query.data}', "
-        f"user_id={getattr(user, 'id', None)}"
+        "[回调查询处理器] 收到管理员审批回调：action=%s pending_id=%s user_id=%s",
+        action,
+        pending_id,
+        user_id,
     )
 
+    callback_query_id = query.id
+    chat_id = query.message.chat_id
+    message_id = query.message.message_id
+
     try:
-        action = "approve" if query.data.startswith("postback_approve_") else "reject"
-        pending_id = int(query.data.split("_")[-1])
-        callback_query_id = query.id
-        chat_id = query.message.chat_id
-        message_id = query.message.message_id
+        await query.answer(text="正在处理，请稍候...", show_alert=False)
+    except Exception as exc:
+        logger.warning("确认 Telegram 回调失败：error_type=%s", type(exc).__name__)
 
-        try:
-            await query.answer(text="正在处理，请稍候...", show_alert=False)
-        except Exception as e:
-            logger.warning("确认 Telegram 回调失败：error_type=%s", type(e).__name__)
-
-        thread = threading.Thread(
-            target=process_pending_conversion,
-            args=(pending_id, action, callback_query_id, chat_id, message_id),
-            daemon=True,
-        )
-        thread.start()
-    except Exception as e:
-        logger.error("处理回调失败：error_type=%s", type(e).__name__)
+    thread = threading.Thread(
+        target=process_pending_conversion,
+        args=(pending_id, action, callback_query_id, chat_id, message_id, user_id),
+        daemon=True,
+    )
+    thread.start()
