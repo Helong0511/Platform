@@ -4,7 +4,7 @@
 功能说明：
 - ``handle_cached_redirect``：Redis 缓存命中时校验状态/过期、替换占位符、写点击、302 跳转
 - ``handle_database_redirect``：缓存未命中时查库、回写缓存，其余流程与缓存路径一致
-- ``log_redirect_details``：以 WARNING 级别输出完整重定向链路日志，便于线上排查
+- ``log_redirect_details``：仅以 DEBUG 级别输出不含请求参数和跳转 URL 的重定向摘要
 
 处理流程（两条路径共用）：
 1. 校验短链启用与过期 → 2. 解析 Offer/渠道 → 3. 生成 click_id
