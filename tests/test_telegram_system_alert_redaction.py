@@ -16,7 +16,7 @@ def test_system_alert_message_omits_description_exception_and_absolute_file_path
         error=RuntimeError(secret),
     )
 
-    assert "database_error" in message
+    assert "system_alert" in message
     assert "RuntimeError" in message
     assert "app.services.worker" in message
     assert "run_task" in message
