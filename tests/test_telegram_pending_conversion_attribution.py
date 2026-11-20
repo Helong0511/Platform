@@ -137,3 +137,38 @@ def test_telegram_approval_does_not_duplicate_existing_conversion(monkeypatch):
     assert fake_db.committed is True
     assert pending.status == "approved"
     assert fake_db.added == []
+
+def test_telegram_approval_uses_signed_click_token_when_click_row_is_not_yet_available(monkeypatch):
+    click_time = datetime(2026, 11, 19, 10, 30, 0)
+    pending = _pending_record(None)
+    pending.click_id = "signed-click-token"
+    token_module = importlib.import_module("app.core.tracking.click_token")
+    monkeypatch.setattr(
+        token_module,
+        "resolve_click_from_token",
+        lambda _click_id: {
+            "offer_id": 41,
+            "publisher_id": 42,
+            "advertiser_id": 43,
+            "click_time": click_time,
+        },
+    )
+    fake_db = _install_fake_runtime(monkeypatch, [pending, None, None])
+
+    handler = importlib.import_module(
+        "app.core.telegram.callback_handlers.postback_approval"
+    )
+    handler.process_pending_conversion(
+        pending_id=77,
+        action="approve",
+        callback_query_id="callback-77",
+        chat_id=100,
+        message_id=200,
+    )
+
+    conversion = fake_db.added[0]
+    assert conversion.click_id == "signed-click-token"
+    assert conversion.click_time == click_time
+    assert conversion.offer_id == 41
+    assert conversion.publisher_id == 42
+    assert conversion.advertiser_id == 43
