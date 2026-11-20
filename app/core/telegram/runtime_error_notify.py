@@ -140,7 +140,7 @@ def build_runtime_error_message(
 
     lines.append("")
     lines.append(f"⏰ {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def _send_sync(message: str) -> None:
