@@ -1,4 +1,4 @@
-""" 
+"""
 Postback 审批回调处理器
 
 处理管理员对 Postback 待确认转化的批准/拒绝操作（python-telegram-bot）。
@@ -56,8 +56,8 @@ def _api(chat_id: int, coro):
 def _build_rejection_message(conversion_id: str, platform: str) -> str:
     """构建拒绝审批通知；不向 Telegram 聊天发送来源 IP 等个人信息。"""
     return (
-        "❌ 已拒绝转化记录\\n\\n"
-        f"转化 ID: {conversion_id}\\n"
+        "❌ 已拒绝转化记录\n\n"
+        f"转化 ID: {conversion_id}\n"
         f"平台：{platform}"
     )
 
@@ -218,9 +218,9 @@ def process_pending_conversion(
                             chat_id=chat_id,
                             message_id=message_id,
                             text=(
-                                f"✅ 已批准并保存转化记录\\n\\n"
-                                f"转化 ID: {conversion.conversion_id}\\n"
-                                f"平台：{conversion.platform}\\n"
+                                f"✅ 已批准并保存转化记录\n\n"
+                                f"转化 ID: {conversion.conversion_id}\n"
+                                f"平台：{conversion.platform}\n"
                                 f"记录 ID: {conversion.id}"
                             ),
                             reply_markup=None,
