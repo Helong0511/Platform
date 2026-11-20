@@ -95,10 +95,10 @@ class ConversionNotificationTemplate:
         """
         message = (
             f"⚠️ <b>待确认转化</b>\n\n"
-            f"平台：{platform}\n"
-            f"转化 ID: {conversion_id}\n"
+            f"平台：{html.escape(str(platform))}\n"
+            f"转化 ID: {html.escape(str(conversion_id))}\n"
             f"金额：${payout:.4f}\n"
-            f"IP: {ip}\n\n"
+            f"IP 网段：{_mask_ip_for_telegram(ip)}\n\n"
             f"请确认是否批准此转化："
         )
         
