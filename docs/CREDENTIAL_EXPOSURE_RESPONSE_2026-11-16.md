@@ -157,3 +157,41 @@
 5. 重写后重新扫描所有 refs、标签与可访问对象；历史重写不能撤销已被第三方保存的副本。
 
 **截至本补充记录时间，未执行任何真实凭据吊销、生产环境变更或 Git 历史重写。**
+
+
+## 2026-11-20 补充：master 分支、凭据现状与分支保护复核
+
+### 当前 main 的 CI 状态
+
+- 当前 main HEAD：`d34d78483286117da0edf9874177feb61c4684f6`。
+- PR #53 合并后的 Full Audit CI（Run `44659252487`）与 Emergency Security CI（Run `44659252520`）均成功。
+- CI 仅证明该提交在 GitHub Actions 测试环境通过；不证明已公开凭据完成轮换、生产密钥迁移或历史重写。
+
+### master 与 main 不是可直接合并的线性分支
+
+- `master` HEAD：`4c143a089bc262c63e4eb416c0def987df6c27bb`，提交日期为 2026-03-04。
+- GitHub compare API 返回两分支没有共同祖先，不能进行常规祖先关系比较或直接合并。
+- 递归 Git tree 静态比较：main 约 908 个文件，master 约 351 个文件；244 个路径两边共有，其中仅 13 个 blob 完全相同、231 个同路径文件内容不同；另有 107 个路径只存在于 master。
+- master 独有的旧 API 路径中，有 54 个文件在 main 中存在同 basename 的新路径（例如旧 `app/api/api_v1/endpoints/` 已迁移到 main 的 `app/api_v1/`）。仍有 12 个 app 文件在 main 中没有同 basename 文件，需逐一确认其功能是否已由其他模块替代。
+- 因为 master 仍含独有文件且没有共同祖先，当前既不应直接合并，也不应直接删除。须先完成剩余模块的调用关系和功能映射；若确认全部过时，再单独执行分支归档/删除决策。
+- 两个分支中的 `keys/private_key.pem` blob SHA 相同；这进一步确认 RSA 私钥并非只存在于旧分支，当前 main 也仍跟踪该文件。
+
+### 当前公开仓库仍跟踪的敏感文件
+
+本次 main tree 复核确认仓库仍为 Public，且以下文件仍被 Git 跟踪：
+
+- `keys/private_key.pem`
+- `nginx/btfrx.online/client.btfrx.online.key`
+- `secrets/gam-23347342743.json`
+- `secrets/gam-23348711678.json`
+
+不要把 `.gitignore` 规则视为已从 Git index 删除，也不要把删除当前文件视为清理 Git 历史。凭据所有者仍须先完成相应 JWT、TLS、GAM 服务账号密钥轮换/吊销与生产运行时迁移，再移除跟踪文件并规划历史重写。此轮没有执行任何凭据吊销、生产主机访问或历史重写。
+
+### main 分支保护状态
+
+- GitHub Branch 对象对 `main` 与 `master` 均返回 `protected: false`。
+- 仓库 Rulesets API 当前返回空数组。
+- 当前集成读取 branch protection 详情时收到 403（Resource not accessible by integration），且没有可用的分支保护写入工具；因此本轮无法替仓库启用保护。
+- 仓库管理员应在 GitHub Settings 中为 `main` 配置 PR 必须审查、要求 Full Audit 与 Emergency Security 必需检查通过、禁止 force push、禁止删除分支，并限制直接推送。启用后应再次通过 GitHub UI/API 验证生效。
+
+**本节为 2026-11-20 静态仓库复核记录。凭据轮换、生产运行时迁移、历史重写、master 剩余模块映射和 main 分支保护仍是上线阻断项。**
