@@ -245,10 +245,13 @@ class PostbackDuplicateService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"查询重复转化记录失败: {str(e)}", exc_info=True)
+            logger.error(
+                "查询重复转化记录失败: error_type=%s",
+                type(e).__name__,
+            )
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"查询失败：{str(e)}"
+                detail="查询重复转化记录失败，请稍后重试",
             )
 
 
