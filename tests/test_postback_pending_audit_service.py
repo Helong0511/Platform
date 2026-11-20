@@ -137,3 +137,29 @@ async def test_web_duplicate_approval_attempt_is_persisted_separately(monkeypatc
     assert captured["action"] == "approve"
     assert captured["outcome"] == "already_exists"
     assert captured["pending_conversion_id"] == 12
+
+
+
+@pytest.mark.asyncio
+async def test_web_rejection_audit_is_added_to_same_session_transaction():
+    service = PostbackPendingService()
+    pending = SimpleNamespace(id=13, status="pending", rejected_at=None)
+    db = _FakeAsyncDB(_ScalarResult(pending))
+
+    response = await service.reject_pending_conversion(
+        13,
+        db,
+        SimpleNamespace(id=45, username="admin"),
+    )
+
+    assert response is not None
+    assert pending.status == "rejected"
+    assert db.flush_count == 1
+    event = db.events[0]
+    assert event.actor_type == "system_user"
+    assert event.actor_id == "45"
+    assert event.source == "web"
+    assert event.action == "reject"
+    assert event.outcome == "rejected"
+    assert event.previous_status == "pending"
+    assert event.new_status == "rejected"
