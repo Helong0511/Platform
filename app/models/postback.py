@@ -155,10 +155,6 @@ class PostbackForwardQueue(Base):
     product = relationship("Product", foreign_keys=[product_id])
 
     __table_args__ = (
-        UniqueConstraint(
-            "telegram_callback_query_id",
-            name="uq_tg_postback_approval_callback",
-        ),
         CheckConstraint(
             "(lease_token IS NULL AND lease_expires_at IS NULL) OR "
             "(lease_token IS NOT NULL AND CHAR_LENGTH(lease_token)=32 AND lease_expires_at IS NOT NULL)",
@@ -545,6 +541,10 @@ class TelegramPostbackApprovalAudit(Base):
     )
 
     __table_args__ = (
+        UniqueConstraint(
+            "telegram_callback_query_id",
+            name="uq_tg_postback_approval_callback",
+        ),
         CheckConstraint(
             "actor_type IN ('telegram', 'system_user', 'system')",
             name="chk_tg_postback_audit_actor_type",
