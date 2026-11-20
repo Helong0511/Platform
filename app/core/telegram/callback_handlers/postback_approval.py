@@ -95,7 +95,7 @@ def process_pending_conversion(
                         ),
                     )
                 except Exception as e:
-                    logger.warning(f"发送回调确认时出错：{e}")
+                    logger.warning("发送回调确认时出错：error_type=%s", type(e).__name__)
                 return
 
             if action == "approve":
@@ -218,7 +218,7 @@ def process_pending_conversion(
                         ),
                     )
                 except Exception as e:
-                    logger.warning(f"更新消息时出错：{e}")
+                    logger.warning("更新 Telegram 消息失败：error_type=%s", type(e).__name__)
 
                 try:
                     _api(
@@ -229,7 +229,7 @@ def process_pending_conversion(
                         ),
                     )
                 except Exception as e:
-                    logger.warning(f"发送回调确认时出错：{e}")
+                    logger.warning("发送回调确认时出错：error_type=%s", type(e).__name__)
 
                 logger.info(
                     f"管理员批准了待确认转化记录：pending_id={pending_id}, conversion_id={conversion.id}"
@@ -255,7 +255,7 @@ def process_pending_conversion(
                         ),
                     )
                 except Exception as e:
-                    logger.warning(f"更新消息时出错：{e}")
+                    logger.warning("更新 Telegram 消息失败：error_type=%s", type(e).__name__)
 
                 try:
                     _api(
@@ -266,12 +266,12 @@ def process_pending_conversion(
                         ),
                     )
                 except Exception as e:
-                    logger.warning(f"发送回调确认时出错：{e}")
+                    logger.warning("发送回调确认时出错：error_type=%s", type(e).__name__)
 
                 logger.info(f"管理员拒绝了待确认转化记录：pending_id={pending_id}")
 
     except Exception as e:
-        logger.error(f"处理待确认转化记录失败：{str(e)}", exc_info=True)
+        logger.error("处理待确认转化记录失败：error_type=%s", type(e).__name__)
         try:
             _api(
                 chat_id,
@@ -281,7 +281,7 @@ def process_pending_conversion(
                 ),
             )
         except Exception as err:
-            logger.warning(f"发送回调确认时出错：{err}")
+            logger.warning("发送回调确认时出错：error_type=%s", type(err).__name__)
 
 
 async def handle_postback_approval(update, context):
@@ -319,7 +319,7 @@ async def handle_postback_approval(update, context):
         try:
             await query.answer(text="正在处理，请稍候...", show_alert=False)
         except Exception as e:
-            logger.warning(f"确认回调时出错：{e}")
+            logger.warning("确认 Telegram 回调失败：error_type=%s", type(e).__name__)
 
         thread = threading.Thread(
             target=process_pending_conversion,
@@ -328,4 +328,4 @@ async def handle_postback_approval(update, context):
         )
         thread.start()
     except Exception as e:
-        logger.error(f"处理回调失败：{str(e)}", exc_info=True)
+        logger.error("处理回调失败：error_type=%s", type(e).__name__)
