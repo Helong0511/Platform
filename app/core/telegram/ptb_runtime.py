@@ -124,7 +124,7 @@ def get_send_bot(
             try:
                 await old_bot.shutdown()
             except Exception as exc:
-                logger.debug("关闭旧发送 Bot 失败（可忽略）: %s", exc)
+                logger.debug("关闭旧发送 Bot 失败（可忽略）；error_type=%s", type(exc).__name__)
         return await _create_send_bot(
             token,
             connect_timeout=connect_timeout,
