@@ -64,7 +64,7 @@ def process_pending_conversion(
     from app.core.config import settings
     from app.core.telegram.ptb_runtime import get_send_bot
     from sqlalchemy import select as sync_select
-    from app.models.models import PendingPostbackConversion, PostbackConversion
+    from app.models.models import PendingPostbackConversion, PostbackConversion, Click
 
     token = getattr(settings, "TELEGRAM_TOKEN", None)
     if not token:
@@ -98,6 +98,56 @@ def process_pending_conversion(
                 return
 
             if action == "approve":
+                # 与 PostbackPendingService 保持一致：批准前检查正式记录，防止 Telegram
+                # 回调路径绕过幂等保护重复创建同一转化。
+                existing_conversion_id = db.execute(
+                    sync_select(PostbackConversion.id)
+                    .where(
+                        PostbackConversion.platform == pending.platform,
+                        PostbackConversion.conversion_id == pending.conversion_id,
+                        PostbackConversion.event_name == pending.event_name,
+                    )
+                    .limit(1)
+                ).scalar_one_or_none()
+                if existing_conversion_id is not None:
+                    pending.status = "approved"
+                    pending.approved_at = get_app_now_naive()
+                    db.commit()
+                    try:
+                        _api(
+                            chat_id,
+                            bot.edit_message_text(
+                                chat_id=chat_id,
+                                message_id=message_id,
+                                text="⚠️ 正式转化记录已存在，待确认记录已标记为处理完成，未重复创建。",
+                                reply_markup=None,
+                            ),
+                        )
+                        _api(
+                            chat_id,
+                            bot.answer_callback_query(
+                                callback_query_id=callback_query_id,
+                                text="正式记录已存在，未重复创建",
+                            ),
+                        )
+                    except Exception as e:
+                        logger.warning("更新重复转化提示失败：error_type=%s", type(e).__name__)
+                    logger.info(
+                        "Telegram 审批发现正式转化已存在：pending_id=%s existing_conversion_id=%s",
+                        pending_id,
+                        existing_conversion_id,
+                    )
+                    return
+
+                # 历史点击归因快照为空时，从 Click 记录补齐。
+                click = None
+                if pending.click_id:
+                    click = db.execute(
+                        sync_select(Click)
+                        .where(Click.click_id == str(pending.click_id))
+                        .limit(1)
+                    ).scalar_one_or_none()
+
                 conversion = PostbackConversion(
                     platform=pending.platform,
                     conversion_id=pending.conversion_id,
@@ -112,9 +162,12 @@ def process_pending_conversion(
                     gid=pending.gid,
                     product_id=pending.product_id,
                     client_id=pending.client_id,
-                    # 审批转正式记录时必须保留点击关联，供归因筛选和历史回查使用。
+                    # 审批转正式记录时保留点击关联，并补齐归因快照，避免后续筛选依赖回退查询。
                     click_id=pending.click_id,
-                    click_time=pending.click_time,
+                    click_time=pending.click_time or (click.click_time if click else None),
+                    offer_id=click.offer_id if click else None,
+                    publisher_id=click.publisher_id if click else None,
+                    advertiser_id=click.advertiser_id if click else None,
                     conversion_status="Pending",
                     raw_data=pending.raw_data,
                     created_at=get_app_now_naive(),
