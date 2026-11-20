@@ -81,7 +81,7 @@ async def test_ip_whitelist_auto_approval_audits_new_conversion(monkeypatch):
     db = _FakeAsyncDB(_ScalarResult([pending]))
 
     async def exists(_pending, _db):
-        return False
+        return None
 
     async def create(_pending, _db):
         _pending.status = "approved"
@@ -181,7 +181,7 @@ async def test_web_successful_approval_audit_is_added_before_request_commit(monk
     db = _FakeAsyncDB(_ScalarResult(pending))
 
     async def exists(_pending, _db):
-        return False
+        return None
 
     async def create(_pending, _db):
         _pending.status = "approved"
