@@ -466,10 +466,13 @@ class PostbackConversionService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"查询 PostBack 转化记录失败: {str(e)}", exc_info=True)
+            logger.error(
+                "查询 PostBack 转化记录失败: error_type=%s",
+                type(e).__name__,
+            )
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"查询失败：{str(e)}"
+                detail="查询 PostBack 转化记录失败，请稍后重试",
             )
 
     async def update_conversion_status(
@@ -538,10 +541,13 @@ class PostbackConversionService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"更新转化状态失败: {str(e)}", exc_info=True)
+            logger.error(
+                "更新转化状态失败: error_type=%s",
+                type(e).__name__,
+            )
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"更新失败：{str(e)}"
+                detail="更新转化状态失败，请稍后重试",
             )
 
 
