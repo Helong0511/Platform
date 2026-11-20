@@ -578,4 +578,8 @@ class TelegramPostbackApprovalAudit(Base):
             "outcome",
             "created_at",
         ),
+        Index(
+            "idx_tg_postback_audit_created_at",
+            "created_at",
+        ),
     )
