@@ -87,3 +87,23 @@ def test_click_and_deduction_apis_do_not_log_or_return_raw_exceptions():
     assert "str(e)" not in deductions_source
     assert "detail=str(e)" not in deductions_source
     assert "exc_info=True" not in deductions_source
+
+
+def test_postback_services_do_not_log_or_return_raw_backend_exceptions():
+    conversion_source = _source("app/services/cpl/postback_conversion_service.py")
+    pending_source = _source("app/services/cpl/postback_pending_service.py")
+    telegram_source = _source("app/core/telegram/callback_handlers/postback_approval.py")
+
+    for source in (conversion_source, pending_source, telegram_source):
+        assert "str(e)" not in source
+        assert "exc_info=True" not in source
+
+    assert 'detail=f"查询失败：{str(e)}"' not in conversion_source
+    assert 'detail=f"更新失败：{str(e)}"' not in conversion_source
+    assert 'detail=f"查询失败：{str(e)}"' not in pending_source
+    assert 'detail=f"批准失败：{str(e)}"' not in pending_source
+    assert 'detail=f"拒绝失败：{str(e)}"' not in pending_source
+    assert "error_type=%s" in conversion_source
+    assert "error_type=%s" in pending_source
+    assert "error_type=%s" in telegram_source
+    assert "来自 IP %s" not in pending_source
