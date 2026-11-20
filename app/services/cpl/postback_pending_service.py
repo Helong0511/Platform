@@ -435,10 +435,7 @@ class PostbackPendingService:
         try:
             # --- 加载 pending 并校验状态 ---
             result = await db.execute(
-                select(PendingPostbackConversion).where(
-                    PendingPostbackConversion.id == pending_id,
-                    PendingPostbackConversion.status == 'pending'
-                )
+                build_pending_for_update_statement(PendingPostbackConversion, pending_id)
             )
             pending = result.scalars().first()
 
