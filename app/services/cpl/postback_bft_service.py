@@ -118,7 +118,7 @@ class PostbackBftService:
                 send_telegram_message_async(settings.TELEGRAM_ADMIN, telegram_msg)
             )
         except Exception as e:
-            logger.warning("发送 BFT PostBack Telegram 通知失败: %s", e)
+            logger.warning("发送 BFT PostBack Telegram 通知失败: error_type=%s", type(e).__name__)
 
     async def receive_bft_postback(
             self,
@@ -191,14 +191,13 @@ class PostbackBftService:
             raise
         except Exception as e:
             logger.error(
-                "处理 BFT PostBack 回调时发生错误: %s",
-                e,
-                exc_info=True,
+                "处理 BFT PostBack 回调时发生错误: error_type=%s",
+                type(e).__name__,
             )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Postback processing failed, please retry",
-            ) from e
+            )
 
 
 postback_bft_service = PostbackBftService()
