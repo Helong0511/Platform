@@ -55,7 +55,7 @@ def get_shared_state() -> Dict[str, Any]:
             with open(STATE_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
     except Exception as e:
-        logger.warning(f"读取共享状态失败：{e}")
+        logger.warning("读取共享状态失败；error_type=%s", type(e).__name__)
     
     return {
         "bot_initialized": False,
@@ -79,7 +79,7 @@ def set_shared_state(state: Dict[str, Any]):
         with open(STATE_FILE, 'w', encoding='utf-8') as f:
             json.dump(state, f, indent=2, ensure_ascii=False)
     except Exception as e:
-        logger.warning(f"写入共享状态失败：{e}")
+        logger.warning("写入共享状态失败；error_type=%s", type(e).__name__)
 
 def update_shared_state(key: str, value: Any):
     """
