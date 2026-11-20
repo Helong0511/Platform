@@ -1036,7 +1036,7 @@ def test_mysql_schema_drift_detects_foreign_key_target_schema_mismatch():
             Column("id", Integer, primary_key=True),
             schema=expected_database,
         )
-        Table(
+        child_table = Table(
             "drift_child",
             metadata,
             Column("id", Integer, primary_key=True),
@@ -1064,8 +1064,9 @@ def test_mysql_schema_drift_detects_foreign_key_target_schema_mismatch():
         engine = create_engine(url, pool_pre_ping=True)
         with engine.connect() as connection:
             drift = _schema_metadata_drift(connection, metadata)
-        assert drift["foreign_key_mismatches"]["drift_child"]["expected"][0][1] == expected_database
-        assert drift["foreign_key_mismatches"]["drift_child"]["actual"][0][1] == actual_database
+        # Drift 结果按 SQLAlchemy Table.fullname（含 schema）作为键，不能只用裸表名。
+        assert drift["foreign_key_mismatches"][child_table.fullname]["expected"][0][1] == expected_database
+        assert drift["foreign_key_mismatches"][child_table.fullname]["actual"][0][1] == actual_database
 
         with root.cursor() as cursor:
             cursor.execute(
