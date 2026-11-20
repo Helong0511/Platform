@@ -85,6 +85,10 @@ def process_pending_conversion(
     actor_telegram_user_id: int | None = None,
 ):
     """处理待确认转化记录（同步操作，在后台线程执行）。"""
+    if action not in {"approve", "reject"}:
+        logger.warning("拒绝未知 Telegram Postback 审批动作")
+        return
+
     from app.core.config import settings
     from app.core.telegram.ptb_runtime import get_send_bot
     from sqlalchemy import select as sync_select
