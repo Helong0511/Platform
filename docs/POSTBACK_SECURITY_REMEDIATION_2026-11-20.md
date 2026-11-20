@@ -6,7 +6,7 @@
 
 - 仓库：`Helong0511/Platform`
 - 当前主线：`main`
-- 本文编写时 main HEAD：`e96a51d66f68b4529dcdfec355f4f2c60d09c154`
+- 本文编写时 main HEAD：`95f66409a08c760e06049504575d4550d3951deb`
 - 当前主线以 `main` 为唯一后续开发与部署基线；不要把无共同祖先的旧 `master` 直接合并回来。
 
 ## 2. 本轮已合并整改
@@ -17,6 +17,19 @@
 | [#56](https://github.com/Helong0511/Platform/pull/56) | `02c94b9d9e05c2d55ac271588c7c90962852937c` | Postback 历史归因筛选回退 Click；Telegram 审批保留点击关联与归因快照；增加重复转化检查和操作者白名单。 |
 | [#57](https://github.com/Helong0511/Platform/pull/57) | `d2474da74cdb3d6f32438490019cc988f93770a4` | 移除 Telegram Bot 全量普通消息调试处理器，避免把消息正文写入 INFO 日志。 |
 | [#58](https://github.com/Helong0511/Platform/pull/58) | `e96a51d66f68b4529dcdfec355f4f2c60d09c154` | Postback 服务异常脱敏、IP/Click ID 日志收敛、BFT Telegram 通知字段白名单化。 |
+| [#60](https://github.com/Helong0511/Platform/pull/60) | `7eb9671c659f4ead13d8d842e7caea17a72fc2de` | Telegram 拒绝审批通知不再暴露来源 IP。 |
+| [#61](https://github.com/Helong0511/Platform/pull/61) | `8bb9a0087317ec0b60e1bf9f1f594d2b69a69220` | Web/Telegram 待审批路径增加 `SELECT ... FOR UPDATE` 行锁；尚需真实 MySQL 并发竞争测试。 |
+| [#62](https://github.com/Helong0511/Platform/pull/62) | `6dd1b0db03150bfa6dd96d177818a65546a1de79` | 待审批 Telegram 模板遮蔽 IPv4/IPv6 来源地址并转义 HTML 字段。 |
+| [#63](https://github.com/Helong0511/Platform/pull/63) | `9b96451f4057bf3dcb8f2e48251bdad17e24214b` | Telegram 运行时告警不再发送异常正文、上下文、堆栈和绝对路径。 |
+| [#64](https://github.com/Helong0511/Platform/pull/64) | `26fd39c73ec46355a20fd37205b278a6f0531d1a` | Postback 转发通知及通知历史不再保存目标 URL、响应正文、原始异常和点击参数。 |
+| [#65](https://github.com/Helong0511/Platform/pull/65) | `f3073a996d7df0694a72d441087218aa879e1a43` | 修复 Telegram 运行时告警换行符显示错误，并清理重复过滤项/无用 import。 |
+| [#66](https://github.com/Helong0511/Platform/pull/66) | `109c57d28d1a0cbcbe15b384df1e3ebf56fe15a7` | Telegram 轮询异常路径不再记录异常正文或 traceback。 |
+| [#67](https://github.com/Helong0511/Platform/pull/67) | `6150548cc0c373842c1c5c523d602e2ea6ec8abb` | 兼容轮询异常处理器、Bot 初始化和运行时告警发送失败日志脱敏。 |
+| [#68](https://github.com/Helong0511/Platform/pull/68) | `d0e8eb0ef500a4138196218245f425b324ebdfcd` | Telegram 普通/按钮消息发送日志与失败返回值不再泄露 API 异常正文、Token、URL 或完整 Chat ID。 |
+| [#69](https://github.com/Helong0511/Platform/pull/69) | `dbe9d81b563d38a7d325417aca43a2d0eb1fbebc` | 系统告警消息和历史记录只保留固定安全描述、异常类型及受限代码定位；通知服务异常日志脱敏。 |
+| [#70](https://github.com/Helong0511/Platform/pull/70) | `c88ab40325e8ed576f5afa6299d65e874d06e57b` | Telegram 命令、菜单回调、统计回调及统计查询异常日志脱敏。 |
+| [#71](https://github.com/Helong0511/Platform/pull/71) | `95f66409a08c760e06049504575d4550d3951deb` | Telegram 命令回复、文件锁和跨进程共享状态异常日志脱敏。 |
+| [#72](https://github.com/Helong0511/Platform/pull/72) | `0bd5d009008cd71b2a11b75206216474b89a0fae` | 旧版 Telegram 通知模板不再发送异常正文/上下文，动态 HTML 字段统一转义。 |
 
 ### 2.1 短链接日志与错误响应
 
@@ -52,20 +65,35 @@
 - BFT Telegram 通知只展示白名单业务字段；IP、Click ID、Token、邮箱、电话、转化 ID 等敏感值脱敏，未知字段和结构化原始值省略。
 - BFT 实际 Postback 入库数据未因通知脱敏而改变。
 
+### 2.5 Telegram 告警与发送链路隐私
+
+- Telegram 运行时告警只保留服务标识、异常类型和受限代码定位；不向群聊发送异常正文、上下文、traceback、主机名、PID 或绝对路径。
+- Postback 转发通知不展示目标 URL、原始异常、点击参数和对端响应正文；通知历史同步避免保存这些敏感字段。
+- 普通消息/按钮发送失败只记录异常类型；发送函数不再把 Chat ID 与原始 API 异常正文拼接返回。
+- Bot 初始化、轮询、兼容异常处理、告警发送失败、命令/回调/统计查询、文件锁和共享状态异常日志均已逐步改为记录异常类型。
+- 旧版系统告警模板不再把原始 error_message/context 放入 Telegram；转化通知动态字段进行 HTML 转义。
+- 异常分类仍可在进程内读取异常文本；该文本不得再被写入日志、Telegram 消息或持久化通知正文。
+
+### 2.6 行锁并发保护的验证边界
+
+- PR #61 已为 Web 手动批准/拒绝、Telegram 审批及按 IP 自动批准路径加入行锁查询。
+- 当前回归测试证明 SQL 编译结果包含 `FOR UPDATE` 与 pending 状态条件。
+- 该测试不等于真实 MySQL/InnoDB 并发验证；仍需覆盖人工批准与拒绝竞争、自动批准与人工审批竞争、锁等待/超时、死锁回滚和事务边界。
+
+
 ## 3. CI 验证记录
 
-PR #58 最新提交对应的 Full Audit 和 Emergency Security 均通过：
+截至本文所记录的 main HEAD，PR #60–#72 均已完成合并；每个 PR 的最终 head SHA 均分别通过 Full Audit CI 与 Emergency Security CI。不得使用早期失败/取消尝试或旧 SHA 的检查结果替代最终提交验证。
 
-- Full Audit run：[#44663227358](https://github.com/Helong0511/Platform/actions/runs/44663227358)
-  - 后端：899 passed，1 skipped。
-  - 前端依赖安装、Lint、Build：通过。
-  - Playwright Browser E2E（mock APIs）：通过。
-  - Python 3.13 password hash compatibility：通过。
-- Emergency Security run：[#44663227241](https://github.com/Helong0511/Platform/actions/runs/44663227241)
-  - Backend security configuration tests：通过。
-  - Frontend lint and build：通过。
+- Full Audit 覆盖后端单元测试、Python 3.13 password hash compatibility、前端依赖安装/Lint/Build，以及 Playwright Browser E2E（mock APIs）。
+- Emergency Security 覆盖后端安全配置测试、前端 Lint/Build。
+- PR #58 的 Full Audit 记录为后端 899 passed、1 skipped；该数字仅对应当时 PR #58，不应误写为当前 main 的测试总数。
+- PR #68 初次新增测试曾失败，修正测试前置条件后，最终 SHA `ef2f7f10822ab7299507c6b37c7c551882a5111b` 的 Full Audit 与 Emergency Security 均通过。
+- PR #70 初次新增测试曾因测试夹具未触发群聊分支而失败；修正后，最终 SHA `4e51c715b6b058976670ae056d506b86eb679a8f` 的 Full Audit 与 Emergency Security 均通过。
+- PR #71 初次 Full Audit 暴露既有测试仍要求日志包含 Chat ID；按隐私要求更新断言后，最终 SHA `5b75a4580c1d0dd61acb2e297704819824814292` 的 Full Audit 与 Emergency Security 均通过。
+- PR #72 最终 SHA `fdf31f5657618d1e97c56924696e85877eea4edc` 的 Full Audit 与 Emergency Security 均通过。
 
-跳过的 1 项为本地核对脚本未检出，CI 注释说明该脚本不作为 CI 依赖；不是失败测试。
+CI 通过代表对应代码提交的自动化检查通过，不等同于生产密钥轮换、生产迁移演练或真实 Telegram/MySQL 环境验收。
 
 ## 4. 仍然存在的上线阻断项
 
@@ -123,6 +151,8 @@ PR #58 最新提交对应的 Full Audit 和 Emergency Security 均通过：
 
 ## 6. 验收结论
 
-本轮四项代码整改已合并，PR #58 的 Full Audit 与 Emergency Security 全部通过。**这只代表本轮代码与 CI 检查通过，不代表生产上线条件已满足。**
+截至本文记录的 `main` HEAD `95f66409a08c760e06049504575d4550d3951deb`，PR #55–#72 的代码整改均已合并；本轮新增的 PR #60–#72 均有对应最终 SHA 的 Full Audit 与 Emergency Security 通过记录。
 
-在 P0 凭据轮换/吊销、生产密钥迁移、Git 历史清理，以及分支保护和生产等价迁移演练完成前，项目状态仍为“代码整改持续进行中 / 不允许宣告安全上线”。
+**这只代表相关代码提交通过自动化检查，不代表生产上线条件已满足。** Telegram 审批持久化审计轨迹仍未实现；PR #61 的行锁仍需真实 MySQL 并发验证。
+
+在 P0 凭据轮换/吊销、生产密钥迁移、Git 历史清理，以及 main 分支保护、生产等价迁移演练和 Telegram 审批审计等事项完成前，项目状态仍为“代码整改持续进行中 / 不允许宣告安全上线”。
