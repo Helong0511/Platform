@@ -155,6 +155,10 @@ class PostbackForwardQueue(Base):
     product = relationship("Product", foreign_keys=[product_id])
 
     __table_args__ = (
+        UniqueConstraint(
+            "telegram_callback_query_id",
+            name="uq_tg_postback_approval_callback",
+        ),
         CheckConstraint(
             "(lease_token IS NULL AND lease_expires_at IS NULL) OR "
             "(lease_token IS NOT NULL AND CHAR_LENGTH(lease_token)=32 AND lease_expires_at IS NOT NULL)",
@@ -531,7 +535,7 @@ class TelegramPostbackApprovalAudit(Base):
     outcome = Column(String(24), nullable=False, comment="结果：approved/rejected/already_exists/denied/not_found")
     previous_status = Column(String(20), nullable=True, comment="操作前待确认记录状态")
     new_status = Column(String(20), nullable=True, comment="操作后待确认记录状态")
-    telegram_callback_query_id = Column(String(128), nullable=True, unique=True, comment="Telegram 回调唯一 ID，用于防止回调重放产生重复审计")
+    telegram_callback_query_id = Column(String(128), nullable=True, comment="Telegram 回调唯一 ID，用于防止回调重放产生重复审计")
     created_at = Column(
         DateTime,
         nullable=False,
