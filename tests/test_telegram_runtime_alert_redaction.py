@@ -20,6 +20,9 @@ def test_runtime_alert_omits_sensitive_exception_payloads():
         stack_trace="Traceback with password=super-secret",
     )
 
+    # Telegram 消息必须使用真实换行，不能输出字面量反斜杠+n。
+    assert "\n服务：" in message
+    assert "\\n服务：" not in message
     assert "DatabaseError" in message
     assert "app.services.example" in message
     assert "load_record" in message
