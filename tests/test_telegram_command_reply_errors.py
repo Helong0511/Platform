@@ -13,7 +13,8 @@ def test_log_command_reply_failure_blocked(caplog):
             Exception("Forbidden: bot was blocked by the user"),
         )
     assert "用户已拉黑该 Bot" in caplog.text
-    assert "5312177749" in caplog.text
+    assert "error_type=Exception" in caplog.text
+    assert "5312177749" not in caplog.text
 
 
 def test_help_text_uses_html_not_markdown_stars():
