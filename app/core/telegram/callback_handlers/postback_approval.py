@@ -12,6 +12,40 @@ from app.core.utils import get_app_now_naive
 from app.core.telegram.sync_db import get_sync_session_factory
 
 
+def _is_authorized_admin(user_id: int | None, chat_type: str | None) -> bool:
+    """
+    验证 Telegram 回调操作者身份。
+
+    优先使用显式 TELEGRAM_ADMIN_USER_IDS；未配置时仅兼容私聊场景，
+    此时 TELEGRAM_ADMIN 中的私聊 Chat ID 与操作者 User ID 相同。
+    群聊必须配置独立用户白名单，不能把群 Chat ID 当作授权主体。
+    """
+    if user_id is None:
+        return False
+
+    from app.core.config import settings
+
+    configured_user_ids = getattr(settings, "TELEGRAM_ADMIN_USER_IDS", None)
+    if configured_user_ids:
+        allowed_user_ids = {
+            item.strip()
+            for item in str(configured_user_ids).split(",")
+            if item.strip()
+        }
+        return str(user_id) in allowed_user_ids
+
+    if chat_type != "private":
+        return False
+
+    admin_chat_ids = getattr(settings, "TELEGRAM_ADMIN", None) or ""
+    legacy_private_ids = {
+        item.strip()
+        for item in str(admin_chat_ids).split(",")
+        if item.strip() and item.strip().isdigit()
+    }
+    return str(user_id) in legacy_private_ids
+
+
 def _api(chat_id: int, coro):
     """后台线程内走发送互斥。"""
     from app.core.telegram.message_sender import call_telegram_api_throttled
@@ -179,9 +213,23 @@ async def handle_postback_approval(update, context):
     if not query or not query.message or not query.data:
         return
 
+    user = query.from_user
+    chat_type = getattr(getattr(query.message, "chat", None), "type", None)
+    if not _is_authorized_admin(getattr(user, "id", None), chat_type):
+        logger.warning(
+            "拒绝未授权 Telegram Postback 审批操作：user_id=%s chat_type=%s",
+            getattr(user, "id", None),
+            chat_type,
+        )
+        try:
+            await query.answer(text="无权限执行此操作", show_alert=True)
+        except Exception as exc:
+            logger.warning("发送未授权回调提示失败：error_type=%s", type(exc).__name__)
+        return
+
     logger.info(
-        f"[回调查询处理器] ✅✅✅ 收到回调查询：callback_data='{query.data}', "
-        f"from_user={query.from_user.username or query.from_user.first_name or '未知'}"
+        f"[回调查询处理器] 收到管理员回调：callback_data='{query.data}', "
+        f"user_id={getattr(user, 'id', None)}"
     )
 
     try:
