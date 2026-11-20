@@ -117,44 +117,32 @@ def build_runtime_error_message(
         context: Optional[dict[str, Any]] = None,
         stack_trace: Optional[str] = None,
 ) -> str:
-    """拼装运行时错误 Telegram 正文。"""
+    """拼装不含异常正文、请求上下文或堆栈的安全运行时告警。"""
+    # 异常正文、上下文和堆栈可能包含 token、连接串、请求参数及个人信息。
+    # Telegram 可能是群聊或被转发的渠道，因此只发送定位元数据；
+    # 详细诊断信息应留在受访问控制的服务端日志/审计记录中。
     service = get_service_display_name()
-    host = os.getenv("HOSTNAME") or os.getenv("COMPUTERNAME") or "-"
-    pid = os.getpid()
-
     lines = [
         "🚨 程序运行错误",
         "",
         f"服务：{service}",
-        f"主机：{host}  PID：{pid}",
         f"类型：{error_type}",
-        f"错误：{error_message[:500]}",
+        "详情：请在受访问控制的服务器日志中查看",
     ]
 
     if location:
+        # 仅保留代码符号和行号，不发送绝对文件路径。
         loc_parts = []
-        for key in ("module", "function", "line", "file"):
-            if location.get(key):
-                loc_parts.append(f"{key}={location[key]}")
+        for key in ("module", "function", "line"):
+            value = location.get(key)
+            if value:
+                loc_parts.append(f"{key}={value}")
         if loc_parts:
             lines.append(f"位置：{', '.join(loc_parts)}")
 
-    if context:
-        lines.append("")
-        lines.append("上下文：")
-        for key, value in list(context.items())[:8]:
-            if value is None:
-                continue
-            lines.append(f"  {key}: {str(value)[:200]}")
-
-    if stack_trace:
-        lines.append("")
-        lines.append("堆栈（截断）：")
-        lines.append(stack_trace[:1200])
-
     lines.append("")
     lines.append(f"⏰ {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def _send_sync(message: str) -> None:
