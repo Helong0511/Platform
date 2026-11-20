@@ -59,6 +59,12 @@ def _install_fake_runtime(monkeypatch, execute_results):
         def add(self, value):
             self.added.append(value)
 
+        def flush(self):
+            return None
+
+        def rollback(self):
+            return None
+
         def commit(self):
             self.committed = True
 
@@ -109,9 +115,11 @@ def test_approved_pending_postback_preserves_click_attribution(monkeypatch):
 
     assert fake_db.committed is True
     assert pending.status == "approved"
-    assert len(fake_db.added) == 1
-    conversion = fake_db.added[0]
-    assert isinstance(conversion, PostbackConversion)
+    conversions = [item for item in fake_db.added if isinstance(item, PostbackConversion)]
+    audits = [item for item in fake_db.added if item.__class__.__name__ == "TelegramPostbackApprovalAudit"]
+    assert len(conversions) == 1
+    assert len(audits) == 1
+    conversion = conversions[0]
     assert conversion.click_id == "trusted-click-77"
     assert conversion.click_time == click_time
     assert conversion.offer_id == 11
@@ -136,7 +144,10 @@ def test_telegram_approval_does_not_duplicate_existing_conversion(monkeypatch):
 
     assert fake_db.committed is True
     assert pending.status == "approved"
-    assert fake_db.added == []
+    assert not any(isinstance(item, PostbackConversion) for item in fake_db.added)
+    audits = [item for item in fake_db.added if item.__class__.__name__ == "TelegramPostbackApprovalAudit"]
+    assert len(audits) == 1
+    assert audits[0].outcome == "already_exists"
 
 def test_telegram_approval_uses_signed_click_token_when_click_row_is_not_yet_available(monkeypatch):
     click_time = datetime(2026, 11, 19, 10, 30, 0)
