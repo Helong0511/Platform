@@ -159,10 +159,10 @@ class PostbackIpWhitelistService:
             await db.refresh(whitelist_item)
 
             logger.info(
-                "管理员 %s 创建 IP 白名单: ip=%s id=%s",
+                "管理员 %s 创建 IP 白名单: id=%s ip_present=%s",
                 current_user.username,
-                data.ip_address,
                 whitelist_item.id,
+                bool(data.ip_address),
             )
 
             approval_result = await postback_pending_service.auto_approve_pending_by_ip(
