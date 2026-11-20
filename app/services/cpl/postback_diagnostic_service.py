@@ -181,7 +181,7 @@ class PostbackDiagnosticService:
 
             logger.info(
                 f"管理员 {current_user.username} 诊断 PostBack 记录: "
-                f"conversion_or_click_id={conversion_or_click_id}, "
+                f"identifier_present={bool(conversion_or_click_id)}, "
                 f"found_in_main={diagnosis_result['found_in_main_table']}, "
                 f"found_in_deduction={diagnosis_result['found_in_deduction_logs']}, "
                 f"found_in_notifications={diagnosis_result['found_in_notifications']}"
