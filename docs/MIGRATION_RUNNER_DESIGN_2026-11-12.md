@@ -1,6 +1,7 @@
 # Migration Runner 设计决策与实施门槛（2026-11-12）
 
-> 状态：设计基线，尚未实现 Runner。本文不授权生产执行，不替代发布审批。
+> 文档性质：2026-11-12 的历史设计决策快照，保留当时的方案推导与实施门槛；其中“尚未实现”等状态描述仅代表该日期，不代表当前仓库状态。
+> 当前状态（2026-11-20）：Migration Runner、ledger、只读 revision gate 已在代码中实现，具体使用方式以 `docs/MIGRATION_RUNNER_OPERATIONS_2026-11-13.md` 和当前代码/CI 为准。该实现仍不等于生产部署演练已完成。
 > 适用仓库：`Helong0511/Platform`。
 > 安全边界：设计、代码和 CI 只允许使用 GitHub Actions 临时 MySQL/Redis、合成数据和 Mock；禁止连接生产服务器、数据库、缓存、队列或真实第三方接口。
 
