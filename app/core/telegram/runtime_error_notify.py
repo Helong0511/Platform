@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import os
 import threading
 import time
 import traceback
@@ -35,7 +34,6 @@ _EXCLUDED_LOGGER_PREFIXES = (
     "telegram",
     "httpx",
     "urllib3",
-    "httpx",
     "httpcore",
 )
 
@@ -142,7 +140,7 @@ def build_runtime_error_message(
 
     lines.append("")
     lines.append(f"⏰ {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def _send_sync(message: str) -> None:
