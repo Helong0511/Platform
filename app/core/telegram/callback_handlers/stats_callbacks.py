@@ -91,7 +91,7 @@ def _process_stats_request(
             f"[统计回调] 已展示 {STATS_PERIOD_LABELS.get(period_key, period_key)} 统计, chat_id={chat_id}"
         )
     except Exception as exc:
-        logger.error(f"[统计回调] 处理失败: {exc}", exc_info=True)
+        logger.error("[统计回调] 处理失败；error_type=%s", type(exc).__name__)
         try:
             _api(
                 chat_id,
@@ -120,7 +120,7 @@ async def handle_stats_callbacks(update, context):
     try:
         await query.answer(text="正在查询统计...", show_alert=False)
     except Exception as exc:
-        logger.warning(f"[统计回调] 即时确认失败: {exc}")
+        logger.warning("[统计回调] 即时确认失败；error_type=%s", type(exc).__name__)
 
     thread = threading.Thread(
         target=_process_stats_request,

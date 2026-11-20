@@ -37,7 +37,7 @@ async def get_chat_id(update, context):
                                 bot_mentioned = True
                                 break
         except Exception as e:
-            logger.warning(f"获取 Bot 信息失败：{e}")
+            logger.warning("获取 Bot 信息失败；error_type=%s", type(e).__name__)
 
     logger.info(
         f"[命令处理器] ✅✅✅ 收到 /id 命令，来自用户："

@@ -19,7 +19,7 @@ async def handle_menu_callbacks(update, context):
     try:
         await query.answer()
     except Exception as exc:
-        logger.warning("菜单回调 answer 失败: %s", exc)
+        logger.warning("菜单回调 answer 失败；error_type=%s", type(exc).__name__)
 
     try:
         if query.data == "View":
@@ -33,4 +33,4 @@ async def handle_menu_callbacks(update, context):
                 )
             )
     except Exception as e:
-        logger.error(f"处理菜单回调失败：{str(e)}", exc_info=True)
+        logger.error("处理菜单回调失败；error_type=%s", type(e).__name__)

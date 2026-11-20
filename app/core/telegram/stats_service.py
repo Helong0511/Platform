@@ -197,5 +197,5 @@ def fetch_stats_sync(period_key: str) -> Optional[Dict[str, Any]]:
     try:
         return asyncio.run(_fetch_ad_data_summary_isolated(period_key))
     except Exception as exc:
-        logger.error(f"Telegram 统计查询失败: period={period_key}, error={exc}", exc_info=True)
+        logger.error("Telegram 统计查询失败: period=%s, error_type=%s", period_key, type(exc).__name__)
         return None

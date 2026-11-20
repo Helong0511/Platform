@@ -73,7 +73,7 @@ def send_stats_menu(chat_id: int, message_id: int | None = None) -> bool:
             )
         return True
     except Exception as exc:
-        logger.error(f"[命令处理器] 展示统计菜单失败: {exc}", exc_info=True)
+        logger.error("[命令处理器] 展示统计菜单失败；error_type=%s", type(exc).__name__)
         return False
 
 
