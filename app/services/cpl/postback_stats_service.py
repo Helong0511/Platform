@@ -131,10 +131,13 @@ class PostbackStatsService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"查询 PostBack 统计信息失败: {e}", exc_info=True)
+            logger.error(
+                "查询 PostBack 统计信息失败: error_type=%s",
+                type(e).__name__,
+            )
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"查询失败：{str(e)}",
+                detail="查询 PostBack 统计信息失败，请稍后重试",
             )
 
 

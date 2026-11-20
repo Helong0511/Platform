@@ -163,9 +163,8 @@ class PostbackPendingService:
                 return result
 
             logger.info(
-                "找到 %s 条来自 IP %s 的待确认记录，开始自动批准",
+                "找到 %s 条待确认记录，开始自动批准",
                 len(pending_list),
-                ip,
             )
 
             for pending in pending_list:
@@ -182,28 +181,24 @@ class PostbackPendingService:
                 except Exception as e:
                     result["failed_count"] += 1
                     logger.warning(
-                        "自动批准待确认记录 %s 失败: %s",
+                        "自动批准待确认记录失败: pending_id=%s error_type=%s",
                         pending.id,
-                        e,
-                        exc_info=True,
+                        type(e).__name__,
                     )
 
             if result["approved_count"] > 0 or result["skipped_count"] > 0:
                 await db.flush()
                 if result["approved_count"] > 0:
                     logger.info(
-                        "管理员 %s 添加 IP %s 白名单后自动批准 %s 条待确认转化",
+                        "管理员 %s 添加 IP 白名单后自动批准 %s 条待确认转化",
                         current_user.username,
-                        ip,
                         result["approved_count"],
                     )
         except Exception as e:
             await db.rollback()
             logger.error(
-                "自动批准来自 IP %s 的待确认记录失败: %s",
-                ip,
-                e,
-                exc_info=True,
+                "自动批准待确认记录失败: error_type=%s",
+                type(e).__name__,
             )
             result["failed_count"] = len(pending_list) if "pending_list" in locals() else 0
 
@@ -337,10 +332,13 @@ class PostbackPendingService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"查询待确认转化记录失败: {str(e)}", exc_info=True)
+            logger.error(
+                "查询待确认转化记录失败: error_type=%s",
+                type(e).__name__,
+            )
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"查询失败：{str(e)}"
+                detail="查询待确认转化记录失败，请稍后重试",
             )
 
     async def approve_pending_conversion(
@@ -408,10 +406,13 @@ class PostbackPendingService:
             raise
         except Exception as e:
             await db.rollback()
-            logger.error(f"批准待确认转化记录失败: {str(e)}", exc_info=True)
+            logger.error(
+                "批准待确认转化记录失败: error_type=%s",
+                type(e).__name__,
+            )
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"批准失败：{str(e)}"
+                detail="批准待确认转化记录失败，请稍后重试",
             )
 
     async def reject_pending_conversion(
@@ -469,10 +470,13 @@ class PostbackPendingService:
             raise
         except Exception as e:
             await db.rollback()
-            logger.error(f"拒绝待确认转化记录失败: {str(e)}", exc_info=True)
+            logger.error(
+                "拒绝待确认转化记录失败: error_type=%s",
+                type(e).__name__,
+            )
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"拒绝失败：{str(e)}"
+                detail="拒绝待确认转化记录失败，请稍后重试",
             )
 
 

@@ -14,6 +14,7 @@ import logging
 from typing import List, Optional
 
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -105,10 +106,13 @@ class PostbackIpWhitelistService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error("查询 IP 白名单失败: %s", e, exc_info=True)
+            logger.error(
+                "查询 IP 白名单失败: error_type=%s",
+                type(e).__name__,
+            )
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"查询失败：{str(e)}",
+                detail="查询 IP 白名单失败，请稍后重试",
             )
 
     async def create_ip_whitelist(
@@ -155,10 +159,10 @@ class PostbackIpWhitelistService:
             await db.refresh(whitelist_item)
 
             logger.info(
-                "管理员 %s 创建 IP 白名单: ip=%s id=%s",
+                "管理员 %s 创建 IP 白名单: id=%s ip_present=%s",
                 current_user.username,
-                data.ip_address,
                 whitelist_item.id,
+                bool(data.ip_address),
             )
 
             approval_result = await postback_pending_service.auto_approve_pending_by_ip(
@@ -182,10 +186,13 @@ class PostbackIpWhitelistService:
             raise
         except Exception as e:
             await db.rollback()
-            logger.error("创建 IP 白名单失败: %s", e, exc_info=True)
+            logger.error(
+                "创建 IP 白名单失败: error_type=%s",
+                type(e).__name__,
+            )
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"创建失败：{str(e)}",
+                detail="创建 IP 白名单失败，请稍后重试",
             )
 
     async def update_ip_whitelist(
@@ -246,10 +253,9 @@ class PostbackIpWhitelistService:
             await db.refresh(whitelist_item)
 
             logger.info(
-                "管理员 %s 更新 IP 白名单: id=%s ip=%s",
+                "管理员 %s 更新 IP 白名单: id=%s",
                 current_user.username,
                 whitelist_id,
-                whitelist_item.ip_address,
             )
 
             return ResponseBaseSchema.success(
@@ -260,10 +266,13 @@ class PostbackIpWhitelistService:
             raise
         except Exception as e:
             await db.rollback()
-            logger.error("更新 IP 白名单失败: %s", e, exc_info=True)
+            logger.error(
+                "更新 IP 白名单失败: error_type=%s",
+                type(e).__name__,
+            )
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"更新失败：{str(e)}",
+                detail="更新 IP 白名单失败，请稍后重试",
             )
 
     async def batch_create_ip_whitelist(
@@ -314,18 +323,20 @@ class PostbackIpWhitelistService:
                     existing_ips.add(trimmed_ip)
                     created_items.append(whitelist_item)
                 except Exception as e:
-                    error_msg = str(e)
-                    if (
-                        "unique constraint" in error_msg.lower()
-                        or "duplicate" in error_msg.lower()
-                    ):
+                    if isinstance(e, IntegrityError):
                         error_msg = "IP地址已存在于白名单中"
                         existing_ips.add(trimmed_ip)
+                    else:
+                        error_msg = "创建失败，请稍后重试"
                     failed_items.append({
                         "ip_address": trimmed_ip,
                         "error": error_msg,
                     })
-                    logger.warning("创建IP白名单失败: %s, %s", trimmed_ip, error_msg)
+                    logger.warning(
+                        "创建 IP 白名单失败: ip_present=%s error_type=%s",
+                        bool(trimmed_ip),
+                        type(e).__name__,
+                    )
 
             if created_items:
                 try:
@@ -334,12 +345,14 @@ class PostbackIpWhitelistService:
                         await db.refresh(item)
                 except Exception as commit_error:
                     await db.rollback()
-                    error_msg = str(commit_error)
-                    logger.error("批量提交IP白名单失败: %s", error_msg, exc_info=True)
+                    logger.error(
+                        "批量提交 IP 白名单失败: error_type=%s",
+                        type(commit_error).__name__,
+                    )
                     for item in created_items:
                         failed_items.append({
                             "ip_address": item.ip_address,
-                            "error": f"提交失败: {error_msg}",
+                            "error": "提交失败，请稍后重试",
                         })
                     created_items = []
 
@@ -405,10 +418,13 @@ class PostbackIpWhitelistService:
             raise
         except Exception as e:
             await db.rollback()
-            logger.error("批量创建 IP 白名单失败: %s", e, exc_info=True)
+            logger.error(
+                "批量创建 IP 白名单失败: error_type=%s",
+                type(e).__name__,
+            )
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"批量创建失败：{str(e)}",
+                detail="批量创建 IP 白名单失败，请稍后重试",
             )
 
     async def delete_ip_whitelist(
@@ -446,10 +462,9 @@ class PostbackIpWhitelistService:
             await db.flush()
 
             logger.info(
-                "管理员 %s 删除 IP 白名单: id=%s ip=%s",
+                "管理员 %s 删除 IP 白名单: id=%s",
                 current_user.username,
                 whitelist_id,
-                ip_address,
             )
 
             return ResponseBaseSchema.success(
@@ -460,10 +475,13 @@ class PostbackIpWhitelistService:
             raise
         except Exception as e:
             await db.rollback()
-            logger.error("删除 IP 白名单失败: %s", e, exc_info=True)
+            logger.error(
+                "删除 IP 白名单失败: error_type=%s",
+                type(e).__name__,
+            )
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"删除失败：{str(e)}",
+                detail="删除 IP 白名单失败，请稍后重试",
             )
 
 

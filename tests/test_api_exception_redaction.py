@@ -87,3 +87,45 @@ def test_click_and_deduction_apis_do_not_log_or_return_raw_exceptions():
     assert "str(e)" not in deductions_source
     assert "detail=str(e)" not in deductions_source
     assert "exc_info=True" not in deductions_source
+
+
+def test_postback_services_do_not_log_or_return_raw_backend_exceptions():
+    paths = (
+        "app/services/cpl/postback_conversion_service.py",
+        "app/services/cpl/postback_pending_service.py",
+        "app/services/cpl/postback_diagnostic_service.py",
+        "app/services/cpl/postback_duplicate_service.py",
+        "app/services/cpl/postback_ip_whitelist_service.py",
+        "app/services/cpl/postback_stats_service.py",
+        "app/services/cpl/postback_bft_service.py",
+        "app/services/cpl/postback_receive_service.py",
+        "app/services/cpl/postback_forward_log_service.py",
+        "app/core/telegram/callback_handlers/postback_approval.py",
+    )
+    sources = {path: _source(path) for path in paths}
+
+    for path, source in sources.items():
+        assert "str(e)" not in source, path
+        assert "exc_info=True" not in source, path
+
+    for path in (
+        "app/services/cpl/postback_conversion_service.py",
+        "app/services/cpl/postback_pending_service.py",
+        "app/services/cpl/postback_diagnostic_service.py",
+        "app/services/cpl/postback_duplicate_service.py",
+        "app/services/cpl/postback_ip_whitelist_service.py",
+        "app/services/cpl/postback_stats_service.py",
+    ):
+        assert "error_type=%s" in sources[path], path
+
+    assert "来自 IP %s" not in sources["app/services/cpl/postback_pending_service.py"]
+    assert "ip=%s" not in sources["app/services/cpl/postback_ip_whitelist_service.py"]
+    assert "发送 BFT PostBack Telegram 通知失败: %s" not in sources[
+        "app/services/cpl/postback_bft_service.py"
+    ]
+    assert "clk_id=%s" not in sources["app/services/cpl/postback_bft_service.py"]
+    assert "Click ID: {clk_id}" not in sources["app/services/cpl/postback_bft_service.py"]
+    assert "IP: {client_ip}" not in sources["app/services/cpl/postback_bft_service.py"]
+    assert "conversion_or_click_id=%s" not in sources[
+        "app/services/cpl/postback_diagnostic_service.py"
+    ]
