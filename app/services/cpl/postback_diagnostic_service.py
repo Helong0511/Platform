@@ -195,10 +195,13 @@ class PostbackDiagnosticService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"诊断 PostBack 记录失败: {str(e)}", exc_info=True)
+            logger.error(
+                "诊断 PostBack 记录失败: error_type=%s",
+                type(e).__name__,
+            )
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"诊断失败: {str(e)}"
+                detail="诊断 PostBack 记录失败，请稍后重试",
             )
 
 
