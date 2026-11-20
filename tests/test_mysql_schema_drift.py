@@ -1069,9 +1069,14 @@ def test_mysql_schema_drift_detects_foreign_key_target_schema_mismatch():
         assert drift["foreign_key_mismatches"][child_table.fullname]["actual"][0][1] == actual_database
 
         with root.cursor() as cursor:
+            # MySQL 在同一条 ALTER 中添加同名外键时仍会先检查名称冲突；
+            # 先删除错误引用，再单独创建正确外键，避免 1826 重名错误。
             cursor.execute(
                 f"ALTER TABLE `{expected_database}`.drift_child "
-                "DROP FOREIGN KEY fk_drift_cross_schema, "
+                "DROP FOREIGN KEY fk_drift_cross_schema"
+            )
+            cursor.execute(
+                f"ALTER TABLE `{expected_database}`.drift_child "
                 "ADD CONSTRAINT fk_drift_cross_schema FOREIGN KEY (parent_id) "
                 f"REFERENCES `{expected_database}`.drift_parent (id) ON DELETE CASCADE"
             )
