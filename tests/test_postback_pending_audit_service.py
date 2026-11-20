@@ -102,6 +102,7 @@ async def test_ip_whitelist_auto_approval_audits_new_conversion(monkeypatch):
     assert event.action == "auto_approve"
     assert event.outcome == "approved"
     assert event.pending_conversion_id == 11
+    assert event.conversion_id == 700
 
 
 @pytest.mark.asyncio
