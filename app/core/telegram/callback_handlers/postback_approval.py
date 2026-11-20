@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 from app.core.utils import get_app_now_naive
 from app.core.telegram.sync_db import get_sync_session_factory
+from app.core.postback.pending_lock import build_pending_for_update_statement
 
 
 def _is_authorized_admin(user_id: int | None, chat_type: str | None) -> bool:
@@ -87,10 +88,7 @@ def process_pending_conversion(
     try:
         with SessionLocal() as db:
             result = db.execute(
-                sync_select(PendingPostbackConversion).where(
-                    PendingPostbackConversion.id == pending_id,
-                    PendingPostbackConversion.status == "pending",
-                )
+                build_pending_for_update_statement(PendingPostbackConversion, pending_id)
             )
             pending = result.scalar_one_or_none()
 
