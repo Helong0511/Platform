@@ -193,11 +193,13 @@ class PostbackPendingService:
                         result["skipped_count"] += 1
                         continue
 
-                    await self._create_conversion_from_pending(pending, db)
+                    conversion = await self._create_conversion_from_pending(pending, db)
+                    # 先 flush 获取正式转化主键，再写入同一事务的审批审计事件。
+                    await db.flush()
                     add_postback_approval_audit(
                         db,
                         pending_conversion_id=pending.id,
-                        conversion_id=None,
+                        conversion_id=conversion.id,
                         actor_type="system_user",
                         actor_id=current_user.id,
                         source="ip_whitelist",
