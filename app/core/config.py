@@ -1075,6 +1075,20 @@ class Settings(BaseSettings):
     # 未配置环境专用值时回退到 TELEGRAM_ADMIN，兼容旧部署。
     TELEGRAM_ADMIN: str | None = os.getenv("TELEGRAM_ADMIN", None)
 
+    # Telegram 回调操作员用户 ID 白名单。群聊 Chat ID 不能代替实际操作者身份。
+    TELEGRAM_ADMIN_USER_IDS: str | None = os.getenv("TELEGRAM_ADMIN_USER_IDS", None)
+
+    @field_validator("TELEGRAM_ADMIN_USER_IDS", mode="before")
+    @classmethod
+    def validate_telegram_admin_user_ids(cls, v: str | None) -> str | None:
+        """校验 Telegram 管理员用户 ID 白名单（逗号分隔的正整数）。"""
+        if v is None or not str(v).strip():
+            return None
+        user_ids = [item.strip() for item in str(v).split(",")]
+        if any(not item.isdigit() or int(item) <= 0 for item in user_ids):
+            raise ValueError("TELEGRAM_ADMIN_USER_IDS 必须是逗号分隔的正整数 Telegram 用户 ID")
+        return ",".join(dict.fromkeys(user_ids))
+
     @field_validator("TELEGRAM_ADMIN", mode="before")
     @classmethod
     def validate_telegram_admin(cls, v: str | None) -> str | None:
