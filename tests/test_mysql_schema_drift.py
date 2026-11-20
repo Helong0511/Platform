@@ -986,3 +986,107 @@ def test_mysql_schema_drift_detects_mysql_index_attribute_drift():
         with root.cursor() as cursor:
             cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
         root.close()
+
+
+def test_mysql_schema_drift_detects_foreign_key_target_schema_mismatch():
+    """同名父表存在于不同数据库时，外键不能错误引用到另一个 schema。"""
+    expected_database = f"platform_ci_fk_expected_{secrets.token_hex(4)}"
+    actual_database = f"platform_ci_fk_actual_{secrets.token_hex(4)}"
+    root = pymysql.connect(
+        host=HOST,
+        port=PORT,
+        user=ROOT_USER,
+        password=ROOT_PASSWORD,
+        charset="utf8mb4",
+        autocommit=True,
+        connect_timeout=5,
+        read_timeout=10,
+        write_timeout=10,
+    )
+    engine = None
+    try:
+        with root.cursor() as cursor:
+            cursor.execute(
+                f"CREATE DATABASE `{expected_database}` "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
+            )
+            cursor.execute(
+                f"CREATE DATABASE `{actual_database}` "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
+            )
+            for database in (expected_database, actual_database):
+                cursor.execute(
+                    f"CREATE TABLE `{database}`.drift_parent ("
+                    "id INT NOT NULL PRIMARY KEY"
+                    ") ENGINE=InnoDB"
+                )
+            cursor.execute(
+                f"CREATE TABLE `{expected_database}`.drift_child ("
+                "id INT NOT NULL PRIMARY KEY, "
+                "parent_id INT NOT NULL, "
+                "CONSTRAINT fk_drift_cross_schema FOREIGN KEY (parent_id) "
+                f"REFERENCES `{actual_database}`.drift_parent (id) ON DELETE CASCADE"
+                ") ENGINE=InnoDB"
+            )
+
+        metadata = MetaData()
+        Table(
+            "drift_parent",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            schema=expected_database,
+        )
+        child_table = Table(
+            "drift_child",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column(
+                "parent_id",
+                Integer,
+                ForeignKey(
+                    f"{expected_database}.drift_parent.id",
+                    ondelete="CASCADE",
+                    name="fk_drift_cross_schema",
+                ),
+                nullable=False,
+            ),
+            schema=expected_database,
+        )
+        url = URL.create(
+            "mysql+pymysql",
+            username=ROOT_USER,
+            password=ROOT_PASSWORD,
+            host=HOST,
+            port=PORT,
+            database=expected_database,
+            query={"charset": "utf8mb4"},
+        )
+        engine = create_engine(url, pool_pre_ping=True)
+        with engine.connect() as connection:
+            drift = _schema_metadata_drift(connection, metadata)
+        # Drift 结果按 SQLAlchemy Table.fullname（含 schema）作为键，不能只用裸表名。
+        assert drift["foreign_key_mismatches"][child_table.fullname]["expected"][0][1] == expected_database
+        assert drift["foreign_key_mismatches"][child_table.fullname]["actual"][0][1] == actual_database
+
+        with root.cursor() as cursor:
+            # MySQL 在同一条 ALTER 中添加同名外键时仍会先检查名称冲突；
+            # 先删除错误引用，再单独创建正确外键，避免 1826 重名错误。
+            cursor.execute(
+                f"ALTER TABLE `{expected_database}`.drift_child "
+                "DROP FOREIGN KEY fk_drift_cross_schema"
+            )
+            cursor.execute(
+                f"ALTER TABLE `{expected_database}`.drift_child "
+                "ADD CONSTRAINT fk_drift_cross_schema FOREIGN KEY (parent_id) "
+                f"REFERENCES `{expected_database}`.drift_parent (id) ON DELETE CASCADE"
+            )
+        with engine.connect() as connection:
+            corrected = _schema_metadata_drift(connection, metadata)
+        assert corrected["foreign_key_mismatches"] == {}
+    finally:
+        if engine is not None:
+            engine.dispose()
+        with root.cursor() as cursor:
+            cursor.execute(f"DROP DATABASE IF EXISTS `{expected_database}`")
+            cursor.execute(f"DROP DATABASE IF EXISTS `{actual_database}`")
+        root.close()

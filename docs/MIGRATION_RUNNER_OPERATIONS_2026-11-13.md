@@ -681,3 +681,19 @@ Schema Gate 除索引名称和列顺序外，额外读取 MySQL `information_sch
 当前 ORM 中的索引均为普通列索引；对于尚未支持安全等价判断的 ORM 函数表达式，不推断其语义一致，而是报告为不可自动验证。该检查只读，不会自动修改索引。真实 MySQL 集成测试覆盖同名同列但前缀长度不同、降序及 invisible 的漂移，并验证修正后告警清除。
 
 官方字段语义以 MySQL 8.0 `INFORMATION_SCHEMA.STATISTICS` 为准；后续新增索引选项时，必须同步扩展 ORM 期望值解析和真实 MySQL 测试。
+
+
+## 34. 2026-11-19：MySQL 外键引用 schema 漂移检查
+
+外键结构比较除本地列、引用表/列及 ON DELETE / ON UPDATE 行为外，还必须核验被引用表所属 schema。MySQL 允许跨数据库引用；若两个数据库存在同名表，仅比较表名和列名会把错误目标误判为一致，可能造成数据完整性约束落在错误的业务库上。
+
+Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `referred_schema` 纳入外键签名。对 MySQL 未显式写 schema 的 ORM 引用，按当前连接数据库解析默认 schema；实际元数据缺省时也使用同一默认值，避免同库引用产生空值/显式库名差异。其他数据库继续保留各自 Inspector 的 schema 语义。
+
+新增真实 MySQL 集成测试：在两个临时数据库中创建同名父表，让子表错误引用另一个数据库；必须报告 `foreign_key_mismatches`。将外键改为 ORM 指定的数据库后，外键漂移必须清零。测试仅允许 GitHub Actions loopback 临时 MySQL，并在 finally 删除两个随机测试库。
+
+约束名称不作为本项语义签名：名称不同不会改变引用目标或级联行为；若后续迁移流程依赖固定约束名，应另设命名契约，而不能混同为外键关系语义。
+
+官方依据：
+- MySQL `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` 提供本地列、引用 schema/table/column 和复合键顺序：https://dev.mysql.com/doc/refman/8.0/en/information-schema-key-column-usage-table.html
+- MySQL `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` 提供约束名称及 ON UPDATE / ON DELETE 规则：https://dev.mysql.com/doc/refman/8.0/en/information-schema-referential-constraints-table.html
+- SQLAlchemy Inspector `get_foreign_keys()` 返回 `referred_schema`、引用表和列等反射信息：https://docs.sqlalchemy.org/en/14/core/reflection.html
