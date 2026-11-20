@@ -152,7 +152,7 @@ def _send_sync(message: str) -> None:
     except Exception as exc:
         # 仅写本地日志，禁止再次触发 Telegram 通知
         logging.getLogger("app.core.telegram.runtime_error_notify").warning(
-            "运行时错误 Telegram 通知发送失败: %s", exc
+            "运行时错误 Telegram 通知发送失败；error_type=%s", type(exc).__name__
         )
 
 

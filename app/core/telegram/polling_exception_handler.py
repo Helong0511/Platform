@@ -79,16 +79,16 @@ class TelegramPollingExceptionHandler:
 
         if is_telegram_conflict_error(error_msg):
             self.conflict_detected = True
-            logger.error("检测到 Telegram 轮询冲突（409），停止当前实例：%s", error_msg)
+            logger.error("检测到 Telegram 轮询冲突（409），停止当前实例；error_type=%s", type(exception).__name__)
             if self.on_conflict:
                 try:
                     self.on_conflict(exception)
                 except Exception as callback_err:
-                    logger.warning("409 冲突回调执行失败：%s", callback_err)
+                    logger.warning("409 冲突回调执行失败；error_type=%s", type(callback_err).__name__)
             return True
 
         if is_transient_telegram_network_error(exception):
-            logger.warning("Telegram 轮询临时网络错误，将自动重试：%s", error_msg)
+            logger.warning("Telegram 轮询临时网络错误，将自动重试；error_type=%s", type(exception).__name__)
             return True
 
         return False

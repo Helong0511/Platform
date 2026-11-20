@@ -142,7 +142,7 @@ def initialize_bot():
             logger.info("Bot 初始化锁已释放")
 
     except Exception as err:
-        logger.error(f"初始化 Telegram Bot 失败：{err}", exc_info=True)
+        logger.error("初始化 Telegram Bot 失败；error_type=%s", type(err).__name__)
         set_bot_state(None, False, dynamic_available, new_application=None)
         return None, False, dynamic_available
 
