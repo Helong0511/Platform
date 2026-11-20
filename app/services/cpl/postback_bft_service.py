@@ -167,15 +167,15 @@ class PostbackBftService:
 
             if not settings.is_production:
                 logger.debug(
-                    "BFT PostBack raw keys=%s clk_id=%s event=%s",
-                    list(mapped_data.keys()),
-                    mapped_data.get("clk_id"),
+                    "BFT PostBack raw_keys_count=%s click_id_present=%s event=%s",
+                    len(mapped_data),
+                    bool(mapped_data.get("clk_id")),
                     mapped_data.get("event_name"),
                 )
             else:
                 logger.info(
-                    "BFT PostBack clk_id=%s event_name=%s",
-                    mapped_data.get("clk_id"),
+                    "BFT PostBack click_id_present=%s event_name=%s",
+                    bool(mapped_data.get("clk_id")),
                     mapped_data.get("event_name"),
                 )
 
