@@ -73,3 +73,18 @@ def add_postback_approval_audit(
     )
     db.add(event)
     return event
+
+
+
+async def persist_postback_approval_audit_independently(bind: Any, **event_fields: Any) -> None:
+    """为未改变业务状态的拒绝/重复尝试写入独立事务审计事件。"""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    session_factory = async_sessionmaker(
+        bind=bind,
+        expire_on_commit=False,
+        autoflush=False,
+    )
+    async with session_factory() as audit_db:
+        add_postback_approval_audit(audit_db, **event_fields)
+        await audit_db.commit()
