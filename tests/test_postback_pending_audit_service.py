@@ -52,7 +52,7 @@ async def test_ip_whitelist_auto_approval_audits_existing_duplicate(monkeypatch)
     db = _FakeAsyncDB(_ScalarResult([pending]))
 
     async def exists(_pending, _db):
-        return True
+        return 654
 
     monkeypatch.setattr(service, "_pending_conversion_exists", exists)
     result = await service.auto_approve_pending_by_ip(
@@ -69,6 +69,7 @@ async def test_ip_whitelist_auto_approval_audits_existing_duplicate(monkeypatch)
     assert event.source == "ip_whitelist"
     assert event.action == "auto_approve"
     assert event.outcome == "already_exists"
+    assert event.conversion_id == 654
     assert event.previous_status == "pending"
     assert event.new_status == "approved"
 
@@ -113,7 +114,7 @@ async def test_web_duplicate_approval_attempt_is_persisted_separately(monkeypatc
     captured = {}
 
     async def exists(_pending, _db):
-        return True
+        return 655
 
     async def persist(bind, **fields):
         captured["bind"] = bind
@@ -137,6 +138,7 @@ async def test_web_duplicate_approval_attempt_is_persisted_separately(monkeypatc
     assert captured["source"] == "web"
     assert captured["action"] == "approve"
     assert captured["outcome"] == "already_exists"
+    assert captured["conversion_id"] == 655
     assert captured["pending_conversion_id"] == 12
 
 
