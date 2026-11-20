@@ -29,9 +29,11 @@ def test_attribution_filter_includes_legacy_click_fallback(
             compile_kwargs={"literal_binds": True},
         )
     )
+    # SQLAlchemy 可能在 SELECT/FROM 之间换行；先统一空白再断言 SQL 结构。
+    normalized_sql = " ".join(sql.split())
 
-    assert f"postback_conversions.{column_name} = {value}" in sql
-    assert f"postback_conversions.{column_name} IS NULL" in sql
-    assert "EXISTS (SELECT 1 FROM clicks" in sql
-    assert f"clicks.{column_name} = {value}" in sql
-    assert "clicks.click_id = postback_conversions.click_id" in sql
+    assert f"postback_conversions.{column_name} = {value}" in normalized_sql
+    assert f"postback_conversions.{column_name} IS NULL" in normalized_sql
+    assert "EXISTS (SELECT 1 FROM clicks" in normalized_sql
+    assert f"clicks.{column_name} = {value}" in normalized_sql
+    assert "clicks.click_id = postback_conversions.click_id" in normalized_sql
