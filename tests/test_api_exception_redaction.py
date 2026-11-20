@@ -123,3 +123,7 @@ def test_postback_services_do_not_log_or_return_raw_backend_exceptions():
     assert "发送 BFT PostBack Telegram 通知失败: %s" not in sources[
         "app/services/cpl/postback_bft_service.py"
     ]
+    assert "clk_id=%s" not in sources["app/services/cpl/postback_bft_service.py"]
+    assert "conversion_or_click_id=%s" not in sources[
+        "app/services/cpl/postback_diagnostic_service.py"
+    ]
