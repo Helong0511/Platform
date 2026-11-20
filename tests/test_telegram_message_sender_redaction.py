@@ -12,6 +12,7 @@ class _FakeBot:
 
 
 def _prepare_sender(monkeypatch):
+    monkeypatch.setattr(message_sender, "is_telegram_enabled", lambda: True)
     monkeypatch.setattr(message_sender, "_check_bot_available", lambda: (True, "Bot 可用"))
     monkeypatch.setattr(message_sender, "_get_send_bot", lambda: _FakeBot())
     monkeypatch.setattr(message_sender, "_acquire_send_mutex", lambda: "")
