@@ -1,7 +1,7 @@
 """
 Postback 转化、转发、通知、短链、斗篷 ORM 模型。
 """
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
     UniqueConstraint, Date, Numeric, CheckConstraint, CHAR, text
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import relationship
@@ -509,3 +509,69 @@ class PendingPostbackConversion(Base):
         Index("idx_pending_click_id", "click_id"),
     )
 
+
+
+class TelegramPostbackApprovalAudit(Base):
+    """
+    Telegram/Web Postback 审批不可变审计事件。
+
+    actor_id 使用字符串独立存储 Telegram User ID 或系统用户 ID，
+    不建立 users 外键，避免将 Telegram 身份错误关联为系统用户。
+    pending/conversion ID 不建立外键，确保业务记录删除后审计仍可追溯。
+    """
+    __tablename__ = "telegram_postback_approval_audits"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True, comment="审计事件 ID")
+    pending_conversion_id = Column(Integer, nullable=True, comment="待确认转化记录 ID（不设外键，保留审计历史）")
+    conversion_id = Column(Integer, nullable=True, comment="正式转化记录 ID（不设外键，保留审计历史）")
+    actor_type = Column(String(20), nullable=False, comment="操作者类型：telegram/system_user/system")
+    actor_id = Column(String(64), nullable=True, comment="操作者 ID；Telegram User ID 以字符串独立存储")
+    source = Column(String(24), nullable=False, comment="操作来源：telegram/web/ip_whitelist")
+    action = Column(String(24), nullable=False, comment="动作：approve/reject/auto_approve")
+    outcome = Column(String(24), nullable=False, comment="结果：approved/rejected/already_exists/denied/not_found")
+    previous_status = Column(String(20), nullable=True, comment="操作前待确认记录状态")
+    new_status = Column(String(20), nullable=True, comment="操作后待确认记录状态")
+    telegram_callback_query_id = Column(String(128), nullable=True, unique=True, comment="Telegram 回调唯一 ID，用于防止回调重放产生重复审计")
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        default=get_app_now_naive,
+        server_default=text("CURRENT_TIMESTAMP"),
+        comment="审计事件时间",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "actor_type IN ('telegram', 'system_user', 'system')",
+            name="chk_tg_postback_audit_actor_type",
+        ),
+        CheckConstraint(
+            "source IN ('telegram', 'web', 'ip_whitelist')",
+            name="chk_tg_postback_audit_source",
+        ),
+        CheckConstraint(
+            "action IN ('approve', 'reject', 'auto_approve')",
+            name="chk_tg_postback_audit_action",
+        ),
+        CheckConstraint(
+            "outcome IN ('approved', 'rejected', 'already_exists', 'denied', 'not_found')",
+            name="chk_tg_postback_audit_outcome",
+        ),
+        Index(
+            "idx_tg_postback_audit_pending_created",
+            "pending_conversion_id",
+            "created_at",
+        ),
+        Index(
+            "idx_tg_postback_audit_actor_created",
+            "actor_type",
+            "actor_id",
+            "created_at",
+        ),
+        Index(
+            "idx_tg_postback_audit_action_outcome_created",
+            "action",
+            "outcome",
+            "created_at",
+        ),
+    )
