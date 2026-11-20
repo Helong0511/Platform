@@ -25,6 +25,7 @@ from app.core.pagination import calculate_pagination_offset
 from app.core.postback.transformers.click_associator import ClickAssociator
 from app.core.tracking.click_token import resolve_click_from_token
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
+from app.core.postback.pending_lock import build_pending_for_update_statement
 from app.models.models import (
     PendingPostbackConversion, PostbackConversion, Product, Client, User
 )
@@ -156,7 +157,7 @@ class PostbackPendingService:
                 select(PendingPostbackConversion).where(
                     PendingPostbackConversion.request_ip == ip,
                     PendingPostbackConversion.status == "pending",
-                )
+                ).with_for_update()
             )
             pending_list = pending_result.scalars().all()
             if not pending_list:
@@ -366,10 +367,7 @@ class PostbackPendingService:
         try:
             # --- 加载 pending 并校验状态 ---
             result = await db.execute(
-                select(PendingPostbackConversion).where(
-                    PendingPostbackConversion.id == pending_id,
-                    PendingPostbackConversion.status == 'pending'
-                )
+                build_pending_for_update_statement(PendingPostbackConversion, pending_id)
             )
             pending = result.scalars().first()
 
