@@ -492,6 +492,8 @@ class PendingPostbackConversion(Base):
     
     # 状态信息
     request_ip = Column(String(50), nullable=False, index=True, comment='请求IP地址（不在白名单）')
+    # 对新入队记录使用 SHA-256 幂等键；历史行允许 NULL，避免迁移期间改写旧数据。
+    dedupe_key = Column(String(64), nullable=True, comment='待审批入队幂等键（SHA-256）')
     status = Column(String(20), default='pending', index=True, comment='状态：pending(待确认)/approved(已批准)/rejected(已拒绝)')
     telegram_message_id = Column(Integer, nullable=True, comment='Telegram 消息ID（用于更新消息）')
     telegram_chat_id = Column(String(50), nullable=True, comment='Telegram Chat ID')
@@ -507,6 +509,7 @@ class PendingPostbackConversion(Base):
         Index("idx_request_ip", "request_ip"),
         Index("idx_created_at", "created_at"),
         Index("idx_pending_click_id", "click_id"),
+        Index("uq_pending_postback_dedupe_key", "dedupe_key", unique=True),
     )
 
 
