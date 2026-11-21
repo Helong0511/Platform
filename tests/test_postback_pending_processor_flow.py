@@ -82,3 +82,29 @@ async def test_pending_queue_outage_returns_retryable_failure(monkeypatch):
     assert result["retryable"] is True
     assert db.rollbacks == 1
     assert db.commits == 0
+
+
+@pytest.mark.asyncio
+async def test_full_pending_queue_returns_retryable_failure(monkeypatch):
+    db = _FakeDB()
+
+    async def backlog_full(**_kwargs):
+        return {"queued": False, "reason": "queue_backlog_full"}
+
+    monkeypatch.setattr(
+        postback_pending_ingest_service.pending_postback_ingest_service,
+        "enqueue",
+        backlog_full,
+    )
+
+    result = await PostbackProcessor._handle_ip_failure(
+        "partner_a",
+        {"conversion_id": "c1", "payout": "1.00"},
+        db,
+        request_ip="203.0.113.10",
+    )
+
+    assert result["success"] is False
+    assert result["retryable"] is True
+    assert db.rollbacks == 1
+    assert db.commits == 0
