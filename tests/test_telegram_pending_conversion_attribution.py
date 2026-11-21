@@ -26,7 +26,7 @@ def _pending_record(click_time):
         client_id=6,
         click_id="trusted-click-77",
         click_time=click_time,
-        raw_data="{}",
+        raw_data='{"email":"private@example.com","click_id":"trusted-click-77"}',
         request_ip="192.0.2.20",
         approved_at=None,
         rejected_at=None,
@@ -125,6 +125,8 @@ def test_approved_pending_postback_preserves_click_attribution(monkeypatch):
     assert conversion.offer_id == 11
     assert conversion.publisher_id == 22
     assert conversion.advertiser_id == 33
+    assert "private@example.com" not in conversion.raw_data
+    assert "trusted-click-77" in conversion.raw_data
 
 
 def test_telegram_approval_does_not_duplicate_existing_conversion(monkeypatch):

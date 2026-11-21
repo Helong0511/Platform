@@ -255,3 +255,36 @@ async def test_web_already_processed_attempt_is_audited_independently(
     assert captured["pending_conversion_id"] == 90
     assert db.events == []
     assert db.flush_count == 0
+
+
+@pytest.mark.asyncio
+async def test_manual_approval_sanitizes_pending_raw_data_before_promotion():
+    service = PostbackPendingService()
+    pending = SimpleNamespace(
+        id=901,
+        status="pending",
+        platform="test-platform",
+        conversion_id="conversion-901",
+        event_name="install",
+        event_value=None,
+        original_payout=10,
+        payout=9,
+        devad_id=None,
+        os="Android",
+        carrier=None,
+        ip="192.0.2.10",
+        gid="202",
+        product_id=5,
+        client_id=6,
+        click_id=None,
+        click_time=None,
+        raw_data='{"email":"private@example.com","click_id":"business-click-901"}',
+    )
+    db = _FakeAsyncDB(_ScalarResult(None))
+
+    conversion = await service._create_conversion_from_pending(pending, db)
+
+    assert conversion.raw_data is not None
+    assert "private@example.com" not in conversion.raw_data
+    assert "business-click-901" in conversion.raw_data
+    assert pending.status == "approved"
