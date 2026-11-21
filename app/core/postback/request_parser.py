@@ -54,9 +54,9 @@ async def collect_postback_raw_data(request: Request) -> Dict[str, Any]:
 
     body = bytearray()
     async for chunk in request.stream():
-        body.extend(chunk)
-        if len(body) > MAX_POSTBACK_BODY_BYTES:
+        if len(body) + len(chunk) > MAX_POSTBACK_BODY_BYTES:
             raise PostbackPayloadTooLarge("request body exceeds limit")
+        body.extend(chunk)
 
     if not body:
         return raw_data
