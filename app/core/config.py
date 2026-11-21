@@ -606,6 +606,13 @@ class Settings(BaseSettings):
     # 监控页「立即清理」冷却秒数；优先 Redis 跨进程，否则本进程
     LOG_MANUAL_CLEANUP_COOLDOWN_SECONDS: int = int(os.getenv("LOG_MANUAL_CLEANUP_COOLDOWN_SECONDS", "60"))
 
+    # ====== Postback / 第三方上报 PII 生命周期 ======
+    # 个人信息载荷保留天数；0 表示默认关闭清理，必须经业务/合规审批后配置正整数。
+    # 当前清理任务仅处理已完成或明确终态的第三方上报与下游转发日志。
+    THIRD_PARTY_REPORT_PII_RETENTION_DAYS: int = int(
+        os.getenv("THIRD_PARTY_REPORT_PII_RETENTION_DAYS", "0")
+    )
+
     # ====== 审计日志配置 ======
     # 审计日志保留天数（超过此天数的日志将被清理）
     # 默认 90 天（3个月），可根据需要调整
