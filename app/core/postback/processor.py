@@ -882,6 +882,7 @@ class PostbackProcessor:
                     # 通知历史在独立的短事务中提交；队列记录已经安全提交。
                     await db.commit()
             except Exception as notify_error:
+                await db.rollback()
                 logger.warning(
                     "发送待审批 Postback 通知失败：error_type=%s",
                     type(notify_error).__name__,
