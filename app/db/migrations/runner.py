@@ -172,12 +172,12 @@ async def _consume_result(connection, statement: str) -> None:
 
 def _is_event_key_backfill_statement(statement: str) -> bool:
     """只匹配 checksum 固定的历史迁移中的 event_key 全表 UPDATE。"""
-    normalized = re.sub(r"\\s+", " ", statement).strip().casefold().rstrip(";")
+    normalized = re.sub(r"\s+", " ", statement).strip().casefold().rstrip(";")
     return (
         normalized.startswith(
             "update third_party_report_logs set event_key = sha2("
         )
-        and re.search(r"\\bwhere event_key is null$", normalized) is not None
+        and re.search(r"\bwhere event_key is null$", normalized) is not None
     )
 
 
@@ -654,7 +654,6 @@ async def _apply_with_locked_connection(
                     )
                 await connection.commit()
             except Exception as exc:
-                # COMMIT ACK 可能丢失；先读 ledger 判断 applied 是否实际已提交。
                 try:
                     await connection.rollback()
                     current_status = await connection.scalar(
@@ -664,22 +663,34 @@ async def _apply_with_locked_connection(
                         ),
                         {"revision": migration.revision},
                     )
-                    if current_status == "applied":
-                        applied_checksums[migration.revision] = migration.sha256
-                        completed.append(migration.revision)
-                        continue
-                    if (
-                        migration.backfill_handler is not None
-                        and current_status == "running"
-                    ):
-                        logger.warning(
-                            "Resumable migration interrupted; keep running ledger for next apply: revision=%s error_type=%s",
-                            migration.revision,
-                            type(exc).__name__,
-                        )
-                        raise MigrationExecutionError(
-                            f"分批迁移中断，账本保留 running，可在确认写入方已停止后安全续跑：{migration.revision}"
-                        ) from exc
+                except Exception:
+                    logger.error(
+                        "Migration 状态核验失败，保留现有 ledger 状态：%s",
+                        migration.revision,
+                        exc_info=True,
+                    )
+                    current_status = None
+
+                # COMMIT ACK 丢失时，数据库可能已经提交 applied；以 ledger 为准。
+                if current_status == "applied":
+                    applied_checksums[migration.revision] = migration.sha256
+                    completed.append(migration.revision)
+                    continue
+
+                if (
+                    migration.backfill_handler is not None
+                    and current_status == "running"
+                ):
+                    logger.warning(
+                        "Resumable migration interrupted; keep running ledger for next apply: revision=%s error_type=%s",
+                        migration.revision,
+                        type(exc).__name__,
+                    )
+                    raise MigrationExecutionError(
+                        f"分批迁移中断，账本保留 running；确认写入方已停止后可安全续跑：{migration.revision}"
+                    ) from exc
+
+                try:
                     result = await connection.execute(
                         text(
                             "UPDATE platform_schema_migrations "
@@ -691,19 +702,18 @@ async def _apply_with_locked_connection(
                             "error_type": type(exc).__name__[:128],
                         },
                     )
-                    if (result.rowcount or 0) == 1:
+                    if result.rowcount == 1:
                         await connection.commit()
                     else:
                         await connection.rollback()
                 except Exception:
-                    # 连接中断时保留 running 墓碑；下一次 apply 会 fail closed。
                     logger.error(
-                        "Migration 失败状态无法回写；ledger 保留 running：revision=%s",
+                        "Migration 失败状态无法回写，ledger 可能仍为 running：%s",
                         migration.revision,
+                        exc_info=True,
                     )
                 raise MigrationExecutionError(
-                    f"migration 执行失败：{migration.revision}；"
-                    "MySQL DDL 可能部分提交，必须先人工核验再恢复"
+                    f"迁移执行失败，账本状态已标记或保留为 failed/running：{migration.revision}"
                 ) from exc
 
             applied_checksums[migration.revision] = migration.sha256
