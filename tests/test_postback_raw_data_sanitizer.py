@@ -12,6 +12,8 @@ def test_redacts_sensitive_fields_recursively_and_preserves_business_fields():
         "phone_number": "+1-555-0100",
         "authorization": "Bearer secret",
         "access_token": "secret-token",
+        "authToken": "camel-secret",
+        "emailAddress": "camel@example.com",
         "nested": {
             "session_id": "session-secret",
             "user_email": "nested@example.com",
@@ -33,6 +35,8 @@ def test_redacts_sensitive_fields_recursively_and_preserves_business_fields():
         "+1-555-0100",
         "Bearer secret",
         "secret-token",
+        "camel-secret",
+        "camel@example.com",
         "session-secret",
         "nested@example.com",
         '"api_key"',
@@ -62,7 +66,7 @@ def test_limits_nested_depth_and_item_count():
 
 def test_oversized_payload_is_replaced_with_size_marker():
     result = sanitize_postback_raw_data({"event": "x" * 40000})
-    assert result[" _redaction".strip()] == "payload_exceeds_storage_limit"
+    assert result["_redaction"] == "payload_exceeds_storage_limit"
     assert result["_sanitized_size_bytes"] > 32 * 1024
 
 
