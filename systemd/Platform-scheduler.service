@@ -1,6 +1,7 @@
 [Unit]
 Description=Platform Backend Scheduler (single worker, scheduled tasks only)
-After=network.target mysql.service redis.service Platform-backend.service
+After=network.target mysql.service redis.service Platform-migrate.service Platform-backend.service
+Requires=Platform-migrate.service
 Wants=mysql.service redis.service
 
 [Service]
