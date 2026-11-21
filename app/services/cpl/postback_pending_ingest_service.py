@@ -7,7 +7,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Optional
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -175,7 +175,14 @@ class PendingPostbackIngestService:
 
         existing = await db.execute(
             select(PendingPostbackConversion.id).where(
-                PendingPostbackConversion.dedupe_key == dedupe_key
+                or_(
+                    PendingPostbackConversion.dedupe_key == dedupe_key,
+                    and_(
+                        PendingPostbackConversion.platform == platform,
+                        PendingPostbackConversion.conversion_id == conversion_id,
+                        PendingPostbackConversion.event_name == event_name,
+                    ),
+                )
             ).limit(1)
         )
         existing_id = existing.scalar_one_or_none()
@@ -221,7 +228,14 @@ class PendingPostbackIngestService:
             await db.rollback()
             duplicate = await db.execute(
                 select(PendingPostbackConversion.id).where(
-                    PendingPostbackConversion.dedupe_key == dedupe_key
+                    or_(
+                        PendingPostbackConversion.dedupe_key == dedupe_key,
+                        and_(
+                            PendingPostbackConversion.platform == platform,
+                            PendingPostbackConversion.conversion_id == conversion_id,
+                            PendingPostbackConversion.event_name == event_name,
+                        ),
+                    )
                 ).limit(1)
             )
             duplicate_id = duplicate.scalar_one_or_none()
