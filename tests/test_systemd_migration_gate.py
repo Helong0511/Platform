@@ -24,7 +24,9 @@ def test_migration_unit_is_fail_closed_and_uses_separate_os_identity():
     assert "RemainAfterExit=yes" in unit
     assert "User=platform-migrator" in unit
     assert "Group=platform-migrator" in unit
-    assert "EnvironmentFile=/etc/platform/migration.env" in unit
+    assert "LoadCredential=application-database-url:/etc/platform/migration-app-database-url" in unit
+    assert "LoadCredential=migration-database-url:/etc/platform/migration-database-url" in unit
+    assert "EnvironmentFile=" not in unit
     assert "WorkingDirectory=/run/platform-migration" in unit
     assert "RuntimeDirectory=platform-migration" in unit
     assert "ProtectSystem=strict" in unit
@@ -55,5 +57,5 @@ def test_backend_and_scheduler_require_successful_migration_unit():
 def test_migration_credentials_are_not_part_of_application_env_template():
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
     assert not re.search(r"^\s*MIGRATION_DATABASE_URL\s*=", env_example, re.MULTILINE)
-    assert "MIGRATION_DATABASE_URL" in env_example
+    assert "LoadCredential" in env_example
     assert "root-only" in env_example
