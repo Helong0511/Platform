@@ -717,14 +717,14 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
 - MySQL DDL 隐式提交，出现 `running` / `failed` 时必须人工核验实际 schema 后恢复；Runner 不做猜测性自动重跑。Ledger 的字段、索引、CHECK 约束及 CHECK 实际拒绝非法写入的行为均有结构/语义校验。
 - `validate` 是离线检查；`status` 是只读 ledger 检查；`apply` 才会执行 DDL。三者不能互相替代。
 
-### 35.2 当前 systemd 发布链路仍有缺口
+### 35.2 systemd 发布链路的 main 基线缺口（本节复核时）
 
 已直接检查当前两个 unit 文件：
 
 - `systemd/Platform-backend.service` 的启动命令是 Gunicorn；其 `ExecStartPre` 仅创建/设置日志目录和文件，没有调用 Migration Runner。
 - `systemd/Platform-scheduler.service` 同样只启动 Gunicorn；其 `After=` 包含 backend service，但没有依赖独立 migration oneshot service。
-- 因此，Runner 虽已实现，systemd 仍未强制“迁移成功后才能启动 API/Scheduler”。当前正确操作顺序必须由发布人员显式保证：备份并确认恢复点 → 离线 validate → 只读 status → 受控 apply → 再启动/重启 backend 与 scheduler → 验证两个 Worker 的只读 Schema Gate。
-- 后续应设计独立的 `platform-migrate.service`（或等效发布流水线步骤），使用独立数据库迁移身份；不能简单让 API 运行账号获得 CREATE/ALTER/DROP 权限，也不能把迁移密码写入命令行或 Git 跟踪文件。迁移 unit 的 OS 身份、EnvironmentFile 权限、systemd ordering、超时、失败告警和审计日志都需要测试后再启用。
+- 上述结论描述本节复核时的 main 基线，不代表后续分支已自动生效。PR `fix/systemd-migration-gate-2026-11-21` 正在补入独立 oneshot unit、Backend/Scheduler 的 `Requires` + `After`、隔离 OS 用户及 root-only 凭据文件；具体设计和部署步骤见本文件第 36 节。只有该 PR 合并、unit 安装并完成目标 Ubuntu 验收后，才能将此缺口标记关闭。
+- 不得简单让 API 运行账号获得 CREATE/ALTER/DROP 权限，也不得把迁移密码写入命令行或 Git 跟踪文件。迁移 unit 的 OS 身份、EnvironmentFile 权限、systemd ordering、超时、失败告警和审计日志必须经 CI 与目标主机验证。
 
 ### 35.3 当前启动行为与权限边界
 
@@ -745,7 +745,7 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
 
 - **公开仓库凭据文件仍被 Git 跟踪**：当前 main tree 仍包含 `keys/private_key.pem`、`nginx/btfrx.online/client.btfrx.online.key`、`secrets/gam-23347342743.json`、`secrets/gam-23348711678.json`；Git tree 对应 mode 均为 `100644`。本次没有读取这些文件内容。必须由凭据所有者先轮换/吊销，完成仓库外运行时迁移与线上验证，再移除跟踪并规划公开历史清理；仅增加 .gitignore 不会移除已跟踪对象。
 - **生产 DDL 风险尚未关闭**：Runner 最低版本为 MySQL 8.0.16；部分 migration 使用 `ADD COLUMN ... AFTER ...`。必须在与目标 MySQL 小版本、表结构、数据量和索引规模相符的隔离副本验证实际 DDL 算法、耗时、metadata lock、磁盘峰值和复制延迟。不得仅凭 CI 临时库通过就直接在生产大表执行。
-- **迁移服务尚未纳入 systemd 强制依赖**：发布前需要可审计地保证 migration job 成功后才启动 API/Scheduler。
+- **迁移服务强制依赖尚待 PR 合并和目标主机验收**：PR `fix/systemd-migration-gate-2026-11-21` 提交了 unit 与依赖配置；在 CI 通过、合并、安装并完成 Ubuntu 验收前，不得视为已关闭。
 - **分支保护尚无可验证证据**：必须在 GitHub 设置并验证 main 的 PR 审核、必需 CI、禁止 force-push、禁止删除规则。
 - **生产备份恢复与故障恢复尚未演练**：至少完成全量备份恢复、迁移中断后的人工核验/forward-fix、应用回滚兼容性和恢复点记录。
 - **目标环境实测尚未完成**：尚未连接生产服务器/数据库；目标 MySQL 版本、sql_mode、账号授权、字符集、现有 schema revision 和真实数据规模均需在授权的隔离/生产发布流程中核验。
