@@ -23,6 +23,7 @@ class _FakeSession:
         self.db_now = db_now
         self.row = row
         self.executed = []
+        self.info = {}
         self.committed = False
         self.rolled_back = False
         self.closed = False
@@ -124,6 +125,7 @@ async def test_acquire_task_lock_recovers_stale_row_using_database_time(monkeypa
     assert record.is_running is True
     assert record.last_run_time == db_now
     assert record.run_count == 5
+    assert db.info["scheduler_lock_run_count"] == 5
     assert db.committed is True
     assert db.closed is False
 
