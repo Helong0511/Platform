@@ -37,6 +37,8 @@ def _read_credential(credential_name: str, *environment_names: str) -> str:
 
 
 def _validate() -> int:
+    from app.db.migrations.runner import _validate_event_key_backfill_contract
+
     migrations = validate_manifest()
     for migration in migrations:
         statements = split_mysql_statements(
@@ -48,6 +50,8 @@ def _validate() -> int:
             raise MigrationManifestError(
                 f"migration contains no executable statements: {migration.revision}"
             )
+        if migration.backfill_handler is not None:
+            _validate_event_key_backfill_contract(migration, statements)
     print(f"Migration validation passed: {len(migrations)} revision(s); SQL syntax boundaries checked.")
     print("No database connection was opened; no SQL was executed.")
     return 0
@@ -64,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "validate":
         try:
             return _validate()
-        except (MigrationManifestError, MigrationSQLParseError, OSError) as exc:
+        except (MigrationManifestError, MigrationSQLParseError, RuntimeError, OSError) as exc:
             print(f"Migration validation failed: {exc}", file=sys.stderr)
             return 1
 
