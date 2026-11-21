@@ -170,14 +170,35 @@ async def _consume_result(connection, statement: str) -> None:
 
 
 
+def _normalized_event_key_statement(statement: str) -> str:
+    return re.sub(r"\s+", " ", statement).strip().casefold().rstrip(";")
+
+
 def _is_event_key_backfill_statement(statement: str) -> bool:
     """只匹配 checksum 固定的历史迁移中的 event_key 全表 UPDATE。"""
-    normalized = re.sub(r"\s+", " ", statement).strip().casefold().rstrip(";")
+    normalized = _normalized_event_key_statement(statement)
     return (
         normalized.startswith(
             "update third_party_report_logs set event_key = sha2("
         )
         and re.search(r"\bwhere event_key is null$", normalized) is not None
+    )
+
+
+def _is_event_key_missing_check_statement(statement: str) -> bool:
+    normalized = _normalized_event_key_statement(statement)
+    return normalized.startswith(
+        "select count(*) as missing_event_keys from third_party_report_logs"
+    ) and "where event_key is null or event_key = ''" in normalized
+
+
+def _is_event_key_duplicate_check_statement(statement: str) -> bool:
+    normalized = _normalized_event_key_statement(statement)
+    return (
+        normalized.startswith(
+            "select event_key, count(*) as duplicate_count from third_party_report_logs"
+        )
+        and "group by event_key having count(*) > 1" in normalized
     )
 
 
@@ -227,7 +248,7 @@ async def _run_third_party_report_event_key_backfill(
             ),
             256
         )
-        WHERE id > :last_id AND id <= :upper_id AND event_key IS NULL
+        WHERE id > :last_id AND id <= :upper_id AND (event_key IS NULL OR event_key = '')
         """
     )
 
@@ -316,6 +337,28 @@ async def _execute_migration_statements(
                 summary["batches"],
                 summary["updated_rows"],
             )
+        elif _is_event_key_missing_check_statement(statement):
+            result = await connection.exec_driver_sql(statement)
+            try:
+                missing_count = int(result.scalar_one())
+            finally:
+                result.close()
+            await connection.commit()
+            if missing_count:
+                raise MigrationRunnerError(
+                    f"event_key 回填后仍有 {missing_count} 条 NULL/空值，拒绝继续 DDL"
+                )
+        elif _is_event_key_duplicate_check_statement(statement):
+            result = await connection.exec_driver_sql(statement)
+            try:
+                duplicate_row = result.fetchone()
+            finally:
+                result.close()
+            await connection.commit()
+            if duplicate_row is not None:
+                raise MigrationRunnerError(
+                    "event_key 回填后发现重复事件键，拒绝创建唯一索引"
+                )
         else:
             await _consume_result(connection, statement)
 
