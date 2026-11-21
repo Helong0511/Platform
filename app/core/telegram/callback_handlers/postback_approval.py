@@ -110,6 +110,13 @@ def process_pending_conversion(
 
     try:
         with SessionLocal() as db:
+            result = db.execute(
+                build_pending_for_update_statement(
+                    PendingPostbackConversion, pending_id, status=None
+                )
+            )
+            pending = result.scalar_one_or_none()
+
             # callback_query_id 是 Telegram 对单次按钮回调的唯一标识。
             # 已存在时记录一次独立的重复尝试，不复用唯一 callback ID。
             prior_callback = db.execute(
@@ -119,6 +126,7 @@ def process_pending_conversion(
                     == callback_query_id
                 )
                 .limit(1)
+                .with_for_update()
             ).scalar_one_or_none()
             if prior_callback is not None:
                 add_postback_approval_audit(
@@ -145,13 +153,6 @@ def process_pending_conversion(
                 except Exception as e:
                     logger.warning("发送重复回调提示失败：error_type=%s", type(e).__name__)
                 return
-
-            result = db.execute(
-                build_pending_for_update_statement(
-                    PendingPostbackConversion, pending_id, status=None
-                )
-            )
-            pending = result.scalar_one_or_none()
 
             if not pending:
                 add_postback_approval_audit(
