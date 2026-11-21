@@ -33,7 +33,7 @@ _MAX_RAW_DATA_ITEMS = 500
 _MAX_RAW_STRING_LENGTH = 4096
 # 支持 user_email、client_ip、phone_number 等复合参数名，避免 URL/form 文本绕过结构化字段脱敏。
 _SENSITIVE_INLINE_KEY = (
-    r"(?:[A-Za-z0-9.-]*[_-])?(?:authorization|proxy[_-]?authorization|auth|"
+    r"(?:[A-Za-z0-9.-]+[_-])*(?:authorization|proxy[_-]?authorization|auth|"
     r"access[_-]?token|refresh[_-]?token|token|secret|password|passwd|"
     r"api[_-]?key|email|e-mail|phone|mobile|ip(?:[_-]?address)?|"
     r"session(?:[_-]?id)?|cookie|set-cookie|idfa|gaid|"
