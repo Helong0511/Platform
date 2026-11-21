@@ -25,6 +25,6 @@ CREATE TABLE `telegram_postback_approval_audits` (
     CONSTRAINT `chk_tg_postback_audit_action`
         CHECK (`action` IN ('approve', 'reject', 'auto_approve')),
     CONSTRAINT `chk_tg_postback_audit_outcome`
-        CHECK (`outcome` IN ('approved', 'rejected', 'already_exists', 'denied', 'not_found'))
+        CHECK (`outcome` IN ('approved', 'rejected', 'already_exists', 'denied', 'not_found', 'already_processed', 'duplicate_callback'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 COMMENT='Telegram/Web Postback 待确认审批不可变审计事件';
