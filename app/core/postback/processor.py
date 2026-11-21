@@ -834,6 +834,20 @@ class PostbackProcessor:
         else:
             message = "Postback 来源 IP 无法确认，未进入待审批队列"
 
+        try:
+            await db.commit()
+        except Exception as commit_error:
+            logger.error(
+                "提交待审批 Postback 记录失败：error_type=%s",
+                type(commit_error).__name__,
+            )
+            await db.rollback()
+            return {
+                "success": False,
+                "message": "待审批记录保存失败，请重试",
+                "retryable": True,
+            }
+
         # 队列记录先提交并释放全局 guard 行锁，再执行 Telegram 网络通知。
         # 通知慢/超时不能让所有并发入队请求长期等待同一把容量互斥锁。
         if queue_result.get("queued"):
@@ -872,20 +886,6 @@ class PostbackProcessor:
                     "发送待审批 Postback 通知失败：error_type=%s",
                     type(notify_error).__name__,
                 )
-
-        try:
-            await db.commit()
-        except Exception as commit_error:
-            logger.error(
-                "提交待审批 Postback 记录失败：error_type=%s",
-                type(commit_error).__name__,
-            )
-            await db.rollback()
-            return {
-                "success": False,
-                "message": "待审批记录保存失败，请重试",
-                "retryable": True,
-            }
 
         return {
             "success": True,
