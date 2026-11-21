@@ -162,7 +162,7 @@ async def test_unauthorized_telegram_callback_persists_denied_audit(monkeypatch)
 class _FakeTelegramSession:
     def __init__(self, pending, existing_conversion_id=None, fail_commit=False):
         self.pending = pending
-        self.results = [None, pending, existing_conversion_id]
+        self.results = [pending, None, existing_conversion_id]
         self.events = []
         self.fail_commit = fail_commit
         self.committed = False
@@ -340,7 +340,7 @@ def test_telegram_already_processed_record_is_audited_without_mutation(monkeypat
 def test_telegram_duplicate_callback_is_audited_separately(monkeypatch):
     pending = _fake_pending()
     db = _FakeTelegramSession(pending)
-    db.results = [123]
+    db.results = [pending, 123]
     handler = _patch_telegram_processor(monkeypatch, db)
 
     handler.process_pending_conversion(
