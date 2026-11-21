@@ -71,7 +71,7 @@
 
 ### 38.2 修复
 
-- `release_task_lock()` 现在重新执行 `SELECT ... FOR UPDATE`，在行锁保护下读取当前持有者，再校验 PID/Host；旧 Worker 不能覆盖新 Worker 的运行状态。
+- `release_task_lock()` 现在重新执行 `SELECT ... FOR UPDATE` 并使用 `populate_existing=True` 刷新 SQLAlchemy identity map，在行锁保护下读取数据库中的当前持有者，再校验 PID/Host；旧 Worker 不能用 Session 中缓存的旧 ORM 对象覆盖新 Worker 的运行状态。
 - `acquire_task_lock()` 在同一锁事务中读取 MySQL 服务端时间表达式 `get_app_now_sql_expression()`，用它判断超时并写入 `last_run_time`。
 - `execute_task_with_lock()` 的提前跳过检查也使用 MySQL 服务端时间，避免 Worker 本地时钟造成误判。若无法读取数据库时间，抢锁路径 fail closed。
 - 第三方 Report Outbox 单批最坏 HTTP 网络预算为 549 秒（每条最多 3 次、每次 60 秒，退避合计 3 秒；每批 3 条），代码注释已与 900 秒 MySQL 任务超时及 960 秒 Redis TTL 对齐。该预算不包含 DB/凭据/调度开销，不能当作生产实测耗时。
