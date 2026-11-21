@@ -49,7 +49,8 @@ def sanitize_postback_raw_data(value: Any) -> Any:
             result = {}
             for key, child in item.items():
                 key_text = str(key)
-                if _SENSITIVE_RAW_KEY.search(key_text):
+                normalized_key = re.sub(r"(?<!^)(?=[A-Z])", "_", key_text).lower()
+                if _SENSITIVE_RAW_KEY.search(normalized_key):
                     continue
                 result[key_text[:128]] = clean(child, depth + 1)
                 if remaining[0] <= 0:
@@ -195,7 +196,10 @@ class ConversionSaver:
 
         if raw_payload is not None:
             if snapshot:
-                raw_payload['_attribution'] = snapshot
+                if isinstance(raw_payload, dict):
+                    raw_payload['_attribution'] = snapshot
+                else:
+                    raw_payload = {'_payload': raw_payload, '_attribution': snapshot}
             raw_data_json = json.dumps(raw_payload, ensure_ascii=False, separators=(",", ":"))
         elif raw_in is not None:
             raw_data_json = json.dumps(sanitize_postback_raw_data(raw_in), ensure_ascii=False, separators=(",", ":"))
