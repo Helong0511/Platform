@@ -24,7 +24,8 @@ _SENSITIVE_RAW_KEY = re.compile(
     r"(?:^|[_-])(authorization|auth|token|secret|password|passwd|api[_-]?key|"
     r"access[_-]?key|cookie|set-cookie|session|email|e-mail|phone|mobile|"
     r"address|street|ssn|social[_-]?security|card[_-]?number|cvv|bank[_-]?account|"
-    r"ip|ip[_-]?address|idfa|gaid|advertising[_-]?id|device[_-]?id)(?:$|[_-])",
+    r"ip|ip[_-]?address|idfa|gaid|devad[_-]?id|advertising[_-]?id|device[_-]?id|"
+    r"user[_-]?agent|ua)(?:$|[_-])",
     re.IGNORECASE,
 )
 _MAX_RAW_DATA_BYTES = 32 * 1024
