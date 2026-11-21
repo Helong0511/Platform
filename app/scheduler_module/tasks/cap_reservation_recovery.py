@@ -47,6 +47,15 @@ async def cap_reservation_recovery_task():
             logger.info(message)
         return stats
     except Exception as exc:
-        set_task_result(CAP_RESERVATION_RECOVERY_TASK_NAME, f"执行失败：{exc}")
-        logger.error("Cap Reservation 崩溃恢复任务失败", exc_info=True)
+        # 异常文本可能包含 Redis/数据库连接信息、SQL 参数或业务标识；
+        # 任务结果会同步到管理端，只记录异常类型，不持久化原始异常内容。
+        error_type = type(exc).__name__
+        set_task_result(
+            CAP_RESERVATION_RECOVERY_TASK_NAME,
+            f"执行失败，需排查服务端日志（error_type={error_type}）",
+        )
+        logger.error(
+            "Cap Reservation 崩溃恢复任务失败：error_type=%s",
+            error_type,
+        )
         raise
