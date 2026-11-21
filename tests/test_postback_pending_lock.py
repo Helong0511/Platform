@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import Column, Integer, MetaData, String, Table
 from sqlalchemy.dialects import mysql
 from sqlalchemy.schema import CreateTable
+from sqlalchemy.orm import declarative_base
 
 from app.core.postback.pending_lock import build_pending_for_update_statement
 from app.models.models import PendingPostbackConversion
@@ -107,12 +108,17 @@ def test_mysql_innodb_pending_lock_serializes_concurrent_approval_reads():
         Column("status", String(20), nullable=False),
         mysql_engine="InnoDB",
     )
+    Base = declarative_base()
+
+    class PendingLockRow(Base):
+        __table__ = pending_table
+
     create_table_sql = str(
         CreateTable(pending_table).compile(dialect=mysql.dialect())
     )
     lock_sql = str(
         build_pending_for_update_statement(
-            pending_table, 1, status=None
+            PendingLockRow, 1, status=None
         ).compile(
             dialect=mysql.dialect(),
             compile_kwargs={"literal_binds": True},
