@@ -82,6 +82,15 @@ def test_audit_helper_rejects_unknown_action_and_actor_type():
             FakeDB(), **{**common, "action": "delete"}, actor_type="telegram"
         )
 
+    # 两种新结果必须通过同一白名单校验，避免运行时写入后被 DB CHECK 拒绝。
+    for outcome in ("already_processed", "duplicate_callback"):
+        event = add_postback_approval_audit(
+            SimpleNamespace(add=lambda value: value),
+            **{**common, "outcome": outcome},
+            actor_type="telegram",
+        )
+        assert event.outcome == outcome
+
 
 def test_callback_data_parser_uses_strict_action_allowlist():
     from app.core.telegram.callback_handlers.postback_approval import (
@@ -153,7 +162,7 @@ async def test_unauthorized_telegram_callback_persists_denied_audit(monkeypatch)
 class _FakeTelegramSession:
     def __init__(self, pending, existing_conversion_id=None, fail_commit=False):
         self.pending = pending
-        self.results = [pending, existing_conversion_id]
+        self.results = [None, pending, existing_conversion_id]
         self.events = []
         self.fail_commit = fail_commit
         self.committed = False
@@ -307,3 +316,40 @@ def test_telegram_audit_is_not_committed_when_business_transaction_fails(monkeyp
     assert len(audits) == 1
     assert db.committed is False
     assert db.rollback_count >= 1
+
+
+def test_telegram_already_processed_record_is_audited_without_mutation(monkeypatch):
+    pending = _fake_pending()
+    pending.status = "approved"
+    db = _FakeTelegramSession(pending)
+    handler = _patch_telegram_processor(monkeypatch, db)
+
+    handler.process_pending_conversion(
+        77, "reject", "callback-after-approved", -100123, 8, 555127
+    )
+
+    audits = [event for event in db.events if event.__class__.__name__ == "TelegramPostbackApprovalAudit"]
+    assert db.committed is True
+    assert pending.status == "approved"
+    assert len(audits) == 1
+    assert audits[0].outcome == "already_processed"
+    assert audits[0].previous_status == "approved"
+    assert audits[0].new_status == "approved"
+
+
+def test_telegram_duplicate_callback_is_audited_separately(monkeypatch):
+    pending = _fake_pending()
+    db = _FakeTelegramSession(pending)
+    db.results = [123]
+    handler = _patch_telegram_processor(monkeypatch, db)
+
+    handler.process_pending_conversion(
+        77, "approve", "callback-replayed", -100123, 8, 555128
+    )
+
+    audits = [event for event in db.events if event.__class__.__name__ == "TelegramPostbackApprovalAudit"]
+    assert db.committed is True
+    assert pending.status == "pending"
+    assert len(audits) == 1
+    assert audits[0].outcome == "duplicate_callback"
+    assert audits[0].telegram_callback_query_id is None
