@@ -24,14 +24,23 @@ logger = logging.getLogger(__name__)
 # 单个来源 IP 的入队上限；Redis 不可用时 fail-closed，不能退化成进程内计数。
 _PENDING_RATE_LIMIT_PER_HOUR = 20
 _PENDING_RATE_LIMIT_PER_DAY = 100
+_PENDING_GLOBAL_RATE_LIMIT_PER_HOUR = 500
+_PENDING_GLOBAL_RATE_LIMIT_PER_DAY = 5000
 _PENDING_RAW_DATA_MAX_BYTES = 32 * 1024
 _PLATFORM_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$")
 _RATE_LIMIT_SCRIPT = """
-local hourly = redis.call('INCR', KEYS[1])
-if hourly == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
-local daily = redis.call('INCR', KEYS[2])
-if daily == 1 then redis.call('EXPIRE', KEYS[2], ARGV[2]) end
-if hourly > tonumber(ARGV[3]) or daily > tonumber(ARGV[4]) then
+local ip_hourly = redis.call('INCR', KEYS[1])
+if ip_hourly == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+local ip_daily = redis.call('INCR', KEYS[2])
+if ip_daily == 1 then redis.call('EXPIRE', KEYS[2], ARGV[2]) end
+local global_hourly = redis.call('INCR', KEYS[3])
+if global_hourly == 1 then redis.call('EXPIRE', KEYS[3], ARGV[1]) end
+local global_daily = redis.call('INCR', KEYS[4])
+if global_daily == 1 then redis.call('EXPIRE', KEYS[4], ARGV[2]) end
+if ip_hourly > tonumber(ARGV[3])
+    or ip_daily > tonumber(ARGV[4])
+    or global_hourly > tonumber(ARGV[5])
+    or global_daily > tonumber(ARGV[6]) then
     return 0
 end
 return 1
@@ -57,13 +66,17 @@ class PendingPostbackIngestService:
         try:
             allowed = await redis.eval(
                 _RATE_LIMIT_SCRIPT,
-                2,
+                4,
                 f"{base}:hour",
                 f"{base}:day",
+                "postback:pending:rate:global:hour",
+                "postback:pending:rate:global:day",
                 3600,
                 86400,
                 _PENDING_RATE_LIMIT_PER_HOUR,
                 _PENDING_RATE_LIMIT_PER_DAY,
+                _PENDING_GLOBAL_RATE_LIMIT_PER_HOUR,
+                _PENDING_GLOBAL_RATE_LIMIT_PER_DAY,
             )
         except Exception as exc:
             logger.warning(
