@@ -218,3 +218,40 @@ async def test_web_successful_approval_audit_is_added_before_request_commit(monk
     assert event.outcome == "approved"
     assert event.pending_conversion_id == 14
     assert event.conversion_id == 701
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,action", [
+    ("approve_pending_conversion", "approve"),
+    ("reject_pending_conversion", "reject"),
+])
+async def test_web_already_processed_attempt_is_audited_independently(
+    monkeypatch, method, action
+):
+    service = PostbackPendingService()
+    pending = SimpleNamespace(id=90, status="approved")
+    db = _FakeAsyncDB(_ScalarResult(pending))
+    captured = {}
+
+    async def persist(bind, **fields):
+        captured.update(fields)
+
+    monkeypatch.setattr(
+        "app.services.cpl.postback_pending_service.persist_postback_approval_audit_independently",
+        persist,
+    )
+
+    with pytest.raises(HTTPException):
+        await getattr(service, method)(
+            90,
+            db,
+            SimpleNamespace(id=99, username="admin"),
+        )
+
+    assert captured["outcome"] == "already_processed"
+    assert captured["action"] == action
+    assert captured["previous_status"] == "approved"
+    assert captured["new_status"] == "approved"
+    assert captured["pending_conversion_id"] == 90
+    assert db.events == []
+    assert db.flush_count == 0
