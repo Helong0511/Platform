@@ -80,3 +80,51 @@ def test_unknown_objects_are_not_serialized_with_repr():
     result = sanitize_postback_raw_data({"metadata": SecretObject()})
     assert result == {"metadata": "[unsupported value omitted]"}
     assert "do-not-leak" not in json.dumps(result)
+
+
+def test_redacts_sensitive_fields_inside_json_encoded_raw_string():
+    raw = json.dumps({
+        "email": "string@example.com",
+        "access_token": "string-token-secret",
+        "nested": {"phoneNumber": "+1-555-0199"},
+        "click_id": "trusted-click-99",
+        "event_name": "purchase",
+    })
+
+    result = sanitize_postback_raw_data(raw)
+
+    assert isinstance(result, str)
+    decoded = json.loads(result)
+    assert decoded["click_id"] == "trusted-click-99"
+    assert decoded["event_name"] == "purchase"
+    assert "email" not in decoded
+    assert "access_token" not in decoded
+    assert "phoneNumber" not in decoded["nested"]
+    assert "string@example.com" not in result
+    assert "string-token-secret" not in result
+    assert "+1-555-0199" not in result
+
+
+def test_redacts_sensitive_query_parameters_and_authorization_headers():
+    raw = (
+        "https://tracker.example/callback?email=query@example.com"
+        "&token=query-secret&click_id=click-100&ip=203.0.113.9\n"
+        "Authorization: Bearer header-secret-token"
+    )
+
+    result = sanitize_postback_raw_data(raw)
+
+    assert "query@example.com" not in result
+    assert "query-secret" not in result
+    assert "203.0.113.9" not in result
+    assert "header-secret-token" not in result
+    assert "click_id=click-100" in result
+    assert "[redacted]" in result
+
+
+def test_oversized_raw_string_is_omitted_without_persisting_prefix():
+    raw = '{"email":"oversized@example.com","payload":"' + ("x" * 40000) + '"}'
+    result = sanitize_postback_raw_data(raw)
+
+    assert result == "[oversized raw string omitted]"
+    assert "oversized@example.com" not in result
