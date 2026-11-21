@@ -73,9 +73,9 @@ class PostbackReceiveService:
         """
         try:
             raw_data = await collect_postback_raw_data(request)
+            # request_ip 仅用于服务端来源识别、IP 白名单和限流；不要注入为回调声明的用户/点击 IP。
+            # 否则非白名单请求会把同一个来源 IP 同时写入 ip 与 request_ip，混淆字段语义并扩大 PII 副本。
             client_ip = get_client_ip(request)
-            if client_ip and client_ip != "unknown" and "ip" not in raw_data:
-                raw_data["ip"] = client_ip
 
             result = await PostbackProcessor.process(
                 platform=platform,
