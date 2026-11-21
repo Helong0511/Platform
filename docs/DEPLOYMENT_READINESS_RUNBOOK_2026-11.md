@@ -1408,3 +1408,13 @@ sudo systemctl restart Platform-scheduler.service
 官方依据：
 - systemd 249 `systemd.exec(5)`：`LoadCredential=` 将凭据以服务专属只读目录提供；官方明确不建议使用环境变量传递密码/密钥：https://www.freedesktop.org/software/systemd/man/249/systemd.exec.html
 - systemd 249 `systemd.unit(5)`：`Requires=` 负责强依赖，`After=` 单独负责启动顺序；两者组合才能保证迁移单元先成功完成后再启动业务服务：https://www.freedesktop.org/software/systemd/man/249/systemd.unit.html
+
+
+## 37. event_key 历史回填：必须使用分批 Migration Runner
+
+- `20261110_third_party_report_event_idempotency` 的 SQL 文件包含历史 event_key 回填，但 Manifest 为该 revision 登记了专用 `third_party_report_event_key` handler。Runner 会将该 UPDATE 替换为按 `id` 主键范围、每批 1000 行、逐批提交的实现；原 SQL 文件及 SHA-256 不变。
+- 该 handler 可在批次中断后从末尾唯一 `running` ledger 状态安全续跑；`status` 会明确输出 `RESUMABLE` 并返回非零状态码，其它 migration 的 running/failed 仍必须人工核验，禁止自动重跑。
+- 该处理器会修复 NULL/空字符串，并实际检查缺失键与重复键查询结果；发现重复键时先停止，不执行后续唯一索引 DDL。
+- **禁止手工执行原 SQL 文件**。直接运行 SQL 会绕过 Runner 的批处理，退化为一次性全表 UPDATE。
+- 迁移期间必须停止所有写入方，不仅是 Backend/Scheduler；后续 NOT NULL/唯一索引 DDL 仍须在等价数据量副本测量 metadata lock、耗时、磁盘和复制延迟。
+- 详细续跑规则与真实 MySQL 测试范围见 `docs/MIGRATION_RUNNER_OPERATIONS_2026-11-13.md` 第 37 节。

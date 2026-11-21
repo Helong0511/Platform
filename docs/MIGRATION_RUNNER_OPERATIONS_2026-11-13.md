@@ -766,3 +766,36 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
 - 安装 ACL、独立用户、root-only LoadCredential 源文件、首次启动、发布顺序和失败恢复步骤详见 `docs/DEPLOYMENT_READINESS_RUNBOOK_2026-11.md` 第 36 节。
 
 CI 负责验证 unit 文件契约、CLI credential 读取与文档一致性；无论 PR 是否合并，都不代表目标 Ubuntu 已安装 unit、已验证 ACL/凭据权限或已执行数据库迁移。
+
+
+## 37. 2026-11-21：第三方上报 event_key 大表分批回填与续跑
+
+### 37.1 为什么要改
+
+历史 revision `20261110_third_party_report_event_idempotency` 的 SQL 文件包含单条全表 `UPDATE ... WHERE event_key IS NULL`。一次性执行会形成一个很大的 InnoDB DML 事务，行锁、undo/redo、复制延迟和故障恢复时间随表规模增长。之前的 MySQL 集成测试只证明小规模结果正确，不能证明大表安全。
+
+### 37.2 Runner 的专用处理
+
+- 原 SQL 文件没有修改，SHA-256 仍为 `57c865bea2818b1923260838a9594a6043a0892081c7d68085794f79092f1c26`，避免破坏已经登记的 checksum。
+- Manifest 为该 revision 显式登记 `backfill_handler=third_party_report_event_key`。未知 handler 会在离线 manifest 校验阶段被拒绝。
+- Runner 只在 SQL 文件中唯一匹配到原始 event_key UPDATE 时，才以专用处理器替代该条全表 UPDATE；零匹配或多匹配均拒绝执行。
+- 专用处理器先读取 `MIN(id)`，按主键升序每批最多 **1000 行**，使用 `id > last_id AND id <= upper_id` 更新，每批独立提交；已完成的非空 event_key 会跳过。重启时从最小主键重新扫描，已提交批次不会重复写入。
+- 除 NULL 外，也会修复空字符串 event_key；这与迁移 SQL 的缺失值检查条件一致。
+- Runner 现在会真正读取并验证 SQL 中的缺失键与重复键 SELECT 结果。仍有 NULL/空值或重复 event_key 时，在后续 NOT NULL/唯一索引 DDL 前 fail closed。
+
+### 37.3 中断与 ledger 状态
+
+- 只有该 revision 的显式分批 handler 可以在 ledger 中保留末尾唯一的 `running` 状态，并由下一次 `apply` 安全续跑；执行顺序、checksum、manifest 前缀仍必须完全一致。
+- 普通迁移的 `running`、所有 `failed`、多个 running、running 后还有 applied、checksum 漂移仍然拒绝自动重跑。
+- `status` 命令会显示 `RESUMABLE` 并以非零状态码退出，明确提示该记录尚未完成；只有 `apply` 对该特定 handler 有续跑权限。批次中断后先确认所有写入方已停止，再重新执行 Migration Runner。普通 running/failed 仍显示人工 DDL 核验阻断。
+- 如果检测到重复事件键，Runner 保留 running。必须先人工核验并修复重复数据，再执行 `apply`；不要手工删除 ledger 行或改 checksum。
+
+### 37.4 运行边界与证据
+
+- 发布时必须停止 Backend、Scheduler 以及所有可能写入 `third_party_report_logs` 的外部任务。systemd 的 Requires/After 只约束仓库内服务，不能自动停止外部写入方。
+- **只能通过 Migration Runner 执行该迁移**。直接在 MySQL 客户端执行原 SQL 文件会绕过专用 handler，重新变成一次性全表 UPDATE。
+- 该优化降低 DML 单批事务和锁持有范围，但不消除后续 `ALTER TABLE ... NOT NULL` 与唯一索引构建的 metadata lock、磁盘峰值和复制延迟风险；必须在等价数据量的隔离副本上测量后再确定发布窗口。
+- Full Audit 新增真实 MySQL 集成测试：2500 行、每 500 行模拟中断、确认 1000 行已提交、再次 apply 完成续跑，并验证空字符串修复、ViewContent 不含 conversion_id、event_key 唯一及重复键修复后续跑。另有独立测试验证重复键会在唯一索引 DDL 前被阻断。
+- CI 的 2500 行数据只是恢复语义测试，不是生产容量/耗时基准；生产数据规模未知，不能据此宣称大表 DDL 已完成验收。
+
+结论：本次修复解决了大表回填单事务和中断后无法续跑的问题；真实生产数据规模、索引构建、metadata lock、备份恢复仍需隔离演练。

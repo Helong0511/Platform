@@ -23,6 +23,9 @@ def _manifest(tmp_path: Path):
                 revision=revision,
                 path=relative,
                 sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                backfill_handler=(
+                    "third_party_report_event_key" if revision == "20261111_second" else None
+                ),
             )
         )
     return tuple(entries)
@@ -119,3 +122,53 @@ def test_ledger_rejects_non_prefix_history(tmp_path: Path):
     rows[0]["checksum"] = entries[1].sha256
     with pytest.raises(MigrationLedgerError, match="contiguous manifest prefix"):
         validate_ledger_rows(rows, repository_root=tmp_path, migrations=entries)
+
+
+
+def test_ledger_allows_only_declared_running_backfill_at_the_end(tmp_path: Path):
+    entries = _manifest(tmp_path)
+    rows = _rows(entries, count=1)
+    rows.append(
+        {
+            "revision": entries[1].revision,
+            "checksum": entries[1].sha256,
+            "status": "running",
+            "execution_order": 2,
+        }
+    )
+
+    applied = validate_ledger_rows(
+        rows,
+        repository_root=tmp_path,
+        migrations=entries,
+        allow_running_revisions={entries[1].revision},
+    )
+    assert applied == {entries[0].revision: entries[0].sha256}
+
+
+def test_ledger_rejects_running_backfill_when_later_revision_is_applied(
+    tmp_path: Path,
+):
+    entries = _manifest(tmp_path)
+    rows = _rows(entries, count=3)
+    rows[1]["status"] = "running"
+    with pytest.raises(MigrationLedgerError, match="only one explicitly resumable running"):
+        validate_ledger_rows(
+            rows,
+            repository_root=tmp_path,
+            migrations=entries,
+            allow_running_revisions={entries[1].revision},
+        )
+
+
+def test_ledger_does_not_allow_running_for_non_backfill_revision(tmp_path: Path):
+    entries = _manifest(tmp_path)
+    rows = _rows(entries, count=1)
+    rows[0]["status"] = "running"
+    with pytest.raises(MigrationLedgerError, match="running resume is not declared safe"):
+        validate_ledger_rows(
+            rows,
+            repository_root=tmp_path,
+            migrations=entries,
+            allow_running_revisions={entries[0].revision},
+        )

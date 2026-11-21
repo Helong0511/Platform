@@ -101,3 +101,19 @@ def test_manifest_rejects_revision_path_mismatch(tmp_path: Path):
     )
     with pytest.raises(MigrationManifestError, match="path does not match revision"):
         validate_manifest(tmp_path, (migration,))
+
+
+def test_manifest_rejects_unknown_backfill_handler(tmp_path: Path):
+    revision = "20261110_example"
+    relative = f"sql/migrations/{revision}.sql"
+    target = tmp_path / relative
+    target.parent.mkdir(parents=True)
+    target.write_text("-- synthetic migration\n", encoding="utf-8")
+    migration = Migration(
+        revision=revision,
+        path=relative,
+        sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
+        backfill_handler="arbitrary_unreviewed_handler",
+    )
+    with pytest.raises(MigrationManifestError, match="unsupported migration backfill handler"):
+        validate_manifest(tmp_path, (migration,))

@@ -2,7 +2,7 @@
 
 仅接受独立 MIGRATION_DATABASE_URL；不读取或回退到应用运行时 DSN。
 每条 migration 先持久化 running，再逐条执行并提交；MySQL DDL 隐式提交，
-失败时记录 failed/running 并 fail closed，禁止未经人工核验自动重跑部分 DDL。
+普通迁移失败后 fail closed；只有 manifest 明确登记的分批回填允许从 running 状态安全续跑。
 """
 from __future__ import annotations
 
@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 _LEDGER_TABLE = "platform_schema_migrations"
 _LEDGER_LOCK_PREFIX = "platform_migrations_"
 _MIN_MYSQL_VERSION = (8, 0, 16)
+_EVENT_KEY_BACKFILL_HANDLER = "third_party_report_event_key"
+_EVENT_KEY_BACKFILL_BATCH_SIZE = 1000
 
 
 class MigrationRunnerError(RuntimeError):
@@ -165,6 +167,227 @@ async def _consume_result(connection, statement: str) -> None:
         result.close()
     # DDL 会隐式提交；显式 commit 也为 DML 和会话状态提供清晰边界。
     await connection.commit()
+
+
+
+def _normalized_event_key_statement(statement: str) -> str:
+    return re.sub(r"\s+", " ", statement).strip().casefold().rstrip(";")
+
+
+def _is_event_key_backfill_statement(statement: str) -> bool:
+    """只匹配 checksum 固定的历史迁移中的 event_key 全表 UPDATE。"""
+    normalized = _normalized_event_key_statement(statement)
+    return (
+        normalized.startswith(
+            "update third_party_report_logs set event_key = sha2("
+        )
+        and re.search(r"\bwhere event_key is null$", normalized) is not None
+    )
+
+
+def _is_event_key_missing_check_statement(statement: str) -> bool:
+    normalized = _normalized_event_key_statement(statement)
+    return normalized.startswith(
+        "select count(*) as missing_event_keys from third_party_report_logs"
+    ) and "where event_key is null or event_key = ''" in normalized
+
+
+def _is_event_key_duplicate_check_statement(statement: str) -> bool:
+    normalized = _normalized_event_key_statement(statement)
+    return (
+        normalized.startswith(
+            "select event_key, count(*) as duplicate_count from third_party_report_logs"
+        )
+        and "group by event_key having count(*) > 1" in normalized
+    )
+
+
+def _validate_event_key_backfill_contract(
+    migration: Migration, statements: tuple[str, ...]
+) -> None:
+    """在任何 DDL 执行前，确认专用 handler 的三条 SQL 契约各出现一次。"""
+    if migration.backfill_handler != _EVENT_KEY_BACKFILL_HANDLER:
+        raise MigrationRunnerError(
+            f"不支持的 migration backfill handler：{migration.backfill_handler}"
+        )
+    counts = {
+        "update": sum(_is_event_key_backfill_statement(item) for item in statements),
+        "missing_check": sum(
+            _is_event_key_missing_check_statement(item) for item in statements
+        ),
+        "duplicate_check": sum(
+            _is_event_key_duplicate_check_statement(item) for item in statements
+        ),
+    }
+    if any(count != 1 for count in counts.values()):
+        raise MigrationRunnerError(
+            f"event_key backfill SQL 契约不完整或重复：{counts}"
+        )
+
+
+async def _run_third_party_report_event_key_backfill(
+    connection,
+    *,
+    batch_size: int | None = None,
+    max_batches: int | None = None,
+) -> dict[str, int]:
+    """按主键范围分批回填并逐批提交；从 MIN(id) 重扫也能安全跳过已完成行。"""
+    if batch_size is None:
+        batch_size = _EVENT_KEY_BACKFILL_BATCH_SIZE
+    if type(batch_size) is not int or not 1 <= batch_size <= 10_000:
+        raise ValueError("event_key backfill batch_size must be between 1 and 10000")
+    if max_batches is not None and (
+        type(max_batches) is not int or max_batches < 1
+    ):
+        raise ValueError("max_batches must be a positive integer when provided")
+
+    minimum_result = await connection.execute(
+        text("SELECT MIN(id) FROM third_party_report_logs")
+    )
+    try:
+        minimum_id = minimum_result.scalar_one_or_none()
+    finally:
+        minimum_result.close()
+    if minimum_id is None:
+        await connection.commit()
+        return {"batches": 0, "scanned_rows": 0, "updated_rows": 0, "last_id": 0}
+
+    last_id = int(minimum_id) - 1
+    scanned_rows = 0
+    updated_rows = 0
+    batches = 0
+    update_sql = text(
+        """
+        UPDATE third_party_report_logs
+        SET event_key = SHA2(
+            CONCAT(
+                CHAR_LENGTH(source), ':', source,
+                CHAR_LENGTH(adsid), ':', adsid,
+                CHAR_LENGTH(event), ':', event,
+                CHAR_LENGTH(CASE WHEN CAST(event AS BINARY) = CAST('ViewContent' AS BINARY)
+                    THEN '' ELSE COALESCE(conversion_id, '') END), ':',
+                CASE WHEN CAST(event AS BINARY) = CAST('ViewContent' AS BINARY)
+                    THEN '' ELSE COALESCE(conversion_id, '') END
+            ),
+            256
+        )
+        WHERE id > :last_id AND id <= :upper_id AND (event_key IS NULL OR event_key = '')
+        """
+    )
+
+    while True:
+        result = await connection.execute(
+            text(
+                "SELECT id FROM third_party_report_logs "
+                "WHERE id > :last_id ORDER BY id LIMIT :batch_size"
+            ),
+            {"last_id": last_id, "batch_size": batch_size},
+        )
+        try:
+            batch_ids = result.scalars().all()
+        finally:
+            result.close()
+
+        if not batch_ids:
+            await connection.commit()
+            break
+
+        upper_id = int(batch_ids[-1])
+        update_result = await connection.execute(
+            update_sql,
+            {"last_id": last_id, "upper_id": upper_id},
+        )
+        try:
+            affected = max(int(update_result.rowcount or 0), 0)
+        finally:
+            update_result.close()
+        await connection.commit()
+
+        scanned_rows += len(batch_ids)
+        updated_rows += affected
+        batches += 1
+        last_id = upper_id
+
+        if batches == 1 or batches % 10 == 0:
+            logger.info(
+                "Migration event_key batch progress: batches=%s scanned=%s updated=%s",
+                batches,
+                scanned_rows,
+                updated_rows,
+            )
+        if max_batches is not None and batches >= max_batches:
+            break
+
+    logger.info(
+        "Migration event_key batch backfill finished: batches=%s scanned=%s updated=%s",
+        batches,
+        scanned_rows,
+        updated_rows,
+    )
+    return {
+        "batches": batches,
+        "scanned_rows": scanned_rows,
+        "updated_rows": updated_rows,
+        "last_id": last_id,
+    }
+
+
+async def _execute_migration_statements(
+    connection, migration: Migration, statements: tuple[str, ...]
+) -> None:
+    """执行 SQL；显式登记的 backfill handler 替换对应全表 UPDATE。"""
+    if migration.backfill_handler is None:
+        for statement in statements:
+            await _consume_result(connection, statement)
+        return
+
+    if migration.backfill_handler != _EVENT_KEY_BACKFILL_HANDLER:
+        raise MigrationRunnerError(
+            f"不支持的 migration backfill handler：{migration.backfill_handler}"
+        )
+
+    matched = 0
+    for statement in statements:
+        if _is_event_key_backfill_statement(statement):
+            matched += 1
+            if matched > 1:
+                raise MigrationRunnerError("event_key backfill SQL 出现重复目标语句")
+            summary = await _run_third_party_report_event_key_backfill(connection)
+            logger.info(
+                "Migration backfill handler completed: revision=%s batches=%s updated=%s",
+                migration.revision,
+                summary["batches"],
+                summary["updated_rows"],
+            )
+        elif _is_event_key_missing_check_statement(statement):
+            result = await connection.exec_driver_sql(statement)
+            try:
+                missing_count = int(result.scalar_one())
+            finally:
+                result.close()
+            await connection.commit()
+            if missing_count:
+                raise MigrationRunnerError(
+                    f"event_key 回填后仍有 {missing_count} 条 NULL/空值，拒绝继续 DDL"
+                )
+        elif _is_event_key_duplicate_check_statement(statement):
+            result = await connection.exec_driver_sql(statement)
+            try:
+                duplicate_row = result.fetchone()
+            finally:
+                result.close()
+            await connection.commit()
+            if duplicate_row is not None:
+                raise MigrationRunnerError(
+                    "event_key 回填后发现重复事件键，拒绝创建唯一索引"
+                )
+        else:
+            await _consume_result(connection, statement)
+
+    if matched != 1:
+        raise MigrationRunnerError(
+            "manifest 声明的 event_key backfill SQL 未唯一匹配；拒绝执行未分批 UPDATE"
+        )
 
 
 async def _verify_ledger_check_semantics(connection) -> None:
@@ -433,6 +656,10 @@ async def _apply_with_locked_connection(
                 raise MigrationRunnerError(
                     f"migration 没有可执行 SQL：{migration.revision}"
                 )
+            if migration.backfill_handler is not None:
+                _validate_event_key_backfill_contract(
+                    migration, parsed[migration.revision]
+                )
 
         await _ensure_ledger_schema(connection)
         raw_rows = (
@@ -443,11 +670,18 @@ async def _apply_with_locked_connection(
                 )
             )
         ).mappings().all()
+        resumable_running_revisions = {
+            item.revision for item in manifest if item.backfill_handler is not None
+        }
         applied_checksums = validate_ledger_rows(
             raw_rows,
             repository_root=root,
             migrations=manifest,
+            allow_running_revisions=resumable_running_revisions,
         )
+        running_rows = {
+            row["revision"]: row for row in raw_rows if row["status"] == "running"
+        }
         pending = plan_migrations(
             applied_checksums,
             repository_root=root,
@@ -457,23 +691,37 @@ async def _apply_with_locked_connection(
         completed: list[str] = []
         for migration in pending:
             execution_order = len(applied_checksums) + 1
-            await connection.execute(
-                text(
-                    "INSERT INTO platform_schema_migrations "
-                    "(revision, checksum, status, execution_order) "
-                    "VALUES (:revision, :checksum, 'running', :execution_order)"
-                ),
-                {
-                    "revision": migration.revision,
-                    "checksum": migration.sha256,
-                    "execution_order": execution_order,
-                },
-            )
-            await connection.commit()
+            existing_running = running_rows.get(migration.revision)
+            if existing_running is not None:
+                if (
+                    migration.backfill_handler is None
+                    or existing_running["checksum"] != migration.sha256
+                    or existing_running["execution_order"] != execution_order
+                ):
+                    raise MigrationRunnerError(
+                        f"running migration 不满足安全续跑条件：{migration.revision}"
+                    )
+                # running 只允许 manifest 显式登记的分批回填；保留原账本行并从批次游标安全重扫。
+                await connection.commit()
+            else:
+                await connection.execute(
+                    text(
+                        "INSERT INTO platform_schema_migrations "
+                        "(revision, checksum, status, execution_order) "
+                        "VALUES (:revision, :checksum, 'running', :execution_order)"
+                    ),
+                    {
+                        "revision": migration.revision,
+                        "checksum": migration.sha256,
+                        "execution_order": execution_order,
+                    },
+                )
+                await connection.commit()
 
             try:
-                for statement in parsed[migration.revision]:
-                    await _consume_result(connection, statement)
+                await _execute_migration_statements(
+                    connection, migration, parsed[migration.revision]
+                )
                 result = await connection.execute(
                     text(
                         "UPDATE platform_schema_migrations "
@@ -488,7 +736,6 @@ async def _apply_with_locked_connection(
                     )
                 await connection.commit()
             except Exception as exc:
-                # COMMIT ACK 可能丢失；先读 ledger 判断 applied 是否实际已提交。
                 try:
                     await connection.rollback()
                     current_status = await connection.scalar(
@@ -498,10 +745,35 @@ async def _apply_with_locked_connection(
                         ),
                         {"revision": migration.revision},
                     )
-                    if current_status == "applied":
-                        applied_checksums[migration.revision] = migration.sha256
-                        completed.append(migration.revision)
-                        continue
+                except Exception:
+                    logger.error(
+                        "Migration 状态核验失败，保留现有 ledger 状态：%s",
+                        migration.revision,
+                        exc_info=True,
+                    )
+                    current_status = None
+
+                # COMMIT ACK 丢失时，数据库可能已经提交 applied；以 ledger 为准。
+                if current_status == "applied":
+                    applied_checksums[migration.revision] = migration.sha256
+                    completed.append(migration.revision)
+                    continue
+
+                if (
+                    migration.backfill_handler is not None
+                    and current_status == "running"
+                ):
+                    logger.warning(
+                        "Resumable migration interrupted; keep running ledger for next apply: revision=%s error_type=%s",
+                        migration.revision,
+                        type(exc).__name__,
+                    )
+                    await connection.rollback()
+                    raise MigrationExecutionError(
+                        f"分批迁移中断，账本保留 running；确认写入方已停止后可安全续跑：{migration.revision}"
+                    ) from exc
+
+                try:
                     result = await connection.execute(
                         text(
                             "UPDATE platform_schema_migrations "
@@ -513,19 +785,18 @@ async def _apply_with_locked_connection(
                             "error_type": type(exc).__name__[:128],
                         },
                     )
-                    if (result.rowcount or 0) == 1:
+                    if result.rowcount == 1:
                         await connection.commit()
                     else:
                         await connection.rollback()
                 except Exception:
-                    # 连接中断时保留 running 墓碑；下一次 apply 会 fail closed。
                     logger.error(
-                        "Migration 失败状态无法回写；ledger 保留 running：revision=%s",
+                        "Migration 失败状态无法回写，ledger 可能仍为 running：%s",
                         migration.revision,
+                        exc_info=True,
                     )
                 raise MigrationExecutionError(
-                    f"migration 执行失败：{migration.revision}；"
-                    "MySQL DDL 可能部分提交，必须先人工核验再恢复"
+                    f"迁移执行失败，账本状态已标记或保留为 failed/running：{migration.revision}"
                 ) from exc
 
             applied_checksums[migration.revision] = migration.sha256
