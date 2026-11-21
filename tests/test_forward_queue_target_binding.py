@@ -197,7 +197,7 @@ async def test_retry_queue_does_not_persist_expanded_request_pii(monkeypatch):
 
     assert len(db.added) == 2
     for task in db.added:
-        assert task.downstream_url == forwarder._FORWARD_QUEUE_REBUILD_MARKER
+        assert task.downstream_url == forwarder.FORWARD_QUEUE_REBUILD_MARKER
         assert task.request_params is None
         assert task.request_data is None
         assert task.conversion_id == conversion.id
