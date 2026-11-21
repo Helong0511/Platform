@@ -14,14 +14,18 @@ class _ScalarResult:
 
 
 class _FakeDB:
-    def __init__(self, existing_id=None):
+    def __init__(self, existing_id=None, pending_count=0):
         self.existing_id = existing_id
+        self.pending_count = pending_count
         self.added = []
         self.flush_count = 0
         self.rollback_count = 0
 
     async def execute(self, _statement):
         return _ScalarResult(self.existing_id)
+
+    async def scalar(self, _statement):
+        return self.pending_count
 
     def add(self, value):
         self.added.append(value)
@@ -208,6 +212,26 @@ async def test_invalid_fields_and_oversized_payload_are_not_stored(
         db=db,
     )
     assert result == {"queued": False, "reason": "payload_too_large"}
+    assert db.added == []
+
+
+@pytest.mark.asyncio
+async def test_full_pending_backlog_rejects_new_record(monkeypatch, valid_payload):
+    db = _FakeDB(pending_count=ingest._PENDING_MAX_OPEN_RECORDS)
+    monkeypatch.setattr(
+        ingest.PendingPostbackIngestService,
+        "_allow_enqueue",
+        staticmethod(_allow),
+    )
+
+    result = await ingest.PendingPostbackIngestService.enqueue(
+        platform="partner_a",
+        raw_data=valid_payload,
+        request_ip="203.0.113.10",
+        db=db,
+    )
+
+    assert result == {"queued": False, "reason": "queue_backlog_full"}
     assert db.added == []
 
 
