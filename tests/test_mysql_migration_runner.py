@@ -860,13 +860,14 @@ async def test_runner_resumes_interrupted_event_key_backfill_in_batches(
                 cursor.executemany(
                     "INSERT INTO third_party_report_logs "
                     "(source, adsid, event, conversion_id, event_key) "
-                    "VALUES (%s, %s, %s, %s, NULL)",
+                    "VALUES (%s, %s, %s, %s, %s)",
                     [
                         (
                             "meta",
                             f"ad-{index}",
                             "ViewContent" if index % 2 == 0 else "Purchase",
                             f"conversion-{index}",
+                            "" if index % 10 == 0 else None,
                         )
                         for index in range(1, 2501)
                     ],
@@ -887,6 +888,15 @@ async def test_runner_resumes_interrupted_event_key_backfill_in_batches(
             256
         )
         WHERE event_key IS NULL;
+
+        SELECT COUNT(*) AS missing_event_keys
+        FROM third_party_report_logs
+        WHERE event_key IS NULL OR event_key = '';
+
+        SELECT event_key, COUNT(*) AS duplicate_count
+        FROM third_party_report_logs
+        GROUP BY event_key
+        HAVING COUNT(*) > 1;
         """
         migrations = _write_migrations(
             tmp_path,
