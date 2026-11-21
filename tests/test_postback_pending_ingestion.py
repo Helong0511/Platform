@@ -241,13 +241,19 @@ async def test_rate_limiter_uses_atomic_redis_script_and_hashed_ip(monkeypatch):
     assert await ingest.PendingPostbackIngestService._allow_enqueue(
         "203.0.113.10"
     ) is True
-    assert captured["key_count"] == 2
+    assert captured["key_count"] == 4
     assert "203.0.113.10" not in " ".join(captured["args"][:2])
-    assert captured["args"][2:] == (
+    assert captured["args"][2:4] == (
+        "postback:pending:rate:global:hour",
+        "postback:pending:rate:global:day",
+    )
+    assert captured["args"][4:] == (
         3600,
         86400,
         ingest._PENDING_RATE_LIMIT_PER_HOUR,
         ingest._PENDING_RATE_LIMIT_PER_DAY,
+        ingest._PENDING_GLOBAL_RATE_LIMIT_PER_HOUR,
+        ingest._PENDING_GLOBAL_RATE_LIMIT_PER_DAY,
     )
     assert "INCR" in captured["script"]
 
