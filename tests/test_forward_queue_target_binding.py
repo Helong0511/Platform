@@ -135,3 +135,71 @@ async def test_worker_revalidates_lease_after_preparation_before_http(monkeypatc
     await forward_tasks.process_single_task(db, task, lease_token=task.lease_token)
     assert renew_calls == [(task.id, task.lease_token), (task.id, task.lease_token)]
     assert db.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_retry_queue_does_not_persist_expanded_request_pii(monkeypatch):
+    import asyncio
+
+    from app.core.postback import forwarder
+
+    class QueueDB:
+        def __init__(self):
+            self.added = []
+
+        async def execute(self, _statement):
+            return _Result(None)
+
+        def add(self, value):
+            self.added.append(value)
+
+        async def flush(self):
+            return None
+
+    async def lock_conversion(_db, _conversion_id):
+        return True
+
+    # 入队触发器由独立 Worker 处理；测试只检查事务中持久化的队列载荷。
+    def discard_task(coro):
+        coro.close()
+        return None
+
+    monkeypatch.setattr(forwarder, "_lock_conversion_for_queue_enqueue", lock_conversion)
+    monkeypatch.setattr(asyncio, "create_task", discard_task)
+
+    db = QueueDB()
+    conversion = SimpleNamespace(id=501)
+
+    await PostbackForwarder._enqueue_publisher_forward_retry(
+        db=db,
+        conversion=conversion,
+        publisher_id=31,
+        downstream_url=(
+            "https://downstream.invalid/cb?click_id=private-click"
+            "&ip=203.0.113.10&email=buyer@example.invalid"
+        ),
+        method="POST",
+        params={"click_id": "private-click", "ip": "203.0.113.10"},
+        json_data={"email": "buyer@example.invalid"},
+    )
+    await PostbackForwarder._enqueue_product_forward_retry(
+        db=db,
+        conversion=conversion,
+        product_id=41,
+        downstream_url=(
+            "https://product.invalid/cb?click_id=private-click"
+            "&ip=203.0.113.10&email=buyer@example.invalid"
+        ),
+        method="GET",
+        params={"click_id": "private-click", "ip": "203.0.113.10"},
+        json_data=None,
+    )
+
+    assert len(db.added) == 2
+    for task in db.added:
+        assert task.downstream_url == forwarder._FORWARD_QUEUE_REBUILD_MARKER
+        assert task.request_params is None
+        assert task.request_data is None
+        assert task.conversion_id == conversion.id
+    assert db.added[0].publisher_id == 31
+    assert db.added[1].product_id == 41
