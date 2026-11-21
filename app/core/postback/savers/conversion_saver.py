@@ -31,6 +31,20 @@ _MAX_RAW_DATA_BYTES = 32 * 1024
 _MAX_RAW_DATA_DEPTH = 8
 _MAX_RAW_DATA_ITEMS = 500
 _MAX_RAW_STRING_LENGTH = 4096
+_SENSITIVE_INLINE_KEY = (
+    r"authorization|proxy[_-]?authorization|auth|access[_-]?token|refresh[_-]?token|"
+    r"token|secret|password|passwd|api[_-]?key|email|e-mail|phone|mobile|"
+    r"ip(?:[_-]?address)?|session(?:[_-]?id)?|cookie|set-cookie|idfa|gaid|"
+    r"advertising[_-]?id|device[_-]?id"
+)
+_SENSITIVE_INLINE_VALUE = re.compile(
+    rf"(?i)(?P<prefix>(?:[?&;]|\\b)[\\"']?(?:{_SENSITIVE_INLINE_KEY})"
+    rf"[\\"']?\\s*[=:]\\s*[\\"']?)(?P<value>[^&;\\s,\\\"'}}\\]]+)"
+)
+_SENSITIVE_HEADER_LINE = re.compile(
+    r"(?im)^(\\s*(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key)\\s*:\\s*)[^\\r\\n]*"
+)
+_BEARER_VALUE = re.compile(r"(?i)\\bBearer\\s+[^\\s,;]+")
 
 
 def sanitize_postback_raw_data(value: Any) -> Any:
@@ -59,7 +73,30 @@ def sanitize_postback_raw_data(value: Any) -> Any:
         if isinstance(item, (list, tuple)):
             return [clean(child, depth + 1) for child in item[:_MAX_RAW_DATA_ITEMS]]
         if isinstance(item, str):
-            return item[:_MAX_RAW_STRING_LENGTH]
+            # 原始请求可能以 JSON 字符串、URL 或 HTTP header 文本传入；
+            # 不能只检查 dict 键名，否则字符串载荷会绕过字段脱敏。
+            if len(item.encode("utf-8", errors="replace")) > _MAX_RAW_DATA_BYTES:
+                return "[oversized raw string omitted]"
+            stripped = item.lstrip()
+            if stripped.startswith(("{", "[")):
+                try:
+                    parsed = json.loads(item)
+                except (json.JSONDecodeError, RecursionError):
+                    parsed = None
+                if isinstance(parsed, (dict, list)):
+                    nested = clean(parsed, depth + 1)
+                    encoded_nested = json.dumps(
+                        nested, ensure_ascii=False, separators=(",", ":")
+                    )
+                    if len(encoded_nested.encode("utf-8")) > _MAX_RAW_STRING_LENGTH:
+                        return "[structured payload omitted: exceeds string limit]"
+                    return encoded_nested
+
+            text = item[:_MAX_RAW_STRING_LENGTH]
+            text = _SENSITIVE_HEADER_LINE.sub(r"\\1[redacted]", text)
+            text = _SENSITIVE_INLINE_VALUE.sub(r"\\1[redacted]", text)
+            text = _BEARER_VALUE.sub("Bearer [redacted]", text)
+            return text
         if item is None or isinstance(item, (bool, int, float)):
             return item
         # JSON 请求通常不会包含自定义对象；未知对象不应通过 repr 泄漏信息。
