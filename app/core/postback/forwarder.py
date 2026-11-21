@@ -38,7 +38,7 @@ from app.core.url.url_params_util import (
 logger = logging.getLogger(__name__)
 
 # Worker 从 PostbackConversion 与当前目标配置重建请求，不需要在队列重复保存展开后的 PII。
-_FORWARD_QUEUE_REBUILD_MARKER = "[重试时根据转化与当前目标配置重建]"
+_FORWARD_QUEUE_REBUILD_MARKER = "[RECONSTRUCTED_AT_RETRY]"
 
 
 def _bind_publisher_target(
