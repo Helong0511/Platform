@@ -256,6 +256,9 @@ async def test_rate_limiter_uses_atomic_redis_script_and_hashed_ip(monkeypatch):
         ingest._PENDING_GLOBAL_RATE_LIMIT_PER_DAY,
     )
     assert "INCR" in captured["script"]
+    assert captured["script"].index("ip_hourly > tonumber") < captured["script"].index(
+        "redis.call('INCR', KEYS[3])"
+    )
 
 
 @pytest.mark.asyncio
