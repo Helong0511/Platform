@@ -50,6 +50,8 @@ def test_backend_and_scheduler_require_successful_migration_unit():
     for filename in ("Platform-backend.service", "Platform-scheduler.service"):
         unit = _unit(filename)
         assert "Requires=Platform-migrate.service" in unit
+        assert "LoadCredential=application-database-url:/etc/platform/application-database-url" in unit
+        assert "UnsetEnvironment=DATABASE_URL SQLALCHEMY_DATABASE_URI" in unit
         after = " ".join(_values(unit, "After"))
         assert "Platform-migrate.service" in after
 
