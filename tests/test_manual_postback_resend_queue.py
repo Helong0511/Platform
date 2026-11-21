@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.dialects import mysql
 
+from app.core.postback.forwarder import FORWARD_QUEUE_REBUILD_MARKER
 from app.services.cpl.postback_forward_log_service import PostbackForwardLogService
 
 
@@ -51,7 +52,10 @@ async def test_manual_resend_enqueues_exact_target_without_copying_pii(monkeypat
         publisher_id=33,
         product_id=None,
         pii_scrubbed_at=None,
-        downstream_url="https://publisher.example/postback?cid={click_id}",
+        downstream_url=(
+            "https://publisher.example/postback?click_id=private-click"
+            "&ip=203.0.113.20&email=buyer@example.invalid"
+        ),
         request_method="POST",
     )
     conversion = SimpleNamespace(id=22)
@@ -79,6 +83,10 @@ async def test_manual_resend_enqueues_exact_target_without_copying_pii(monkeypat
     assert task.publisher_id == 33
     assert task.product_id is None
     assert task.request_method == "POST"
+    assert task.downstream_url == FORWARD_QUEUE_REBUILD_MARKER
+    assert "private-click" not in task.downstream_url
+    assert "203.0.113.20" not in task.downstream_url
+    assert "buyer@example.invalid" not in task.downstream_url
     assert task.request_data is None
     assert task.request_params is None
     assert task.retry_count == 0
