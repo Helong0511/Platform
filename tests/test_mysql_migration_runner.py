@@ -1186,11 +1186,10 @@ async def test_runner_applies_historical_event_key_migration_with_batched_backfi
                 assert indexes["unique_event_key"] == (0, "event_key")
                 assert "unique_source_adsid" not in indexes
 
-        assert await read_migration_status(
+        migration_status = await read_migration_status(
             url, application_database_url=app_url
-        ) and (await read_migration_status(
-            url, application_database_url=app_url
-        ))[0]["status"] == "applied"
+        )
+        assert migration_status[0]["status"] == "applied"
         assert await apply_migrations(
             url,
             application_database_url=app_url,
