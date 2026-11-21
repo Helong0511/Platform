@@ -72,3 +72,27 @@ def test_retryable_result_message_is_not_exposed_to_upstream():
     assert exc.value.detail == receive_module._POSTBACK_RETRY_HINT
     assert "buyer@example.invalid" not in exc.value.detail
     assert "private-click" not in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_receive_keeps_server_source_ip_out_of_callback_user_ip(monkeypatch):
+    captured = {}
+
+    async def parsed_data(_request):
+        return {"conversion_id": "conv-1", "event_name": "Purchase", "payout": "1.00"}
+
+    async def process(**kwargs):
+        captured.update(kwargs)
+        return {"success": True, "message": "accepted"}
+
+    monkeypatch.setattr(receive_module, "collect_postback_raw_data", parsed_data)
+    monkeypatch.setattr(receive_module, "get_client_ip", lambda _request: "203.0.113.20")
+    monkeypatch.setattr(receive_module.PostbackProcessor, "process", process)
+
+    response = await receive_module.postback_receive_service.receive_postback(
+        _request(), "demo", object()
+    )
+
+    assert response.body == b"ok"
+    assert captured["request_ip"] == "203.0.113.20"
+    assert "ip" not in captured["raw_data"]
