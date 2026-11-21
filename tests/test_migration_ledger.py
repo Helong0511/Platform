@@ -165,7 +165,7 @@ def test_ledger_does_not_allow_running_for_non_backfill_revision(tmp_path: Path)
     entries = _manifest(tmp_path)
     rows = _rows(entries, count=1)
     rows[0]["status"] = "running"
-    with pytest.raises(MigrationLedgerError, match="manual DDL recovery is required"):
+    with pytest.raises(MigrationLedgerError, match="running resume is not declared safe"):
         validate_ledger_rows(
             rows,
             repository_root=tmp_path,
