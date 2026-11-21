@@ -351,6 +351,7 @@ async def release_task_lock(
                 select(ScheduledTask)
                 .where(ScheduledTask.task_name == task_name)
                 .with_for_update(of=ScheduledTask)
+                .execution_options(populate_existing=True)
             )
             task_record = result.scalar_one_or_none()
 
