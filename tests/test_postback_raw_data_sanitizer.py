@@ -128,3 +128,21 @@ def test_oversized_raw_string_is_omitted_without_persisting_prefix():
 
     assert result == "[oversized raw string omitted]"
     assert "oversized@example.com" not in result
+
+
+
+def test_redacts_composite_sensitive_query_and_form_parameter_names():
+    raw = (
+        "https://tracker.example/callback?user_email=user@example.com"
+        "&client_ip=203.0.113.20&phone_number=%2B1-555-0123"
+        "&x_user_token=compound-secret&click_id=click-200"
+    )
+
+    result = sanitize_postback_raw_data(raw)
+
+    assert "user@example.com" not in result
+    assert "203.0.113.20" not in result
+    assert "%2B1-555-0123" not in result
+    assert "compound-secret" not in result
+    assert "click_id=click-200" in result
+    assert "[redacted]" in result
