@@ -1300,9 +1300,9 @@ PR #1 仍保持 Open / Draft；不合并 main、不部署。凭据安全专项�
 
 ---
 
-## 36. 2026-11-21：systemd 强制 Migration Runner 门禁（PR 验收前）
+## 36. 2026-11-21：systemd 强制 Migration Runner 门禁
 
-> 本节描述仓库拟采用的 Ubuntu systemd 部署方式。合并前以 PR CI 为准；部署人员必须先安装三个 unit 并准备迁移凭据文件。没有完成这些步骤时，Backend/Scheduler 因 Requires 依赖缺失而按设计 fail-closed。
+> 本节描述仓库中的 Ubuntu systemd 门禁配置及部署步骤。代码合并和 CI 通过只证明仓库实现；部署人员仍必须在目标主机安装三个 unit、准备凭据文件并完成 systemd/ACL/MySQL 验收。未完成时不得宣称生产发布链路已经生效。
 
 ### 36.1 服务依赖与执行顺序
 
@@ -1398,7 +1398,11 @@ sudo systemctl restart Platform-scheduler.service
 
 ### 36.6 当前结论
 
-systemd 的依赖关系将从“依赖人工记得先迁移”改为“迁移服务失败即阻止业务服务启动”。但生产上线仍受公开仓库凭据轮换/外部迁移、真实大表 DDL 演练、备份恢复、分支保护和目标环境验证阻断。
+仓库中的 Backend 与 Scheduler 已通过 `Requires=Platform-migrate.service` 和 `After=Platform-migrate.service` 固化启动门禁；迁移服务依次执行离线校验、增量迁移和只读 ledger 状态核验，任一步失败都阻止业务 Worker 启动。数据库 DSN 由 systemd `LoadCredential` 提供，不放入进程环境变量。
+
+这仍然只是代码和 CI 层面的门禁：目标 Ubuntu 尚须安装 unit、创建专用用户、设置最小 ACL、配置两个 root-only DSN 源文件，并完成 systemd 版本、MySQL 授权、迁移耗时和失败恢复验收。`TimeoutStartSec=2h` 是当前默认上限；正式部署前必须根据等价数据量的隔离演练测得的最长迁移时间加安全余量调整，不能把 2 小时视为已经验证的生产 SLA。
+
+生产上线仍受公开仓库凭据轮换/外部迁移、真实大表 DDL 演练、备份恢复、分支保护和目标环境验证阻断。
 
 
 官方依据：
