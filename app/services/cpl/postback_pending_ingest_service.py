@@ -165,7 +165,7 @@ class PendingPostbackIngestService:
             except (InvalidOperation, ValueError, TypeError):
                 return {"queued": False, "reason": "invalid_fields"}
 
-        dedupe_source = "\x1f".join((platform.lower(), conversion_id, event_name))
+        dedupe_source = "\x1f".join((platform.casefold(), conversion_id.casefold(), event_name.casefold()))
         dedupe_key = hashlib.sha256(dedupe_source.encode("utf-8")).hexdigest()
 
         existing = await db.execute(
