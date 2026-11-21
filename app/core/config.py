@@ -1192,8 +1192,8 @@ if settings.is_production:
         logger.error("生产环境必须设置 SECRET_KEY 环境变量")
 
     # 验证数据库连接
-    if not os.getenv("DATABASE_URL"):
-        logger.error("生产环境必须设置 DATABASE_URL 环境变量")
+    if not settings.SQLALCHEMY_DATABASE_URI:
+        logger.error("生产环境必须通过 LoadCredential 或 DATABASE_URL 显式配置数据库连接")
 
     # 验证管理员密码
     if not os.getenv("FIRST_SUPERUSER_PASSWORD") or settings.FIRST_SUPERUSER_PASSWORD == "admin123":
