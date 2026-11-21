@@ -110,48 +110,101 @@ def process_pending_conversion(
 
     try:
         with SessionLocal() as db:
-            result = db.execute(
-                build_pending_for_update_statement(PendingPostbackConversion, pending_id)
-            )
-            pending = result.scalar_one_or_none()
-
-            if not pending:
-                existing_audit_id = db.execute(
-                    sync_select(TelegramPostbackApprovalAudit.id)
-                    .where(
-                        TelegramPostbackApprovalAudit.telegram_callback_query_id
-                        == callback_query_id
-                    )
-                    .limit(1)
-                ).scalar_one_or_none()
-                if existing_audit_id is None:
-                    add_postback_approval_audit(
-                        db,
-                        pending_conversion_id=pending_id,
-                        conversion_id=None,
-                        actor_type="telegram",
-                        actor_id=actor_telegram_user_id,
-                        source="telegram",
-                        action=action,
-                        outcome="not_found",
-                        previous_status=None,
-                        new_status=None,
-                        telegram_callback_query_id=callback_query_id,
-                    )
-                    db.commit()
-                else:
-                    # 同一个 Telegram callback_query_id 已完成过，按幂等重放处理。
-                    db.rollback()
+            # callback_query_id 是 Telegram 对单次按钮回调的唯一标识。
+            # 已存在时记录一次独立的重复尝试，不复用唯一 callback ID。
+            prior_callback = db.execute(
+                sync_select(TelegramPostbackApprovalAudit.id)
+                .where(
+                    TelegramPostbackApprovalAudit.telegram_callback_query_id
+                    == callback_query_id
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+            if prior_callback is not None:
+                add_postback_approval_audit(
+                    db,
+                    pending_conversion_id=pending_id,
+                    conversion_id=None,
+                    actor_type="telegram",
+                    actor_id=actor_telegram_user_id,
+                    source="telegram",
+                    action=action,
+                    outcome="duplicate_callback",
+                    previous_status=None,
+                    new_status=None,
+                )
+                db.commit()
                 try:
                     _api(
                         chat_id,
                         bot.answer_callback_query(
                             callback_query_id=callback_query_id,
-                            text="记录不存在或已被处理",
+                            text="该回调已处理，请刷新记录状态",
+                        ),
+                    )
+                except Exception as e:
+                    logger.warning("发送重复回调提示失败：error_type=%s", type(e).__name__)
+                return
+
+            result = db.execute(
+                build_pending_for_update_statement(
+                    PendingPostbackConversion, pending_id, status=None
+                )
+            )
+            pending = result.scalar_one_or_none()
+
+            if not pending:
+                add_postback_approval_audit(
+                    db,
+                    pending_conversion_id=pending_id,
+                    conversion_id=None,
+                    actor_type="telegram",
+                    actor_id=actor_telegram_user_id,
+                    source="telegram",
+                    action=action,
+                    outcome="not_found",
+                    previous_status=None,
+                    new_status=None,
+                    telegram_callback_query_id=callback_query_id,
+                )
+                db.commit()
+                try:
+                    _api(
+                        chat_id,
+                        bot.answer_callback_query(
+                            callback_query_id=callback_query_id,
+                            text="记录不存在",
                         ),
                     )
                 except Exception as e:
                     logger.warning("发送回调确认时出错：error_type=%s", type(e).__name__)
+                return
+
+            if pending.status != "pending":
+                add_postback_approval_audit(
+                    db,
+                    pending_conversion_id=pending_id,
+                    conversion_id=None,
+                    actor_type="telegram",
+                    actor_id=actor_telegram_user_id,
+                    source="telegram",
+                    action=action,
+                    outcome="already_processed",
+                    previous_status=pending.status,
+                    new_status=pending.status,
+                    telegram_callback_query_id=callback_query_id,
+                )
+                db.commit()
+                try:
+                    _api(
+                        chat_id,
+                        bot.answer_callback_query(
+                            callback_query_id=callback_query_id,
+                            text=f"记录已处理，当前状态：{pending.status}",
+                        ),
+                    )
+                except Exception as e:
+                    logger.warning("发送已处理提示失败：error_type=%s", type(e).__name__)
                 return
 
             if action == "approve":
