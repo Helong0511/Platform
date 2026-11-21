@@ -1344,20 +1344,20 @@ sudo setfacl -R -m u:platform-migrator:rX /data/Platform/app /data/Platform/sql/
 创建两个 root-only 文件，每个文件只写一行 DSN 原文（不写 `KEY=` 前缀）：
 
 ```bash
-sudo install -o root -g root -m 0600 /dev/null /etc/platform/migration-app-database-url
+sudo install -o root -g root -m 0600 /dev/null /etc/platform/application-database-url
 sudo install -o root -g root -m 0600 /dev/null /etc/platform/migration-database-url
-sudoedit /etc/platform/migration-app-database-url
+sudoedit /etc/platform/application-database-url
 sudoedit /etc/platform/migration-database-url
-sudo stat -c '%U:%G %a %n' /etc/platform/migration-app-database-url /etc/platform/migration-database-url
+sudo stat -c '%U:%G %a %n' /etc/platform/application-database-url /etc/platform/migration-database-url
 systemd --version
 ```
 
-- `migration-app-database-url`：应用运行账号的 MySQL DSN，必须与 API 的 `/data/Platform/.env` 中 `DATABASE_URL` 指向同一 endpoint/database。
+- `application-database-url`：应用运行账号的 MySQL DSN，是 Backend、Scheduler 与 Migration Runner 共用的唯一权威来源；Ubuntu 生产环境必须从 `/data/Platform/.env` 删除 `DATABASE_URL`，避免把密码通过 EnvironmentFile/dotenv 注入环境变量。Windows/本地开发仍可在 `.env` 中配置 `DATABASE_URL`。
 - `migration-database-url`：独立迁移账号的 MySQL DSN，必须指向同一 endpoint/database；Runner 还会比较 MySQL 服务端 `CURRENT_USER()`。
-- 两个文件均必须为 `root:root 0600`；迁移账号不能直接读取源文件，只能通过 systemd 为该 unit 提供的只读 credential directory 读取。
+- 两个文件均必须为 `root:root 0600`；Backend、Scheduler 与迁移账号都不能直接读取源文件，只能通过各自 systemd unit 提供的只读 credential directory 读取。三个 unit 从同一个 application DSN 源文件加载，避免维护两份应用连接串。
 - 数据库密码必须 URL encode；不得把 DSN、密码或密钥放在 shell 命令行参数、Git、工单或 CI 日志。
-- systemd 不通过 `EnvironmentFile` 或 `Environment=` 传递数据库凭据；CLI 检测到 `CREDENTIALS_DIRECTORY` 后，若凭据文件缺失会 fail-closed，不会回退到环境变量。
-- 手工/CI 运行 CLI 时仍可显式设置 `DATABASE_URL` 与 `MIGRATION_DATABASE_URL`；systemd 生产 unit 不使用此回退路径。
+- systemd 不通过 `EnvironmentFile` 或 `Environment=` 传递数据库凭据；Backend/Scheduler 使用 `UnsetEnvironment` 清除 DSN 环境变量，应用配置和 CLI 检测到 `CREDENTIALS_DIRECTORY` 后强制读取 credential 文件，缺失时 fail-closed，不会回退到 `.env` 或环境变量。
+- 手工/CI 运行 CLI 时仍可显式设置 `DATABASE_URL` 与 `MIGRATION_DATABASE_URL`；Windows/本地应用配置也仍支持 `.env`。systemd 生产 unit 不使用这些回退路径。
 
 ### 36.4 首次启动与每次发布
 
