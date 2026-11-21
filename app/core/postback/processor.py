@@ -821,6 +821,8 @@ class PostbackProcessor:
             message = "来源请求频率超过待审批入队限制"
         elif reason == "payload_too_large":
             message = "Postback 请求数据超过待审批存储限制"
+        elif reason == "queue_backlog_full":
+            message = "待审批队列积压已达安全上限，暂不接收新记录"
         elif reason in {"invalid_fields", "invalid_payload", "invalid_platform"}:
             message = "Postback 字段校验失败，未进入待审批队列"
         else:
