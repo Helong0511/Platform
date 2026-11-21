@@ -987,3 +987,113 @@ async def test_runner_resumes_interrupted_event_key_backfill_in_batches(
         ) == ()
     finally:
         _drop_database(database)
+
+
+
+@pytest.mark.asyncio
+async def test_runner_blocks_duplicate_event_keys_and_resumes_after_manual_repair(
+    tmp_path: Path,
+):
+    """真实 MySQL 验证重复 event_key 检查有效，人工修复后可安全续跑。"""
+    database = _create_database()
+    try:
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "CREATE TABLE third_party_report_logs ("
+                    "id INT NOT NULL PRIMARY KEY AUTO_INCREMENT, "
+                    "source VARCHAR(50) NOT NULL, "
+                    "adsid VARCHAR(500) NOT NULL, "
+                    "event VARCHAR(50) NOT NULL, "
+                    "conversion_id VARCHAR(255) NULL, "
+                    "event_key VARCHAR(64) NULL"
+                    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+                )
+                cursor.executemany(
+                    "INSERT INTO third_party_report_logs "
+                    "(source, adsid, event, conversion_id, event_key) "
+                    "VALUES (%s, %s, %s, %s, NULL)",
+                    [
+                        ("meta", "same-ad", "Purchase", "same-conversion"),
+                        ("meta", "same-ad", "Purchase", "same-conversion"),
+                    ],
+                )
+
+        migration_sql = """
+        UPDATE third_party_report_logs
+        SET event_key = SHA2(
+            CONCAT(
+                CHAR_LENGTH(source), ':', source,
+                CHAR_LENGTH(adsid), ':', adsid,
+                CHAR_LENGTH(event), ':', event,
+                CHAR_LENGTH(CASE WHEN CAST(event AS BINARY) = CAST('ViewContent' AS BINARY)
+                    THEN '' ELSE COALESCE(conversion_id, '') END), ':',
+                CASE WHEN CAST(event AS BINARY) = CAST('ViewContent' AS BINARY)
+                    THEN '' ELSE COALESCE(conversion_id, '') END
+            ),
+            256
+        )
+        WHERE event_key IS NULL;
+
+        SELECT COUNT(*) AS missing_event_keys
+        FROM third_party_report_logs
+        WHERE event_key IS NULL OR event_key = '';
+
+        SELECT event_key, COUNT(*) AS duplicate_count
+        FROM third_party_report_logs
+        GROUP BY event_key
+        HAVING COUNT(*) > 1;
+        """
+        migrations = _write_migrations(
+            tmp_path,
+            [
+                (
+                    "20261110_event_key_duplicate_test",
+                    migration_sql,
+                    "third_party_report_event_key",
+                )
+            ],
+        )
+        url = _database_url(database)
+        app_url = _application_database_url(database)
+        with pytest.raises(MigrationExecutionError) as failure:
+            await apply_migrations(
+                url,
+                application_database_url=app_url,
+                repository_root=tmp_path,
+                migrations=migrations,
+            )
+        assert "重复事件键" in str(failure.value.__cause__)
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT status FROM platform_schema_migrations WHERE revision = %s",
+                    (migrations[0].revision,),
+                )
+                assert cursor.fetchone()[0] == "running"
+                cursor.execute(
+                    "DELETE FROM third_party_report_logs WHERE id = 2"
+                )
+
+        assert await apply_migrations(
+            url,
+            application_database_url=app_url,
+            repository_root=tmp_path,
+            migrations=migrations,
+        ) == (migrations[0].revision,)
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COUNT(*), COUNT(event_key), COUNT(DISTINCT event_key) "
+                    "FROM third_party_report_logs"
+                )
+                assert cursor.fetchone() == (1, 1, 1)
+                cursor.execute(
+                    "SELECT status FROM platform_schema_migrations WHERE revision = %s",
+                    (migrations[0].revision,),
+                )
+                assert cursor.fetchone()[0] == "applied"
+    finally:
+        _drop_database(database)
