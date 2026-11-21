@@ -97,6 +97,18 @@ async def test_chunked_body_without_content_length_is_still_bounded():
 
 
 @pytest.mark.asyncio
+async def test_too_many_urlencoded_fields_are_rejected_with_payload_limit():
+    body = "&".join(f"k{index}=v" for index in range(201)).encode("ascii")
+    request = _request(
+        "POST",
+        body,
+        "application/x-www-form-urlencoded",
+    )
+    with pytest.raises(PostbackPayloadTooLarge):
+        await collect_postback_raw_data(request)
+
+
+@pytest.mark.asyncio
 async def test_multipart_file_upload_is_not_accepted():
     request = _request("POST", b"ignored", "multipart/form-data; boundary=abc")
     with pytest.raises(UnsupportedPostbackContentType):
