@@ -10,7 +10,13 @@ from app.core.postback.request_parser import (
 )
 
 
-def _request(method, body=b"", content_type="application/json", query=b""):
+def _request(
+    method,
+    body=b"",
+    content_type="application/json",
+    query=b"",
+    include_content_length=True,
+):
     consumed = False
 
     async def receive():
@@ -27,7 +33,7 @@ def _request(method, body=b"", content_type="application/json", query=b""):
     headers = []
     if content_type:
         headers.append((b"content-type", content_type.encode("ascii")))
-    if method == "POST":
+    if method == "POST" and include_content_length:
         headers.append((b"content-length", str(len(body)).encode("ascii")))
     scope = {
         "type": "http",
@@ -73,6 +79,18 @@ async def test_oversized_postback_body_is_rejected():
         "POST",
         b"x" * (MAX_POSTBACK_BODY_BYTES + 1),
         "application/json",
+    )
+    with pytest.raises(PostbackPayloadTooLarge):
+        await collect_postback_raw_data(request)
+
+
+@pytest.mark.asyncio
+async def test_chunked_body_without_content_length_is_still_bounded():
+    request = _request(
+        "POST",
+        b"x" * (MAX_POSTBACK_BODY_BYTES + 1),
+        "application/json",
+        include_content_length=False,
     )
     with pytest.raises(PostbackPayloadTooLarge):
         await collect_postback_raw_data(request)
