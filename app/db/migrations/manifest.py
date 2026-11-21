@@ -122,6 +122,11 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         path="sql/migrations/20261121_postback_pending_dedupe.sql",
         sha256="daff528884b60e581ac422d0dab0ba4c9946c5a28aadfa6d2e34a767f53d4d0d",
     ),
+    Migration(
+        revision="20261121_postback_pending_queue_guard",
+        path="sql/migrations/20261121_postback_pending_queue_guard.sql",
+        sha256="cf2806625e2f65da86bfbaca651ba19c86b9722283a50d93d21edea2402fa71f",
+    ),
 
 )
 
