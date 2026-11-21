@@ -1,5 +1,6 @@
 """非白名单 Postback 待审批入队安全测试。"""
 import json
+
 import pytest
 
 from app.services.cpl import postback_pending_ingest_service as ingest
