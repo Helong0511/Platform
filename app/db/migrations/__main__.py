@@ -105,23 +105,54 @@ def main(argv: list[str] | None = None) -> int:
                     f"{row['revision']} | {row['status']} | {row['execution_order']} | "
                     f"{row['started_at']} | {row['applied_at']} | {row['error_type'] or '-'}"
                 )
-            blocked = [row for row in rows if row["status"] != "applied"]
-            if blocked:
-                print(
-                    f"BLOCKED: {len(blocked)} migration record(s) require manual DDL reconciliation.",
-                    file=sys.stderr,
-                )
-                return 3
-
             from app.db.migrations.ledger import validate_ledger_rows
             from app.db.migrations.manifest import validate_manifest
             from app.db.migrations.planner import plan_migrations
 
             root = Path(__file__).resolve().parents[3]
             manifest = validate_manifest(root)
-            applied = validate_ledger_rows(
-                rows, repository_root=root, migrations=manifest
-            )
+            resumable_revisions = {
+                migration.revision
+                for migration in manifest
+                if migration.backfill_handler is not None
+            }
+            try:
+                applied = validate_ledger_rows(
+                    rows,
+                    repository_root=root,
+                    migrations=manifest,
+                    allow_running_revisions=resumable_revisions,
+                )
+            except MigrationManifestError:
+                print(
+                    "BLOCKED: ledger state requires manual DDL reconciliation; "
+                    "automatic resume is not allowed.",
+                    file=sys.stderr,
+                )
+                return 3
+
+            blocked = [row for row in rows if row["status"] != "applied"]
+            if blocked:
+                resumable = [
+                    row
+                    for row in blocked
+                    if row["status"] == "running"
+                    and row["revision"] in resumable_revisions
+                ]
+                if len(blocked) == 1 and len(resumable) == 1:
+                    print(
+                        "RESUMABLE: one declared batch backfill is still running. "
+                        "Stop all writers, then rerun 'python -m app.db.migrations apply'; "
+                        "the schema is not yet verified.",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        f"BLOCKED: {len(blocked)} migration record(s) require manual DDL reconciliation.",
+                        file=sys.stderr,
+                    )
+                return 3
+
             pending = plan_migrations(
                 applied, repository_root=root, migrations=manifest
             )
@@ -133,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 3
             print("Migration history is valid and current; physical application schema is not verified by this command.")
             return 0
-        except (RuntimeError, ValueError, OSError) as exc:
+        except (MigrationManifestError, RuntimeError, ValueError, OSError) as exc:
             print(f"Migration status failed: {type(exc).__name__}", file=sys.stderr)
             return 1
 
