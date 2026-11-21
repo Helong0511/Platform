@@ -174,6 +174,8 @@ class PendingPostbackIngestService:
             ("carrier", 50),
             ("gid", 100),
             ("click_id", 255),
+            ("devad_id", 255),
+            ("ip", 50),
         )
         for field_name, max_length in bounded_fields:
             field_value = normalized.get(field_name)
@@ -184,6 +186,17 @@ class PendingPostbackIngestService:
             normalized[field_name] = str(field_value).strip()
             if len(normalized[field_name]) > max_length:
                 return {"queued": False, "reason": "invalid_fields"}
+
+        # 用户/设备 IP 与请求来源 IP 是不同语义：前者来自回调字段，仅作业务快照；
+        # 后者来自服务端连接上下文，独立用于白名单与限流。
+        user_ip = normalized.get("ip")
+        if user_ip:
+            try:
+                user_ip = str(ipaddress.ip_address(str(user_ip).strip()))
+            except ValueError:
+                user_ip = None
+        else:
+            user_ip = None
 
         event_value = normalized.get("event_value")
         if event_value is not None:
@@ -240,11 +253,11 @@ class PendingPostbackIngestService:
             event_value=event_value,
             original_payout=payout,
             payout=payout,
-            devad_id=None,
+            devad_id=normalized.get("devad_id"),
             os=normalized.get("os"),
             carrier=normalized.get("carrier"),
             # 来源 IP 以服务端可信连接信息为准，不采信请求体自报 IP。
-            ip=source_ip,
+            ip=user_ip,
             gid=normalized.get("gid"),
             product_id=None,
             client_id=None,
