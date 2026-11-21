@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # systemd 注入的 CREDENTIALS_DIRECTORY 是可信路径，不能被 .env 覆盖。
 _SYSTEMD_CREDENTIALS_DIRECTORY = os.getenv("CREDENTIALS_DIRECTORY", "").strip()
 if os.getenv("UNIT_TEST") != "1":
-    # 使用 override=True 确保 .env 文件中的值覆盖系统环境变量
+    # 本地/Windows 保留 .env 优先；systemd 存在凭据目录时改为系统环境优先
     # 如果无法读取 .env 文件（如权限问题），静默失败
     # 因为 systemd 可能已经通过 EnvironmentFile 加载了环境变量
     try:
@@ -45,6 +45,9 @@ if _SYSTEMD_CREDENTIALS_DIRECTORY:
     os.environ["CREDENTIALS_DIRECTORY"] = _SYSTEMD_CREDENTIALS_DIRECTORY
     os.environ.pop("DATABASE_URL", None)
     os.environ.pop("SQLALCHEMY_DATABASE_URI", None)
+else:
+    # 不允许普通 .env 文件伪造 systemd 专属凭据目录。
+    os.environ.pop("CREDENTIALS_DIRECTORY", None)
 
 
 def _default_db_pool_size() -> int:
