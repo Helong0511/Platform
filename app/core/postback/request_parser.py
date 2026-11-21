@@ -1,56 +1,91 @@
 """Postback 回调请求体/Query 参数解析。"""
 import json
-import logging
 from typing import Any, Dict
+from urllib.parse import parse_qsl
 
 from fastapi import Request
 
-logger = logging.getLogger(__name__)
+MAX_POSTBACK_BODY_BYTES = 64 * 1024
+MAX_POSTBACK_FIELDS = 200
+
+
+class PostbackPayloadTooLarge(ValueError):
+    """Postback 请求超过解析上限。"""
+
+
+class UnsupportedPostbackContentType(ValueError):
+    """Postback 不支持的请求体类型。"""
 
 
 async def collect_postback_raw_data(request: Request) -> Dict[str, Any]:
-    """
-    从 GET Query 与 POST Body 收集 Postback 原始参数（Body 同名键覆盖 Query）。
+    """有界解析 GET Query 与 POST JSON/Form，拒绝无界或不支持的请求体。
+
+    S2S 回调不需要上传文件；明确拒绝 multipart/file，避免公开入口被用作文件上传点。
     """
     raw_data: Dict[str, Any] = {}
+    query_string = request.scope.get("query_string", b"")
+    if len(query_string) > MAX_POSTBACK_BODY_BYTES:
+        raise PostbackPayloadTooLarge("query string exceeds limit")
+    if len(request.query_params) > MAX_POSTBACK_FIELDS:
+        raise PostbackPayloadTooLarge("too many query parameters")
     for key, value in request.query_params.items():
         raw_data[key] = value
 
     if request.method != "POST":
         return raw_data
 
-    content_type = request.headers.get("content-type", "").lower()
-    try:
-        if "application/json" in content_type or not content_type:
-            try:
-                body_data = await request.json()
-                if isinstance(body_data, dict):
-                    raw_data.update(body_data)
-            except (json.JSONDecodeError, ValueError, Exception):
-                pass
-        elif (
-            "application/x-www-form-urlencoded" in content_type
-            or "multipart/form-data" in content_type
-        ):
-            try:
-                form_data = await request.form()
-                for key, value in form_data.items():
-                    raw_data[key] = value
-            except Exception:
-                pass
-        else:
-            try:
-                body_bytes = await request.body()
-                if body_bytes:
-                    body_str = body_bytes.decode("utf-8")
-                    if "=" in body_str:
-                        for pair in body_str.split("&"):
-                            if "=" in pair:
-                                key, value = pair.split("=", 1)
-                                raw_data[key] = value
-            except Exception:
-                pass
-    except Exception as e:
-        logger.warning("读取 POST Body 数据时发生错误：%s", type(e).__name__)
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_POSTBACK_BODY_BYTES:
+                raise PostbackPayloadTooLarge("request body exceeds limit")
+        except ValueError as exc:
+            if isinstance(exc, PostbackPayloadTooLarge):
+                raise
+            raise ValueError("invalid Content-Length") from exc
 
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type not in {
+        "",
+        "application/json",
+        "application/x-www-form-urlencoded",
+    }:
+        raise UnsupportedPostbackContentType("unsupported Postback content type")
+
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAX_POSTBACK_BODY_BYTES:
+            raise PostbackPayloadTooLarge("request body exceeds limit")
+
+    if not body:
+        return raw_data
+
+    if content_type in {"", "application/json"}:
+        try:
+            body_data = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("invalid JSON Postback body") from exc
+        if not isinstance(body_data, dict):
+            raise ValueError("Postback JSON body must be an object")
+        if len(body_data) > MAX_POSTBACK_FIELDS:
+            raise PostbackPayloadTooLarge("too many Postback fields")
+        raw_data.update(body_data)
+    else:
+        try:
+            form_items = parse_qsl(
+                body.decode("utf-8"),
+                keep_blank_values=True,
+                strict_parsing=False,
+                max_num_fields=MAX_POSTBACK_FIELDS,
+                encoding="utf-8",
+                errors="strict",
+            )
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise ValueError("invalid URL-encoded Postback body") from exc
+        for key, value in form_items:
+            raw_data[key] = value
+
+    if len(raw_data) > MAX_POSTBACK_FIELDS:
+        raise PostbackPayloadTooLarge("too many combined Postback fields")
     return raw_data
