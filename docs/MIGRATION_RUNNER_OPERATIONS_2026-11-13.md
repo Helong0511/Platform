@@ -751,3 +751,17 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
 - **目标环境实测尚未完成**：尚未连接生产服务器/数据库；目标 MySQL 版本、sql_mode、账号授权、字符集、现有 schema revision 和真实数据规模均需在授权的隔离/生产发布流程中核验。
 
 结论：当前 Migration Runner 具备较完整的安全执行机制和隔离 CI 证据，但仓库仍不能据此标记为生产上线就绪。以上阻断项关闭前，不执行生产 migration、不删除仍在使用的密钥文件、不清理公开历史。
+
+
+## 36. 2026-11-21：systemd Migration Runner 强制依赖设计
+
+当前服务文件已纳入独立迁移 unit 设计（以 PR `fix/systemd-migration-gate-2026-11-21` 为准）：
+
+- `Platform-migrate.service` 使用独立 `platform-migrator` OS 用户，`Type=oneshot`、`RemainAfterExit=yes`；依次运行离线 `validate`、数据库 `apply`、只读 `status`。
+- Backend 和 Scheduler 对迁移 unit 使用 `Requires=` + `After=`。缺少迁移 unit、凭据文件或迁移失败时，业务服务 fail-closed。
+- 迁移 DSN 单独放在 root-only `/etc/platform/migration.env`，绝不写入应用 `.env`；应用 DSN 在迁移专用文件中作为对照值提供。迁移服务只读加载 `app/`、`sql/migrations/`、`venv/`，不获得项目密钥目录访问权。
+- 迁移服务的 `RuntimeDirectory` 工作目录与 `PYTHONPATH` 分离，避免 Pydantic Settings 从应用工作目录意外加载完整 `.env`。
+- 每次部署需停止 API/Scheduler，更新代码后使用 `systemctl restart Platform-migrate.service`（oneshot 已 active 时不能只用 start），成功后再重启 Backend，最后启动 Scheduler。
+- 安装 ACL、独立用户、root-only EnvironmentFile、首次启动、发布顺序和失败恢复步骤详见 `docs/DEPLOYMENT_READINESS_RUNBOOK_2026-11.md` 第 36 节。
+
+此项在 PR 合并前仍需 CI 验证 unit 文件契约和文档一致性；未在生产 Ubuntu 主机执行，不代表目标环境已经安装或迁移。
