@@ -15,7 +15,7 @@ import pymysql
 from sqlalchemy import URL
 
 from app.db.migrations.ledger import MigrationLedgerError
-from app.db.migrations.manifest import Migration
+from app.db.migrations.manifest import MIGRATION_MANIFEST, Migration
 from app.db.migrations.runner import (
     MigrationExecutionError,
     MigrationLockUnavailable,
@@ -1095,5 +1095,107 @@ async def test_runner_blocks_duplicate_event_keys_and_resumes_after_manual_repai
                     (migrations[0].revision,),
                 )
                 assert cursor.fetchone()[0] == "applied"
+    finally:
+        _drop_database(database)
+
+
+
+@pytest.mark.asyncio
+async def test_runner_applies_historical_event_key_migration_with_batched_backfill(
+    tmp_path: Path,
+):
+    """真实执行历史 SQL migration，验证 handler、checksum、NOT NULL 和唯一索引。"""
+    database = _create_database()
+    try:
+        migration = next(
+            item
+            for item in MIGRATION_MANIFEST
+            if item.revision == "20261110_third_party_report_event_idempotency"
+        )
+        repository_root = Path(__file__).resolve().parents[1]
+        source_sql = repository_root / migration.path
+        target_sql = tmp_path / migration.path
+        target_sql.parent.mkdir(parents=True, exist_ok=True)
+        target_sql.write_bytes(source_sql.read_bytes())
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "CREATE TABLE third_party_report_logs ("
+                    "id INT NOT NULL PRIMARY KEY AUTO_INCREMENT, "
+                    "source VARCHAR(50) NOT NULL, "
+                    "adsid VARCHAR(500) NOT NULL, "
+                    "event VARCHAR(50) NOT NULL, "
+                    "conversion_id VARCHAR(255) NULL"
+                    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+                )
+                cursor.execute(
+                    "CREATE UNIQUE INDEX unique_source_adsid "
+                    "ON third_party_report_logs (source, adsid)"
+                )
+                cursor.executemany(
+                    "INSERT INTO third_party_report_logs "
+                    "(source, adsid, event, conversion_id) VALUES (%s, %s, %s, %s)",
+                    [
+                        (
+                            "meta",
+                            f"ad-{index}",
+                            "ViewContent" if index % 2 == 0 else "Purchase",
+                            f"conversion-{index}",
+                        )
+                        for index in range(1, 2501)
+                    ],
+                )
+
+        url = _database_url(database)
+        app_url = _application_database_url(database)
+        assert await apply_migrations(
+            url,
+            application_database_url=app_url,
+            repository_root=tmp_path,
+            migrations=(migration,),
+        ) == (migration.revision,)
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COUNT(*), COUNT(event_key), COUNT(DISTINCT event_key) "
+                    "FROM third_party_report_logs"
+                )
+                assert cursor.fetchone() == (2500, 2500, 2500)
+
+                cursor.execute(
+                    "SELECT IS_NULLABLE, COLUMN_TYPE FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'third_party_report_logs' "
+                    "AND COLUMN_NAME = 'event_key'",
+                    (database,),
+                )
+                assert cursor.fetchone() == ("NO", "varchar(64)")
+
+                cursor.execute(
+                    "SELECT INDEX_NAME, NON_UNIQUE, "
+                    "GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) "
+                    "FROM information_schema.STATISTICS "
+                    "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'third_party_report_logs' "
+                    "GROUP BY INDEX_NAME",
+                    (database,),
+                )
+                indexes = {
+                    row[0]: (row[1], row[2]) for row in cursor.fetchall()
+                }
+                assert indexes["unique_event_key"] == (0, "event_key")
+                assert "unique_source_adsid" not in indexes
+
+        assert await read_migration_status(
+            url, application_database_url=app_url
+        ) and (await read_migration_status(
+            url, application_database_url=app_url
+        ))[0]["status"] == "applied"
+        assert await apply_migrations(
+            url,
+            application_database_url=app_url,
+            repository_root=tmp_path,
+            migrations=(migration,),
+        ) == ()
     finally:
         _drop_database(database)
