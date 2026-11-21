@@ -26,6 +26,7 @@ from app.core.postback.transformers.click_associator import ClickAssociator
 from app.core.tracking.click_token import resolve_click_from_token
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from app.core.postback.pending_lock import build_pending_for_update_statement
+from app.core.postback.savers.conversion_saver import sanitize_postback_raw_data
 from app.core.postback.approval_audit import (
     add_postback_approval_audit,
     persist_postback_approval_audit_independently,
@@ -119,7 +120,11 @@ class PostbackPendingService:
             publisher_id=click_assoc.get("publisher_id") if click_assoc else None,
             advertiser_id=click_assoc.get("advertiser_id") if click_assoc else None,
             conversion_status="Pending",
-            raw_data=pending.raw_data,
+            raw_data=(
+                sanitize_postback_raw_data(pending.raw_data)
+                if pending.raw_data is not None
+                else None
+            ),
             created_at=get_app_now_naive(),
         )
         db.add(conversion)
