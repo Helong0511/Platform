@@ -140,14 +140,30 @@ class PendingPostbackIngestService:
         except (InvalidOperation, ValueError, TypeError):
             return {"queued": False, "reason": "invalid_fields"}
 
+        # 对应数据库 VARCHAR/Numeric 列做显式边界校验，避免恶意长字段或溢出值触发 DB 错误。
+        bounded_fields = (
+            ("os", 20),
+            ("carrier", 50),
+            ("gid", 100),
+            ("click_id", 255),
+        )
+        for field_name, max_length in bounded_fields:
+            field_value = normalized.get(field_name)
+            if field_value is not None and len(str(field_value)) > max_length:
+                return {"queued": False, "reason": "invalid_fields"}
+
         event_value = normalized.get("event_value")
         if event_value is not None:
             try:
                 event_value = Decimal(str(event_value))
-                if not event_value.is_finite():
-                    event_value = None
+                if (
+                    not event_value.is_finite()
+                    or abs(event_value) > Decimal("99999999.9999")
+                    or event_value != event_value.quantize(Decimal("0.0001"))
+                ):
+                    return {"queued": False, "reason": "invalid_fields"}
             except (InvalidOperation, ValueError, TypeError):
-                event_value = None
+                return {"queued": False, "reason": "invalid_fields"}
 
         dedupe_source = "\x1f".join((platform.lower(), conversion_id, event_name))
         dedupe_key = hashlib.sha256(dedupe_source.encode("utf-8")).hexdigest()
