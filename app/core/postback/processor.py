@@ -822,7 +822,13 @@ class PostbackProcessor:
         elif reason == "payload_too_large":
             message = "Postback 请求数据超过待审批存储限制"
         elif reason == "queue_backlog_full":
-            message = "待审批队列积压已达安全上限，暂不接收新记录"
+            # 队列满是暂时性容量保护，不能向上游返回 200 丢弃回调；要求上游稍后重试。
+            await db.rollback()
+            return {
+                "success": False,
+                "message": "待审批队列容量已满，请稍后重试",
+                "retryable": True,
+            }
         elif reason in {"invalid_fields", "invalid_payload", "invalid_platform"}:
             message = "Postback 字段校验失败，未进入待审批队列"
         else:
