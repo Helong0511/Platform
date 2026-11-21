@@ -1352,7 +1352,7 @@ sudo stat -c '%U:%G %a %n' /etc/platform/application-database-url /etc/platform/
 systemd --version
 ```
 
-- `application-database-url`：应用运行账号的 MySQL DSN，是 Backend、Scheduler 与 Migration Runner 共用的唯一权威来源；Ubuntu 生产环境必须从 `/data/Platform/.env` 删除 `DATABASE_URL`，避免把密码通过 EnvironmentFile/dotenv 注入环境变量。Windows/本地开发仍可在 `.env` 中配置 `DATABASE_URL`。
+- `application-database-url`：应用运行账号的 MySQL DSN，是 Backend、Scheduler 与 Migration Runner 共用的唯一权威来源；Ubuntu 生产环境必须从 `/data/Platform/.env` 删除 `DATABASE_URL` 与 `SQLALCHEMY_DATABASE_URI`，避免把密码通过 EnvironmentFile/dotenv 注入环境变量。Windows/本地开发仍可在 `.env` 中配置 `DATABASE_URL`。
 - `migration-database-url`：独立迁移账号的 MySQL DSN，必须指向同一 endpoint/database；Runner 还会比较 MySQL 服务端 `CURRENT_USER()`。
 - 两个文件均必须为 `root:root 0600`；Backend、Scheduler 与迁移账号都不能直接读取源文件，只能通过各自 systemd unit 提供的只读 credential directory 读取。三个 unit 从同一个 application DSN 源文件加载，避免维护两份应用连接串。
 - 数据库密码必须 URL encode；不得把 DSN、密码或密钥放在 shell 命令行参数、Git、工单或 CI 日志。
