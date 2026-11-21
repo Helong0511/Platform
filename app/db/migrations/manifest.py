@@ -112,6 +112,12 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         sha256="28bae4c3bf2559b28ee4810ef43009dcd8b8828fdc2b325c9f69172ae91158a6",
     ),
 
+    Migration(
+        revision="20261120_telegram_postback_approval_audit",
+        path="sql/migrations/20261120_telegram_postback_approval_audit.sql",
+        sha256="8bd43771b0064498733f88bb0a3c0ff34d04ac1a41f57d775be5bb5696902e24",
+    ),
+
 )
 
 _REVISION_PATTERN = re.compile(r"^20[0-9]{6}_[a-z0-9_]+$")

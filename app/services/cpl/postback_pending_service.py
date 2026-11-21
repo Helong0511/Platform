@@ -26,6 +26,10 @@ from app.core.postback.transformers.click_associator import ClickAssociator
 from app.core.tracking.click_token import resolve_click_from_token
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from app.core.postback.pending_lock import build_pending_for_update_statement
+from app.core.postback.approval_audit import (
+    add_postback_approval_audit,
+    persist_postback_approval_audit_independently,
+)
 from app.models.models import (
     PendingPostbackConversion, PostbackConversion, Product, Client, User
 )
@@ -65,20 +69,20 @@ class PostbackPendingService:
 
     async def _pending_conversion_exists(
             self, pending: PendingPostbackConversion, db: AsyncSession
-    ) -> bool:
+    ) -> Optional[int]:
         """
-        检查正式转化表是否已有同 platform + conversion_id + event_name 记录。
+        查询同 platform + conversion_id + event_name 的正式转化记录 ID。
 
-        用于批准前幂等校验，避免重复入库。
+        返回主键而非布尔值，使重复审批审计也能准确关联既有转化记录。
         """
         existing = await db.execute(
-            select(PostbackConversion).where(
+            select(PostbackConversion.id).where(
                 PostbackConversion.platform == pending.platform,
                 PostbackConversion.conversion_id == pending.conversion_id,
                 PostbackConversion.event_name == pending.event_name,
             )
         )
-        return existing.scalars().first() is not None
+        return existing.scalars().first()
 
     async def _create_conversion_from_pending(
             self,
@@ -170,13 +174,41 @@ class PostbackPendingService:
 
             for pending in pending_list:
                 try:
-                    if await self._pending_conversion_exists(pending, db):
+                    previous_status = pending.status
+                    existing_conversion_id = await self._pending_conversion_exists(pending, db)
+                    if existing_conversion_id is not None:
                         pending.status = "approved"
                         pending.approved_at = get_app_now_naive()
+                        add_postback_approval_audit(
+                            db,
+                            pending_conversion_id=pending.id,
+                            conversion_id=existing_conversion_id,
+                            actor_type="system_user",
+                            actor_id=current_user.id,
+                            source="ip_whitelist",
+                            action="auto_approve",
+                            outcome="already_exists",
+                            previous_status=previous_status,
+                            new_status=pending.status,
+                        )
                         result["skipped_count"] += 1
                         continue
 
-                    await self._create_conversion_from_pending(pending, db)
+                    conversion = await self._create_conversion_from_pending(pending, db)
+                    # 先 flush 获取正式转化主键，再写入同一事务的审批审计事件。
+                    await db.flush()
+                    add_postback_approval_audit(
+                        db,
+                        pending_conversion_id=pending.id,
+                        conversion_id=conversion.id,
+                        actor_type="system_user",
+                        actor_id=current_user.id,
+                        source="ip_whitelist",
+                        action="auto_approve",
+                        outcome="approved",
+                        previous_status=previous_status,
+                        new_status=pending.status,
+                    )
                     result["approved_count"] += 1
                     result["approved_ids"].append(pending.id)
                 except Exception as e:
@@ -364,27 +396,81 @@ class PostbackPendingService:
         Raises:
             APIException: 记录不存在、已处理或正式记录已存在
         """
+        audit_attempt = None
         try:
             # --- 加载 pending 并校验状态 ---
             result = await db.execute(
-                build_pending_for_update_statement(PendingPostbackConversion, pending_id)
+                build_pending_for_update_statement(PendingPostbackConversion, pending_id, status=None)
             )
             pending = result.scalars().first()
 
             if not pending:
+                audit_attempt = {
+                    "pending_conversion_id": pending_id,
+                    "conversion_id": None,
+                    "actor_type": "system_user",
+                    "actor_id": current_user.id,
+                    "source": "web",
+                    "action": "approve",
+                    "outcome": "not_found",
+                    "previous_status": None,
+                    "new_status": None,
+                }
                 raise_api_exception(
                     ErrorCode.NOT_FOUND,
                     detail=f"待确认记录 ID {pending_id} 不存在或已被处理"
                 )
 
-            if await self._pending_conversion_exists(pending, db):
+            if pending.status != "pending":
+                audit_attempt = {
+                    "pending_conversion_id": pending_id,
+                    "conversion_id": None,
+                    "actor_type": "system_user",
+                    "actor_id": current_user.id,
+                    "source": "web",
+                    "action": "approve",
+                    "outcome": "already_processed",
+                    "previous_status": pending.status,
+                    "new_status": pending.status,
+                }
+                raise_api_exception(
+                    ErrorCode.OPERATION_FAILED,
+                    detail=f"待确认记录已处理，当前状态：{pending.status}",
+                )
+
+            existing_conversion_id = await self._pending_conversion_exists(pending, db)
+            if existing_conversion_id is not None:
+                audit_attempt = {
+                    "pending_conversion_id": pending_id,
+                    "conversion_id": existing_conversion_id,
+                    "actor_type": "system_user",
+                    "actor_id": current_user.id,
+                    "source": "web",
+                    "action": "approve",
+                    "outcome": "already_exists",
+                    "previous_status": pending.status,
+                    "new_status": pending.status,
+                }
                 raise_api_exception(
                     ErrorCode.OPERATION_FAILED,
                     detail="该转化记录已存在，无法重复创建",
                 )
 
+            previous_status = pending.status
             conversion = await self._create_conversion_from_pending(pending, db)
             await db.flush()
+            add_postback_approval_audit(
+                db,
+                pending_conversion_id=pending.id,
+                conversion_id=conversion.id,
+                actor_type="system_user",
+                actor_id=current_user.id,
+                source="web",
+                action="approve",
+                outcome="approved",
+                previous_status=previous_status,
+                new_status=pending.status,
+            )
             await db.refresh(conversion)
 
             # 构建响应
@@ -401,6 +487,17 @@ class PostbackPendingService:
             )
 
         except HTTPException:
+            if audit_attempt is not None:
+                try:
+                    await persist_postback_approval_audit_independently(
+                        db.bind,
+                        **audit_attempt,
+                    )
+                except Exception as audit_exc:
+                    logger.warning(
+                        "记录待确认批准拦截审计失败；error_type=%s",
+                        type(audit_exc).__name__,
+                    )
             raise
         except Exception as e:
             await db.rollback()
@@ -432,23 +529,65 @@ class PostbackPendingService:
         Returns:
             ResponseBaseSchema: 含 id 与 status=rejected
         """
+        audit_attempt = None
         try:
             # --- 加载 pending 并校验状态 ---
             result = await db.execute(
-                build_pending_for_update_statement(PendingPostbackConversion, pending_id)
+                build_pending_for_update_statement(PendingPostbackConversion, pending_id, status=None)
             )
             pending = result.scalars().first()
 
             if not pending:
+                audit_attempt = {
+                    "pending_conversion_id": pending_id,
+                    "conversion_id": None,
+                    "actor_type": "system_user",
+                    "actor_id": current_user.id,
+                    "source": "web",
+                    "action": "reject",
+                    "outcome": "not_found",
+                    "previous_status": None,
+                    "new_status": None,
+                }
                 raise_api_exception(
                     ErrorCode.NOT_FOUND,
                     detail=f"待确认记录 ID {pending_id} 不存在或已被处理"
                 )
 
-            # 更新状态
+            if pending.status != "pending":
+                audit_attempt = {
+                    "pending_conversion_id": pending_id,
+                    "conversion_id": None,
+                    "actor_type": "system_user",
+                    "actor_id": current_user.id,
+                    "source": "web",
+                    "action": "reject",
+                    "outcome": "already_processed",
+                    "previous_status": pending.status,
+                    "new_status": pending.status,
+                }
+                raise_api_exception(
+                    ErrorCode.OPERATION_FAILED,
+                    detail=f"待确认记录已处理，当前状态：{pending.status}",
+                )
+
+            # 更新状态并在同一事务写入审计事件。
+            previous_status = pending.status
             pending.status = 'rejected'
             pending.rejected_at = get_app_now_naive()
 
+            add_postback_approval_audit(
+                db,
+                pending_conversion_id=pending.id,
+                conversion_id=None,
+                actor_type="system_user",
+                actor_id=current_user.id,
+                source="web",
+                action="reject",
+                outcome="rejected",
+                previous_status=previous_status,
+                new_status=pending.status,
+            )
             await db.flush()
 
             logger.info(
@@ -462,6 +601,17 @@ class PostbackPendingService:
             )
 
         except HTTPException:
+            if audit_attempt is not None:
+                try:
+                    await persist_postback_approval_audit_independently(
+                        db.bind,
+                        **audit_attempt,
+                    )
+                except Exception as audit_exc:
+                    logger.warning(
+                        "记录待确认拒绝拦截审计失败；error_type=%s",
+                        type(audit_exc).__name__,
+                    )
             raise
         except Exception as e:
             await db.rollback()

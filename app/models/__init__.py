@@ -29,6 +29,7 @@ from app.models.postback import (
     PostbackNotification,
     ShortLink,
     PendingPostbackConversion,
+    TelegramPostbackApprovalAudit,
 )
 from app.models.cpl import (
     Advertiser,
@@ -77,6 +78,7 @@ __all__ = [
     "PostbackNotification",
     "ShortLink",
     "PendingPostbackConversion",
+    "TelegramPostbackApprovalAudit",
     "Advertiser",
     "Publisher",
     "Offer",
