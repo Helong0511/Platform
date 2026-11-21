@@ -88,7 +88,7 @@ async def test_valid_non_whitelisted_postback_is_sanitized_and_queued(
     assert "devad_id" not in stored
 
 
-async def _allow():
+async def _allow(_request_ip):
     return True
 
 
