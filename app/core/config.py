@@ -20,12 +20,14 @@ logger = logging.getLogger(__name__)
 
 # 加载环境变量
 # 单测/CI 由 conftest 注入环境变量，不读取 .env，避免本地生产配置干扰
+# systemd 注入的 CREDENTIALS_DIRECTORY 是可信路径，不能被 .env 覆盖。
+_SYSTEMD_CREDENTIALS_DIRECTORY = os.getenv("CREDENTIALS_DIRECTORY", "").strip()
 if os.getenv("UNIT_TEST") != "1":
     # 使用 override=True 确保 .env 文件中的值覆盖系统环境变量
     # 如果无法读取 .env 文件（如权限问题），静默失败
     # 因为 systemd 可能已经通过 EnvironmentFile 加载了环境变量
     try:
-        load_dotenv(override=True)
+        load_dotenv(override=not bool(_SYSTEMD_CREDENTIALS_DIRECTORY))
     except (PermissionError, IOError, OSError) as e:
         # 如果无法读取 .env 文件，记录警告但继续运行
         # 这通常发生在 systemd 服务中，因为环境变量可能已经通过 EnvironmentFile 加载
@@ -39,7 +41,8 @@ if os.getenv("UNIT_TEST") != "1":
 
 # systemd LoadCredential 是生产数据库 DSN 的唯一来源；清除 dotenv 对数据库 DSN 的环境注入。
 # Settings 字段校验会直接从 CREDENTIALS_DIRECTORY 读取 application-database-url。
-if os.getenv("CREDENTIALS_DIRECTORY", "").strip():
+if _SYSTEMD_CREDENTIALS_DIRECTORY:
+    os.environ["CREDENTIALS_DIRECTORY"] = _SYSTEMD_CREDENTIALS_DIRECTORY
     os.environ.pop("DATABASE_URL", None)
     os.environ.pop("SQLALCHEMY_DATABASE_URI", None)
 
