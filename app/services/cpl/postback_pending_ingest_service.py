@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.redis_client import get_redis_client
 from app.core.utils import get_app_now_naive
-from app.models.models import PendingPostbackConversion
+from app.models.models import PendingPostbackConversion, PendingPostbackQueueGuard
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +230,18 @@ class PendingPostbackIngestService:
         if existing_id is not None:
             return {"queued": False, "reason": "duplicate", "pending_id": existing_id}
 
-        # 限制全局待审批积压，避免多来源轮换 IP 长期堆积数据库。
+        # 先锁定数据库中的单例互斥行，再统计 pending 数量。
+        # 所有并发入队都必须持有同一行锁直到事务提交，COUNT + INSERT 因而串行执行。
+        # 锁行缺失或迁移未执行时 fail-closed，不能退化为不受限入队。
+        guard_result = await db.execute(
+            select(PendingPostbackQueueGuard.id)
+            .where(PendingPostbackQueueGuard.id == 1)
+            .with_for_update()
+        )
+        if guard_result.scalar_one_or_none() is None:
+            raise PendingPostbackQueueError("pending queue capacity guard unavailable")
+
+        # 容量统计必须发生在互斥行锁之后；锁一直持有到调用方提交本次事务。
         pending_count = await db.scalar(
             select(func.count())
             .select_from(PendingPostbackConversion)
