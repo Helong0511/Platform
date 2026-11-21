@@ -202,6 +202,29 @@ def _is_event_key_duplicate_check_statement(statement: str) -> bool:
     )
 
 
+def _validate_event_key_backfill_contract(
+    migration: Migration, statements: tuple[str, ...]
+) -> None:
+    """在任何 DDL 执行前，确认专用 handler 的三条 SQL 契约各出现一次。"""
+    if migration.backfill_handler != _EVENT_KEY_BACKFILL_HANDLER:
+        raise MigrationRunnerError(
+            f"不支持的 migration backfill handler：{migration.backfill_handler}"
+        )
+    counts = {
+        "update": sum(_is_event_key_backfill_statement(item) for item in statements),
+        "missing_check": sum(
+            _is_event_key_missing_check_statement(item) for item in statements
+        ),
+        "duplicate_check": sum(
+            _is_event_key_duplicate_check_statement(item) for item in statements
+        ),
+    }
+    if any(count != 1 for count in counts.values()):
+        raise MigrationRunnerError(
+            f"event_key backfill SQL 契约不完整或重复：{counts}"
+        )
+
+
 async def _run_third_party_report_event_key_backfill(
     connection,
     *,
@@ -632,6 +655,10 @@ async def _apply_with_locked_connection(
             if not parsed[migration.revision]:
                 raise MigrationRunnerError(
                     f"migration 没有可执行 SQL：{migration.revision}"
+                )
+            if migration.backfill_handler is not None:
+                _validate_event_key_backfill_contract(
+                    migration, parsed[migration.revision]
                 )
 
         await _ensure_ledger_schema(connection)
