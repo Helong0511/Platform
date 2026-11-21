@@ -100,7 +100,7 @@ def test_approved_pending_postback_preserves_click_attribution(monkeypatch):
         publisher_id=22,
         advertiser_id=33,
     )
-    fake_db = _install_fake_runtime(monkeypatch, [pending, None, click])
+    fake_db = _install_fake_runtime(monkeypatch, [pending, None, None, click])
 
     handler = importlib.import_module(
         "app.core.telegram.callback_handlers.postback_approval"
@@ -129,7 +129,7 @@ def test_approved_pending_postback_preserves_click_attribution(monkeypatch):
 
 def test_telegram_approval_does_not_duplicate_existing_conversion(monkeypatch):
     pending = _pending_record(datetime(2026, 11, 19, 10, 30, 0))
-    fake_db = _install_fake_runtime(monkeypatch, [pending, 1234])
+    fake_db = _install_fake_runtime(monkeypatch, [pending, None, 1234])
 
     handler = importlib.import_module(
         "app.core.telegram.callback_handlers.postback_approval"
@@ -164,7 +164,7 @@ def test_telegram_approval_uses_signed_click_token_when_click_row_is_not_yet_ava
             "click_time": click_time,
         },
     )
-    fake_db = _install_fake_runtime(monkeypatch, [pending, None, None])
+    fake_db = _install_fake_runtime(monkeypatch, [pending, None, None, None])
 
     handler = importlib.import_module(
         "app.core.telegram.callback_handlers.postback_approval"
