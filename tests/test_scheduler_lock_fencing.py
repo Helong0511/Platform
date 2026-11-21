@@ -153,6 +153,7 @@ async def test_release_task_lock_relocks_row_before_owner_check(monkeypatch):
 
     compiled = str(db.executed[0].compile(dialect=mysql.dialect())).upper()
     assert "FOR UPDATE" in compiled
+    assert db.executed[0].get_execution_options()["populate_existing"] is True
     assert record.is_running is False
     assert record.success_count == 3
     assert record.last_error == "done"
