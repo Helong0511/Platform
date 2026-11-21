@@ -214,6 +214,17 @@ class PendingPostbackIngestService:
         dedupe_source = "\x1f".join((platform.casefold(), conversion_id.casefold(), event_name.casefold()))
         dedupe_key = hashlib.sha256(dedupe_source.encode("utf-8")).hexdigest()
 
+        # 必须先获取 guard 行锁，再执行任何普通 SELECT。
+        # MySQL REPEATABLE READ 会在首次一致性读时建立快照；先锁后读可避免等待 guard 期间
+        # 已提交的新入队记录落在旧快照之外，造成 COUNT 低估并突破容量上限。
+        guard_result = await db.execute(
+            select(PendingPostbackQueueGuard.id)
+            .where(PendingPostbackQueueGuard.id == 1)
+            .with_for_update()
+        )
+        if guard_result.scalar_one_or_none() is None:
+            raise PendingPostbackQueueError("pending queue capacity guard unavailable")
+
         existing = await db.execute(
             select(PendingPostbackConversion.id).where(
                 or_(
@@ -230,23 +241,6 @@ class PendingPostbackIngestService:
         if existing_id is not None:
             return {"queued": False, "reason": "duplicate", "pending_id": existing_id}
 
-        # 先锁定数据库中的单例互斥行，再统计 pending 数量。
-        # 所有并发入队都必须持有同一行锁直到事务提交，COUNT + INSERT 因而串行执行。
-        # 锁行缺失或迁移未执行时 fail-closed，不能退化为不受限入队。
-        guard_result = await db.execute(
-            select(PendingPostbackQueueGuard.id)
-            .where(PendingPostbackQueueGuard.id == 1)
-            .with_for_update()
-        )
-        if guard_result.scalar_one_or_none() is None:
-            raise PendingPostbackQueueError("pending queue capacity guard unavailable")
-
-        # 容量统计必须发生在互斥行锁之后；锁一直持有到调用方提交本次事务。
-        pending_count = await db.scalar(
-            select(func.count())
-            .select_from(PendingPostbackConversion)
-            .where(PendingPostbackConversion.status == "pending")
-        )
         if int(pending_count or 0) >= _PENDING_MAX_OPEN_RECORDS:
             return {"queued": False, "reason": "queue_backlog_full"}
 
