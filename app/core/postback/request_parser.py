@@ -81,7 +81,11 @@ async def collect_postback_raw_data(request: Request) -> Dict[str, Any]:
                 encoding="utf-8",
                 errors="strict",
             )
-        except (UnicodeDecodeError, ValueError) as exc:
+        except ValueError as exc:
+            if "Max number of fields" in str(exc):
+                raise PostbackPayloadTooLarge("too many Postback fields") from exc
+            raise ValueError("invalid URL-encoded Postback body") from exc
+        except UnicodeDecodeError as exc:
             raise ValueError("invalid URL-encoded Postback body") from exc
         for key, value in form_items:
             raw_data[key] = value
