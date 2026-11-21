@@ -37,8 +37,8 @@ _SENSITIVE_INLINE_KEY = (
     r"(?:[A-Za-z0-9.-]+[_-])*(?:authorization|proxy[_-]?authorization|auth|"
     r"access[_-]?token|refresh[_-]?token|token|secret|password|passwd|"
     r"api[_-]?key|email|e-mail|phone|mobile|ip(?:[_-]?address)?|"
-    r"session(?:[_-]?id)?|cookie|set-cookie|idfa|gaid|"
-    r"advertising[_-]?id|device[_-]?id)(?:[_-]?[A-Za-z0-9.-]*)"
+    r"session(?:[_-]?id)?|cookie|set-cookie|idfa|gaid|devad[_-]?id|"
+    r"user[_-]?agent|ua|advertising[_-]?id|device[_-]?id)(?:[_-]?[A-Za-z0-9.-]*)"
 )
 _SENSITIVE_INLINE_VALUE = re.compile(
     rf"""(?i)(?P<prefix>(?:[?&;]|\b)["']?(?:{_SENSITIVE_INLINE_KEY})["']?\s*[=:]\s*["']?)(?P<value>[^&;\s,"']+)"""
