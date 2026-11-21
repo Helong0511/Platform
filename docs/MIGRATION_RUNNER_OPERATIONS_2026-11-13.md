@@ -21,7 +21,7 @@ python -m app.db.migrations apply
 1. MySQL 版本至少 8.0.16。
 2. 连接字符集为 utf8mb4。
 3. `MIGRATION_DATABASE_URL` 必须显式设置为 `mysql+aiomysql` DSN。
-4. 应用数据库也必须为 MySQL，且与迁移 DSN 指向同一数据库名、同一服务器端点（TCP 主机/端口或 Unix Socket）；迁移账号用户名必须不同于应用运行账号。CLI 会从应用设置读取 `SQLALCHEMY_DATABASE_URI` 并在任何不匹配时 fail closed。
+4. 应用数据库也必须为 MySQL，且与迁移 DSN 指向同一数据库名、同一服务器端点（TCP 主机/端口或 Unix Socket）；迁移账号用户名必须不同于应用运行账号。systemd 生产部署通过 `LoadCredential` 分别提供应用 DSN 与迁移 DSN；手工/CI 环境可通过 `DATABASE_URL` / `SQLALCHEMY_DATABASE_URI` 和 `MIGRATION_DATABASE_URL` 提供，任何不匹配均 fail closed。
 5. 目标数据库必须由受控 provisioning 预先创建并选定。完整基线导入时使用 MySQL 客户端显式指定目标库，例如 `mysql --default-character-set=utf8mb4 --database=<目标库> < sql/platform.sql`；基线文件不再自行 CREATE DATABASE 或 USE。Runner 只执行 `app/db/migrations/manifest.py` 登记的增量 migration，不会导入 `sql/platform.sql`。
 
 示例仅展示变量形式，不要把真实密码提交到仓库或写入命令历史：
@@ -712,7 +712,7 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
   - `20261121_postback_pending_dedupe`
   - `20261121_postback_pending_queue_guard`
 - 迁移文件集合必须与 manifest 完全一致；每个 revision 的 SQL 文件以 SHA-256 固定，路径必须严格匹配 revision，依赖必须指向更早 revision。未登记 SQL、缺失文件、checksum 漂移和非法依赖均拒绝执行。
-- Runner 只接受显式 `MIGRATION_DATABASE_URL` 的 `mysql+aiomysql` DSN；要求应用与迁移 DSN 指向同一 MySQL endpoint/database，但认证账号不同，并进一步比较服务端 `CURRENT_USER()`。
+- Runner 只接受显式 `mysql+aiomysql` 迁移 DSN；CLI 在 systemd 下从 `CREDENTIALS_DIRECTORY/migration-database-url` 与 `application-database-url` 读取，在手工/CI 下才兼容显式环境变量。要求应用与迁移 DSN 指向同一 MySQL endpoint/database，但认证账号不同，并进一步比较服务端 `CURRENT_USER()`。
 - Runner 要求 MySQL 8.0.16 或更高版本、utf8mb4 session；通过同一物理连接持有数据库级 `GET_LOCK`，直到 `RELEASE_LOCK`。每个 revision 先持久化 `running`，再逐语句执行；成功后置为 `applied`。
 - MySQL DDL 隐式提交，出现 `running` / `failed` 时必须人工核验实际 schema 后恢复；Runner 不做猜测性自动重跑。Ledger 的字段、索引、CHECK 约束及 CHECK 实际拒绝非法写入的行为均有结构/语义校验。
 - `validate` 是离线检查；`status` 是只读 ledger 检查；`apply` 才会执行 DDL。三者不能互相替代。
@@ -724,7 +724,7 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
 - `systemd/Platform-backend.service` 的启动命令是 Gunicorn；其 `ExecStartPre` 仅创建/设置日志目录和文件，没有调用 Migration Runner。
 - `systemd/Platform-scheduler.service` 同样只启动 Gunicorn；其 `After=` 包含 backend service，但没有依赖独立 migration oneshot service。
 - 上述结论描述本节复核时的 main 基线，不代表后续分支已自动生效。PR `fix/systemd-migration-gate-2026-11-21` 正在补入独立 oneshot unit、Backend/Scheduler 的 `Requires` + `After`、隔离 OS 用户及 root-only 凭据文件；具体设计和部署步骤见本文件第 36 节。只有该 PR 合并、unit 安装并完成目标 Ubuntu 验收后，才能将此缺口标记关闭。
-- 不得简单让 API 运行账号获得 CREATE/ALTER/DROP 权限，也不得把迁移密码写入命令行或 Git 跟踪文件。迁移 unit 的 OS 身份、EnvironmentFile 权限、systemd ordering、超时、失败告警和审计日志必须经 CI 与目标主机验证。
+- 不得简单让 API 运行账号获得 CREATE/ALTER/DROP 权限，也不得把迁移密码写入命令行或 Git 跟踪文件。迁移 unit 的 OS 身份、LoadCredential 源文件权限、systemd ordering、超时、失败告警和审计日志必须经 CI 与目标主机验证。
 
 ### 35.3 当前启动行为与权限边界
 
@@ -762,6 +762,6 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
 - 迁移与应用 DSN 分别放在 root-only `/etc/platform/migration-database-url` 和 `/etc/platform/migration-app-database-url`，由 systemd `LoadCredential=` 注入只读凭据目录；不使用 `EnvironmentFile` 或环境变量传递密码，CLI 直接读取 credential 文件。迁移服务只读加载 `app/`、`sql/migrations/`、`venv/`，不获得项目密钥目录访问权，也不加载应用 `.env` 或读取 JWT/RSA/TLS 密钥。
 - 迁移服务的 `RuntimeDirectory` 工作目录与 `PYTHONPATH` 分离，避免 Pydantic Settings 从应用工作目录意外加载完整 `.env`。
 - 每次部署需停止 API/Scheduler，更新代码后使用 `systemctl restart Platform-migrate.service`（oneshot 已 active 时不能只用 start），成功后再重启 Backend，最后启动 Scheduler。
-- 安装 ACL、独立用户、root-only EnvironmentFile、首次启动、发布顺序和失败恢复步骤详见 `docs/DEPLOYMENT_READINESS_RUNBOOK_2026-11.md` 第 36 节。
+- 安装 ACL、独立用户、root-only LoadCredential 源文件、首次启动、发布顺序和失败恢复步骤详见 `docs/DEPLOYMENT_READINESS_RUNBOOK_2026-11.md` 第 36 节。
 
 此项在 PR 合并前仍需 CI 验证 unit 文件契约和文档一致性；未在生产 Ubuntu 主机执行，不代表目标环境已经安装或迁移。
