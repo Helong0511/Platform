@@ -68,7 +68,7 @@ python -m app.db.migrations apply
 
 - API/Scheduler lifespan 已移除 `create_database()` 与 `Base.metadata.create_all()`，启动时只读检查 migration revision 和 ORM 表/列是否存在。
 - 旧的 `create_tables()` / `create_database()` 兼容入口目前均 fail-closed，不再执行 DDL；仍需全仓搜索并核验所有遗留调用点、脚本入口和间接调用。
-- Migration Runner 已实现并有隔离 MySQL 集成测试，但当前 `Platform-backend.service` 与 `Platform-scheduler.service` 均未配置独立 migration oneshot 依赖，也没有 `ExecStartPre` 调用 Runner；发布流程必须显式先执行 `python -m app.db.migrations validate`、`status`、`apply`，再启动 API/Scheduler。仍需把该顺序固化为可审计的部署单元/发布流程，并验证迁移账号权限边界。
+- 本条记录 2026-11-21 PR #88 之前的 main 基线：当时 `Platform-backend.service` 与 `Platform-scheduler.service` 尚未依赖独立 migration oneshot。PR #88（本分支）补入 `Platform-migrate.service`、Backend/Scheduler 强依赖及 systemd LoadCredential；在 PR 合并、unit 安装并完成目标 Ubuntu 验收前，仍不得认为发布顺序门禁已在生产生效。
 - 新库基线导入、旧库升级、备份恢复、worker pause/resume 和失败人工恢复演练仍未完成。
 
 因此：当前命令和 CI 仅证明隔离测试环境中的 Runner 与只读启动 gate 行为；未完成真实新库/旧库部署演练前，不能在生产执行，也不能宣称上线就绪。
