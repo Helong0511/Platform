@@ -65,7 +65,9 @@ def test_limits_nested_depth_and_item_count():
 
 
 def test_oversized_payload_is_replaced_with_size_marker():
-    result = sanitize_postback_raw_data({"event": "x" * 40000})
+    # 单字段会先受 4 KiB 上限约束；用多个合法字段验证整体 JSON 体积上限。
+    payload = {f"event_{index}": "x" * 4000 for index in range(10)}
+    result = sanitize_postback_raw_data(payload)
     assert result["_redaction"] == "payload_exceeds_storage_limit"
     assert result["_sanitized_size_bytes"] > 32 * 1024
 
