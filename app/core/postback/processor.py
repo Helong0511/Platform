@@ -52,6 +52,10 @@ from app.services.third_party_report_outbox import (
 )
 from app.core.utils import get_app_now_naive
 from app.services.cap_reservation_ledger import CapReservationLedger
+from app.services.cpl.postback_pending_ingest_service import (
+    pending_postback_ingest_service,
+    PendingPostbackQueueError,
+)
 from app.core.url.url_params_util import (
     parse_stored_url_params,
     resolve_dp_from_url_params,
@@ -125,7 +129,9 @@ class PostbackProcessor:
             
             if not ip_valid:
                 logger.warning("IP 验证失败，处理失败流程")
-                return await PostbackProcessor._handle_ip_failure(platform, raw_data, db)
+                return await PostbackProcessor._handle_ip_failure(
+                    platform, raw_data, db, request_ip=cleaned_ip
+                )
             
             # ========== 第 2 步：数据验证 ==========
             logger.info("=== 第 2 步：数据验证 ===")
@@ -767,68 +773,116 @@ class PostbackProcessor:
     async def _handle_ip_failure(
         platform: str,
         raw_data: Dict[str, Any],
-        db: AsyncSession
+        db: AsyncSession,
+        request_ip: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """将通过基础校验的非白名单回调安全写入待审批队列。
+
+        待审批阶段不创建正式转化、不占用 Cap、不触发下游转发。
         """
-        处理 IP 验证失败
-        
-        Args:
-            platform: 平台名称
-            raw_data: 原始数据
-            db: 数据库会话
-        
-        Returns:
-            处理结果
-        """
-        conversion_id_hint = (
-            raw_data.get("clk_id")
-            or raw_data.get("conversion_id")
-            or raw_data.get("click_id")
-            or "unknown"
-        )
-        
-        # 发送管理员通知
         try:
-            admin_config_result = await db.execute(
-                select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+            queue_result = await pending_postback_ingest_service.enqueue(
+                platform=platform,
+                raw_data=raw_data,
+                request_ip=request_ip,
+                db=db,
             )
-            admin_config = admin_config_result.scalars().first()
-            
-            if (
-                admin_config
-                and admin_config.telegram_enabled
-                and admin_config.notify_system_errors
-                and admin_config.telegram_chat_id
-            ):
-                msg_lines = [
-                    "⚠️ Postback IP 验证失败",
-                    "",
-                    f"平台：{platform}",
-                    "转化 ID/点击 ID: [已省略]",
-                    "说明：IP 为空或无法获取，已拒绝处理（不入库、不转发）。"
-                ]
-                
-                await TelegramNotificationService.send_admin_notification(
-                    message="\n".join(msg_lines),
-                    telegram_chat_id=admin_config.telegram_chat_id,
-                    notification_type='system_error',
-                    db=db,
-                    commit=False,
+        except PendingPostbackQueueError:
+            await db.rollback()
+            logger.error("待审批 Postback 入队保护不可用，拒绝接收并要求上游重试")
+            return {
+                "success": False,
+                "message": "待审批队列暂不可用，请重试",
+                "retryable": True,
+            }
+        except Exception as queue_error:
+            await db.rollback()
+            logger.error(
+                "待审批 Postback 入队失败：error_type=%s",
+                type(queue_error).__name__,
+            )
+            return {
+                "success": False,
+                "message": "待审批队列处理失败，请重试",
+                "retryable": True,
+            }
+
+        reason = queue_result.get("reason")
+        if queue_result.get("queued"):
+            message = "非白名单 Postback 已进入待审批队列"
+            logger.info(
+                "非白名单 Postback 待审批记录已创建：platform=%s pending_id=%s",
+                platform,
+                queue_result.get("pending_id"),
+            )
+        elif reason == "duplicate":
+            message = "重复 Postback，待审批记录已存在"
+        elif reason == "rate_limited":
+            message = "来源请求频率超过待审批入队限制"
+        elif reason == "payload_too_large":
+            message = "Postback 请求数据超过待审批存储限制"
+        elif reason == "queue_backlog_full":
+            message = "待审批队列积压已达安全上限，暂不接收新记录"
+        elif reason in {"invalid_fields", "invalid_payload", "invalid_platform"}:
+            message = "Postback 字段校验失败，未进入待审批队列"
+        else:
+            message = "Postback 来源 IP 无法确认，未进入待审批队列"
+
+        # 只有新记录才通知管理员，避免重复回调持续制造通知噪声。
+        if queue_result.get("queued"):
+            try:
+                admin_config_result = await db.execute(
+                    select(AdminNotificationConfig).where(
+                        AdminNotificationConfig.id == 1
+                    )
                 )
-        except Exception as e:
-            logger.warning("发送 IP 验证失败通知失败：error_type=%s", type(e).__name__)
+                admin_config = admin_config_result.scalars().first()
+                if (
+                    admin_config
+                    and admin_config.telegram_enabled
+                    and admin_config.notify_system_errors
+                    and admin_config.telegram_chat_id
+                ):
+                    await TelegramNotificationService.send_admin_notification(
+                        message="\n".join(
+                            [
+                                "⚠️ 非白名单 Postback 待审批",
+                                "",
+                                f"平台：{platform}",
+                                f"待审批记录 ID：{queue_result.get('pending_id')}",
+                                "说明：请求已通过基础字段校验并脱敏入队；批准前不会创建正式转化或向下游转发。",
+                            ]
+                        ),
+                        telegram_chat_id=admin_config.telegram_chat_id,
+                        notification_type="system_error",
+                        db=db,
+                        commit=False,
+                    )
+            except Exception as notify_error:
+                logger.warning(
+                    "发送待审批 Postback 通知失败：error_type=%s",
+                    type(notify_error).__name__,
+                )
 
         try:
             await db.commit()
-        except Exception as e:
-            logger.warning("提交 IP 失败通知记录失败：error_type=%s", type(e).__name__)
+        except Exception as commit_error:
+            logger.error(
+                "提交待审批 Postback 记录失败：error_type=%s",
+                type(commit_error).__name__,
+            )
             await db.rollback()
-        
+            return {
+                "success": False,
+                "message": "待审批记录保存失败，请重试",
+                "retryable": True,
+            }
+
         return {
             "success": True,
-            "message": "PostBack 接收成功（IP 验证失败，未记录）",
-            "conversion_id": conversion_id_hint,
+            "message": message,
             "platform": platform,
-            "is_test_data": True
+            "pending_id": queue_result.get("pending_id"),
+            "is_pending": bool(queue_result.get("queued")),
+            "retryable": False,
         }
-

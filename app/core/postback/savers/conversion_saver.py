@@ -24,7 +24,8 @@ _SENSITIVE_RAW_KEY = re.compile(
     r"(?:^|[_-])(authorization|auth|token|secret|password|passwd|api[_-]?key|"
     r"access[_-]?key|cookie|set-cookie|session|email|e-mail|phone|mobile|"
     r"address|street|ssn|social[_-]?security|card[_-]?number|cvv|bank[_-]?account|"
-    r"ip|ip[_-]?address|idfa|gaid|advertising[_-]?id|device[_-]?id)(?:$|[_-])",
+    r"ip|ip[_-]?address|idfa|gaid|devad[_-]?id|advertising[_-]?id|device[_-]?id|"
+    r"user[_-]?agent|ua)(?:$|[_-])",
     re.IGNORECASE,
 )
 _MAX_RAW_DATA_BYTES = 32 * 1024
@@ -36,8 +37,8 @@ _SENSITIVE_INLINE_KEY = (
     r"(?:[A-Za-z0-9.-]+[_-])*(?:authorization|proxy[_-]?authorization|auth|"
     r"access[_-]?token|refresh[_-]?token|token|secret|password|passwd|"
     r"api[_-]?key|email|e-mail|phone|mobile|ip(?:[_-]?address)?|"
-    r"session(?:[_-]?id)?|cookie|set-cookie|idfa|gaid|"
-    r"advertising[_-]?id|device[_-]?id)(?:[_-]?[A-Za-z0-9.-]*)"
+    r"session(?:[_-]?id)?|cookie|set-cookie|idfa|gaid|devad[_-]?id|"
+    r"user[_-]?agent|ua|advertising[_-]?id|device[_-]?id)(?:[_-]?[A-Za-z0-9.-]*)"
 )
 _SENSITIVE_INLINE_VALUE = re.compile(
     rf"""(?i)(?P<prefix>(?:[?&;]|\b)["']?(?:{_SENSITIVE_INLINE_KEY})["']?\s*[=:]\s*["']?)(?P<value>[^&;\s,"']+)"""

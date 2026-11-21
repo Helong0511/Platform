@@ -19,7 +19,11 @@ from fastapi import HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.postback import PostbackProcessor
-from app.core.postback.request_parser import collect_postback_raw_data
+from app.core.postback.request_parser import (
+    collect_postback_raw_data,
+    PostbackPayloadTooLarge,
+    UnsupportedPostbackContentType,
+)
 from app.core.utils import get_client_ip
 
 logger = logging.getLogger(__name__)
@@ -83,6 +87,21 @@ class PostbackReceiveService:
             return build_postback_ok_response()
         except HTTPException:
             raise
+        except PostbackPayloadTooLarge:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Postback request exceeds the accepted size or field limit",
+            )
+        except UnsupportedPostbackContentType:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="Unsupported Postback content type",
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid Postback request payload",
+            )
         except Exception as e:
             # 异常消息/SQL 参数可能包含 click_id、IP、邮箱等原始数据，不写入应用日志。
             logger.error(
