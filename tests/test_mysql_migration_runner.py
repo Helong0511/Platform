@@ -900,7 +900,6 @@ async def test_runner_resumes_interrupted_event_key_backfill_in_batches(
         )
         url = _database_url(database)
         app_url = _application_database_url(database)
-        monkeypatch.setattr(migration_runner, "_EVENT_KEY_BACKFILL_BATCH_SIZE", 500)
         original_backfill = migration_runner._run_third_party_report_event_key_backfill
 
         async def interrupt_after_two_batches(connection):
@@ -957,10 +956,10 @@ async def test_runner_resumes_interrupted_event_key_backfill_in_batches(
                 )
                 assert cursor.fetchone() == (2500, 2500, 2500)
                 cursor.execute(
-                    "SELECT event_key FROM third_party_report_logs WHERE id = 1"
+                    "SELECT event_key FROM third_party_report_logs WHERE id = 2"
                 )
                 first_event_key = cursor.fetchone()[0]
-                expected_payload = "4:meta4:ad-18:ViewContent0:"
+                expected_payload = "4:meta4:ad-211:ViewContent0:"
                 assert first_event_key == hashlib.sha256(
                     expected_payload.encode("utf-8")
                 ).hexdigest()
