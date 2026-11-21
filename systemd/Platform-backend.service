@@ -1,7 +1,7 @@
 [Unit]
 Description=Platform Backend API Service
-After=network.target mysql.service redis.service
-Requires=mysql.service
+After=network.target mysql.service redis.service Platform-migrate.service
+Requires=mysql.service Platform-migrate.service
 
 [Service]
 Type=simple
