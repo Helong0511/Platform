@@ -49,6 +49,7 @@ def valid_payload():
         "phone": "+15555550123",
         "ip": "198.51.100.200",
         "user_agent": "private-agent",
+        "devad_id": "device-ad-123",
     }
 
 
@@ -75,13 +76,15 @@ async def test_valid_non_whitelisted_postback_is_sanitized_and_queued(
     pending = db.added[0]
     assert pending.status == "pending"
     assert pending.request_ip == "203.0.113.10"
-    assert pending.ip == "203.0.113.10"
+    assert pending.ip == "198.51.100.200"
+    assert pending.devad_id == "device-ad-123"
     assert pending.dedupe_key and len(pending.dedupe_key) == 64
     stored = json.loads(pending.raw_data)
     assert "email" not in stored
     assert "phone" not in stored
     assert "ip" not in stored
     assert "user_agent" not in stored
+    assert "devad_id" not in stored
 
 
 async def _allow():
