@@ -15,14 +15,19 @@ class _ScalarResult:
 
 
 class _FakeDB:
-    def __init__(self, existing_id=None, pending_count=0):
+    def __init__(self, existing_id=None, pending_count=0, guard_available=True):
         self.existing_id = existing_id
         self.pending_count = pending_count
+        self.guard_available = guard_available
+        self.guard_statement = None
         self.added = []
         self.flush_count = 0
         self.rollback_count = 0
 
-    async def execute(self, _statement):
+    async def execute(self, statement):
+        if "postback_pending_queue_guard" in str(statement):
+            self.guard_statement = statement
+            return _ScalarResult(1 if self.guard_available else None)
         return _ScalarResult(self.existing_id)
 
     async def scalar(self, _statement):
@@ -126,7 +131,10 @@ async def test_concurrent_duplicate_is_resolved_by_unique_key(monkeypatch, valid
             super().__init__()
             self.query_count = 0
 
-        async def execute(self, _statement):
+        async def execute(self, statement):
+            if "postback_pending_queue_guard" in str(statement):
+                self.guard_statement = statement
+                return _ScalarResult(1)
             self.query_count += 1
             return _ScalarResult(None if self.query_count == 1 else 88)
 
@@ -302,3 +310,45 @@ async def test_rate_limiter_rejects_over_limit(monkeypatch):
     assert await ingest.PendingPostbackIngestService._allow_enqueue(
         "203.0.113.10"
     ) is False
+
+
+@pytest.mark.asyncio
+async def test_pending_backlog_guard_uses_mysql_row_lock(monkeypatch, valid_payload):
+    db = _FakeDB(pending_count=ingest._PENDING_MAX_OPEN_RECORDS - 1)
+    monkeypatch.setattr(
+        ingest.PendingPostbackIngestService,
+        "_allow_enqueue",
+        staticmethod(_allow),
+    )
+
+    result = await ingest.PendingPostbackIngestService.enqueue(
+        platform="partner_a",
+        raw_data=valid_payload,
+        request_ip="203.0.113.10",
+        db=db,
+    )
+
+    assert result == {"queued": True, "pending_id": 91}
+    assert db.guard_statement is not None
+    assert "FOR UPDATE" in str(db.guard_statement).upper()
+
+
+@pytest.mark.asyncio
+async def test_pending_backlog_guard_missing_fails_closed(monkeypatch, valid_payload):
+    db = _FakeDB(guard_available=False)
+    monkeypatch.setattr(
+        ingest.PendingPostbackIngestService,
+        "_allow_enqueue",
+        staticmethod(_allow),
+    )
+
+    with pytest.raises(ingest.PendingPostbackQueueError):
+        await ingest.PendingPostbackIngestService.enqueue(
+            platform="partner_a",
+            raw_data=valid_payload,
+            request_ip="203.0.113.10",
+            db=db,
+        )
+
+    assert db.added == []
+    assert db.flush_count == 0
