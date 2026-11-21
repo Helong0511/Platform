@@ -1,6 +1,6 @@
 """Postback 回调请求体/Query 参数解析。"""
 import json
-from typing import Any, Dict
+from typing import Dict
 from urllib.parse import parse_qsl
 
 from fastapi import Request
