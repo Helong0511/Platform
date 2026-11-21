@@ -12,7 +12,7 @@ WorkingDirectory=/run/platform-migration
 RuntimeDirectory=platform-migration
 RuntimeDirectoryMode=0700
 # systemd LoadCredential 将 root 管理的 DSN 文件放入服务专属只读凭据目录。
-LoadCredential=application-database-url:/etc/platform/migration-app-database-url
+LoadCredential=application-database-url:/etc/platform/application-database-url
 LoadCredential=migration-database-url:/etc/platform/migration-database-url
 Environment=PATH=/data/Platform/venv/bin
 Environment=PYTHONPATH=/data/Platform
