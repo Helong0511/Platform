@@ -746,7 +746,7 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
 
 - **公开仓库凭据文件仍被 Git 跟踪**：当前 main tree 仍包含 `keys/private_key.pem`、`nginx/btfrx.online/client.btfrx.online.key`、`secrets/gam-23347342743.json`、`secrets/gam-23348711678.json`；Git tree 对应 mode 均为 `100644`。本次没有读取这些文件内容。必须由凭据所有者先轮换/吊销，完成仓库外运行时迁移与线上验证，再移除跟踪并规划公开历史清理；仅增加 .gitignore 不会移除已跟踪对象。
 - **生产 DDL 风险尚未关闭**：Runner 最低版本为 MySQL 8.0.16；部分 migration 使用 `ADD COLUMN ... AFTER ...`。必须在与目标 MySQL 小版本、表结构、数据量和索引规模相符的隔离副本验证实际 DDL 算法、耗时、metadata lock、磁盘峰值和复制延迟。不得仅凭 CI 临时库通过就直接在生产大表执行。
-- **迁移服务强制依赖尚待 PR 合并和目标主机验收**：PR `fix/systemd-migration-gate-2026-11-21` 提交了 unit 与依赖配置；在 CI 通过、合并、安装并完成 Ubuntu 验收前，不得视为已关闭。
+- **目标 Ubuntu 的迁移门禁安装与验收尚未完成**：PR #88 提交了独立 unit、Backend/Scheduler 强依赖和 LoadCredential 配置；合并后仍须在目标主机安装 unit、创建专用用户、配置凭据/ACL 并完成 systemd 启动失败演练，才能关闭此项。
 - **分支保护尚无可验证证据**：必须在 GitHub 设置并验证 main 的 PR 审核、必需 CI、禁止 force-push、禁止删除规则。
 - **生产备份恢复与故障恢复尚未演练**：至少完成全量备份恢复、迁移中断后的人工核验/forward-fix、应用回滚兼容性和恢复点记录。
 - **目标环境实测尚未完成**：尚未连接生产服务器/数据库；目标 MySQL 版本、sql_mode、账号授权、字符集、现有 schema revision 和真实数据规模均需在授权的隔离/生产发布流程中核验。
@@ -765,4 +765,4 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
 - 每次部署需停止 API/Scheduler，更新代码后使用 `systemctl restart Platform-migrate.service`（oneshot 已 active 时不能只用 start），成功后再重启 Backend，最后启动 Scheduler。
 - 安装 ACL、独立用户、root-only LoadCredential 源文件、首次启动、发布顺序和失败恢复步骤详见 `docs/DEPLOYMENT_READINESS_RUNBOOK_2026-11.md` 第 36 节。
 
-此项在 PR 合并前仍需 CI 验证 unit 文件契约和文档一致性；未在生产 Ubuntu 主机执行，不代表目标环境已经安装或迁移。
+CI 负责验证 unit 文件契约、CLI credential 读取与文档一致性；无论 PR 是否合并，都不代表目标 Ubuntu 已安装 unit、已验证 ACL/凭据权限或已执行数据库迁移。
