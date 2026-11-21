@@ -7,7 +7,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Optional
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,7 @@ _PENDING_RATE_LIMIT_PER_HOUR = 20
 _PENDING_RATE_LIMIT_PER_DAY = 100
 _PENDING_GLOBAL_RATE_LIMIT_PER_HOUR = 500
 _PENDING_GLOBAL_RATE_LIMIT_PER_DAY = 5000
+_PENDING_MAX_OPEN_RECORDS = 10000
 _PENDING_RAW_DATA_MAX_BYTES = 32 * 1024
 _PLATFORM_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$")
 _RATE_LIMIT_SCRIPT = """
@@ -215,6 +216,15 @@ class PendingPostbackIngestService:
         existing_id = existing.scalar_one_or_none()
         if existing_id is not None:
             return {"queued": False, "reason": "duplicate", "pending_id": existing_id}
+
+        # 限制全局待审批积压，避免多来源轮换 IP 长期堆积数据库。
+        pending_count = await db.scalar(
+            select(func.count())
+            .select_from(PendingPostbackConversion)
+            .where(PendingPostbackConversion.status == "pending")
+        )
+        if int(pending_count or 0) >= _PENDING_MAX_OPEN_RECORDS:
+            return {"queued": False, "reason": "queue_backlog_full"}
 
         sanitized = sanitize_postback_raw_data(raw_data)
         raw_json = json.dumps(
