@@ -34,6 +34,7 @@ def test_pending_lock_defaults_to_pending_status():
 import asyncio
 import os
 import uuid
+from urllib.parse import quote_plus
 
 import pymysql
 import pytest
@@ -81,8 +82,8 @@ async def test_mysql_innodb_pending_lock_serializes_concurrent_approval_reads():
     finally:
         admin.close()
 
-    password_url = password.replace("@", "%40").replace("/", "%2F").replace(":", "%3A")
-    user_url = user.replace("@", "%40").replace("/", "%2F").replace(":", "%3A")
+    password_url = quote_plus(password)
+    user_url = quote_plus(user)
     engine = create_async_engine(
         f"mysql+aiomysql://{user_url}:{password_url}@{host}:{port}/{database}?charset=utf8mb4",
         pool_pre_ping=True,
@@ -144,12 +145,13 @@ async def test_mysql_innodb_pending_lock_serializes_concurrent_approval_reads():
         await asyncio.wait_for(second_started.wait(), timeout=5)
         await asyncio.sleep(0.15)
         # 第二个事务必须等待第一个事务释放 InnoDB 行锁。
-        assert not second_task.done()
+        second_was_blocked = not second_task.done()
         release_first.set()
         await asyncio.wait_for(
             asyncio.gather(first_task, second_task),
             timeout=15,
         )
+        assert second_was_blocked
         assert second_status == ["approved"]
     finally:
         await engine.dispose()
