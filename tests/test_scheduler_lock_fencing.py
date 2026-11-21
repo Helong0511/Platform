@@ -148,7 +148,7 @@ async def test_release_task_lock_relocks_row_before_owner_check(monkeypatch):
     monkeypatch.setattr(scheduler_lock, "get_app_now_naive", lambda: now)
 
     await scheduler_lock.release_task_lock(
-        db, "clock-test", success=True, result_message="done"
+        db, "clock-test", success=True, result_message="done", expected_run_count=3
     )
 
     compiled = str(db.executed[0].compile(dialect=mysql.dialect())).upper()
@@ -189,3 +189,38 @@ async def test_scheduler_stale_precheck_uses_database_clock(monkeypatch):
         "UTC_TIMESTAMP" in str(statement.compile(dialect=mysql.dialect())).upper()
         for statement in db.executed
     )
+
+
+
+@pytest.mark.asyncio
+async def test_release_task_lock_does_not_release_new_run_from_same_pid(monkeypatch):
+    now = datetime(2026, 11, 21, 12, 0, 0)
+    record = SimpleNamespace(
+        last_run_pid=222,
+        last_run_host="scheduler-host",
+        is_running=True,
+        updated_at=None,
+        last_finish_time=None,
+        success_count=2,
+        error_count=0,
+        last_error=None,
+        run_count=8,
+    )
+    db = _FakeSession(row=record)
+    monkeypatch.setattr(scheduler_lock, "get_current_pid", lambda: 222)
+    monkeypatch.setattr(scheduler_lock, "CURRENT_HOST", "scheduler-host")
+    monkeypatch.setattr(scheduler_lock, "get_app_now_naive", lambda: now)
+
+    # 同一个 PID/Host 已经在超时后重新抢锁；旧运行的 run_count 不能释放新一代锁。
+    await scheduler_lock.release_task_lock(
+        db,
+        "clock-test",
+        success=True,
+        result_message="old run finished",
+        expected_run_count=7,
+    )
+
+    assert record.is_running is True
+    assert record.run_count == 8
+    assert db.committed is False
+    assert db.rolled_back is True
