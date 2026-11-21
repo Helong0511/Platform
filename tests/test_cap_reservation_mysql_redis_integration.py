@@ -1576,3 +1576,100 @@ async def test_mysql_recovery_claim_fences_stale_postback_commit(monkeypatch):
         if engine is not None:
             await engine.dispose()
         _drop_isolated_mysql_database(database)
+
+
+@pytest.mark.asyncio
+async def test_pending_postback_guard_serializes_concurrent_capacity_checks():
+    """真实 MySQL/InnoDB 多连接验证：10,000 上限检查不能被并发 enqueue 穿透。"""
+    database = _create_isolated_mysql_database()
+    engine = None
+    try:
+        migration = Path(
+            "sql/migrations/20261121_postback_pending_queue_guard.sql"
+        ).read_text(encoding="utf-8")
+        connection = pymysql.connect(
+            host=MYSQL_HOST,
+            port=int(os.getenv("MYSQL_INTEGRATION_PORT", "3306")),
+            user=os.getenv("MYSQL_INTEGRATION_USER", "root"),
+            password=os.getenv("MYSQL_INTEGRATION_PASSWORD", ""),
+            database=database,
+            charset="utf8mb4",
+            autocommit=True,
+            connect_timeout=5,
+        )
+        try:
+            with connection.cursor() as cursor:
+                for statement in split_mysql_statements(migration):
+                    cursor.execute(statement)
+                    if cursor.description:
+                        cursor.fetchall()
+                cursor.execute(
+                    """
+                    CREATE TABLE pending_postback_conversions (
+                        id BIGINT NOT NULL AUTO_INCREMENT,
+                        status VARCHAR(20) NOT NULL,
+                        PRIMARY KEY (id),
+                        KEY idx_pending_status (status)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                      COLLATE=utf8mb4_unicode_ci
+                    """
+                )
+        finally:
+            connection.close()
+
+        password = quote_plus(os.getenv("MYSQL_INTEGRATION_PASSWORD", ""))
+        user = quote_plus(os.getenv("MYSQL_INTEGRATION_USER", "root"))
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:"
+            f"{int(os.getenv('MYSQL_INTEGRATION_PORT', '3306'))}/{database}"
+            "?charset=utf8mb4",
+            pool_pre_ping=True,
+        )
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+
+        async def attempt_enqueue():
+            async with session_factory() as session:
+                await session.execute(
+                    text(
+                        "SELECT id FROM postback_pending_queue_guard "
+                        "WHERE id = 1 FOR UPDATE"
+                    )
+                )
+                count = await session.scalar(
+                    text(
+                        "SELECT COUNT(*) FROM pending_postback_conversions "
+                        "WHERE status = 'pending'"
+                    )
+                )
+                # 拉长临界区，确保另一个独立连接确实会等待同一 guard 行。
+                await asyncio.sleep(0.1)
+                if int(count or 0) >= 1:
+                    await session.rollback()
+                    return False
+                await session.execute(
+                    text(
+                        "INSERT INTO pending_postback_conversions (status) "
+                        "VALUES ('pending')"
+                    )
+                )
+                await session.commit()
+                return True
+
+        outcomes = await asyncio.gather(attempt_enqueue(), attempt_enqueue())
+        assert sum(outcomes) == 1
+        async with session_factory() as session:
+            count = await session.scalar(
+                text(
+                    "SELECT COUNT(*) FROM pending_postback_conversions "
+                    "WHERE status = 'pending'"
+                )
+            )
+        assert count == 1
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        _drop_isolated_mysql_database(database)
