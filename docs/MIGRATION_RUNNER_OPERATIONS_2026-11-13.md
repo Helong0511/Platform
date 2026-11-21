@@ -49,7 +49,7 @@ python -m app.db.migrations apply
 `sql/platform.sql` 是完整 schema 快照，含 `DROP TABLE IF EXISTS` 和客户端 DELIMITER / routine 定义；当前快照不包含 `CREATE DATABASE` 或 `USE`，由 provisioning 预先创建目标库，并通过 MySQL 客户端 `--database=<目标库>` 显式选择。它不是增量 migration，也不是 Runner 的输入。
 
 - 只允许在全新或可丢弃数据库上使用经过审核的初始化流程。
-- 当前 manifest 共 14 条 revision；执行前必须先运行 `validate`，并核对 `status` 与目标环境基线版本。
+- 当前 manifest 共 18 条 revision；执行前必须先运行 `validate`，并核对 `status` 与目标环境基线版本。
 - 绝不能把它用于已有数据库升级。
 - 不要把“ORM 表名覆盖测试通过”误认为所有列、索引、外键、CHECK 和字符集都已完成物理结构核验。
 
@@ -66,8 +66,8 @@ python -m app.db.migrations apply
 ## 6. 当前尚未达到生产使用条件
 
 - API/Scheduler lifespan 已移除 `create_database()` 与 `Base.metadata.create_all()`，启动时只读检查 migration revision 和 ORM 表/列是否存在。
-- 旧的 `create_tables()` / `create_database()` helper 尚待全仓调用点核查与禁用/迁移。
-- Runner 尚未成为 systemd 部署的唯一 schema 变更入口；仍需演练 migration job 先于 API/Scheduler 启动。
+- 旧的 `create_tables()` / `create_database()` 兼容入口目前均 fail-closed，不再执行 DDL；仍需全仓搜索并核验所有遗留调用点、脚本入口和间接调用。
+- Migration Runner 已实现并有隔离 MySQL 集成测试，但当前 `Platform-backend.service` 与 `Platform-scheduler.service` 均未配置独立 migration oneshot 依赖，也没有 `ExecStartPre` 调用 Runner；发布流程必须显式先执行 `python -m app.db.migrations validate`、`status`、`apply`，再启动 API/Scheduler。仍需把该顺序固化为可审计的部署单元/发布流程，并验证迁移账号权限边界。
 - 新库基线导入、旧库升级、备份恢复、worker pause/resume 和失败人工恢复演练仍未完成。
 
 因此：当前命令和 CI 仅证明隔离测试环境中的 Runner 与只读启动 gate 行为；未完成真实新库/旧库部署演练前，不能在生产执行，也不能宣称上线就绪。
@@ -699,3 +699,55 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
 - MySQL `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` 提供本地列、引用 schema/table/column 和复合键顺序：https://dev.mysql.com/doc/refman/8.0/en/information-schema-key-column-usage-table.html
 - MySQL `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` 提供约束名称及 ON UPDATE / ON DELETE 规则：https://dev.mysql.com/doc/refman/8.0/en/information-schema-referential-constraints-table.html
 - SQLAlchemy Inspector `get_foreign_keys()` 返回 `referred_schema`、引用表和列等反射信息：https://docs.sqlalchemy.org/en/14/core/reflection.html
+
+
+## 35. 2026-11-21：当前 main 的 Migration Runner 与部署入口复核
+
+本节以 GitHub `main` 提交 `4f0d14f761af7fe4eb097d5c72404aaa469918e6` 为审计基线；本节不是生产数据库执行记录。
+
+### 35.1 当前 manifest 与执行器状态
+
+- 当前 `app/db/migrations/manifest.py` 明确登记 **18 条**增量 revision，最后三条为：
+  - `20261120_telegram_postback_approval_audit`
+  - `20261121_postback_pending_dedupe`
+  - `20261121_postback_pending_queue_guard`
+- 迁移文件集合必须与 manifest 完全一致；每个 revision 的 SQL 文件以 SHA-256 固定，路径必须严格匹配 revision，依赖必须指向更早 revision。未登记 SQL、缺失文件、checksum 漂移和非法依赖均拒绝执行。
+- Runner 只接受显式 `MIGRATION_DATABASE_URL` 的 `mysql+aiomysql` DSN；要求应用与迁移 DSN 指向同一 MySQL endpoint/database，但认证账号不同，并进一步比较服务端 `CURRENT_USER()`。
+- Runner 要求 MySQL 8.0.16 或更高版本、utf8mb4 session；通过同一物理连接持有数据库级 `GET_LOCK`，直到 `RELEASE_LOCK`。每个 revision 先持久化 `running`，再逐语句执行；成功后置为 `applied`。
+- MySQL DDL 隐式提交，出现 `running` / `failed` 时必须人工核验实际 schema 后恢复；Runner 不做猜测性自动重跑。Ledger 的字段、索引、CHECK 约束及 CHECK 实际拒绝非法写入的行为均有结构/语义校验。
+- `validate` 是离线检查；`status` 是只读 ledger 检查；`apply` 才会执行 DDL。三者不能互相替代。
+
+### 35.2 当前 systemd 发布链路仍有缺口
+
+已直接检查当前两个 unit 文件：
+
+- `systemd/Platform-backend.service` 的启动命令是 Gunicorn；其 `ExecStartPre` 仅创建/设置日志目录和文件，没有调用 Migration Runner。
+- `systemd/Platform-scheduler.service` 同样只启动 Gunicorn；其 `After=` 包含 backend service，但没有依赖独立 migration oneshot service。
+- 因此，Runner 虽已实现，systemd 仍未强制“迁移成功后才能启动 API/Scheduler”。当前正确操作顺序必须由发布人员显式保证：备份并确认恢复点 → 离线 validate → 只读 status → 受控 apply → 再启动/重启 backend 与 scheduler → 验证两个 Worker 的只读 Schema Gate。
+- 后续应设计独立的 `platform-migrate.service`（或等效发布流水线步骤），使用独立数据库迁移身份；不能简单让 API 运行账号获得 CREATE/ALTER/DROP 权限，也不能把迁移密码写入命令行或 Git 跟踪文件。迁移 unit 的 OS 身份、EnvironmentFile 权限、systemd ordering、超时、失败告警和审计日志都需要测试后再启用。
+
+### 35.3 当前启动行为与权限边界
+
+- `app/db/migrations/gate.py::verify_schema_revision()` 只读取 ledger，要求 ledger 全部为 applied、revision/checksum/execution_order 构成 manifest 连续前缀，并且没有 pending revision；缺失或异常时拒绝启动。
+- FastAPI lifespan 在数据库初始化阶段执行只读 revision gate 与 ORM schema drift 检查；漂移会阻止 Worker 启动。该 Gate 不会自动创建表或修复 schema。
+- `app/db/database.py::create_database()` 与 `app/core/database.py::create_tables()` 当前均为 fail-closed 兼容函数；它们被误调用时会抛错，不会执行 CREATE DATABASE 或 `Base.metadata.create_all()`。但全仓调用点与动态入口仍需完成最终穷尽搜索。
+- lifespan 仍调用 `init_db()` 做默认管理员存在性检查/初始化；这属于业务数据初始化，不是 schema migration。发布前应确认管理员初始化配置、密码来源、并发唯一性和最小权限，不应将它误认为 migration Runner 的职责。
+- Scheduler Worker 另有任务配置同步流程；其失败会阻止调度 Worker 就绪。需在部署演练中确认 API 与 Scheduler 的职责边界、任务同步幂等性及单实例约束。
+
+### 35.4 当前 CI 证据与证据边界
+
+- `main` 的提交 SHA：`4f0d14f761af7fe4eb097d5c72404aaa469918e6`。
+- Full Audit CI：[Run 44887408836](https://github.com/Helong0511/Platform/actions/runs/44887408836)，结论 success。
+- Emergency Security CI：[Run 44887408854](https://github.com/Helong0511/Platform/actions/runs/44887408854)，结论 success。
+- CI 成功只证明该 SHA 在隔离测试环境中的自动检查结果；不代表已对生产数据库执行 18 条迁移，也不代表生产数据备份恢复、目标版本 DDL 算法、真实大表锁等待或故障恢复已演练。
+
+### 35.5 仍然有效的上线阻断项
+
+- **公开仓库凭据文件仍被 Git 跟踪**：当前 main tree 仍包含 `keys/private_key.pem`、`nginx/btfrx.online/client.btfrx.online.key`、`secrets/gam-23347342743.json`、`secrets/gam-23348711678.json`；Git tree 对应 mode 均为 `100644`。本次没有读取这些文件内容。必须由凭据所有者先轮换/吊销，完成仓库外运行时迁移与线上验证，再移除跟踪并规划公开历史清理；仅增加 .gitignore 不会移除已跟踪对象。
+- **生产 DDL 风险尚未关闭**：Runner 最低版本为 MySQL 8.0.16；部分 migration 使用 `ADD COLUMN ... AFTER ...`。必须在与目标 MySQL 小版本、表结构、数据量和索引规模相符的隔离副本验证实际 DDL 算法、耗时、metadata lock、磁盘峰值和复制延迟。不得仅凭 CI 临时库通过就直接在生产大表执行。
+- **迁移服务尚未纳入 systemd 强制依赖**：发布前需要可审计地保证 migration job 成功后才启动 API/Scheduler。
+- **分支保护尚无可验证证据**：必须在 GitHub 设置并验证 main 的 PR 审核、必需 CI、禁止 force-push、禁止删除规则。
+- **生产备份恢复与故障恢复尚未演练**：至少完成全量备份恢复、迁移中断后的人工核验/forward-fix、应用回滚兼容性和恢复点记录。
+- **目标环境实测尚未完成**：尚未连接生产服务器/数据库；目标 MySQL 版本、sql_mode、账号授权、字符集、现有 schema revision 和真实数据规模均需在授权的隔离/生产发布流程中核验。
+
+结论：当前 Migration Runner 具备较完整的安全执行机制和隔离 CI 证据，但仓库仍不能据此标记为生产上线就绪。以上阻断项关闭前，不执行生产 migration、不删除仍在使用的密钥文件、不清理公开历史。
