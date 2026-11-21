@@ -397,7 +397,7 @@ class Settings(BaseSettings):
 
     # ====== 数据库配置 ======
     # 数据库连接 URI 必须由部署环境显式注入；仓库不提供任何可连接的默认账号。
-    # 本地开发、CI、测试和生产均通过 DATABASE_URL / SQLALCHEMY_DATABASE_URI 配置。
+    # Windows/本地开发和 CI 使用显式 DATABASE_URL；Ubuntu systemd 生产从 LoadCredential 读取。
     SQLALCHEMY_DATABASE_URI: str = Field(
         default="",
         alias="DATABASE_URL",
