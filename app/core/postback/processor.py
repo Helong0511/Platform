@@ -822,13 +822,34 @@ class PostbackProcessor:
         elif reason == "payload_too_large":
             message = "Postback 请求数据超过待审批存储限制"
         elif reason == "queue_backlog_full":
-            message = "待审批队列积压已达安全上限，暂不接收新记录"
+            # 队列满是暂时性容量保护，不能向上游返回 200 丢弃回调；要求上游稍后重试。
+            await db.rollback()
+            return {
+                "success": False,
+                "message": "待审批队列容量已满，请稍后重试",
+                "retryable": True,
+            }
         elif reason in {"invalid_fields", "invalid_payload", "invalid_platform"}:
             message = "Postback 字段校验失败，未进入待审批队列"
         else:
             message = "Postback 来源 IP 无法确认，未进入待审批队列"
 
-        # 只有新记录才通知管理员，避免重复回调持续制造通知噪声。
+        try:
+            await db.commit()
+        except Exception as commit_error:
+            logger.error(
+                "提交待审批 Postback 记录失败：error_type=%s",
+                type(commit_error).__name__,
+            )
+            await db.rollback()
+            return {
+                "success": False,
+                "message": "待审批记录保存失败，请重试",
+                "retryable": True,
+            }
+
+        # 队列记录先提交并释放全局 guard 行锁，再执行 Telegram 网络通知。
+        # 通知慢/超时不能让所有并发入队请求长期等待同一把容量互斥锁。
         if queue_result.get("queued"):
             try:
                 admin_config_result = await db.execute(
@@ -858,25 +879,14 @@ class PostbackProcessor:
                         db=db,
                         commit=False,
                     )
+                    # 通知历史在独立的短事务中提交；队列记录已经安全提交。
+                    await db.commit()
             except Exception as notify_error:
+                await db.rollback()
                 logger.warning(
                     "发送待审批 Postback 通知失败：error_type=%s",
                     type(notify_error).__name__,
                 )
-
-        try:
-            await db.commit()
-        except Exception as commit_error:
-            logger.error(
-                "提交待审批 Postback 记录失败：error_type=%s",
-                type(commit_error).__name__,
-            )
-            await db.rollback()
-            return {
-                "success": False,
-                "message": "待审批记录保存失败，请重试",
-                "retryable": True,
-            }
 
         return {
             "success": True,

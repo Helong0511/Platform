@@ -514,6 +514,24 @@ class PendingPostbackConversion(Base):
 
 
 
+class PendingPostbackQueueGuard(Base):
+    """
+    待审批队列容量检查的 MySQL 单例互斥行。
+
+    所有入队事务在 COUNT pending 记录前锁定 id=1；
+    InnoDB 行锁持有到事务提交，从而串行化并发容量检查。
+    """
+    __tablename__ = "postback_pending_queue_guard"
+
+    id = Column(Integer, primary_key=True, comment="固定单例 ID，唯一允许值为 1")
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+        comment="互斥行创建时间",
+    )
+
+
 class TelegramPostbackApprovalAudit(Base):
     """
     Telegram/Web Postback 审批不可变审计事件。

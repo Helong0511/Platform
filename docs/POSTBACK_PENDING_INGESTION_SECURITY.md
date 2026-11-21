@@ -27,7 +27,7 @@
 | 入队限流 | Redis Lua 原子计数：每来源 IP 每小时 20 次、每天 100 次；全局每小时 500 次、每天 5,000 次 |
 | Redis 故障 | fail-closed，返回可重试 503；不降级为单进程内存计数 |
 | 重复回调 | SHA-256 dedupe_key + MySQL 唯一索引，防止并发重复入队 |
-| 待审批积压 | 当前先查询 pending 数量，达到 10,000 条时暂停新入队；该 COUNT 检查不是原子配额，并发入队可能短暂超过阈值，不能视为严格硬上限 |
+| 待审批积压 | 入队前锁定 MySQL 单例 guard 行，再执行 pending COUNT 与 INSERT；并发入队串行化，达到 10,000 条时返回可重试 503 |
 
 限流 Redis key 使用来源 IP 的 SHA-256 摘要，不把明文 IP 放入 Redis key；同时使用全局计数，降低攻击者轮换来源 IP 绕过限流的风险。
 
@@ -37,9 +37,10 @@
 
 新增迁移：
 
-`sql/migrations/20261121_postback_pending_dedupe.sql`
+- `sql/migrations/20261121_postback_pending_dedupe.sql`：为 `pending_postback_conversions` 增加可空 `dedupe_key` 和唯一索引。历史记录保持 NULL，不执行历史数据去重或删除。MySQL 唯一索引允许多条 NULL，因此只约束新入队记录。
+- `sql/migrations/20261121_postback_pending_queue_guard.sql`：创建 InnoDB 单例互斥表并初始化 `id=1`。每次入队必须先执行 `SELECT ... FOR UPDATE` 锁定该行，再读取 pending 数量并插入记录；行锁持有到入队事务提交。guard 行缺失或迁移未执行时 fail-closed，不会绕过容量保护。
 
-该迁移为 `pending_postback_conversions` 增加可空 `dedupe_key` 和唯一索引。历史记录保持 NULL，不执行历史数据去重或删除。MySQL 唯一索引允许多条 NULL，因此只约束新入队记录。
+容量上限依赖 MySQL/InnoDB 行锁语义；不要在 SQLite 或不支持行级锁的数据库上将其视为并发保护。
 
 部署前必须通过项目迁移 Runner 检查并应用迁移；不要跳过迁移直接发布新代码。迁移清单 SHA-256 已登记在 `app/db/migrations/manifest.py`。
 
@@ -57,6 +58,8 @@ Windows 本机如果没有启动 Redis，非白名单请求也会 fail-closed。
 - Redis 不可用时 fail-closed；
 - Redis Lua 原子限流与超限拒绝；
 - 已存在 dedupe_key 时重复请求不再插入；
+- 待审批容量检查先锁定单例 guard 行，guard 缺失时 fail-closed；
+- 队列达到上限时回滚并返回可重试失败，避免向上游返回 200 后丢弃回调；
 - 请求体大小、字段数、Content-Type 和 UTF-8 JSON/Form 解析边界；
 - Processor 的非白名单路径只创建待审批记录，不进入正式转化流程。
 
@@ -64,6 +67,6 @@ Windows 本机如果没有启动 Redis，非白名单请求也会 fail-closed。
 
 1. `pending_postback_conversions.request_ip` 保存服务端来源 IP，`ip` 保存回调用户/点击 IP；二者用途不同，均需按业务、审计和合规要求确定保留期限。
 2. `postback_conversions.raw_data/ip/devad_id` 与 `pending_postback_conversions.raw_data/ip/request_ip` 的统一 PII 生命周期仍需单独设计。当前没有自动清理这些字段，不应自行设置期限或删除历史数据。
-3. 当前 10,000 条积压保护使用普通 COUNT 查询，不是并发安全的硬配额；需要引入数据库单例配额行锁/原子计数方案并进行真实 MySQL 并发测试后，才能承诺严格上限。
+3. 10,000 条积压保护已改为单例 guard 行锁串行化容量检查；仍需在隔离 MySQL/InnoDB 环境验证多连接并发入队、锁等待超时、死锁回滚与事务释放。
 4. 应在部署环境验证可信代理配置，确保 `get_client_ip()` 只信任受控代理传入的来源 IP，不能直接信任任意客户端可伪造的转发头。
 5. 本次变更的真实 MySQL 迁移、Redis Lua 和端到端测试以 PR CI 结果为准；合并后还需在隔离环境进行部署验收。

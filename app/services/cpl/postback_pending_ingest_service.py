@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.redis_client import get_redis_client
 from app.core.utils import get_app_now_naive
-from app.models.models import PendingPostbackConversion
+from app.models.models import PendingPostbackConversion, PendingPostbackQueueGuard
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +214,17 @@ class PendingPostbackIngestService:
         dedupe_source = "\x1f".join((platform.casefold(), conversion_id.casefold(), event_name.casefold()))
         dedupe_key = hashlib.sha256(dedupe_source.encode("utf-8")).hexdigest()
 
+        # 必须先获取 guard 行锁，再执行任何普通 SELECT。
+        # MySQL REPEATABLE READ 会在首次一致性读时建立快照；先锁后读可避免等待 guard 期间
+        # 已提交的新入队记录落在旧快照之外，造成 COUNT 低估并突破容量上限。
+        guard_result = await db.execute(
+            select(PendingPostbackQueueGuard.id)
+            .where(PendingPostbackQueueGuard.id == 1)
+            .with_for_update()
+        )
+        if guard_result.scalar_one_or_none() is None:
+            raise PendingPostbackQueueError("pending queue capacity guard unavailable")
+
         existing = await db.execute(
             select(PendingPostbackConversion.id).where(
                 or_(
@@ -230,7 +241,8 @@ class PendingPostbackIngestService:
         if existing_id is not None:
             return {"queued": False, "reason": "duplicate", "pending_id": existing_id}
 
-        # 限制全局待审批积压，避免多来源轮换 IP 长期堆积数据库。
+        # guard 锁已持有；并发 enqueue 无法在此事务提交前插入另一条 pending 记录。
+        # 此时一致性读快照建立在获取 guard 之后，不会漏掉此前等待期间已提交的入队。
         pending_count = await db.scalar(
             select(func.count())
             .select_from(PendingPostbackConversion)
