@@ -1339,28 +1339,25 @@ sudo setfacl -R -m u:platform-migrator:rX /data/Platform/app /data/Platform/sql/
 
 ### 36.3 迁移凭据文件
 
-创建 `/etc/platform/migration.env`，权限必须为 root-only：
+要求目标 Ubuntu 的 systemd 版本支持 `LoadCredential=`（systemd 247+；Ubuntu 22.04 的 systemd 249 支持）。凭据文件由 root 管理，systemd 在启动时将内容复制到仅迁移服务可读的只读凭据目录；CLI 从 `CREDENTIALS_DIRECTORY` 读取，不把 DSN 放入服务环境变量。
+
+创建两个 root-only 文件，每个文件只写一行 DSN 原文（不写 `KEY=` 前缀）：
 
 ```bash
-sudo install -o root -g root -m 0600 /dev/null /etc/platform/migration.env
-sudoedit /etc/platform/migration.env
-sudo stat -c '%U:%G %a %n' /etc/platform/migration.env
+sudo install -o root -g root -m 0600 /dev/null /etc/platform/migration-app-database-url
+sudo install -o root -g root -m 0600 /dev/null /etc/platform/migration-database-url
+sudoedit /etc/platform/migration-app-database-url
+sudoedit /etc/platform/migration-database-url
+sudo stat -c '%U:%G %a %n' /etc/platform/migration-app-database-url /etc/platform/migration-database-url
+systemd --version
 ```
 
-文件只包含以下变量（示例为占位格式，不得复制占位密码上线）：
-
-```ini
-PRODUCTION_ENV=production
-DATABASE_URL=mysql+aiomysql://<application_user>:<url_encoded_password>@127.0.0.1:3306/platform?charset=utf8mb4&collation=utf8mb4_0900_ai_ci
-MIGRATION_DATABASE_URL=mysql+aiomysql://<migration_user>:<url_encoded_password>@127.0.0.1:3306/platform?charset=utf8mb4
-SECRET_KEY=<独立生成的至少32字符随机占位密钥>
-```
-
-- `DATABASE_URL` 必须与 API 的 `/data/Platform/.env` 中应用 DSN 指向同一 MySQL endpoint/database，且使用应用运行账号。
-- `MIGRATION_DATABASE_URL` 必须指向同一 endpoint/database，但使用独立迁移账号；Runner 会比较 DSN 与 MySQL 服务端 `CURRENT_USER()`。
-- `SECRET_KEY` 仅用于满足当前 Settings 的生产配置校验；请使用迁移进程专用随机值，不要复用 JWT、RSA、TLS 或其它业务密钥。
+- `migration-app-database-url`：应用运行账号的 MySQL DSN，必须与 API 的 `/data/Platform/.env` 中 `DATABASE_URL` 指向同一 endpoint/database。
+- `migration-database-url`：独立迁移账号的 MySQL DSN，必须指向同一 endpoint/database；Runner 还会比较 MySQL 服务端 `CURRENT_USER()`。
+- 两个文件均必须为 `root:root 0600`；迁移账号不能直接读取源文件，只能通过 systemd 为该 unit 提供的只读 credential directory 读取。
 - 数据库密码必须 URL encode；不得把 DSN、密码或密钥放在 shell 命令行参数、Git、工单或 CI 日志。
-- `/etc/platform/migration.env` 由 systemd 管理器读取并注入迁移进程；应用服务没有该 EnvironmentFile，不应获得迁移 DSN。
+- systemd 不通过 `EnvironmentFile` 或 `Environment=` 传递数据库凭据；CLI 检测到 `CREDENTIALS_DIRECTORY` 后，若凭据文件缺失会 fail-closed，不会回退到环境变量。
+- 手工/CI 运行 CLI 时仍可显式设置 `DATABASE_URL` 与 `MIGRATION_DATABASE_URL`；systemd 生产 unit 不使用此回退路径。
 
 ### 36.4 首次启动与每次发布
 
