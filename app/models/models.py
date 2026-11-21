@@ -8,7 +8,7 @@ from app.models.user import User
 from app.models.client_product import Client, Product, AdData, TBSearchData, ProductAssignment
 from app.models.ad_data_health import AdDataDayBaseline, AdDataHealthAlert, AdDataHealthSettings
 from app.models.system import ScheduledTask, UserAuditLog, CountryInfo, CountryAlias
-from app.models.postback import PostbackConversion, PostbackForwardLog, PostbackForwardQueue, ClientNotificationConfig, ProductNotificationConfig, AdminNotificationConfig, CloakConfig, PostbackNotification, ShortLink, ShortLinkClickSyncBatch, PendingPostbackConversion, TelegramPostbackApprovalAudit
+from app.models.postback import PostbackConversion, PostbackForwardLog, PostbackForwardQueue, ClientNotificationConfig, ProductNotificationConfig, AdminNotificationConfig, CloakConfig, PostbackNotification, ShortLink, ShortLinkClickSyncBatch, PendingPostbackConversion, PendingPostbackQueueGuard, TelegramPostbackApprovalAudit
 from app.models.cpl import Advertiser, Publisher, Offer, OfferPublisherAssignment, Click, OfferCap, OfferDiscount, AdvertiserTest, AffiliateTest
 from app.models.cap_reservation import CapReservation
 from app.models.deduction import ConversionDeductionConfig, ConversionDeductionLog
@@ -38,6 +38,7 @@ __all__ = [
     "ShortLink",
     "ShortLinkClickSyncBatch",
     "PendingPostbackConversion",
+    "PendingPostbackQueueGuard",
     "TelegramPostbackApprovalAudit",
     "Advertiser",
     "Publisher",
