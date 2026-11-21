@@ -184,10 +184,12 @@ def _is_event_key_backfill_statement(statement: str) -> bool:
 async def _run_third_party_report_event_key_backfill(
     connection,
     *,
-    batch_size: int = _EVENT_KEY_BACKFILL_BATCH_SIZE,
+    batch_size: int | None = None,
     max_batches: int | None = None,
 ) -> dict[str, int]:
     """按主键范围分批回填并逐批提交；从 id=0 重扫也能安全跳过已完成行。"""
+    if batch_size is None:
+        batch_size = _EVENT_KEY_BACKFILL_BATCH_SIZE
     if type(batch_size) is not int or not 1 <= batch_size <= 10_000:
         raise ValueError("event_key backfill batch_size must be between 1 and 10000")
     if max_batches is not None and (
