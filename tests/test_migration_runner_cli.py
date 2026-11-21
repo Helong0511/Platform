@@ -96,3 +96,89 @@ def test_status_reads_systemd_credentials_without_environment_fallback(
         "application": "mysql+aiomysql://application_user:secret@127.0.0.1:3306/platform",
     }
     assert "secret" not in capsys.readouterr().out
+
+
+
+def test_status_reports_declared_running_backfill_as_resumable(
+    tmp_path, monkeypatch, capsys
+):
+    from app.db.migrations import runner
+    from app.db.migrations.manifest import MIGRATION_MANIFEST
+
+    (tmp_path / "migration-database-url").write_text(
+        "mysql+aiomysql://migration_user:secret@127.0.0.1:3306/platform",
+        encoding="utf-8",
+    )
+    (tmp_path / "application-database-url").write_text(
+        "mysql+aiomysql://application_user:secret@127.0.0.1:3306/platform",
+        encoding="utf-8",
+    )
+    first, resumable = MIGRATION_MANIFEST[:2]
+    rows = (
+        {
+            "revision": first.revision,
+            "checksum": first.sha256,
+            "status": "applied",
+            "execution_order": 1,
+            "started_at": None,
+            "applied_at": None,
+            "error_type": None,
+        },
+        {
+            "revision": resumable.revision,
+            "checksum": resumable.sha256,
+            "status": "running",
+            "execution_order": 2,
+            "started_at": None,
+            "applied_at": None,
+            "error_type": None,
+        },
+    )
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+
+    async def fake_status(*args, **kwargs):
+        return rows
+
+    monkeypatch.setattr(runner, "read_migration_status", fake_status)
+    assert main(["status"]) == 3
+    output = capsys.readouterr().err
+    assert "RESUMABLE" in output
+    assert "rerun 'python -m app.db.migrations apply'" in output
+
+
+def test_status_keeps_ordinary_running_migration_manual_recovery_only(
+    tmp_path, monkeypatch, capsys
+):
+    from app.db.migrations import runner
+    from app.db.migrations.manifest import MIGRATION_MANIFEST
+
+    (tmp_path / "migration-database-url").write_text(
+        "mysql+aiomysql://migration_user:secret@127.0.0.1:3306/platform",
+        encoding="utf-8",
+    )
+    (tmp_path / "application-database-url").write_text(
+        "mysql+aiomysql://application_user:secret@127.0.0.1:3306/platform",
+        encoding="utf-8",
+    )
+    first = MIGRATION_MANIFEST[0]
+    rows = (
+        {
+            "revision": first.revision,
+            "checksum": first.sha256,
+            "status": "running",
+            "execution_order": 1,
+            "started_at": None,
+            "applied_at": None,
+            "error_type": None,
+        },
+    )
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+
+    async def fake_status(*args, **kwargs):
+        return rows
+
+    monkeypatch.setattr(runner, "read_migration_status", fake_status)
+    assert main(["status"]) == 3
+    output = capsys.readouterr().err
+    assert "manual DDL reconciliation" in output
+    assert "RESUMABLE" not in output
