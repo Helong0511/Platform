@@ -5,6 +5,7 @@
 """
 import logging
 import json
+import re
 from decimal import Decimal
 from typing import Dict, Any, Optional
 from datetime import datetime
@@ -15,6 +16,63 @@ from app.models.models import PostbackConversion, Click, Product
 from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
+
+
+# Postback 原始请求可能包含上游用户标识、认证凭据和联系信息。
+# 这些字段不参与归因快照，禁止原样写入长期业务记录。
+_SENSITIVE_RAW_KEY = re.compile(
+    r"(?:^|[_-])(authorization|auth|token|secret|password|passwd|api[_-]?key|"
+    r"access[_-]?key|cookie|set-cookie|session|email|e-mail|phone|mobile|"
+    r"address|street|ssn|social[_-]?security|card[_-]?number|cvv|bank[_-]?account|"
+    r"ip|ip[_-]?address|idfa|gaid|advertising[_-]?id|device[_-]?id)(?:$|[_-])",
+    re.IGNORECASE,
+)
+_MAX_RAW_DATA_BYTES = 32 * 1024
+_MAX_RAW_DATA_DEPTH = 8
+_MAX_RAW_DATA_ITEMS = 500
+_MAX_RAW_STRING_LENGTH = 4096
+
+
+def sanitize_postback_raw_data(value: Any) -> Any:
+    """递归清理 Postback 原始数据中的敏感字段并限制持久化体积。
+
+    仅用于数据库诊断快照，不改变实际业务解析使用的原始请求。
+    超限时保存明确的省略标记，避免截断 JSON 或意外持久化超大请求。
+    """
+    remaining = [_MAX_RAW_DATA_ITEMS]
+
+    def clean(item: Any, depth: int) -> Any:
+        remaining[0] -= 1
+        if remaining[0] < 0 or depth > _MAX_RAW_DATA_DEPTH:
+            return "[omitted]"
+        if isinstance(item, dict):
+            result = {}
+            for key, child in item.items():
+                key_text = str(key)
+                normalized_key = re.sub(r"(?<!^)(?=[A-Z])", "_", key_text).lower()
+                if _SENSITIVE_RAW_KEY.search(normalized_key):
+                    continue
+                result[key_text[:128]] = clean(child, depth + 1)
+                if remaining[0] <= 0:
+                    break
+            return result
+        if isinstance(item, (list, tuple)):
+            return [clean(child, depth + 1) for child in item[:_MAX_RAW_DATA_ITEMS]]
+        if isinstance(item, str):
+            return item[:_MAX_RAW_STRING_LENGTH]
+        if item is None or isinstance(item, (bool, int, float)):
+            return item
+        # JSON 请求通常不会包含自定义对象；未知对象不应通过 repr 泄漏信息。
+        return "[unsupported value omitted]"
+
+    sanitized = clean(value, 0)
+    encoded = json.dumps(sanitized, ensure_ascii=False, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > _MAX_RAW_DATA_BYTES:
+        return {
+            "_redaction": "payload_exceeds_storage_limit",
+            "_sanitized_size_bytes": len(encoded.encode("utf-8")),
+        }
+    return sanitized
 
 
 class ConversionSaver:
@@ -104,7 +162,7 @@ class ConversionSaver:
         """
         # 归因快照在可信租户/产品归属核验后生成，避免把请求体字段当成可信归属。
         raw_in = normalized_data.get('raw_data')
-        raw_payload = dict(raw_in) if isinstance(raw_in, dict) else None
+        raw_payload = sanitize_postback_raw_data(raw_in) if raw_in is not None else None
         snapshot = None
 
         click_time = None
@@ -138,12 +196,15 @@ class ConversionSaver:
 
         if raw_payload is not None:
             if snapshot:
-                raw_payload['_attribution'] = snapshot
-            raw_data_json = json.dumps(raw_payload)
+                if isinstance(raw_payload, dict):
+                    raw_payload['_attribution'] = snapshot
+                else:
+                    raw_payload = {'_payload': raw_payload, '_attribution': snapshot}
+            raw_data_json = json.dumps(raw_payload, ensure_ascii=False, separators=(",", ":"))
         elif raw_in is not None:
-            raw_data_json = json.dumps(raw_in)
+            raw_data_json = json.dumps(sanitize_postback_raw_data(raw_in), ensure_ascii=False, separators=(",", ":"))
         elif snapshot:
-            raw_data_json = json.dumps({'_attribution': snapshot})
+            raw_data_json = json.dumps({'_attribution': snapshot}, ensure_ascii=False, separators=(",", ":"))
         else:
             raw_data_json = None
 
