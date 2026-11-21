@@ -149,7 +149,12 @@ class PendingPostbackIngestService:
         )
         for field_name, max_length in bounded_fields:
             field_value = normalized.get(field_name)
-            if field_value is not None and len(str(field_value)) > max_length:
+            if field_value is None:
+                continue
+            if isinstance(field_value, (dict, list, tuple, set)):
+                return {"queued": False, "reason": "invalid_fields"}
+            normalized[field_name] = str(field_value).strip()
+            if len(normalized[field_name]) > max_length:
                 return {"queued": False, "reason": "invalid_fields"}
 
         event_value = normalized.get("event_value")
@@ -178,7 +183,9 @@ class PendingPostbackIngestService:
             return {"queued": False, "reason": "duplicate", "pending_id": existing_id}
 
         sanitized = sanitize_postback_raw_data(raw_data)
-        raw_json = json.dumps(sanitized, ensure_ascii=False, separators=(",", ":"))
+        raw_json = json.dumps(
+            sanitized, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+        )
         if len(raw_json.encode("utf-8")) > _PENDING_RAW_DATA_MAX_BYTES:
             return {"queued": False, "reason": "payload_too_large"}
 
