@@ -241,6 +241,13 @@ class PendingPostbackIngestService:
         if existing_id is not None:
             return {"queued": False, "reason": "duplicate", "pending_id": existing_id}
 
+        # guard 锁已持有；并发 enqueue 无法在此事务提交前插入另一条 pending 记录。
+        # 此时一致性读快照建立在获取 guard 之后，不会漏掉此前等待期间已提交的入队。
+        pending_count = await db.scalar(
+            select(func.count())
+            .select_from(PendingPostbackConversion)
+            .where(PendingPostbackConversion.status == "pending")
+        )
         if int(pending_count or 0) >= _PENDING_MAX_OPEN_RECORDS:
             return {"queued": False, "reason": "queue_backlog_full"}
 
