@@ -1,6 +1,6 @@
 """systemd Migration Runner 发布依赖契约测试；不连接系统服务或数据库。"""
-from pathlib import Path
 import re
+from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
