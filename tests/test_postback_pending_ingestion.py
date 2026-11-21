@@ -110,6 +110,44 @@ async def test_duplicate_pending_event_is_not_inserted(monkeypatch, valid_payloa
 
 
 @pytest.mark.asyncio
+async def test_concurrent_duplicate_is_resolved_by_unique_key(monkeypatch, valid_payload):
+    from sqlalchemy.exc import IntegrityError
+
+    class ConcurrentDuplicateDB(_FakeDB):
+        def __init__(self):
+            super().__init__()
+            self.query_count = 0
+
+        async def execute(self, _statement):
+            self.query_count += 1
+            return _ScalarResult(None if self.query_count == 1 else 88)
+
+        async def flush(self):
+            raise IntegrityError("INSERT", {}, Exception("duplicate key"))
+
+    db = ConcurrentDuplicateDB()
+    monkeypatch.setattr(
+        ingest.PendingPostbackIngestService,
+        "_allow_enqueue",
+        staticmethod(_allow),
+    )
+    result = await ingest.PendingPostbackIngestService.enqueue(
+        platform="partner_a",
+        raw_data=valid_payload,
+        request_ip="203.0.113.10",
+        db=db,
+    )
+
+    assert result == {
+        "queued": False,
+        "reason": "duplicate",
+        "pending_id": 88,
+    }
+    assert db.rollback_count == 1
+    assert db.query_count == 2
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "request_ip",
     [None, "", "unknown", "not-an-ip"],
