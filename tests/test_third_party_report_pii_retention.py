@@ -502,3 +502,23 @@ async def test_legacy_unresolved_outbox_is_terminal_for_pii_retention(monkeypatc
     assert "legacy_unresolved" in " ".join(str(value) for value in params.values())
     # 即使历史行状态为 pending，也不要求 status in ('success', 'failed') 才可清理。
     assert "third_party_report_logs.status in" in sql
+
+
+@pytest.mark.asyncio
+async def test_retention_uses_declared_fail_safe_default_without_database_access(monkeypatch):
+    """未配置保留期限时，默认关闭清理且不连接数据库。"""
+    field = type(retention.settings).model_fields.get(
+        "THIRD_PARTY_REPORT_PII_RETENTION_DAYS"
+    )
+    assert field is not None
+    assert field.default == 0
+
+    def fail_open():
+        raise AssertionError("默认关闭时不应连接数据库")
+
+    monkeypatch.setattr(retention, "AsyncSessionLocal", fail_open)
+    result = await retention.scrub_expired_third_party_report_pii()
+
+    assert result["enabled"] is False
+    assert result["retention_days"] == 0
+    assert result["scrubbed"] == 0
