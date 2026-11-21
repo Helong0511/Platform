@@ -124,8 +124,16 @@ class PendingPostbackIngestService:
                 return {"queued": False, "reason": "invalid_fields"}
             normalized = DataNormalizer.normalize(raw_data, platform)
 
-        conversion_id = str(normalized.get("conversion_id") or "").strip()
-        event_name = str(normalized.get("event_name") or "default").strip() or "default"
+        if not isinstance(normalized, dict):
+            return {"queued": False, "reason": "invalid_fields"}
+        conversion_value = normalized.get("conversion_id")
+        event_value_raw = normalized.get("event_name")
+        if isinstance(conversion_value, (dict, list, tuple, set, bytes, bytearray)):
+            return {"queued": False, "reason": "invalid_fields"}
+        if isinstance(event_value_raw, (dict, list, tuple, set, bytes, bytearray)):
+            return {"queued": False, "reason": "invalid_fields"}
+        conversion_id = str(conversion_value or "").strip()
+        event_name = str(event_value_raw or "default").strip() or "default"
         if not conversion_id or len(conversion_id) > 200 or len(event_name) > 100:
             return {"queued": False, "reason": "invalid_fields"}
 
@@ -151,7 +159,7 @@ class PendingPostbackIngestService:
             field_value = normalized.get(field_name)
             if field_value is None:
                 continue
-            if isinstance(field_value, (dict, list, tuple, set)):
+            if isinstance(field_value, (dict, list, tuple, set, bytes, bytearray)):
                 return {"queued": False, "reason": "invalid_fields"}
             normalized[field_name] = str(field_value).strip()
             if len(normalized[field_name]) > max_length:
