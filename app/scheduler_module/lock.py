@@ -271,6 +271,8 @@ async def acquire_task_lock(
             return False, None
 
         _claim_task_lock(task_record, now=db_now_app)
+        # run_count 是单调递增的本次运行代号，用于防止同一 PID/Host 超时后重新抢锁时旧任务误释放新锁。
+        db.info["scheduler_lock_run_count"] = task_record.run_count
         await db.commit()
         logger.debug(
             "任务 %s 成功获取锁（进程ID: %s, 主机: %s）",
@@ -327,7 +329,8 @@ async def release_task_lock(
         task_name: str,
         success: bool = True,
         error_message: Optional[str] = None,
-        result_message: Optional[str] = None
+        result_message: Optional[str] = None,
+        expected_run_count: Optional[int] = None,
 ) -> None:
     """
     释放任务锁并更新执行结果
@@ -359,11 +362,17 @@ async def release_task_lock(
                 # 严格验证锁的所有权（确保是当前进程持有的锁）
                 # 如果锁不属于当前进程，记录警告但不释放锁（防止误释放其他进程的锁）
                 current_pid = get_current_pid()
-                if task_record.last_run_pid != current_pid or task_record.last_run_host != CURRENT_HOST:
+                if (
+                    task_record.last_run_pid != current_pid
+                    or task_record.last_run_host != CURRENT_HOST
+                    or expected_run_count is None
+                    or task_record.run_count != expected_run_count
+                ):
                     logger.warning(
                         f"任务 {task_name} 锁的所有权不匹配，拒绝释放锁。"
                         f"当前进程: {current_pid}@{CURRENT_HOST}, "
-                        f"锁持有者: {task_record.last_run_pid}@{task_record.last_run_host}"
+                        f"锁持有者: {task_record.last_run_pid}@{task_record.last_run_host}, "
+                        f"run_count={task_record.run_count}, expected_run_count={expected_run_count}"
                     )
                     await db.rollback()
                     return  # 不释放其他进程的锁
@@ -393,6 +402,7 @@ async def release_task_lock(
                     # 失败时如果没有提供信息，last_error 保持原值（可能是之前的错误）
 
                 await db.commit()
+                db.info.pop("scheduler_lock_run_count", None)
                 if success:
                     logger.debug(
                         f"任务 {task_name} 锁已释放，执行成功 "
