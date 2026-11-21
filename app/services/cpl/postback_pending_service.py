@@ -175,7 +175,24 @@ class PostbackPendingService:
             for pending in pending_list:
                 try:
                     previous_status = pending.status
-                    existing_conversion_id = await self._pending_conversion_exists(pending, db)
+                    if pending.status != "pending":
+                audit_attempt = {
+                    "pending_conversion_id": pending_id,
+                    "conversion_id": None,
+                    "actor_type": "system_user",
+                    "actor_id": current_user.id,
+                    "source": "web",
+                    "action": "approve",
+                    "outcome": "already_processed",
+                    "previous_status": pending.status,
+                    "new_status": pending.status,
+                }
+                raise_api_exception(
+                    ErrorCode.OPERATION_FAILED,
+                    detail=f"待确认记录已处理，当前状态：{pending.status}",
+                )
+
+            existing_conversion_id = await self._pending_conversion_exists(pending, db)
                     if existing_conversion_id is not None:
                         pending.status = "approved"
                         pending.approved_at = get_app_now_naive()
@@ -400,7 +417,7 @@ class PostbackPendingService:
         try:
             # --- 加载 pending 并校验状态 ---
             result = await db.execute(
-                build_pending_for_update_statement(PendingPostbackConversion, pending_id)
+                build_pending_for_update_statement(PendingPostbackConversion, pending_id, status=None)
             )
             pending = result.scalars().first()
 
@@ -516,7 +533,7 @@ class PostbackPendingService:
         try:
             # --- 加载 pending 并校验状态 ---
             result = await db.execute(
-                build_pending_for_update_statement(PendingPostbackConversion, pending_id)
+                build_pending_for_update_statement(PendingPostbackConversion, pending_id, status=None)
             )
             pending = result.scalars().first()
 
@@ -535,6 +552,23 @@ class PostbackPendingService:
                 raise_api_exception(
                     ErrorCode.NOT_FOUND,
                     detail=f"待确认记录 ID {pending_id} 不存在或已被处理"
+                )
+
+            if pending.status != "pending":
+                audit_attempt = {
+                    "pending_conversion_id": pending_id,
+                    "conversion_id": None,
+                    "actor_type": "system_user",
+                    "actor_id": current_user.id,
+                    "source": "web",
+                    "action": "reject",
+                    "outcome": "already_processed",
+                    "previous_status": pending.status,
+                    "new_status": pending.status,
+                }
+                raise_api_exception(
+                    ErrorCode.OPERATION_FAILED,
+                    detail=f"待确认记录已处理，当前状态：{pending.status}",
                 )
 
             # 更新状态并在同一事务写入审计事件。
