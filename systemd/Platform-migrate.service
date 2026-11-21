@@ -11,8 +11,9 @@ Group=platform-migrator
 WorkingDirectory=/run/platform-migration
 RuntimeDirectory=platform-migration
 RuntimeDirectoryMode=0700
-EnvironmentFile=/etc/platform/migration.env
-# 固定生产模式；迁移服务不从应用工作目录加载 /data/Platform/.env。
+# systemd LoadCredential 将 root 管理的 DSN 文件放入服务专属只读凭据目录。
+LoadCredential=application-database-url:/etc/platform/migration-app-database-url
+LoadCredential=migration-database-url:/etc/platform/migration-database-url
 Environment=PRODUCTION_ENV=production
 Environment=PATH=/data/Platform/venv/bin
 Environment=PYTHONPATH=/data/Platform
