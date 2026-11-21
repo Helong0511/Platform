@@ -528,7 +528,7 @@ class TelegramPostbackApprovalAudit(Base):
     actor_id = Column(String(64), nullable=True, comment="操作者 ID；Telegram User ID 以字符串独立存储")
     source = Column(String(24), nullable=False, comment="操作来源：telegram/web/ip_whitelist")
     action = Column(String(24), nullable=False, comment="动作：approve/reject/auto_approve")
-    outcome = Column(String(24), nullable=False, comment="结果：approved/rejected/already_exists/denied/not_found")
+    outcome = Column(String(24), nullable=False, comment="结果：approved/rejected/already_exists/denied/not_found/already_processed/duplicate_callback")
     previous_status = Column(String(20), nullable=True, comment="操作前待确认记录状态")
     new_status = Column(String(20), nullable=True, comment="操作后待确认记录状态")
     telegram_callback_query_id = Column(String(128), nullable=True, comment="Telegram 回调唯一 ID，用于防止回调重放产生重复审计")
@@ -558,7 +558,7 @@ class TelegramPostbackApprovalAudit(Base):
             name="chk_tg_postback_audit_action",
         ),
         CheckConstraint(
-            "outcome IN ('approved', 'rejected', 'already_exists', 'denied', 'not_found')",
+            "outcome IN ('approved', 'rejected', 'already_exists', 'denied', 'not_found', 'already_processed', 'duplicate_callback')",
             name="chk_tg_postback_audit_outcome",
         ),
         Index(
