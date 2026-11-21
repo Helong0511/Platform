@@ -787,7 +787,7 @@ CI 负责验证 unit 文件契约、CLI credential 读取与文档一致性；�
 
 - 只有该 revision 的显式分批 handler 可以在 ledger 中保留末尾唯一的 `running` 状态，并由下一次 `apply` 安全续跑；执行顺序、checksum、manifest 前缀仍必须完全一致。
 - 普通迁移的 `running`、所有 `failed`、多个 running、running 后还有 applied、checksum 漂移仍然拒绝自动重跑。
-- `status` 命令不会把 running 当作完成；只有 `apply` 对该特定 handler 有续跑权限。批次中断后先确认所有写入方已停止，再重新执行 Migration Runner。
+- `status` 命令会显示 `RESUMABLE` 并以非零状态码退出，明确提示该记录尚未完成；只有 `apply` 对该特定 handler 有续跑权限。批次中断后先确认所有写入方已停止，再重新执行 Migration Runner。普通 running/failed 仍显示人工 DDL 核验阻断。
 - 如果检测到重复事件键，Runner 保留 running。必须先人工核验并修复重复数据，再执行 `apply`；不要手工删除 ledger 行或改 checksum。
 
 ### 37.4 运行边界与证据
