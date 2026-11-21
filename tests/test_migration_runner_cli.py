@@ -66,3 +66,33 @@ def test_systemd_credentials_directory_never_falls_back_to_environment(
     output = capsys.readouterr().err
     assert "migration database credential is required" in output
     assert "must-not-use" not in output
+
+
+def test_status_reads_systemd_credentials_without_environment_fallback(
+    tmp_path, monkeypatch, capsys
+):
+    from app.db.migrations import runner
+
+    (tmp_path / "migration-database-url").write_text(
+        "mysql+aiomysql://migration_user:secret@127.0.0.1:3306/platform",
+        encoding="utf-8",
+    )
+    (tmp_path / "application-database-url").write_text(
+        "mysql+aiomysql://application_user:secret@127.0.0.1:3306/platform",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    captured = {}
+
+    async def fake_status(database_url, application_database_url=None, **kwargs):
+        captured["migration"] = database_url
+        captured["application"] = application_database_url
+        return []
+
+    monkeypatch.setattr(runner, "read_migration_status", fake_status)
+    assert main(["status"]) == 3
+    assert captured == {
+        "migration": "mysql+aiomysql://migration_user:secret@127.0.0.1:3306/platform",
+        "application": "mysql+aiomysql://application_user:secret@127.0.0.1:3306/platform",
+    }
+    assert "secret" not in capsys.readouterr().out
