@@ -20,6 +20,8 @@ class Migration:
     path: str
     sha256: str
     depends_on: tuple[str, ...] = ()
+    # 仅显式登记、经过集成测试的可恢复分批回填；其它 running ledger 仍 fail closed。
+    backfill_handler: str | None = None
 
 
 # 仅允许显式登记的迁移；新增 SQL 文件必须先经过审查并登记 SHA-256。
@@ -33,6 +35,7 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         revision="20261110_third_party_report_event_idempotency",
         path="sql/migrations/20261110_third_party_report_event_idempotency.sql",
         sha256="57c865bea2818b1923260838a9594a6043a0892081c7d68085794f79092f1c26",
+        backfill_handler="third_party_report_event_key",
     ),
     Migration(
         revision="20261111_cap_reservation_ledger",
@@ -132,6 +135,7 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
 
 _REVISION_PATTERN = re.compile(r"^20[0-9]{6}_[a-z0-9_]+$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_ALLOWED_BACKFILL_HANDLERS = {"third_party_report_event_key"}
 
 
 class MigrationManifestError(RuntimeError):
@@ -164,6 +168,10 @@ def validate_manifest(
             raise MigrationManifestError(f"invalid migration revision: {entry.revision!r}")
         if entry.revision in by_revision:
             raise MigrationManifestError(f"duplicate migration revision: {entry.revision}")
+        if entry.backfill_handler is not None and entry.backfill_handler not in _ALLOWED_BACKFILL_HANDLERS:
+            raise MigrationManifestError(
+                f"unsupported migration backfill handler: {entry.backfill_handler!r}"
+            )
         if not _SHA256_PATTERN.fullmatch(entry.sha256):
             raise MigrationManifestError(f"invalid SHA-256 for revision: {entry.revision}")
         if entry.path in seen_paths:
