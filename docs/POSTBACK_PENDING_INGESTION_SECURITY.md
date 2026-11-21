@@ -24,11 +24,11 @@
 | 文件上传 | 不接受 multipart/form-data |
 | 原始快照 | 入队前递归脱敏；存储上限 32 KiB |
 | 敏感字段 | 不在 raw_data 快照中保留邮箱、电话、IP、设备广告标识、UA、凭证等 |
-| 入队限流 | Redis Lua 原子计数：每来源 IP 每小时 20 次、每天 100 次 |
+| 入队限流 | Redis Lua 原子计数：每来源 IP 每小时 20 次、每天 100 次；全局每小时 500 次、每天 5,000 次 |
 | Redis 故障 | fail-closed，返回可重试 503；不降级为单进程内存计数 |
 | 重复回调 | SHA-256 dedupe_key + MySQL 唯一索引，防止并发重复入队 |
 
-限流 Redis key 使用来源 IP 的 SHA-256 摘要，不把明文 IP 放入 Redis key。
+限流 Redis key 使用来源 IP 的 SHA-256 摘要，不把明文 IP 放入 Redis key；同时使用全局计数，降低攻击者轮换来源 IP 绕过限流的风险。
 
 ## 数据库迁移
 
