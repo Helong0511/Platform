@@ -1399,3 +1399,8 @@ sudo systemctl restart Platform-scheduler.service
 ### 36.6 当前结论
 
 systemd 的依赖关系将从“依赖人工记得先迁移”改为“迁移服务失败即阻止业务服务启动”。但生产上线仍受公开仓库凭据轮换/外部迁移、真实大表 DDL 演练、备份恢复、分支保护和目标环境验证阻断。
+
+
+官方依据：
+- systemd 249 `systemd.exec(5)`：`LoadCredential=` 将凭据以服务专属只读目录提供；官方明确不建议使用环境变量传递密码/密钥：https://www.freedesktop.org/software/systemd/man/249/systemd.exec.html
+- systemd 249 `systemd.unit(5)`：`Requires=` 负责强依赖，`After=` 单独负责启动顺序；两者组合才能保证迁移单元先成功完成后再启动业务服务：https://www.freedesktop.org/software/systemd/man/249/systemd.unit.html
