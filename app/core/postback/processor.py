@@ -834,7 +834,8 @@ class PostbackProcessor:
         else:
             message = "Postback 来源 IP 无法确认，未进入待审批队列"
 
-        # 只有新记录才通知管理员，避免重复回调持续制造通知噪声。
+        # 队列记录先提交并释放全局 guard 行锁，再执行 Telegram 网络通知。
+        # 通知慢/超时不能让所有并发入队请求长期等待同一把容量互斥锁。
         if queue_result.get("queued"):
             try:
                 admin_config_result = await db.execute(
@@ -864,6 +865,8 @@ class PostbackProcessor:
                         db=db,
                         commit=False,
                     )
+                    # 通知历史在独立的短事务中提交；队列记录已经安全提交。
+                    await db.commit()
             except Exception as notify_error:
                 logger.warning(
                     "发送待审批 Postback 通知失败：error_type=%s",
