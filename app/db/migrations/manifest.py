@@ -115,7 +115,7 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     Migration(
         revision="20261120_telegram_postback_approval_audit",
         path="sql/migrations/20261120_telegram_postback_approval_audit.sql",
-        sha256="c7c1e9694e7a275163a79065182e5b4bb035ed29309361b19ac556568b3162e9",
+        sha256="8bd43771b0064498733f88bb0a3c0ff34d04ac1a41f57d775be5bb5696902e24",
     ),
 
 )
