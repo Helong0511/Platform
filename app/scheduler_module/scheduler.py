@@ -392,6 +392,7 @@ async def _execute_task_with_lock_internal(
         return
 
     # 确保数据库会话在 finally 中关闭
+    expected_run_count = lock_db.info.get("scheduler_lock_run_count")
     task_record = None
     task_id = None
     # 提前提取审计日志所需属性，避免 release_task_lock 后 ORM 对象过期触发 MissingGreenlet
@@ -440,7 +441,13 @@ async def _execute_task_with_lock_internal(
 
             # 释放锁，标记成功
             # 如果任务提供了result_message，会保存到last_error字段
-            await release_task_lock(lock_db, task_name, success=True, result_message=result_message)
+            await release_task_lock(
+                lock_db,
+                task_name,
+                success=True,
+                result_message=result_message,
+                expected_run_count=expected_run_count,
+            )
             success_msg = f"任务 '{task_name}' 执行成功（耗时: {round(execution_duration, 2)}秒）"
             logger.debug(success_msg)
 
@@ -528,7 +535,8 @@ async def _execute_task_with_lock_internal(
                 lock_db,
                 task_name,
                 success=False,
-                result_message=result_message
+                result_message=result_message,
+                expected_run_count=expected_run_count,
             )
 
             # 记录审计日志（失败）- 使用新的数据库会话避免事务冲突
