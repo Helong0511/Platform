@@ -37,6 +37,9 @@ from app.core.url.url_params_util import (
 
 logger = logging.getLogger(__name__)
 
+# Worker 从 PostbackConversion 与当前目标配置重建请求，不需要在队列重复保存展开后的 PII。
+_FORWARD_QUEUE_REBUILD_MARKER = "[RECONSTRUCTED_AT_RETRY]"
+
 
 def _bind_publisher_target(
     click_association_data: Dict[str, Any],
@@ -684,10 +687,12 @@ class PostbackForwarder:
                 conversion_id=conversion.id,
                 product_id=None,
                 publisher_id=publisher_id,
-                downstream_url=downstream_url,
+                # process_single_task 不读取这些载荷，而是根据 conversion 和目标当前配置重建请求。
+                # 不在长期重试队列重复保存已展开 click_id/IP 等敏感值。
+                downstream_url=_FORWARD_QUEUE_REBUILD_MARKER,
                 request_method=method,
-                request_params=json.dumps(params, ensure_ascii=False) if params else None,
-                request_data=json.dumps(json_data, ensure_ascii=False) if json_data else None,
+                request_params=None,
+                request_data=None,
                 retry_count=0,
                 next_retry_time=get_app_now_naive(),
             )
@@ -749,10 +754,12 @@ class PostbackForwarder:
                 conversion_id=conversion.id,
                 product_id=product_id,
                 publisher_id=None,
-                downstream_url=downstream_url,
+                # process_single_task 不读取这些载荷，而是根据 conversion 和目标当前配置重建请求。
+                # 不在长期重试队列重复保存已展开 click_id/IP 等敏感值。
+                downstream_url=_FORWARD_QUEUE_REBUILD_MARKER,
                 request_method=method,
-                request_params=json.dumps(params, ensure_ascii=False) if params else None,
-                request_data=json.dumps(json_data, ensure_ascii=False) if json_data else None,
+                request_params=None,
+                request_data=None,
                 retry_count=0,
                 next_retry_time=get_app_now_naive(),
             )
