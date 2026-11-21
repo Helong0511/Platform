@@ -16,6 +16,8 @@ _ALLOWED_OUTCOMES = frozenset({
     "already_exists",
     "denied",
     "not_found",
+    "already_processed",
+    "duplicate_callback",
 })
 
 
