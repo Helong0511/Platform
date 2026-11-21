@@ -38,7 +38,7 @@ _SENSITIVE_INLINE_KEY = (
     r"advertising[_-]?id|device[_-]?id"
 )
 _SENSITIVE_INLINE_VALUE = re.compile(
-    rf"""(?i)(?P<prefix>(?:[?&;]|\b)["']?(?:{_SENSITIVE_INLINE_KEY})["']?\s*[=:]\s*["']?)(?P<value>[^&;\s,"'}\]]+)"""
+    rf"""(?i)(?P<prefix>(?:[?&;]|\b)["']?(?:{_SENSITIVE_INLINE_KEY})["']?\s*[=:]\s*["']?)(?P<value>[^&;\s,"']+)"""
 )
 _SENSITIVE_HEADER_LINE = re.compile(
     r"""(?im)^(\s*(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key)\s*:\s*)[^\r\n]*"""
