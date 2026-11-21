@@ -11,10 +11,6 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.postback.handlers import get_handler
-from app.core.postback.savers.conversion_saver import sanitize_postback_raw_data
-from app.core.postback.transformers.normalizer import DataNormalizer
-from app.core.postback.validators.data_validator import DataValidator, validate_payout_value
 from app.core.redis_client import get_redis_client
 from app.core.utils import get_app_now_naive
 from app.models.models import PendingPostbackConversion
@@ -120,6 +116,15 @@ class PendingPostbackIngestService:
             return {"queued": False, "reason": "invalid_payload"}
         if len(encoded_input) > _PENDING_RAW_DATA_MAX_BYTES:
             return {"queued": False, "reason": "payload_too_large"}
+
+        # 延迟导入 Postback 子模块，避免与 app.core.postback.__init__ 的处理器注册发生循环导入。
+        from app.core.postback.handlers import get_handler
+        from app.core.postback.savers.conversion_saver import sanitize_postback_raw_data
+        from app.core.postback.transformers.normalizer import DataNormalizer
+        from app.core.postback.validators.data_validator import (
+            DataValidator,
+            validate_payout_value,
+        )
 
         # 先限流，再执行平台验证和标准化，降低无白名单来源的资源消耗。
         if not await PendingPostbackIngestService._allow_enqueue(source_ip):
