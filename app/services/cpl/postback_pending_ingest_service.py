@@ -29,14 +29,15 @@ local ip_hourly = redis.call('INCR', KEYS[1])
 if ip_hourly == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
 local ip_daily = redis.call('INCR', KEYS[2])
 if ip_daily == 1 then redis.call('EXPIRE', KEYS[2], ARGV[2]) end
+-- 已超过单 IP 上限时立即拒绝，不让单一来源消耗全局配额。
+if ip_hourly > tonumber(ARGV[3]) or ip_daily > tonumber(ARGV[4]) then
+    return 0
+end
 local global_hourly = redis.call('INCR', KEYS[3])
 if global_hourly == 1 then redis.call('EXPIRE', KEYS[3], ARGV[1]) end
 local global_daily = redis.call('INCR', KEYS[4])
 if global_daily == 1 then redis.call('EXPIRE', KEYS[4], ARGV[2]) end
-if ip_hourly > tonumber(ARGV[3])
-    or ip_daily > tonumber(ARGV[4])
-    or global_hourly > tonumber(ARGV[5])
-    or global_daily > tonumber(ARGV[6]) then
+if global_hourly > tonumber(ARGV[5]) or global_daily > tonumber(ARGV[6]) then
     return 0
 end
 return 1
