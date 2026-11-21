@@ -24,7 +24,7 @@ def test_migration_unit_is_fail_closed_and_uses_separate_os_identity():
     assert "RemainAfterExit=yes" in unit
     assert "User=platform-migrator" in unit
     assert "Group=platform-migrator" in unit
-    assert "LoadCredential=application-database-url:/etc/platform/migration-app-database-url" in unit
+    assert "LoadCredential=application-database-url:/etc/platform/application-database-url" in unit
     assert "LoadCredential=migration-database-url:/etc/platform/migration-database-url" in unit
     assert "EnvironmentFile=" not in unit
     assert "WorkingDirectory=/run/platform-migration" in unit
