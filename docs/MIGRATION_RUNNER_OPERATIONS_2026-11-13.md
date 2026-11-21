@@ -759,7 +759,7 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
 
 - `Platform-migrate.service` 使用独立 `platform-migrator` OS 用户，`Type=oneshot`、`RemainAfterExit=yes`；依次运行离线 `validate`、数据库 `apply`、只读 `status`。
 - Backend 和 Scheduler 对迁移 unit 使用 `Requires=` + `After=`。缺少迁移 unit、凭据文件或迁移失败时，业务服务 fail-closed。
-- 迁移 DSN 单独放在 root-only `/etc/platform/migration.env`，绝不写入应用 `.env`；应用 DSN 在迁移专用文件中作为对照值提供。迁移服务只读加载 `app/`、`sql/migrations/`、`venv/`，不获得项目密钥目录访问权。
+- 迁移与应用 DSN 分别放在 root-only `/etc/platform/migration-database-url` 和 `/etc/platform/migration-app-database-url`，由 systemd `LoadCredential=` 注入只读凭据目录；不使用 `EnvironmentFile` 或环境变量传递密码，CLI 直接读取 credential 文件。迁移服务只读加载 `app/`、`sql/migrations/`、`venv/`，不获得项目密钥目录访问权，也不加载应用 `.env` 或读取 JWT/RSA/TLS 密钥。
 - 迁移服务的 `RuntimeDirectory` 工作目录与 `PYTHONPATH` 分离，避免 Pydantic Settings 从应用工作目录意外加载完整 `.env`。
 - 每次部署需停止 API/Scheduler，更新代码后使用 `systemctl restart Platform-migrate.service`（oneshot 已 active 时不能只用 start），成功后再重启 Backend，最后启动 Scheduler。
 - 安装 ACL、独立用户、root-only EnvironmentFile、首次启动、发布顺序和失败恢复步骤详见 `docs/DEPLOYMENT_READINESS_RUNBOOK_2026-11.md` 第 36 节。
