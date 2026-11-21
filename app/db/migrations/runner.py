@@ -195,7 +195,18 @@ async def _run_third_party_report_event_key_backfill(
     ):
         raise ValueError("max_batches must be a positive integer when provided")
 
-    last_id = 0
+    minimum_result = await connection.execute(
+        text("SELECT MIN(id) FROM third_party_report_logs")
+    )
+    try:
+        minimum_id = minimum_result.scalar_one_or_none()
+    finally:
+        minimum_result.close()
+    if minimum_id is None:
+        await connection.commit()
+        return {"batches": 0, "scanned_rows": 0, "updated_rows": 0, "last_id": 0}
+
+    last_id = int(minimum_id) - 1
     scanned_rows = 0
     updated_rows = 0
     batches = 0
@@ -686,6 +697,7 @@ async def _apply_with_locked_connection(
                         migration.revision,
                         type(exc).__name__,
                     )
+                    await connection.rollback()
                     raise MigrationExecutionError(
                         f"分批迁移中断，账本保留 running；确认写入方已停止后可安全续跑：{migration.revision}"
                     ) from exc
