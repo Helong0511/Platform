@@ -1,7 +1,5 @@
 """非白名单 Postback 待审批入队安全测试。"""
 import json
-from types import SimpleNamespace
-
 import pytest
 
 from app.services.cpl import postback_pending_ingest_service as ingest
@@ -55,9 +53,11 @@ async def test_valid_non_whitelisted_postback_is_sanitized_and_queued(
     monkeypatch, valid_payload
 ):
     db = _FakeDB()
-    monkeypatch.setattr(ingest.PendingPostbackIngestService, "_allow_enqueue", staticmethod(
-        lambda _ip: _allow()
-    ))
+    monkeypatch.setattr(
+        ingest.PendingPostbackIngestService,
+        "_allow_enqueue",
+        staticmethod(_allow),
+    )
 
     result = await ingest.PendingPostbackIngestService.enqueue(
         platform="partner_a",
