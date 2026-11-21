@@ -938,7 +938,7 @@ async def test_runner_resumes_interrupted_event_key_backfill_in_batches(
                 cursor.execute(
                     "SELECT COUNT(*) FROM third_party_report_logs WHERE event_key IS NOT NULL"
                 )
-                assert cursor.fetchone()[0] == 1000
+                assert cursor.fetchone()[0] == 1150
                 cursor.execute(
                     "SELECT status FROM platform_schema_migrations WHERE revision = %s",
                     (migrations[0].revision,),
@@ -1173,7 +1173,7 @@ async def test_runner_applies_historical_event_key_migration_with_batched_backfi
                 assert cursor.fetchone() == ("NO", "varchar(64)")
 
                 cursor.execute(
-                    "SELECT INDEX_NAME, NON_UNIQUE, "
+                    "SELECT INDEX_NAME, MAX(NON_UNIQUE), "
                     "GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) "
                     "FROM information_schema.STATISTICS "
                     "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'third_party_report_logs' "
