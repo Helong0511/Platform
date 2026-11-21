@@ -138,7 +138,9 @@ def _application_database_url(database: str) -> str:
 
 def _write_migrations(tmp_path: Path, definitions):
     migrations = []
-    for revision, sql in definitions:
+    for definition in definitions:
+        revision, sql = definition[:2]
+        backfill_handler = definition[2] if len(definition) > 2 else None
         relative = f"sql/migrations/{revision}.sql"
         target = tmp_path / relative
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -148,6 +150,7 @@ def _write_migrations(tmp_path: Path, definitions):
                 revision=revision,
                 path=relative,
                 sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
+                backfill_handler=backfill_handler,
             )
         )
     return tuple(migrations)
@@ -829,4 +832,149 @@ async def test_runner_executes_with_database_scoped_migration_least_privileges(
             cursor.execute(f"DROP DATABASE IF EXISTS `{external_database}`")
             cursor.execute("DROP DATABASE IF EXISTS migration_privilege_database_must_be_denied")
         root.close()
+        _drop_database(database)
+
+
+
+@pytest.mark.asyncio
+async def test_runner_resumes_interrupted_event_key_backfill_in_batches(
+    tmp_path: Path, monkeypatch
+):
+    """真实 MySQL 验证分批提交、running ledger 续跑和幂等回填。"""
+    import app.db.migrations.runner as migration_runner
+
+    database = _create_database()
+    try:
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "CREATE TABLE third_party_report_logs ("
+                    "id INT NOT NULL PRIMARY KEY AUTO_INCREMENT, "
+                    "source VARCHAR(50) NOT NULL, "
+                    "adsid VARCHAR(500) NOT NULL, "
+                    "event VARCHAR(50) NOT NULL, "
+                    "conversion_id VARCHAR(255) NULL, "
+                    "event_key VARCHAR(64) NULL"
+                    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+                )
+                cursor.executemany(
+                    "INSERT INTO third_party_report_logs "
+                    "(source, adsid, event, conversion_id, event_key) "
+                    "VALUES (%s, %s, %s, %s, NULL)",
+                    [
+                        (
+                            "meta",
+                            f"ad-{index}",
+                            "ViewContent" if index % 2 == 0 else "Purchase",
+                            f"conversion-{index}",
+                        )
+                        for index in range(1, 2501)
+                    ],
+                )
+
+        update_sql = """
+        UPDATE third_party_report_logs
+        SET event_key = SHA2(
+            CONCAT(
+                CHAR_LENGTH(source), ':', source,
+                CHAR_LENGTH(adsid), ':', adsid,
+                CHAR_LENGTH(event), ':', event,
+                CHAR_LENGTH(CASE WHEN CAST(event AS BINARY) = CAST('ViewContent' AS BINARY)
+                    THEN '' ELSE COALESCE(conversion_id, '') END), ':',
+                CASE WHEN CAST(event AS BINARY) = CAST('ViewContent' AS BINARY)
+                    THEN '' ELSE COALESCE(conversion_id, '') END
+            ),
+            256
+        )
+        WHERE event_key IS NULL;
+        """
+        migrations = _write_migrations(
+            tmp_path,
+            [
+                (
+                    "20261110_event_key_backfill_test",
+                    update_sql,
+                    "third_party_report_event_key",
+                )
+            ],
+        )
+        url = _database_url(database)
+        app_url = _application_database_url(database)
+        monkeypatch.setattr(migration_runner, "_EVENT_KEY_BACKFILL_BATCH_SIZE", 500)
+        original_backfill = migration_runner._run_third_party_report_event_key_backfill
+
+        async def interrupt_after_two_batches(connection):
+            summary = await original_backfill(
+                connection, batch_size=500, max_batches=2
+            )
+            assert summary["batches"] == 2
+            assert summary["updated_rows"] == 1000
+            raise RuntimeError("synthetic batch interruption")
+
+        monkeypatch.setattr(
+            migration_runner,
+            "_run_third_party_report_event_key_backfill",
+            interrupt_after_two_batches,
+        )
+        with pytest.raises(MigrationExecutionError, match="running"):
+            await apply_migrations(
+                url,
+                application_database_url=app_url,
+                repository_root=tmp_path,
+                migrations=migrations,
+            )
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM third_party_report_logs WHERE event_key IS NOT NULL"
+                )
+                assert cursor.fetchone()[0] == 1000
+                cursor.execute(
+                    "SELECT status FROM platform_schema_migrations WHERE revision = %s",
+                    (migrations[0].revision,),
+                )
+                assert cursor.fetchone()[0] == "running"
+
+        # 从 running 状态重新 apply：重扫已完成的 PK 范围，但只更新 NULL 行。
+        monkeypatch.setattr(
+            migration_runner,
+            "_run_third_party_report_event_key_backfill",
+            original_backfill,
+        )
+        assert await apply_migrations(
+            url,
+            application_database_url=app_url,
+            repository_root=tmp_path,
+            migrations=migrations,
+        ) == (migrations[0].revision,)
+
+        with _root_connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COUNT(*), COUNT(event_key), COUNT(DISTINCT event_key) "
+                    "FROM third_party_report_logs"
+                )
+                assert cursor.fetchone() == (2500, 2500, 2500)
+                cursor.execute(
+                    "SELECT event_key FROM third_party_report_logs WHERE id = 1"
+                )
+                first_event_key = cursor.fetchone()[0]
+                expected_payload = "4:meta4:ad-18:ViewContent0:"
+                assert first_event_key == hashlib.sha256(
+                    expected_payload.encode("utf-8")
+                ).hexdigest()
+                cursor.execute(
+                    "SELECT status FROM platform_schema_migrations WHERE revision = %s",
+                    (migrations[0].revision,),
+                )
+                assert cursor.fetchone()[0] == "applied"
+
+        assert await apply_migrations(
+            url,
+            application_database_url=app_url,
+            repository_root=tmp_path,
+            migrations=migrations,
+        ) == ()
+    finally:
         _drop_database(database)
