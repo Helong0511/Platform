@@ -20,13 +20,14 @@ python -m app.db.migrations apply
 
 1. MySQL 版本至少 8.0.16。
 2. 连接字符集为 utf8mb4。
-3. `MIGRATION_DATABASE_URL` 必须显式设置为 `mysql+aiomysql` DSN。
+3. `MIGRATION_DATABASE_URL` 必须显式设置为 `mysql+aiomysql` DSN；systemd 生产服务通过 `LoadCredential` 读取，不使用环境变量传递密码。
 4. 应用数据库也必须为 MySQL，且与迁移 DSN 指向同一数据库名、同一服务器端点（TCP 主机/端口或 Unix Socket）；迁移账号用户名必须不同于应用运行账号。systemd 生产部署通过 `LoadCredential` 分别提供应用 DSN 与迁移 DSN；手工/CI 环境可通过 `DATABASE_URL` / `SQLALCHEMY_DATABASE_URI` 和 `MIGRATION_DATABASE_URL` 提供，任何不匹配均 fail closed。
 5. 目标数据库必须由受控 provisioning 预先创建并选定。完整基线导入时使用 MySQL 客户端显式指定目标库，例如 `mysql --default-character-set=utf8mb4 --database=<目标库> < sql/platform.sql`；基线文件不再自行 CREATE DATABASE 或 USE。Runner 只执行 `app/db/migrations/manifest.py` 登记的增量 migration，不会导入 `sql/platform.sql`。
 
 示例仅展示变量形式，不要把真实密码提交到仓库或写入命令历史：
 
 ```bash
+export DATABASE_URL='mysql+aiomysql://<application_user>:<password>@<db-host>:3306/platform?charset=utf8mb4'
 export MIGRATION_DATABASE_URL='mysql+aiomysql://<migration_user>:<password>@<db-host>:3306/platform?charset=utf8mb4'
 python -m app.db.migrations validate
 python -m app.db.migrations status
@@ -218,7 +219,7 @@ MySQL 8.0.29 之前，INSTANT ADD COLUMN 只能追加到表尾；8.0.29 起才�
 
 - `app/bootstrap/lifespan.py` 启动先执行只读 `verify_schema_revision` 与 ORM schema drift 检查，之后才调用 `init_db()`；当前 lifespan 中未见调用 `create_database()` 或 `Base.metadata.create_all()`。
 - `app/core/database.py` 的旧兼容入口 `create_tables()` 已明确抛出异常，提示使用独立 Migration Runner；该入口本身不会执行 DDL。
-- `app/db/migrations/runner.py` 的 `apply_migrations()` 强制要求独立的 `MIGRATION_DATABASE_URL` 与应用 DSN，检查数据库名、MySQL endpoint 和用户名不同；并在单一物理连接持有 GET_LOCK 直到 RELEASE_LOCK。
+- `app/db/migrations/runner.py` 的 `apply_migrations()` 强制要求显式传入独立迁移 DSN 与应用 DSN，检查数据库名、MySQL endpoint 和用户名不同；并在单一物理连接持有 GET_LOCK 直到 RELEASE_LOCK。systemd CLI 从只读凭据文件读取这两个值，手工/CI CLI 才使用环境变量。
 - `tests/test_mysql_runtime_privileges.py` 在 GitHub Actions loopback 临时 MySQL 中创建专用 runtime 用户，仅授予目标 schema 的 SELECT/INSERT/UPDATE/DELETE；验证管理员 bootstrap、两个 Worker 并发首次初始化、重复初始化，以及 CREATE/ALTER/CREATE INDEX/DROP 被拒绝。
 
 ### 15.2 尚未封闭的旧入口
