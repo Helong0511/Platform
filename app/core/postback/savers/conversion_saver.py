@@ -38,13 +38,12 @@ _SENSITIVE_INLINE_KEY = (
     r"advertising[_-]?id|device[_-]?id"
 )
 _SENSITIVE_INLINE_VALUE = re.compile(
-    rf"(?i)(?P<prefix>(?:[?&;]|\\b)[\\"']?(?:{_SENSITIVE_INLINE_KEY})"
-    rf"[\\"']?\\s*[=:]\\s*[\\"']?)(?P<value>[^&;\\s,\\\"'}}\\]]+)"
+    rf"""(?i)(?P<prefix>(?:[?&;]|\b)["']?(?:{_SENSITIVE_INLINE_KEY})["']?\s*[=:]\s*["']?)(?P<value>[^&;\s,"'}\]]+)"""
 )
 _SENSITIVE_HEADER_LINE = re.compile(
-    r"(?im)^(\\s*(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key)\\s*:\\s*)[^\\r\\n]*"
+    r"""(?im)^(\s*(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key)\s*:\s*)[^\r\n]*"""
 )
-_BEARER_VALUE = re.compile(r"(?i)\\bBearer\\s+[^\\s,;]+")
+_BEARER_VALUE = re.compile(r"(?i)\bBearer\s+[^\s,;]+")
 
 
 def sanitize_postback_raw_data(value: Any) -> Any:
@@ -93,8 +92,8 @@ def sanitize_postback_raw_data(value: Any) -> Any:
                     return encoded_nested
 
             text = item[:_MAX_RAW_STRING_LENGTH]
-            text = _SENSITIVE_HEADER_LINE.sub(r"\\1[redacted]", text)
-            text = _SENSITIVE_INLINE_VALUE.sub(r"\\1[redacted]", text)
+            text = _SENSITIVE_HEADER_LINE.sub(r"\1[redacted]", text)
+            text = _SENSITIVE_INLINE_VALUE.sub(r"\1[redacted]", text)
             text = _BEARER_VALUE.sub("Bearer [redacted]", text)
             return text
         if item is None or isinstance(item, (bool, int, float)):
