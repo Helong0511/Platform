@@ -31,11 +31,13 @@ _MAX_RAW_DATA_BYTES = 32 * 1024
 _MAX_RAW_DATA_DEPTH = 8
 _MAX_RAW_DATA_ITEMS = 500
 _MAX_RAW_STRING_LENGTH = 4096
+# 支持 user_email、client_ip、phone_number 等复合参数名，避免 URL/form 文本绕过结构化字段脱敏。
 _SENSITIVE_INLINE_KEY = (
-    r"authorization|proxy[_-]?authorization|auth|access[_-]?token|refresh[_-]?token|"
-    r"token|secret|password|passwd|api[_-]?key|email|e-mail|phone|mobile|"
-    r"ip(?:[_-]?address)?|session(?:[_-]?id)?|cookie|set-cookie|idfa|gaid|"
-    r"advertising[_-]?id|device[_-]?id"
+    r"(?:[A-Za-z0-9.-]*[_-])?(?:authorization|proxy[_-]?authorization|auth|"
+    r"access[_-]?token|refresh[_-]?token|token|secret|password|passwd|"
+    r"api[_-]?key|email|e-mail|phone|mobile|ip(?:[_-]?address)?|"
+    r"session(?:[_-]?id)?|cookie|set-cookie|idfa|gaid|"
+    r"advertising[_-]?id|device[_-]?id)(?:[A-Za-z0-9.-]*)"
 )
 _SENSITIVE_INLINE_VALUE = re.compile(
     rf"""(?i)(?P<prefix>(?:[?&;]|\b)["']?(?:{_SENSITIVE_INLINE_KEY})["']?\s*[=:]\s*["']?)(?P<value>[^&;\s,"']+)"""
