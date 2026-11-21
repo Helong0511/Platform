@@ -26,7 +26,10 @@ from sqlalchemy.future import select
 from app.core.errors import ErrorCode
 from app.core.pagination import calculate_pagination_offset
 from app.core.exceptions import raise_api_exception
-from app.core.postback.forwarder import _lock_conversion_for_queue_enqueue
+from app.core.postback.forwarder import (
+    FORWARD_QUEUE_REBUILD_MARKER,
+    _lock_conversion_for_queue_enqueue,
+)
 from app.core.utils import get_app_now_naive, parse_date_to_app_timezone
 from app.models.models import (
     PostbackForwardLog,
@@ -255,9 +258,9 @@ class PostbackForwardLogService:
                 conversion_id=conversion.id,
                 publisher_id=publisher_id,
                 product_id=product_id,
-                # Worker 会根据 conversion 和目标当前配置重新构建请求；
-                # 此处只保留原日志中的模板地址，不复制历史请求参数/请求体 PII。
-                downstream_url=forward_log.downstream_url,
+                # Worker 根据 conversion 和目标当前配置重建请求；
+                # 历史日志中的 URL 可能是已展开的个人信息载荷，不能复制到重试队列。
+                downstream_url=FORWARD_QUEUE_REBUILD_MARKER,
                 request_method=forward_log.request_method or "GET",
                 request_data=None,
                 request_params=None,
