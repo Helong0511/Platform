@@ -62,9 +62,8 @@ Windows 本机如果没有启动 Redis，非白名单请求也会 fail-closed。
 
 ## 尚未完成的上线前事项
 
-1. `pending_postback_conversions.request_ip` 和独立 `ip` 字段仍保存来源 IP；需要按业务、审计和合规要求确定保留期限。
+1. `pending_postback_conversions.request_ip` 保存服务端来源 IP，`ip` 保存回调用户/点击 IP；二者用途不同，均需按业务、审计和合规要求确定保留期限。
 2. `postback_conversions.raw_data/ip/devad_id` 与 `pending_postback_conversions.raw_data/ip/request_ip` 的统一 PII 生命周期仍需单独设计。当前没有自动清理这些字段，不应自行设置期限或删除历史数据。
 3. 当前 10,000 条积压保护使用普通 COUNT 查询，不是并发安全的硬配额；需要引入数据库单例配额行锁/原子计数方案并进行真实 MySQL 并发测试后，才能承诺严格上限。
-4.
-5. 应在部署环境验证可信代理配置，确保 `get_client_ip()` 只信任受控代理传入的来源 IP，不能直接信任任意客户端可伪造的转发头。
-6. 本次变更的真实 MySQL 迁移、Redis Lua 和端到端测试以 PR CI 结果为准；合并后还需在隔离环境进行部署验收。
+4. 应在部署环境验证可信代理配置，确保 `get_client_ip()` 只信任受控代理传入的来源 IP，不能直接信任任意客户端可伪造的转发头。
+5. 本次变更的真实 MySQL 迁移、Redis Lua 和端到端测试以 PR CI 结果为准；合并后还需在隔离环境进行部署验收。
