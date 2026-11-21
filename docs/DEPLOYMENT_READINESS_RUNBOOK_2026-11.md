@@ -1296,3 +1296,115 @@ PR #1 仍保持 Open / Draft；不合并 main、不部署。凭据安全专项�
 - QueryBuilder 通用分页在现有业务排序后追加主键降序，覆盖基于仓储分页的列表，同时保留受控内部导出页大小。
 - 每日汇总 SQL 和内存排序路径此前已有分组维度稳定键；国家列表按唯一国家代码排序，斗篷配置与定时任务按主键排序，保持现有确定性排序。
 - 新增 QueryBuilder SQL 排序回归断言；等待 PR Full Audit CI 与 Emergency Security CI。
+
+
+---
+
+## 36. 2026-11-21：systemd 强制 Migration Runner 门禁
+
+> 本节描述仓库中的 Ubuntu systemd 门禁配置及部署步骤。代码合并和 CI 通过只证明仓库实现；部署人员仍必须在目标主机安装三个 unit、准备凭据文件并完成 systemd/ACL/MySQL 验收。未完成时不得宣称生产发布链路已经生效。
+
+### 36.1 服务依赖与执行顺序
+
+- 新增 `systemd/Platform-migrate.service`，使用独立 Linux 用户 `platform-migrator`，类型为 `oneshot`，成功后 `RemainAfterExit=yes`。
+- 执行顺序固定为：离线 `validate` → 数据库 `apply` → 只读 `status`。任一步骤非零退出，迁移服务失败。
+- `Platform-backend.service` 和 `Platform-scheduler.service` 均设置 `Requires=Platform-migrate.service` 与 `After=Platform-migrate.service`；迁移失败时，依赖的业务 Worker 不启动。
+- 迁移服务不读取应用工作目录的 `.env`：工作目录使用 systemd 创建的 `/run/platform-migration`，代码通过 `PYTHONPATH=/data/Platform` 只读加载；`MIGRATION_DATABASE_URL` 不得写入应用 `.env`。
+- 迁移服务只读访问 `/data/Platform`，不需要 Redis，不运行 Gunicorn，不创建管理员、不启动 Scheduler，也不自动执行生产操作以外的其它任务。
+
+### 36.2 Ubuntu 一次性安装
+
+先确认仓库发布目录、虚拟环境和服务账号路径正确；以下命令不会执行数据库迁移：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y acl
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin platform-migrator
+sudo install -d -o root -g root -m 0700 /etc/platform
+sudo install -d -o root -g root -m 0755 /etc/systemd/system
+sudo install -o root -g root -m 0644 systemd/Platform-migrate.service /etc/systemd/system/Platform-migrate.service
+sudo install -o root -g root -m 0644 systemd/Platform-backend.service /etc/systemd/system/Platform-backend.service
+sudo install -o root -g root -m 0644 systemd/Platform-scheduler.service /etc/systemd/system/Platform-scheduler.service
+```
+
+只授予迁移用户读取运行代码、虚拟环境和迁移 SQL 的 ACL；不要递归授权整个项目目录，否则可能使仓库内的密钥文件或应用 `.env` 对迁移用户可读：
+
+```bash
+sudo setfacl -m u:platform-migrator:--x /data/Platform
+sudo setfacl -m u:platform-migrator:--x /data/Platform/sql
+sudo setfacl -R -m u:platform-migrator:rX /data/Platform/app /data/Platform/sql/migrations /data/Platform/venv
+```
+
+部署后使用 `namei -l`、`getfacl` 核验每级目录的遍历权限；确认 `platform-migrator` 无权读取 `/data/Platform/.env`、`/data/Platform/keys`、`/data/Platform/secrets` 和 Nginx 私钥。每次更换 release/虚拟环境后重新核验 ACL。
+
+### 36.3 迁移凭据文件
+
+要求目标 Ubuntu 的 systemd 版本支持 `LoadCredential=`（systemd 247+；Ubuntu 22.04 的 systemd 249 支持）。凭据文件由 root 管理，systemd 在启动时将内容复制到仅迁移服务可读的只读凭据目录；CLI 从 `CREDENTIALS_DIRECTORY` 读取，不把 DSN 放入服务环境变量。
+
+创建两个 root-only 文件，每个文件只写一行 DSN 原文（不写 `KEY=` 前缀）：
+
+```bash
+sudo install -o root -g root -m 0600 /dev/null /etc/platform/application-database-url
+sudo install -o root -g root -m 0600 /dev/null /etc/platform/migration-database-url
+sudoedit /etc/platform/application-database-url
+sudoedit /etc/platform/migration-database-url
+sudo stat -c '%U:%G %a %n' /etc/platform/application-database-url /etc/platform/migration-database-url
+systemd --version
+```
+
+- `application-database-url`：应用运行账号的 MySQL DSN，是 Backend、Scheduler 与 Migration Runner 共用的唯一权威来源；Ubuntu 生产环境必须从 `/data/Platform/.env` 删除 `DATABASE_URL` 与 `SQLALCHEMY_DATABASE_URI`，避免把密码通过 EnvironmentFile/dotenv 注入环境变量。Windows/本地开发仍可在 `.env` 中配置 `DATABASE_URL`。
+- `migration-database-url`：独立迁移账号的 MySQL DSN，必须指向同一 endpoint/database；Runner 还会比较 MySQL 服务端 `CURRENT_USER()`。
+- 两个文件均必须为 `root:root 0600`；Backend、Scheduler 与迁移账号都不能直接读取源文件，只能通过各自 systemd unit 提供的只读 credential directory 读取。三个 unit 从同一个 application DSN 源文件加载，避免维护两份应用连接串。
+- 数据库密码必须 URL encode；不得把 DSN、密码或密钥放在 shell 命令行参数、Git、工单或 CI 日志。
+- systemd 不通过 `EnvironmentFile` 或 `Environment=` 传递数据库凭据；Backend/Scheduler 使用 `UnsetEnvironment` 清除 DSN 环境变量，应用配置和 CLI 检测到 `CREDENTIALS_DIRECTORY` 后强制读取 credential 文件，缺失时 fail-closed，不会回退到 `.env` 或环境变量。
+- 手工/CI 运行 CLI 时仍可显式设置 `DATABASE_URL` 与 `MIGRATION_DATABASE_URL`；Windows/本地应用配置也仍支持 `.env`。systemd 生产 unit 不使用这些回退路径。
+
+### 36.4 首次启动与每次发布
+
+安装 unit 后：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable Platform-backend.service Platform-scheduler.service
+sudo systemctl start Platform-backend.service Platform-scheduler.service
+```
+
+首次启动时，systemd 会先执行迁移 oneshot，成功完成 `validate/apply/status` 后才允许业务服务启动。
+
+每次发布必须先停止业务 Worker，替换并核验同一版本代码/虚拟环境，再执行：
+
+```bash
+sudo systemctl stop Platform-scheduler.service Platform-backend.service
+sudo systemctl restart Platform-migrate.service
+sudo systemctl status Platform-migrate.service --no-pager
+sudo journalctl -u Platform-migrate.service -n 200 --no-pager
+sudo systemctl restart Platform-backend.service
+sudo systemctl restart Platform-scheduler.service
+```
+
+- `RemainAfterExit=yes` 意味着成功的 oneshot 会保持 active；发布时必须用 `restart` 重新执行迁移，不能只用 `start`。
+- 上述命令必须逐条检查退出码；迁移 restart 失败时，严禁继续启动 Backend/Scheduler。
+- 迁移成功后再启动 Backend，最后启动 Scheduler；确认两个服务的 Schema Gate 均通过。
+- 不允许在迁移尚未完成时新旧 API/Worker 混跑；维护窗口、排空请求和备份恢复点必须按具体业务迁移要求执行。
+
+### 36.5 失败处理和权限验收
+
+- `validate` 失败：停止发布，修复 manifest/SQL 文件或发布包，不连接数据库。
+- `apply` 失败、超时或主机重启：保留 ledger 与当前 schema；检查 `running/failed` revision、已执行 DDL、MySQL 错误日志和 schema diff。未经人工核验与 forward-fix 审批，不得重跑。
+- `status` 失败：不启动任何业务 Worker；核查 ledger 是否缺 revision、checksum 漂移或 pending 状态。
+- 用迁移账号执行 `SHOW GRANTS`，核实仅有目标 schema 所需权限；拒绝全局权限、`GRANT OPTION`、用户管理权限及跨 schema 授权。应用账号仍不得有 CREATE/ALTER/DROP。
+- 迁移服务的 `User` 与 API 的 `www-data` 不同；确认迁移用户不能读取应用 `.env`、仓库凭据目录和 Nginx TLS 私钥。
+- 此设计仅实现服务依赖和本机权限边界；尚未在目标 Ubuntu 主机验证 systemd 版本、ACL、MySQL 连接、真实迁移耗时、备份恢复或失败告警。CI 通过不等于生产部署验收。
+
+### 36.6 当前结论
+
+仓库中的 Backend 与 Scheduler 已通过 `Requires=Platform-migrate.service` 和 `After=Platform-migrate.service` 固化启动门禁；迁移服务依次执行离线校验、增量迁移和只读 ledger 状态核验，任一步失败都阻止业务 Worker 启动。数据库 DSN 由 systemd `LoadCredential` 提供，不放入进程环境变量。
+
+这仍然只是代码和 CI 层面的门禁：目标 Ubuntu 尚须安装 unit、创建专用用户、设置最小 ACL、配置两个 root-only DSN 源文件，并完成 systemd 版本、MySQL 授权、迁移耗时和失败恢复验收。`TimeoutStartSec=2h` 是当前默认上限；正式部署前必须根据等价数据量的隔离演练测得的最长迁移时间加安全余量调整，不能把 2 小时视为已经验证的生产 SLA。
+
+生产上线仍受公开仓库凭据轮换/外部迁移、真实大表 DDL 演练、备份恢复、分支保护和目标环境验证阻断。
+
+
+官方依据：
+- systemd 249 `systemd.exec(5)`：`LoadCredential=` 将凭据以服务专属只读目录提供；官方明确不建议使用环境变量传递密码/密钥：https://www.freedesktop.org/software/systemd/man/249/systemd.exec.html
+- systemd 249 `systemd.unit(5)`：`Requires=` 负责强依赖，`After=` 单独负责启动顺序；两者组合才能保证迁移单元先成功完成后再启动业务服务：https://www.freedesktop.org/software/systemd/man/249/systemd.unit.html

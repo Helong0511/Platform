@@ -1,6 +1,7 @@
 [Unit]
 Description=Platform Backend Scheduler (single worker, scheduled tasks only)
-After=network.target mysql.service redis.service Platform-backend.service
+After=network.target mysql.service redis.service Platform-migrate.service Platform-backend.service
+Requires=Platform-migrate.service
 Wants=mysql.service redis.service
 
 [Service]
@@ -10,6 +11,8 @@ Group=www-data
 WorkingDirectory=/data/Platform
 Environment="PATH=/data/Platform/venv/bin"
 EnvironmentFile=/data/Platform/.env
+LoadCredential=application-database-url:/etc/platform/application-database-url
+UnsetEnvironment=DATABASE_URL SQLALCHEMY_DATABASE_URI
 # 以下变量必须写在 EnvironmentFile 之后，覆盖 .env 中的 ENABLE_SCHEDULER=false
 Environment="PRODUCTION_ENV=production"
 Environment="GUNICORN_ROLE=scheduler"

@@ -20,13 +20,14 @@ python -m app.db.migrations apply
 
 1. MySQL 版本至少 8.0.16。
 2. 连接字符集为 utf8mb4。
-3. `MIGRATION_DATABASE_URL` 必须显式设置为 `mysql+aiomysql` DSN。
-4. 应用数据库也必须为 MySQL，且与迁移 DSN 指向同一数据库名、同一服务器端点（TCP 主机/端口或 Unix Socket）；迁移账号用户名必须不同于应用运行账号。CLI 会从应用设置读取 `SQLALCHEMY_DATABASE_URI` 并在任何不匹配时 fail closed。
+3. `MIGRATION_DATABASE_URL` 必须显式设置为 `mysql+aiomysql` DSN；systemd 生产服务通过 `LoadCredential` 读取，不使用环境变量传递密码。
+4. 应用数据库也必须为 MySQL，且与迁移 DSN 指向同一数据库名、同一服务器端点（TCP 主机/端口或 Unix Socket）；迁移账号用户名必须不同于应用运行账号。systemd 生产部署通过 `LoadCredential` 分别提供应用 DSN 与迁移 DSN；手工/CI 环境可通过 `DATABASE_URL` / `SQLALCHEMY_DATABASE_URI` 和 `MIGRATION_DATABASE_URL` 提供，任何不匹配均 fail closed。
 5. 目标数据库必须由受控 provisioning 预先创建并选定。完整基线导入时使用 MySQL 客户端显式指定目标库，例如 `mysql --default-character-set=utf8mb4 --database=<目标库> < sql/platform.sql`；基线文件不再自行 CREATE DATABASE 或 USE。Runner 只执行 `app/db/migrations/manifest.py` 登记的增量 migration，不会导入 `sql/platform.sql`。
 
 示例仅展示变量形式，不要把真实密码提交到仓库或写入命令历史：
 
 ```bash
+export DATABASE_URL='mysql+aiomysql://<application_user>:<password>@<db-host>:3306/platform?charset=utf8mb4'
 export MIGRATION_DATABASE_URL='mysql+aiomysql://<migration_user>:<password>@<db-host>:3306/platform?charset=utf8mb4'
 python -m app.db.migrations validate
 python -m app.db.migrations status
@@ -67,7 +68,7 @@ python -m app.db.migrations apply
 
 - API/Scheduler lifespan 已移除 `create_database()` 与 `Base.metadata.create_all()`，启动时只读检查 migration revision 和 ORM 表/列是否存在。
 - 旧的 `create_tables()` / `create_database()` 兼容入口目前均 fail-closed，不再执行 DDL；仍需全仓搜索并核验所有遗留调用点、脚本入口和间接调用。
-- Migration Runner 已实现并有隔离 MySQL 集成测试，但当前 `Platform-backend.service` 与 `Platform-scheduler.service` 均未配置独立 migration oneshot 依赖，也没有 `ExecStartPre` 调用 Runner；发布流程必须显式先执行 `python -m app.db.migrations validate`、`status`、`apply`，再启动 API/Scheduler。仍需把该顺序固化为可审计的部署单元/发布流程，并验证迁移账号权限边界。
+- 本条记录 2026-11-21 PR #88 之前的 main 基线：当时 `Platform-backend.service` 与 `Platform-scheduler.service` 尚未依赖独立 migration oneshot。PR #88（本分支）补入 `Platform-migrate.service`、Backend/Scheduler 强依赖及 systemd LoadCredential；在 PR 合并、unit 安装并完成目标 Ubuntu 验收前，仍不得认为发布顺序门禁已在生产生效。
 - 新库基线导入、旧库升级、备份恢复、worker pause/resume 和失败人工恢复演练仍未完成。
 
 因此：当前命令和 CI 仅证明隔离测试环境中的 Runner 与只读启动 gate 行为；未完成真实新库/旧库部署演练前，不能在生产执行，也不能宣称上线就绪。
@@ -218,7 +219,7 @@ MySQL 8.0.29 之前，INSTANT ADD COLUMN 只能追加到表尾；8.0.29 起才�
 
 - `app/bootstrap/lifespan.py` 启动先执行只读 `verify_schema_revision` 与 ORM schema drift 检查，之后才调用 `init_db()`；当前 lifespan 中未见调用 `create_database()` 或 `Base.metadata.create_all()`。
 - `app/core/database.py` 的旧兼容入口 `create_tables()` 已明确抛出异常，提示使用独立 Migration Runner；该入口本身不会执行 DDL。
-- `app/db/migrations/runner.py` 的 `apply_migrations()` 强制要求独立的 `MIGRATION_DATABASE_URL` 与应用 DSN，检查数据库名、MySQL endpoint 和用户名不同；并在单一物理连接持有 GET_LOCK 直到 RELEASE_LOCK。
+- `app/db/migrations/runner.py` 的 `apply_migrations()` 强制要求显式传入独立迁移 DSN 与应用 DSN，检查数据库名、MySQL endpoint 和用户名不同；并在单一物理连接持有 GET_LOCK 直到 RELEASE_LOCK。systemd CLI 从只读凭据文件读取这两个值，手工/CI CLI 才使用环境变量。
 - `tests/test_mysql_runtime_privileges.py` 在 GitHub Actions loopback 临时 MySQL 中创建专用 runtime 用户，仅授予目标 schema 的 SELECT/INSERT/UPDATE/DELETE；验证管理员 bootstrap、两个 Worker 并发首次初始化、重复初始化，以及 CREATE/ALTER/CREATE INDEX/DROP 被拒绝。
 
 ### 15.2 尚未封闭的旧入口
@@ -712,19 +713,19 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
   - `20261121_postback_pending_dedupe`
   - `20261121_postback_pending_queue_guard`
 - 迁移文件集合必须与 manifest 完全一致；每个 revision 的 SQL 文件以 SHA-256 固定，路径必须严格匹配 revision，依赖必须指向更早 revision。未登记 SQL、缺失文件、checksum 漂移和非法依赖均拒绝执行。
-- Runner 只接受显式 `MIGRATION_DATABASE_URL` 的 `mysql+aiomysql` DSN；要求应用与迁移 DSN 指向同一 MySQL endpoint/database，但认证账号不同，并进一步比较服务端 `CURRENT_USER()`。
+- Runner 只接受显式 `mysql+aiomysql` 迁移 DSN；CLI 在 systemd 下从 `CREDENTIALS_DIRECTORY/migration-database-url` 与 `application-database-url` 读取，在手工/CI 下才兼容显式环境变量。要求应用与迁移 DSN 指向同一 MySQL endpoint/database，但认证账号不同，并进一步比较服务端 `CURRENT_USER()`。
 - Runner 要求 MySQL 8.0.16 或更高版本、utf8mb4 session；通过同一物理连接持有数据库级 `GET_LOCK`，直到 `RELEASE_LOCK`。每个 revision 先持久化 `running`，再逐语句执行；成功后置为 `applied`。
 - MySQL DDL 隐式提交，出现 `running` / `failed` 时必须人工核验实际 schema 后恢复；Runner 不做猜测性自动重跑。Ledger 的字段、索引、CHECK 约束及 CHECK 实际拒绝非法写入的行为均有结构/语义校验。
 - `validate` 是离线检查；`status` 是只读 ledger 检查；`apply` 才会执行 DDL。三者不能互相替代。
 
-### 35.2 当前 systemd 发布链路仍有缺口
+### 35.2 systemd 发布链路的 main 基线缺口（本节复核时）
 
 已直接检查当前两个 unit 文件：
 
 - `systemd/Platform-backend.service` 的启动命令是 Gunicorn；其 `ExecStartPre` 仅创建/设置日志目录和文件，没有调用 Migration Runner。
 - `systemd/Platform-scheduler.service` 同样只启动 Gunicorn；其 `After=` 包含 backend service，但没有依赖独立 migration oneshot service。
-- 因此，Runner 虽已实现，systemd 仍未强制“迁移成功后才能启动 API/Scheduler”。当前正确操作顺序必须由发布人员显式保证：备份并确认恢复点 → 离线 validate → 只读 status → 受控 apply → 再启动/重启 backend 与 scheduler → 验证两个 Worker 的只读 Schema Gate。
-- 后续应设计独立的 `platform-migrate.service`（或等效发布流水线步骤），使用独立数据库迁移身份；不能简单让 API 运行账号获得 CREATE/ALTER/DROP 权限，也不能把迁移密码写入命令行或 Git 跟踪文件。迁移 unit 的 OS 身份、EnvironmentFile 权限、systemd ordering、超时、失败告警和审计日志都需要测试后再启用。
+- 上述结论描述本节复核时的 main 基线，不代表后续分支已自动生效。PR `fix/systemd-migration-gate-2026-11-21` 正在补入独立 oneshot unit、Backend/Scheduler 的 `Requires` + `After`、隔离 OS 用户及 root-only 凭据文件；具体设计和部署步骤见本文件第 36 节。只有该 PR 合并、unit 安装并完成目标 Ubuntu 验收后，才能将此缺口标记关闭。
+- 不得简单让 API 运行账号获得 CREATE/ALTER/DROP 权限，也不得把迁移密码写入命令行或 Git 跟踪文件。迁移 unit 的 OS 身份、LoadCredential 源文件权限、systemd ordering、超时、失败告警和审计日志必须经 CI 与目标主机验证。
 
 ### 35.3 当前启动行为与权限边界
 
@@ -745,9 +746,23 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
 
 - **公开仓库凭据文件仍被 Git 跟踪**：当前 main tree 仍包含 `keys/private_key.pem`、`nginx/btfrx.online/client.btfrx.online.key`、`secrets/gam-23347342743.json`、`secrets/gam-23348711678.json`；Git tree 对应 mode 均为 `100644`。本次没有读取这些文件内容。必须由凭据所有者先轮换/吊销，完成仓库外运行时迁移与线上验证，再移除跟踪并规划公开历史清理；仅增加 .gitignore 不会移除已跟踪对象。
 - **生产 DDL 风险尚未关闭**：Runner 最低版本为 MySQL 8.0.16；部分 migration 使用 `ADD COLUMN ... AFTER ...`。必须在与目标 MySQL 小版本、表结构、数据量和索引规模相符的隔离副本验证实际 DDL 算法、耗时、metadata lock、磁盘峰值和复制延迟。不得仅凭 CI 临时库通过就直接在生产大表执行。
-- **迁移服务尚未纳入 systemd 强制依赖**：发布前需要可审计地保证 migration job 成功后才启动 API/Scheduler。
+- **目标 Ubuntu 的迁移门禁安装与验收尚未完成**：PR #88 提交了独立 unit、Backend/Scheduler 强依赖和 LoadCredential 配置；合并后仍须在目标主机安装 unit、创建专用用户、配置凭据/ACL 并完成 systemd 启动失败演练，才能关闭此项。
 - **分支保护尚无可验证证据**：必须在 GitHub 设置并验证 main 的 PR 审核、必需 CI、禁止 force-push、禁止删除规则。
 - **生产备份恢复与故障恢复尚未演练**：至少完成全量备份恢复、迁移中断后的人工核验/forward-fix、应用回滚兼容性和恢复点记录。
 - **目标环境实测尚未完成**：尚未连接生产服务器/数据库；目标 MySQL 版本、sql_mode、账号授权、字符集、现有 schema revision 和真实数据规模均需在授权的隔离/生产发布流程中核验。
 
 结论：当前 Migration Runner 具备较完整的安全执行机制和隔离 CI 证据，但仓库仍不能据此标记为生产上线就绪。以上阻断项关闭前，不执行生产 migration、不删除仍在使用的密钥文件、不清理公开历史。
+
+
+## 36. 2026-11-21：systemd Migration Runner 强制依赖设计
+
+当前服务文件已纳入独立迁移 unit 设计（以 PR `fix/systemd-migration-gate-2026-11-21` 为准）：
+
+- `Platform-migrate.service` 使用独立 `platform-migrator` OS 用户，`Type=oneshot`、`RemainAfterExit=yes`；依次运行离线 `validate`、数据库 `apply`、只读 `status`。
+- Backend 和 Scheduler 对迁移 unit 使用 `Requires=` + `After=`。缺少迁移 unit、凭据文件或迁移失败时，业务服务 fail-closed。
+- 迁移与应用 DSN 分别放在 root-only `/etc/platform/migration-database-url` 和 `/etc/platform/application-database-url`，由 systemd `LoadCredential=` 注入只读凭据目录；不使用 `EnvironmentFile` 或环境变量传递密码，CLI 直接读取 credential 文件。迁移服务只读加载 `app/`、`sql/migrations/`、`venv/`，不获得项目密钥目录访问权，也不加载应用 `.env` 或读取 JWT/RSA/TLS 密钥。Backend/Scheduler 仍加载其它非数据库应用配置，但通过 `UnsetEnvironment` 清除 `DATABASE_URL` / `SQLALCHEMY_DATABASE_URI`，由同一 LoadCredential 文件提供数据库连接。
+- 迁移服务的 `RuntimeDirectory` 工作目录与 `PYTHONPATH` 分离，避免 Pydantic Settings 从应用工作目录意外加载完整 `.env`。
+- 每次部署需停止 API/Scheduler，更新代码后使用 `systemctl restart Platform-migrate.service`（oneshot 已 active 时不能只用 start），成功后再重启 Backend，最后启动 Scheduler。
+- 安装 ACL、独立用户、root-only LoadCredential 源文件、首次启动、发布顺序和失败恢复步骤详见 `docs/DEPLOYMENT_READINESS_RUNBOOK_2026-11.md` 第 36 节。
+
+CI 负责验证 unit 文件契约、CLI credential 读取与文档一致性；无论 PR 是否合并，都不代表目标 Ubuntu 已安装 unit、已验证 ACL/凭据权限或已执行数据库迁移。

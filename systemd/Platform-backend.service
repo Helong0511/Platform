@@ -1,7 +1,7 @@
 [Unit]
 Description=Platform Backend API Service
-After=network.target mysql.service redis.service
-Requires=mysql.service
+After=network.target mysql.service redis.service Platform-migrate.service
+Requires=mysql.service Platform-migrate.service
 
 [Service]
 Type=simple
@@ -10,6 +10,8 @@ Group=www-data
 WorkingDirectory=/data/Platform
 Environment="PATH=/data/Platform/venv/bin"
 EnvironmentFile=/data/Platform/.env
+LoadCredential=application-database-url:/etc/platform/application-database-url
+UnsetEnvironment=DATABASE_URL SQLALCHEMY_DATABASE_URI
 # 以下变量写在 EnvironmentFile 之后，确保覆盖 .env
 Environment="PRODUCTION_ENV=production"
 Environment="GUNICORN_ROLE=api"

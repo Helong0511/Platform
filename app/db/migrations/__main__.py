@@ -1,6 +1,7 @@
 """迁移工具命令行入口。
 
 validate 仅校验仓库内迁移清单和 SQL 文件，不创建数据库连接、不执行 SQL。
+systemd 部署通过 LoadCredential 注入 DSN 文件；手工/CI 环境可使用显式环境变量。
 """
 from __future__ import annotations
 
@@ -12,6 +13,27 @@ from pathlib import Path
 
 from app.db.migrations.manifest import MigrationManifestError, validate_manifest
 from app.db.migrations.sql_parser import MigrationSQLParseError, split_mysql_statements
+
+
+def _read_credential(credential_name: str, *environment_names: str) -> str:
+    """优先读取 systemd LoadCredential 文件；存在凭据目录时禁止回退到环境变量。"""
+    credentials_directory = os.getenv("CREDENTIALS_DIRECTORY", "").strip()
+    if credentials_directory:
+        credential_path = Path(credentials_directory) / credential_name
+        try:
+            return credential_path.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            return ""
+        except OSError as exc:
+            raise RuntimeError(
+                f"无法读取 systemd credential：{credential_name}"
+            ) from exc
+
+    for environment_name in environment_names:
+        value = os.getenv(environment_name, "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _validate() -> int:
@@ -35,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.db.migrations")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("validate", help="validate manifest and SQL statement boundaries (offline)")
-    subparsers.add_parser("apply", help="apply pending migrations using MIGRATION_DATABASE_URL")
+    subparsers.add_parser("apply", help="apply pending migrations using a protected migration credential")
     subparsers.add_parser("status", help="read migration ledger status without changing schema")
     args = parser.parse_args(argv)
 
@@ -47,18 +69,31 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     if args.command == "status":
-        database_url = os.getenv("MIGRATION_DATABASE_URL", "").strip()
+        try:
+            database_url = _read_credential(
+                "migration-database-url", "MIGRATION_DATABASE_URL"
+            )
+            application_database_url = _read_credential(
+                "application-database-url",
+                "DATABASE_URL",
+                "SQLALCHEMY_DATABASE_URI",
+            )
+        except RuntimeError as exc:
+            print(f"Migration status failed: {exc}", file=sys.stderr)
+            return 1
         if not database_url:
-            print("Migration status failed: MIGRATION_DATABASE_URL is required.", file=sys.stderr)
+            print("Migration status failed: migration database credential is required.", file=sys.stderr)
+            return 2
+        if not application_database_url:
+            print("Migration status failed: application database credential is required.", file=sys.stderr)
             return 2
         try:
-            from app.core.config import settings
             from app.db.migrations.runner import read_migration_status
 
             rows = asyncio.run(
                 read_migration_status(
                     database_url,
-                    application_database_url=str(settings.SQLALCHEMY_DATABASE_URI),
+                    application_database_url=application_database_url,
                 )
             )
             if not rows:
@@ -77,8 +112,6 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
                 return 3
-
-            from pathlib import Path
 
             from app.db.migrations.ledger import validate_ledger_rows
             from app.db.migrations.manifest import validate_manifest
@@ -105,18 +138,31 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     if args.command == "apply":
-        database_url = os.getenv("MIGRATION_DATABASE_URL", "").strip()
+        try:
+            database_url = _read_credential(
+                "migration-database-url", "MIGRATION_DATABASE_URL"
+            )
+            application_database_url = _read_credential(
+                "application-database-url",
+                "DATABASE_URL",
+                "SQLALCHEMY_DATABASE_URI",
+            )
+        except RuntimeError as exc:
+            print(f"Migration failed: {exc}", file=sys.stderr)
+            return 1
         if not database_url:
-            print("Migration failed: MIGRATION_DATABASE_URL is required; application DSN is never used.", file=sys.stderr)
+            print("Migration failed: migration database credential is required; application DSN is never used.", file=sys.stderr)
+            return 2
+        if not application_database_url:
+            print("Migration failed: application database credential is required.", file=sys.stderr)
             return 2
         try:
-            from app.core.config import settings
             from app.db.migrations.runner import apply_migrations
 
             completed = asyncio.run(
                 apply_migrations(
                     database_url,
-                    application_database_url=str(settings.SQLALCHEMY_DATABASE_URI),
+                    application_database_url=application_database_url,
                 )
             )
             print(f"Migration apply completed: {len(completed)} revision(s)")

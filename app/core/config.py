@@ -13,18 +13,21 @@ import secrets
 import os
 import logging
 import platform
+from pathlib import Path
 
 # 获取日志记录器
 logger = logging.getLogger(__name__)
 
 # 加载环境变量
 # 单测/CI 由 conftest 注入环境变量，不读取 .env，避免本地生产配置干扰
+# systemd 注入的 CREDENTIALS_DIRECTORY 是可信路径，不能被 .env 覆盖。
+_SYSTEMD_CREDENTIALS_DIRECTORY = os.getenv("CREDENTIALS_DIRECTORY", "").strip()
 if os.getenv("UNIT_TEST") != "1":
-    # 使用 override=True 确保 .env 文件中的值覆盖系统环境变量
+    # 本地/Windows 保留 .env 优先；systemd 存在凭据目录时改为系统环境优先
     # 如果无法读取 .env 文件（如权限问题），静默失败
     # 因为 systemd 可能已经通过 EnvironmentFile 加载了环境变量
     try:
-        load_dotenv(override=True)
+        load_dotenv(override=not bool(_SYSTEMD_CREDENTIALS_DIRECTORY))
     except (PermissionError, IOError, OSError) as e:
         # 如果无法读取 .env 文件，记录警告但继续运行
         # 这通常发生在 systemd 服务中，因为环境变量可能已经通过 EnvironmentFile 加载
@@ -35,6 +38,16 @@ if os.getenv("UNIT_TEST") != "1":
             # 开发环境：给出更明确的提示
             logger.warning(f"无法读取 .env 文件: {e}")
             logger.info("如果使用 systemd 服务，请确保 .env 文件权限正确：sudo chown www-data:www-data /data/Platform/.env && sudo chmod 640 /data/Platform/.env")
+
+# systemd LoadCredential 是生产数据库 DSN 的唯一来源；清除 dotenv 对数据库 DSN 的环境注入。
+# Settings 字段校验会直接从 CREDENTIALS_DIRECTORY 读取 application-database-url。
+if _SYSTEMD_CREDENTIALS_DIRECTORY:
+    os.environ["CREDENTIALS_DIRECTORY"] = _SYSTEMD_CREDENTIALS_DIRECTORY
+    os.environ.pop("DATABASE_URL", None)
+    os.environ.pop("SQLALCHEMY_DATABASE_URI", None)
+else:
+    # 不允许普通 .env 文件伪造 systemd 专属凭据目录。
+    os.environ.pop("CREDENTIALS_DIRECTORY", None)
 
 
 def _default_db_pool_size() -> int:
@@ -390,7 +403,7 @@ class Settings(BaseSettings):
 
     # ====== 数据库配置 ======
     # 数据库连接 URI 必须由部署环境显式注入；仓库不提供任何可连接的默认账号。
-    # 本地开发、CI、测试和生产均通过 DATABASE_URL / SQLALCHEMY_DATABASE_URI 配置。
+    # Windows/本地开发和 CI 使用显式 DATABASE_URL；Ubuntu systemd 生产从 LoadCredential 读取。
     SQLALCHEMY_DATABASE_URI: str = Field(
         default="",
         alias="DATABASE_URL",
@@ -400,7 +413,24 @@ class Settings(BaseSettings):
     @field_validator("SQLALCHEMY_DATABASE_URI", mode="before")
     @classmethod
     def validate_database_uri(cls, v):
-        """拒绝缺失数据库 DSN，避免回退到源码内置账号或密码。"""
+        """systemd 下优先且强制读取 LoadCredential；本地/CI 才使用显式 DSN。"""
+        credentials_directory = os.getenv("CREDENTIALS_DIRECTORY", "").strip()
+        if credentials_directory:
+            credential_path = Path(credentials_directory) / "application-database-url"
+            try:
+                credential_value = credential_path.read_text(encoding="utf-8").strip()
+            except FileNotFoundError as exc:
+                raise ValueError(
+                    "systemd application database credential is required"
+                ) from exc
+            except OSError as exc:
+                raise ValueError(
+                    "unable to read systemd application database credential"
+                ) from exc
+            if not credential_value:
+                raise ValueError("systemd application database credential is empty")
+            return credential_value
+
         explicit_database_url = (
             os.getenv("DATABASE_URL") or os.getenv("SQLALCHEMY_DATABASE_URI")
         )
@@ -1168,8 +1198,8 @@ if settings.is_production:
         logger.error("生产环境必须设置 SECRET_KEY 环境变量")
 
     # 验证数据库连接
-    if not os.getenv("DATABASE_URL"):
-        logger.error("生产环境必须设置 DATABASE_URL 环境变量")
+    if not settings.SQLALCHEMY_DATABASE_URI:
+        logger.error("生产环境必须通过 LoadCredential 或 DATABASE_URL 显式配置数据库连接")
 
     # 验证管理员密码
     if not os.getenv("FIRST_SUPERUSER_PASSWORD") or settings.FIRST_SUPERUSER_PASSWORD == "admin123":
