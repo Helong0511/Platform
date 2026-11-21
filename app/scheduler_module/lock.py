@@ -345,12 +345,12 @@ async def release_task_lock(
     max_retries = 3
     for attempt in range(1, max_retries + 1):
         try:
-            # 使用行锁确保原子性更新
-            # 注意：这里使用同一个 db 会话，已经在 acquire_task_lock 中获取了锁
-            # 所以不需要再次获取锁，直接查询即可
+            # acquire_task_lock 的事务已提交并释放行锁；释放前必须重新锁行。
+            # 否则旧 Worker 的一致性读可能看到旧 PID 并覆盖新 Worker 的锁状态。
             result = await db.execute(
                 select(ScheduledTask)
                 .where(ScheduledTask.task_name == task_name)
+                .with_for_update(of=ScheduledTask)
             )
             task_record = result.scalar_one_or_none()
 
