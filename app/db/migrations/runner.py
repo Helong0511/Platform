@@ -208,7 +208,7 @@ async def _run_third_party_report_event_key_backfill(
     batch_size: int | None = None,
     max_batches: int | None = None,
 ) -> dict[str, int]:
-    """按主键范围分批回填并逐批提交；从 id=0 重扫也能安全跳过已完成行。"""
+    """按主键范围分批回填并逐批提交；从 MIN(id) 重扫也能安全跳过已完成行。"""
     if batch_size is None:
         batch_size = _EVENT_KEY_BACKFILL_BATCH_SIZE
     if type(batch_size) is not int or not 1 <= batch_size <= 10_000:
@@ -287,11 +287,10 @@ async def _run_third_party_report_event_key_backfill(
 
         if batches == 1 or batches % 10 == 0:
             logger.info(
-                "Migration event_key batch progress: batches=%s scanned=%s updated=%s last_id=%s",
+                "Migration event_key batch progress: batches=%s scanned=%s updated=%s",
                 batches,
                 scanned_rows,
                 updated_rows,
-                last_id,
             )
         if max_batches is not None and batches >= max_batches:
             break
