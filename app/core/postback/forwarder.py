@@ -38,7 +38,7 @@ from app.core.url.url_params_util import (
 logger = logging.getLogger(__name__)
 
 # Worker 从 PostbackConversion 与当前目标配置重建请求，不需要在队列重复保存展开后的 PII。
-_FORWARD_QUEUE_REBUILD_MARKER = "[RECONSTRUCTED_AT_RETRY]"
+FORWARD_QUEUE_REBUILD_MARKER = "[RECONSTRUCTED_AT_RETRY]"
 
 
 def _bind_publisher_target(
@@ -689,7 +689,7 @@ class PostbackForwarder:
                 publisher_id=publisher_id,
                 # process_single_task 不读取这些载荷，而是根据 conversion 和目标当前配置重建请求。
                 # 不在长期重试队列重复保存已展开 click_id/IP 等敏感值。
-                downstream_url=_FORWARD_QUEUE_REBUILD_MARKER,
+                downstream_url=FORWARD_QUEUE_REBUILD_MARKER,
                 request_method=method,
                 request_params=None,
                 request_data=None,
@@ -756,7 +756,7 @@ class PostbackForwarder:
                 publisher_id=None,
                 # process_single_task 不读取这些载荷，而是根据 conversion 和目标当前配置重建请求。
                 # 不在长期重试队列重复保存已展开 click_id/IP 等敏感值。
-                downstream_url=_FORWARD_QUEUE_REBUILD_MARKER,
+                downstream_url=FORWARD_QUEUE_REBUILD_MARKER,
                 request_method=method,
                 request_params=None,
                 request_data=None,
