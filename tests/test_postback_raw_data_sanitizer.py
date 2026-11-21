@@ -52,6 +52,9 @@ def test_redacts_ip_and_device_identifiers_from_raw_snapshot():
         "gaid": "gaid-value",
         "advertising_id": "ad-id",
         "device_id": "device-id",
+        "devad_id": "devad-value",
+        "user_agent": "private-agent",
+        "ua": "private-ua",
         "click_id": "click-1",
     })
 
@@ -135,7 +138,8 @@ def test_redacts_composite_sensitive_query_and_form_parameter_names():
     raw = (
         "https://tracker.example/callback?user_email=user@example.com"
         "&client_ip=203.0.113.20&phone_number=%2B1-555-0123"
-        "&x_user_token=compound-secret&click_id=click-200"
+        "&x_user_token=compound-secret&devad_id=device-ad-secret"
+        "&user_agent=private-agent&click_id=click-200"
     )
 
     result = sanitize_postback_raw_data(raw)
@@ -144,5 +148,7 @@ def test_redacts_composite_sensitive_query_and_form_parameter_names():
     assert "203.0.113.20" not in result
     assert "%2B1-555-0123" not in result
     assert "compound-secret" not in result
+    assert "device-ad-secret" not in result
+    assert "private-agent" not in result
     assert "click_id=click-200" in result
     assert "[redacted]" in result
