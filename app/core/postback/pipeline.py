@@ -60,47 +60,43 @@ async def step_associate_click(ctx: PostbackPipelineContext) -> Optional[Dict[st
 
 async def step_validate_offer_status(ctx: PostbackPipelineContext) -> bool:
     """
-    流水线步骤：校验关联的 Offer 是否仍处于激活状态。
+    校验关联 Offer 的实时激活状态；无法确认时必须 fail-closed。
 
-    Offer 下线（is_active=False 或 status != 'Active'）后，不再处理新转化，
-    避免 Cap 占用、通知发送和数据污染。
-
-    Args:
-        ctx: 流水线上下文
-
-    Returns:
-        True 表示 Offer 有效，可继续处理；False 表示 Offer 已下线，应跳过。
+    无 Offer ID 的直连 Postback 保持原有兼容行为。存在 Offer ID 时，
+    每次都从数据库读取状态，避免复用 ClickAssociator 缓存的过期 ORM 对象。
+    数据库查询异常向上抛出，由 PostbackProcessor 回滚事务并返回可重试失败。
     """
     offer_id, _, _ = attribution_ids_from_association(ctx.click_association)
     if not offer_id:
         return True  # 无 Offer ID（如直连 postback），不阻断
 
-    # 优先使用关联结果中已加载的 ORM 对象
-    offer_obj = None
-    assoc = ctx.click_association or {}
-    if isinstance(assoc.get("offer"), Offer):
-        offer_obj = assoc["offer"]
-    else:
-        try:
-            r = await ctx.db.execute(
-                select(Offer).where(Offer.id == offer_id).limit(1)
-            )
-            offer_obj = r.scalars().first()
-        except Exception as e:
-            logger.warning("Offer 状态校验查询失败（放行）：offer_id=%s error_type=%s", offer_id, type(e).__name__)
-            return True  # 查询失败不阻断，避免基础设施故障导致转化丢失
+    # 只读取状态列，确保查询到数据库当前值，不依赖可能过期的 ORM identity map 对象。
+    # 不捕获数据库异常：查询失败绝不能被解释为 Offer 有效。
+    result = await ctx.db.execute(
+        select(Offer.is_active, Offer.status)
+        .where(Offer.id == offer_id)
+        .limit(1)
+    )
+    offer_state = result.one_or_none()
 
-    if offer_obj and (not offer_obj.is_active or offer_obj.status != "Active"):
+    if offer_state is None:
         logger.warning(
-            "Offer 已下线，跳过转化处理: offer_id=%s is_active=%s status=%s",
+            "关联 Offer 不存在，拒绝处理 Postback：offer_id=%s",
             offer_id,
-            offer_obj.is_active,
-            offer_obj.status,
+        )
+        return False
+
+    is_active, status = offer_state
+    if not is_active or status != "Active":
+        logger.warning(
+            "Offer 已下线，跳过转化处理：offer_id=%s is_active=%s status=%s",
+            offer_id,
+            is_active,
+            status,
         )
         return False
 
     return True
-
 
 async def step_check_duplicate(ctx: PostbackPipelineContext) -> bool:
     """返回 True 表示重复，应跳过后续入库。"""
