@@ -13,6 +13,7 @@ from app.core.utils import get_app_now_naive
 from app.core.telegram.sync_db import get_sync_session_factory
 from app.core.postback.pending_lock import build_pending_for_update_statement
 from app.core.postback.approval_audit import add_postback_approval_audit
+from app.core.postback.savers.conversion_saver import sanitize_postback_raw_data
 
 
 def _is_authorized_admin(user_id: int | None, chat_type: str | None) -> bool:
@@ -317,7 +318,11 @@ def process_pending_conversion(
                     publisher_id=publisher_id,
                     advertiser_id=advertiser_id,
                     conversion_status="Pending",
-                    raw_data=pending.raw_data,
+                    raw_data=(
+                        sanitize_postback_raw_data(pending.raw_data)
+                        if pending.raw_data is not None
+                        else None
+                    ),
                     created_at=get_app_now_naive(),
                 )
                 previous_status = pending.status
