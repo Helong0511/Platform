@@ -1422,7 +1422,7 @@ sudo systemctl restart Platform-scheduler.service
 
 ## 38. Scheduler 多 Worker 锁释放与时钟基准
 
-- `acquire_task_lock` 提交事务后，抢锁时的 InnoDB 行锁已经释放；任务结束时必须重新 `SELECT ... FOR UPDATE`、使用 `populate_existing=True` 刷新 ORM identity map 并校验当前 PID/Host。不得使用旧事务快照或 Session 缓存对象直接释放锁。
+- `acquire_task_lock` 提交事务后，抢锁时的 InnoDB 行锁已经释放；任务结束时必须重新 `SELECT ... FOR UPDATE`、使用 `populate_existing=True` 刷新 ORM identity map，并校验 PID/Host 与抢锁时保存的 `run_count` 运行代号。仅 PID/Host 无法区分同一 Worker 超时后重新抢到的下一代任务；旧运行必须携带原 `run_count`，否则 fail closed。不得使用旧事务快照或 Session 缓存对象直接释放锁。
 - Scheduler stale timeout 与 `last_run_time` 写入统一使用 MySQL 服务端时间；不要用多台 Ubuntu Worker 的本地系统时间互相判断锁是否过期。
 - Redis Scheduler 锁是有限 TTL，MySQL Scheduler 锁也是时间租约；任务超过租约后旧 Worker 可能继续运行。Outbox 等有外部副作用的任务必须另有自己的 lease token/fencing 与幂等键。
 - Outbox 单批网络预算上限按 549 秒估算（3 条 × 每条 3 次 60 秒请求 + 3 秒退避），900 秒 MySQL 锁和 960 秒 Redis TTL 只提供理论余量，不代表数据库/生产环境压测结果。
