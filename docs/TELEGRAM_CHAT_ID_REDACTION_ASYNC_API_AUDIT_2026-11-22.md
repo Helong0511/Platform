@@ -50,7 +50,7 @@
 
 除 `/send` 与 `/test` 外，`/status` 同步调用状态探测，`/diagnostic` 和 `/reset_webhook` 也直接调用同步 `run_on_send_loop`。这些同步等待都可能阻塞 ASGI 事件循环。
 
-新增 `run_on_send_loop_async`，通过工作线程等待发送 loop；状态探测也通过 `asyncio.to_thread` 执行。管理路由中的 Telegram API 网络等待均改为异步等待，不在请求事件循环中直接执行同步等待。
+新增 `run_on_send_loop_async`，通过工作线程等待发送 loop；状态探测也通过 `asyncio.to_thread` 执行。管理路由中的 Telegram API 网络等待均改为异步等待，不在请求事件循环中直接执行同步等待。异步 `send_admin_notification` 也改为 await 异步发送器；应用关闭阶段的服务停止通知移至工作线程，避免 lifespan 事件循环被同步网络发送阻塞。
 
 `POST /telegram/send` 与 `POST /telegram/test` 是异步路由，但此前直接调用同步发送函数。同步发送会通过线程安全事件循环等待网络请求，并可能执行多轮退避与重试；直接在 async 路由中调用会占住当前 FastAPI 事件循环。
 
