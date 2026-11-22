@@ -50,7 +50,7 @@ def test_send_bot_uses_centralized_http_timeouts(monkeypatch):
         "read_timeout": 30.0,
         "write_timeout": 30.0,
     }
-    assert captured["initialization_timeout"] == 33.0
+    assert captured["initialization_timeout"] == 40.0
 
 
 
