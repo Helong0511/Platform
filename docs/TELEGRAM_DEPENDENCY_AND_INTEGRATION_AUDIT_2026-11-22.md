@@ -72,7 +72,7 @@
 4. 当前没有 `TELEGRAM_PROXY` 配置。生产主机若不能直连 `api.telegram.org`，需增加代理配置并对 URL userinfo 做日志脱敏。
 5. Telegram sendMessage 在服务端已接收、但客户端响应超时的情况下无法提供严格 exactly-once；重试可能重复通知，停止重试又可能丢消息，需要接受 best-effort 语义或设计 outbox/人工核对。
 6. 消息截断函数对 HTML/Markdown 格式化消息直接按字符串切片，超长内容可能切断标签/转义序列；目前常规通知较短，若开放格式化长消息入口，应增加 parse-mode-aware truncation 或超长拒绝策略。
-7. 发送日志仍需完成 Chat ID 脱敏；不得把 Telegram 用户/群组 ID 当作普通无敏感性日志字段。
+7. Chat ID 日志脱敏已在后续修复中完成：发送成功、429 限流、带按钮发送成功和无效 Chat ID 日志只记录目标类型，不输出实际用户/群组 ID。
 
 ## 验收要求
 
