@@ -1536,4 +1536,4 @@ Redis 官方 2026-08-28 安全公告指出，TLS pending-data 处理路径存在
 
 当前项目 Python 客户端 `redis==8.1.0` 的官方支持矩阵包括 Redis 7.2、7.4、8.0、8.2、8.4、8.6、8.8；建议生产优先使用 Redis 7.4.11+（或上述已修复且在客户端支持矩阵中的分支版本）。低于修复版本时，先安排服务端升级与兼容性演练，不得仅升级 Python 客户端就认为服务端漏洞已修复。
 
-GitHub Actions 临时 Redis 镜像固定为 `redis:7.4.11-alpine`，避免 `redis:7.4-alpine` 浮动标签使 CI 实际补丁版本不可审计。CI 临时服务版本不能替代生产实例版本核验；本轮没有连接或修改生产 Redis。
+GitHub Actions 临时 Redis 镜像固定为 `redis:7.4.12-alpine`，避免 `redis:7.4-alpine` 浮动标签使 CI 实际补丁版本不可审计。CI 临时服务版本不能替代生产实例版本核验；本轮没有连接或修改生产 Redis。
