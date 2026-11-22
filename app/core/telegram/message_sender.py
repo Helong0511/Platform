@@ -503,11 +503,7 @@ def _check_bot_available() -> tuple[bool, str]:
         return False, "Bot 未初始化（无 token）"
 
     try:
-        get_send_bot(
-            token.strip(),
-            connect_timeout=3.0,
-            read_timeout=float(TIMEOUT_SECONDS),
-        )
+        get_send_bot(token.strip())
         if not bot_initialized:
             set_bot_state(bot, True, True)
         return True, "Bot 可用"
@@ -523,11 +519,7 @@ def _get_send_bot():
     token = getattr(settings, "TELEGRAM_TOKEN", None)
     if not token or not str(token).strip():
         raise RuntimeError("TELEGRAM_TOKEN 未配置")
-    return get_send_bot(
-        str(token).strip(),
-        connect_timeout=3.0,
-        read_timeout=float(TIMEOUT_SECONDS),
-    )
+    return get_send_bot(str(token).strip())
 
 
 def _sync_bot_call(coro, *, timeout: Optional[float] = None):
