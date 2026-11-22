@@ -249,3 +249,21 @@ async def test_id_command_uses_throttled_sender_and_escapes_group_title(monkeypa
     assert "&lt;b&gt;unsafe group&lt;/b&gt;" in sent_text
     assert "<b>unsafe group</b>" not in sent_text
     assert send_async.await_args.kwargs["reply_to_message_id"] == 7
+
+
+@pytest.mark.asyncio
+async def test_async_admin_notification_uses_async_sender(monkeypatch):
+    from app.core.telegram import message_sender
+
+    monkeypatch.setattr(message_sender, "is_telegram_enabled", lambda: True)
+    send_async = AsyncMock(return_value=True)
+    monkeypatch.setattr(message_sender, "send_telegram_message_async", send_async)
+
+    result = await message_sender.send_admin_notification(
+        "后台通知",
+        "123456789",
+        notification_type="system",
+    )
+
+    assert result is True
+    send_async.assert_awaited_once_with("123456789", "⚠️ 后台通知")
