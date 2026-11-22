@@ -4,16 +4,20 @@ Telegram Bot 轮询管理模块
 使用 python-telegram-bot Application.run_polling 做长轮询（守护线程）。
 """
 import asyncio
-import os
-import time
 import logging
+import os
 import random
 import threading
+import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from app.core.telegram.file_lock import acquire_bot_lock, release_bot_lock, is_lock_held
+from app.core.telegram.file_lock import (
+    acquire_bot_lock,
+    release_bot_lock,
+    is_lock_held,
+)
 from app.core.telegram.shared_state import (
     get_shared_state,
     set_shared_state,
@@ -37,7 +41,6 @@ _polling_loop: Optional[asyncio.AbstractEventLoop] = None
 POLLING_LONG_POLL_TIMEOUT_SECONDS = 10
 POLLING_GET_UPDATES_READ_TIMEOUT_SECONDS = 65.0
 POLLING_BOOTSTRAP_RETRIES = 3
-
 
 
 # 运行期 supervisor：PTB bootstrap 重试耗尽/异常退出后，由唯一 TelegramBot 线程有限恢复。
