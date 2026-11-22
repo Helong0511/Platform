@@ -13,6 +13,7 @@
 - 对独立 getUpdates request 显式设置 connect=3s、read=65s、write=60s、pool=5s。
 - `run_polling` 显式设置长轮询 timeout=10s，read timeout 至少比它多 55 秒。
 - 设置有限的 `bootstrap_retries=3`，降低启动瞬间 Telegram 网络抖动导致一次性启动失败的概率；不是无限重试，持续不可用仍需进程管理器监控和重启。
+- 显式调用 `.job_queue(None)`：项目虽然安装 APScheduler 作为自身调度器依赖，但 Telegram 模块没有使用 PTB JobQueue，避免 PTB 因检测到 APScheduler 而自动创建另一套调度器。
 
 ## 依赖与官方 API 核验
 
