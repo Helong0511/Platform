@@ -48,6 +48,8 @@ CREATE TABLE `clicks_archive`
     `device_model` varchar(100) NULL DEFAULT NULL,
     `url_params` text NULL,
     `all_headers` text NULL,
+    `original_request_url` text NULL,
+    `final_redirect_url` text NULL,
     PRIMARY KEY (`id`) USING BTREE,
     INDEX `idx_click_id`(`click_id` ASC) USING BTREE,
     INDEX `idx_offer_id`(`offer_id` ASC) USING BTREE,
@@ -148,14 +150,16 @@ class ClicksArchiveService:
                      `os`, `os_version`, `browser`, `browser_version`,
                      `accept_language`, `accept_encoding`, `is_bot`,
                      `device_type`, `device_brand`, `device_model`,
-                     `url_params`, `all_headers`)
+                     `url_params`, `all_headers`, `original_request_url`,
+                     `final_redirect_url`)
                     SELECT `id`, `click_id`, `offer_id`, `publisher_id`, `advertiser_id`,
                            `short_link_id`, `click_time`, `ip`, `device`, `country`,
                            `user_agent`, `referer`, `conversion_id`, `created_at`,
                            `os`, `os_version`, `browser`, `browser_version`,
                            `accept_language`, `accept_encoding`, `is_bot`,
                            `device_type`, `device_brand`, `device_model`,
-                           `url_params`, `all_headers`
+                           `url_params`, `all_headers`, `original_request_url`,
+                           `final_redirect_url`
                     FROM `clicks`
                     WHERE `click_time` < :archive_date
                     """
