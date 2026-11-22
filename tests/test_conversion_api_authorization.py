@@ -10,7 +10,6 @@ from app.api_v1.cpl.conversions import summary as conversion_summary_routes
 from app.api_v1.cpl.conversions.summary import router as conversion_summary_router
 from app.api_v1.postback.routes.conversions import router as postback_conversion_router
 from app.core.database import get_db, get_db_readonly
-from app.core.dependencies import get_conversion_service
 from app.core.security import (
     get_current_user,
     require_admin,
