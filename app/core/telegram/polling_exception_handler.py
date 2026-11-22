@@ -56,6 +56,25 @@ def is_transient_telegram_network_error(exception: BaseException) -> bool:
     return any(keyword in msg_lower for keyword in _TRANSIENT_NETWORK_KEYWORDS)
 
 
+
+def is_permanent_telegram_auth_error(exception: BaseException) -> bool:
+    """识别 Bot Token 无效/未授权等永久认证错误，禁止 supervisor 自动重试。"""
+    error_code = getattr(exception, "error_code", None)
+    error_type = type(exception).__name__.casefold()
+    message = str(exception).casefold()
+    if error_code == 401 or error_type in {"invalidtoken", "unauthorized"}:
+        return True
+    return any(
+        marker in message
+        for marker in (
+            "unauthorized",
+            "invalid token",
+            "token is invalid",
+            "not authorized",
+        )
+    )
+
+
 class TelegramPollingExceptionHandler:
     """轮询异常处理器（兼容保留；PTB 路径主要用 polling_manager._on_error）。"""
 
