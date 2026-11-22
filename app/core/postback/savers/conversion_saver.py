@@ -99,7 +99,7 @@ def sanitize_postback_raw_data(value: Any) -> Any:
             # 不能只检查 dict 键名，否则字符串载荷会绕过字段脱敏。
             if len(item.encode("utf-8", errors="replace")) > _MAX_RAW_DATA_BYTES:
                 return "[oversized raw string omitted]"
-            original_text = item[:_MAX_RAW_STRING_LENGTH]
+            original_text = item
             # 上游可能把 JSON/query/header 再做一到多层 percent-encoding；
             # 先在内存中最多解码 3 次，仅用于识别与脱敏，不改变业务解析输入。
             text = _decode_percent_encoded_text(original_text)
@@ -118,12 +118,17 @@ def sanitize_postback_raw_data(value: Any) -> Any:
                         if len(encoded_nested.encode("utf-8")) > _MAX_RAW_STRING_LENGTH:
                             return "[structured payload omitted: exceeds string limit]"
                         return encoded_nested
+                    if len(original_text.encode("utf-8", errors="replace")) > _MAX_RAW_STRING_LENGTH:
+                        return "[structured payload omitted: exceeds string limit]"
+                    # 没有发现敏感字段时保留原始编码形式，避免改变 click_id 等业务快照值。
+                    return original_text
 
             sanitized_text = _SENSITIVE_HEADER_LINE.sub(r"\1[redacted]", text)
             sanitized_text = _SENSITIVE_INLINE_VALUE.sub(r"\1[redacted]", sanitized_text)
             sanitized_text = _BEARER_VALUE.sub("Bearer [redacted]", sanitized_text)
-            # 没有发现敏感信息时保留原始编码形式，避免改变 click_id 等业务快照值。
-            return sanitized_text if sanitized_text != text else original_text
+            if sanitized_text != text:
+                return sanitized_text[:_MAX_RAW_STRING_LENGTH]
+            return original_text[:_MAX_RAW_STRING_LENGTH]
         if item is None or isinstance(item, (bool, int, float)):
             return item
         # JSON 请求通常不会包含自定义对象；未知对象不应通过 repr 泄漏信息。
