@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from app.core.telegram import message_sender as ms
+from app.core.config import settings
 
 
 class _FakeRedis:
@@ -195,3 +196,65 @@ def test_send_mutex_serializes_and_releases():
 
 def test_estimate_timeout_covers_rate_limit_budget():
     assert ms.estimate_telegram_send_timeout_seconds(1) >= ms.MAX_RATE_LIMIT_WAIT
+
+
+
+def test_sync_redis_uses_url_with_acl_tls_db_and_password_override(monkeypatch):
+    calls = {}
+
+    class _FakeClient:
+        def ping(self):
+            return True
+
+    class _FakeRedis:
+        @staticmethod
+        def from_url(url, **kwargs):
+            calls["url"] = url
+            calls["kwargs"] = kwargs
+            return _FakeClient()
+
+    monkeypatch.setattr(settings, "REDIS_HOST", None, raising=False)
+    monkeypatch.setattr(
+        settings,
+        "REDIS_URL",
+        "rediss://telegram-user:url-secret@redis.example:6380/4",
+        raising=False,
+    )
+    monkeypatch.setattr(settings, "REDIS_PASSWORD", "explicit-secret", raising=False)
+    monkeypatch.setitem(sys.modules, "redis", SimpleNamespace(Redis=_FakeRedis))
+
+    client = ms._get_sync_redis()
+
+    assert isinstance(client, _FakeClient)
+    assert calls["url"] == "rediss://telegram-user:url-secret@redis.example:6380/4"
+    assert calls["kwargs"]["password"] == "explicit-secret"
+    assert calls["kwargs"]["decode_responses"] is True
+    assert calls["kwargs"]["socket_connect_timeout"] == 1.0
+
+
+def test_sync_redis_preserves_url_password_when_no_override(monkeypatch):
+    calls = {}
+
+    class _FakeClient:
+        def ping(self):
+            return True
+
+    class _FakeRedis:
+        @staticmethod
+        def from_url(url, **kwargs):
+            calls["url"] = url
+            calls["kwargs"] = kwargs
+            return _FakeClient()
+
+    monkeypatch.setattr(settings, "REDIS_HOST", None, raising=False)
+    monkeypatch.setattr(
+        settings,
+        "REDIS_URL",
+        "redis://acl-user:url-secret@redis.example:6379/3",
+        raising=False,
+    )
+    monkeypatch.setattr(settings, "REDIS_PASSWORD", None, raising=False)
+    monkeypatch.setitem(sys.modules, "redis", SimpleNamespace(Redis=_FakeRedis))
+
+    assert isinstance(ms._get_sync_redis(), _FakeClient)
+    assert "password" not in calls["kwargs"]
