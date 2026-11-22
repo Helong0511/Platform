@@ -97,3 +97,13 @@ def test_lock_fails_closed_without_os_lock_support(tmp_path, monkeypatch):
 
     assert file_lock.acquire_bot_lock(tmp_path / "unsupported.lock") is False
     assert file_lock.is_lock_held() is False
+
+
+
+def test_bot_lock_does_not_allow_same_process_reentry(tmp_path):
+    file_lock.release_bot_lock()
+    lock_path = tmp_path / "telegram_bot.lock"
+
+    assert file_lock.acquire_bot_lock(lock_path) is True
+    assert file_lock.acquire_bot_lock(lock_path) is False
+    file_lock.release_bot_lock()
