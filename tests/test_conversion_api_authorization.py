@@ -6,6 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
+from app.api_v1.cpl.conversions import summary as conversion_summary_routes
 from app.api_v1.cpl.conversions.summary import router as conversion_summary_router
 from app.api_v1.postback.routes.conversions import router as postback_conversion_router
 from app.core.database import get_db, get_db_readonly
@@ -76,7 +77,7 @@ class _ConversionService:
         return [{"offer_id": 10, "offer_name": "scoped-offer", "click_count": 12}]
 
 
-def _build_summary_app(*, user=None, db=None, service=None, authenticated=True):
+def _build_summary_app(*, user=None, db=None, service=None, authenticated=True, monkeypatch):
     app = FastAPI()
     app.include_router(conversion_summary_router, prefix="/conversion-summary")
     db = db or _AuthorizationDB()
@@ -85,12 +86,14 @@ def _build_summary_app(*, user=None, db=None, service=None, authenticated=True):
     async def override_db():
         yield db
 
-    async def override_service():
+    async def override_service(_db):
         return service
+
+    # 路由函数内部直接调用 get_conversion_service(db)，不是 Depends；需替换模块级工厂。
+    monkeypatch.setattr(conversion_summary_routes, "get_conversion_service", override_service)
 
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_db_readonly] = override_db
-    app.dependency_overrides[get_conversion_service] = override_service
     if authenticated:
         async def override_current_user():
             return user
@@ -140,7 +143,7 @@ def test_postback_conversion_routes_keep_admin_only_dependency():
 
 @pytest.mark.asyncio
 async def test_conversion_summary_rejects_unauthenticated_request():
-    app, _, _ = _build_summary_app(authenticated=False)
+    app, _, _ = _build_summary_app(authenticated=False, monkeypatch=monkeypatch)
 
     response = await _get(app, "/conversion-summary/")
 
@@ -152,7 +155,7 @@ async def test_conversion_summary_allows_admin_without_client_lookup():
     user = SimpleNamespace(id=1, role=UserRole.ADMIN)
     db = _AuthorizationDB()
     service = _ConversionService()
-    app, db, service = _build_summary_app(user=user, db=db, service=service)
+    app, db, service = _build_summary_app(user=user, db=db, service=service, monkeypatch=monkeypatch)
 
     response = await _get(app, "/conversion-summary/")
 
