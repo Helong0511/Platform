@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from concurrent.futures import TimeoutError as FutureTimeoutError
 import threading
 from typing import Any, Optional, TypeVar
 
@@ -86,7 +87,12 @@ def run_on_send_loop(coro, *, timeout: Optional[float] = None):
     """
     loop = ensure_send_loop()
     future = asyncio.run_coroutine_threadsafe(coro, loop)
-    return future.result(timeout=timeout)
+    try:
+        return future.result(timeout=timeout)
+    except FutureTimeoutError:
+        # 超时后必须通知 loop 取消底层协程，避免请求在调用方已重试后仍继续发送。
+        future.cancel()
+        raise
 
 
 async def run_on_send_loop_async(coro, *, timeout: Optional[float] = None):
@@ -138,7 +144,7 @@ def get_send_bot(token: str):
         _build(),
         timeout=max(
             10.0,
-            SEND_BOT_CONNECT_TIMEOUT_SECONDS + SEND_BOT_READ_TIMEOUT_SECONDS,
+            SEND_BOT_CONNECT_TIMEOUT_SECONDS + SEND_BOT_READ_TIMEOUT_SECONDS + 7.0,
         ),
     )
 
