@@ -63,6 +63,24 @@ _RELEASE_MUTEX_LUA = (
     "if redis.call('get', KEYS[1]) == ARGV[1] then "
     "return redis.call('del', KEYS[1]) else return 0 end"
 )
+# 共享 429 backoff 只能延长，不能被另一个较短 retry_after 覆盖。
+# PTTL=-2 表示 key 不存在；PTTL=-1 表示永久 key，必须保留而不能缩短。
+_UPDATE_BACKOFF_MAX_TTL_LUA = """
+local current_ttl = redis.call('PTTL', KEYS[1])
+local requested_ttl = tonumber(ARGV[1]) * 1000
+if current_ttl == -2 then
+    redis.call('SET', KEYS[1], ARGV[2], 'PX', requested_ttl)
+    return requested_ttl
+end
+if current_ttl == -1 then
+    return -1
+end
+if current_ttl < requested_ttl then
+    redis.call('PEXPIRE', KEYS[1], requested_ttl)
+    return requested_ttl
+end
+return current_ttl
+"""
 _SYNC_REDIS_FAIL_BACKOFF = 30.0
 
 _sync_redis_client = None
@@ -306,8 +324,16 @@ def _note_rate_limited(chat_id: str, retry_after: int) -> None:
     if not redis_client:
         return
     try:
-        redis_client.setex(_REDIS_BACKOFF_GLOBAL, wait, "1")
-        redis_client.setex(
+        redis_client.eval(
+            _UPDATE_BACKOFF_MAX_TTL_LUA,
+            1,
+            _REDIS_BACKOFF_GLOBAL,
+            wait,
+            "1",
+        )
+        redis_client.eval(
+            _UPDATE_BACKOFF_MAX_TTL_LUA,
+            1,
             _REDIS_BACKOFF_CHAT.format(chat_key=_redis_chat_identifier(chat_id)),
             wait,
             "1",
