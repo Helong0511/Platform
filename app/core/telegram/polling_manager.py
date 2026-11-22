@@ -563,9 +563,9 @@ def _run_polling_supervisor() -> None:
         name="TelegramPollingHealthWatchdog",
         daemon=True,
     )
-    watchdog.start()
 
     try:
+        watchdog.start()
         while not _supervisor_stop_event.is_set():
             try:
                 start_polling()
