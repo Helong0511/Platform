@@ -274,7 +274,7 @@ async def check_cap_consistency_api(
         from app.core.errors import ErrorCode
         from app.core.exceptions import raise_api_exception
 
-        logger.error("检查Cap计数一致性失败: %s", e, exc_info=True)
+        logger.error("检查Cap计数一致性失败（异常类型：%s）", type(e).__name__)
         try:
             await log_user_action(
                 db=db,
@@ -297,6 +297,6 @@ async def check_cap_consistency_api(
         except Exception:
             logger.exception("记录 Cap 一致性检查失败审计日志时发生异常")
         raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
+            ErrorCode.INTERNAL_ERROR,
             detail="检查Cap计数一致性失败，请稍后重试或联系系统管理员。",
         )
