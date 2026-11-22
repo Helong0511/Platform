@@ -8,6 +8,7 @@ import os
 import time
 import logging
 import random
+import threading
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ from app.core.telegram.shared_state import (
 )
 from app.core.config import settings
 from app.core.telegram.polling_exception_handler import (
+    is_permanent_telegram_auth_error,
     is_telegram_conflict_error,
     is_transient_telegram_network_error,
 )
@@ -35,6 +37,106 @@ _polling_loop: Optional[asyncio.AbstractEventLoop] = None
 POLLING_LONG_POLL_TIMEOUT_SECONDS = 10
 POLLING_GET_UPDATES_READ_TIMEOUT_SECONDS = 65.0
 POLLING_BOOTSTRAP_RETRIES = 3
+
+
+
+# 运行期 supervisor：PTB bootstrap 重试耗尽/异常退出后，由唯一 TelegramBot 线程有限恢复。
+POLLING_SUPERVISOR_MAX_RESTARTS = 5
+POLLING_SUPERVISOR_BASE_DELAY_SECONDS = 2.0
+POLLING_SUPERVISOR_MAX_DELAY_SECONDS = 60.0
+POLLING_SUPERVISOR_JITTER_SECONDS = 1.0
+POLLING_HEALTH_STALE_AFTER_SECONDS = 180.0
+POLLING_HEALTH_CHECK_INTERVAL_SECONDS = 30.0
+
+_supervisor_stop_event = threading.Event()
+_supervisor_running = False
+_last_polling_exit_reason = "not_started"
+_last_polling_error_at: Optional[float] = None
+_last_get_updates_success_at: Optional[float] = None
+_last_update_received_at: Optional[float] = None
+_supervisor_restart_count = 0
+
+
+def get_polling_health_status() -> dict:
+    """返回轮询线程与 getUpdates 成功心跳；线程存活本身不等于健康。"""
+    now = time.time()
+    thread_alive = any(
+        thread.name == "TelegramBot" and thread.is_alive()
+        for thread in threading.enumerate()
+    )
+    success_at = _last_get_updates_success_at
+    success_age = None if success_at is None else max(0.0, now - success_at)
+    healthy = bool(
+        thread_alive
+        and _supervisor_running
+        and success_age is not None
+        and success_age <= POLLING_HEALTH_STALE_AFTER_SECONDS
+    )
+    return {
+        "thread_alive": thread_alive,
+        "supervisor_running": _supervisor_running,
+        "healthy": healthy,
+        "last_exit_reason": _last_polling_exit_reason,
+        "last_error_at": _last_polling_error_at,
+        "last_get_updates_success_at": success_at,
+        "last_get_updates_success_age_seconds": success_age,
+        "last_update_received_at": _last_update_received_at,
+        "restart_count": _supervisor_restart_count,
+    }
+
+
+async def _record_update_received(_update, _context) -> None:
+    """记录最近一次成功收到并交给 PTB 处理的 Update 时间。"""
+    global _last_update_received_at
+    _last_update_received_at = time.time()
+
+
+def _instrument_get_updates(application) -> None:
+    """包装 Bot.get_updates，记录成功返回时间，不改变 PTB 内部重试策略。"""
+    original_get_updates = application.bot.get_updates
+
+    async def tracked_get_updates(*args, **kwargs):
+        global _last_get_updates_success_at
+        result = await original_get_updates(*args, **kwargs)
+        _last_get_updates_success_at = time.time()
+        return result
+
+    application.bot.get_updates = tracked_get_updates
+
+
+def _notify_supervisor_failure(reason: str) -> None:
+    """通过现有去重通知通道发送不含 Token/异常正文的 supervisor 告警。"""
+    try:
+        from app.core.telegram.runtime_error_notify import notify_runtime_error_sync
+
+        notify_runtime_error_sync(
+            error_type="TelegramPollingSupervisor",
+            error_message=f"Telegram polling supervisor stopped or circuit-opened: {reason}",
+            location={
+                "module": "app.core.telegram.polling_manager",
+                "function": "start_bot_thread",
+            },
+        )
+    except Exception as exc:
+        logger.warning(
+            "Telegram polling supervisor 告警调度失败；error_type=%s",
+            type(exc).__name__,
+        )
+
+
+def _polling_health_watchdog() -> None:
+    """运行期网络重试若长期没有成功 getUpdates，发一次告警；恢复后允许再次告警。"""
+    alert_sent = False
+    while not _supervisor_stop_event.wait(POLLING_HEALTH_CHECK_INTERVAL_SECONDS):
+        success_at = _last_get_updates_success_at
+        if success_at is None:
+            continue
+        stale = time.time() - success_at > POLLING_HEALTH_STALE_AFTER_SECONDS
+        if stale and not alert_sent:
+            _notify_supervisor_failure("getUpdates heartbeat stale")
+            alert_sent = True
+        elif not stale:
+            alert_sent = False
 
 
 def _build_polling_application(token: str):
