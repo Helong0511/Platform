@@ -1503,3 +1503,22 @@ sudo systemctl restart Platform-scheduler.service
 - Outbox / Cap Reservation 多 Worker 组合故障、租约过期、远端成功但本地 ACK 丢失等压力演练仍需补齐。
 - 分支保护状态无法通过当前 GitHub 只读权限确认；必须在仓库设置中核验 main 的 PR 审查、必需 CI、禁止直接推送和 force-push 规则。
 - 本轮没有读取私钥内容、没有轮换/吊销凭据、没有访问生产主机，也没有重写 Git 历史。
+
+## 41. 2026-11-22：待审批 Postback 终态 PII 清理补齐
+
+### 发现与修复
+
+- 审计确认此前 PII 任务只覆盖 `third_party_report_logs` 与 `postback_forward_logs`，未覆盖 `pending_postback_conversions` 中的请求来源 IP、用户 IP、设备广告 ID、Click ID、原始 JSON 和 Telegram 消息关联字段。
+- 新增独立配置 `PENDING_POSTBACK_PII_RETENTION_DAYS=0`，默认关闭，不复用第三方 Report 的保留天数。
+- 新增 `pii_scrubbed_at` 与复合扫描索引；增量 migration 与 `sql/platform.sql` 全新安装基线同步。
+- 每日既有 PII Scheduler 同时调用待审批终态清理函数；只选择到期的 `approved/rejected`，绝不选择 `pending`。
+- 使用 `FOR UPDATE SKIP LOCKED` 和有上限的批次，多个 Scheduler Worker 不会重复锁定同一批记录。
+- 清理设备/请求标识、点击关联、原始 JSON 与 Telegram 消息定位信息；保留平台、转化业务 ID、事件名、dedupe_key、金额/财务字段、状态和审计时间。
+- `request_ip` 为 NOT NULL，清理时置为空字符串；展示层应将其解释为已清理，而非真实 IP。
+
+### 不得误判为已解决的事项
+
+- `pending` 状态仍可能长期保存 PII；必须另行审批待处理 SLA、超期拒绝/隔离与重放机制，不能擅自删除。
+- 正式 `postback_conversions` 的 raw_data、IP、设备 ID 仍未纳入该清理函数，需要单独定义业务与合规保留规则。
+- 两个新旧 PII 配置均保持默认关闭，只有业务/合规负责人书面批准后才能设置正整数。
+- SQL migration、真实 MySQL 大表 ALTER 锁影响、备份恢复和生产 Scheduler 多 Worker 演练仍需 CI/隔离环境/生产变更窗口分别验收。
