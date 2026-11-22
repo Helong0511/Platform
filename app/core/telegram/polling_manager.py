@@ -153,8 +153,27 @@ def _notify_supervisor_failure(reason: str) -> None:
         )
 
 
+def _request_polling_restart_for_stale_heartbeat() -> bool:
+    """在 PTB 原事件循环中请求优雅停止，让 supervisor 以退避策略重建 polling。"""
+    app = _active_application
+    loop = _polling_loop
+    if app is None or loop is None or not loop.is_running():
+        logger.warning("getUpdates 心跳超时，但当前 PTB Application/事件循环不可用")
+        return False
+    try:
+        loop.call_soon_threadsafe(app.stop_running)
+        logger.warning("getUpdates 心跳超时，已请求 PTB 优雅停止并交由 supervisor 恢复")
+        return True
+    except Exception as exc:
+        logger.warning(
+            "getUpdates 心跳超时后请求停止失败；error_type=%s",
+            type(exc).__name__,
+        )
+        return False
+
+
 def _polling_health_watchdog() -> None:
-    """运行期网络重试若长期没有成功 getUpdates，发一次告警；恢复后允许再次告警。"""
+    """运行期网络重试若长期没有成功 getUpdates，告警并触发一次受控重启。"""
     alert_sent = False
     while not _supervisor_stop_event.wait(POLLING_HEALTH_CHECK_INTERVAL_SECONDS):
         success_at = _last_get_updates_success_at
@@ -163,6 +182,7 @@ def _polling_health_watchdog() -> None:
         stale = time.time() - success_at > POLLING_HEALTH_STALE_AFTER_SECONDS
         if stale and not alert_sent:
             _notify_supervisor_failure("getUpdates heartbeat stale")
+            _request_polling_restart_for_stale_heartbeat()
             alert_sent = True
         elif not stale:
             alert_sent = False
