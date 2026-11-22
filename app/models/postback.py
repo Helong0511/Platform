@@ -503,6 +503,9 @@ class PendingPostbackConversion(Base):
     updated_at = Column(DateTime, default=get_app_now_naive, onupdate=get_app_now_naive, nullable=False, comment='更新时间')
     approved_at = Column(DateTime, nullable=True, comment='批准时间')
     rejected_at = Column(DateTime, nullable=True, comment='拒绝时间')
+    pii_scrubbed_at = Column(
+        DateTime, nullable=True, comment='终态 Postback 个人信息按独立保留策略清理时间'
+    )
     
     __table_args__ = (
         Index("idx_status", "status"),
