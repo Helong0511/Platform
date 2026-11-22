@@ -72,6 +72,13 @@
 - PTB 22.8 官方支持 Python 3.10+；redis-py 8.1.0 是官方仍支持 Python 3.10 的版本线，因此当前依赖组合适合 Python 3.10、3.11、3.13。
 - redis-py 官方支持矩阵对 6.0+ 客户端列出的 Redis 服务端起点为 7.2；本仓库 Full Audit CI 使用 Redis 7.4。生产 Redis 必须核验为 7.2+，不能只看 Python 包安装成功。
 - 新增 Telegram 依赖矩阵 CI，在 Python 3.10/3.11/3.13 安装固定的 PTB/HTTPX/redis-py/APScheduler 版本，运行 `pip check` 并导入实际使用的 API。
+
+### PyPI 供应链来源核验
+
+- python-telegram-bot 22.8 的 PyPI wheel/sdist 有 Sigstore provenance，发布仓库与 GitHub Actions workflow 可验证。
+- APScheduler 3.11.3 的 PyPI wheel/sdist 也有 provenance。
+- HTTPX 0.28.1 与 redis-py 8.1.0 当前 PyPI 发布文件未提供 provenance；PyPI 页面提供 SHA-256 文件校验和，但当前 requirements.txt 仅锁版本、没有全量传递依赖 hashes。
+- 不因缺少 provenance 就贸然替换成熟依赖；上线前应建立完整 lockfile（含全部传递依赖与 hashes），并在 CI 使用 `pip install --require-hashes` 验证。当前 CI 的 `pip check` 只验证元数据依赖冲突，不等于供应链完整性验证。
 - 如果项目未来统一提升到 Python 3.11+，可评估 redis-py 8.2.x 稳定版本；不要在仍需 Python 3.10 的环境中直接升级到只支持 Python 3.11+ 的 redis-py 版本。
 
 ## 仍需运维/业务确认的事项
