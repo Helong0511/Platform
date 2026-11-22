@@ -146,6 +146,7 @@ def get_approval_worker_status() -> dict[str, int | bool]:
             "accepting": _accepting,
             "active_workers": _active_workers,
             "pending_tasks": len(_pending_ids),
+            "queue_depth": max(0, len(_pending_ids) - _active_workers),
             "worker_limit": APPROVAL_WORKER_COUNT,
             "queue_capacity": APPROVAL_QUEUE_CAPACITY,
             "completed": _completed_count,
