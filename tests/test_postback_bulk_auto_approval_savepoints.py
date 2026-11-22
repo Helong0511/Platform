@@ -1,5 +1,4 @@
 """IP 白名单批量自动审批的 SAVEPOINT 事务边界测试。"""
-from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
