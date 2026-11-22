@@ -12,6 +12,8 @@ Telegram 消息发送模块
 """
 import logging
 import importlib
+import hashlib
+import hmac
 import math
 import os
 import random
@@ -53,8 +55,8 @@ MAX_SERVER_BACKOFF_SECONDS = 7 * 24 * 3600  # Redis 共享服务端 retry_after 
 _GATE_SPIN_SECONDS = 0.02  # 闸门刚过期时的短睡，避免空转烧 CPU
 _REDIS_BACKOFF_GLOBAL = "telegram:send:backoff:__global__"
 _REDIS_GATE_GLOBAL = "telegram:send:gate:__global__"
-_REDIS_BACKOFF_CHAT = "telegram:send:backoff:{chat_id}"
-_REDIS_GATE_CHAT = "telegram:send:gate:{chat_id}"
+_REDIS_BACKOFF_CHAT = "telegram:send:backoff:{chat_key}"
+_REDIS_GATE_CHAT = "telegram:send:gate:{chat_key}"
 _REDIS_SEND_MUTEX = "telegram:send:mutex"
 _MUTEX_TTL_SECONDS = MAX_RATE_LIMIT_WAIT + 60
 _RELEASE_MUTEX_LUA = (
@@ -87,6 +89,22 @@ def estimate_telegram_send_timeout_seconds(chat_count: int = 1) -> float:
 def _admin_chat_count() -> int:
     admin = getattr(settings, "TELEGRAM_ADMIN", None) or ""
     return max(1, len([c for c in str(admin).split(",") if c.strip()]))
+
+
+def _redis_chat_identifier(chat_id: str) -> str:
+    """使用应用密钥生成稳定的 Chat ID HMAC，避免 Redis key 暴露原始 ID。"""
+    raw_chat_id = str(chat_id).strip()
+    secret = getattr(settings, "SECRET_KEY", None) or getattr(settings, "TELEGRAM_TOKEN", None)
+    if secret:
+        digest = hmac.new(
+            str(secret).encode("utf-8"),
+            raw_chat_id.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+    else:
+        # 非生产测试配置缺少应用密钥时仍不把原始 Chat ID 写入 Redis key。
+        digest = hashlib.sha256(raw_chat_id.encode("utf-8")).hexdigest()
+    return digest
 
 
 async def send_telegram_notify_async(
@@ -290,7 +308,7 @@ def _note_rate_limited(chat_id: str, retry_after: int) -> None:
     try:
         redis_client.setex(_REDIS_BACKOFF_GLOBAL, wait, "1")
         redis_client.setex(
-            _REDIS_BACKOFF_CHAT.format(chat_id=chat_id),
+            _REDIS_BACKOFF_CHAT.format(chat_key=_redis_chat_identifier(chat_id)),
             wait,
             "1",
         )
@@ -392,7 +410,7 @@ def _wait_before_send(chat_id: Optional[str] = None) -> None:
     注意：闸门抢占失败且 PTTL=0 时只短睡再试，禁止空转 ``continue``（会烧满 CPU）。
     """
     global _last_send_monotonic
-    chat_key = (str(chat_id).strip() if chat_id else "__default__") or "__default__"
+    chat_key = _redis_chat_identifier(str(chat_id).strip()) if chat_id else "__default__"
     chat_interval = _chat_send_interval(chat_id)
     deadline = time.monotonic() + max(MAX_RATE_LIMIT_WAIT * 2, 30.0)
 
@@ -406,7 +424,7 @@ def _wait_before_send(chat_id: Optional[str] = None) -> None:
                 _redis_wait_seconds(redis_client, _REDIS_BACKOFF_GLOBAL),
                 _redis_wait_seconds(
                     redis_client,
-                    _REDIS_BACKOFF_CHAT.format(chat_id=chat_key),
+                    _REDIS_BACKOFF_CHAT.format(chat_key=chat_key),
                 ),
             )
             if sleep_for <= 0:
@@ -421,12 +439,12 @@ def _wait_before_send(chat_id: Optional[str] = None) -> None:
                         continue
                 elif not _try_acquire_redis_gate(
                     redis_client,
-                    _REDIS_GATE_CHAT.format(chat_id=chat_key),
+                    _REDIS_GATE_CHAT.format(chat_key=chat_key),
                     chat_interval,
                 ):
                     wait = _redis_wait_seconds(
                         redis_client,
-                        _REDIS_GATE_CHAT.format(chat_id=chat_key),
+                        _REDIS_GATE_CHAT.format(chat_key=chat_key),
                     )
                     if wait > 0:
                         sleep_for = wait
