@@ -131,8 +131,8 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         sha256="cf2806625e2f65da86bfbaca651ba19c86b9722283a50d93d21edea2402fa71f",
     ),
     Migration(
-        revision="20261122_click_archive_url_fields",
-        path="sql/migrations/20261122_click_archive_url_fields.sql",
+        revision="20261122_z_click_archive_url_fields",
+        path="sql/migrations/20261122_z_click_archive_url_fields.sql",
         sha256="c6ea68d66dd0a69105d25afb6b50b4d659aac3f9423f914d8ac49a010c3269d7",
     ),
     Migration(
