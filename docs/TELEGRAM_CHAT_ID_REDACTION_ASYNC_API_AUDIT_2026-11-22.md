@@ -32,7 +32,13 @@
 
 现使用应用 `SECRET_KEY` 对 Chat ID 计算 HMAC-SHA256 后再生成 Redis key；未配置密钥的测试环境退回 SHA-256，仍不写入原始 ID。限流语义与 TTL 不变；已有旧格式键会自然按 TTL 过期，不再继续刷新。
 
-### 3. 管理 API 不再阻塞 FastAPI 事件循环
+### 3. 发送 Bot 使用统一 HTTPX 超时配置
+
+原先 `get_send_bot` 按 Token 缓存单例，但各调用点传入不同 read timeout。应用启动时 `initialize_bot` 先以 5 秒创建发送 Bot，正式发送路径随后请求 30 秒；由于缓存只按 Token 命中，后续 30 秒参数被忽略，实际发送仍可能只有 5 秒超时。
+
+现将发送 Bot 的 HTTPX 超时集中为 connect=3 秒、read/write=30 秒，移除调用点的分散超时参数。诊断请求仍可通过 `run_on_send_loop` 的外层等待上限控制自身响应时间，不再污染进程级发送 Bot 的传输配置。
+
+### 4. 管理 API 不再阻塞 FastAPI 事件循环
 
 `POST /telegram/send` 与 `POST /telegram/test` 是异步路由，但此前直接调用同步发送函数。同步发送会通过线程安全事件循环等待网络请求，并可能执行多轮退避与重试；直接在 async 路由中调用会占住当前 FastAPI 事件循环。
 
