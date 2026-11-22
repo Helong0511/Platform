@@ -27,6 +27,7 @@ from app.core.telegram import (
 )
 from app.core.utils import get_app_now_naive
 from app.core.config import settings
+from app.core.telegram.notification_templates import _mask_ip_for_telegram
 from app.core.telegram_utils import (
     format_telegram_message,
     build_conversion_message,
@@ -857,7 +858,7 @@ class TelegramNotificationService:
         fields = {
             "转化ID": pending_conversion.conversion_id,
             "平台": pending_conversion.platform,
-            "请求IP": pending_conversion.request_ip,
+            "请求IP": _mask_ip_for_telegram(pending_conversion.request_ip),
         }
 
         if hasattr(pending_conversion, 'payout') and pending_conversion.payout:
