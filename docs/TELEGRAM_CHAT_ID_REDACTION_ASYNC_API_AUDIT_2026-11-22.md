@@ -70,7 +70,7 @@
 ### Python 与 Redis 服务端版本边界
 
 - PTB 22.8 官方支持 Python 3.10+；redis-py 8.1.0 是官方仍支持 Python 3.10 的版本线，因此当前依赖组合适合 Python 3.10、3.11、3.13。
-- redis-py 官方支持矩阵对 6.0+ 客户端列出的 Redis 服务端起点为 7.2；本仓库 Full Audit CI 使用 Redis 7.4。生产 Redis 必须核验为 7.2+，不能只看 Python 包安装成功。
+- redis-py 官方支持矩阵对 6.0+ 客户端列出的 Redis 服务端起点为 7.2；本仓库 Full Audit CI 固定使用 Redis 7.4.11。另需核验 Redis 服务端 CVE-2026-81934 补丁：7.4 分支至少 7.4.11，7.2 分支至少 7.2.16。生产 Redis 必须同时满足客户端兼容矩阵与服务端安全补丁要求。
 - 新增 Telegram 依赖矩阵 CI，在 Python 3.10/3.11/3.13 安装固定的 PTB/HTTPX/redis-py/APScheduler 版本，运行 `pip check` 并导入实际使用的 API。
 
 ### PyPI 供应链来源核验
