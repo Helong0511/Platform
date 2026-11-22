@@ -110,3 +110,22 @@ async def _async_false(*args, **kwargs):
 
 async def _async_noop(*args, **kwargs):
     return None
+
+
+@pytest.mark.asyncio
+async def test_archive_delete_count_mismatch_rolls_back_archive_insert(monkeypatch):
+    service = archive_module.ClicksArchiveService()
+    db = _FakeDB(total=2, inserted=2, deleted=1)
+    monkeypatch.setattr(service, "should_skip_archive", _async_false)
+    monkeypatch.setattr(service, "_ensure_archive_table", _async_noop)
+    monkeypatch.setattr(
+        archive_module, "get_app_now_naive",
+        lambda: datetime(2026, 11, 22, 12, 0, 0),
+    )
+
+    with pytest.raises(RuntimeError, match="实际删除=1"):
+        await service.archive_old_clicks(db, days=90)
+
+    assert any("DELETE FROM `clicks`" in sql for sql in db.statements)
+    assert db.committed is False
+    assert db.rolled_back is True
