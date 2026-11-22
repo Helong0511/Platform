@@ -1,12 +1,18 @@
 """Telegram diagnostics must never print Bot Tokens, proxy credentials, or private chat IDs."""
 from app.core.telegram import bot_diagnostics
-from app.core.config import settings
+from types import SimpleNamespace
 
 
 def test_diagnostic_configuration_does_not_expose_token_or_chat_ids(monkeypatch):
-    monkeypatch.setattr(settings, "TELEGRAM_TOKEN", "123456:TOP_SECRET_TOKEN", raising=False)
-    monkeypatch.setattr(settings, "TELEGRAM_ADMIN", "123456789,-1001234567890", raising=False)
-    monkeypatch.setattr(settings, "TELEGRAM_CHAT_ID", "-1001234567890", raising=False)
+    monkeypatch.setattr(
+        bot_diagnostics,
+        "settings",
+        SimpleNamespace(
+            TELEGRAM_TOKEN="123456:TOP_SECRET_TOKEN",
+            TELEGRAM_ADMIN="123456789,-1001234567890",
+            TELEGRAM_CHAT_ID="-1001234567890",
+        ),
+    )
 
     result = bot_diagnostics.TelegramBotDiagnostics._check_configuration()
     rendered = repr(result)
@@ -45,7 +51,7 @@ def test_diagnostic_environment_variables_are_redacted(monkeypatch):
 def test_diagnostic_network_error_does_not_expose_api_url(monkeypatch):
     from app.core.telegram import ptb_runtime
 
-    monkeypatch.setattr(settings, "TELEGRAM_TOKEN", "configured-token", raising=False)
+    monkeypatch.setattr(bot_diagnostics.settings, "TELEGRAM_TOKEN", "configured-token")
     monkeypatch.setattr(
         ptb_runtime,
         "get_send_bot",
