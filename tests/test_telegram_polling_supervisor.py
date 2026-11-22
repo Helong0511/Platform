@@ -149,3 +149,49 @@ def test_polling_error_handler_marks_conflict_as_terminal():
 
     assert app.stopped is True
     assert manager._last_polling_exit_reason == "conflict"
+
+
+
+def test_polling_error_handler_stops_on_permanent_authentication_error():
+    class UnauthorizedError(Exception):
+        error_code = 401
+
+    class FakeApplication:
+        def __init__(self):
+            self.stopped = False
+
+        def stop_running(self):
+            self.stopped = True
+
+    app = FakeApplication()
+    context = SimpleNamespace(error=UnauthorizedError("token unauthorized"), application=app)
+
+    asyncio.run(manager._on_error(None, context))
+
+    assert app.stopped is True
+    assert manager._last_polling_exit_reason == "permanent_auth_error"
+
+
+def test_polling_health_distinguishes_live_thread_from_stale_get_updates(monkeypatch):
+    class FakeThread:
+        name = "TelegramBot"
+
+        def is_alive(self):
+            return True
+
+    monkeypatch.setattr(manager.threading, "enumerate", lambda: [FakeThread()])
+    monkeypatch.setattr(manager, "_supervisor_running", True)
+    monkeypatch.setattr(
+        manager,
+        "_last_get_updates_success_at",
+        time.time() - manager.POLLING_HEALTH_STALE_AFTER_SECONDS - 1,
+    )
+
+    stale = manager.get_polling_health_status()
+    assert stale["thread_alive"] is True
+    assert stale["healthy"] is False
+
+    monkeypatch.setattr(manager, "_last_get_updates_success_at", time.time())
+    fresh = manager.get_polling_health_status()
+    assert fresh["thread_alive"] is True
+    assert fresh["healthy"] is True
