@@ -32,6 +32,7 @@ class _FakeDB:
         self,
         *,
         max_id=3,
+        existing_click=None,
         batches=None,
         inserted_counts=None,
         deleted_counts=None,
@@ -40,6 +41,7 @@ class _FakeDB:
         transient_error_code=1213,
     ):
         self.max_id = max_id
+        self.existing_click = existing_click
         self.batches = list(batches or [])
         self.inserted_counts = list(inserted_counts or [])
         self.deleted_counts = list(deleted_counts or [])
@@ -58,6 +60,9 @@ class _FakeDB:
         sql = str(statement)
         self.statements.append(sql)
         self.parameters.append(dict(params or {}))
+
+        if "SELECT 1 FROM `clicks` LIMIT 1" in sql:
+            return _Result(scalar_value=self.existing_click)
 
         if "SELECT MAX(`id`) FROM `clicks`" in sql:
             return _Result(scalar_value=self.max_id)
@@ -120,6 +125,19 @@ def _prepare_service(monkeypatch, db):
         lambda: datetime(2026, 11, 22, 12, 0, 0),
     )
     return service, db
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("existing_click", "expected_skip"), [(None, True), (1, False)])
+async def test_should_skip_archive_uses_fast_existence_probe(monkeypatch, existing_click, expected_skip):
+    db = _FakeDB(existing_click=existing_click)
+    service = archive_module.ClicksArchiveService()
+    monkeypatch.setattr(archive_module, "should_persist_clicks_to_db", lambda: False)
+
+    assert await service.should_skip_archive(db) is expected_skip
+    assert db.statements == ["SELECT 1 FROM `clicks` LIMIT 1"]
+
+
 
 
 @pytest.mark.asyncio
