@@ -100,6 +100,51 @@ jobs:
           pytest "${TEST_FILES[@]}" -v -rs --tb=short -o faulthandler_timeout=120 --durations=30
 
 
+
+  telegram-dependency-compatibility:
+    name: Telegram dependency compatibility (Python ${{ matrix.python-version }})
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.13"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pinned Telegram runtime dependencies
+        run: >-
+          python -m pip install
+          "python-telegram-bot==22.8"
+          "httpx==0.28.1"
+          "redis==8.1.0"
+          "apscheduler==3.11.3"
+      - name: Verify dependency graph and imports
+        run: |
+          python -m pip check
+          python - <<'PY'
+          from importlib.metadata import version
+
+          import httpx
+          import redis
+          from apscheduler.schedulers.asyncio import AsyncIOScheduler
+          from telegram import Bot
+          from telegram.ext import Application, CommandHandler
+          from telegram.request import HTTPXRequest
+
+          assert version("python-telegram-bot") == "22.8"
+          assert version("httpx") == "0.28.1"
+          assert version("redis") == "8.1.0"
+          assert version("APScheduler") == "3.11.3"
+          assert httpx.__version__ == "0.28.1"
+          assert redis.__version__ == "8.1.0"
+          assert Bot and Application and CommandHandler and HTTPXRequest and AsyncIOScheduler
+          print("Telegram runtime dependency compatibility passed.")
+          PY
+
+
   password-runtime-compatibility:
     name: Python 3.13 password hash compatibility
     timeout-minutes: 10
