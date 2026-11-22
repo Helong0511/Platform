@@ -1,0 +1,60 @@
+# Telegram Chat ID 脱敏与管理 API 异步发送审计（2026-11-22）
+
+## 审计结论
+
+- Telegram SDK 依赖组合保持不变：`python-telegram-bot==22.8` 与 `httpx==0.28.1` 满足 PTB 22.8 的官方依赖约束 `httpx>=0.27,<0.29`。
+- 本轮没有发现需要改用 pyTelegramBotAPI、Telethon 或 Pyrogram 的技术理由；项目使用 PTB 的 `telegram.*` 命名空间，依赖清单只声明 `python-telegram-bot`。
+- 发现并修复了 Chat ID 在发送日志、命令日志、统计回调日志和管理 API 审计详情中的明文暴露。
+- 发现并修复了两个 async 管理 API 端点直接执行同步 Telegram 发送的问题。
+
+## 修复内容
+
+### 1. Chat ID 日志与审计脱敏
+
+新增 `mask_telegram_chat_id`：
+- 普通用户 ID 仅保留前 2 位和后 4 位；
+- 群组 ID 保留 `-100` 类型前缀及后 4 位；
+- 支持逗号分隔的多个 ID；
+- 非法值统一显示为 `[已隐藏]`，空值显示为 `[未提供]`。
+
+应用位置：
+- 普通消息发送器；
+- 带按钮消息发送器；
+- `/start`、`/help`、`/id` 命令日志；
+- 统计菜单回调日志；
+- `POST /telegram/send` 的审计详情。
+
+注意：`/id` 命令仍会把 Chat ID 返回给发起命令的 Telegram 聊天，这是该命令的既定功能；只是不再将完整 ID 写入服务端日志。审计记录保存脱敏值，不保存原始值。
+
+### 2. 管理 API 不再阻塞 FastAPI 事件循环
+
+`POST /telegram/send` 与 `POST /telegram/test` 是异步路由，但此前直接调用同步发送函数。同步发送会通过线程安全事件循环等待网络请求，并可能执行多轮退避与重试；直接在 async 路由中调用会占住当前 FastAPI 事件循环。
+
+现改为 await 已有的 `send_telegram_message_async` 包装器。该包装器通过 `asyncio.to_thread` 将同步兼容发送路径放入工作线程，不改变既有发送限流、重试和失败返回语义。
+
+## 依赖与兼容性核验
+
+| 组件 | 项目固定版本 | 核验结果 |
+|---|---:|---|
+| python-telegram-bot | 22.8 | 官方当前稳定发布；Python 3.10+；保留 |
+| HTTPX | 0.28.1 | 满足 PTB 22.8 的 `>=0.27,<0.29`；保留 |
+| redis-py | 8.1.0 | 发送器同步 Redis 限流使用 `Redis.from_url`；保留 |
+| APScheduler | 3.11.3 | 项目调度器依赖；PTB JobQueue 显式禁用，不安装 PTB job-queue extra |
+
+不启用 PTB 的 `all`、`ext`、`rate-limiter`、`job-queue`、`http2`、`socks` extras：当前项目没有相应功能需求，且已有 Redis 限流和独立 APScheduler。不要把 APScheduler 4.0 alpha 当作生产升级目标。
+
+## 仍需运维/业务确认的事项
+
+1. `drop_pending_updates=True` 会丢弃 Bot 停机期间尚未处理的 Updates，可能影响审批 callback。必须由业务确认是否接受；本次不擅自改变。
+2. OS 文件锁只协调同一主机。多主机部署同一 Bot Token 时必须增加 Redis 等分布式租约/ fencing 机制，不能依赖本地锁。
+3. 启动阶段网络不可用并耗尽 bootstrap retries 后，轮询线程可能退出；生产需要线程级健康检查、告警与恢复策略。
+4. Telegram 发送请求超时存在“服务端已接收但客户端未收到响应”的不确定窗口；Bot API sendMessage 没有通用幂等键，通知语义仍是 best effort，不能宣称 exactly-once。
+5. 当前 requirements.txt 固定直接依赖，但没有完整锁定所有传递依赖的 lockfile/hash。生产构建应记录实际解析结果、执行 `pip check`，并逐步建立可复现的依赖锁定/制品校验流程。
+6. `/id` 会在聊天消息中显示 Chat ID 和 User ID，这是命令本身的用途；应确保 Bot 仅在预期私聊/群组中使用，避免把命令消息转发到公开频道。
+
+## 验收
+
+- 新增测试覆盖 Chat ID 掩码、发送日志不泄露原始群组 ID、管理 API 使用异步发送、审计记录只保存掩码 ID。
+- PR CI 必须全部成功后才合并；合并后还需核验 main SHA 的所有 required checks。
+- 不使用真实 Telegram Bot Token 做 CI 网络测试。
+- 不在生产 Bot 上执行压测。
