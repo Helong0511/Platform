@@ -19,6 +19,7 @@ import re
 import threading
 import time
 from datetime import timedelta
+from urllib.parse import urlsplit
 from typing import Optional, List, Dict, Any
 
 from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH, validate_chat_id
@@ -204,21 +205,39 @@ def _get_sync_redis():
         if time.monotonic() < _sync_redis_failed_until:
             return None
         host = getattr(settings, "REDIS_HOST", None)
-        if not host or not str(host).strip():
+        redis_url = str(getattr(settings, "REDIS_URL", None) or "").strip()
+        redis_password = getattr(settings, "REDIS_PASSWORD", None) or None
+        if not (host and str(host).strip()) and not redis_url:
             _sync_redis_failed_until = time.monotonic() + _SYNC_REDIS_FAIL_BACKOFF
             return None
         try:
             import redis as redis_sync
 
-            client = redis_sync.Redis(
-                host=str(host).strip(),
-                port=int(getattr(settings, "REDIS_PORT", 6379) or 6379),
-                db=int(getattr(settings, "REDIS_DB", 0) or 0),
-                password=getattr(settings, "REDIS_PASSWORD", None) or None,
-                socket_connect_timeout=1.0,
-                socket_timeout=1.0,
-                decode_responses=True,
-            )
+            if host and str(host).strip():
+                # 与异步 Redis 客户端保持一致：显式 REDIS_HOST 优先于 REDIS_URL。
+                client = redis_sync.Redis(
+                    host=str(host).strip(),
+                    port=int(getattr(settings, "REDIS_PORT", 6379) or 6379),
+                    db=int(getattr(settings, "REDIS_DB", 0) or 0),
+                    password=redis_password,
+                    socket_connect_timeout=1.0,
+                    socket_timeout=1.0,
+                    decode_responses=True,
+                )
+            else:
+                # REDIS_URL 支持 redis/rediss、ACL username、DB path 与 TLS。
+                # 仅在显式设置 REDIS_PASSWORD 时覆盖 URL 密码，避免 None 抹掉 URL 凭据。
+                parsed_url = urlsplit(redis_url)
+                if parsed_url.scheme not in {"redis", "rediss"} or not parsed_url.hostname:
+                    raise ValueError("REDIS_URL 必须是有效的 redis:// 或 rediss:// URL")
+                connection_options = {
+                    "socket_connect_timeout": 1.0,
+                    "socket_timeout": 1.0,
+                    "decode_responses": True,
+                }
+                if redis_password:
+                    connection_options["password"] = redis_password
+                client = redis_sync.Redis.from_url(redis_url, **connection_options)
             client.ping()
             _sync_redis_client = client
             return _sync_redis_client
