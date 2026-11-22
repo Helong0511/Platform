@@ -60,7 +60,7 @@
 
 `app/schemas/postback.py` 的 `PostbackConversionResponse` 包含 `devad_id`、`ip`、`click_id`、`click_time` 等字段；`app/services/cpl/postback_conversion_service.py` 将 ORM 记录序列化为该响应模型。
 
-这说明管理端查询响应会携带这些字段。是否存在越权访问风险，仍需结合路由依赖、RBAC 权限矩阵、客户/广告主数据范围及导出接口逐项验证；不能仅凭响应模型断言所有用户均可访问。
+这说明管理端查询响应会携带这些字段。当前已核实原始 Postback 查询路由为 ADMIN-only，客户转化汇总有 Client/Publisher 范围过滤与字段裁剪；但管理员最小权限、导出接口、其他异步报表和备份副本仍需单独核验。不能仅凭响应模型断言所有用户均可访问。
 
 ## 3. 风险与优先级
 
@@ -68,7 +68,7 @@
 |---|---|---|---|
 | PB-PII-01 | P1 | 正式转化表保留设备标识、IP、Click ID、raw_data，但没有独立保留/清理策略 | 正式业务数据可能长期保留超出必要范围的 PII |
 | CLK-PII-01 | P1 | 点击记录归档 90 天后仍将 IP、UA、Referer、URL 参数、请求头、设备信息复制到归档表；未见归档表 PII 清理机制 | 归档数据可能无限期积累敏感信息 |
-| PB-API-01 | P1 待验证 | 转化响应模型包含 IP、设备广告 ID、Click ID 等字段 | 需验证管理员、客户、广告主、只读角色的字段最小化及租户隔离 |
+| PB-API-01 | P1 范围已缩小 | 已核查的原始 Postback 查询路由为 ADMIN-only；客户汇总有租户范围过滤和财务/广告主字段裁剪 | 管理员字段最小化、所有导出/异步报表及客户 A/B 反向访问仍需逐项验收 |
 | PB-PII-02 | P2 | 待审批表与正式表各自保存 PII 副本 | 两份记录的保留、删除、更正与审计关联策略需要一致设计 |
 | PB-OPS-01 | P1 待验证 | 当前清理服务主要处理在线业务表 | 还需盘点备份、只读副本、binlog、导出文件、日志与运维快照中的 PII 生命周期 |
 
@@ -110,13 +110,16 @@
 - PR #96 已合并：只覆盖 `pending_postback_conversions` 中超过独立期限的 `approved/rejected` 记录；默认关闭，不清理 `pending`。
 - `THIRD_PARTY_REPORT_PII_RETENTION_DAYS=0` 与 `PENDING_POSTBACK_PII_RETENTION_DAYS=0` 均保持默认关闭。
 - 正式转化表与点击归档表尚无本报告定义的独立清理实现。
-- 真实 MySQL 迁移、备份/副本生命周期、角色字段最小化仍需隔离环境和部署验收。
+- 点击归档已改为有界批次并通过 MySQL 双 Worker 并发测试，但这不等于 PII 已按期限清理；归档表仍无获批的 PII 到期清理策略。
+- PR #102 已增加真实 FastAPI/ASGI 权限矩阵测试：转化总览 ADMIN/CLIENT/其他角色、无关联 Client/Publisher、Postback 查询路由管理员门禁和客户财务字段裁剪均有覆盖。
+- PR #99 已修复归档事务原子性；PR #100 已补齐归档 URL 字段及既有表迁移；PR #101 已实现有界批次、行锁和死锁重试。
+- 正式转化表保留期、备份/binlog/只读副本/导出/日志生命周期仍需业务/合规批准和隔离环境验收。
 - 本报告不代表项目已达到生产上线安全标准。
 
 
 ## 8. 2026-11-22 API 权限与字段范围复核补充
 
-本节基于当前 main `4ccc61108386bf6a7bcf36116287e0ea41592dc2` 的路由、权限依赖和服务层实现复核，修正第 2.4 节中尚未完成的权限验证状态。
+本节最初基于 main `4ccc61108386bf6a7bcf36116287e0ea41592dc2` 完成静态复核；后续 PR #102 已在 main `c74a9197f75a11ea423627defa9c0d709b10410c` 增加 FastAPI/ASGI 权限矩阵测试。
 
 ### 8.1 原始 Postback 转化列表
 
@@ -131,19 +134,20 @@
 - 该依赖只允许 ADMIN，或至少关联一个启用 Client 且拥有启用 Publisher 的 CLIENT；其它角色返回 403。
 - `ConversionService` 对 CLIENT 收集该用户全部启用 Client，再将可见范围限制到这些 Client 关联的启用 Publisher。没有 Client 或 Publisher 时 fail-closed 返回空范围/拒绝访问，不退化为全局统计。
 - 对 CLIENT 返回值执行字段裁剪：总览删除 `total_po`、`total_profit`，分组项删除 `po`、`adv_po`、`advertiser_id`、`advertiser_name`；按 Offer 汇总删除 `po`。
-- 现有 `tests/test_conversion_client_scope.py` 覆盖缺失 Client 时返回空范围及多 Client 归属收集；仍需在真实 API 层补充角色矩阵测试，避免只测 Service SQL 而遗漏路由装配、依赖覆盖或响应序列化问题。
+- `tests/test_conversion_client_scope.py` 覆盖缺失 Client 时返回空范围、多 Client 归属收集，以及用户指定的 `publisher_id` 必须与自身 Publisher 范围取交集。
+- PR #102 的 `tests/test_conversion_api_authorization.py` 使用 FastAPI + ASGITransport 覆盖未认证 401、ADMIN 放行、有效 CLIENT 放行、缺失 Client/Publisher 与其他角色 403，并确认拒绝请求不会调用 Service。
 
 ### 8.3 本次复核后的风险定级
 
 - 原始 Postback PII 查询的角色门禁已在静态代码中确认是 ADMIN-only；原报告 PB-API-01 不再作为“客户/渠道可直接访问原始 PII”的已确认缺陷。
 - 仍需验证管理员账号自身的最小权限、管理员操作审计、字段展示/导出最小化，以及未来新增导出/批量下载接口是否复用相同权限约束。
-- 客户转化总览当前有 Publisher 归属范围和敏感财务字段裁剪，但应补充真实 HTTP/API 层角色矩阵和多租户反向访问测试。
+- 客户转化总览已有 Publisher 归属范围和敏感财务字段裁剪，FastAPI 层角色矩阵已覆盖；本次另补充 `publisher_id` 参数不能扩大租户范围的 SQL 交集测试。
 
 ### 8.4 仍未完成的验收项
 
-- [ ] 使用 FastAPI TestClient/真实依赖装配验证 ADMIN、CLIENT、PUBLISHER、ADVERTISER、只读角色对原始 Postback API 的 401/403/200 行为
-- [ ] 验证客户 A 不能通过参数篡改读取客户 B 的 Publisher/Offer/转化汇总
-- [ ] 验证客户响应不包含 `devad_id`、`ip`、`click_id`、上游 PO、广告主 ID/名称等不必要字段
+- [x] 使用 FastAPI/ASGI 真实路由装配验证转化汇总 ADMIN、CLIENT、其他角色的 401/403/200 行为；Postback 查询路由已验证 ADMIN-only 依赖和 CLIENT 拒绝
+- [x] 验证客户指定的 `publisher_id` 与自身 Publisher 范围做 AND 交集，不能通过参数扩大渠道范围；仍需补充完整客户 A/B 数据库端到端反向访问测试
+- [x] 验证客户汇总裁剪上游 PO、利润、广告主 ID/名称；原始 `devad_id`、`ip`、`click_id` 查询仍由 ADMIN-only Postback 路由保护
 - [ ] 验证管理员查询、详情、导出均有操作者、时间、筛选范围和导出审计记录
 - [ ] 搜索并逐项验证所有 Postback/Conversion 导出、下载、异步报表端点及后台任务的数据访问范围
 
