@@ -250,7 +250,7 @@ def mask_telegram_chat_id(chat_id: Any) -> str:
         digits = raw[1:] if sign else raw
         if len(digits) <= 6:
             masked_ids.append(sign + ("*" * len(digits)))
-        elif sign and digits.startswith("100"):
+        elif sign and digits.startswith("100") and len(digits) > 7:
             masked_ids.append(f"-100****{digits[-4:]}")
         else:
             masked_ids.append(f"{sign}{digits[:2]}***{digits[-4:]}")
