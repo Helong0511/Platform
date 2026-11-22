@@ -138,6 +138,24 @@ async def api_health_check():
     """API 存活探测（不访问数据库），供本地开发确认后端已启动。"""
     return {"status": "ok"}
 
+
+@app.get(f"{settings.API_V1_STR}/health/telegram", tags=["系统"])
+async def telegram_health_check():
+    """Telegram polling readiness：区分线程存活与 getUpdates 成功心跳。"""
+    if not getattr(settings, "TELEGRAM_ENABLE", True):
+        return {"status": "disabled"}
+    from app.core.telegram.service_notify import should_run_telegram_polling
+
+    if not should_run_telegram_polling():
+        return {"status": "not_owner"}
+    from app.core.telegram.polling_manager import get_polling_health_status
+
+    health = get_polling_health_status()
+    return {
+        "status": "ok" if health["healthy"] else "degraded",
+        **health,
+    }
+
 # 处理 favicon.ico 请求
 @app.get("/favicon.ico")
 async def favicon():
