@@ -1523,3 +1523,17 @@ sudo systemctl restart Platform-scheduler.service
 - 两个新旧 PII 配置均保持默认关闭，只有业务/合规负责人书面批准后才能设置正整数。
 - SQL migration、真实 MySQL 大表 ALTER 锁影响、备份恢复和生产 Scheduler 多 Worker 演练仍需 CI/隔离环境/生产变更窗口分别验收。
 - MySQL 官方说明 `NOWAIT/SKIP LOCKED` 不适用于 statement-based replication；若生产使用 binlog/复制，部署前核验 `binlog_format`，要求 ROW 或经 DBA 评估的 MIXED，禁止纯 STATEMENT。
+
+
+## 2026-11-22 补充：Redis 服务端安全补丁版本核验（CVE-2026-81934）
+
+Redis 官方 2026-08-28 安全公告指出，TLS pending-data 处理路径存在 use-after-free 风险；官方修复版本包括 Redis 7.4.11、7.2.16、8.2.9、8.4.6、8.6.6、8.8.2、8.10.1，以及 6.2.24。该问题影响 Redis **服务端**，不要与 Python 客户端 `redis==8.1.0` 混为一谈。
+
+上线前必须在目标生产实例核验实际 Redis Server 版本：
+- 自建 Ubuntu：`redis-server --version`
+- 实例运行状态：`redis-cli INFO server`，检查 `redis_version`
+- 托管 Redis：从云控制台/服务商维护记录取得实际引擎版本与补丁状态
+
+当前项目 Python 客户端 `redis==8.1.0` 的官方支持矩阵包括 Redis 7.2、7.4、8.0、8.2、8.4、8.6、8.8；建议生产优先使用 Redis 7.4.11+（或上述已修复且在客户端支持矩阵中的分支版本）。低于修复版本时，先安排服务端升级与兼容性演练，不得仅升级 Python 客户端就认为服务端漏洞已修复。
+
+GitHub Actions 临时 Redis 镜像固定为 `redis:7.4.11-alpine`，避免 `redis:7.4-alpine` 浮动标签使 CI 实际补丁版本不可审计。CI 临时服务版本不能替代生产实例版本核验；本轮没有连接或修改生产 Redis。
