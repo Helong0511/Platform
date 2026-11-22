@@ -185,8 +185,8 @@ def test_redacts_single_and_double_url_encoded_json_strings():
 
 def test_redacts_double_url_encoded_query_keys_and_values():
     raw_query = (
-        "https://tracker.example/callback?%65mail=person%2540example.com"
-        "&%2569p=203.0.113.88&click_id=keep-query-click"
+        "https://tracker.example/callback?%65mail=person%40example.com"
+        "&%69p=203.0.113.88&click_id=keep-query-click"
     )
     raw = quote(quote(raw_query, safe=""), safe="")
 
