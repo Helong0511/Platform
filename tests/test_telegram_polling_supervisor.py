@@ -216,3 +216,15 @@ def test_non_owner_worker_reports_remote_polling_owner(monkeypatch):
     assert health["is_owner"] is False
     assert health["remote_owner_alive"] is True
     assert health["healthy"] is False
+
+
+
+def test_supervisor_startup_configuration_failure_is_reported(monkeypatch):
+    alerts = []
+    monkeypatch.setattr(manager, "_check_bot_ready_for_polling", lambda: False)
+    monkeypatch.setattr(manager, "PTB_AVAILABLE", True)
+    monkeypatch.setattr(manager, "_notify_supervisor_failure", alerts.append)
+
+    assert manager.start_bot_thread() is False
+    assert manager._last_polling_exit_reason == "configuration_error"
+    assert alerts == ["configuration_error"]
