@@ -29,6 +29,36 @@ _handlers_registered = False
 _bot_started = False
 _active_application = None
 
+# PTB 的 getUpdates 使用独立 HTTPXRequest；默认 read_timeout=5s，
+# 必须大于 Telegram 长轮询 timeout=10s，并留出网络/调度余量。
+POLLING_LONG_POLL_TIMEOUT_SECONDS = 10.0
+POLLING_GET_UPDATES_READ_TIMEOUT_SECONDS = 65.0
+POLLING_BOOTSTRAP_RETRIES = 3
+
+
+def _build_polling_application(token: str):
+    """构建 PTB Application，并显式配置 getUpdates 独立连接超时。"""
+    from telegram.ext import Application
+    from telegram.request import HTTPXRequest
+
+    request = HTTPXRequest(
+        connect_timeout=3.0,
+        read_timeout=60.0,
+        write_timeout=60.0,
+        pool_timeout=5.0,
+    )
+    return (
+        Application.builder()
+        .token(token)
+        .request(request)
+        .get_updates_connect_timeout(3.0)
+        .get_updates_read_timeout(POLLING_GET_UPDATES_READ_TIMEOUT_SECONDS)
+        .get_updates_write_timeout(60.0)
+        .get_updates_pool_timeout(5.0)
+        .post_init(_post_init)
+        .build()
+    )
+
 
 def _check_bot_ready_for_polling() -> bool:
     """轮询启动前：模块可用且 Token 已配置。"""
@@ -207,8 +237,6 @@ def start_polling():
         }
     )
 
-    from telegram.ext import Application
-    from telegram.request import HTTPXRequest
     from app.core.telegram.bot_state import set_bot_state
     from app.core.telegram.ptb_runtime import get_send_bot, run_on_send_loop
 
@@ -239,19 +267,7 @@ def start_polling():
             return False
         logger.warning(f"[PID:{current_pid}] 验证时发生错误，但继续启动；error_type={type(e).__name__}")
 
-    request = HTTPXRequest(
-        connect_timeout=3.0,
-        read_timeout=60.0,
-        write_timeout=60.0,
-        pool_timeout=5.0,
-    )
-    application = (
-        Application.builder()
-        .token(token)
-        .request(request)
-        .post_init(_post_init)
-        .build()
-    )
+    application = _build_polling_application(token)
     _handlers_registered = False
     register_handlers(application)
     application.add_error_handler(_on_error)
@@ -266,6 +282,8 @@ def start_polling():
         thread_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(thread_loop)
         application.run_polling(
+            timeout=POLLING_LONG_POLL_TIMEOUT_SECONDS,
+            bootstrap_retries=POLLING_BOOTSTRAP_RETRIES,
             allowed_updates=["message", "callback_query"],
             drop_pending_updates=True,
             close_loop=True,
