@@ -644,6 +644,8 @@ def start_bot_thread():
     Returns:
         bool: supervisor 线程是否成功启动（不代表已经取得 OS 锁或轮询健康）。
     """
+    global _last_polling_exit_reason
+
     if not _check_bot_ready_for_polling():
         reason = "dependency_unavailable" if not PTB_AVAILABLE else "configuration_error"
         _last_polling_exit_reason = reason
