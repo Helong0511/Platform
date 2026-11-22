@@ -66,8 +66,8 @@ def sanitize_postback_raw_data(value: Any) -> Any:
             for key, child in item.items():
                 key_text = str(key)
                 # 先拆分连续大写缩写与普通驼峰，避免 clientIP 被错误拆成 client_i_p。
-                normalized_key = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\\1_\\2", key_text)
-                normalized_key = re.sub(r"([a-z0-9])([A-Z])", r"\\1_\\2", normalized_key).lower()
+                normalized_key = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", key_text)
+                normalized_key = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", normalized_key).lower()
                 if _SENSITIVE_RAW_KEY.search(normalized_key):
                     continue
                 result[key_text[:128]] = clean(child, depth + 1)
