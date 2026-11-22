@@ -175,7 +175,8 @@ def _check_bot_ready_for_polling() -> bool:
 
 def _cleanup_on_polling_conflict(current_pid: int) -> None:
     """409 冲突时清理共享状态；OS 锁由 start_polling 外层 finally 统一释放。"""
-    global _bot_started, _active_application
+    global _bot_started, _active_application, _last_polling_exit_reason
+    _last_polling_exit_reason = "conflict"
     _bot_started = False
     _active_application = None
     set_shared_state(
@@ -245,9 +246,11 @@ async def _post_init(application) -> None:
 
 async def _on_error(update, context) -> None:
     """Application 全局错误处理：冲突停轮询，临时网络仅 warning。"""
+    global _last_polling_exit_reason, _last_polling_error_at
     error = context.error
     if error is None:
         return
+    _last_polling_error_at = time.time()
     msg = str(error)
     if is_telegram_conflict_error(msg):
         logger.error("检测到 Telegram 轮询冲突（409），请求 run_polling 优雅退出；error_type=%s", type(error).__name__)
@@ -392,6 +395,7 @@ def start_polling():
 def _start_polling_with_lock(current_pid: int, token: str) -> bool:
     """调用方已持有 OS 锁；执行 Bot 验证、构建、注册和轮询。"""
     global _bot_started, _active_application, _handlers_registered, _polling_loop
+    global _last_polling_exit_reason, _last_polling_error_at
 
     _bot_started = True
     logger.info(f"[PID:{current_pid}] 成功获取锁，标记 Bot 为已启动状态")
@@ -437,6 +441,7 @@ def _start_polling_with_lock(current_pid: int, token: str) -> bool:
         logger.warning(f"[PID:{current_pid}] 验证时发生错误，但继续启动；error_type={type(e).__name__}")
 
     application = _build_polling_application(token)
+    _instrument_get_updates(application)
     _handlers_registered = False
     register_handlers(application)
     application.add_error_handler(_on_error)
@@ -460,13 +465,20 @@ def _start_polling_with_lock(current_pid: int, token: str) -> bool:
             stop_signals=None,
         )
     except Exception as e:
+        _last_polling_error_at = time.time()
         if is_telegram_conflict_error(str(e)):
+            _last_polling_exit_reason = "conflict"
             logger.error(f"[PID:{current_pid}] 轮询过程中检测到其他 Bot 实例；error_type={type(e).__name__}")
             _cleanup_on_polling_conflict(current_pid)
             return False
-        if is_transient_telegram_network_error(e):
+        if is_permanent_telegram_auth_error(e):
+            _last_polling_exit_reason = "permanent_auth_error"
+            logger.error(f"轮询认证失败，停止自动重试；error_type={type(e).__name__}")
+        elif is_transient_telegram_network_error(e):
+            _last_polling_exit_reason = "transient_network_error"
             logger.warning(f"轮询意外退出，临时网络错误；error_type={type(e).__name__}")
         else:
+            _last_polling_exit_reason = "unexpected_exception"
             logger.error(f"轮询意外退出；error_type={type(e).__name__}")
 
     return True
