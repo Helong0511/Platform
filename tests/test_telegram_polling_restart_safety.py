@@ -1,6 +1,8 @@
 """Telegram polling shutdown/restart must not leave a second live poller."""
 import threading
 
+import pytest
+
 from app.core.telegram import polling_manager as manager
 from app.core.telegram import file_lock
 
@@ -168,3 +170,25 @@ def test_windows_msvcrt_lock_path_is_exercised_on_non_windows_ci(tmp_path, monke
         (FakeMsvcrt.LK_UNLCK, 1, 0),
     ]
     assert lock_path.exists()
+
+
+
+def test_kernel_flock_blocks_a_second_open_file_description(tmp_path):
+    if not file_lock.HAS_FCNTL:
+        pytest.skip("fcntl flock is unavailable on this platform")
+
+    import fcntl
+
+    file_lock.release_bot_lock()
+    lock_path = tmp_path / "telegram_bot.lock"
+    assert file_lock.acquire_bot_lock(lock_path) is True
+
+    try:
+        with open(lock_path, "a+b") as second_handle:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(
+                    second_handle.fileno(),
+                    fcntl.LOCK_EX | fcntl.LOCK_NB,
+                )
+    finally:
+        file_lock.release_bot_lock()
