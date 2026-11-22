@@ -71,7 +71,7 @@ async def scrub_third_party_report_pii_task():
             f"pending_enabled={pending_stats['enabled']}"
         )
         set_task_result(THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME, message)
-        logger.info("第三方上报及下游转发日志 PII 生命周期任务：%s", message)
+        logger.info("Postback 与第三方上报 PII 生命周期任务：%s", message)
         return stats
     except Exception as exc:
         set_task_result(
