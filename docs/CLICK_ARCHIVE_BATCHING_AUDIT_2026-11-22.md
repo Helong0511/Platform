@@ -4,7 +4,7 @@
 
 此前 `archive_old_clicks()` 在一个事务内执行全量 `INSERT ... SELECT` 与范围 `DELETE`。当历史点击积压较大时，事务持续时间、锁持有行数、undo/redo 量和锁等待均没有上界；调度器普通任务锁预算只有 300 秒，可能在任务仍运行时被其他 Worker 视为过期。
 
-本次改为**固定高水位 + 有界行锁批次 + 每批独立事务**：
+本次改为**固定高水位 + 有界行锁批次 + 每批独立事务**；令牌模式下仅用 `SELECT 1 ... LIMIT 1` 判断主表是否有数据，不再为跳过任务执行全表 `COUNT(*)`：
 
 1. 捕获本轮主表最大 `id` 作为 `high_water_id`，固定本轮扫描边界。
 2. 使用 `click_time < cutoff AND id <= high_water_id`，按 `click_time, id` 排序，最多选择 1000 条。
