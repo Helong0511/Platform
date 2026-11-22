@@ -181,6 +181,7 @@ def test_polling_health_distinguishes_live_thread_from_stale_get_updates(monkeyp
 
     monkeypatch.setattr(manager.threading, "enumerate", lambda: [FakeThread()])
     monkeypatch.setattr(manager, "_supervisor_running", True)
+    monkeypatch.setattr(manager, "is_lock_held", lambda: True)
     monkeypatch.setattr(
         manager,
         "_last_get_updates_success_at",
@@ -201,6 +202,7 @@ def test_polling_health_distinguishes_live_thread_from_stale_get_updates(monkeyp
 def test_non_owner_worker_reports_remote_polling_owner(monkeypatch):
     monkeypatch.setattr(manager.threading, "enumerate", lambda: [])
     monkeypatch.setattr(manager, "_supervisor_running", False)
+    monkeypatch.setattr(manager, "is_lock_held", lambda: False)
     monkeypatch.setattr(
         manager,
         "get_shared_state",
