@@ -67,6 +67,13 @@
 
 不启用 PTB 的 `all`、`ext`、`rate-limiter`、`job-queue`、`http2`、`socks` extras：当前项目没有相应功能需求，且已有 Redis 限流和独立 APScheduler。不要把 APScheduler 4.0 alpha 当作生产升级目标。
 
+### Python 与 Redis 服务端版本边界
+
+- PTB 22.8 官方支持 Python 3.10+；redis-py 8.1.0 是官方仍支持 Python 3.10 的版本线，因此当前依赖组合适合 Python 3.10、3.11、3.13。
+- redis-py 官方支持矩阵对 6.0+ 客户端列出的 Redis 服务端起点为 7.2；本仓库 Full Audit CI 使用 Redis 7.4。生产 Redis 必须核验为 7.2+，不能只看 Python 包安装成功。
+- 新增 Telegram 依赖矩阵 CI，在 Python 3.10/3.11/3.13 安装固定的 PTB/HTTPX/redis-py/APScheduler 版本，运行 `pip check` 并导入实际使用的 API。
+- 如果项目未来统一提升到 Python 3.11+，可评估 redis-py 8.2.x 稳定版本；不要在仍需 Python 3.10 的环境中直接升级到只支持 Python 3.11+ 的 redis-py 版本。
+
 ## 仍需运维/业务确认的事项
 
 1. `drop_pending_updates=True` 会丢弃 Bot 停机期间尚未处理的 Updates，可能影响审批 callback。必须由业务确认是否接受；本次不擅自改变。
