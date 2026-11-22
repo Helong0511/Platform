@@ -1,6 +1,8 @@
 """非白名单 Postback 处理器必须进入待审批分支且不走正式转化。"""
 import pytest
+from fastapi import HTTPException
 
+from app.services.cpl.postback_receive_service import raise_if_postback_retryable
 from app.core.postback.processor import PostbackProcessor
 from app.services.cpl import postback_pending_ingest_service
 
@@ -108,3 +110,40 @@ async def test_full_pending_queue_returns_retryable_failure(monkeypatch):
     assert result["retryable"] is True
     assert db.rollbacks == 1
     assert db.commits == 0
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reason",
+    ["rate_limited", "missing_source_ip", "invalid_source_ip"],
+)
+async def test_rate_limit_and_untrusted_source_ip_are_retryable(
+    monkeypatch, reason
+):
+    db = _FakeDB()
+
+    async def rejected(**_kwargs):
+        return {"queued": False, "reason": reason}
+
+    monkeypatch.setattr(
+        postback_pending_ingest_service.pending_postback_ingest_service,
+        "enqueue",
+        rejected,
+    )
+
+    result = await PostbackProcessor._handle_ip_failure(
+        "partner_a",
+        {"conversion_id": "c1", "payout": "1.00"},
+        db,
+        request_ip="203.0.113.10",
+    )
+
+    assert result["success"] is False
+    assert result["retryable"] is True
+    assert db.rollbacks == 1
+    assert db.commits == 0
+
+    with pytest.raises(HTTPException) as exc_info:
+        raise_if_postback_retryable(result)
+    assert exc_info.value.status_code == 503
