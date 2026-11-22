@@ -52,6 +52,7 @@ async def test_manual_resend_enqueues_exact_target_without_copying_pii(monkeypat
         publisher_id=33,
         product_id=None,
         pii_scrubbed_at=None,
+        success=False,
         downstream_url=(
             "https://publisher.example/postback?click_id=private-click"
             "&ip=203.0.113.20&email=buyer@example.invalid"
@@ -134,6 +135,32 @@ async def test_manual_resend_rejects_scrubbed_log_before_conversion_lookup(monke
 
 
 @pytest.mark.asyncio
+async def test_manual_resend_rejects_successful_log_before_conversion_lookup(monkeypatch):
+    log = SimpleNamespace(
+        id=11,
+        conversion_id=22,
+        publisher_id=33,
+        product_id=None,
+        pii_scrubbed_at=None,
+        success=True,
+    )
+    db = _FakeDB([log])
+
+    with pytest.raises(HTTPException) as exc:
+        await PostbackForwardLogService().resend_forward(
+            forward_log_id=11,
+            db=db,
+            current_user=SimpleNamespace(id=7),
+        )
+
+    assert exc.value.status_code == 200
+    assert exc.value.detail["code"] == 409
+    assert not db.added
+    # 成功状态在转换读取和入队前被拒绝。
+    assert len(db.statements) == 1
+
+
+@pytest.mark.asyncio
 async def test_manual_resend_rejects_existing_target_queue_task(monkeypatch):
     log = SimpleNamespace(
         id=11,
@@ -141,6 +168,7 @@ async def test_manual_resend_rejects_existing_target_queue_task(monkeypatch):
         publisher_id=None,
         product_id=44,
         pii_scrubbed_at=None,
+        success=False,
         downstream_url="https://product.example/postback",
         request_method="GET",
     )
