@@ -66,8 +66,8 @@ class ClicksArchiveService:
     """
     点击数据冷热分离服务。
 
-    使用 INSERT IGNORE 避免主键冲突后 DELETE 主表；
-    模块级单例 clicks_archive_service 供定时任务直接调用。
+    使用普通 INSERT ... SELECT；任何重复键或写入异常都会回滚，
+    只有归档与删除数量均核对一致后才提交；模块级单例供定时任务调用。
     """
 
     async def count_clicks(self, db: AsyncSession) -> int:
