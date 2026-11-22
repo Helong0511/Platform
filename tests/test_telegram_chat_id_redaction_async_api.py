@@ -283,6 +283,7 @@ async def test_async_admin_notification_uses_async_sender(monkeypatch):
     assert result is True
     send_async.assert_awaited_once_with("123456789", "⚠️ 后台通知")
 
+
 @pytest.mark.asyncio
 async def test_id_command_keeps_full_user_id_in_private_chat(monkeypatch):
     from app.core.telegram.command_handlers import id_command
