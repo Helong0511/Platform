@@ -88,7 +88,9 @@ class ClicksArchiveService:
         """
         if should_persist_clicks_to_db():
             return False
-        return await self.count_clicks(db) == 0
+        # 仅需判断是否存在记录，不执行全表 COUNT，避免令牌模式下空任务扫描大表。
+        result = await db.execute(text("SELECT 1 FROM `clicks` LIMIT 1"))
+        return result.scalar() is None
 
     async def archive_old_clicks(
         self,
