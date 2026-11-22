@@ -15,13 +15,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.telegram import (
-    send_telegram_message,
+    send_telegram_message_async,
     bot_initialized,
     get_bot_status_info,
     bot,
     TELEBOT_AVAILABLE,
 )
 from app.core.config import settings
+from app.core.telegram_utils import mask_telegram_chat_id
 from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.database import get_db
 from app.core.errors import ErrorCode
@@ -195,7 +196,7 @@ async def send_message(
             )
 
         # 发送消息
-        success = send_telegram_message(
+        success = await send_telegram_message_async(
             request.chat_id,
             request.message
         )
@@ -211,7 +212,11 @@ async def send_message(
                 resource_id=0,
                 resource_name="发送Telegram消息",
                 request=http_request,
-                details={"chat_id": request.chat_id},
+                details={
+                    "chat_id_masked": mask_telegram_chat_id(
+                        request.chat_id or getattr(settings, "TELEGRAM_ADMIN", None)
+                    )
+                },
             )
             await commit_audit_log(db)
             return ResponseBaseSchema.success(data=SendMessageResponse(
@@ -224,9 +229,6 @@ async def send_message(
                 message="消息发送失败，请检查日志或 TELEGRAM_ADMIN 配置"
             )
 
-    except HTTPException:
-        # 重新抛出 HTTPException（包括 raise_api_exception 抛出的）
-        raise
     except HTTPException:
         raise
     except Exception as e:
@@ -276,7 +278,7 @@ async def test_bot_connection(
         current_time = get_app_now()
         test_message = f"🧪 Telegram Bot 连接测试\n\n发送时间: {current_time.strftime('%Y-%m-%d %H:%M:%S')}（时区: {settings.TIMEZONE}）\n测试用户: {current_user.username}"
 
-        success = send_telegram_message(test_message)
+        success = await send_telegram_message_async(test_message)
 
         # ---------- 条件分支 ----------
         if success:
