@@ -138,3 +138,33 @@ def test_restart_checks_all_existing_polling_threads(monkeypatch):
     assert result["thread_joined"] is False
     assert result["started"] is False
     assert result["restarted"] is False
+
+
+
+def test_windows_msvcrt_lock_path_is_exercised_on_non_windows_ci(tmp_path, monkeypatch):
+    import os
+
+    calls = []
+
+    class FakeMsvcrt:
+        LK_NBLCK = 1
+        LK_UNLCK = 2
+
+        @staticmethod
+        def locking(fd, mode, byte_count):
+            calls.append((mode, byte_count, os.lseek(fd, 0, os.SEEK_CUR)))
+
+    file_lock.release_bot_lock()
+    monkeypatch.setattr(file_lock, "HAS_FCNTL", False)
+    monkeypatch.setattr(file_lock, "HAS_MSVCRT", True)
+    monkeypatch.setattr(file_lock, "msvcrt", FakeMsvcrt, raising=False)
+
+    lock_path = tmp_path / "windows_style.lock"
+    assert file_lock.acquire_bot_lock(lock_path) is True
+    file_lock.release_bot_lock()
+
+    assert calls == [
+        (FakeMsvcrt.LK_NBLCK, 1, 0),
+        (FakeMsvcrt.LK_UNLCK, 1, 0),
+    ]
+    assert lock_path.exists()
