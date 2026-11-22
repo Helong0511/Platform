@@ -168,7 +168,7 @@ def _rate_limit_seconds_from_exc(exc: BaseException) -> Optional[int]:
             else:
                 seconds = None
             if seconds is not None and math.isfinite(seconds):
-                return max(0, math.ceil(seconds))
+                return max(1, math.ceil(seconds))
         except (OverflowError, TypeError, ValueError):
             pass
     return _parse_retry_after(str(exc))
