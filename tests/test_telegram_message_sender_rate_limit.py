@@ -112,7 +112,7 @@ def test_note_rate_limited_writes_shared_backoff():
     with patch.object(ms, "_get_sync_redis", return_value=fake):
         ms._note_rate_limited("5312177749", 8)
     assert ms._REDIS_BACKOFF_GLOBAL in fake.store
-    assert ms._REDIS_BACKOFF_CHAT.format(chat_id="5312177749") in fake.store
+    assert ms._REDIS_BACKOFF_CHAT.format(chat_key=ms._redis_chat_identifier("5312177749")) in fake.store
     assert fake.pttl(ms._REDIS_BACKOFF_GLOBAL) > 7000
 
 
@@ -149,7 +149,7 @@ def test_wait_before_send_cross_process_chat_gate(monkeypatch):
 
     # 直接模拟另一个 worker 已占用 per-chat 闸门，避免依赖两次调用之间
     # 的真实调度时间；本测试只验证跨进程闸门等待，不测试本地时间间隔。
-    fake.setex(ms._REDIS_GATE_CHAT.format(chat_id="chat-a"), 1, "other-worker")
+    fake.setex(ms._REDIS_GATE_CHAT.format(chat_key=ms._redis_chat_identifier("chat-a")), 1, "other-worker")
 
     with patch.object(ms, "_get_sync_redis", return_value=fake):
         ms._wait_before_send("chat-a")
@@ -161,7 +161,7 @@ def test_chat_gate_miss_with_zero_pttl_spins_briefly(monkeypatch):
     """抢占失败且 PTTL=0 时短睡再抢，禁止空转，也禁止睡满 MIN_SEND_INTERVAL。"""
     fake = _FakeRedis()
     chat_key = "chat-expire"
-    gate_key = ms._REDIS_GATE_CHAT.format(chat_id=chat_key)
+    gate_key = ms._REDIS_GATE_CHAT.format(chat_key=ms._redis_chat_identifier(chat_key))
     global_key = ms._REDIS_GATE_GLOBAL
     slept = []
     state = {"chat_attempts": 0}
@@ -302,7 +302,7 @@ def test_wait_before_send_applies_group_interval_to_redis_gate(monkeypatch):
     with patch.object(ms, "_get_sync_redis", return_value=fake):
         ms._wait_before_send("-1001234567890")
 
-    group_gate = ms._REDIS_GATE_CHAT.format(chat_id="-1001234567890")
+    group_gate = ms._REDIS_GATE_CHAT.format(chat_key=ms._redis_chat_identifier("-1001234567890"))
     assert (group_gate, 3.1) in observed
 
 
@@ -320,7 +320,7 @@ def test_note_rate_limited_preserves_server_retry_after_above_inline_budget(monk
 
     assert (ms._REDIS_BACKOFF_GLOBAL, 300, "1") in calls
     assert (
-        ms._REDIS_BACKOFF_CHAT.format(chat_id="-1001234567890"),
+        ms._REDIS_BACKOFF_CHAT.format(chat_key=ms._redis_chat_identifier("-1001234567890")),
         300,
         "1",
     ) in calls
