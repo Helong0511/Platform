@@ -5,7 +5,11 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
+from app.api_v1.postback import audit as postback_audit
 from app.api_v1.postback.routes import conversions as postback_routes
+from app.api_v1.postback.routes import diagnostic as diagnostic_routes
+from app.api_v1.postback.routes import forward_logs as forward_log_routes
+from app.api_v1.postback.routes import pending as pending_routes
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.models import UserRole
@@ -18,6 +22,9 @@ class _AuditDB:
 def _build_app(monkeypatch, *, commit_error=None):
     app = FastAPI()
     app.include_router(postback_routes.router)
+    app.include_router(forward_log_routes.router)
+    app.include_router(pending_routes.router)
+    app.include_router(diagnostic_routes.router)
     db = _AuditDB()
     user = SimpleNamespace(id=1, username="security-admin", role=UserRole.ADMIN)
     events = []
@@ -42,8 +49,8 @@ def _build_app(monkeypatch, *, commit_error=None):
 
     app.dependency_overrides[get_current_user] = override_user
     app.dependency_overrides[get_db] = override_db
-    monkeypatch.setattr(postback_routes, "log_user_action", fake_log_user_action)
-    monkeypatch.setattr(postback_routes, "commit_audit_log", fake_commit_audit_log)
+    monkeypatch.setattr(postback_audit, "log_user_action", fake_log_user_action)
+    monkeypatch.setattr(postback_audit, "commit_audit_log", fake_commit_audit_log)
     return app, db, user, events, audit_calls, commit_calls
 
 
@@ -143,6 +150,79 @@ async def test_postback_stats_and_duplicate_reads_are_also_audited(monkeypatch):
     ]
     assert "raw-transaction-secret" not in str(audit_calls[1])
     assert audit_calls[1]["details"]["filter_fields_present"] == ["conversion_id"]
+
+
+@pytest.mark.asyncio
+async def test_forward_pending_and_diagnostic_pii_reads_are_audited(monkeypatch):
+    app, db, _, events, audit_calls, commit_calls = _build_app(monkeypatch)
+
+    async def fake_forward_logs(*args, **kwargs):
+        events.append("forward_handler")
+        return {"ok": True, "data": []}
+
+    async def fake_pending(*args, **kwargs):
+        events.append("pending_handler")
+        return {"ok": True, "data": []}
+
+    async def fake_diagnostic(*args, **kwargs):
+        events.append("diagnostic_handler")
+        return {"ok": True, "data": {}}
+
+    monkeypatch.setattr(
+        forward_log_routes.forward_log_handler,
+        "get_postback_forward_logs",
+        fake_forward_logs,
+    )
+    monkeypatch.setattr(
+        pending_routes.pending_handler,
+        "get_pending_postback_conversions",
+        fake_pending,
+    )
+    monkeypatch.setattr(
+        diagnostic_routes.diagnostic_handler,
+        "diagnose_postback_record",
+        fake_diagnostic,
+    )
+
+    forward_response = await _request(
+        app,
+        "/postback/forward-logs?conversion_id=123&success=true&page=3&page_size=50",
+    )
+    pending_response = await _request(
+        app,
+        "/postback/pending-conversions?request_ip=203.0.113.5&status=pending&page=2",
+    )
+    diagnostic_response = await _request(
+        app,
+        "/postback/diagnose?conversion_or_click_id=raw-diagnostic-id",
+    )
+
+    assert forward_response.status_code == 200
+    assert pending_response.status_code == 200
+    assert diagnostic_response.status_code == 200
+    assert [call["resource_name"] for call in audit_calls] == [
+        "forward_log_list",
+        "pending_conversion_list",
+        "conversion_diagnostic",
+    ]
+    assert len(commit_calls) == 3
+    assert commit_calls == [db, db, db]
+    assert events == [
+        "forward_handler", "audit", "commit",
+        "pending_handler", "audit", "commit",
+        "diagnostic_handler", "audit", "commit",
+    ]
+    assert "203.0.113.5" not in str(audit_calls[1])
+    assert "raw-diagnostic-id" not in str(audit_calls[2])
+    assert audit_calls[1]["details"]["filter_fields_present"] == [
+        "request_ip",
+        "status",
+    ]
+    assert audit_calls[2]["details"]["filter_fields_present"] == [
+        "conversion_or_click_id"
+    ]
+
+
 
 
 @pytest.mark.asyncio
