@@ -273,3 +273,34 @@ def test_sync_redis_preserves_url_password_when_no_override(monkeypatch):
 
     assert isinstance(ms._get_sync_redis(), _FakeClient)
     assert "password" not in calls["kwargs"]
+
+
+
+def test_group_chat_uses_telegram_twenty_per_minute_limit(monkeypatch):
+    monkeypatch.setattr(ms, "MIN_SEND_INTERVAL", 1.1)
+    monkeypatch.setattr(ms, "MIN_GROUP_SEND_INTERVAL", 3.1)
+
+    assert ms._chat_send_interval("123456789") == 1.1
+    assert ms._chat_send_interval("-1001234567890") == 3.1
+    assert ms._chat_send_interval("-123456") == 3.1
+    assert ms._chat_send_interval(None) == 1.1
+
+
+def test_wait_before_send_applies_group_interval_to_redis_gate(monkeypatch):
+    fake = _FakeRedis()
+    observed = []
+    monkeypatch.setattr(ms, "MIN_SEND_INTERVAL", 1.1)
+    monkeypatch.setattr(ms, "MIN_GROUP_SEND_INTERVAL", 3.1)
+    monkeypatch.setattr(ms, "MIN_GLOBAL_SEND_INTERVAL", 0.0)
+    monkeypatch.setattr(ms, "_redis_wait_seconds", lambda *_args: 0.0)
+    monkeypatch.setattr(
+        ms,
+        "_try_acquire_redis_gate",
+        lambda _redis, key, interval: observed.append((key, interval)) or True,
+    )
+
+    with patch.object(ms, "_get_sync_redis", return_value=fake):
+        ms._wait_before_send("-1001234567890")
+
+    group_gate = ms._REDIS_GATE_CHAT.format(chat_id="-1001234567890")
+    assert (group_gate, 3.1) in observed
