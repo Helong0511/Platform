@@ -71,7 +71,7 @@
 
 ### 38.2 修复
 
-- `release_task_lock()` 现在重新执行 `SELECT ... FOR UPDATE` 并使用 `populate_existing=True` 刷新 SQLAlchemy identity map，在行锁保护下读取数据库中的当前持有者，再校验 PID/Host；旧 Worker 不能用 Session 中缓存的旧 ORM 对象覆盖新 Worker 的运行状态。
+- `release_task_lock()` 现在重新执行 `SELECT ... FOR UPDATE` 并使用 `populate_existing=True` 刷新 SQLAlchemy identity map，在行锁保护下读取数据库中的当前持有者，再校验 PID/Host 和单调递增的 `run_count` 运行代号。仅 PID/Host 不足以识别同一进程超时后重新抢到的下一代任务；旧运行必须携带抢锁时保存的 `run_count`，否则 fail closed，不释放锁。
 - `acquire_task_lock()` 在同一锁事务中读取 MySQL 服务端时间表达式 `get_app_now_sql_expression()`，用它判断超时并写入 `last_run_time`。
 - `execute_task_with_lock()` 的提前跳过检查也使用 MySQL 服务端时间，避免 Worker 本地时钟造成误判。若无法读取数据库时间，抢锁路径 fail closed。
 - 第三方 Report Outbox 单批最坏 HTTP 网络预算为 549 秒（每条最多 3 次、每次 60 秒，退避合计 3 秒；每批 3 条），代码注释已与 900 秒 MySQL 任务超时及 960 秒 Redis TTL 对齐。该预算不包含 DB/凭据/调度开销，不能当作生产实测耗时。
@@ -81,6 +81,6 @@
 - 使用快/慢偏移的模拟 Worker 时钟，验证抢锁与 stale precheck 只使用 DB 时间。
 - 验证任务开始时间写入 DB 时间。
 - 编译 MySQL 方言 SQL，验证释放锁时确实包含 `FOR UPDATE`。
-- 这些测试证明时间源与 SQL 锁语义；仍需在真实多 MySQL 会话下做故障注入/长任务演练，不能替代生产级压测。
+- 这些测试证明时间源、SQL 行锁、identity map 刷新及同 PID/Host 的旧运行代号不能释放新运行；仍需在真实多 MySQL 会话下做故障注入/长任务演练，不能替代生产级压测。
 
-结论：修复了旧 Worker 使用一致性快照误释放新 Worker 锁的竞态，并统一锁超时判断时间源。任务超时后旧 Worker 仍可能继续执行其业务函数；各业务任务仍必须具备自己的幂等/租约 fencing，不能把 Scheduler 锁当作外部副作用的 exactly-once 保证。
+结论：修复了旧 Worker 使用一致性快照/ORM 缓存误释放新 Worker 锁的竞态；使用 `run_count` 作为同 PID/Host 的运行代号 fencing，并统一锁超时判断时间源。任务超时后旧 Worker 仍可能继续执行其业务函数；各业务任务仍必须具备自己的幂等/租约 fencing，不能把 Scheduler 锁当作外部副作用的 exactly-once 保证。
