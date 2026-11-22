@@ -141,7 +141,7 @@ def test_postback_conversion_routes_keep_admin_only_dependency():
 
 
 @pytest.mark.asyncio
-async def test_conversion_summary_rejects_unauthenticated_request():
+async def test_conversion_summary_rejects_unauthenticated_request(monkeypatch):
     app, _, _ = _build_summary_app(authenticated=False, monkeypatch=monkeypatch)
 
     response = await _get(app, "/conversion-summary/")
@@ -150,7 +150,7 @@ async def test_conversion_summary_rejects_unauthenticated_request():
 
 
 @pytest.mark.asyncio
-async def test_conversion_summary_allows_admin_without_client_lookup():
+async def test_conversion_summary_allows_admin_without_client_lookup(monkeypatch):
     user = SimpleNamespace(id=1, role=UserRole.ADMIN)
     db = _AuthorizationDB()
     service = _ConversionService()
@@ -166,11 +166,11 @@ async def test_conversion_summary_allows_admin_without_client_lookup():
 
 
 @pytest.mark.asyncio
-async def test_conversion_summary_allows_client_with_active_publisher_scope():
+async def test_conversion_summary_allows_client_with_active_publisher_scope(monkeypatch):
     user = SimpleNamespace(id=77, role=UserRole.CLIENT)
     db = _AuthorizationDB(client_ids=[11, 22], publisher_id=901)
     service = _ConversionService()
-    app, db, service = _build_summary_app(user=user, db=db, service=service)
+    app, db, service = _build_summary_app(user=user, db=db, service=service, monkeypatch=monkeypatch)
 
     response = await _get(app, "/conversion-summary/?publisher_id=901")
 
@@ -182,11 +182,11 @@ async def test_conversion_summary_allows_client_with_active_publisher_scope():
 
 
 @pytest.mark.asyncio
-async def test_conversion_summary_rejects_client_without_active_client_record():
+async def test_conversion_summary_rejects_client_without_active_client_record(monkeypatch):
     user = SimpleNamespace(id=78, role=UserRole.CLIENT)
     db = _AuthorizationDB(client_ids=[], publisher_id=None)
     service = _ConversionService()
-    app, db, service = _build_summary_app(user=user, db=db, service=service)
+    app, db, service = _build_summary_app(user=user, db=db, service=service, monkeypatch=monkeypatch)
 
     response = await _get(app, "/conversion-summary/")
 
@@ -196,11 +196,11 @@ async def test_conversion_summary_rejects_client_without_active_client_record():
 
 
 @pytest.mark.asyncio
-async def test_conversion_summary_rejects_client_without_active_publisher():
+async def test_conversion_summary_rejects_client_without_active_publisher(monkeypatch):
     user = SimpleNamespace(id=79, role=UserRole.CLIENT)
     db = _AuthorizationDB(client_ids=[11, 22], publisher_id=None)
     service = _ConversionService()
-    app, db, service = _build_summary_app(user=user, db=db, service=service)
+    app, db, service = _build_summary_app(user=user, db=db, service=service, monkeypatch=monkeypatch)
 
     response = await _get(app, "/conversion-summary/")
 
@@ -211,11 +211,11 @@ async def test_conversion_summary_rejects_client_without_active_publisher():
 
 @pytest.mark.parametrize("role", ["publisher", "advertiser", "readonly", "operator"])
 @pytest.mark.asyncio
-async def test_conversion_summary_rejects_non_client_non_admin_roles(role):
+async def test_conversion_summary_rejects_non_client_non_admin_roles(role, monkeypatch):
     user = SimpleNamespace(id=80, role=role)
     db = _AuthorizationDB()
     service = _ConversionService()
-    app, db, service = _build_summary_app(user=user, db=db, service=service)
+    app, db, service = _build_summary_app(user=user, db=db, service=service, monkeypatch=monkeypatch)
 
     response = await _get(app, "/conversion-summary/")
 
@@ -225,11 +225,11 @@ async def test_conversion_summary_rejects_non_client_non_admin_roles(role):
 
 
 @pytest.mark.asyncio
-async def test_conversion_by_offer_client_route_uses_same_scope_dependency():
+async def test_conversion_by_offer_client_route_uses_same_scope_dependency(monkeypatch):
     user = SimpleNamespace(id=81, role=UserRole.CLIENT)
     db = _AuthorizationDB(client_ids=[11], publisher_id=902)
     service = _ConversionService()
-    app, db, service = _build_summary_app(user=user, db=db, service=service)
+    app, db, service = _build_summary_app(user=user, db=db, service=service, monkeypatch=monkeypatch)
 
     response = await _get(app, "/conversion-summary/by-offer")
 
