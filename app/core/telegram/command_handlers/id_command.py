@@ -43,8 +43,8 @@ async def get_chat_id(update, context):
             logger.warning("获取 Bot 信息失败；error_type=%s", type(e).__name__)
 
     logger.info(
-        "[命令处理器] 收到 /id 命令，来自用户：%s（Chat ID: %s, Chat Type: %s, Bot Mentioned: %s）",
-        (user.username or user.first_name) if user else "未知",
+        "[命令处理器] 收到 /id 命令，user_id=%s chat_id=%s chat_type=%s bot_mentioned=%s",
+        mask_telegram_chat_id(getattr(user, "id", None)),
         mask_telegram_chat_id(chat.id),
         chat_type,
         bot_mentioned,
