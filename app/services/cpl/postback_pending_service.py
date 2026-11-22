@@ -141,12 +141,8 @@ class PostbackPendingService:
         """
         将指定来源 IP 下所有 pending 待确认记录批量批准。
 
-        已存在正式记录的仅更新 pending 状态为 approved 并计入 skipped_count。
-
-        Args:
-            ip_address: 待匹配 request_ip（去首尾空白）
-            db: 异步数据库会话
-            current_user: 触发操作的管理员（写日志用）
+        每条记录使用独立 SAVEPOINT：单条数据/约束错误回滚当前记录，
+        不污染同批其它记录；整个批次仍由调用方统一提交外层事务。
 
         Returns:
             Dict: approved_count、skipped_count、failed_count、approved_ids
@@ -161,6 +157,7 @@ class PostbackPendingService:
         if not ip:
             return result
 
+        pending_list = []
         try:
             pending_result = await db.execute(
                 select(PendingPostbackConversion).where(
@@ -178,67 +175,78 @@ class PostbackPendingService:
             )
 
             for pending in pending_list:
+                pending_id = pending.id
+                row_outcome = None
+                row_conversion_id = None
+                previous_status = pending.status
                 try:
-                    previous_status = pending.status
-                    existing_conversion_id = await self._pending_conversion_exists(pending, db)
-                    if existing_conversion_id is not None:
-                        pending.status = "approved"
-                        pending.approved_at = get_app_now_naive()
+                    # 每条记录单独建立保存点，避免一次 flush 失败使整个批次事务失效。
+                    async with db.begin_nested():
+                        existing_conversion_id = await self._pending_conversion_exists(pending, db)
+                        if existing_conversion_id is not None:
+                            pending.status = "approved"
+                            pending.approved_at = get_app_now_naive()
+                            row_outcome = "already_exists"
+                            row_conversion_id = existing_conversion_id
+                        else:
+                            conversion = await self._create_conversion_from_pending(pending, db)
+                            # 在保存点内先 flush 获取正式转化 ID，再写入同事务审批审计。
+                            await db.flush()
+                            row_outcome = "approved"
+                            row_conversion_id = conversion.id
+
                         add_postback_approval_audit(
                             db,
-                            pending_conversion_id=pending.id,
-                            conversion_id=existing_conversion_id,
+                            pending_conversion_id=pending_id,
+                            conversion_id=row_conversion_id,
                             actor_type="system_user",
                             actor_id=current_user.id,
                             source="ip_whitelist",
                             action="auto_approve",
-                            outcome="already_exists",
+                            outcome=row_outcome,
                             previous_status=previous_status,
                             new_status=pending.status,
                         )
-                        result["skipped_count"] += 1
-                        continue
+                        # 确保约束错误在当前 SAVEPOINT 内暴露并回滚。
+                        await db.flush()
 
-                    conversion = await self._create_conversion_from_pending(pending, db)
-                    # 先 flush 获取正式转化主键，再写入同一事务的审批审计事件。
-                    await db.flush()
-                    add_postback_approval_audit(
-                        db,
-                        pending_conversion_id=pending.id,
-                        conversion_id=conversion.id,
-                        actor_type="system_user",
-                        actor_id=current_user.id,
-                        source="ip_whitelist",
-                        action="auto_approve",
-                        outcome="approved",
-                        previous_status=previous_status,
-                        new_status=pending.status,
-                    )
-                    result["approved_count"] += 1
-                    result["approved_ids"].append(pending.id)
-                except Exception as e:
+                    # 只有 SAVEPOINT 成功释放后才更新成功计数。
+                    if row_outcome == "already_exists":
+                        result["skipped_count"] += 1
+                    elif row_outcome == "approved":
+                        result["approved_count"] += 1
+                        result["approved_ids"].append(pending_id)
+                except Exception as row_error:
+                    # SAVEPOINT 回滚后若外层事务也已失效，不能继续处理后续记录。
+                    if not db.is_active:
+                        raise
                     result["failed_count"] += 1
                     logger.warning(
                         "自动批准待确认记录失败: pending_id=%s error_type=%s",
-                        pending.id,
-                        type(e).__name__,
+                        pending_id,
+                        type(row_error).__name__,
                     )
 
-            if result["approved_count"] > 0 or result["skipped_count"] > 0:
-                await db.flush()
-                if result["approved_count"] > 0:
-                    logger.info(
-                        "管理员 %s 添加 IP 白名单后自动批准 %s 条待确认转化",
-                        current_user.username,
-                        result["approved_count"],
-                    )
+            if result["approved_count"] > 0:
+                logger.info(
+                    "管理员 %s 添加 IP 白名单后自动批准 %s 条待确认转化",
+                    current_user.username,
+                    result["approved_count"],
+                )
+            # 不在此处 commit；由请求事务边界统一提交。
         except Exception as e:
             await db.rollback()
             logger.error(
-                "自动批准待确认记录失败: error_type=%s",
+                "批量自动批准事务失败，已回滚整个批次: error_type=%s",
                 type(e).__name__,
             )
-            result["failed_count"] = len(pending_list) if "pending_list" in locals() else 0
+            # 外层事务回滚后，之前各 SAVEPOINT 的变更也全部撤销，成功计数必须清零。
+            result = {
+                "approved_count": 0,
+                "skipped_count": 0,
+                "failed_count": len(pending_list),
+                "approved_ids": [],
+            }
 
         return result
 
