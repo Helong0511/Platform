@@ -509,6 +509,7 @@ def _start_polling_with_lock(current_pid: int, token: str) -> bool:
 def _run_polling_supervisor() -> None:
     """唯一 TelegramBot 线程监督 polling 生命周期，并对可恢复退出做有限退避。"""
     global _supervisor_running, _supervisor_restart_count, _last_polling_exit_reason
+    global _last_polling_error_at
 
     _supervisor_running = True
     _supervisor_restart_count = 0
@@ -524,7 +525,6 @@ def _run_polling_supervisor() -> None:
             try:
                 start_polling()
             except Exception as exc:
-                global _last_polling_error_at
                 _last_polling_error_at = time.time()
                 if is_telegram_conflict_error(str(exc)):
                     _last_polling_exit_reason = "conflict"
@@ -682,9 +682,6 @@ def restart_bot_thread(
     如果旧线程无法在 join_timeout 内退出，则 fail closed：不释放其锁、不清状态、
     不启动第二个轮询线程。
     """
-    import threading
-    import time
-
     global _bot_started, _handlers_registered
 
     stopped = stop_polling_application(timeout=stop_timeout)
