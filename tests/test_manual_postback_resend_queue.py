@@ -52,6 +52,7 @@ async def test_manual_resend_enqueues_exact_target_without_copying_pii(monkeypat
         publisher_id=33,
         product_id=None,
         pii_scrubbed_at=None,
+        success=False,
         downstream_url=(
             "https://publisher.example/postback?click_id=private-click"
             "&ip=203.0.113.20&email=buyer@example.invalid"
@@ -167,6 +168,7 @@ async def test_manual_resend_rejects_existing_target_queue_task(monkeypatch):
         publisher_id=None,
         product_id=44,
         pii_scrubbed_at=None,
+        success=False,
         downstream_url="https://product.example/postback",
         request_method="GET",
     )
