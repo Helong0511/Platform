@@ -60,6 +60,10 @@ async def test_archive_commits_only_after_matching_insert_and_delete_counts(monk
 
     insert_sql = next(sql for sql in db.statements if "INSERT INTO" in sql)
     assert "INSERT IGNORE" not in insert_sql
+    assert "`original_request_url`" in insert_sql
+    assert "`final_redirect_url`" in insert_sql
+    assert "`original_request_url`" in archive_module._CREATE_ARCHIVE_TABLE_SQL
+    assert "`final_redirect_url`" in archive_module._CREATE_ARCHIVE_TABLE_SQL
     assert db.committed is True
     assert db.rolled_back is False
     assert result["archived_count"] == 2
