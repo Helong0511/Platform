@@ -195,3 +195,21 @@ def test_polling_health_distinguishes_live_thread_from_stale_get_updates(monkeyp
     fresh = manager.get_polling_health_status()
     assert fresh["thread_alive"] is True
     assert fresh["healthy"] is True
+
+
+
+def test_non_owner_worker_reports_remote_polling_owner(monkeypatch):
+    monkeypatch.setattr(manager.threading, "enumerate", lambda: [])
+    monkeypatch.setattr(manager, "_supervisor_running", False)
+    monkeypatch.setattr(
+        manager,
+        "get_shared_state",
+        lambda: {"bot_running": True, "current_pid": 987654},
+    )
+    monkeypatch.setattr(manager, "is_bot_running", lambda: True)
+
+    health = manager.get_polling_health_status()
+
+    assert health["is_owner"] is False
+    assert health["remote_owner_alive"] is True
+    assert health["healthy"] is False
