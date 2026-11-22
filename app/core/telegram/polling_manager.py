@@ -272,14 +272,21 @@ def start_polling():
         bool: 是否成功启动并正常结束（冲突返回 False）
     """
     global _bot_started, _active_application, _handlers_registered, _polling_loop
+    global _last_polling_exit_reason, _last_get_updates_success_at, _last_polling_error_at
 
+    if threading.current_thread().name != "TelegramBot":
+        _supervisor_stop_event.clear()
+    _last_polling_exit_reason = "starting"
+    _last_get_updates_success_at = None
     current_pid = os.getpid()
 
     if _bot_started:
+        _last_polling_exit_reason = "already_running"
         logger.info(f"[PID:{current_pid}] Telegram Bot 已经启动，跳过重复启动...")
         return False
 
     if is_bot_running():
+        _last_polling_exit_reason = "already_running"
         logger.info(f"[PID:{current_pid}] Telegram Bot 已在其他进程中运行，跳过启动...")
         return False
 
@@ -287,12 +294,14 @@ def start_polling():
 
     telegram_enabled = getattr(settings, "TELEGRAM_ENABLE", True)
     if not telegram_enabled:
+        _last_polling_exit_reason = "disabled"
         logger.info(
             f"[PID:{current_pid}] Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过启动"
         )
         return False
 
     if not PTB_AVAILABLE:
+        _last_polling_exit_reason = "dependency_unavailable"
         logger.error(
             f"[PID:{current_pid}] python-telegram-bot 未安装，无法启动 Bot"
         )
@@ -300,6 +309,7 @@ def start_polling():
 
     token = getattr(settings, "TELEGRAM_TOKEN", None)
     if not token or not str(token).strip():
+        _last_polling_exit_reason = "configuration_error"
         logger.error(f"[PID:{current_pid}] Telegram token 未配置，无法启动")
         return False
     token = str(token).strip()
@@ -311,6 +321,7 @@ def start_polling():
     logger.info(f"[PID:{current_pid}] 尝试获取 Telegram Bot 启动锁...")
     lock_acquired = acquire_bot_lock()
     if not lock_acquired:
+        _last_polling_exit_reason = "lock_not_acquired"
         logger.info(
             f"[PID:{current_pid}] 其他进程已启动 Telegram Bot，或无法获取锁，跳过启动..."
         )
@@ -321,12 +332,30 @@ def start_polling():
     entered_runtime = False
     try:
         if is_bot_running():
+            _last_polling_exit_reason = "already_running"
             logger.info(
                 f"[PID:{current_pid}] Telegram Bot 已在其他进程中运行，跳过启动..."
             )
             return False
         entered_runtime = True
-        return _start_polling_with_lock(current_pid, token)
+        try:
+            result = _start_polling_with_lock(current_pid, token)
+            if _last_polling_exit_reason == "starting":
+                _last_polling_exit_reason = (
+                    "stopped" if _supervisor_stop_event.is_set() else "unexpected_return"
+                )
+            return result
+        except Exception as exc:
+            _last_polling_error_at = time.time()
+            if is_telegram_conflict_error(str(exc)):
+                _last_polling_exit_reason = "conflict"
+            elif is_permanent_telegram_auth_error(exc):
+                _last_polling_exit_reason = "permanent_auth_error"
+            elif is_transient_telegram_network_error(exc):
+                _last_polling_exit_reason = "transient_network_error"
+            else:
+                _last_polling_exit_reason = "unexpected_exception"
+            raise
     finally:
         # 无论导入、Bot 探测、Application 构建、Handler 注册还是 run_polling 抛错，
         # 都必须释放当前进程刚取得的 OS 锁。状态清理只在本次启动已进入运行阶段时执行。
