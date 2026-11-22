@@ -247,3 +247,18 @@ def test_large_json_string_is_omitted_instead_of_truncated():
     result = sanitize_postback_raw_data(raw)
 
     assert result == "[structured payload omitted: exceeds string limit]"
+
+
+
+def test_redacts_percent_encoded_json_with_utf8_bom():
+    raw_json = "\\ufeff" + json.dumps({
+        "email": "bom@example.com",
+        "click_id": "bom-click-preserved",
+    }, separators=(",", ":"))
+    raw = quote(raw_json, safe="")
+
+    result = sanitize_postback_raw_data(raw)
+    decoded = json.loads(result)
+
+    assert decoded == {"click_id": "bom-click-preserved"}
+    assert "bom@example.com" not in result
