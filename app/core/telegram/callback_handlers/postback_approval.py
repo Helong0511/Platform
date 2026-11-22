@@ -108,7 +108,7 @@ def process_pending_conversion(
             TelegramPostbackApprovalAudit,
         )
         from app.core.tracking.click_token import resolve_click_from_token
-    
+
         token = getattr(settings, "TELEGRAM_TOKEN", None)
         if not token:
             raise RuntimeError("Telegram token is not configured")
@@ -462,7 +462,11 @@ def process_pending_conversion(
                 )
             except Exception as err:
                 logger.warning("发送回调确认时出错：error_type=%s", type(err).__name__)
-        elif fallback_bot is not None and callback_loop is not None and callback_loop.is_running():
+        elif (
+            fallback_bot is not None
+            and callback_loop is not None
+            and callback_loop.is_running()
+        ):
             try:
                 # context.bot 属于 PTB 主事件循环，必须回投原事件循环，不能跨线程直接运行其 HTTP 客户端。
                 fallback_coro = fallback_bot.answer_callback_query(
@@ -476,7 +480,10 @@ def process_pending_conversion(
                 future = asyncio.run_coroutine_threadsafe(fallback_coro, callback_loop)
                 future.result(timeout=5)
             except Exception as err:
-                logger.warning("通过 PTB 主事件循环发送最终回调失败：error_type=%s", type(err).__name__)
+                logger.warning(
+                    "通过 PTB 主事件循环发送最终回调失败：error_type=%s",
+                    type(err).__name__,
+                )
         else:
             logger.error(
                 "Telegram 审批初始化失败且没有可用 Bot/事件循环发送最终回调：pending_id=%s",
@@ -555,7 +562,16 @@ async def handle_postback_approval(update, context):
 
     thread = threading.Thread(
         target=process_pending_conversion,
-        args=(pending_id, action, callback_query_id, chat_id, message_id, user_id, getattr(context, "bot", None), asyncio.get_running_loop()),
+        args=(
+            pending_id,
+            action,
+            callback_query_id,
+            chat_id,
+            message_id,
+            user_id,
+            getattr(context, "bot", None),
+            asyncio.get_running_loop(),
+        ),
         daemon=True,
     )
     thread.start()
