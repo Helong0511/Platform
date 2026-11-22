@@ -286,3 +286,84 @@ async def scrub_expired_postback_forward_log_pii(
         "cutoff": cutoff.isoformat(sep=" "),
         "message": f"已清除 {len(rows)} 条下游转发日志中的个人信息载荷",
     }
+
+async def scrub_expired_pending_postback_pii(
+    *,
+    retention_days: int | None = None,
+    batch_size: int = 200,
+) -> dict:
+    """只清理到期 approved/rejected 待审批记录的 PII；pending 永远不由此任务触碰。"""
+    from app.models.postback import PendingPostbackConversion
+
+    days = (
+        int(settings.PENDING_POSTBACK_PII_RETENTION_DAYS)
+        if retention_days is None
+        else int(retention_days)
+    )
+    if days < 0:
+        raise ValueError("待审批 Postback PII 保留天数不能小于 0")
+    if batch_size < 1 or batch_size > 1000:
+        raise ValueError("待审批 Postback PII 清理 batch_size 必须在 1 到 1000 之间")
+    if days == 0:
+        return {
+            "enabled": False,
+            "retention_days": 0,
+            "selected": 0,
+            "scrubbed": 0,
+            "message": "未配置待审批 Postback PII 保留期限，按 fail-safe 策略跳过清理",
+        }
+
+    now = get_app_now_naive()
+    cutoff = now - timedelta(days=days)
+    cutoff_sql = get_app_now_sql_expression(-(days * 24 * 60 * 60))
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(PendingPostbackConversion)
+            .where(
+                PendingPostbackConversion.created_at < cutoff_sql,
+                PendingPostbackConversion.status.in_(("approved", "rejected")),
+                PendingPostbackConversion.pii_scrubbed_at.is_(None),
+            )
+            .order_by(
+                PendingPostbackConversion.created_at.asc(),
+                PendingPostbackConversion.id.asc(),
+            )
+            .limit(batch_size)
+            .with_for_update(skip_locked=True)
+        )
+        rows = list(result.scalars().all())
+        for row in rows:
+            # 保留 platform/conversion_id/event_name/dedupe_key 与财务字段，维持幂等及业务对账。
+            # 终态后清除请求来源、设备标识、点击关联、原始 JSON 和 Telegram 消息定位信息。
+            row.devad_id = None
+            row.os = None
+            row.carrier = None
+            row.ip = None
+            row.gid = None
+            row.click_id = None
+            row.click_time = None
+            row.raw_data = None
+            row.request_ip = ""
+            row.telegram_message_id = None
+            row.telegram_chat_id = None
+            row.pii_scrubbed_at = now
+
+        if rows:
+            await db.commit()
+            logger.info(
+                "待审批 Postback 终态 PII 清理完成：scrubbed=%s retention_days=%s",
+                len(rows),
+                days,
+            )
+        else:
+            await db.rollback()
+
+    return {
+        "enabled": True,
+        "retention_days": days,
+        "selected": len(rows),
+        "scrubbed": len(rows),
+        "cutoff": cutoff.isoformat(sep=" "),
+        "message": f"已清除 {len(rows)} 条待审批 Postback 终态记录中的个人信息载荷",
+    }
