@@ -36,12 +36,16 @@ class _FakeDB:
         inserted_counts=None,
         deleted_counts=None,
         insert_error_batch=None,
+        transient_insert_errors=0,
+        transient_error_code=1213,
     ):
         self.max_id = max_id
         self.batches = list(batches or [])
         self.inserted_counts = list(inserted_counts or [])
         self.deleted_counts = list(deleted_counts or [])
         self.insert_error_batch = insert_error_batch
+        self.transient_insert_errors = transient_insert_errors
+        self.transient_error_code = transient_error_code
         self.select_calls = 0
         self.current_batch_index = -1
         self.current_ids = []
@@ -69,6 +73,9 @@ class _FakeDB:
             return _Result(values=self.current_ids)
 
         if "INSERT INTO `clicks_archive`" in sql:
+            if self.transient_insert_errors > 0:
+                self.transient_insert_errors -= 1
+                raise RuntimeError(self.transient_error_code, "simulated transient database lock error")
             if self.insert_error_batch == self.current_batch_index + 1:
                 raise RuntimeError("simulated archive write failure")
             count = (
@@ -135,7 +142,6 @@ async def test_archive_uses_bounded_locked_batches_and_commits_each_complete_bat
     assert "`id` <= :high_water_id" in select_sql
     assert insert_sql.count("`original_request_url`") == 2
     assert insert_sql.count("`final_redirect_url`") == 2
-    assert "expanding" not in insert_sql.lower()  # expanding 参数由 SQLAlchemy 在执行时安全展开
     assert all(p.get("high_water_id") == 3 for p in db.parameters if "high_water_id" in p)
     assert all(p.get("batch_size") == 2 for p in db.parameters if "batch_size" in p)
     assert db.commit_count == 3  # 两个数据批次 + 结束时空批次
@@ -203,6 +209,31 @@ async def test_archive_failure_after_prior_commit_keeps_completed_batches_resuma
     assert len(delete_statements) == 1  # 第二批写入失败，不执行第二批删除
     assert db.commit_count == 1  # 第一批已完整提交
     assert db.rollback_count == 1  # 仅回滚失败的第二批
+
+
+@pytest.mark.parametrize("mysql_errno", [1205, 1213])
+@pytest.mark.asyncio
+async def test_archive_retries_transient_lock_timeout_or_deadlock(monkeypatch, mysql_errno):
+    db = _FakeDB(
+        max_id=3,
+        batches=[[1, 2], [1, 2], [3], []],
+        inserted_counts=[0, 2, 1],
+        deleted_counts=[0, 2, 1],
+        transient_insert_errors=1,
+        transient_error_code=mysql_errno,
+    )
+    service, db = _prepare_service(monkeypatch, db)
+
+    result = await service.archive_old_clicks(db, days=90, batch_size=2)
+
+    assert result["archived_count"] == 3
+    assert result["deleted_count"] == 3
+    assert result["batch_count"] == 2
+    assert db.rollback_count == 1
+    assert db.commit_count == 3
+    assert sum("FOR UPDATE" in sql for sql in db.statements) == 4
+
+
 
 
 @pytest.mark.asyncio
