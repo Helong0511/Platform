@@ -1476,3 +1476,30 @@ sudo systemctl restart Platform-scheduler.service
 - .env 当前已从 Tree 移除，但历史路径尚未清理。
 - 本轮未读取任何密钥内容、未访问云端密钥管理系统、未轮换/吊销任何凭据、未修改生产主机，也未重写 Git 历史。
 - 在服务所有者完成轮换、仓库外注入、线上验证和历史清理之前，不得将凭据风险标记为已解决，也不得宣称系统可安全上线。
+
+## 40. 2026-11-22：Cap 错误脱敏与非白名单 Postback 重试语义（PR #93 / #94）
+
+### Cap 一致性检查异常处理（PR #93）
+
+- Cap 一致性检查内部服务异常统一返回通用 HTTP 500，不再将 Redis/数据库原始异常消息返回 API 调用方。
+- 应用日志只记录异常类型，不写原始异常文本或 traceback。
+- 管理审计记录只保留异常类型，不持久化原始异常字符串；审计写入失败时同样只记录异常类型，避免二次异常重新泄露凭据。
+- 回归测试通过真实审计写入边界验证 API、审计记录和日志均不包含合成凭据。
+- Full Audit CI 与 Emergency Security CI 均通过后合并到 main。
+
+### 非白名单 Postback 入队拒绝语义（PR #94）
+
+- 非白名单回调在入队限流命中、服务端来源 IP 缺失/无效或入队结果无法识别时，必须返回可重试失败，不得返回 HTTP 200 `ok`。
+- Redis 不可用、队列积压达到上限、数据库提交失败仍按可重试失败处理；数据库事务在拒绝路径回滚。
+- 已存在的幂等重复记录仍返回成功，避免上游重复投递造成重复入队。
+- 更新 `docs/POSTBACK_PENDING_INGESTION_SECURITY.md`，明确上游响应语义；增加测试验证临时拒绝最终映射为 HTTP 503。
+- Full Audit CI 与 Emergency Security CI 均通过后合并到 main。
+
+### 本轮仍未关闭的上线阻断项
+
+- Git Tree 仍跟踪 JWT RSA 私钥、Nginx TLS 私钥及两份 GAM 服务账号 JSON；必须先轮换/吊销、迁移到仓库外、验证生产运行，再移除跟踪并评估 Git 历史清理。
+- PostbackConversion 与待审批 Postback 的专用 PII 字段仍未纳入自动清理；`THIRD_PARTY_REPORT_PII_RETENTION_DAYS=0` 继续保持默认关闭，等待业务/合规负责人批准用途、期限和访问策略。
+- 完整旧 schema/历史数据升级、中断重跑、备份恢复与兼容回滚演练仍未完成。
+- Outbox / Cap Reservation 多 Worker 组合故障、租约过期、远端成功但本地 ACK 丢失等压力演练仍需补齐。
+- 分支保护状态无法通过当前 GitHub 只读权限确认；必须在仓库设置中核验 main 的 PR 审查、必需 CI、禁止直接推送和 force-push 规则。
+- 本轮没有读取私钥内容、没有轮换/吊销凭据、没有访问生产主机，也没有重写 Git 历史。
