@@ -254,7 +254,7 @@ _cache_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 async def get_cache_backend() -> CacheBackend:
-    """获取缓存后端实例（单例模式）"""
+    """获取缓存后端，并在 Redis 故障恢复后自动切回共享缓存。"""
     global _cache_backend, _cache_loop
 
     try:
@@ -263,24 +263,34 @@ async def get_cache_backend() -> CacheBackend:
         current_loop = None
 
     if _cache_backend is not None and current_loop is not None:
-        if _cache_loop is not current_loop or _cache_loop.is_closed():
+        if _cache_loop is not current_loop or _cache_loop is None or _cache_loop.is_closed():
             _cache_backend = None
             _cache_loop = None
-    
-    if _cache_backend is None:
-        # 尝试使用Redis
-        redis_client = await get_redis_client()
-        if redis_client:
-            _cache_backend = RedisCacheBackend(redis_client)
-            logger.info("使用Redis作为缓存后端")
-        else:
-            # 降级到内存缓存
-            _cache_backend = MemoryCacheBackend()
-            logger.info("使用内存缓存作为缓存后端（Redis不可用）")
 
-        if current_loop is not None:
-            _cache_loop = current_loop
-    
+    # get_redis_client 内部有 30 秒健康检查间隔及连接失败退避；
+    # 每次取后端都调用它不会逐请求 ping，但能让内存降级后端在 Redis 恢复时自动切回。
+    redis_client = await get_redis_client()
+
+    if redis_client is not None:
+        if (
+            not isinstance(_cache_backend, RedisCacheBackend)
+            or _cache_backend.redis is not redis_client
+        ):
+            _cache_backend = RedisCacheBackend(redis_client)
+            logger.info("Redis 缓存后端已连接或恢复")
+    elif not isinstance(_cache_backend, MemoryCacheBackend):
+        # Redis 未配置或健康检查失败：切换到有界内存缓存，避免继续持有失效客户端。
+        _cache_backend = MemoryCacheBackend()
+        logger.warning("Redis 缓存不可用，已切换到有界内存缓存")
+
+    if _cache_backend is None:
+        # 初次调用且 Redis 不可用时的安全降级。
+        _cache_backend = MemoryCacheBackend()
+        logger.info("使用内存缓存作为缓存后端（Redis不可用）")
+
+    if current_loop is not None:
+        _cache_loop = current_loop
+
     return _cache_backend
 
 
