@@ -6,6 +6,7 @@
 - 本轮没有发现需要改用 pyTelegramBotAPI、Telethon 或 Pyrogram 的技术理由；项目使用 PTB 的 `telegram.*` 命名空间，依赖清单只声明 `python-telegram-bot`。
 - 发现并修复了 Chat ID 在发送日志、命令日志、统计回调日志和管理 API 审计详情中的明文暴露。
 - 发现并修复了两个 async 管理 API 端点直接执行同步 Telegram 发送的问题。
+- 修复管理路由静态导入 `bot_initialized` 布尔值导致无法读取初始化后实时状态的问题。
 
 ## 修复内容
 
@@ -38,7 +39,13 @@
 
 现将发送 Bot 的 HTTPX 超时集中为 connect=3 秒、read/write=30 秒，移除调用点的分散超时参数。诊断请求仍可通过 `run_on_send_loop` 的外层等待上限控制自身响应时间，不再污染进程级发送 Bot 的传输配置。
 
-### 4. 管理 API 不再阻塞 FastAPI 事件循环
+### 4. 管理路由读取实时 Bot 状态
+
+路由模块此前通过 `from ...bot_state import bot_initialized` 导入不可变布尔值。应用生命周期在路由导入后执行初始化，`set_bot_state` 重新赋值不会更新路由模块已绑定的旧布尔值，可能造成 Bot 已初始化但管理 API 仍返回 503。
+
+现改为引用 `telegram_bot_state.bot_initialized` 和 `telegram_bot_state.TELEBOT_AVAILABLE`，在每次请求时读取模块当前值。
+
+### 5. 管理 API 不再阻塞 FastAPI 事件循环
 
 `POST /telegram/send` 与 `POST /telegram/test` 是异步路由，但此前直接调用同步发送函数。同步发送会通过线程安全事件循环等待网络请求，并可能执行多轮退避与重试；直接在 async 路由中调用会占住当前 FastAPI 事件循环。
 
