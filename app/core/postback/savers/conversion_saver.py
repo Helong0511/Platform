@@ -109,17 +109,13 @@ def sanitize_postback_raw_data(value: Any) -> Any:
                 if not isinstance(parsed, (dict, list)):
                     return False, None
                 nested = clean(parsed, depth + 1)
-                if nested != parsed:
-                    encoded_nested = json.dumps(
-                        nested, ensure_ascii=False, separators=(",", ":")
-                    )
-                    if len(encoded_nested.encode("utf-8")) > _MAX_RAW_STRING_LENGTH:
-                        return True, "[structured payload omitted: exceeds string limit]"
-                    return True, encoded_nested
-                if len(original_text.encode("utf-8", errors="replace")) > _MAX_RAW_STRING_LENGTH:
+                encoded_nested = json.dumps(
+                    nested, ensure_ascii=False, separators=(",", ":")
+                )
+                if len(encoded_nested.encode("utf-8")) > _MAX_RAW_STRING_LENGTH:
                     return True, "[structured payload omitted: exceeds string limit]"
-                # 没有发现敏感字段时保留原始编码形式，避免改变 click_id 等业务快照值。
-                return True, original_text
+                # JSON 快照统一紧凑序列化；非敏感字段值（含 click_id）由 clean 原样保留。
+                return True, encoded_nested
 
             # 先解析原始 JSON，避免先解码外层 JSON 时破坏其中被编码的字符串字段。
             is_structured, structured_result = _clean_json_text(original_text)
