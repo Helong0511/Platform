@@ -99,14 +99,14 @@ async def test_authorized_approval_callback_logs_masked_user_id(monkeypatch):
     logs = []
     monkeypatch.setattr(handler.logger, "info", lambda *args: logs.append(args))
 
-    class FakeThread:
-        def __init__(self, **_kwargs):
-            pass
+    from app.core.telegram import approval_worker
 
-        def start(self):
-            return None
-
-    monkeypatch.setattr(handler.threading, "Thread", FakeThread)
+    submitted = []
+    monkeypatch.setattr(
+        approval_worker,
+        "submit_approval_task",
+        lambda *args: submitted.append(args) or "submitted",
+    )
 
     class FakeQuery:
         data = "postback_approve_77"
@@ -129,3 +129,5 @@ async def test_authorized_approval_callback_logs_masked_user_id(monkeypatch):
     rendered_logs = repr(logs)
     assert "12***6789" in rendered_logs
     assert "123456789" not in rendered_logs
+    assert len(submitted) == 1
+    assert submitted[0][0] == 77
