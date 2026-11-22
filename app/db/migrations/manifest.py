@@ -130,6 +130,15 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         path="sql/migrations/20261121_postback_pending_queue_guard.sql",
         sha256="cf2806625e2f65da86bfbaca651ba19c86b9722283a50d93d21edea2402fa71f",
     ),
+    Migration(
+        revision="20261122_pending_postback_pii_retention",
+        path="sql/migrations/20261122_pending_postback_pii_retention.sql",
+        sha256="f2bccb27ae8aaa93a7c2cd037f2a3eaa089fdb61163df04b00db485d307737ab",
+        depends_on=(
+            "20261121_postback_pending_dedupe",
+            "20261121_postback_pending_queue_guard",
+        ),
+    ),
 
 )
 
