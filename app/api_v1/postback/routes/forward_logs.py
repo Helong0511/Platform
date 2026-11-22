@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.database import get_db
 from app.core.security import require_admin
+from app.api_v1.postback.audit import audit_postback_pii_read
 from app.models.models import User
 
 from ..handlers import forward_log_handler
@@ -28,10 +29,33 @@ async def get_postback_forward_logs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    return await forward_log_handler.get_postback_forward_logs(
+    result = await forward_log_handler.get_postback_forward_logs(
         request, conversion_id, product_id, publisher_id, success,
         start_date, end_date, page, page_size, db, current_user,
     )
+    await audit_postback_pii_read(
+        db=db,
+        current_user=current_user,
+        request=request,
+        resource_name="forward_log_list",
+        details={
+            "filter_fields_present": [
+                name
+                for name, value in {
+                    "conversion_id": conversion_id,
+                    "product_id": product_id,
+                    "publisher_id": publisher_id,
+                    "success": success,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }.items()
+                if value is not None and value != ""
+            ],
+            "page": page,
+            "page_size": page_size,
+        },
+    )
+    return result
 
 
 @router.post("/postback/forward-logs/{forward_log_id}/resend", summary="补发 PostBack 转发（管理员）")
