@@ -1,4 +1,5 @@
 """Telegram Chat ID 日志脱敏与管理 API 异步发送回归测试。"""
+import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
