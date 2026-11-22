@@ -22,11 +22,18 @@ def test_startup_failure_always_releases_lock_and_clears_state(
     monkeypatch.setattr(manager, "is_bot_running", lambda: False)
     monkeypatch.setattr(manager, "acquire_bot_lock", lambda: True)
     monkeypatch.setattr(manager, "release_bot_lock", lambda: released.append(True))
-    monkeypatch.setattr(manager, "set_shared_state", lambda state: shared_states.append(state.copy()))
+    monkeypatch.setattr(
+        manager,
+        "set_shared_state",
+        lambda state: shared_states.append(state.copy()),
+    )
     monkeypatch.setattr(manager.time, "sleep", lambda *_args: None)
     monkeypatch.setattr(manager, "PTB_AVAILABLE", True)
-    monkeypatch.setattr(manager.settings, "TELEGRAM_ENABLE", True)
-    monkeypatch.setattr(manager.settings, "TELEGRAM_TOKEN", "test-token")
+    monkeypatch.setattr(
+        manager,
+        "settings",
+        SimpleNamespace(TELEGRAM_ENABLE=True, TELEGRAM_TOKEN="test-token"),
+    )
 
     # Token 探测失败会被既有兼容逻辑捕获，随后继续构建轮询 Application；
     # 这样可分别注入 Application、Handler、bot_state 阶段的异常。
@@ -49,7 +56,9 @@ def test_startup_failure_always_releases_lock_and_clears_state(
             lambda _token: (_ for _ in ()).throw(RuntimeError("synthetic build failure")),
         )
     else:
-        monkeypatch.setattr(manager, "_build_polling_application", lambda _token: FakeApplication())
+        monkeypatch.setattr(
+            manager, "_build_polling_application", lambda _token: FakeApplication()
+        )
 
     if failure_stage == "handler_registration":
         monkeypatch.setattr(
