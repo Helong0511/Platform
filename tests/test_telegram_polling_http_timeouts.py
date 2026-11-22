@@ -43,6 +43,7 @@ def test_get_updates_read_timeout_exceeds_long_poll_timeout():
     assert values[read_timeout_name] == 65.0
     assert values[long_poll_timeout_name] == 10.0
     assert values[bootstrap_retries_name] == 3
+    assert any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "job_queue" and node.args and isinstance(node.args[0], ast.Constant) and node.args[0].value is None for node in ast.walk(tree))
     assert values[read_timeout_name] > values[long_poll_timeout_name]
 
 
