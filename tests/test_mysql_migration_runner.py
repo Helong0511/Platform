@@ -1199,3 +1199,40 @@ async def test_runner_applies_historical_event_key_migration_with_batched_backfi
         ) == ()
     finally:
         _drop_database(database)
+
+
+@pytest.mark.asyncio
+async def test_runner_applies_bounded_lock_waits_on_real_mysql_session(tmp_path: Path):
+    """真实 MySQL 验证 Runner 在 migration DDL 前设置两个 SESSION 锁等待预算。"""
+    database = _create_database()
+    connection = None
+    try:
+        migrations = _write_migrations(
+            tmp_path,
+            [
+                (
+                    "20261122_lock_timeout_probe",
+                    "CREATE TABLE migration_lock_timeout_probe AS "
+                    "SELECT @@SESSION.lock_wait_timeout AS metadata_timeout, "
+                    "@@SESSION.innodb_lock_wait_timeout AS row_timeout;",
+                )
+            ],
+        )
+        await apply_migrations(
+            _database_url(database),
+            application_database_url=_application_database_url(database),
+            repository_root=tmp_path,
+            migrations=migrations,
+        )
+
+        connection = _root_connect(database)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT metadata_timeout, row_timeout "
+                "FROM migration_lock_timeout_probe"
+            )
+            assert cursor.fetchone() == (30, 30)
+    finally:
+        if connection is not None:
+            connection.close()
+        _drop_database(database)
