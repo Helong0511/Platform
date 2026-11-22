@@ -388,3 +388,48 @@ async def test_real_redis_rejects_reservation_reuse_after_rollback(monkeypatch):
     finally:
         await redis.delete(counter_key, token_key)
         await redis.aclose()
+
+@pytest.mark.asyncio
+async def test_real_redis_telegram_shared_backoff_ttl_never_shrinks():
+    """较短的 retry_after 不得覆盖更长的 Redis 共享 backoff。"""
+    from app.core.telegram import message_sender
+
+    redis = Redis.from_url(REDIS_URL, decode_responses=True)
+    key = f"ci:telegram:backoff:{uuid.uuid4().hex}"
+
+    try:
+        assert await redis.ping() is True
+
+        first = await redis.eval(
+            message_sender._UPDATE_BACKOFF_MAX_TTL_LUA,
+            1,
+            key,
+            120,
+            "1",
+        )
+        assert first >= 120_000
+        first_ttl = await redis.pttl(key)
+        assert first_ttl >= 119_000
+
+        shorter = await redis.eval(
+            message_sender._UPDATE_BACKOFF_MAX_TTL_LUA,
+            1,
+            key,
+            5,
+            "1",
+        )
+        assert shorter >= 0
+        assert await redis.pttl(key) >= first_ttl - 250
+
+        longer = await redis.eval(
+            message_sender._UPDATE_BACKOFF_MAX_TTL_LUA,
+            1,
+            key,
+            180,
+            "1",
+        )
+        assert longer >= 180_000
+        assert await redis.pttl(key) >= 179_000
+    finally:
+        await redis.delete(key)
+        await redis.aclose()
