@@ -100,31 +100,42 @@ def sanitize_postback_raw_data(value: Any) -> Any:
             if len(item.encode("utf-8", errors="replace")) > _MAX_RAW_DATA_BYTES:
                 return "[oversized raw string omitted]"
             original_text = item
-            # 上游可能把 JSON/query/header 再做一到多层 percent-encoding；
-            # 先在内存中最多解码 3 次，仅用于识别与脱敏，不改变业务解析输入。
-            text = _decode_percent_encoded_text(original_text)
-            stripped = text.lstrip()
-            if stripped.startswith(("{", "[")):
-                try:
-                    parsed = json.loads(text)
-                except (json.JSONDecodeError, RecursionError):
-                    parsed = None
-                if isinstance(parsed, (dict, list)):
-                    nested = clean(parsed, depth + 1)
-                    if nested != parsed:
-                        encoded_nested = json.dumps(
-                            nested, ensure_ascii=False, separators=(",", ":")
-                        )
-                        if len(encoded_nested.encode("utf-8")) > _MAX_RAW_STRING_LENGTH:
-                            return "[structured payload omitted: exceeds string limit]"
-                        return encoded_nested
-                    if len(original_text.encode("utf-8", errors="replace")) > _MAX_RAW_STRING_LENGTH:
-                        return "[structured payload omitted: exceeds string limit]"
-                    # 没有发现敏感字段时保留原始编码形式，避免改变 click_id 等业务快照值。
-                    return original_text
 
-            sanitized_text = _SENSITIVE_HEADER_LINE.sub(r"\1[redacted]", text)
-            sanitized_text = _SENSITIVE_INLINE_VALUE.sub(r"\1[redacted]", sanitized_text)
+            def _clean_json_text(candidate: str) -> tuple[bool, Any]:
+                try:
+                    parsed = json.loads(candidate)
+                except (json.JSONDecodeError, RecursionError):
+                    return False, None
+                if not isinstance(parsed, (dict, list)):
+                    return False, None
+                nested = clean(parsed, depth + 1)
+                if nested != parsed:
+                    encoded_nested = json.dumps(
+                        nested, ensure_ascii=False, separators=(",", ":")
+                    )
+                    if len(encoded_nested.encode("utf-8")) > _MAX_RAW_STRING_LENGTH:
+                        return True, "[structured payload omitted: exceeds string limit]"
+                    return True, encoded_nested
+                if len(original_text.encode("utf-8", errors="replace")) > _MAX_RAW_STRING_LENGTH:
+                    return True, "[structured payload omitted: exceeds string limit]"
+                # 没有发现敏感字段时保留原始编码形式，避免改变 click_id 等业务快照值。
+                return True, original_text
+
+            # 先解析原始 JSON，避免先解码外层 JSON 时破坏其中被编码的字符串字段。
+            is_structured, structured_result = _clean_json_text(original_text)
+            if is_structured:
+                return structured_result
+
+            # 上游也可能把整个 JSON/query/header 再做一到多层 percent-encoding；
+            # 最多解码 3 次，仅用于识别与脱敏，不改变业务解析输入。
+            text = _decode_percent_encoded_text(original_text)
+            if text != original_text:
+                is_structured, structured_result = _clean_json_text(text)
+                if is_structured:
+                    return structured_result
+
+            sanitized_text = _SENSITIVE_HEADER_LINE.sub(r"\\1[redacted]", text)
+            sanitized_text = _SENSITIVE_INLINE_VALUE.sub(r"\\1[redacted]", sanitized_text)
             sanitized_text = _BEARER_VALUE.sub("Bearer [redacted]", sanitized_text)
             if sanitized_text != text:
                 return sanitized_text[:_MAX_RAW_STRING_LENGTH]
