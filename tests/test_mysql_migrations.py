@@ -102,7 +102,7 @@ def _run_sql_file(cursor, relative_path: str) -> None:
 
 def _index_columns(cursor, table_name: str, index_name: str) -> list[str]:
     """读取隔离 MySQL 索引的真实列顺序，避免只检查索引名称而漏掉 schema drift。"""
-    allowed_tables = {"third_party_report_logs", "postback_forward_logs", "postback_forward_queue"}
+    allowed_tables = {"third_party_report_logs", "postback_forward_logs", "postback_forward_queue", "pending_postback_conversions"}
     if table_name not in allowed_tables:
         raise ValueError("unexpected migration test table")
     cursor.execute(f"SHOW INDEX FROM `{table_name}` WHERE Key_name = %s", (index_name,))
@@ -115,7 +115,7 @@ def _index_columns(cursor, table_name: str, index_name: str) -> list[str]:
 
 def _column_metadata(cursor, table_name: str, column_name: str):
     """读取字段类型、NULL 和默认值，核对迁移结果而不只核对字段名。"""
-    allowed_tables = {"third_party_report_logs", "postback_forward_logs"}
+    allowed_tables = {"third_party_report_logs", "postback_forward_logs", "pending_postback_conversions"}
     if table_name not in allowed_tables:
         raise ValueError("unexpected migration test table")
     cursor.execute(f"SHOW COLUMNS FROM `{table_name}` LIKE %s", (column_name,))
