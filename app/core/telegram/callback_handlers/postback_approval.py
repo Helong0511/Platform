@@ -3,6 +3,7 @@ Postback 审批回调处理器
 
 处理管理员对 Postback 待确认转化的批准/拒绝操作（python-telegram-bot）。
 """
+import asyncio
 import logging
 
 from app.core.telegram_utils import mask_telegram_chat_id
@@ -87,13 +88,14 @@ def process_pending_conversion(
     message_id: int,
     actor_telegram_user_id: int | None = None,
     fallback_bot=None,
+    callback_loop=None,
 ):
     """处理待确认转化记录（同步操作，在后台线程执行）。"""
     if action not in {"approve", "reject"}:
         logger.warning("拒绝未知 Telegram Postback 审批动作")
         return
 
-    bot = fallback_bot
+    bot = None
     business_committed = False
     try:
         from app.core.config import settings
@@ -460,9 +462,24 @@ def process_pending_conversion(
                 )
             except Exception as err:
                 logger.warning("发送回调确认时出错：error_type=%s", type(err).__name__)
+        elif fallback_bot is not None and callback_loop is not None and callback_loop.is_running():
+            try:
+                # context.bot 属于 PTB 主事件循环，必须回投原事件循环，不能跨线程直接运行其 HTTP 客户端。
+                fallback_coro = fallback_bot.answer_callback_query(
+                    callback_query_id=callback_query_id,
+                    text=(
+                        "审批已完成，但消息更新失败，请刷新记录状态"
+                        if business_committed
+                        else "处理失败，请稍后重试"
+                    ),
+                )
+                future = asyncio.run_coroutine_threadsafe(fallback_coro, callback_loop)
+                future.result(timeout=5)
+            except Exception as err:
+                logger.warning("通过 PTB 主事件循环发送最终回调失败：error_type=%s", type(err).__name__)
         else:
             logger.error(
-                "Telegram 审批初始化失败且没有可用 Bot 发送最终回调：pending_id=%s",
+                "Telegram 审批初始化失败且没有可用 Bot/事件循环发送最终回调：pending_id=%s",
                 pending_id,
             )
 
@@ -538,7 +555,7 @@ async def handle_postback_approval(update, context):
 
     thread = threading.Thread(
         target=process_pending_conversion,
-        args=(pending_id, action, callback_query_id, chat_id, message_id, user_id, getattr(context, "bot", None)),
+        args=(pending_id, action, callback_query_id, chat_id, message_id, user_id, getattr(context, "bot", None), asyncio.get_running_loop()),
         daemon=True,
     )
     thread.start()
