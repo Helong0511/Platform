@@ -31,13 +31,13 @@
 
 ## 健康监测
 
-- 包装 PTB Bot 的 `get_updates`，记录最后一次成功返回时间。
+- 使用自定义 ExtBot 子类覆盖 `get_updates`，成功返回时记录时间。PTB Bot 实例使用 `__slots__`，不能依赖实例级 monkeypatch。
 - 增加 group=-1 的 TypeHandler，记录最后一次收到 Update 的时间，不抢占业务 Handler。
-- `get_polling_health_status()` 同时核对 supervisor 线程存活、supervisor 状态和最近成功 getUpdates 心跳。
+- `get_polling_health_status()` 同时核对 supervisor 线程存活、supervisor 状态和最近成功 getUpdates 心跳，并通过共享状态区分本进程 owner 与其它存活 owner。
 - 线程存活但 180 秒没有成功 getUpdates 时，由 watchdog 发出一次去重告警；恢复后重新允许后续告警。
 - 新增 `GET /api/v1/health/telegram`：
   - `disabled`：Telegram 功能禁用；
-  - `not_owner`：当前进程不是 polling owner；
+  - `not_owner`：当前进程不是 polling owner，且共享状态显示另一个 owner 进程仍存活；
   - `ok`：线程存活且 getUpdates 心跳未过期；
   - `degraded`：未启动、线程已退出或心跳超时。
 - API 基础存活探针 `/api/v1/health` 保持原样，不把 Telegram 降级误判为整个 API 进程死亡。
