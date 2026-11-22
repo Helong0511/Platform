@@ -487,37 +487,144 @@ def _start_polling_with_lock(current_pid: int, token: str) -> bool:
     return True
 
 
+def _run_polling_supervisor() -> None:
+    """唯一 TelegramBot 线程监督 polling 生命周期，并对可恢复退出做有限退避。"""
+    global _supervisor_running, _supervisor_restart_count, _last_polling_exit_reason
+
+    _supervisor_running = True
+    _supervisor_restart_count = 0
+    watchdog = threading.Thread(
+        target=_polling_health_watchdog,
+        name="TelegramPollingHealthWatchdog",
+        daemon=True,
+    )
+    watchdog.start()
+
+    try:
+        while not _supervisor_stop_event.is_set():
+            try:
+                start_polling()
+            except Exception as exc:
+                global _last_polling_error_at
+                _last_polling_error_at = time.time()
+                if is_telegram_conflict_error(str(exc)):
+                    _last_polling_exit_reason = "conflict"
+                elif is_permanent_telegram_auth_error(exc):
+                    _last_polling_exit_reason = "permanent_auth_error"
+                elif is_transient_telegram_network_error(exc):
+                    _last_polling_exit_reason = "transient_network_error"
+                else:
+                    _last_polling_exit_reason = "unexpected_exception"
+                logger.error(
+                    "Telegram polling supervisor 捕获启动异常；reason=%s error_type=%s",
+                    _last_polling_exit_reason,
+                    type(exc).__name__,
+                )
+
+            reason = _last_polling_exit_reason
+            if _supervisor_stop_event.is_set() or reason == "stopped":
+                break
+
+            if reason in {"conflict", "permanent_auth_error"}:
+                logger.error(
+                    "Telegram polling supervisor 进入停止/熔断状态：reason=%s",
+                    reason,
+                )
+                _notify_supervisor_failure(reason)
+                break
+
+            if reason in {"disabled", "dependency_unavailable", "configuration_error"}:
+                logger.error(
+                    "Telegram polling supervisor 配置不可用，停止自动重试：reason=%s",
+                    reason,
+                )
+                _notify_supervisor_failure(reason)
+                break
+
+            if reason in {"already_running", "lock_not_acquired"}:
+                logger.info(
+                    "Telegram polling supervisor 未取得启动所有权，不进行重试：reason=%s",
+                    reason,
+                )
+                break
+
+            if reason not in {
+                "transient_network_error",
+                "unexpected_return",
+                "unexpected_exception",
+            }:
+                logger.error(
+                    "Telegram polling supervisor 遇到未知退出状态，停止自动重试：reason=%s",
+                    reason,
+                )
+                _notify_supervisor_failure("unknown exit state")
+                break
+
+            if _supervisor_restart_count >= POLLING_SUPERVISOR_MAX_RESTARTS:
+                logger.error(
+                    "Telegram polling supervisor 达到最大恢复次数，进入熔断：restarts=%s",
+                    _supervisor_restart_count,
+                )
+                _notify_supervisor_failure("maximum restart attempts reached")
+                break
+
+            attempt = _supervisor_restart_count + 1
+            delay = min(
+                POLLING_SUPERVISOR_BASE_DELAY_SECONDS * (2 ** (attempt - 1)),
+                POLLING_SUPERVISOR_MAX_DELAY_SECONDS,
+            ) + random.uniform(0.0, POLLING_SUPERVISOR_JITTER_SECONDS)
+            _supervisor_restart_count = attempt
+            logger.warning(
+                "Telegram polling 将在退避后重启：attempt=%s/%s delay_seconds=%.2f reason=%s",
+                attempt,
+                POLLING_SUPERVISOR_MAX_RESTARTS,
+                delay,
+                reason,
+            )
+            if _supervisor_stop_event.wait(delay):
+                break
+    finally:
+        _supervisor_stop_event.set()
+        _supervisor_running = False
+        logger.info(
+            "Telegram polling supervisor 已结束：last_reason=%s restarts=%s",
+            _last_polling_exit_reason,
+            _supervisor_restart_count,
+        )
+
+
 def start_bot_thread():
     """
-    在独立线程中启动 Bot 轮询
+    在独立线程中启动 Telegram polling supervisor。
 
     Returns:
-        bool: 线程是否成功启动（不代表一定获取到锁）
+        bool: supervisor 线程是否成功启动（不代表已经取得 OS 锁或轮询健康）。
     """
-    import threading
-
     if not _check_bot_ready_for_polling():
         logger.error("python-telegram-bot 不可用或 Token 未配置，无法启动轮询线程")
         return False
 
     for thread in threading.enumerate():
-        if thread.name == "TelegramBot":
+        if thread.name == "TelegramBot" and thread.is_alive():
             logger.info("Telegram Bot 轮询线程已经在运行，跳过重复启动...")
             return False
 
-    def run_polling():
-        logger.info("Telegram Bot 轮询线程开始运行")
-        try:
-            start_polling()
-        except Exception as e:
-            logger.error(f"Telegram Bot 轮询线程出错；error_type={type(e).__name__}")
-        logger.info("Telegram Bot 轮询线程已结束")
-
-    thread = threading.Thread(target=run_polling, daemon=True, name="TelegramBot")
-    thread.start()
-    logger.info("Telegram Bot 轮询线程已启动")
+    _supervisor_stop_event.clear()
+    thread = threading.Thread(
+        target=_run_polling_supervisor,
+        daemon=True,
+        name="TelegramBot",
+    )
+    try:
+        thread.start()
+    except Exception as exc:
+        logger.error(
+            "Telegram polling supervisor 线程启动失败；error_type=%s",
+            type(exc).__name__,
+        )
+        return False
+    logger.info("Telegram Bot polling supervisor 线程已启动")
     return True
-
 
 def stop_polling_application(timeout: float = 10.0) -> bool:
     """
@@ -525,6 +632,7 @@ def stop_polling_application(timeout: float = 10.0) -> bool:
 
     timeout 参数保留兼容旧调用方；停止完成由 restart_bot_thread 的 join 确认。
     """
+    _supervisor_stop_event.set()
     app = _active_application
     if app is None:
         from app.core.telegram import bot_state
