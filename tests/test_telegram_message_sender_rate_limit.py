@@ -356,7 +356,10 @@ def test_send_message_does_not_retry_before_long_retry_after(monkeypatch):
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not sleep/retry early")),
     )
 
-    ok, error = ms.send_telegram_message_result("123456789", "test message")
+    ok, error = ms.send_telegram_message_result(
+        ["123456789", "987654321"],
+        "test message",
+    )
 
     assert ok is False
     assert "超过当前请求预算" in error
