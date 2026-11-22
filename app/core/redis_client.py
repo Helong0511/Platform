@@ -10,6 +10,7 @@ import logging
 import os
 import time
 from typing import Optional
+from urllib.parse import urlsplit
 try:
     import redis.asyncio as aioredis
     REDIS_AVAILABLE = True
@@ -149,23 +150,53 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
                     _reset_redis_singleton()
                     _mark_redis_connect_failed()
 
-        # 从配置中读取Redis连接信息
-        redis_host = getattr(settings, 'REDIS_HOST', None) or None
-        redis_port = getattr(settings, 'REDIS_PORT', None) or 6379
-        redis_db = getattr(settings, 'REDIS_DB', None) or 0
-        redis_password = getattr(settings, 'REDIS_PASSWORD', None) or None
+        # 兼容两种配置方式：优先使用明确拆分的 REDIS_HOST；否则解析模板中的 REDIS_URL。
+        redis_host = getattr(settings, "REDIS_HOST", None) or None
+        redis_url = (getattr(settings, "REDIS_URL", None) or "").strip()
+        redis_password = getattr(settings, "REDIS_PASSWORD", None) or None
+        use_redis_url = not redis_host
+
+        if use_redis_url:
+            if not redis_url:
+                redis_host = None
+                redis_port = 6379
+                redis_db = 0
+            else:
+                try:
+                    parsed_url = urlsplit(redis_url)
+                    if (
+                        parsed_url.scheme not in {"redis", "rediss"}
+                        or not parsed_url.hostname
+                    ):
+                        raise ValueError("REDIS_URL 必须是 redis:// 或 rediss:// URL")
+                    redis_host = parsed_url.hostname
+                    redis_port = parsed_url.port if parsed_url.port is not None else 6379
+                    database_path = parsed_url.path.lstrip("/")
+                    redis_db = int(database_path or 0)
+                    if not 0 <= redis_db <= 2**31 - 1:
+                        raise ValueError("REDIS_URL 数据库编号必须是非负整数")
+                    if not 1 <= redis_port <= 65535:
+                        raise ValueError("REDIS_URL 端口必须在 1 到 65535 之间")
+                    # 显式 REDIS_PASSWORD 优先；否则保留 URL 中的 ACL 密码。
+                    redis_password = redis_password or parsed_url.password
+                except (TypeError, ValueError) as exc:
+                    logger.error("REDIS_URL 配置无效：error_type=%s", type(exc).__name__)
+                    return None
+        else:
+            redis_port = getattr(settings, "REDIS_PORT", 6379) or 6379
+            redis_db = getattr(settings, "REDIS_DB", 0) or 0
 
         # 检查Redis库是否可用
         if not REDIS_AVAILABLE:
             logger.warning("Redis库未安装，将使用内存存储。安装命令: pip install redis>=6.0.0")
             return None
 
-        # 如果未配置Redis，返回None（使用内存存储）
+        # 如果两种连接配置均缺失，返回 None（使用内存存储）
         if not redis_host:
             if settings.is_production:
                 logger.warning(
-                    "生产环境未配置Redis，将使用内存存储（多进程环境下可能不一致）。"
-                    "请检查 .env 文件中的 REDIS_HOST 配置"
+                    "生产环境未配置 Redis，将使用内存存储（多进程环境下可能不一致）。"
+                    "请配置 REDIS_URL 或 REDIS_HOST"
                 )
             elif not _redis_dev_no_host_logged:
                 logger.info("开发环境未配置 Redis，使用内存存储（限流/CSRF/缓存均为进程内）")
@@ -180,8 +211,8 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
         ):
             if not _redis_dev_loopback_skip_logged:
                 logger.info(
-                    "开发环境 REDIS_HOST=%s 指向本机且未设置 REDIS_FORCE，"
-                    "跳过 Redis 连接并使用内存存储（限流/CSRF/缓存均为进程内）",
+                    "开发环境 Redis 主机 %s 指向本机且未设置 REDIS_FORCE，"
+                    "跳过连接并使用内存存储（限流/CSRF/缓存均为进程内）",
                     redis_host,
                 )
                 _redis_dev_loopback_skip_logged = True
@@ -189,25 +220,38 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
 
         connect_timeout = _redis_socket_connect_timeout()
         logger.debug(
-            f"尝试连接Redis: {redis_host}:{redis_port}/{redis_db} "
-            f"(密码: {'已设置' if redis_password else '未设置'}, 超时: {connect_timeout}s)"
+            "尝试连接 Redis: %s:%s/%s (密码: %s, 超时: %ss)",
+            redis_host,
+            redis_port,
+            redis_db,
+            "已设置" if redis_password else "未设置",
+            connect_timeout,
         )
 
         try:
-            max_connections = getattr(settings, 'REDIS_MAX_CONNECTIONS', 10)
-            _redis_client = aioredis.Redis(
-                host=redis_host,
-                port=redis_port,
-                db=redis_db,
-                password=redis_password,
-                decode_responses=True,
-                socket_connect_timeout=connect_timeout,
-                socket_timeout=connect_timeout,
-                health_check_interval=30,
-                max_connections=max_connections,
-                socket_keepalive=True,
-                socket_keepalive_options={},
-            )
+            max_connections = getattr(settings, "REDIS_MAX_CONNECTIONS", 10)
+            connection_options = {
+                "decode_responses": True,
+                "socket_connect_timeout": connect_timeout,
+                "socket_timeout": connect_timeout,
+                "health_check_interval": 30,
+                "max_connections": max_connections,
+                "socket_keepalive": True,
+                "socket_keepalive_options": {},
+            }
+            if use_redis_url:
+                # URL 自带 TLS、ACL 用户名、DB 和查询参数；不记录或输出 URL 中的凭据。
+                if redis_password:
+                    connection_options["password"] = redis_password
+                _redis_client = aioredis.from_url(redis_url, **connection_options)
+            else:
+                _redis_client = aioredis.Redis(
+                    host=redis_host,
+                    port=redis_port,
+                    db=redis_db,
+                    password=redis_password,
+                    **connection_options,
+                )
 
             await _redis_client.ping()
             logger.info(f"Redis连接成功: {redis_host}:{redis_port}/{redis_db}")
