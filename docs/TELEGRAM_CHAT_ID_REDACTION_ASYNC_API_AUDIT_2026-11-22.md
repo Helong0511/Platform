@@ -73,6 +73,11 @@
 - redis-py 官方支持矩阵对 6.0+ 客户端列出的 Redis 服务端起点为 7.2；本仓库 Full Audit CI 固定使用 Redis 7.4.12。另需核验 Redis 服务端 CVE-2026-81934 补丁：7.4 分支至少 7.4.11，7.2 分支至少 7.2.16。生产 Redis 必须同时满足客户端兼容矩阵与服务端安全补丁要求。
 - 新增 Telegram 依赖矩阵 CI，在 Python 3.10/3.11/3.13 安装固定的 PTB/HTTPX/redis-py/APScheduler 版本，运行 `pip check` 并导入实际使用的 API。
 
+### PTB 并发模型与许可证
+
+- PTB v22.8 官方说明其基于 asyncio，且部分 `telegram.ext` 类不保证跨线程安全。本项目将 polling `Application` 限定在 polling 专用 loop，将独立发送 `Bot` 的 HTTPX client 限定在 send 专用 loop；worker 线程只把 Bot API coroutine 投递到 send loop，不得在 worker 线程直接 await 或操作 `Application`、`Updater`、`CallbackContext`、`Update` 等对象。后续新增 Telegram 功能必须遵守此边界。
+- PTB 采用 LGPL-3.0。官方说明使用该库的应用本身不必因此改为 LGPL；若修改或分发 PTB 本体/衍生作品，仍需履行 LGPL 义务并保留许可与版权声明。
+
 ### PyPI 供应链来源核验
 
 - python-telegram-bot 22.8 的 PyPI wheel/sdist 有 Sigstore provenance，发布仓库与 GitHub Actions workflow 可验证。
