@@ -1106,7 +1106,7 @@ async def lifespan(app: FastAPI):
         telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
         if telegram_enabled:
             try:
-                notify_service_stopped()
+                await asyncio.to_thread(notify_service_stopped)
             except asyncio.CancelledError:
                 logger.debug("发送服务关闭通知时任务被取消（正常关闭流程）")
             except asyncio.TimeoutError:
