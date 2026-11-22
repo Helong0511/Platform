@@ -5,6 +5,8 @@
 """
 import logging
 
+from app.core.telegram_utils import mask_telegram_chat_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,9 +42,11 @@ async def get_chat_id(update, context):
             logger.warning("获取 Bot 信息失败；error_type=%s", type(e).__name__)
 
     logger.info(
-        f"[命令处理器] ✅✅✅ 收到 /id 命令，来自用户："
-        f"{(user.username or user.first_name) if user else '未知'} "
-        f"(Chat ID: {chat.id}, Chat Type: {chat_type}, Bot Mentioned: {bot_mentioned})"
+        "[命令处理器] 收到 /id 命令，来自用户：%s（Chat ID: %s, Chat Type: %s, Bot Mentioned: %s）",
+        (user.username or user.first_name) if user else "未知",
+        mask_telegram_chat_id(chat.id),
+        chat_type,
+        bot_mentioned,
     )
 
     if is_group and not bot_mentioned and bot_username:
@@ -69,7 +73,10 @@ async def get_chat_id(update, context):
             parse_mode="HTML",
             reply_to_message_id=message.message_id,
         )
-        logger.info(f"[命令处理器] 已发送 Chat ID 到：{chat.id}")
+        logger.info(
+            "[命令处理器] 已发送 Chat ID 到：%s",
+            mask_telegram_chat_id(chat.id),
+        )
     except Exception as e:
         from app.core.telegram.command_handlers._reply_errors import log_command_reply_failure
 
