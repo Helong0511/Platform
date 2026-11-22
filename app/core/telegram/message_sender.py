@@ -323,7 +323,9 @@ def _try_acquire_redis_gate(redis_client, key: str, interval_seconds: float) -> 
         return bool(redis_client.set(key, str(os.getpid()), nx=True, px=px))
     except Exception:
         _mark_sync_redis_failed()
-        return True  # Redis 异常时放行，仍靠进程内间隔兜底
+        # 这是通知通道的 fail-open：仅当前进程限流，多 worker/多主机 Redis 故障时可能触发 Telegram 429。
+        # Telegram 通知不得承担资金/转化等核心业务状态的唯一保障职责。
+        return True
 
 
 def _acquire_send_mutex(timeout: Optional[float] = None) -> Optional[str]:
