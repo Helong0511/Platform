@@ -44,7 +44,7 @@
 
 路由模块此前通过 `from ...bot_state import bot_initialized` 导入不可变布尔值。应用生命周期在路由导入后执行初始化，`set_bot_state` 重新赋值不会更新路由模块已绑定的旧布尔值，可能造成 Bot 已初始化但管理 API 仍返回 503。
 
-现改为引用 `telegram_bot_state.bot_initialized` 和 `telegram_bot_state.TELEBOT_AVAILABLE`，在每次请求时读取模块当前值。
+现改为引用 `telegram_bot_state.bot_initialized` 和 `telegram_bot_state.TELEBOT_AVAILABLE`，在每次请求时读取模块当前值。 同时在 `app.core.telegram.__init__` 对历史兼容导出的布尔快照增加明确警告：新代码必须使用 `is_bot_available()` 或 `bot_state` 模块实时读取，不能继续 `from-import` 后缓存。
 
 ### 5. 所有 Telegram 管理路由的阻塞等待移出 FastAPI 事件循环
 
