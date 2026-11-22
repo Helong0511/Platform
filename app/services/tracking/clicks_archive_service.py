@@ -135,40 +135,56 @@ class ClicksArchiveService:
 
         logger.info("发现 %s 条需要归档的点击记录", total_count)
 
-        # ====== 迁移：INSERT IGNORE 防重复，再 DELETE 主表 ======
-        archive_result = await db.execute(
-            text(
-                """
-                INSERT IGNORE INTO `clicks_archive`
-                (`id`, `click_id`, `offer_id`, `publisher_id`, `advertiser_id`,
-                 `short_link_id`, `click_time`, `ip`, `device`, `country`,
-                 `user_agent`, `referer`, `conversion_id`, `created_at`,
-                 `os`, `os_version`, `browser`, `browser_version`,
-                 `accept_language`, `accept_encoding`, `is_bot`,
-                 `device_type`, `device_brand`, `device_model`,
-                 `url_params`, `all_headers`)
-                SELECT `id`, `click_id`, `offer_id`, `publisher_id`, `advertiser_id`,
-                       `short_link_id`, `click_time`, `ip`, `device`, `country`,
-                       `user_agent`, `referer`, `conversion_id`, `created_at`,
-                       `os`, `os_version`, `browser`, `browser_version`,
-                       `accept_language`, `accept_encoding`, `is_bot`,
-                       `device_type`, `device_brand`, `device_model`,
-                       `url_params`, `all_headers`
-                FROM `clicks`
-                WHERE `click_time` < :archive_date
-                """
-            ),
-            {"archive_date": archive_date},
-        )
-        archived_count = archive_result.rowcount
+        # ====== 迁移：先完整写入归档表，成功后才删除主表 ======
+        # 不使用 INSERT IGNORE：重复键或数据异常必须使事务失败，禁止静默跳过后删除源记录。
+        try:
+            archive_result = await db.execute(
+                text(
+                    """
+                    INSERT INTO `clicks_archive`
+                    (`id`, `click_id`, `offer_id`, `publisher_id`, `advertiser_id`,
+                     `short_link_id`, `click_time`, `ip`, `device`, `country`,
+                     `user_agent`, `referer`, `conversion_id`, `created_at`,
+                     `os`, `os_version`, `browser`, `browser_version`,
+                     `accept_language`, `accept_encoding`, `is_bot`,
+                     `device_type`, `device_brand`, `device_model`,
+                     `url_params`, `all_headers`)
+                    SELECT `id`, `click_id`, `offer_id`, `publisher_id`, `advertiser_id`,
+                           `short_link_id`, `click_time`, `ip`, `device`, `country`,
+                           `user_agent`, `referer`, `conversion_id`, `created_at`,
+                           `os`, `os_version`, `browser`, `browser_version`,
+                           `accept_language`, `accept_encoding`, `is_bot`,
+                           `device_type`, `device_brand`, `device_model`,
+                           `url_params`, `all_headers`
+                    FROM `clicks`
+                    WHERE `click_time` < :archive_date
+                    """
+                ),
+                {"archive_date": archive_date},
+            )
+            archived_count = archive_result.rowcount
+            if archived_count != total_count:
+                raise RuntimeError(
+                    "点击归档数量不一致，已中止删除源记录："
+                    f"待归档={total_count}，实际写入={archived_count}"
+                )
 
-        delete_result = await db.execute(
-            text("DELETE FROM `clicks` WHERE `click_time` < :archive_date"),
-            {"archive_date": archive_date},
-        )
-        deleted_count = delete_result.rowcount
+            delete_result = await db.execute(
+                text("DELETE FROM `clicks` WHERE `click_time` < :archive_date"),
+                {"archive_date": archive_date},
+            )
+            deleted_count = delete_result.rowcount
+            if deleted_count != total_count:
+                raise RuntimeError(
+                    "点击归档后源表删除数量不一致，事务已回滚："
+                    f"待删除={total_count}，实际删除={deleted_count}"
+                )
 
-        await db.commit()
+            await db.commit()
+        except Exception:
+            # 任一环节异常均回滚归档写入和源表删除，保留原始点击记录以便重试。
+            await db.rollback()
+            raise
 
         return {
             "archived_count": archived_count,
