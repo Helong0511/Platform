@@ -10,6 +10,8 @@ Telegram Bot 模块
 """
 
 from app.core.telegram.bot_initializer import initialize_bot, get_bot, is_bot_available
+# 兼容导出：bot_initialized / TELEBOT_AVAILABLE 是导入时快照。
+# 运行时判断必须调用 is_bot_available() 或读取 bot_state 模块，禁止直接 from-import 后长期缓存布尔值。
 from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE, get_bot_status_info
 from app.core.telegram.message_sender import (
     is_telegram_enabled,
