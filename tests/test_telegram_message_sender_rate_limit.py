@@ -389,6 +389,7 @@ def test_send_message_with_buttons_does_not_retry_before_long_retry_after(monkey
             calls.append("send")
             return object()
 
+    monkeypatch.setattr(ms, "settings", SimpleNamespace(TELEGRAM_ENABLE=True))
     monkeypatch.setattr(ms, "_check_bot_available", lambda: (True, "ok"))
     monkeypatch.setattr(ms, "_get_send_bot", lambda: _FakeBot())
     monkeypatch.setattr(ms, "_acquire_send_mutex", lambda: "mutex-token")
