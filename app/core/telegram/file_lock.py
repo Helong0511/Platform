@@ -152,8 +152,9 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 3
     global _bot_lock_file, _bot_lock_acquired, _bot_lock_path
 
     if _bot_lock_acquired and _bot_lock_file is not None:
-        requested_path = Path(lock_file_path) if lock_file_path is not None else get_default_lock_path()
-        return _bot_lock_path == requested_path
+        # 同一进程的其他线程也不能重复取得全局 Bot 锁。
+        logger.info("当前进程已有线程持有 Telegram Bot 锁")
+        return False
 
     if not HAS_FCNTL and not HAS_MSVCRT:
         logger.error("当前平台没有可用的 OS 文件锁，拒绝启动 Telegram 轮询")
