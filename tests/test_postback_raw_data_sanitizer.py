@@ -167,8 +167,9 @@ def test_redacts_single_and_double_url_encoded_json_strings():
     raw_json = json.dumps(payload, separators=(",", ":"))
     single_encoded = quote(raw_json, safe="")
     double_encoded = quote(single_encoded, safe="")
+    triple_encoded = quote(double_encoded, safe="")
 
-    for raw in (single_encoded, double_encoded):
+    for raw in (single_encoded, double_encoded, triple_encoded):
         result = sanitize_postback_raw_data(raw)
         assert isinstance(result, str)
         decoded = json.loads(result)
