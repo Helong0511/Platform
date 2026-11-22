@@ -134,8 +134,8 @@ def sanitize_postback_raw_data(value: Any) -> Any:
                 if is_structured:
                     return structured_result
 
-            sanitized_text = _SENSITIVE_HEADER_LINE.sub(r"\\1[redacted]", text)
-            sanitized_text = _SENSITIVE_INLINE_VALUE.sub(r"\\1[redacted]", sanitized_text)
+            sanitized_text = _SENSITIVE_HEADER_LINE.sub(r"\1[redacted]", text)
+            sanitized_text = _SENSITIVE_INLINE_VALUE.sub(r"\1[redacted]", sanitized_text)
             sanitized_text = _BEARER_VALUE.sub("Bearer [redacted]", sanitized_text)
             if sanitized_text != text:
                 return sanitized_text[:_MAX_RAW_STRING_LENGTH]
