@@ -262,3 +262,33 @@ def test_redacts_percent_encoded_json_with_utf8_bom():
 
     assert decoded == {"click_id": "bom-click-preserved"}
     assert "bom@example.com" not in result
+
+
+
+def test_omits_payloads_that_remain_percent_encoded_after_decode_limit():
+    payload = json.dumps({
+        "email": "too-deep@example.com",
+        "click_id": "keep-if-decodable",
+    }, separators=(",", ":"))
+    over_encoded = payload
+    for _ in range(4):
+        over_encoded = quote(over_encoded, safe="")
+
+    result = sanitize_postback_raw_data(over_encoded)
+
+    assert result == "[encoded raw payload omitted]"
+    assert "too-deep@example.com" not in result
+
+
+def test_drops_dictionary_keys_that_remain_percent_encoded_after_decode_limit():
+    encoded_email_key = "email"
+    for _ in range(4):
+        encoded_email_key = quote(encoded_email_key, safe="")
+
+    result = sanitize_postback_raw_data({
+        encoded_email_key: "too-deep-key@example.com",
+        "click_id": "trusted-click",
+    })
+
+    assert result == {"click_id": "trusted-click"}
+    assert "too-deep-key@example.com" not in json.dumps(result)
