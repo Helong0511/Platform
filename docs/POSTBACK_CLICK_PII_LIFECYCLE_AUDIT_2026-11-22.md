@@ -46,6 +46,7 @@
 
 - `ip`、`user_agent`、`referer`
 - `url_params`、`all_headers`
+- `original_request_url`、`final_redirect_url`（已在 2026-11-22 后续归档字段复核中发现原归档映射遗漏，PR #100 补齐新建表 DDL、复制 SQL、全量基线及既有表增量迁移）
 - `device`、`country`、`os`、`os_version`
 - `browser`、`browser_version`、`accept_language`、`accept_encoding`
 - `device_type`、`device_brand`、`device_model`
@@ -77,7 +78,7 @@
 - `click_id` 可能是归因关联键；若需清理，应先设计不可逆/可控的关联替代标识，并验证历史归因查询、补数、争议处理及回传重试。
 - `payout`、`original_payout`、`event_value`、扣减状态与扣减量属于业务/财务证据，不应与 PII 载荷一起清除。
 - `raw_data` 可能包含 PII、上游业务字段、排障证据；应优先评估字段白名单化、结构化最小快照，而不是无限期保存完整原始 JSON。
-- `url_params`、`all_headers`、`referer` 可能携带令牌、邮箱、Click ID、广告参数或其他用户输入，必须按敏感载荷处理。
+- `url_params`、`all_headers`、`referer`、`original_request_url`、`final_redirect_url` 可能携带令牌、邮箱、Click ID、广告参数或其他用户输入，必须按敏感载荷处理。
 
 ## 5. 建议实施顺序
 
