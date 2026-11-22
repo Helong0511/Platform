@@ -281,8 +281,8 @@ def test_omits_payloads_that_remain_percent_encoded_after_decode_limit():
 
 
 def test_drops_dictionary_keys_that_remain_percent_encoded_after_decode_limit():
-    encoded_email_key = "email"
-    for _ in range(4):
+    encoded_email_key = "%65mail"
+    for _ in range(3):
         encoded_email_key = quote(encoded_email_key, safe="")
 
     result = sanitize_postback_raw_data({
