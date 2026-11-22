@@ -112,7 +112,9 @@ def _probe_telegram_connection() -> str:
     except FuturesTimeoutError:
         return f"超时(>{int(_CONNECTION_PROBE_TIMEOUT_SEC)}s，本地网络可能无法访问 Telegram)"
     except Exception as e:
-        return f"失败: {str(e)}"
+        # PTB/HTTPX 异常可能包含请求 URL；Telegram Bot API URL 中含完整 Bot Token。
+        # 状态接口只返回异常类型，不把异常正文透传到管理端。
+        return f"失败（{type(e).__name__}）"
 
 
 def get_bot_status_info():

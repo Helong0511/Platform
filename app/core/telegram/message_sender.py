@@ -18,6 +18,7 @@ import random
 import re
 import threading
 import time
+from datetime import timedelta
 from typing import Optional, List, Dict, Any
 
 from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH, validate_chat_id
@@ -158,8 +159,17 @@ def _rate_limit_seconds_from_exc(exc: BaseException) -> Optional[int]:
     retry_after = getattr(exc, "retry_after", None)
     if retry_after is not None:
         try:
-            return int(retry_after)
-        except (TypeError, ValueError):
+            # PTB 22.2+ 支持 timedelta；未来大版本可能将其作为默认类型。
+            # 不能直接 int(timedelta)，否则会退化为固定 60 秒并可能提前重试。
+            if isinstance(retry_after, timedelta):
+                seconds = retry_after.total_seconds()
+            elif isinstance(retry_after, (int, float)) and not isinstance(retry_after, bool):
+                seconds = float(retry_after)
+            else:
+                seconds = None
+            if seconds is not None and math.isfinite(seconds):
+                return max(1, math.ceil(seconds))
+        except (OverflowError, TypeError, ValueError):
             pass
     return _parse_retry_after(str(exc))
 
