@@ -285,7 +285,7 @@ async def check_cap_consistency_api(
                 resource_name="Cap计数一致性检查",
                 request=request,
                 success=False,
-                error_message=str(e)[:1000],
+                error_message=f"异常类型：{type(e).__name__}",
                 details={
                     "outcome": "failed",
                     "offer_id": offer_id,
