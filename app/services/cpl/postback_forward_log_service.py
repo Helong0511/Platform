@@ -205,6 +205,12 @@ class PostbackForwardLogService:
                     ErrorCode.CONFLICT,
                     detail="该转发日志已按保留策略清除载荷，不允许补发",
                 )
+            # 普通补发只允许处理失败记录；成功记录再次发送可能造成下游重复记账。
+            if forward_log.success:
+                raise_api_exception(
+                    ErrorCode.CONFLICT,
+                    detail="该转发日志已成功，不允许通过普通补发接口重复发送",
+                )
 
             # 目标必须明确；Publisher/产品关联被删除后不可猜测或改投其它目标。
             publisher_id = forward_log.publisher_id
