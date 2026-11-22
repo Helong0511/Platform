@@ -28,10 +28,11 @@ from app.core.telegram.ptb_runtime import PTB_AVAILABLE
 _handlers_registered = False
 _bot_started = False
 _active_application = None
+_polling_loop: Optional[asyncio.AbstractEventLoop] = None
 
 # PTB 的 getUpdates 使用独立 HTTPXRequest；默认 read_timeout=5s，
 # 必须大于 Telegram 长轮询 timeout=10s，并留出网络/调度余量。
-POLLING_LONG_POLL_TIMEOUT_SECONDS = 10.0
+POLLING_LONG_POLL_TIMEOUT_SECONDS = 10
 POLLING_GET_UPDATES_READ_TIMEOUT_SECONDS = 65.0
 POLLING_BOOTSTRAP_RETRIES = 3
 
@@ -85,15 +86,7 @@ def _cleanup_on_polling_conflict(current_pid: int) -> None:
             "bot_username": None,
         }
     )
-    try:
-        from app.core.telegram.file_lock import get_default_lock_path
-
-        lock_path = get_default_lock_path()
-        if lock_path.exists():
-            lock_path.unlink()
-            logger.info(f"[PID:{current_pid}] 已删除锁文件，避免锁文件残留")
-    except Exception as cleanup_error:
-        logger.warning("[PID:%s] 清理锁文件失败：error_type=%s", current_pid, type(cleanup_error).__name__)
+    # OS 锁文件保留稳定 inode；释放句柄即可，不得 unlink 活跃锁路径。
 
 
 def register_handlers(application) -> None:
@@ -156,12 +149,13 @@ async def _on_error(update, context) -> None:
         return
     msg = str(error)
     if is_telegram_conflict_error(msg):
-        logger.error("检测到 Telegram 轮询冲突（409），停止当前实例；error_type=%s", type(error).__name__)
-        app = context.application
+        logger.error("检测到 Telegram 轮询冲突（409），请求 run_polling 优雅退出；error_type=%s", type(error).__name__)
         try:
-            await app.stop()
+            # 此错误处理器运行在 Application 事件循环内；stop_running 会让 run_polling
+            # 按官方顺序停止 Updater、Application 并执行 shutdown。
+            context.application.stop_running()
         except Exception as stop_err:
-            logger.warning("409 冲突时停止 Application 失败；error_type=%s", type(stop_err).__name__)
+            logger.warning("409 冲突时停止轮询失败；error_type=%s", type(stop_err).__name__)
         return
     if is_transient_telegram_network_error(error):
         logger.warning("Telegram 轮询临时网络错误，将自动重试；error_type=%s", type(error).__name__)
@@ -176,7 +170,7 @@ def start_polling():
     Returns:
         bool: 是否成功启动并正常结束（冲突返回 False）
     """
-    global _bot_started, _active_application, _handlers_registered
+    global _bot_started, _active_application, _handlers_registered, _polling_loop
 
     current_pid = os.getpid()
 
@@ -283,6 +277,7 @@ def start_polling():
         # 同时为本线程绑定独立事件循环，避免误用主线程 uvloop。
         thread_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(thread_loop)
+        _polling_loop = thread_loop
         application.run_polling(
             timeout=POLLING_LONG_POLL_TIMEOUT_SECONDS,
             bootstrap_retries=POLLING_BOOTSTRAP_RETRIES,
@@ -301,6 +296,7 @@ def start_polling():
         else:
             logger.error(f"轮询意外退出；error_type={type(e).__name__}")
     finally:
+        _polling_loop = None
         try:
             release_bot_lock()
             logger.info("Telegram Bot 已停止并释放锁")
@@ -356,42 +352,27 @@ def start_bot_thread():
 
 def stop_polling_application(timeout: float = 10.0) -> bool:
     """
-    优雅停止当前进程内的 Application 轮询（若存在）。
+    从管理线程请求 PTB run_polling 在其所属事件循环中优雅停止。
 
-    Returns:
-        是否发起了停止请求
+    timeout 参数保留兼容旧调用方；停止完成由 restart_bot_thread 的 join 确认。
     """
-    global _active_application, _bot_started, _handlers_registered
-    from app.core.telegram import bot_state
-
-    app = _active_application or bot_state.application
+    app = _active_application
     if app is None:
-        _bot_started = False
+        from app.core.telegram import bot_state
+        app = bot_state.application
+    loop = _polling_loop
+
+    if app is None or loop is None or not loop.is_running():
         return False
 
     try:
-        loop = getattr(app, "_loop", None)
-        if loop is None:
-            updater = getattr(app, "updater", None)
-            loop = getattr(updater, "_loop", None) if updater is not None else None
-
-        if loop is not None and loop.is_running():
-            fut = asyncio.run_coroutine_threadsafe(app.stop(), loop)
-            fut.result(timeout=timeout)
-        elif hasattr(app, "stop_running"):
-            app.stop_running()
-        logger.info("Telegram Application 已请求停止")
+        # stop_running 必须在 run_polling 所属事件循环中调用，不能从管理线程直接调用。
+        loop.call_soon_threadsafe(app.stop_running)
+        logger.info("已向 TelegramBot 事件循环发送优雅停止请求")
         return True
     except Exception as exc:
-        logger.warning("停止 Telegram Application 失败；error_type=%s", type(exc).__name__)
+        logger.warning("请求停止 Telegram 轮询失败；error_type=%s", type(exc).__name__)
         return False
-    finally:
-        _bot_started = False
-        _handlers_registered = False
-        _active_application = None
-        from app.core.telegram.bot_state import set_bot_state
-
-        set_bot_state(None, True, True, new_application=None)
 
 
 def restart_bot_thread(
@@ -400,10 +381,10 @@ def restart_bot_thread(
     join_timeout: float = 15.0,
 ) -> dict:
     """
-    真正重启：先停 Application / 等轮询线程退出，再启动新线程。
+    先向 PTB run_polling 请求优雅退出，再等待旧线程真正结束后才启动新实例。
 
-    Returns:
-        dict: stopped / thread_joined / started / restarted
+    如果旧线程无法在 join_timeout 内退出，则 fail closed：不释放其锁、不清状态、
+    不启动第二个轮询线程。
     """
     import threading
     import time
@@ -412,27 +393,31 @@ def restart_bot_thread(
 
     stopped = stop_polling_application(timeout=stop_timeout)
 
-    bot_thread = None
-    for thread in threading.enumerate():
-        if thread.name == "TelegramBot":
-            bot_thread = thread
-            break
+    bot_threads = [
+        thread for thread in threading.enumerate() if thread.name == "TelegramBot"
+    ]
+    for bot_thread in bot_threads:
+        if bot_thread.is_alive():
+            bot_thread.join(timeout=join_timeout)
+    thread_joined = all(not thread.is_alive() for thread in bot_threads)
 
-    thread_joined = True
-    if bot_thread is not None and bot_thread.is_alive():
-        bot_thread.join(timeout=join_timeout)
-        thread_joined = not bot_thread.is_alive()
-        if not thread_joined:
-            logger.warning(
-                "TelegramBot 线程在 %.0fs 内未退出，仍尝试重启（可能与旧实例短暂冲突）",
-                join_timeout,
-            )
+    if not thread_joined:
+        logger.error(
+            "TelegramBot 旧线程在 %.0f 秒内未退出；为避免双 polling，拒绝释放锁和启动新线程",
+            join_timeout,
+        )
+        return {
+            "stopped": bool(stopped),
+            "thread_joined": False,
+            "started": False,
+            "restarted": False,
+        }
 
-    # 轮询线程 finally 通常会放锁；此处兜底，避免旧锁卡住新实例
+    # 旧线程已退出，其 finally 已正常释放锁并清理状态；此处只兜底清理本进程句柄。
     try:
         release_bot_lock()
     except Exception as exc:
-        logger.debug("重启时兜底释放锁失败（可忽略）；error_type=%s", type(exc).__name__)
+        logger.warning("旧线程退出后的锁清理失败；error_type=%s", type(exc).__name__)
 
     set_shared_state(
         {
@@ -443,16 +428,15 @@ def restart_bot_thread(
             "bot_username": None,
         }
     )
+
     _bot_started = False
     _handlers_registered = False
-
-    # 给旧 getUpdates 连接一点释放时间
     time.sleep(0.5)
 
     started = start_bot_thread()
     return {
         "stopped": bool(stopped),
-        "thread_joined": bool(thread_joined),
+        "thread_joined": True,
         "started": bool(started),
         "restarted": bool(started),
     }

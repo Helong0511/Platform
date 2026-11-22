@@ -21,7 +21,7 @@ class _FakeApplication:
     def __init__(self):
         self.stopped = False
 
-    async def stop(self):
+    def stop_running(self):
         self.stopped = True
 
 
