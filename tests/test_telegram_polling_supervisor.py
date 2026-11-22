@@ -117,11 +117,11 @@ def test_get_updates_instrumentation_records_success_heartbeat():
         async def get_updates(self):
             return []
 
-    application = SimpleNamespace(bot=FakeBot())
+    tracked_bot_class = manager._create_health_tracked_bot_class(FakeBot)
+    bot = tracked_bot_class()
     manager._last_get_updates_success_at = None
-    manager._instrument_get_updates(application)
 
-    assert asyncio.run(application.bot.get_updates()) == []
+    assert asyncio.run(bot.get_updates()) == []
     assert manager._last_get_updates_success_at is not None
 
 
