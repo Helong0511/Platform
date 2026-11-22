@@ -282,3 +282,29 @@ async def test_async_admin_notification_uses_async_sender(monkeypatch):
 
     assert result is True
     send_async.assert_awaited_once_with("123456789", "⚠️ 后台通知")
+
+@pytest.mark.asyncio
+async def test_id_command_keeps_full_user_id_in_private_chat(monkeypatch):
+    from app.core.telegram.command_handlers import id_command
+
+    send_async = AsyncMock(return_value=True)
+    monkeypatch.setattr(id_command, "send_telegram_message_async", send_async)
+    chat = SimpleNamespace(id=123456789, type="private", title=None)
+    message = SimpleNamespace(
+        chat=chat,
+        chat_id=chat.id,
+        message_id=8,
+        text="/id",
+        entities=[],
+    )
+    user = SimpleNamespace(id=987654321)
+    context = SimpleNamespace(bot=SimpleNamespace(get_me=AsyncMock()))
+
+    await id_command.get_chat_id(
+        SimpleNamespace(effective_message=message, effective_user=user),
+        context,
+    )
+
+    sent_text = send_async.await_args.args[1]
+    assert "Chat ID: <code>123456789</code>" in sent_text
+    assert "User ID: <code>987654321</code>" in sent_text
