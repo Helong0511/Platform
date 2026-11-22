@@ -121,9 +121,23 @@ def _notify_supervisor_failure(reason: str) -> None:
     try:
         from app.core.telegram.runtime_error_notify import notify_runtime_error_sync
 
+        safe_reason = (
+            reason
+            if reason in {
+                "conflict",
+                "permanent_auth_error",
+                "maximum restart attempts reached",
+                "getUpdates heartbeat stale",
+                "disabled",
+                "dependency_unavailable",
+                "configuration_error",
+                "unknown exit state",
+            }
+            else "unexpected"
+        )
         notify_runtime_error_sync(
-            error_type="TelegramPollingSupervisor",
-            error_message=f"Telegram polling supervisor stopped or circuit-opened: {reason}",
+            error_type=f"TelegramPollingSupervisor:{safe_reason}",
+            error_message="Telegram polling supervisor stopped or circuit-opened",
             location={
                 "module": "app.core.telegram.polling_manager",
                 "function": "start_bot_thread",
