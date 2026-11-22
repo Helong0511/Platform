@@ -328,6 +328,7 @@ def test_note_rate_limited_preserves_server_retry_after_above_inline_budget(monk
 
 def test_send_message_does_not_retry_before_long_retry_after(monkeypatch):
     from datetime import timedelta
+    from types import SimpleNamespace
 
     calls = []
     noted = []
@@ -343,6 +344,7 @@ def test_send_message_does_not_retry_before_long_retry_after(monkeypatch):
             calls.append("send")
             return object()
 
+    monkeypatch.setattr(ms, "settings", SimpleNamespace(TELEGRAM_ENABLE=True))
     monkeypatch.setattr(ms, "_check_bot_available", lambda: (True, "ok"))
     monkeypatch.setattr(ms, "_get_send_bot", lambda: _FakeBot())
     monkeypatch.setattr(ms, "_acquire_send_mutex", lambda: "mutex-token")
@@ -371,6 +373,7 @@ def test_send_message_does_not_retry_before_long_retry_after(monkeypatch):
 
 def test_send_message_with_buttons_does_not_retry_before_long_retry_after(monkeypatch):
     from datetime import timedelta
+    from types import SimpleNamespace
 
     calls = []
     noted = []
