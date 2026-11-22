@@ -3,6 +3,8 @@ import asyncio
 import sys
 from types import ModuleType
 
+import pytest
+
 from app.core.telegram import ptb_runtime
 
 
