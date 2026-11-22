@@ -102,8 +102,13 @@ def sanitize_postback_raw_data(value: Any) -> Any:
             original_text = item
 
             def _clean_json_text(candidate: str) -> tuple[bool, Any]:
+                candidate_text = candidate.lstrip()
+                if candidate_text.startswith("\\ufeff"):
+                    candidate_text = candidate_text.lstrip("\\ufeff").lstrip()
+                if not candidate_text.startswith(("{", "[")):
+                    return False, None
                 try:
-                    parsed = json.loads(candidate)
+                    parsed = json.loads(candidate_text)
                 except (json.JSONDecodeError, RecursionError):
                     return False, None
                 if not isinstance(parsed, (dict, list)):
