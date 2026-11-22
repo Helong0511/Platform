@@ -16,6 +16,7 @@ def test_mask_telegram_chat_id_handles_private_group_multiple_and_invalid_values
     assert mask_telegram_chat_id("12345") == "*****"
     assert mask_telegram_chat_id("123456") == "******"
     assert mask_telegram_chat_id("1234567") == "12***4567"
+    assert mask_telegram_chat_id("-1001234") == "-10***1234"
     assert mask_telegram_chat_id("123456789, -1001234567890") == "12***6789,-100****7890"
     assert mask_telegram_chat_id("not-a-chat-id") == "[已隐藏]"
     assert mask_telegram_chat_id(None) == "[未提供]"
