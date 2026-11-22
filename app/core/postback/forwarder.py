@@ -303,9 +303,10 @@ class PostbackForwarder:
             
             logger.info("POST JSON 字段数：%s", len(json_data or {}))
         else:
-            # 对于 GET 请求，参数已经在 URL 中
-            request_params = params
-            logger.info("GET 参数字段数：%s", len(request_params or {}))
+            # UrlBuilder 已将参数编码进 final_url；再次传入 params 会被 HTTPX 合并，造成重复查询参数。
+            # 保留 params 仅用于脱敏日志，不作为第二份请求参数发送。
+            request_params = None
+            logger.info("GET 参数字段数：%s", len(params or {}))
         
         # 详细日志：发送请求
         logger.info(f"=== 发送 HTTP 请求 ===")
@@ -592,7 +593,8 @@ class PostbackForwarder:
             if oid is not None:
                 json_data['offer_id'] = str(oid)
         else:
-            request_params = params
+            # UrlBuilder 已将参数编码进 final_url；避免 HTTPX 再次合并 params 造成重复键。
+            request_params = None
 
         success, status_code, response_content = await HttpClient.send_request(
             url=final_url,
