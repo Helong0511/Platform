@@ -10,6 +10,7 @@ import logging
 import os
 import time
 from typing import Optional
+from urllib.parse import urlsplit
 try:
     import redis.asyncio as aioredis
     REDIS_AVAILABLE = True
@@ -162,15 +163,20 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
                 redis_db = 0
             else:
                 try:
-                    from urllib.parse import urlsplit
-
                     parsed_url = urlsplit(redis_url)
-                    if parsed_url.scheme not in {"redis", "rediss"} or not parsed_url.hostname:
+                    if (
+                        parsed_url.scheme not in {"redis", "rediss"}
+                        or not parsed_url.hostname
+                    ):
                         raise ValueError("REDIS_URL 必须是 redis:// 或 rediss:// URL")
                     redis_host = parsed_url.hostname
-                    redis_port = parsed_url.port or 6379
+                    redis_port = parsed_url.port if parsed_url.port is not None else 6379
                     database_path = parsed_url.path.lstrip("/")
                     redis_db = int(database_path or 0)
+                    if not 0 <= redis_db <= 2**31 - 1:
+                        raise ValueError("REDIS_URL 数据库编号必须是非负整数")
+                    if not 1 <= redis_port <= 65535:
+                        raise ValueError("REDIS_URL 端口必须在 1 到 65535 之间")
                     # 显式 REDIS_PASSWORD 优先；否则保留 URL 中的 ACL 密码。
                     redis_password = redis_password or parsed_url.password
                 except (TypeError, ValueError) as exc:
