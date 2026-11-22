@@ -26,12 +26,13 @@
 - PTB 22.8 要求 `>=0.27,<0.29`，0.28.1 完全满足。
 - 当前无需升级到不兼容主版本，也不需要额外安装 `http2` 或 `socks` extra。
 - 默认 TLS 证书校验保持启用；不得为绕过证书问题设置 `verify=False`。
+- License 为 BSD-3-Clause；当前 PyPI 0.28.1 的 sdist/wheel 均没有 provenance attestation，发布文件提供 SHA-256。缺少 provenance 不等于包恶意，但供应链可验证性弱于 PTB/新 APScheduler 版本。
 
 ### redis-py 8.1.0
 
 - 与项目的同步 `Redis.from_url` 发送限流器兼容。
 - 支持 `redis://`、`rediss://`、URL ACL 用户名/密码、DB path；项目另外支持显式密码覆盖和 legacy host 配置。
-- 当前公开漏洞数据库未发现 8.1.0 的直接已知漏洞；PyPI 此版本未提供 provenance attestation，这是供应链可验证性方面的注意项，不等同于发现恶意包。
+- License 为 MIT。当前公开漏洞数据库未发现 8.1.0 的直接已知漏洞；PyPI 此版本未提供 provenance attestation，这是供应链可验证性方面的注意项，不等同于发现恶意包。
 - Redis 不可用时跨进程限流无法保证，发送器保留 best-effort 降级；生产必须监控 Redis 连接状态。
 
 ### APScheduler 3.11.3
@@ -39,6 +40,7 @@
 - 项目调度器使用 `AsyncIOScheduler`、`CronTrigger`、`IntervalTrigger`、`AsyncIOExecutor` 和 `MemoryJobStore`。
 - 官方 3.11.3 修复了 ZoneInfo 时区下 DST 春季跳时期间子分钟 interval job 停滞，以及导入任务后 scheduler/jobstore 链接缺失的问题。
 - 3.11.1/3.11.2 还修复了异步 scheduler shutdown 和 DST 重复时段 CronTrigger 无限循环问题。
+- License 为 MIT；3.11.3 发布文件有 PyPI provenance attestation。
 - 3.11.3 是 3.x 稳定版本；4.0.0a6 属于 alpha 预发布版，不采用。
 - 3.11.3 仍满足 PTB JobQueue 的 APScheduler 3.x 兼容范围；但本项目不使用 PTB JobQueue，已显式 `.job_queue(None)`，避免 APScheduler 被 PTB 自动识别后重复创建调度器。
 
