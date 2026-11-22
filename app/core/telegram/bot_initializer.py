@@ -109,9 +109,7 @@ def initialize_bot():
         try:
             logger.info("正在加载 Telegram token...")
             token = getattr(settings, "TELEGRAM_TOKEN", None) or None
-            logger.info(
-                f"Telegram token 加载结果：{token[:4]}****" if token else "None"
-            )
+            logger.info("Telegram Token 配置状态：%s", "已配置" if token else "未配置")
 
             if token and isinstance(token, str) and token.strip():
                 from app.core.telegram.ptb_runtime import get_send_bot
@@ -131,7 +129,7 @@ def initialize_bot():
                         "bot_username": None,
                     }
                 )
-                logger.info(f"Telegram Bot 初始化成功，token: {token[:4]}****")
+                logger.info("Telegram Bot 初始化成功")
                 return send_bot, True, dynamic_available
 
             logger.warning("Telegram token 未设置或为空，Telegram Bot 功能将不可用")
