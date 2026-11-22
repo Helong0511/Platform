@@ -16,6 +16,7 @@ import asyncio
 import logging
 import os
 import socket
+from datetime import datetime
 from typing import Optional
 
 import pytz
@@ -26,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.db_errors import is_database_unreachable_error, is_duplicate_entry_error
 from app.core.database import AsyncSessionLocal
-from app.core.utils import get_app_now_naive, APP_TIMEZONE
+from app.core.utils import get_app_now_naive, get_app_now_sql_expression
 from app.models.models import ScheduledTask
 
 logger = logging.getLogger(__name__)
@@ -165,6 +166,8 @@ def _resolve_stale_running_lock(
     task_record: ScheduledTask,
     task_name: str,
     timeout_seconds: int,
+    *,
+    now: datetime,
 ) -> bool:
     """
     处理 is_running 状态。
@@ -176,7 +179,10 @@ def _resolve_stale_running_lock(
 
     last_run_app = _last_run_app_naive(task_record.last_run_time)
     if last_run_app is not None:
-        time_diff = (get_app_now_naive() - last_run_app).total_seconds()
+        now_app = _last_run_app_naive(now)
+        if now_app is None:
+            return False
+        time_diff = (now_app - last_run_app).total_seconds()
         if time_diff > timeout_seconds:
             logger.warning(
                 "任务 %s 执行超时（%.1f秒），释放锁。上次执行进程: PID %s@%s",
@@ -203,7 +209,7 @@ def _resolve_stale_running_lock(
     return True
 
 
-def _claim_task_lock(task_record: ScheduledTask) -> None:
+def _claim_task_lock(task_record: ScheduledTask, *, now: datetime) -> None:
     """将任务标记为当前进程持有锁。
 
     不在抢锁时清空 last_error：保留上次执行结果，直到本次 release 时覆盖，
@@ -212,7 +218,7 @@ def _claim_task_lock(task_record: ScheduledTask) -> None:
     task_record.is_running = True
     task_record.last_run_pid = get_current_pid()
     task_record.last_run_host = CURRENT_HOST
-    task_record.last_run_time = get_app_now_naive()
+    task_record.last_run_time = _last_run_app_naive(now)
     task_record.run_count += 1
 
 
@@ -248,12 +254,25 @@ async def acquire_task_lock(
             await db.close()
             return False, None
 
-        if not _resolve_stale_running_lock(task_record, task_name, timeout_seconds):
+        # 使用 MySQL 服务端时间判断租约，避免多节点系统时钟偏差导致提前抢锁或延迟恢复。
+        db_now = await db.scalar(select(get_app_now_sql_expression()))
+        db_now_app = _last_run_app_naive(db_now)
+        if db_now_app is None:
+            logger.error("无法读取数据库当前时间，拒绝获取任务锁：%s", task_name)
             await db.rollback()
             await db.close()
             return False, None
 
-        _claim_task_lock(task_record)
+        if not _resolve_stale_running_lock(
+            task_record, task_name, timeout_seconds, now=db_now_app
+        ):
+            await db.rollback()
+            await db.close()
+            return False, None
+
+        _claim_task_lock(task_record, now=db_now_app)
+        # run_count 是单调递增的本次运行代号，用于防止同一 PID/Host 超时后重新抢锁时旧任务误释放新锁。
+        db.info["scheduler_lock_run_count"] = task_record.run_count
         await db.commit()
         logger.debug(
             "任务 %s 成功获取锁（进程ID: %s, 主机: %s）",
@@ -310,7 +329,8 @@ async def release_task_lock(
         task_name: str,
         success: bool = True,
         error_message: Optional[str] = None,
-        result_message: Optional[str] = None
+        result_message: Optional[str] = None,
+        expected_run_count: Optional[int] = None,
 ) -> None:
     """
     释放任务锁并更新执行结果
@@ -328,12 +348,13 @@ async def release_task_lock(
     max_retries = 3
     for attempt in range(1, max_retries + 1):
         try:
-            # 使用行锁确保原子性更新
-            # 注意：这里使用同一个 db 会话，已经在 acquire_task_lock 中获取了锁
-            # 所以不需要再次获取锁，直接查询即可
+            # acquire_task_lock 的事务已提交并释放行锁；释放前必须重新锁行。
+            # 否则旧 Worker 的一致性读可能看到旧 PID 并覆盖新 Worker 的锁状态。
             result = await db.execute(
                 select(ScheduledTask)
                 .where(ScheduledTask.task_name == task_name)
+                .with_for_update(of=ScheduledTask)
+                .execution_options(populate_existing=True)
             )
             task_record = result.scalar_one_or_none()
 
@@ -341,11 +362,17 @@ async def release_task_lock(
                 # 严格验证锁的所有权（确保是当前进程持有的锁）
                 # 如果锁不属于当前进程，记录警告但不释放锁（防止误释放其他进程的锁）
                 current_pid = get_current_pid()
-                if task_record.last_run_pid != current_pid or task_record.last_run_host != CURRENT_HOST:
+                if (
+                    task_record.last_run_pid != current_pid
+                    or task_record.last_run_host != CURRENT_HOST
+                    or expected_run_count is None
+                    or task_record.run_count != expected_run_count
+                ):
                     logger.warning(
                         f"任务 {task_name} 锁的所有权不匹配，拒绝释放锁。"
                         f"当前进程: {current_pid}@{CURRENT_HOST}, "
-                        f"锁持有者: {task_record.last_run_pid}@{task_record.last_run_host}"
+                        f"锁持有者: {task_record.last_run_pid}@{task_record.last_run_host}, "
+                        f"run_count={task_record.run_count}, expected_run_count={expected_run_count}"
                     )
                     await db.rollback()
                     return  # 不释放其他进程的锁
@@ -375,6 +402,7 @@ async def release_task_lock(
                     # 失败时如果没有提供信息，last_error 保持原值（可能是之前的错误）
 
                 await db.commit()
+                db.info.pop("scheduler_lock_run_count", None)
                 if success:
                     logger.debug(
                         f"任务 {task_name} 锁已释放，执行成功 "

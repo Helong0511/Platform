@@ -60,7 +60,7 @@ from app.scheduler_module.task_result_registry import get_task_result, auto_regi
 from app.scheduler_module.task_result_store import get_task_result as get_store_task_result
 from app.core.config import settings
 from app.core.db_errors import is_database_unreachable_error
-from app.core.utils import get_app_now_naive, APP_TIMEZONE
+from app.core.utils import get_app_now_naive, get_app_now_sql_expression, APP_TIMEZONE
 from app.core.database import AsyncSessionLocal
 from app.models.models import ScheduledTask
 from app.core.audit_log import log_user_action
@@ -265,7 +265,19 @@ async def execute_task_with_lock(
                     # 如果带时区信息，转换为北京时间（naive）
                     last_run_app = task_record.last_run_time.astimezone(APP_TIMEZONE).replace(tzinfo=None)
 
-                now_app = get_app_now_naive()  # 使用北京时间比较
+                # 与 acquire_task_lock 使用相同的 MySQL 服务端时间，避免多节点时钟偏差。
+                db_now = await db.scalar(select(get_app_now_sql_expression()))
+                if db_now is None:
+                    log_scheduled_task_skip(
+                        task_name,
+                        "无法读取数据库当前时间",
+                        detail=f"holder_pid={task_record.last_run_pid} holder_host={task_record.last_run_host}",
+                    )
+                    return
+                if db_now.tzinfo is None:
+                    now_app = db_now
+                else:
+                    now_app = db_now.astimezone(APP_TIMEZONE).replace(tzinfo=None)
                 elapsed = (now_app - last_run_app).total_seconds()
 
                 if elapsed < task_lock_timeout:
@@ -380,6 +392,7 @@ async def _execute_task_with_lock_internal(
         return
 
     # 确保数据库会话在 finally 中关闭
+    expected_run_count = lock_db.info.get("scheduler_lock_run_count")
     task_record = None
     task_id = None
     # 提前提取审计日志所需属性，避免 release_task_lock 后 ORM 对象过期触发 MissingGreenlet
@@ -428,7 +441,13 @@ async def _execute_task_with_lock_internal(
 
             # 释放锁，标记成功
             # 如果任务提供了result_message，会保存到last_error字段
-            await release_task_lock(lock_db, task_name, success=True, result_message=result_message)
+            await release_task_lock(
+                lock_db,
+                task_name,
+                success=True,
+                result_message=result_message,
+                expected_run_count=expected_run_count,
+            )
             success_msg = f"任务 '{task_name}' 执行成功（耗时: {round(execution_duration, 2)}秒）"
             logger.debug(success_msg)
 
@@ -516,7 +535,8 @@ async def _execute_task_with_lock_internal(
                 lock_db,
                 task_name,
                 success=False,
-                result_message=result_message
+                result_message=result_message,
+                expected_run_count=expected_run_count,
             )
 
             # 记录审计日志（失败）- 使用新的数据库会话避免事务冲突

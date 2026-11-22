@@ -14,7 +14,7 @@ async def process_third_party_report_outbox_task():
     started = datetime.now(timezone.utc)
     try:
         # 单条事件最多 3 次 HTTP 请求，每次总 deadline 60 秒；
-        # 每批限制 3 条，最坏网络预算约 540 秒，低于 900 秒调度锁。
+        # 每批限制 3 条，最坏网络预算约 549 秒，低于 900 秒调度锁。
         stats = await process_postback_report_outbox(batch_size=3)
         duration = (datetime.now(timezone.utc) - started).total_seconds()
         message = (
