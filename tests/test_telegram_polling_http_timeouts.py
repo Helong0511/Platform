@@ -50,6 +50,6 @@ def test_get_updates_read_timeout_exceeds_long_poll_timeout():
 def test_polling_timeout_constants_are_safe_for_long_polling():
     values = _module_constants(_load_polling_ast())
 
-    assert values["POLLING_LONG_POLL_TIMEOUT_SECONDS"] == 10.0
+    assert values["POLLING_LONG_POLL_TIMEOUT_SECONDS"] == 10
     assert values["POLLING_GET_UPDATES_READ_TIMEOUT_SECONDS"] > values["POLLING_LONG_POLL_TIMEOUT_SECONDS"]
     assert values["POLLING_BOOTSTRAP_RETRIES"] == 3
