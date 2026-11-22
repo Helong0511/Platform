@@ -385,7 +385,7 @@ async def diagnostic_bot(
             run_on_send_loop,
         )
 
-        send_bot = get_send_bot(str(token).strip(), connect_timeout=3.0, read_timeout=10.0)
+        send_bot = get_send_bot(str(token).strip())
 
         # 5. 检查 Webhook
         webhook_url = None
@@ -487,7 +487,7 @@ async def reset_webhook(
 
         from app.core.telegram.ptb_runtime import get_send_bot, run_on_send_loop
 
-        send_bot = get_send_bot(str(token).strip(), connect_timeout=3.0, read_timeout=15.0)
+        send_bot = get_send_bot(str(token).strip())
 
         # 删除 webhook
         run_on_send_loop(
