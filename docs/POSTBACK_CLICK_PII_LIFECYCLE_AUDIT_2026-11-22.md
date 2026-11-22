@@ -109,3 +109,39 @@
 - 正式转化表与点击归档表尚无本报告定义的独立清理实现。
 - 真实 MySQL 迁移、备份/副本生命周期、角色字段最小化仍需隔离环境和部署验收。
 - 本报告不代表项目已达到生产上线安全标准。
+
+
+## 8. 2026-11-22 API 权限与字段范围复核补充
+
+本节基于当前 main `4ccc61108386bf6a7bcf36116287e0ea41592dc2` 的路由、权限依赖和服务层实现复核，修正第 2.4 节中尚未完成的权限验证状态。
+
+### 8.1 原始 Postback 转化列表
+
+- `GET /postback/conversions` 由 `app/api_v1/postback/routes/conversions.py` 定义，直接依赖 `require_admin`。
+- 该路由调用 `postback_conversion_service`，将 ORM 记录序列化为 `PostbackConversionResponse`；该响应包含 `devad_id`、`ip`、`click_id`、`click_time` 等字段。
+- 同文件中的 Postback stats、更新状态和重复检查路由也使用 `require_admin`。
+- 因此，**在已核查的这组原始 Postback 查询接口中，PII 响应被管理员角色门禁保护**。当前静态证据不支持“普通客户/渠道可以直接调用此接口读取原始 IP/设备标识”的结论。
+
+### 8.2 客户可见的转化总览
+
+- `GET /cpl/conversions/` 与 `GET /cpl/conversions/by-offer` 使用 `require_publisher_or_admin`。
+- 该依赖只允许 ADMIN，或至少关联一个启用 Client 且拥有启用 Publisher 的 CLIENT；其它角色返回 403。
+- `ConversionService` 对 CLIENT 收集该用户全部启用 Client，再将可见范围限制到这些 Client 关联的启用 Publisher。没有 Client 或 Publisher 时 fail-closed 返回空范围/拒绝访问，不退化为全局统计。
+- 对 CLIENT 返回值执行字段裁剪：总览删除 `total_po`、`total_profit`，分组项删除 `po`、`adv_po`、`advertiser_id`、`advertiser_name`；按 Offer 汇总删除 `po`。
+- 现有 `tests/test_conversion_client_scope.py` 覆盖缺失 Client 时返回空范围及多 Client 归属收集；仍需在真实 API 层补充角色矩阵测试，避免只测 Service SQL 而遗漏路由装配、依赖覆盖或响应序列化问题。
+
+### 8.3 本次复核后的风险定级
+
+- 原始 Postback PII 查询的角色门禁已在静态代码中确认是 ADMIN-only；原报告 PB-API-01 不再作为“客户/渠道可直接访问原始 PII”的已确认缺陷。
+- 仍需验证管理员账号自身的最小权限、管理员操作审计、字段展示/导出最小化，以及未来新增导出/批量下载接口是否复用相同权限约束。
+- 客户转化总览当前有 Publisher 归属范围和敏感财务字段裁剪，但应补充真实 HTTP/API 层角色矩阵和多租户反向访问测试。
+
+### 8.4 仍未完成的验收项
+
+- [ ] 使用 FastAPI TestClient/真实依赖装配验证 ADMIN、CLIENT、PUBLISHER、ADVERTISER、只读角色对原始 Postback API 的 401/403/200 行为
+- [ ] 验证客户 A 不能通过参数篡改读取客户 B 的 Publisher/Offer/转化汇总
+- [ ] 验证客户响应不包含 `devad_id`、`ip`、`click_id`、上游 PO、广告主 ID/名称等不必要字段
+- [ ] 验证管理员查询、详情、导出均有操作者、时间、筛选范围和导出审计记录
+- [ ] 搜索并逐项验证所有 Postback/Conversion 导出、下载、异步报表端点及后台任务的数据访问范围
+
+本补充仅更新静态审计证据，不改变 API 行为，不访问生产数据。
