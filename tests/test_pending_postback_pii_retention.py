@@ -102,6 +102,7 @@ async def test_terminal_pending_postback_pii_is_scrubbed_but_business_identity_i
     assert "pending_postback_conversions.pii_scrubbed_at is null" in sql
     assert "pending_postback_conversions.created_at <" in sql
     assert "for update skip locked" in sql
+    assert {"approved", "rejected"}.issubset(set(captured["params"].values()))
 
     assert approved.devad_id is None
     assert approved.os is None
