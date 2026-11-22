@@ -9,6 +9,7 @@ import re
 from decimal import Decimal
 from typing import Dict, Any, Optional
 from datetime import datetime
+from urllib.parse import unquote
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -32,6 +33,21 @@ _MAX_RAW_DATA_BYTES = 32 * 1024
 _MAX_RAW_DATA_DEPTH = 8
 _MAX_RAW_DATA_ITEMS = 500
 _MAX_RAW_STRING_LENGTH = 4096
+_MAX_RAW_URL_DECODE_PASSES = 3
+_PERCENT_ENCODED_BYTE = re.compile(r"%[0-9a-fA-F]{2}")
+
+
+def _decode_percent_encoded_text(value: str) -> str:
+    """有界解码 URL 编码文本，供敏感字段识别使用。"""
+    decoded = value
+    for _ in range(_MAX_RAW_URL_DECODE_PASSES):
+        if not _PERCENT_ENCODED_BYTE.search(decoded):
+            break
+        candidate = unquote(decoded, errors="replace")
+        if candidate == decoded:
+            break
+        decoded = candidate
+    return decoded
 # 支持 user_email、client_ip、phone_number 等复合参数名，避免 URL/form 文本绕过结构化字段脱敏。
 _SENSITIVE_INLINE_KEY = (
     r"(?:[A-Za-z0-9.-]+[_-])*(?:authorization|proxy[_-]?authorization|auth|"
@@ -65,8 +81,10 @@ def sanitize_postback_raw_data(value: Any) -> Any:
             result = {}
             for key, child in item.items():
                 key_text = str(key)
+                # JSON 键名也可能被 URL 编码；先有界解码，再做驼峰/缩写归一化。
+                decoded_key = _decode_percent_encoded_text(key_text)
                 # 先拆分连续大写缩写与普通驼峰，避免 clientIP 被错误拆成 client_i_p。
-                normalized_key = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", key_text)
+                normalized_key = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", decoded_key)
                 normalized_key = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", normalized_key).lower()
                 if _SENSITIVE_RAW_KEY.search(normalized_key):
                     continue
@@ -81,26 +99,31 @@ def sanitize_postback_raw_data(value: Any) -> Any:
             # 不能只检查 dict 键名，否则字符串载荷会绕过字段脱敏。
             if len(item.encode("utf-8", errors="replace")) > _MAX_RAW_DATA_BYTES:
                 return "[oversized raw string omitted]"
-            stripped = item.lstrip()
+            original_text = item[:_MAX_RAW_STRING_LENGTH]
+            # 上游可能把 JSON/query/header 再做一到多层 percent-encoding；
+            # 先在内存中最多解码 3 次，仅用于识别与脱敏，不改变业务解析输入。
+            text = _decode_percent_encoded_text(original_text)
+            stripped = text.lstrip()
             if stripped.startswith(("{", "[")):
                 try:
-                    parsed = json.loads(item)
+                    parsed = json.loads(text)
                 except (json.JSONDecodeError, RecursionError):
                     parsed = None
                 if isinstance(parsed, (dict, list)):
                     nested = clean(parsed, depth + 1)
-                    encoded_nested = json.dumps(
-                        nested, ensure_ascii=False, separators=(",", ":")
-                    )
-                    if len(encoded_nested.encode("utf-8")) > _MAX_RAW_STRING_LENGTH:
-                        return "[structured payload omitted: exceeds string limit]"
-                    return encoded_nested
+                    if nested != parsed:
+                        encoded_nested = json.dumps(
+                            nested, ensure_ascii=False, separators=(",", ":")
+                        )
+                        if len(encoded_nested.encode("utf-8")) > _MAX_RAW_STRING_LENGTH:
+                            return "[structured payload omitted: exceeds string limit]"
+                        return encoded_nested
 
-            text = item[:_MAX_RAW_STRING_LENGTH]
-            text = _SENSITIVE_HEADER_LINE.sub(r"\1[redacted]", text)
-            text = _SENSITIVE_INLINE_VALUE.sub(r"\1[redacted]", text)
-            text = _BEARER_VALUE.sub("Bearer [redacted]", text)
-            return text
+            sanitized_text = _SENSITIVE_HEADER_LINE.sub(r"\1[redacted]", text)
+            sanitized_text = _SENSITIVE_INLINE_VALUE.sub(r"\1[redacted]", sanitized_text)
+            sanitized_text = _BEARER_VALUE.sub("Bearer [redacted]", sanitized_text)
+            # 没有发现敏感信息时保留原始编码形式，避免改变 click_id 等业务快照值。
+            return sanitized_text if sanitized_text != text else original_text
         if item is None or isinstance(item, (bool, int, float)):
             return item
         # JSON 请求通常不会包含自定义对象；未知对象不应通过 repr 泄漏信息。
