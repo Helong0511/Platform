@@ -129,8 +129,6 @@ def test_note_rate_limited_writes_shared_backoff():
     assert fake.pttl(ms._REDIS_BACKOFF_GLOBAL) > 7000
 
 
-
-
 def test_note_rate_limited_never_shortens_existing_shared_backoff():
     fake = _FakeRedis()
     global_key = ms._REDIS_BACKOFF_GLOBAL
