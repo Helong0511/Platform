@@ -49,36 +49,56 @@ SEND_BOT_READ_TIMEOUT_SECONDS = 30.0
 
 
 def _send_loop_worker() -> None:
-    """发送专用事件循环线程入口。"""
+    """发送专用事件循环线程入口；READY 只在 loop 真正运行后触发。"""
     global _send_loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     _send_loop = loop
-    _SEND_LOOP_READY.set()
-    loop.run_forever()
+    # call_soon 回调只有在 run_forever 已进入事件循环后才会执行。
+    loop.call_soon(_SEND_LOOP_READY.set)
+    try:
+        loop.run_forever()
+    finally:
+        if _send_loop is loop:
+            _send_loop = None
+        asyncio.set_event_loop(None)
+        if not loop.is_closed():
+            loop.close()
 
 
 def ensure_send_loop() -> asyncio.AbstractEventLoop:
-    """确保发送专用事件循环已启动，并返回该 loop。"""
+    """线程安全地确保唯一发送事件循环已进入运行状态。"""
     global _send_thread
-    if _send_loop is not None and _send_loop.is_running():
-        return _send_loop
 
     with _loop_start_lock:
         if _send_loop is not None and _send_loop.is_running():
             return _send_loop
+
+        # 如果有启动线程正在初始化，等待它的同一个 READY Event，不能重复创建线程。
+        if _send_thread is not None and _send_thread.is_alive():
+            if not _SEND_LOOP_READY.wait(timeout=5.0):
+                raise RuntimeError("Telegram 发送事件循环启动超时")
+            loop = _send_loop
+            if loop is None or not loop.is_running():
+                raise RuntimeError("Telegram 发送事件循环未能进入运行状态")
+            return loop
+
         _SEND_LOOP_READY.clear()
-        _send_thread = threading.Thread(
+        thread = threading.Thread(
             target=_send_loop_worker,
             name="TelegramSendLoop",
             daemon=True,
         )
-        _send_thread.start()
+        _send_thread = thread
+        thread.start()
 
-    if not _SEND_LOOP_READY.wait(timeout=5.0):
-        raise RuntimeError("Telegram 发送事件循环启动超时")
-    assert _send_loop is not None
-    return _send_loop
+        # 等待必须在启动锁内完成；worker 不获取该锁，因此不会形成锁等待环。
+        if not _SEND_LOOP_READY.wait(timeout=5.0):
+            raise RuntimeError("Telegram 发送事件循环启动超时")
+        loop = _send_loop
+        if loop is None or not loop.is_running():
+            raise RuntimeError("Telegram 发送事件循环未能进入运行状态")
+        return loop
 
 
 def run_on_send_loop(coro, *, timeout: Optional[float] = None):
