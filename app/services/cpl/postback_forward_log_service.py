@@ -43,18 +43,30 @@ from app.schemas.postback import PostbackForwardLogResponse
 logger = logging.getLogger(__name__)
 
 
+def _safe_downstream_url(value: Optional[str]) -> str:
+    """仅保留下游 URL 的协议、主机和端口，绝不回显 userinfo 或请求参数。"""
+    try:
+        parsed_url = urlsplit(value or "")
+        scheme = parsed_url.scheme.lower()
+        hostname = parsed_url.hostname
+        if scheme not in {"http", "https"} or not hostname:
+            return "历史下游 URL 已脱敏"
+
+        # hostname 不包含 URL 中的 username/password；IPv6 地址需要保留方括号。
+        safe_host = f"[{hostname}]" if ":" in hostname else hostname
+        port = parsed_url.port
+        if port is not None:
+            safe_host = f"{safe_host}:{port}"
+        return f"{scheme}://{safe_host}"
+    except (ValueError, UnicodeError):
+        # 包括非法端口、无效 IPv6 等情况，宁可隐藏也不回显原始 URL。
+        return "历史下游 URL 已脱敏"
+
+
 def _safe_forward_log_response(log: PostbackForwardLog) -> PostbackForwardLogResponse:
     """历史日志可能包含原始个人信息，API 只返回脱敏摘要。"""
     response = PostbackForwardLogResponse.model_validate(log)
-    try:
-        parsed_url = urlsplit(log.downstream_url or "")
-        safe_url = (
-            f"{parsed_url.scheme}://{parsed_url.netloc}"
-            if parsed_url.scheme and parsed_url.netloc
-            else "历史下游 URL 已脱敏"
-        )
-    except ValueError:
-        safe_url = "历史下游 URL 已脱敏"
+    safe_url = _safe_downstream_url(log.downstream_url)
 
     return response.model_copy(
         update={
