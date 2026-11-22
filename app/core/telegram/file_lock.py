@@ -9,6 +9,7 @@ import errno
 import logging
 import os
 import time
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -33,6 +34,7 @@ LOCK_EXPIRE_SECONDS = 3600  # 仅供旧锁文件诊断；互斥不再依赖时�
 _bot_lock_file = None
 _bot_lock_acquired = False
 _bot_lock_path: Optional[Path] = None
+_bot_lock_state_lock = threading.RLock()
 
 
 def get_default_lock_path() -> Path:
@@ -143,7 +145,7 @@ def _write_lock_metadata(handle, current_pid: int) -> None:
     os.fsync(handle.fileno())
 
 
-def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 3) -> bool:
+def _acquire_bot_lock_unlocked(lock_file_path: Optional[Path] = None, max_retries: int = 3) -> bool:
     """
     使用 fcntl.flock（Linux/macOS）或 msvcrt.locking（Windows）获取互斥锁。
 
@@ -229,7 +231,7 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 3
     return False
 
 
-def release_bot_lock() -> None:
+def _release_bot_lock_unlocked() -> None:
     """释放 OS 锁并关闭句柄；保留锁文件，避免 unlink 竞态。"""
     global _bot_lock_file, _bot_lock_acquired, _bot_lock_path
 
@@ -257,6 +259,19 @@ def release_bot_lock() -> None:
             logger.debug("Telegram Bot 锁文件保留以维持稳定 inode：%s", path)
 
 
+def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 3) -> bool:
+    """线程安全地获取当前进程唯一的 Telegram Bot OS 文件锁。"""
+    with _bot_lock_state_lock:
+        return _acquire_bot_lock_unlocked(lock_file_path, max_retries)
+
+
+def release_bot_lock() -> None:
+    """线程安全地释放 Telegram Bot OS 文件锁。"""
+    with _bot_lock_state_lock:
+        _release_bot_lock_unlocked()
+
+
 def is_lock_held() -> bool:
     """检查当前进程是否持有 OS 文件锁句柄。"""
-    return _bot_lock_acquired and _bot_lock_file is not None
+    with _bot_lock_state_lock:
+        return _bot_lock_acquired and _bot_lock_file is not None
