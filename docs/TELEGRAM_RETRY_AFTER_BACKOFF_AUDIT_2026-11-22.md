@@ -8,7 +8,7 @@
 
 - 区分“单次调用内同步等待预算”与“服务端共享 backoff TTL”。
 - 单次调用仍最多同步等待 120 秒，避免业务请求无限挂起。
-- Redis backoff 按服务端原始 `retry_after` 保存，最大安全上限 24 小时。
+- Redis backoff 按服务端原始 `retry_after` 保存，最大安全上限 7 天。
 - 当服务端要求等待超过 120 秒时，当前发送请求立即停止重试并返回失败，不再提前 sleep 120 秒后重试。
 - 其它 worker 读取完整 Redis TTL；如果等待超过互斥锁预算，获取锁超时并 fail closed，不会提前发送。
 - 普通消息、带按钮消息、通用 PTB API 调用都不再截短服务端 RetryAfter。
