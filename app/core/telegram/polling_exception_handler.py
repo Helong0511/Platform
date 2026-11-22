@@ -56,7 +56,6 @@ def is_transient_telegram_network_error(exception: BaseException) -> bool:
     return any(keyword in msg_lower for keyword in _TRANSIENT_NETWORK_KEYWORDS)
 
 
-
 def is_permanent_telegram_auth_error(exception: BaseException) -> bool:
     """识别 Bot Token 无效/未授权等永久认证错误，禁止 supervisor 自动重试。"""
     error_code = getattr(exception, "error_code", None)
