@@ -112,11 +112,6 @@ class TelegramBotDiagnostics:
         telegram_token = getattr(settings, 'TELEGRAM_TOKEN', None)
         if telegram_token:
             config_status["telegram_token_configured"] = True
-            config_status["token_length"] = len(telegram_token)
-            config_status["token_prefix"] = telegram_token[:4] + "****" if len(telegram_token) > 4 else telegram_token
-            config_status["token_bot_id"] = (
-                telegram_token.split(":", 1)[0] if ":" in telegram_token else None
-            )
             is_prod = is_production_env_name(detect_production_env())
             env_key = "TELEGRAM_TOKEN_PRODUCTION" if is_prod else "TELEGRAM_TOKEN_LOCAL"
             if os.getenv(env_key) and str(os.getenv(env_key)).strip():
@@ -130,13 +125,11 @@ class TelegramBotDiagnostics:
         telegram_admin = getattr(settings, 'TELEGRAM_ADMIN', None)
         if telegram_admin:
             config_status["telegram_admin_configured"] = True
-            config_status["admin_value"] = telegram_admin
         
         # 检查聊天ID
         telegram_chat_id = getattr(settings, 'TELEGRAM_CHAT_ID', None)
         if telegram_chat_id:
             config_status["telegram_chat_id_configured"] = True
-            config_status["chat_id_value"] = telegram_chat_id
         
         return config_status
     
@@ -160,7 +153,7 @@ class TelegramBotDiagnostics:
                 "available": test_available
             }
         except Exception as e:
-            init_status["reinitialize_error"] = str(e)
+            init_status["reinitialize_error"] = type(e).__name__
         
         return init_status
     
@@ -193,7 +186,7 @@ class TelegramBotDiagnostics:
                     "username": me.username,
                 }
             except Exception as e:
-                network_status["connection_test"] = f"失败: {str(e)}"
+                network_status["connection_test"] = f"失败（{type(e).__name__}）"
                 network_status["api_accessible"] = False
 
         return network_status
@@ -209,7 +202,12 @@ class TelegramBotDiagnostics:
         # 检查环境变量
         for key in os.environ:
             if "TELEGRAM" in key.upper():
-                system_status["env_vars"][key] = os.environ[key]
+                value = os.environ[key]
+                # 只显示开关值；Token、Chat ID、代理 URL、锁路径等均不回显原值。
+                if key.upper() == "TELEGRAM_ENABLE":
+                    system_status["env_vars"][key] = value
+                else:
+                    system_status["env_vars"][key] = "[已设置]" if value.strip() else "[未设置]"
         
         # 检查文件权限
         lock_file_path = getattr(settings, 'TELEGRAM_BOT_LOCK_FILE', None)
@@ -226,7 +224,7 @@ class TelegramBotDiagnostics:
                         "exists": False
                     }
             except Exception as e:
-                system_status["file_permissions"]["lock_file_error"] = str(e)
+                system_status["file_permissions"]["lock_file_error"] = type(e).__name__
         
         return system_status
     
