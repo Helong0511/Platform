@@ -1,4 +1,5 @@
 import json
+from urllib.parse import quote
 
 from app.core.postback.savers.conversion_saver import sanitize_postback_raw_data
 
@@ -152,3 +153,68 @@ def test_redacts_composite_sensitive_query_and_form_parameter_names():
     assert "private-agent" not in result
     assert "click_id=click-200" in result
     assert "[redacted]" in result
+
+
+
+def test_redacts_single_and_double_url_encoded_json_strings():
+    payload = {
+        "email": "encoded@example.com",
+        "ip_address": "203.0.113.77",
+        "nested": {"phoneNumber": "+1-555-0144"},
+        "click_id": "keep-encoded-json-click",
+        "event_name": "purchase",
+    }
+    raw_json = json.dumps(payload, separators=(",", ":"))
+    single_encoded = quote(raw_json, safe="")
+    double_encoded = quote(single_encoded, safe="")
+
+    for raw in (single_encoded, double_encoded):
+        result = sanitize_postback_raw_data(raw)
+        assert isinstance(result, str)
+        decoded = json.loads(result)
+        assert decoded["click_id"] == "keep-encoded-json-click"
+        assert decoded["event_name"] == "purchase"
+        assert "email" not in decoded
+        assert "ip_address" not in decoded
+        assert "phoneNumber" not in decoded["nested"]
+        assert "encoded@example.com" not in result
+        assert "203.0.113.77" not in result
+        assert "+1-555-0144" not in result
+
+
+def test_redacts_double_url_encoded_query_keys_and_values():
+    raw_query = (
+        "https://tracker.example/callback?%65mail=person%2540example.com"
+        "&%2569p=203.0.113.88&click_id=keep-query-click"
+    )
+    raw = quote(quote(raw_query, safe=""), safe="")
+
+    result = sanitize_postback_raw_data(raw)
+
+    assert "person@example.com" not in result
+    assert "203.0.113.88" not in result
+    assert "email=" in result
+    assert "ip=" in result
+    assert "click_id=keep-query-click" in result
+    assert "[redacted]" in result
+
+
+def test_redacts_url_encoded_sensitive_dictionary_keys():
+    result = sanitize_postback_raw_data({
+        "%65mail": "encoded-key@example.com",
+        "%2569p": "203.0.113.99",
+        "click_id": "trusted-click",
+        "event_name": "purchase",
+    })
+
+    assert result == {"click_id": "trusted-click", "event_name": "purchase"}
+    serialized = json.dumps(result)
+    assert "encoded-key@example.com" not in serialized
+    assert "203.0.113.99" not in serialized
+
+
+def test_preserves_non_sensitive_percent_encoded_business_values():
+    original = "click%2Fid%2Dwith%252Fencoding"
+    result = sanitize_postback_raw_data({"click_id": original})
+
+    assert result["click_id"] == original
