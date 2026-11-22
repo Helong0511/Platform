@@ -104,7 +104,7 @@ async def test_archive_count_mismatch_rolls_back_without_deleting_source(monkeyp
     assert db.rolled_back is True
 
 
-async def _async_false():
+async def _async_false(*args, **kwargs):
     return False
 
 
