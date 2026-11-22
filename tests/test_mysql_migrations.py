@@ -147,7 +147,7 @@ def test_click_archive_url_fields_migration_is_idempotent_and_preserves_existing
                 ('{"x-test":"kept"}',),
             )
 
-            migration = "sql/migrations/20261122_click_archive_url_fields.sql"
+            migration = "sql/migrations/20261122_z_click_archive_url_fields.sql"
             _run_sql_file(cursor, migration)
             _run_sql_file(cursor, migration)
 
@@ -183,7 +183,7 @@ def test_click_archive_url_fields_migration_rejects_wrong_existing_column_type()
             with pytest.raises(pymysql.err.OperationalError) as migration_error:
                 _run_sql_file(
                     cursor,
-                    "sql/migrations/20261122_click_archive_url_fields.sql",
+                    "sql/migrations/20261122_z_click_archive_url_fields.sql",
                 )
             assert migration_error.value.args[0] == 1060
     finally:
@@ -199,7 +199,7 @@ def test_click_archive_url_fields_migration_skips_when_archive_table_is_absent()
     try:
         with connection.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS clicks_archive")
-            _run_sql_file(cursor, "sql/migrations/20261122_click_archive_url_fields.sql")
+            _run_sql_file(cursor, "sql/migrations/20261122_z_click_archive_url_fields.sql")
             cursor.execute("SHOW TABLES LIKE 'clicks_archive'")
             assert cursor.fetchone() is None
     finally:
