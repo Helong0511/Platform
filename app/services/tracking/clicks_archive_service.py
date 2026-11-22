@@ -2,7 +2,7 @@
 点击记录归档服务（主表 clicks → clicks_archive）。
 
 职责：
-- 将 click_time 早于保留期的记录 INSERT IGNORE 至归档表后 DELETE 主表
+- 将 click_time 早于保留期的记录完整写入归档表，核对数量后再删除主表
 - 归档表不存在时自动 CREATE；令牌模式且主表为空时跳过
 
 默认保留 90 天；由定时任务 archive_old_clicks 调用模块单例 clicks_archive_service。
@@ -91,7 +91,7 @@ class ClicksArchiveService:
         归档并清理过期点击记录。
 
         流程：计算 cutoff → 跳过判断 → 确保归档表存在 → 统计待归档数 →
-        INSERT IGNORE 到 clicks_archive → DELETE 主表 → commit。
+        普通 INSERT 到 clicks_archive → 核对写入数量 → DELETE 主表 → 核对删除数量 → commit。
 
         Args:
             db: 数据库会话
