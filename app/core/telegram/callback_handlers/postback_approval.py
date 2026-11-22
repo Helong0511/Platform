@@ -4,6 +4,8 @@ Postback 审批回调处理器
 处理管理员对 Postback 待确认转化的批准/拒绝操作（python-telegram-bot）。
 """
 import logging
+
+from app.core.telegram_utils import mask_telegram_chat_id
 import re
 import threading
 
@@ -461,7 +463,7 @@ async def handle_postback_approval(update, context):
     if not _is_authorized_admin(user_id, chat_type):
         logger.warning(
             "拒绝未授权 Telegram Postback 审批操作：user_id=%s chat_type=%s",
-            user_id,
+            mask_telegram_chat_id(user_id),
             chat_type,
         )
         # 未授权尝试不改变业务记录，使用独立同步事务持久化拒绝事件。
@@ -497,7 +499,7 @@ async def handle_postback_approval(update, context):
         "[回调查询处理器] 收到管理员审批回调：action=%s pending_id=%s user_id=%s",
         action,
         pending_id,
-        user_id,
+        mask_telegram_chat_id(user_id),
     )
 
     callback_query_id = query.id
