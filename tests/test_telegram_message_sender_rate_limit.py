@@ -101,7 +101,7 @@ def test_rate_limit_seconds_supports_retry_after_timedelta():
     assert ms._rate_limit_seconds_from_exc(_RetryAfterError(8)) == 8
     assert ms._rate_limit_seconds_from_exc(_RetryAfterError(timedelta(seconds=8))) == 8
     assert ms._rate_limit_seconds_from_exc(_RetryAfterError(timedelta(milliseconds=1500))) == 2
-    assert ms._rate_limit_seconds_from_exc(_RetryAfterError(timedelta(0))) == 0
+    assert ms._rate_limit_seconds_from_exc(_RetryAfterError(timedelta(0))) == 1
 
 
 def test_note_rate_limited_writes_shared_backoff():
