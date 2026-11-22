@@ -5,7 +5,8 @@
 """
 import logging
 
-from app.core.telegram_utils import mask_telegram_chat_id
+from app.core.telegram import send_telegram_message_async
+from app.core.telegram_utils import escape_html, mask_telegram_chat_id
 
 logger = logging.getLogger(__name__)
 
@@ -62,17 +63,23 @@ async def get_chat_id(update, context):
     ]
 
     if is_group:
-        response_lines.append(f"👥 Group Title: {chat.title or 'N/A'}")
+        response_lines.append(f"👥 Group Title: {escape_html(chat.title or 'N/A')}")
         if bot_username:
             response_lines.append(f"🤖 Bot Username: @{bot_username}")
 
     try:
-        await context.bot.send_message(
-            chat_id=chat.id,
-            text="\n".join(response_lines),
+        sent = await send_telegram_message_async(
+            chat.id,
+            "\n".join(response_lines),
             parse_mode="HTML",
             reply_to_message_id=message.message_id,
         )
+        if not sent:
+            logger.warning(
+                "[命令处理器] Chat ID 回复发送失败，chat_id=%s",
+                mask_telegram_chat_id(chat.id),
+            )
+            return
         logger.info(
             "[命令处理器] 已发送 Chat ID 到：%s",
             mask_telegram_chat_id(chat.id),
