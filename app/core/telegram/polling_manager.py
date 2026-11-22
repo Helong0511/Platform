@@ -55,6 +55,8 @@ def _build_polling_application(token: str):
         .get_updates_read_timeout(POLLING_GET_UPDATES_READ_TIMEOUT_SECONDS)
         .get_updates_write_timeout(60.0)
         .get_updates_pool_timeout(5.0)
+        # APScheduler 是项目自身调度依赖；Telegram 未使用 PTB JobQueue，禁止自动创建额外调度器。
+        .job_queue(None)
         .post_init(_post_init)
         .build()
     )
