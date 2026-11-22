@@ -49,3 +49,33 @@ def test_send_bot_uses_centralized_http_timeouts(monkeypatch):
         "write_timeout": 30.0,
     }
     assert captured["initialization_timeout"] == 33.0
+
+
+
+def test_run_on_send_loop_cancels_underlying_future_after_timeout(monkeypatch):
+    from concurrent.futures import TimeoutError as FutureTimeoutError
+
+    class FakeFuture:
+        cancelled = False
+
+        def result(self, timeout=None):
+            raise FutureTimeoutError()
+
+        def cancel(self):
+            self.cancelled = True
+            return True
+
+    from app.core.telegram import ptb_runtime
+
+    future = FakeFuture()
+    monkeypatch.setattr(ptb_runtime, "ensure_send_loop", lambda: object())
+    monkeypatch.setattr(
+        ptb_runtime.asyncio,
+        "run_coroutine_threadsafe",
+        lambda _coro, _loop: future,
+    )
+
+    with pytest.raises(FutureTimeoutError):
+        ptb_runtime.run_on_send_loop(object(), timeout=0.01)
+
+    assert future.cancelled is True
