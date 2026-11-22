@@ -93,7 +93,11 @@ async def _record_update_received(_update, _context) -> None:
 
 def _instrument_get_updates(application) -> None:
     """包装 Bot.get_updates，记录成功返回时间，不改变 PTB 内部重试策略。"""
-    original_get_updates = application.bot.get_updates
+    bot = getattr(application, "bot", None)
+    original_get_updates = getattr(bot, "get_updates", None)
+    if not callable(original_get_updates):
+        logger.warning("Telegram polling Bot 不支持 get_updates 心跳包装")
+        return
 
     async def tracked_get_updates(*args, **kwargs):
         global _last_get_updates_success_at
@@ -101,7 +105,13 @@ def _instrument_get_updates(application) -> None:
         _last_get_updates_success_at = time.time()
         return result
 
-    application.bot.get_updates = tracked_get_updates
+    try:
+        bot.get_updates = tracked_get_updates
+    except (AttributeError, TypeError) as exc:
+        logger.warning(
+            "Telegram getUpdates 心跳包装失败；error_type=%s",
+            type(exc).__name__,
+        )
 
 
 def _notify_supervisor_failure(reason: str) -> None:
