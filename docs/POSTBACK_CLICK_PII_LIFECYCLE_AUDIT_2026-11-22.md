@@ -112,6 +112,7 @@
 - 正式转化表与点击归档表尚无本报告定义的独立清理实现。
 - 点击归档已改为有界批次并通过 MySQL 双 Worker 并发测试，但这不等于 PII 已按期限清理；归档表仍无获批的 PII 到期清理策略。
 - PR #102 已增加真实 FastAPI/ASGI 权限矩阵测试：转化总览 ADMIN/CLIENT/其他角色、无关联 Client/Publisher、Postback 查询路由管理员门禁和客户财务字段裁剪均有覆盖。
+- PR #104 为管理员读取 Postback 转化列表、统计和重复检查增加严格审计：记录管理员身份、HTTP 方法/路径、筛选字段是否出现及分页大小；不记录原始 click_id/conversion_id 值；审计提交失败时不向客户端返回查询结果。
 - PR #99 已修复归档事务原子性；PR #100 已补齐归档 URL 字段及既有表迁移；PR #101 已实现有界批次、行锁和死锁重试。
 - 正式转化表保留期、备份/binlog/只读副本/导出/日志生命周期仍需业务/合规批准和隔离环境验收。
 - 本报告不代表项目已达到生产上线安全标准。
@@ -119,7 +120,7 @@
 
 ## 8. 2026-11-22 API 权限与字段范围复核补充
 
-本节最初基于 main `4ccc61108386bf6a7bcf36116287e0ea41592dc2` 完成静态复核；后续 PR #102 已在 main `c74a9197f75a11ea423627defa9c0d709b10410c` 增加 FastAPI/ASGI 权限矩阵测试。
+本节最初基于 main `4ccc61108386bf6a7bcf36116287e0ea41592dc2` 完成静态复核；后续 PR #102 已在 main `c74a9197f75a11ea423627defa9c0d709b10410c` 增加 FastAPI/ASGI 权限矩阵测试，PR #103 当前 main 为 `61b7633249d118dcc2b9caf44174ad14a56297ae` 并补充客户 Publisher 参数交集测试。
 
 ### 8.1 原始 Postback 转化列表
 
@@ -135,6 +136,7 @@
 - `ConversionService` 对 CLIENT 收集该用户全部启用 Client，再将可见范围限制到这些 Client 关联的启用 Publisher。没有 Client 或 Publisher 时 fail-closed 返回空范围/拒绝访问，不退化为全局统计。
 - 对 CLIENT 返回值执行字段裁剪：总览删除 `total_po`、`total_profit`，分组项删除 `po`、`adv_po`、`advertiser_id`、`advertiser_name`；按 Offer 汇总删除 `po`。
 - `tests/test_conversion_client_scope.py` 覆盖缺失 Client 时返回空范围、多 Client 归属收集，以及用户指定的 `publisher_id` 必须与自身 Publisher 范围取交集。
+- Postback 管理员读取日志已覆盖转化列表、统计和重复检查三个 GET 接口；只记录筛选字段存在性，不保存原始 Click ID/Conversion ID。
 - PR #102 的 `tests/test_conversion_api_authorization.py` 使用 FastAPI + ASGITransport 覆盖未认证 401、ADMIN 放行、有效 CLIENT 放行、缺失 Client/Publisher 与其他角色 403，并确认拒绝请求不会调用 Service。
 
 ### 8.3 本次复核后的风险定级
