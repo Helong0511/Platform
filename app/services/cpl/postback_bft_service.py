@@ -133,9 +133,25 @@ class PostbackBftService:
                 telegram_msg += "无参数\n"
             if len(telegram_msg) > 4096:
                 telegram_msg = truncate_message(telegram_msg)
-            asyncio.create_task(
+            notification_task = asyncio.create_task(
                 send_telegram_message_async(settings.TELEGRAM_ADMIN, telegram_msg)
             )
+
+            def _log_notification_result(task: asyncio.Task) -> None:
+                try:
+                    sent = task.result()
+                except asyncio.CancelledError:
+                    logger.debug("BFT Postback Telegram 通知任务已取消")
+                except Exception as exc:
+                    logger.warning(
+                        "BFT Postback Telegram 通知任务异常；error_type=%s",
+                        type(exc).__name__,
+                    )
+                else:
+                    if not sent:
+                        logger.warning("BFT Postback Telegram 通知发送失败（发送器返回 False）")
+
+            notification_task.add_done_callback(_log_notification_result)
         except Exception as e:
             logger.warning("发送 BFT PostBack Telegram 通知失败: error_type=%s", type(e).__name__)
 

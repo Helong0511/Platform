@@ -12,6 +12,8 @@ Telegram 消息发送模块
 """
 import logging
 import importlib
+import hashlib
+import hmac
 import math
 import os
 import random
@@ -22,7 +24,12 @@ from datetime import timedelta
 from urllib.parse import urlsplit
 from typing import Optional, List, Dict, Any
 
-from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH, validate_chat_id
+from app.core.telegram_utils import (
+    truncate_message,
+    MAX_TELEGRAM_MESSAGE_LENGTH,
+    validate_chat_id,
+    mask_telegram_chat_id,
+)
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -48,8 +55,8 @@ MAX_SERVER_BACKOFF_SECONDS = 7 * 24 * 3600  # Redis 共享服务端 retry_after 
 _GATE_SPIN_SECONDS = 0.02  # 闸门刚过期时的短睡，避免空转烧 CPU
 _REDIS_BACKOFF_GLOBAL = "telegram:send:backoff:__global__"
 _REDIS_GATE_GLOBAL = "telegram:send:gate:__global__"
-_REDIS_BACKOFF_CHAT = "telegram:send:backoff:{chat_id}"
-_REDIS_GATE_CHAT = "telegram:send:gate:{chat_id}"
+_REDIS_BACKOFF_CHAT = "telegram:send:backoff:{chat_key}"
+_REDIS_GATE_CHAT = "telegram:send:gate:{chat_key}"
 _REDIS_SEND_MUTEX = "telegram:send:mutex"
 _MUTEX_TTL_SECONDS = MAX_RATE_LIMIT_WAIT + 60
 _RELEASE_MUTEX_LUA = (
@@ -82,6 +89,22 @@ def estimate_telegram_send_timeout_seconds(chat_count: int = 1) -> float:
 def _admin_chat_count() -> int:
     admin = getattr(settings, "TELEGRAM_ADMIN", None) or ""
     return max(1, len([c for c in str(admin).split(",") if c.strip()]))
+
+
+def _redis_chat_identifier(chat_id: str) -> str:
+    """使用应用密钥生成稳定的 Chat ID HMAC，避免 Redis key 暴露原始 ID。"""
+    raw_chat_id = str(chat_id).strip()
+    secret = getattr(settings, "SECRET_KEY", None) or getattr(settings, "TELEGRAM_TOKEN", None)
+    if secret:
+        digest = hmac.new(
+            str(secret).encode("utf-8"),
+            raw_chat_id.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+    else:
+        # 非生产测试配置缺少应用密钥时仍不把原始 Chat ID 写入 Redis key。
+        digest = hashlib.sha256(raw_chat_id.encode("utf-8")).hexdigest()
+    return digest
 
 
 async def send_telegram_notify_async(
@@ -285,7 +308,7 @@ def _note_rate_limited(chat_id: str, retry_after: int) -> None:
     try:
         redis_client.setex(_REDIS_BACKOFF_GLOBAL, wait, "1")
         redis_client.setex(
-            _REDIS_BACKOFF_CHAT.format(chat_id=chat_id),
+            _REDIS_BACKOFF_CHAT.format(chat_key=_redis_chat_identifier(chat_id)),
             wait,
             "1",
         )
@@ -300,7 +323,9 @@ def _try_acquire_redis_gate(redis_client, key: str, interval_seconds: float) -> 
         return bool(redis_client.set(key, str(os.getpid()), nx=True, px=px))
     except Exception:
         _mark_sync_redis_failed()
-        return True  # Redis 异常时放行，仍靠进程内间隔兜底
+        # 这是通知通道的 fail-open：仅当前进程限流，多 worker/多主机 Redis 故障时可能触发 Telegram 429。
+        # Telegram 通知不得承担资金/转化等核心业务状态的唯一保障职责。
+        return True
 
 
 def _acquire_send_mutex(timeout: Optional[float] = None) -> Optional[str]:
@@ -387,7 +412,7 @@ def _wait_before_send(chat_id: Optional[str] = None) -> None:
     注意：闸门抢占失败且 PTTL=0 时只短睡再试，禁止空转 ``continue``（会烧满 CPU）。
     """
     global _last_send_monotonic
-    chat_key = (str(chat_id).strip() if chat_id else "__default__") or "__default__"
+    chat_key = _redis_chat_identifier(str(chat_id).strip()) if chat_id else "__default__"
     chat_interval = _chat_send_interval(chat_id)
     deadline = time.monotonic() + max(MAX_RATE_LIMIT_WAIT * 2, 30.0)
 
@@ -401,7 +426,7 @@ def _wait_before_send(chat_id: Optional[str] = None) -> None:
                 _redis_wait_seconds(redis_client, _REDIS_BACKOFF_GLOBAL),
                 _redis_wait_seconds(
                     redis_client,
-                    _REDIS_BACKOFF_CHAT.format(chat_id=chat_key),
+                    _REDIS_BACKOFF_CHAT.format(chat_key=chat_key),
                 ),
             )
             if sleep_for <= 0:
@@ -416,12 +441,12 @@ def _wait_before_send(chat_id: Optional[str] = None) -> None:
                         continue
                 elif not _try_acquire_redis_gate(
                     redis_client,
-                    _REDIS_GATE_CHAT.format(chat_id=chat_key),
+                    _REDIS_GATE_CHAT.format(chat_key=chat_key),
                     chat_interval,
                 ):
                     wait = _redis_wait_seconds(
                         redis_client,
-                        _REDIS_GATE_CHAT.format(chat_id=chat_key),
+                        _REDIS_GATE_CHAT.format(chat_key=chat_key),
                     )
                     if wait > 0:
                         sleep_for = wait
@@ -480,11 +505,7 @@ def _check_bot_available() -> tuple[bool, str]:
         return False, "Bot 未初始化（无 token）"
 
     try:
-        get_send_bot(
-            token.strip(),
-            connect_timeout=3.0,
-            read_timeout=float(TIMEOUT_SECONDS),
-        )
+        get_send_bot(token.strip())
         if not bot_initialized:
             set_bot_state(bot, True, True)
         return True, "Bot 可用"
@@ -500,11 +521,7 @@ def _get_send_bot():
     token = getattr(settings, "TELEGRAM_TOKEN", None)
     if not token or not str(token).strip():
         raise RuntimeError("TELEGRAM_TOKEN 未配置")
-    return get_send_bot(
-        str(token).strip(),
-        connect_timeout=3.0,
-        read_timeout=float(TIMEOUT_SECONDS),
-    )
+    return get_send_bot(str(token).strip())
 
 
 def _sync_bot_call(coro, *, timeout: Optional[float] = None):
@@ -631,7 +648,8 @@ def send_telegram_message_result(
                         send_kwargs["parse_mode"] = parse_mode
                     _sync_bot_call(bot.send_message(**send_kwargs))
                     logger.info(
-                        f"已发送 Telegram 消息到：{chat_id}（尝试 {attempt + 1}/{MAX_RETRIES}）"
+                        "已发送 Telegram 消息到：%s（尝试 %s/%s）",
+                        mask_telegram_chat_id(chat_id), attempt + 1, MAX_RETRIES,
                     )
                     success = True
                     break
@@ -657,8 +675,8 @@ def send_telegram_message_result(
                             return False, last_error
                         if attempt < MAX_RETRIES - 1:
                             logger.warning(
-                                f"发送 Telegram 消息到 {chat_id} 触发限流，"
-                                f"{retry_after}秒后重试（{attempt + 1}/{MAX_RETRIES}）"
+                                "发送 Telegram 消息到 %s 触发限流，%s 秒后重试（%s/%s）",
+                                mask_telegram_chat_id(chat_id), retry_after, attempt + 1, MAX_RETRIES,
                             )
                             # 持锁睡眠 + 抖动：其它 worker 排队等互斥锁，避免同时撞 429
                             _refresh_send_mutex(mutex_token, retry_after + 60)
@@ -780,7 +798,10 @@ def send_telegram_message_with_buttons(
         return False, None
 
     if not chat_id or not validate_chat_id(str(chat_id).strip()):
-        logger.warning(f"无效的 Telegram Chat ID，无法发送带按钮消息: {chat_id!r}")
+        logger.warning(
+            "无效的 Telegram Chat ID，无法发送带按钮消息：%s",
+            mask_telegram_chat_id(chat_id),
+        )
         return False, None
 
     try:
@@ -811,8 +832,8 @@ def send_telegram_message_with_buttons(
                         send_kwargs["parse_mode"] = parse_mode
                     sent_message = _sync_bot_call(bot.send_message(**send_kwargs))
                     logger.info(
-                        f"已发送带按钮的 Telegram 消息到：{chat_id}"
-                        f"（尝试 {attempt + 1}/{MAX_RETRIES}）"
+                        "已发送带按钮的 Telegram 消息到：%s（尝试 %s/%s）",
+                        mask_telegram_chat_id(chat_id), attempt + 1, MAX_RETRIES,
                     )
                     return True, sent_message.message_id
 
@@ -831,8 +852,8 @@ def send_telegram_message_with_buttons(
                             return False, None
                         if attempt < MAX_RETRIES - 1:
                             logger.warning(
-                                f"发送带按钮的 Telegram 消息触发限流，"
-                                f"{retry_after}秒后重试（{attempt + 1}/{MAX_RETRIES}）"
+                                "发送带按钮的 Telegram 消息触发限流，%s 秒后重试（%s/%s）",
+                                retry_after, attempt + 1, MAX_RETRIES,
                             )
                             _refresh_send_mutex(mutex_token, retry_after + 60)
                             _sleep_with_jitter(retry_after, max_extra=2.0)
@@ -907,7 +928,7 @@ async def send_admin_notification(
     prefix = type_prefixes.get(notification_type, '🔔 ')
     full_message = f"{prefix}{message}"
     
-    return send_telegram_message(telegram_chat_id, full_message)
+    return await send_telegram_message_async(telegram_chat_id, full_message)
 
 
 def call_telegram_api_throttled(

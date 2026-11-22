@@ -6,6 +6,8 @@
 import logging
 import threading
 
+from app.core.telegram_utils import mask_telegram_chat_id
+
 logger = logging.getLogger(__name__)
 
 VALID_STATS_PERIODS = frozenset({
@@ -88,7 +90,9 @@ def _process_stats_request(
                 ),
             )
         logger.info(
-            f"[统计回调] 已展示 {STATS_PERIOD_LABELS.get(period_key, period_key)} 统计, chat_id={chat_id}"
+            "[统计回调] 已展示 %s 统计，chat_id=%s",
+            STATS_PERIOD_LABELS.get(period_key, period_key),
+            mask_telegram_chat_id(chat_id),
         )
     except Exception as exc:
         logger.error("[统计回调] 处理失败；error_type=%s", type(exc).__name__)

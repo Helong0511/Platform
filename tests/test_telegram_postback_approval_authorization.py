@@ -63,6 +63,8 @@ async def test_unauthorized_group_callback_is_rejected_without_starting_approval
     monkeypatch.setattr(settings, "TELEGRAM_ADMIN", "-100123456789", raising=False)
 
     answered = []
+    logs = []
+    monkeypatch.setattr(handler.logger, "warning", lambda *args: logs.append(args))
 
     class FakeQuery:
         data = "postback_approve_77"
@@ -83,3 +85,47 @@ async def test_unauthorized_group_callback_is_rejected_without_starting_approval
     )
 
     assert answered == [{"text": "无权限执行此操作", "show_alert": True}]
+    rendered_logs = repr(logs)
+    assert "55***5555" in rendered_logs
+    assert "555555555" not in rendered_logs
+
+
+@pytest.mark.asyncio
+async def test_authorized_approval_callback_logs_masked_user_id(monkeypatch):
+    handler = importlib.import_module(
+        "app.core.telegram.callback_handlers.postback_approval"
+    )
+    monkeypatch.setattr(settings, "TELEGRAM_ADMIN_USER_IDS", "123456789", raising=False)
+    logs = []
+    monkeypatch.setattr(handler.logger, "info", lambda *args: logs.append(args))
+
+    class FakeThread:
+        def __init__(self, **_kwargs):
+            pass
+
+        def start(self):
+            return None
+
+    monkeypatch.setattr(handler.threading, "Thread", FakeThread)
+
+    class FakeQuery:
+        data = "postback_approve_77"
+        id = "callback-77"
+        from_user = SimpleNamespace(id=123456789, username="admin", first_name="Admin")
+        message = SimpleNamespace(
+            chat_id=123456789,
+            message_id=42,
+            chat=SimpleNamespace(type="private"),
+        )
+
+        async def answer(self, **_kwargs):
+            return None
+
+    await handler.handle_postback_approval(
+        SimpleNamespace(callback_query=FakeQuery()),
+        context=None,
+    )
+
+    rendered_logs = repr(logs)
+    assert "12***6789" in rendered_logs
+    assert "123456789" not in rendered_logs

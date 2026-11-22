@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from concurrent.futures import TimeoutError as FutureTimeoutError
 import threading
 from typing import Any, Optional, TypeVar
 
@@ -38,6 +39,10 @@ _send_bot_token: Optional[str] = None
 _loop_start_lock = threading.Lock()
 _send_bot_lock = threading.Lock()
 _SEND_LOOP_READY = threading.Event()
+
+# 发送 Bot 是进程级单例，所有调用方必须共享一致的 HTTPX 超时配置。
+SEND_BOT_CONNECT_TIMEOUT_SECONDS = 3.0
+SEND_BOT_READ_TIMEOUT_SECONDS = 30.0
 
 
 def _send_loop_worker() -> None:
@@ -78,35 +83,44 @@ def run_on_send_loop(coro, *, timeout: Optional[float] = None):
     在发送专用 loop 上执行协程并同步等待结果。
 
     可从任意线程调用（含已有 running loop 的 async 上下文）。
+    PTB Bot API coroutine 必须在 send loop 执行；调用方不得在自己的 loop 直接 await。
+    不得直接在 ASGI/async handler 中调用，应使用 run_on_send_loop_async。
     """
     loop = ensure_send_loop()
     future = asyncio.run_coroutine_threadsafe(coro, loop)
-    return future.result(timeout=timeout)
+    try:
+        return future.result(timeout=timeout)
+    except FutureTimeoutError:
+        # 超时后必须通知 loop 取消底层协程，避免请求在调用方已重试后仍继续发送。
+        future.cancel()
+        raise
 
 
-async def _create_send_bot(token: str, *, connect_timeout: float, read_timeout: float):
+async def run_on_send_loop_async(coro, *, timeout: Optional[float] = None):
+    """在 async handler 中非阻塞地等待发送 loop，避免占用当前事件循环。"""
+    return await asyncio.to_thread(run_on_send_loop, coro, timeout=timeout)
+
+
+async def _create_send_bot(token: str):
     from telegram import Bot
     from telegram.request import HTTPXRequest
 
     request = HTTPXRequest(
-        connect_timeout=connect_timeout,
-        read_timeout=read_timeout,
-        write_timeout=read_timeout,
+        connect_timeout=SEND_BOT_CONNECT_TIMEOUT_SECONDS,
+        read_timeout=SEND_BOT_READ_TIMEOUT_SECONDS,
+        write_timeout=SEND_BOT_READ_TIMEOUT_SECONDS,
     )
     bot = Bot(token=token, request=request)
     await bot.initialize()
     return bot
 
 
-def get_send_bot(
-    token: str,
-    *,
-    connect_timeout: float = 3.0,
-    read_timeout: float = 30.0,
-):
+def get_send_bot(token: str):
     """
     获取（或重建）发送专用 Bot 实例，绑定在发送 loop 上。
 
+    发送 Bot 是按 Token 缓存的进程级单例，因此使用统一的 3s connect / 30s read
+    超时；不要让先创建实例的诊断调用把正式发送超时缩短。
     注意：不得在持有锁时调用 run_on_send_loop（会与 ensure_send_loop 死锁）。
     """
     global _send_bot, _send_bot_token
@@ -125,15 +139,14 @@ def get_send_bot(
                 await old_bot.shutdown()
             except Exception as exc:
                 logger.debug("关闭旧发送 Bot 失败（可忽略）；error_type=%s", type(exc).__name__)
-        return await _create_send_bot(
-            token,
-            connect_timeout=connect_timeout,
-            read_timeout=read_timeout,
-        )
+        return await _create_send_bot(token)
 
     new_bot = run_on_send_loop(
         _build(),
-        timeout=max(10.0, connect_timeout + read_timeout),
+        timeout=max(
+            10.0,
+            SEND_BOT_CONNECT_TIMEOUT_SECONDS + SEND_BOT_READ_TIMEOUT_SECONDS + 7.0,
+        ),
     )
 
     with _send_bot_lock:

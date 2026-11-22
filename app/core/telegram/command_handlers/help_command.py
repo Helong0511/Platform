@@ -5,6 +5,9 @@
 """
 import logging
 
+from app.core.telegram import send_telegram_message_async
+from app.core.telegram_utils import mask_telegram_chat_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -30,12 +33,21 @@ async def cmd_help(update, context):
     )
 
     try:
-        await context.bot.send_message(
-            chat_id=message.chat_id,
-            text=help_text,
+        sent = await send_telegram_message_async(
+            message.chat_id,
+            help_text,
             parse_mode="HTML",
         )
-        logger.info(f"[命令处理器] 已发送帮助信息到：{message.chat_id}")
+        if not sent:
+            logger.warning(
+                "[命令处理器] 帮助信息发送失败，chat_id=%s",
+                mask_telegram_chat_id(message.chat_id),
+            )
+            return
+        logger.info(
+            "[命令处理器] 已发送帮助信息到：%s",
+            mask_telegram_chat_id(message.chat_id),
+        )
     except Exception as e:
         from app.core.telegram.command_handlers._reply_errors import log_command_reply_failure
 

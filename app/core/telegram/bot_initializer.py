@@ -114,11 +114,7 @@ def initialize_bot():
             if token and isinstance(token, str) and token.strip():
                 from app.core.telegram.ptb_runtime import get_send_bot
 
-                send_bot = get_send_bot(
-                    token.strip(),
-                    connect_timeout=3.0,
-                    read_timeout=5.0,
-                )
+                send_bot = get_send_bot(token.strip())
                 set_bot_state(send_bot, True, dynamic_available, new_application=None)
                 set_shared_state(
                     {

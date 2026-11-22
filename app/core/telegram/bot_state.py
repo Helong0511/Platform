@@ -103,7 +103,7 @@ def _probe_telegram_connection() -> str:
     try:
         from app.core.telegram.ptb_runtime import get_send_bot, run_on_send_loop
 
-        send_bot = get_send_bot(str(token).strip(), connect_timeout=3.0, read_timeout=5.0)
+        send_bot = get_send_bot(str(token).strip())
         future = _probe_executor.submit(
             lambda: run_on_send_loop(send_bot.get_me(), timeout=_CONNECTION_PROBE_TIMEOUT_SEC)
         )

@@ -24,7 +24,7 @@ jobs:
     # 仅供 CI 使用的临时 Redis 服务；与任何生产资源完全隔离。
     services:
       redis:
-        image: redis:7.4-alpine
+        image: redis:7.4.12-alpine
         ports:
           - 6379:6379
         options: >-
@@ -53,6 +53,13 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Verify resolved Python dependency compatibility
+        run: python -m pip check
+      - name: Audit Python dependencies for known vulnerabilities
+        run: |
+          python -m venv .venv-pip-audit
+          .venv-pip-audit/bin/python -m pip install "pip-audit==2.10.1"
+          .venv-pip-audit/bin/pip-audit -r requirements.txt --progress-spinner off
       - name: Compile Python
         run: python -m compileall app -q
       - name: Run unit tests
@@ -96,6 +103,51 @@ jobs:
           # 输出逐条测试节点，便于从 Actions 日志核对 MySQL/Redis 集成测试是否真实执行。
           # 卡住时定期输出 Python 线程栈；同时记录最慢测试，避免 45 分钟后只剩取消信息。
           pytest "${TEST_FILES[@]}" -v -rs --tb=short -o faulthandler_timeout=120 --durations=30
+
+
+
+  telegram-dependency-compatibility:
+    name: Telegram dependency compatibility (Python ${{ matrix.python-version }})
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.13"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pinned Telegram runtime dependencies
+        run: >-
+          python -m pip install
+          "python-telegram-bot==22.8"
+          "httpx==0.28.1"
+          "redis==8.1.0"
+          "apscheduler==3.11.3"
+      - name: Verify dependency graph and imports
+        run: |
+          python -m pip check
+          python - <<'PY'
+          from importlib.metadata import version
+
+          import httpx
+          import redis
+          from apscheduler.schedulers.asyncio import AsyncIOScheduler
+          from telegram import Bot
+          from telegram.ext import Application, CommandHandler
+          from telegram.request import HTTPXRequest
+
+          assert version("python-telegram-bot") == "22.8"
+          assert version("httpx") == "0.28.1"
+          assert version("redis") == "8.1.0"
+          assert version("APScheduler") == "3.11.3"
+          assert httpx.__version__ == "0.28.1"
+          assert redis.__version__ == "8.1.0"
+          assert Bot and Application and CommandHandler and HTTPXRequest and AsyncIOScheduler
+          print("Telegram runtime dependency compatibility passed.")
+          PY
 
 
   password-runtime-compatibility:

@@ -5,6 +5,9 @@
 """
 import logging
 
+from app.core.telegram import send_telegram_message_async
+from app.core.telegram_utils import escape_html, mask_telegram_chat_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,9 +43,11 @@ async def get_chat_id(update, context):
             logger.warning("获取 Bot 信息失败；error_type=%s", type(e).__name__)
 
     logger.info(
-        f"[命令处理器] ✅✅✅ 收到 /id 命令，来自用户："
-        f"{(user.username or user.first_name) if user else '未知'} "
-        f"(Chat ID: {chat.id}, Chat Type: {chat_type}, Bot Mentioned: {bot_mentioned})"
+        "[命令处理器] 收到 /id 命令，user_id=%s chat_id=%s chat_type=%s bot_mentioned=%s",
+        mask_telegram_chat_id(getattr(user, "id", None)),
+        mask_telegram_chat_id(chat.id),
+        chat_type,
+        bot_mentioned,
     )
 
     if is_group and not bot_mentioned and bot_username:
@@ -58,18 +63,27 @@ async def get_chat_id(update, context):
     ]
 
     if is_group:
-        response_lines.append(f"👥 Group Title: {chat.title or 'N/A'}")
+        response_lines.append(f"👥 Group Title: {escape_html(chat.title or 'N/A')}")
         if bot_username:
             response_lines.append(f"🤖 Bot Username: @{bot_username}")
 
     try:
-        await context.bot.send_message(
-            chat_id=chat.id,
-            text="\n".join(response_lines),
+        sent = await send_telegram_message_async(
+            chat.id,
+            "\n".join(response_lines),
             parse_mode="HTML",
             reply_to_message_id=message.message_id,
         )
-        logger.info(f"[命令处理器] 已发送 Chat ID 到：{chat.id}")
+        if not sent:
+            logger.warning(
+                "[命令处理器] Chat ID 回复发送失败，chat_id=%s",
+                mask_telegram_chat_id(chat.id),
+            )
+            return
+        logger.info(
+            "[命令处理器] 已发送 Chat ID 到：%s",
+            mask_telegram_chat_id(chat.id),
+        )
     except Exception as e:
         from app.core.telegram.command_handlers._reply_errors import log_command_reply_failure
 
