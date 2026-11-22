@@ -93,11 +93,11 @@
 3. 启动阶段网络不可用并耗尽 bootstrap retries 后，轮询线程可能退出；生产需要线程级健康检查、告警与恢复策略。
 4. Telegram 发送请求超时存在“服务端已接收但客户端未收到响应”的不确定窗口；Bot API sendMessage 没有通用幂等键，通知语义仍是 best effort，不能宣称 exactly-once。
 5. 当前 requirements.txt 固定直接依赖，但没有完整锁定所有传递依赖的 lockfile/hash。两条 Python CI workflow 已加入 `python -m pip check`；Full Audit 还使用 `pip-audit==2.10.1` 扫描 requirements.txt 及其传递依赖的已知漏洞。`pip check` 不等于漏洞扫描，`pip-audit` 也不等于哈希/来源验证；生产构建仍应记录解析结果并建立可复现的 hash lock。
-6. `/id` 会在聊天消息中显示 Chat ID 和 User ID，这是命令本身的用途；应确保 Bot 仅在预期私聊/群组中使用，避免把命令消息转发到公开频道。
+6. `/id` 私聊返回 Chat ID 和 User ID；群组仅返回 Chat ID，User ID 显示为隐私保护提示，不向群成员公开。Chat ID 仍属于可关联标识，避免将群组命令回复转发到公开频道。
 7. BFT 通知仍使用 request-scoped fire-and-forget task，没有持久化队列或 shutdown drain；高峰期可能积累任务，worker 重启时也可能取消未完成通知。通知不得作为转化入库/回调成功的前置条件；后续如需可靠送达，应建设有界队列、限流、重试与可观测的通知 outbox。
 8. `send_telegram_message_async` 使用默认线程池执行同步兼容发送器；高并发突发时多个通知可能占用线程等待 Redis 发送锁。若通知量明显增长，应改为有界的单消费者/多消费者发送队列，而不是继续增加线程数。
 9. Telegram Bot API 的 `sendMessage` 没有通用幂等键；网络超时可能发生在 Telegram 已接收消息但客户端未收到响应之后，自动重试可能重复通知。当前只能 best effort，不能承诺 exactly-once。
-11. 发送专用事件循环和 Bot HTTPX client 当前没有独立的 lifespan shutdown/close 流程；进程退出会回收资源，但优雅停机时应补齐 task drain、Bot.shutdown、loop.stop/join。
+10. 发送专用事件循环和 Bot HTTPX client 当前没有独立的 lifespan shutdown/close 流程；进程退出会回收资源，但优雅停机时应补齐 task drain、Bot.shutdown、loop.stop/join。
 
 ## 验收
 
@@ -105,3 +105,12 @@
 - PR CI 必须全部成功后才合并；合并后还需核验 main SHA 的所有 required checks。
 - 不使用真实 Telegram Bot Token 做 CI 网络测试。
 - 不在生产 Bot 上执行压测。
+
+
+## 2026-11-22 补充：群组 /id 用户标识披露控制
+
+- 群组/超级群组中的 /id 回复只返回当前 Chat ID，不再输出执行命令者的 Telegram User ID；提示文字明确说明群组中不公开个人 ID。
+- 私聊中的 /id 仍返回完整 Chat ID 和 User ID，保留管理员私聊排障能力。
+- 群组标题继续通过 HTML escape 处理；Chat ID 日志继续使用掩码值。
+- 回归测试覆盖群组不泄露原始 User ID、私聊仍可查询 User ID 两种场景。
+- 变更通过独立 PR 验收，未直接写入 main。
