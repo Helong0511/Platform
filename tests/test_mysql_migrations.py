@@ -167,6 +167,32 @@ def test_click_archive_url_fields_migration_is_idempotent_and_preserves_existing
         connection.close()
 
 
+def test_click_archive_url_fields_migration_rejects_wrong_existing_column_type():
+    """同名 URL 列类型错误时必须 fail closed，不得当作迁移完成。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS clicks_archive")
+            cursor.execute(
+                "CREATE TABLE clicks_archive ("
+                "id INT NOT NULL AUTO_INCREMENT, all_headers TEXT NULL, "
+                "original_request_url VARCHAR(100) NULL, PRIMARY KEY (id)) "
+                "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+
+            with pytest.raises(pymysql.err.OperationalError) as migration_error:
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261122_click_archive_url_fields.sql",
+                )
+            assert migration_error.value.args[0] == 1060
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS clicks_archive")
+        connection.close()
+
+
+
 def test_click_archive_url_fields_migration_skips_when_archive_table_is_absent():
     """归档表尚未创建时 migration 应安全跳过，后续由服务完整 DDL 建表。"""
     connection = _connect()
