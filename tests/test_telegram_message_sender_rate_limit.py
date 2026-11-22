@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
@@ -89,6 +90,18 @@ def test_parse_retry_after():
     assert ms._parse_retry_after("Too Many Requests: retry after 8") == 8
     assert ms._parse_retry_after("retry after 1") == 1
     assert ms._parse_retry_after("nope") is None
+
+
+def test_rate_limit_seconds_supports_retry_after_timedelta():
+    class _RetryAfterError(Exception):
+        def __init__(self, retry_after):
+            super().__init__("Flood control exceeded")
+            self.retry_after = retry_after
+
+    assert ms._rate_limit_seconds_from_exc(_RetryAfterError(8)) == 8
+    assert ms._rate_limit_seconds_from_exc(_RetryAfterError(timedelta(seconds=8))) == 8
+    assert ms._rate_limit_seconds_from_exc(_RetryAfterError(timedelta(milliseconds=1500))) == 2
+    assert ms._rate_limit_seconds_from_exc(_RetryAfterError(timedelta(0))) == 0
 
 
 def test_note_rate_limited_writes_shared_backoff():
