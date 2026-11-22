@@ -82,10 +82,16 @@ def run_on_send_loop(coro, *, timeout: Optional[float] = None):
     在发送专用 loop 上执行协程并同步等待结果。
 
     可从任意线程调用（含已有 running loop 的 async 上下文）。
+    不得直接在 ASGI/async handler 中调用，应使用 run_on_send_loop_async。
     """
     loop = ensure_send_loop()
     future = asyncio.run_coroutine_threadsafe(coro, loop)
     return future.result(timeout=timeout)
+
+
+async def run_on_send_loop_async(coro, *, timeout: Optional[float] = None):
+    """在 async handler 中非阻塞地等待发送 loop，避免占用当前事件循环。"""
+    return await asyncio.to_thread(run_on_send_loop, coro, timeout=timeout)
 
 
 async def _create_send_bot(token: str):
