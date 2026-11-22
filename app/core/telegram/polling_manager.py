@@ -645,7 +645,10 @@ def start_bot_thread():
         bool: supervisor 线程是否成功启动（不代表已经取得 OS 锁或轮询健康）。
     """
     if not _check_bot_ready_for_polling():
+        reason = "dependency_unavailable" if not PTB_AVAILABLE else "configuration_error"
+        _last_polling_exit_reason = reason
         logger.error("python-telegram-bot 不可用或 Token 未配置，无法启动轮询线程")
+        _notify_supervisor_failure(reason)
         return False
 
     for thread in threading.enumerate():
@@ -662,10 +665,12 @@ def start_bot_thread():
     try:
         thread.start()
     except Exception as exc:
+        _last_polling_exit_reason = "unexpected_exception"
         logger.error(
             "Telegram polling supervisor 线程启动失败；error_type=%s",
             type(exc).__name__,
         )
+        _notify_supervisor_failure("unexpected")
         return False
     logger.info("Telegram Bot polling supervisor 线程已启动")
     return True
