@@ -1117,6 +1117,26 @@ async def lifespan(app: FastAPI):
                 and _bot_state_mod.bot_initialized
                 and has_bot_lock()
             ):
+                # 先停止接收新审批并有限等待在途任务，再停止 PTB 事件循环。
+                # 这样回调初始化失败时仍可借助原 PTB loop 发送最终状态。
+                try:
+                    from app.core.telegram.approval_worker import shutdown_approval_workers
+
+                    drain_result = await asyncio.to_thread(
+                        shutdown_approval_workers,
+                        8.0,
+                    )
+                    logger.info(
+                        "[Worker PID:%s] Telegram 审批任务 drain 完成：%s",
+                        worker_pid,
+                        drain_result,
+                    )
+                except Exception as drain_err:
+                    logger.warning(
+                        "[Worker PID:%s] Telegram 审批任务 drain 异常：error_type=%s",
+                        worker_pid,
+                        type(drain_err).__name__,
+                    )
                 try:
                     stop_polling_application(timeout=8.0)
                 except Exception as stop_err:

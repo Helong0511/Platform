@@ -8,7 +8,6 @@ import logging
 
 from app.core.telegram_utils import mask_telegram_chat_id
 import re
-import threading
 
 logger = logging.getLogger(__name__)
 
@@ -555,23 +554,35 @@ async def handle_postback_approval(update, context):
     chat_id = query.message.chat_id
     message_id = query.message.message_id
 
+    from app.core.telegram.approval_worker import submit_approval_task
+
+    submit_result = submit_approval_task(
+        pending_id,
+        process_pending_conversion,
+        pending_id,
+        action,
+        callback_query_id,
+        chat_id,
+        message_id,
+        user_id,
+        getattr(context, "bot", None),
+        asyncio.get_running_loop(),
+    )
+    if submit_result == "duplicate":
+        try:
+            await query.answer(text="该记录正在处理中，请稍后刷新状态", show_alert=False)
+        except Exception as exc:
+            logger.warning("发送重复审批提示失败：error_type=%s", type(exc).__name__)
+        return
+    if submit_result != "submitted":
+        try:
+            await query.answer(text="审批队列繁忙，请稍后重试", show_alert=True)
+        except Exception as exc:
+            logger.warning("发送审批队列繁忙提示失败：error_type=%s", type(exc).__name__)
+        return
+
     try:
         await query.answer(text="正在处理，请稍候...", show_alert=False)
     except Exception as exc:
+        # 已成功入队，回调确认失败不应取消审批任务；结果仍以数据库状态为准。
         logger.warning("确认 Telegram 回调失败：error_type=%s", type(exc).__name__)
-
-    thread = threading.Thread(
-        target=process_pending_conversion,
-        args=(
-            pending_id,
-            action,
-            callback_query_id,
-            chat_id,
-            message_id,
-            user_id,
-            getattr(context, "bot", None),
-            asyncio.get_running_loop(),
-        ),
-        daemon=True,
-    )
-    thread.start()
