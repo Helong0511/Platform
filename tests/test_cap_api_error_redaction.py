@@ -75,10 +75,13 @@ async def test_cap_audit_logging_failure_does_not_log_raw_exception(monkeypatch,
         async def check_cap_consistency(self, *, offer_id, fix):
             raise RuntimeError("cap service failed")
 
+    async def fake_get_cap_service(db):
+        return BrokenCapService()
+
     async def fail_audit_write(**_kwargs):
         raise RuntimeError(secret_detail)
 
-    monkeypatch.setattr(caps, "get_cap_service", lambda db: BrokenCapService())
+    monkeypatch.setattr(caps, "get_cap_service", fake_get_cap_service)
     monkeypatch.setattr(caps, "log_user_action", fail_audit_write)
     monkeypatch.setattr(caps, "commit_audit_log", AsyncMock())
 
