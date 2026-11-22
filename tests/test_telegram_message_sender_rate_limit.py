@@ -359,7 +359,7 @@ def test_send_message_does_not_retry_before_long_retry_after(monkeypatch):
     )
 
     ok, error = ms.send_telegram_message_result(
-        ["123456789", "987654321"],
+        "123456789,987654321",
         "test message",
     )
 
