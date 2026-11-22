@@ -83,6 +83,9 @@ def sanitize_postback_raw_data(value: Any) -> Any:
                 key_text = str(key)
                 # JSON 键名也可能被 URL 编码；先有界解码，再做驼峰/缩写归一化。
                 decoded_key = _decode_percent_encoded_text(key_text)
+                # 超过解码上限仍有编码字节时，无法证明键名安全，整项 fail-closed 丢弃。
+                if _PERCENT_ENCODED_BYTE.search(decoded_key):
+                    continue
                 # 先拆分连续大写缩写与普通驼峰，避免 clientIP 被错误拆成 client_i_p。
                 normalized_key = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", decoded_key)
                 normalized_key = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", normalized_key).lower()
@@ -130,6 +133,9 @@ def sanitize_postback_raw_data(value: Any) -> Any:
             # 上游也可能把整个 JSON/query/header 再做一到多层 percent-encoding；
             # 最多解码 3 次，仅用于识别与脱敏，不改变业务解析输入。
             text = _decode_percent_encoded_text(original_text)
+            # 超过解码上限仍残留 %XX 时无法确认内容是否含 PII，不能原样持久化。
+            if _PERCENT_ENCODED_BYTE.search(text):
+                return "[encoded raw payload omitted]"
             if text != original_text:
                 is_structured, structured_result = _clean_json_text(text)
                 if is_structured:
