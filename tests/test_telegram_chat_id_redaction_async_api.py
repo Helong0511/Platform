@@ -237,6 +237,8 @@ async def test_id_command_uses_throttled_sender_and_escapes_group_title(monkeypa
 
     send_async = AsyncMock(return_value=True)
     monkeypatch.setattr(id_command, "send_telegram_message_async", send_async)
+    logs = []
+    monkeypatch.setattr(id_command.logger, "info", lambda *args: logs.append(args))
     chat = SimpleNamespace(id=-1001234567890, type="supergroup", title="<b>unsafe group</b>")
     message = SimpleNamespace(
         chat=chat,
@@ -255,6 +257,11 @@ async def test_id_command_uses_throttled_sender_and_escapes_group_title(monkeypa
     assert "&lt;b&gt;unsafe group&lt;/b&gt;" in sent_text
     assert "<b>unsafe group</b>" not in sent_text
     assert send_async.await_args.kwargs["reply_to_message_id"] == 7
+    rendered_logs = repr(logs)
+    assert "12***6789" in rendered_logs
+    assert "123456789" not in rendered_logs
+    assert "admin" not in rendered_logs
+    assert "Admin" not in rendered_logs
 
 
 @pytest.mark.asyncio
