@@ -103,8 +103,8 @@ def sanitize_postback_raw_data(value: Any) -> Any:
 
             def _clean_json_text(candidate: str) -> tuple[bool, Any]:
                 candidate_text = candidate.lstrip()
-                if candidate_text.startswith("\\ufeff"):
-                    candidate_text = candidate_text.lstrip("\\ufeff").lstrip()
+                if candidate_text.startswith("\ufeff"):
+                    candidate_text = candidate_text.lstrip("\ufeff").lstrip()
                 if not candidate_text.startswith(("{", "[")):
                     return False, None
                 try:
