@@ -6,7 +6,7 @@
 - `app/core/telegram/polling_exception_handler.py`
 - `app/main.py`：`/api/v1/health/telegram`
 - 关联 Issue：#132
-- 修复 PR：待创建
+- 修复 PR：[ #151 ](https://github.com/Helong0511/Platform/pull/151)
 
 ## PTB 22.8 行为边界
 
