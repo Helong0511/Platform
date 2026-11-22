@@ -64,15 +64,27 @@ def get_polling_health_status() -> dict:
         thread.name == "TelegramBot" and thread.is_alive()
         for thread in threading.enumerate()
     )
+    shared_state = get_shared_state()
+    shared_pid = shared_state.get("current_pid")
+    remote_owner_alive = bool(
+        shared_state.get("bot_running")
+        and shared_pid is not None
+        and shared_pid != os.getpid()
+        and is_bot_running()
+    )
+    is_owner = bool(thread_alive or _supervisor_running)
     success_at = _last_get_updates_success_at
     success_age = None if success_at is None else max(0.0, now - success_at)
     healthy = bool(
-        thread_alive
+        is_owner
+        and thread_alive
         and _supervisor_running
         and success_age is not None
         and success_age <= POLLING_HEALTH_STALE_AFTER_SECONDS
     )
     return {
+        "is_owner": is_owner,
+        "remote_owner_alive": remote_owner_alive,
         "thread_alive": thread_alive,
         "supervisor_running": _supervisor_running,
         "healthy": healthy,
