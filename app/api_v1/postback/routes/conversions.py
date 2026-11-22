@@ -12,6 +12,32 @@ from ..handlers import conversion_handler, stats_handler, duplicate_handler
 
 router = APIRouter()
 
+async def _audit_postback_pii_read(
+    *,
+    db: AsyncSession,
+    current_user: User,
+    request: Request,
+    resource_name: str,
+    details: dict,
+) -> None:
+    """记录管理员读取 Postback 敏感数据的审计事件；审计写入失败时拒绝返回数据。"""
+    await log_user_action(
+        db=db,
+        action_type="API_ACCESS",
+        user=current_user,
+        resource_type="POSTBACK_PII_ACCESS",
+        resource_name=resource_name,
+        request_method=request.method,
+        request_path=request.url.path,
+        status_code=200,
+        success=True,
+        details=details,
+        strict=True,
+    )
+    await commit_audit_log(db)
+
+
+
 
 @router.get("/postback/conversions", summary="查询 PostBack 转化记录（管理员，已融合转化日志功能）")
 async def get_postback_conversions(
@@ -32,11 +58,39 @@ async def get_postback_conversions(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    return await conversion_handler.get_postback_conversions(
+    result = await conversion_handler.get_postback_conversions(
         request, platform, product_id, client_id, conversion_or_click_id,
         click_id, offer_id, publisher_id, advertiser_id, conversion_status,
         start_date, end_date, page, page_size, db, current_user,
     )
+    await _audit_postback_pii_read(
+        db=db,
+        current_user=current_user,
+        request=request,
+        resource_name="conversion_list",
+        details={
+            "filter_fields_present": [
+                name
+                for name, value in {
+                    "platform": platform,
+                    "product_id": product_id,
+                    "client_id": client_id,
+                    "conversion_or_click_id": conversion_or_click_id,
+                    "click_id": click_id,
+                    "offer_id": offer_id,
+                    "publisher_id": publisher_id,
+                    "advertiser_id": advertiser_id,
+                    "conversion_status": conversion_status,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }.items()
+                if value is not None and value != ""
+            ],
+            "page": page,
+            "page_size": page_size,
+        },
+    )
+    return result
 
 
 @router.get("/postback/stats", summary="PostBack 统计信息（管理员）")
@@ -48,13 +102,31 @@ async def get_postback_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    return await stats_handler.get_postback_stats(
+    result = await stats_handler.get_postback_stats(
         platform=platform,
         start_date=start_date,
         end_date=end_date,
         db=db,
         current_user=current_user,
     )
+    await _audit_postback_pii_read(
+        db=db,
+        current_user=current_user,
+        request=request,
+        resource_name="conversion_stats",
+        details={
+            "filter_fields_present": [
+                name
+                for name, value in {
+                    "platform": platform,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }.items()
+                if value is not None and value != ""
+            ],
+        },
+    )
+    return result
 
 
 @router.put("/postback/conversions/{conversion_id}/status", summary="更新转化状态（管理员）")
@@ -83,11 +155,29 @@ async def update_conversion_status(
 
 @router.get("/postback/check-duplicates", summary="检查重复的转化记录（管理员）")
 async def check_duplicate_conversions(
+    request: Request,
     platform: Optional[str] = Query(None, description="平台名称（可选）"),
     conversion_id: Optional[str] = Query(None, description="转化ID（可选）"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    return await duplicate_handler.check_duplicate_conversions(
+    result = await duplicate_handler.check_duplicate_conversions(
         platform, conversion_id, db, current_user,
     )
+    await _audit_postback_pii_read(
+        db=db,
+        current_user=current_user,
+        request=request,
+        resource_name="duplicate_check",
+        details={
+            "filter_fields_present": [
+                name
+                for name, value in {
+                    "platform": platform,
+                    "conversion_id": conversion_id,
+                }.items()
+                if value is not None and value != ""
+            ],
+        },
+    )
+    return result
