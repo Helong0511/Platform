@@ -86,15 +86,7 @@ def _cleanup_on_polling_conflict(current_pid: int) -> None:
             "bot_username": None,
         }
     )
-    try:
-        from app.core.telegram.file_lock import get_default_lock_path
-
-        lock_path = get_default_lock_path()
-        if lock_path.exists():
-            lock_path.unlink()
-            logger.info(f"[PID:{current_pid}] 已删除锁文件，避免锁文件残留")
-    except Exception as cleanup_error:
-        logger.warning("[PID:%s] 清理锁文件失败：error_type=%s", current_pid, type(cleanup_error).__name__)
+    # OS 锁文件保留稳定 inode；释放句柄即可，不得 unlink 活跃锁路径。
 
 
 def register_handlers(application) -> None:
@@ -178,7 +170,7 @@ def start_polling():
     Returns:
         bool: 是否成功启动并正常结束（冲突返回 False）
     """
-    global _bot_started, _active_application, _handlers_registered
+    global _bot_started, _active_application, _handlers_registered, _polling_loop
 
     current_pid = os.getpid()
 
@@ -396,6 +388,8 @@ def restart_bot_thread(
     """
     import threading
     import time
+
+    global _bot_started, _handlers_registered
 
     stopped = stop_polling_application(timeout=stop_timeout)
 
