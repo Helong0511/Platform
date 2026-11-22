@@ -228,3 +228,35 @@ def test_supervisor_startup_configuration_failure_is_reported(monkeypatch):
     assert manager.start_bot_thread() is False
     assert manager._last_polling_exit_reason == "configuration_error"
     assert alerts == ["configuration_error"]
+
+
+
+def test_stale_get_updates_watchdog_alerts_and_requests_controlled_restart(monkeypatch):
+    class StopAfterOneCheck:
+        def __init__(self):
+            self.calls = 0
+
+        def wait(self, _timeout):
+            self.calls += 1
+            return self.calls > 1
+
+    alerts = []
+    restarts = []
+    monkeypatch.setattr(manager, "_supervisor_stop_event", StopAfterOneCheck())
+    monkeypatch.setattr(manager, "POLLING_HEALTH_CHECK_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(
+        manager,
+        "_last_get_updates_success_at",
+        time.time() - manager.POLLING_HEALTH_STALE_AFTER_SECONDS - 1,
+    )
+    monkeypatch.setattr(manager, "_notify_supervisor_failure", alerts.append)
+    monkeypatch.setattr(
+        manager,
+        "_request_polling_restart_for_stale_heartbeat",
+        lambda: restarts.append(True) or True,
+    )
+
+    manager._polling_health_watchdog()
+
+    assert alerts == ["getUpdates heartbeat stale"]
+    assert restarts == [True]
