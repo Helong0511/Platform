@@ -32,7 +32,7 @@ _polling_loop: Optional[asyncio.AbstractEventLoop] = None
 
 # PTB 的 getUpdates 使用独立 HTTPXRequest；默认 read_timeout=5s，
 # 必须大于 Telegram 长轮询 timeout=10s，并留出网络/调度余量。
-POLLING_LONG_POLL_TIMEOUT_SECONDS = 10.0
+POLLING_LONG_POLL_TIMEOUT_SECONDS = 10
 POLLING_GET_UPDATES_READ_TIMEOUT_SECONDS = 65.0
 POLLING_BOOTSTRAP_RETRIES = 3
 
