@@ -1,6 +1,5 @@
 """产品查找与创建"""
 import logging
-from datetime import date
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +15,7 @@ from app.core.product_name import (
     insert_unique_product,
     normalize_product_name,
 )
-from app.core.utils import find_or_create_default_client
+from app.core.utils import find_or_create_default_client, get_app_now_naive
 from app.models.models import User, Client, Product
 
 logger = logging.getLogger(__name__)
@@ -147,7 +146,7 @@ async def find_or_create_product(
         _remember_product(product_map, product_name_map, product_info)
         return product_info
 
-    product_start_date = date.today()
+    product_start_date = get_app_now_naive().date()
     await initialize_product_assignment(
         db=db,
         product_id=saved_product.id,
