@@ -40,7 +40,7 @@ async def test_cache_backend_recovers_when_redis_becomes_available(monkeypatch):
 async def test_cache_backend_switches_to_memory_and_recovers_after_runtime_outage(monkeypatch):
     """运行中 Redis 断连切换到内存后，恢复时应重新绑定健康 Redis 客户端。"""
     state = {"client": FakeRedis()}
-    loop = __import__("asyncio").get_running_loop()
+    loop = asyncio.get_running_loop()
 
     async def fake_get_redis_client():
         return state["client"]
