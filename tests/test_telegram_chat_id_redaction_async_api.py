@@ -17,6 +17,20 @@ def test_mask_telegram_chat_id_handles_private_group_multiple_and_invalid_values
     assert mask_telegram_chat_id(None) == "[未提供]"
 
 
+def test_redis_rate_limit_keys_do_not_contain_raw_chat_ids(monkeypatch):
+    from app.core.telegram import message_sender
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "SECRET_KEY", "unit-test-hmac-secret", raising=False)
+    chat_id = "-1001234567890"
+    identifier = message_sender._redis_chat_identifier(chat_id)
+
+    assert len(identifier) == 64
+    assert chat_id not in identifier
+    assert identifier == message_sender._redis_chat_identifier(chat_id)
+    assert identifier != message_sender._redis_chat_identifier("-1001234567891")
+
+
 def test_sync_sender_logs_masked_chat_id(monkeypatch):
     from app.core.telegram import message_sender
 
