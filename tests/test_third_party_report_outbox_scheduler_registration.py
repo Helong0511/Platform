@@ -224,4 +224,5 @@ def test_outbox_scheduler_lock_budget_exceeds_bounded_batch_http_budget():
     # 3 条/批 × 3 次请求/条 × 60 秒总 deadline = 540 秒；
     # DB 锁为 900 秒，Redis 锁由调度器再增加 60 秒缓冲。
     assert _task_lock_timeout_seconds(THIRD_PARTY_REPORT_OUTBOX_TASK_NAME) == 900
+    assert _task_lock_timeout_seconds("点击记录归档") == 900
     assert _task_lock_timeout_seconds("普通任务") == 300

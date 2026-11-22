@@ -56,12 +56,16 @@ async def archive_old_clicks(days: int = 90) -> dict:
             set_task_result(
                 task_name,
                 f"执行成功: 归档 {result['archived_count']} 条, "
-                f"删除 {result['deleted_count']} 条",
+                f"删除 {result['deleted_count']} 条, "
+                f"分批 {result.get('batch_count', 0)} 批, "
+                f"高水位 ID {result.get('high_water_id')}",
             )
             logger.info(
-                "归档完成：归档 %s 条，删除 %s 条",
+                "归档完成：归档 %s 条，删除 %s 条，批次 %s，高水位 ID %s",
                 result["archived_count"],
                 result["deleted_count"],
+                result.get("batch_count", 0),
+                result.get("high_water_id"),
             )
             return result
         except Exception as e:
