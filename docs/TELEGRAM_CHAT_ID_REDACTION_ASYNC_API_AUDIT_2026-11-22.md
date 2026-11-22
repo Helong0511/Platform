@@ -61,7 +61,7 @@
 2. OS 文件锁只协调同一主机。多主机部署同一 Bot Token 时必须增加 Redis 等分布式租约/ fencing 机制，不能依赖本地锁。
 3. 启动阶段网络不可用并耗尽 bootstrap retries 后，轮询线程可能退出；生产需要线程级健康检查、告警与恢复策略。
 4. Telegram 发送请求超时存在“服务端已接收但客户端未收到响应”的不确定窗口；Bot API sendMessage 没有通用幂等键，通知语义仍是 best effort，不能宣称 exactly-once。
-5. 当前 requirements.txt 固定直接依赖，但没有完整锁定所有传递依赖的 lockfile/hash。生产构建应记录实际解析结果、执行 `pip check`，并逐步建立可复现的依赖锁定/制品校验流程。
+5. 当前 requirements.txt 固定直接依赖，但没有完整锁定所有传递依赖的 lockfile/hash。两条 Python CI workflow 已加入 `python -m pip check`，用于阻止已安装依赖元数据冲突；生产构建仍应记录实际解析结果，并逐步建立可复现的依赖锁定/制品校验流程。
 6. `/id` 会在聊天消息中显示 Chat ID 和 User ID，这是命令本身的用途；应确保 Bot 仅在预期私聊/群组中使用，避免把命令消息转发到公开频道。
 
 ## 验收
