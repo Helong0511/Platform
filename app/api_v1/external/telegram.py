@@ -14,13 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.telegram import (
-    send_telegram_message_async,
-    bot_initialized,
-    get_bot_status_info,
-    bot,
-    TELEBOT_AVAILABLE,
-)
+from app.core.telegram import send_telegram_message_async, get_bot_status_info
+from app.core.telegram import bot_state as telegram_bot_state
 from app.core.config import settings
 from app.core.telegram_utils import mask_telegram_chat_id
 from app.core.audit_log import log_user_action, commit_audit_log
@@ -122,7 +117,7 @@ async def get_bot_status(
 
         # 构建状态消息
         # ---------- 条件分支 ----------
-        if bot_initialized and token_configured:
+        if telegram_bot_state.bot_initialized and token_configured:
             # ---------- 条件分支 ----------
             if bot_thread_alive:
                 status_message = "Telegram Bot 已初始化并运行中"
@@ -139,11 +134,11 @@ async def get_bot_status(
 
         # 添加连接测试信息
         # ---------- 条件分支 ----------
-        if connection_test != "成功" and bot_initialized:
+        if connection_test != "成功" and telegram_bot_state.bot_initialized:
             status_message += f" | 连接测试: {connection_test}"
 
         return ResponseBaseSchema.success(data=BotStatusResponse(
-            initialized=bot_initialized,
+            initialized=telegram_bot_state.bot_initialized,
             token_configured=token_configured,
             admin_configured=admin_configured,
             message=status_message
@@ -188,7 +183,7 @@ async def send_message(
     # ---------- 异常处理 ----------
     try:
         # ---------- 条件分支 ----------
-        if not bot_initialized:
+        if not telegram_bot_state.bot_initialized:
             raise_api_exception(
                 error_code=ErrorCode.SERVICE_UNAVAILABLE,
                 message="Telegram Bot 未初始化，请检查 TELEGRAM_TOKEN 配置",
@@ -267,7 +262,7 @@ async def test_bot_connection(
     # ---------- 异常处理 ----------
     try:
         # ---------- 条件分支 ----------
-        if not bot_initialized:
+        if not telegram_bot_state.bot_initialized:
             raise_api_exception(
                 error_code=ErrorCode.SERVICE_UNAVAILABLE,
                 message="Telegram Bot 未初始化，请检查 TELEGRAM_TOKEN 配置",
@@ -331,7 +326,7 @@ async def diagnostic_bot(
 
         # 1. 检查 Bot 初始化
         # ---------- 条件分支 ----------
-        if not bot_initialized:
+        if not telegram_bot_state.bot_initialized:
             recommendations.append("❌ Bot 未初始化，请检查 TELEGRAM_TOKEN 配置")
             return ResponseBaseSchema.success(data=DiagnosticResponse(
                 bot_initialized=False,
@@ -343,7 +338,7 @@ async def diagnostic_bot(
 
         # 2. 检查模块可用性
         # ---------- 条件分支 ----------
-        if not TELEBOT_AVAILABLE:
+        if not telegram_bot_state.TELEBOT_AVAILABLE:
             recommendations.append("❌ python-telegram-bot 未安装，请运行: pip install 'python-telegram-bot==22.8'")
             return ResponseBaseSchema.success(data=DiagnosticResponse(
                 bot_initialized=False,
@@ -433,7 +428,7 @@ async def diagnostic_bot(
             recommendations.append("💡 查看日志中是否有 '收到 X 个更新' 或 '检测到命令' 的信息")
 
         return ResponseBaseSchema.success(data=DiagnosticResponse(
-            bot_initialized=bot_initialized,
+            bot_initialized=telegram_bot_state.bot_initialized,
             bot_thread_alive=bot_thread_alive,
             webhook_url=webhook_url,
             handlers_count=handlers_count,
@@ -470,7 +465,7 @@ async def reset_webhook(
     try:
 
         # ---------- 条件分支 ----------
-        if not bot_initialized or not TELEBOT_AVAILABLE:
+        if not telegram_bot_state.bot_initialized or not telegram_bot_state.TELEBOT_AVAILABLE:
             raise_api_exception(
                 error_code=ErrorCode.SERVICE_UNAVAILABLE,
                 message="Bot 未初始化",
@@ -572,7 +567,7 @@ async def send_alert(
     # ---------- 异常处理 ----------
     try:
         # ---------- 条件分支 ----------
-        if not bot_initialized:
+        if not telegram_bot_state.bot_initialized:
             raise_api_exception(
                 error_code=ErrorCode.SERVICE_UNAVAILABLE,
                 message="Telegram Bot 未初始化，请检查 TELEGRAM_TOKEN 配置",
@@ -670,7 +665,7 @@ async def send_batch_notifications(
     # ---------- 异常处理 ----------
     try:
         # ---------- 条件分支 ----------
-        if not bot_initialized:
+        if not telegram_bot_state.bot_initialized:
             raise_api_exception(
                 error_code=ErrorCode.SERVICE_UNAVAILABLE,
                 message="Telegram Bot 未初始化，请检查 TELEGRAM_TOKEN 配置",
