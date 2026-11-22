@@ -68,6 +68,19 @@ class _FakeRedis:
         return int(remain * 1000)
 
     def eval(self, script, numkeys, *keys_and_args):
+        if script == ms._UPDATE_BACKOFF_MAX_TTL_LUA:
+            key, seconds, value = keys_and_args
+            self._purge()
+            requested_expiry = time.monotonic() + float(seconds)
+            item = self.store.get(key)
+            if item is None:
+                self.store[key] = (str(value), requested_expiry)
+                return int(float(seconds) * 1000)
+            if item[1] < requested_expiry:
+                self.store[key] = (item[0], requested_expiry)
+                return int(float(seconds) * 1000)
+            return max(0, int((item[1] - time.monotonic()) * 1000))
+
         key = keys_and_args[0]
         token = keys_and_args[1]
         item = self.store.get(key)
@@ -114,6 +127,27 @@ def test_note_rate_limited_writes_shared_backoff():
     assert ms._REDIS_BACKOFF_GLOBAL in fake.store
     assert ms._REDIS_BACKOFF_CHAT.format(chat_key=ms._redis_chat_identifier("5312177749")) in fake.store
     assert fake.pttl(ms._REDIS_BACKOFF_GLOBAL) > 7000
+
+
+
+
+def test_note_rate_limited_never_shortens_existing_shared_backoff():
+    fake = _FakeRedis()
+    global_key = ms._REDIS_BACKOFF_GLOBAL
+    chat_key = ms._REDIS_BACKOFF_CHAT.format(
+        chat_key=ms._redis_chat_identifier("5312177749")
+    )
+    fake.setex(global_key, 120, "1")
+    fake.setex(chat_key, 120, "1")
+
+    with patch.object(ms, "_get_sync_redis", return_value=fake):
+        ms._note_rate_limited("5312177749", 5)
+        assert fake.pttl(global_key) >= 119_000
+        assert fake.pttl(chat_key) >= 119_000
+
+        ms._note_rate_limited("5312177749", 180)
+        assert fake.pttl(global_key) >= 179_000
+        assert fake.pttl(chat_key) >= 179_000
 
 
 def test_wait_before_send_honors_shared_backoff(monkeypatch):
