@@ -21,6 +21,35 @@ class _ScalarResult:
         return self.value
 
 
+class _FakeNestedTransaction:
+    """模拟 SQLAlchemy SAVEPOINT，异常时恢复当前保存点内的状态。"""
+
+    def __init__(self, db):
+        self.db = db
+        self.snapshot = None
+
+    async def __aenter__(self):
+        self.snapshot = [
+            (getattr(row, "status", None), getattr(row, "approved_at", None),
+             getattr(row, "rejected_at", None))
+            for row in self.db.pending_rows
+        ]
+        self.event_count = len(self.db.events)
+        return self
+
+    async def __aexit__(self, exc_type, _exc, _tb):
+        if exc_type is not None:
+            for row, state in zip(self.db.pending_rows, self.snapshot):
+                if hasattr(row, "status"):
+                    row.status = state[0]
+                if hasattr(row, "approved_at"):
+                    row.approved_at = state[1]
+                if hasattr(row, "rejected_at"):
+                    row.rejected_at = state[2]
+            del self.db.events[self.event_count:]
+        return False
+
+
 class _FakeAsyncDB:
     def __init__(self, result):
         self.result = result
@@ -28,9 +57,16 @@ class _FakeAsyncDB:
         self.bind = object()
         self.flush_count = 0
         self.rollback_count = 0
+        self.is_active = True
+        self.pending_rows = []
 
     async def execute(self, _statement):
+        rows = self.result.value if isinstance(self.result.value, list) else [self.result.value]
+        self.pending_rows = [row for row in rows if row is not None]
         return self.result
+
+    def begin_nested(self):
+        return _FakeNestedTransaction(self)
 
     def add(self, event):
         self.events.append(event)
