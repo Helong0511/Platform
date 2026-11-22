@@ -926,7 +926,7 @@ async def send_admin_notification(
     prefix = type_prefixes.get(notification_type, '🔔 ')
     full_message = f"{prefix}{message}"
     
-    return send_telegram_message(telegram_chat_id, full_message)
+    return await send_telegram_message_async(telegram_chat_id, full_message)
 
 
 def call_telegram_api_throttled(
