@@ -38,7 +38,7 @@
 
 原先 `get_send_bot` 按 Token 缓存单例，但各调用点传入不同 read timeout。应用启动时 `initialize_bot` 先以 5 秒创建发送 Bot，正式发送路径随后请求 30 秒；由于缓存只按 Token 命中，后续 30 秒参数被忽略，实际发送仍可能只有 5 秒超时。
 
-现将发送 Bot 的 HTTPX 超时集中为 connect=3 秒、read/write=30 秒，移除调用点的分散超时参数。诊断请求仍可通过 `run_on_send_loop` 的外层等待上限控制自身响应时间，不再污染进程级发送 Bot 的传输配置。
+现将发送 Bot 的 HTTPX 超时集中为 connect=3 秒、read/write=30 秒，移除调用点的分散超时参数。诊断请求仍可通过 `run_on_send_loop` 的外层等待上限控制自身响应时间，不再污染进程级发送 Bot 的传输配置。`run_on_send_loop` 在外层等待超时时现在会取消底层 Future，避免调用方超时后底层发送协程继续执行；Bot 初始化等待预算为 40 秒，略高于 3 秒连接 + 30 秒读取超时。
 
 ### 4. 管理路由读取实时 Bot 状态
 
