@@ -47,6 +47,8 @@
 - `ip`、`user_agent`、`referer`
 - `url_params`、`all_headers`
 - `original_request_url`、`final_redirect_url`（已在 2026-11-22 后续归档字段复核中发现原归档映射遗漏，PR #100 补齐新建表 DDL、复制 SQL、全量基线及既有表增量迁移）
+
+注意：增量迁移只新增可空列，不可能自动还原过去归档时未复制的 URL 值；既有归档行对应新列将为 `NULL`。如业务确需恢复，必须单独核查可用备份/binlog，不能从当前归档表推断或伪造。
 - `device`、`country`、`os`、`os_version`
 - `browser`、`browser_version`、`accept_language`、`accept_encoding`
 - `device_type`、`device_brand`、`device_model`
