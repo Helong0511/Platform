@@ -131,3 +131,50 @@ async def test_authorized_approval_callback_logs_masked_user_id(monkeypatch):
     assert "123456789" not in rendered_logs
     assert len(submitted) == 1
     assert submitted[0][0] == 77
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "submit_result,expected_text,show_alert",
+    [
+        ("duplicate", "该记录正在处理中，请稍后刷新状态", False),
+        ("full", "审批队列繁忙，请稍后重试", True),
+        ("shutting_down", "审批队列繁忙，请稍后重试", True),
+    ],
+)
+async def test_approval_queue_rejection_returns_immediate_callback_feedback(
+    monkeypatch, submit_result, expected_text, show_alert
+):
+    handler = importlib.import_module(
+        "app.core.telegram.callback_handlers.postback_approval"
+    )
+    from app.core.telegram import approval_worker
+
+    monkeypatch.setattr(settings, "TELEGRAM_ADMIN_USER_IDS", "123456789", raising=False)
+    monkeypatch.setattr(
+        approval_worker,
+        "submit_approval_task",
+        lambda *_args: submit_result,
+    )
+    answered = []
+
+    class FakeQuery:
+        data = "postback_approve_77"
+        id = "callback-queue-rejected"
+        from_user = SimpleNamespace(id=123456789, username="admin", first_name="Admin")
+        message = SimpleNamespace(
+            chat_id=123456789,
+            message_id=42,
+            chat=SimpleNamespace(type="private"),
+        )
+
+        async def answer(self, **kwargs):
+            answered.append(kwargs)
+
+    await handler.handle_postback_approval(
+        SimpleNamespace(callback_query=FakeQuery()),
+        context=None,
+    )
+
+    assert answered == [{"text": expected_text, "show_alert": show_alert}]
