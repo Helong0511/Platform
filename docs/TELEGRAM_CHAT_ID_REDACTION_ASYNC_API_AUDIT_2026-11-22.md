@@ -97,7 +97,7 @@
 7. BFT 通知仍使用 request-scoped fire-and-forget task，没有持久化队列或 shutdown drain；高峰期可能积累任务，worker 重启时也可能取消未完成通知。通知不得作为转化入库/回调成功的前置条件；后续如需可靠送达，应建设有界队列、限流、重试与可观测的通知 outbox。
 8. `send_telegram_message_async` 使用默认线程池执行同步兼容发送器；高并发突发时多个通知可能占用线程等待 Redis 发送锁。若通知量明显增长，应改为有界的单消费者/多消费者发送队列，而不是继续增加线程数。
 9. Telegram Bot API 的 `sendMessage` 没有通用幂等键；网络超时可能发生在 Telegram 已接收消息但客户端未收到响应之后，自动重试可能重复通知。当前只能 best effort，不能承诺 exactly-once。
-10. 发送专用事件循环和 Bot HTTPX client 当前没有独立的 lifespan shutdown/close 流程；进程退出会回收资源，但优雅停机时应补齐 task drain、Bot.shutdown、loop.stop/join。
+11. 发送专用事件循环和 Bot HTTPX client 当前没有独立的 lifespan shutdown/close 流程；进程退出会回收资源，但优雅停机时应补齐 task drain、Bot.shutdown、loop.stop/join。
 
 ## 验收
 
