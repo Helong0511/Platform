@@ -58,8 +58,42 @@ def test_approval_worker_pool_bounds_workers_and_rejects_overflow():
     assert len(started) == approval_worker.APPROVAL_MAX_IN_FLIGHT
 
 
-def test_approval_worker_rejects_new_tasks_after_shutdown_begins(monkeypatch):
-    monkeypatch.setattr(approval_worker, "_accepting", False)
 
+
+
+def test_approval_worker_shutdown_drains_active_and_cancels_queued_tasks():
+    release = threading.Event()
+    active_started = threading.Event()
+
+    def blocking_processor(_pending_id):
+        active_started.set()
+        release.wait(timeout=3.0)
+
+    try:
+        for pending_id in range(approval_worker.APPROVAL_MAX_IN_FLIGHT):
+            assert approval_worker.submit_approval_task(
+                10000 + pending_id,
+                blocking_processor,
+                pending_id,
+            ) == "submitted"
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if approval_worker.get_approval_worker_status()["active_workers"] == 4:
+                break
+            time.sleep(0.01)
+        assert active_started.is_set()
+        assert approval_worker.get_approval_worker_status()["active_workers"] == 4
+
+        result = approval_worker.shutdown_approval_workers(timeout=0.05)
+        assert result["cancelled"] == approval_worker.APPROVAL_QUEUE_CAPACITY
+        assert result["remaining"] == approval_worker.APPROVAL_WORKER_COUNT
+    finally:
+        release.set()
+
+    assert _wait_until_idle()
+
+
+def test_approval_worker_rejects_new_tasks_after_shutdown_begins():
     assert approval_worker.submit_approval_task(7001, lambda: None) == "shutting_down"
     assert approval_worker.get_approval_worker_status()["accepting"] is False
