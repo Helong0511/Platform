@@ -5,6 +5,8 @@
 """
 import logging
 
+from app.core.telegram_utils import mask_telegram_chat_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,7 +37,10 @@ async def cmd_help(update, context):
             text=help_text,
             parse_mode="HTML",
         )
-        logger.info(f"[命令处理器] 已发送帮助信息到：{message.chat_id}")
+        logger.info(
+            "[命令处理器] 已发送帮助信息到：%s",
+            mask_telegram_chat_id(message.chat_id),
+        )
     except Exception as e:
         from app.core.telegram.command_handlers._reply_errors import log_command_reply_failure
 
