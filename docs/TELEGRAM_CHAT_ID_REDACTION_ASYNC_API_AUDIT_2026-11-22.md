@@ -26,7 +26,13 @@
 
 注意：`/id` 命令仍会把 Chat ID 返回给发起命令的 Telegram 聊天，这是该命令的既定功能；只是不再将完整 ID 写入服务端日志。审计记录保存脱敏值，不保存原始值。
 
-### 2. 管理 API 不再阻塞 FastAPI 事件循环
+### 2. Redis 限流键不再包含原始 Chat ID
+
+原先 per-chat backoff/gate Redis key 直接拼接 Chat ID。虽然不是日志，但 Redis 运维查看、慢查询诊断、键扫描和备份元数据均可能暴露完整聊天标识。
+
+现使用应用 `SECRET_KEY` 对 Chat ID 计算 HMAC-SHA256 后再生成 Redis key；未配置密钥的测试环境退回 SHA-256，仍不写入原始 ID。限流语义与 TTL 不变；已有旧格式键会自然按 TTL 过期，不再继续刷新。
+
+### 3. 管理 API 不再阻塞 FastAPI 事件循环
 
 `POST /telegram/send` 与 `POST /telegram/test` 是异步路由，但此前直接调用同步发送函数。同步发送会通过线程安全事件循环等待网络请求，并可能执行多轮退避与重试；直接在 async 路由中调用会占住当前 FastAPI 事件循环。
 
