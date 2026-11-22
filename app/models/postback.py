@@ -512,6 +512,13 @@ class PendingPostbackConversion(Base):
         Index("idx_request_ip", "request_ip"),
         Index("idx_created_at", "created_at"),
         Index("idx_pending_click_id", "click_id"),
+        Index(
+            "idx_pending_postback_pii_retention",
+            "pii_scrubbed_at",
+            "status",
+            "created_at",
+            "id",
+        ),
         Index("uq_pending_postback_dedupe_key", "dedupe_key", unique=True),
     )
 
