@@ -151,7 +151,6 @@ def test_polling_error_handler_marks_conflict_as_terminal():
     assert manager._last_polling_exit_reason == "conflict"
 
 
-
 def test_polling_error_handler_stops_on_permanent_authentication_error():
     class UnauthorizedError(Exception):
         error_code = 401
@@ -164,7 +163,10 @@ def test_polling_error_handler_stops_on_permanent_authentication_error():
             self.stopped = True
 
     app = FakeApplication()
-    context = SimpleNamespace(error=UnauthorizedError("token unauthorized"), application=app)
+    context = SimpleNamespace(
+        error=UnauthorizedError("token unauthorized"),
+        application=app,
+    )
 
     asyncio.run(manager._on_error(None, context))
 
@@ -196,7 +198,6 @@ def test_polling_health_distinguishes_live_thread_from_stale_get_updates(monkeyp
     fresh = manager.get_polling_health_status()
     assert fresh["thread_alive"] is True
     assert fresh["healthy"] is True
-
 
 
 def test_non_owner_worker_reports_remote_polling_owner(monkeypatch):
