@@ -13,7 +13,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from app.core.telegram.file_lock import acquire_bot_lock, release_bot_lock
+from app.core.telegram.file_lock import acquire_bot_lock, release_bot_lock, is_lock_held
 from app.core.telegram.shared_state import (
     get_shared_state,
     set_shared_state,
@@ -72,7 +72,7 @@ def get_polling_health_status() -> dict:
         and shared_pid != os.getpid()
         and is_bot_running()
     )
-    is_owner = bool(thread_alive or _supervisor_running)
+    is_owner = is_lock_held()
     success_at = _last_get_updates_success_at
     success_age = None if success_at is None else max(0.0, now - success_at)
     healthy = bool(
