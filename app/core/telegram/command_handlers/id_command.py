@@ -65,12 +65,12 @@ async def get_chat_id(update, context):
     if is_group:
         response_lines.append("👤 User ID: <i>群组中不公开（隐私保护）</i>")
         response_lines.append(f"👥 Group Title: {escape_html(chat.title or 'N/A')}")
+        if bot_username:
+            response_lines.append(f"🤖 Bot Username: @{bot_username}")
     else:
         response_lines.append(
             f"👤 User ID: <code>{user.id if user else 'N/A'}</code>"
         )
-        if bot_username:
-            response_lines.append(f"🤖 Bot Username: @{bot_username}")
 
     try:
         sent = await send_telegram_message_async(
