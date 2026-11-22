@@ -56,14 +56,19 @@ async def get_chat_id(update, context):
             f"可能无法响应（Telegram 隐私模式）"
         )
 
+    # 群组消息对所有成员可见；仅私聊返回个人 User ID，避免向群成员披露个人标识。
     response_lines = [
         f"💬 Chat ID: <code>{chat.id}</code>",
-        f"👤 User ID: <code>{user.id if user else 'N/A'}</code>",
         f"💬 Chat Type: {chat_type}",
     ]
 
     if is_group:
+        response_lines.append("👤 User ID: <i>群组中不公开（隐私保护）</i>")
         response_lines.append(f"👥 Group Title: {escape_html(chat.title or 'N/A')}")
+    else:
+        response_lines.append(
+            f"👤 User ID: <code>{user.id if user else 'N/A'}</code>"
+        )
         if bot_username:
             response_lines.append(f"🤖 Bot Username: @{bot_username}")
 
