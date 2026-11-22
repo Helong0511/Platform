@@ -9,6 +9,7 @@ import re
 from decimal import Decimal
 from typing import Dict, Any, Optional
 from datetime import datetime
+from urllib.parse import unquote
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -32,6 +33,21 @@ _MAX_RAW_DATA_BYTES = 32 * 1024
 _MAX_RAW_DATA_DEPTH = 8
 _MAX_RAW_DATA_ITEMS = 500
 _MAX_RAW_STRING_LENGTH = 4096
+_MAX_RAW_URL_DECODE_PASSES = 3
+_PERCENT_ENCODED_BYTE = re.compile(r"%[0-9a-fA-F]{2}")
+
+
+def _decode_percent_encoded_text(value: str) -> str:
+    """有界解码 URL 编码文本，供敏感字段识别使用。"""
+    decoded = value
+    for _ in range(_MAX_RAW_URL_DECODE_PASSES):
+        if not _PERCENT_ENCODED_BYTE.search(decoded):
+            break
+        candidate = unquote(decoded, errors="replace")
+        if candidate == decoded:
+            break
+        decoded = candidate
+    return decoded
 # 支持 user_email、client_ip、phone_number 等复合参数名，避免 URL/form 文本绕过结构化字段脱敏。
 _SENSITIVE_INLINE_KEY = (
     r"(?:[A-Za-z0-9.-]+[_-])*(?:authorization|proxy[_-]?authorization|auth|"
@@ -65,8 +81,13 @@ def sanitize_postback_raw_data(value: Any) -> Any:
             result = {}
             for key, child in item.items():
                 key_text = str(key)
+                # JSON 键名也可能被 URL 编码；先有界解码，再做驼峰/缩写归一化。
+                decoded_key = _decode_percent_encoded_text(key_text)
+                # 超过解码上限仍有编码字节时，无法证明键名安全，整项 fail-closed 丢弃。
+                if _PERCENT_ENCODED_BYTE.search(decoded_key):
+                    continue
                 # 先拆分连续大写缩写与普通驼峰，避免 clientIP 被错误拆成 client_i_p。
-                normalized_key = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", key_text)
+                normalized_key = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", decoded_key)
                 normalized_key = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", normalized_key).lower()
                 if _SENSITIVE_RAW_KEY.search(normalized_key):
                     continue
@@ -81,26 +102,51 @@ def sanitize_postback_raw_data(value: Any) -> Any:
             # 不能只检查 dict 键名，否则字符串载荷会绕过字段脱敏。
             if len(item.encode("utf-8", errors="replace")) > _MAX_RAW_DATA_BYTES:
                 return "[oversized raw string omitted]"
-            stripped = item.lstrip()
-            if stripped.startswith(("{", "[")):
-                try:
-                    parsed = json.loads(item)
-                except (json.JSONDecodeError, RecursionError):
-                    parsed = None
-                if isinstance(parsed, (dict, list)):
-                    nested = clean(parsed, depth + 1)
-                    encoded_nested = json.dumps(
-                        nested, ensure_ascii=False, separators=(",", ":")
-                    )
-                    if len(encoded_nested.encode("utf-8")) > _MAX_RAW_STRING_LENGTH:
-                        return "[structured payload omitted: exceeds string limit]"
-                    return encoded_nested
+            original_text = item
 
-            text = item[:_MAX_RAW_STRING_LENGTH]
-            text = _SENSITIVE_HEADER_LINE.sub(r"\1[redacted]", text)
-            text = _SENSITIVE_INLINE_VALUE.sub(r"\1[redacted]", text)
-            text = _BEARER_VALUE.sub("Bearer [redacted]", text)
-            return text
+            def _clean_json_text(candidate: str) -> tuple[bool, Any]:
+                candidate_text = candidate.lstrip()
+                if candidate_text.startswith("\ufeff"):
+                    candidate_text = candidate_text.lstrip("\ufeff").lstrip()
+                if not candidate_text.startswith(("{", "[")):
+                    return False, None
+                try:
+                    parsed = json.loads(candidate_text)
+                except (json.JSONDecodeError, RecursionError):
+                    return False, None
+                if not isinstance(parsed, (dict, list)):
+                    return False, None
+                nested = clean(parsed, depth + 1)
+                encoded_nested = json.dumps(
+                    nested, ensure_ascii=False, separators=(",", ":")
+                )
+                if len(encoded_nested.encode("utf-8")) > _MAX_RAW_STRING_LENGTH:
+                    return True, "[structured payload omitted: exceeds string limit]"
+                # JSON 快照统一紧凑序列化；非敏感字段值（含 click_id）由 clean 原样保留。
+                return True, encoded_nested
+
+            # 先解析原始 JSON，避免先解码外层 JSON 时破坏其中被编码的字符串字段。
+            is_structured, structured_result = _clean_json_text(original_text)
+            if is_structured:
+                return structured_result
+
+            # 上游也可能把整个 JSON/query/header 再做一到多层 percent-encoding；
+            # 最多解码 3 次，仅用于识别与脱敏，不改变业务解析输入。
+            text = _decode_percent_encoded_text(original_text)
+            # 超过解码上限仍残留 %XX 时无法确认内容是否含 PII，不能原样持久化。
+            if _PERCENT_ENCODED_BYTE.search(text):
+                return "[encoded raw payload omitted]"
+            if text != original_text:
+                is_structured, structured_result = _clean_json_text(text)
+                if is_structured:
+                    return structured_result
+
+            sanitized_text = _SENSITIVE_HEADER_LINE.sub(r"\1[redacted]", text)
+            sanitized_text = _SENSITIVE_INLINE_VALUE.sub(r"\1[redacted]", sanitized_text)
+            sanitized_text = _BEARER_VALUE.sub("Bearer [redacted]", sanitized_text)
+            if sanitized_text != text:
+                return sanitized_text[:_MAX_RAW_STRING_LENGTH]
+            return original_text[:_MAX_RAW_STRING_LENGTH]
         if item is None or isinstance(item, (bool, int, float)):
             return item
         # JSON 请求通常不会包含自定义对象；未知对象不应通过 repr 泄漏信息。

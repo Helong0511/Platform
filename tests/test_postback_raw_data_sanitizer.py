@@ -1,4 +1,5 @@
 import json
+from urllib.parse import quote
 
 from app.core.postback.savers.conversion_saver import sanitize_postback_raw_data
 
@@ -152,3 +153,142 @@ def test_redacts_composite_sensitive_query_and_form_parameter_names():
     assert "private-agent" not in result
     assert "click_id=click-200" in result
     assert "[redacted]" in result
+
+
+
+def test_redacts_single_and_double_url_encoded_json_strings():
+    payload = {
+        "email": "encoded@example.com",
+        "ip_address": "203.0.113.77",
+        "nested": {"phoneNumber": "+1-555-0144"},
+        "click_id": "keep-encoded-json-click",
+        "event_name": "purchase",
+    }
+    raw_json = json.dumps(payload, separators=(",", ":"))
+    single_encoded = quote(raw_json, safe="")
+    double_encoded = quote(single_encoded, safe="")
+    triple_encoded = quote(double_encoded, safe="")
+
+    for raw in (single_encoded, double_encoded, triple_encoded):
+        result = sanitize_postback_raw_data(raw)
+        assert isinstance(result, str)
+        decoded = json.loads(result)
+        assert decoded["click_id"] == "keep-encoded-json-click"
+        assert decoded["event_name"] == "purchase"
+        assert "email" not in decoded
+        assert "ip_address" not in decoded
+        assert "phoneNumber" not in decoded["nested"]
+        assert "encoded@example.com" not in result
+        assert "203.0.113.77" not in result
+        assert "+1-555-0144" not in result
+
+
+def test_redacts_double_url_encoded_query_keys_and_values():
+    raw_query = (
+        "https://tracker.example/callback?%65mail=person%40example.com"
+        "&%69p=203.0.113.88&click_id=keep-query-click"
+    )
+    raw = quote(quote(raw_query, safe=""), safe="")
+
+    result = sanitize_postback_raw_data(raw)
+
+    assert "person@example.com" not in result
+    assert "203.0.113.88" not in result
+    assert "email=" in result
+    assert "ip=" in result
+    assert "click_id=keep-query-click" in result
+    assert "[redacted]" in result
+
+
+def test_redacts_url_encoded_sensitive_dictionary_keys():
+    result = sanitize_postback_raw_data({
+        "%65mail": "encoded-key@example.com",
+        "%2569p": "203.0.113.99",
+        "click_id": "trusted-click",
+        "event_name": "purchase",
+    })
+
+    assert result == {"click_id": "trusted-click", "event_name": "purchase"}
+    serialized = json.dumps(result)
+    assert "encoded-key@example.com" not in serialized
+    assert "203.0.113.99" not in serialized
+
+
+def test_preserves_non_sensitive_percent_encoded_business_values():
+    original = "click%2Fid%2Dwith%252Fencoding"
+    result = sanitize_postback_raw_data({"click_id": original})
+
+    assert result["click_id"] == original
+
+
+
+def test_redacts_url_encoded_json_nested_inside_outer_json_string():
+    inner = json.dumps({
+        "email": "nested-encoded@example.com",
+        "click_id": "nested-click-preserved",
+    }, separators=(",", ":"))
+    outer = json.dumps({
+        "payload": quote(inner, safe=""),
+        "event_name": "purchase",
+    }, separators=(",", ":"))
+
+    result = sanitize_postback_raw_data(outer)
+    decoded_outer = json.loads(result)
+    decoded_inner = json.loads(decoded_outer["payload"])
+
+    assert decoded_outer["event_name"] == "purchase"
+    assert decoded_inner == {"click_id": "nested-click-preserved"}
+    assert "nested-encoded@example.com" not in result
+
+
+def test_large_json_string_is_omitted_instead_of_truncated():
+    raw = json.dumps({"event_name": "x" * 5000})
+
+    result = sanitize_postback_raw_data(raw)
+
+    assert result == "[structured payload omitted: exceeds string limit]"
+
+
+
+def test_redacts_percent_encoded_json_with_utf8_bom():
+    raw_json = "\ufeff" + json.dumps({
+        "email": "bom@example.com",
+        "click_id": "bom-click-preserved",
+    }, separators=(",", ":"))
+    raw = quote(raw_json, safe="")
+
+    result = sanitize_postback_raw_data(raw)
+    decoded = json.loads(result)
+
+    assert decoded == {"click_id": "bom-click-preserved"}
+    assert "bom@example.com" not in result
+
+
+
+def test_omits_payloads_that_remain_percent_encoded_after_decode_limit():
+    payload = json.dumps({
+        "email": "too-deep@example.com",
+        "click_id": "keep-if-decodable",
+    }, separators=(",", ":"))
+    over_encoded = payload
+    for _ in range(4):
+        over_encoded = quote(over_encoded, safe="")
+
+    result = sanitize_postback_raw_data(over_encoded)
+
+    assert result == "[encoded raw payload omitted]"
+    assert "too-deep@example.com" not in result
+
+
+def test_drops_dictionary_keys_that_remain_percent_encoded_after_decode_limit():
+    encoded_email_key = "%65mail"
+    for _ in range(3):
+        encoded_email_key = quote(encoded_email_key, safe="")
+
+    result = sanitize_postback_raw_data({
+        encoded_email_key: "too-deep-key@example.com",
+        "click_id": "trusted-click",
+    })
+
+    assert result == {"click_id": "trusted-click"}
+    assert "too-deep-key@example.com" not in json.dumps(result)

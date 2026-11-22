@@ -154,3 +154,17 @@
 - [ ] 搜索并逐项验证所有 Postback/Conversion 导出、下载、异步报表端点及后台任务的数据访问范围
 
 本补充仅更新静态审计证据，不改变 API 行为，不访问生产数据。
+
+
+## 2026-11-22 补充：多层 URL 编码原始回调脱敏绕过
+
+审计发现原始回调快照清理逻辑虽然会递归处理 dict/list、JSON 字符串及普通 Query/Form 文本，但没有对 percent-encoded JSON 字符串或 percent-encoded 字段名做解码识别。攻击者或上游 SDK 若将 JSON/字段名二次编码，原有敏感字段正则可能看不到 `email`、`ip`、`token` 等键，导致 PII 进入 `postback_conversions.raw_data` 或 pending 原始快照。
+
+修复在**仅用于持久化快照的 sanitizer** 中增加最多 3 次 URL percent decode；若超过上限仍残留 `%XX`，对应键/字符串 fail-closed 丢弃：
+- 对 dict key 先有界解码，再做敏感字段名归一化，阻止 `%65mail`、`%2569p` 绕过。
+- 对字符串先有界解码，再识别 JSON、Query、HTTP header、Bearer token。
+- 非结构化文本在未发现敏感内容时保留原始编码形式；结构化 JSON 按既有规则紧凑序列化，非敏感字段值（包括 click_id）保持不变。
+- 实际归因/转化解析仍使用原始请求数据，不把 sanitizer 的解码结果回写到业务解析流程。
+- 新增单层/双层/三层 URL 编码 JSON、双层编码 Query 参数、编码字典键、嵌套编码 JSON、BOM、超出解码上限时 fail-closed、非敏感 click_id 保留测试。
+
+剩余限制：URL percent decode 不是通用的内容解码器；未知字段名下的任意 PII、Base64/压缩/加密载荷仍无法仅靠字段名黑名单保证识别。不要将当前 sanitizer 描述为对任意上游原始数据的完整匿名化；后续仍需基于上游字段契约采用字段白名单，并由业务/合规负责人批准 raw payload 生命周期。
