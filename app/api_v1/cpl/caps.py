@@ -294,8 +294,11 @@ async def check_cap_consistency_api(
                 },
             )
             await commit_audit_log(db)
-        except Exception:
-            logger.exception("记录 Cap 一致性检查失败审计日志时发生异常")
+        except Exception as audit_error:
+            logger.error(
+                "记录 Cap 一致性检查失败审计日志时发生异常：error_type=%s",
+                type(audit_error).__name__,
+            )
         raise_api_exception(
             ErrorCode.INTERNAL_ERROR,
             detail="检查Cap计数一致性失败，请稍后重试或联系系统管理员。",
