@@ -72,9 +72,8 @@ def _check_bot_ready_for_polling() -> bool:
 
 
 def _cleanup_on_polling_conflict(current_pid: int) -> None:
-    """409 冲突时释放锁并清理共享状态。"""
+    """409 冲突时清理共享状态；OS 锁由 start_polling 外层 finally 统一释放。"""
     global _bot_started, _active_application
-    release_bot_lock()
     _bot_started = False
     _active_application = None
     set_shared_state(
@@ -215,10 +214,53 @@ def start_polling():
         )
         return False
 
-    if is_bot_running():
-        logger.info(f"[PID:{current_pid}] Telegram Bot 已在其他进程中运行，跳过启动...")
-        release_bot_lock()
-        return False
+
+    # 成功获取 OS 锁后，所有初始化和运行步骤必须处于同一个 finally 生命周期内。
+    entered_runtime = False
+    try:
+        if is_bot_running():
+            logger.info(
+                f"[PID:{current_pid}] Telegram Bot 已在其他进程中运行，跳过启动..."
+            )
+            return False
+        entered_runtime = True
+        return _start_polling_with_lock(current_pid, token)
+    finally:
+        # 无论导入、Bot 探测、Application 构建、Handler 注册还是 run_polling 抛错，
+        # 都必须释放当前进程刚取得的 OS 锁。状态清理只在本次启动已进入运行阶段时执行。
+        try:
+            release_bot_lock()
+        except Exception as cleanup_error:
+            logger.warning(
+                "Telegram Bot 启动清理时释放锁失败；error_type=%s",
+                type(cleanup_error).__name__,
+            )
+        if entered_runtime:
+            _polling_loop = None
+            _bot_started = False
+            _active_application = None
+            try:
+                from app.core.telegram.bot_state import set_bot_state
+                set_bot_state(None, True, True, new_application=None)
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Telegram Bot 状态清理失败；error_type=%s",
+                    type(cleanup_error).__name__,
+                )
+            set_shared_state(
+                {
+                    "bot_initialized": True,
+                    "bot_running": False,
+                    "current_pid": None,
+                    "last_start_time": None,
+                    "bot_username": None,
+                }
+            )
+
+
+def _start_polling_with_lock(current_pid: int, token: str) -> bool:
+    """调用方已持有 OS 锁；执行 Bot 验证、构建、注册和轮询。"""
+    global _bot_started, _active_application, _handlers_registered, _polling_loop
 
     _bot_started = True
     logger.info(f"[PID:{current_pid}] 成功获取锁，标记 Bot 为已启动状态")
@@ -295,25 +337,6 @@ def start_polling():
             logger.warning(f"轮询意外退出，临时网络错误；error_type={type(e).__name__}")
         else:
             logger.error(f"轮询意外退出；error_type={type(e).__name__}")
-    finally:
-        _polling_loop = None
-        try:
-            release_bot_lock()
-            logger.info("Telegram Bot 已停止并释放锁")
-        except Exception as e:
-            logger.warning(f"释放锁时发生错误；error_type={type(e).__name__}")
-        _bot_started = False
-        _active_application = None
-        set_bot_state(None, True, True, new_application=None)
-        set_shared_state(
-            {
-                "bot_initialized": True,
-                "bot_running": False,
-                "current_pid": None,
-                "last_start_time": None,
-                "bot_username": None,
-            }
-        )
 
     return True
 
