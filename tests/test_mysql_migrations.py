@@ -102,7 +102,7 @@ def _run_sql_file(cursor, relative_path: str) -> None:
 
 def _index_columns(cursor, table_name: str, index_name: str) -> list[str]:
     """读取隔离 MySQL 索引的真实列顺序，避免只检查索引名称而漏掉 schema drift。"""
-    allowed_tables = {"third_party_report_logs", "postback_forward_logs", "postback_forward_queue"}
+    allowed_tables = {"third_party_report_logs", "postback_forward_logs", "postback_forward_queue", "pending_postback_conversions"}
     if table_name not in allowed_tables:
         raise ValueError("unexpected migration test table")
     cursor.execute(f"SHOW INDEX FROM `{table_name}` WHERE Key_name = %s", (index_name,))
@@ -115,7 +115,7 @@ def _index_columns(cursor, table_name: str, index_name: str) -> list[str]:
 
 def _column_metadata(cursor, table_name: str, column_name: str):
     """读取字段类型、NULL 和默认值，核对迁移结果而不只核对字段名。"""
-    allowed_tables = {"third_party_report_logs", "postback_forward_logs"}
+    allowed_tables = {"third_party_report_logs", "postback_forward_logs", "pending_postback_conversions"}
     if table_name not in allowed_tables:
         raise ValueError("unexpected migration test table")
     cursor.execute(f"SHOW COLUMNS FROM `{table_name}` LIKE %s", (column_name,))
@@ -129,6 +129,86 @@ def _event_key(source: str, adsid: str, event: str, conversion_id: str | None) -
     parts = (source or "", adsid or "", event or "", identity_conversion_id)
     identity = "".join(f"{len(part)}:{part}" for part in parts)
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def test_pending_postback_pii_retention_migration_is_idempotent_and_preserves_history():
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS pending_postback_conversions")
+            cursor.execute(
+                "CREATE TABLE pending_postback_conversions ("
+                "id INT NOT NULL AUTO_INCREMENT, status VARCHAR(20) NOT NULL, "
+                "created_at DATETIME NOT NULL, rejected_at DATETIME NULL, "
+                "PRIMARY KEY (id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            cursor.execute(
+                "INSERT INTO pending_postback_conversions (status, created_at) "
+                "VALUES ('approved', '2026-01-01 00:00:00'), ('pending', '2026-01-01 00:00:00')"
+            )
+
+            migration = "sql/migrations/20261122_pending_postback_pii_retention.sql"
+            _run_sql_file(cursor, migration)
+            _run_sql_file(cursor, migration)
+
+            marker = _column_metadata(cursor, "pending_postback_conversions", "pii_scrubbed_at")
+            assert marker is not None
+            assert marker[1].lower() == "datetime"
+            assert marker[2] == "YES"
+
+            cursor.execute("SHOW INDEX FROM pending_postback_conversions")
+            rows = [
+                row for row in cursor.fetchall()
+                if row[2] == "idx_pending_postback_pii_retention"
+            ]
+            assert len(rows) == 4
+            assert all(row[1] == 1 for row in rows)
+            assert [row[4] for row in sorted(rows, key=lambda row: row[3])] == [
+                "pii_scrubbed_at", "status", "created_at", "id"
+            ]
+
+            cursor.execute(
+                "SELECT status, pii_scrubbed_at FROM pending_postback_conversions ORDER BY id"
+            )
+            assert cursor.fetchall() == (("approved", None), ("pending", None))
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS pending_postback_conversions")
+        connection.close()
+
+
+def test_pending_postback_pii_migration_rejects_wrong_same_name_index():
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS pending_postback_conversions")
+            cursor.execute(
+                "CREATE TABLE pending_postback_conversions ("
+                "id INT NOT NULL AUTO_INCREMENT, status VARCHAR(20) NOT NULL, "
+                "created_at DATETIME NOT NULL, rejected_at DATETIME NULL, "
+                "pii_scrubbed_at DATETIME NULL, PRIMARY KEY (id), "
+                "KEY idx_pending_postback_pii_retention (status)) "
+                "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+
+            with pytest.raises(pymysql.err.OperationalError) as migration_error:
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261122_pending_postback_pii_retention.sql",
+                )
+            assert migration_error.value.args[0] == 1061
+
+            cursor.execute("SHOW INDEX FROM pending_postback_conversions")
+            rows = [
+                row for row in cursor.fetchall()
+                if row[2] == "idx_pending_postback_pii_retention"
+            ]
+            assert len(rows) == 1
+            assert rows[0][4] == "status"
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS pending_postback_conversions")
+        connection.close()
 
 
 def test_event_key_migration_preserves_legacy_unique_index_when_new_key_collides():

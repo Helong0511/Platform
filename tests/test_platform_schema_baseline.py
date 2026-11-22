@@ -87,3 +87,32 @@ def test_platform_baseline_third_party_identity_scope_is_complete():
     assert len(split_mysql_statements(lock_table_sql)) == 1
     assert "`identity_key` CHAR(64)" in lock_table_sql
     assert "`identity_fingerprint` BINARY(64)" in lock_table_sql
+
+def test_pending_postback_pii_retention_is_in_baseline_and_manifest():
+    from app.db.migrations.manifest import validate_manifest
+    from app.models import Base
+
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "sql" / "platform.sql").read_text(encoding="utf-8")
+    table_start = source.index(
+        "CREATE TABLE IF NOT EXISTS `pending_postback_conversions`"
+    )
+    table_end = source.index(
+        "COMMENT = '待确认Postback转化表（非白名单IP请求）'",
+        table_start,
+    )
+    table_sql = source[table_start:table_end]
+
+    assert "`pii_scrubbed_at` DATETIME NULL" in table_sql
+    assert "idx_pending_postback_pii_retention" in table_sql
+    assert "pii_scrubbed_at` ASC, `status` ASC, `created_at` ASC, `id` ASC" in table_sql
+
+    migrations = validate_manifest(root)
+    revision = next(
+        item for item in migrations
+        if item.revision == "20261122_pending_postback_pii_retention"
+    )
+    assert revision.path == "sql/migrations/20261122_pending_postback_pii_retention.sql"
+    assert "pii_scrubbed_at" in Base.metadata.tables[
+        "pending_postback_conversions"
+    ].columns

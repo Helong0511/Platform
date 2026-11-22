@@ -642,6 +642,10 @@ class Settings(BaseSettings):
     THIRD_PARTY_REPORT_PII_RETENTION_DAYS: int = int(
         os.getenv("THIRD_PARTY_REPORT_PII_RETENTION_DAYS", "0")
     )
+    # 待审批 Postback 终态记录的 PII 单独配置；仅清理 approved/rejected，不碰 pending。
+    PENDING_POSTBACK_PII_RETENTION_DAYS: int = int(
+        os.getenv("PENDING_POSTBACK_PII_RETENTION_DAYS", "0")
+    )
 
     # ====== 审计日志配置 ======
     # 审计日志保留天数（超过此天数的日志将被清理）

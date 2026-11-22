@@ -667,6 +667,7 @@ CREATE TABLE IF NOT EXISTS `pending_postback_conversions`  (
   `updated_at` DATETIME NOT NULL COMMENT '更新时间',
   `approved_at` DATETIME NULL DEFAULT NULL COMMENT '批准时间',
   `rejected_at` DATETIME NULL DEFAULT NULL COMMENT '拒绝时间',
+  `pii_scrubbed_at` DATETIME NULL DEFAULT NULL COMMENT '终态 Postback 个人信息按独立保留策略清理时间',
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `product_id`(`product_id` ASC) USING BTREE,
   INDEX `client_id`(`client_id` ASC) USING BTREE,
@@ -675,6 +676,7 @@ CREATE TABLE IF NOT EXISTS `pending_postback_conversions`  (
   INDEX `idx_request_ip`(`request_ip` ASC) USING BTREE,
   INDEX `idx_created_at`(`created_at` ASC) USING BTREE,
   INDEX `idx_pending_click_id`(`click_id` ASC) USING BTREE,
+  INDEX `idx_pending_postback_pii_retention`(`pii_scrubbed_at` ASC, `status` ASC, `created_at` ASC, `id` ASC) USING BTREE,
   CONSTRAINT `pending_postback_conversions_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `pending_postback_conversions_ibfk_2` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '待确认Postback转化表（非白名单IP请求）' ROW_FORMAT = Dynamic;

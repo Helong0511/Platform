@@ -71,10 +71,29 @@ Windows 本机如果没有启动 Redis，非白名单请求也会 fail-closed。
 - 请求体大小、字段数、Content-Type 和 UTF-8 JSON/Form 解析边界；
 - Processor 的非白名单路径只创建待审批记录，不进入正式转化流程。
 
-## 尚未完成的上线前事项
+## PII 生命周期与尚未完成的上线前事项
 
-1. `pending_postback_conversions.request_ip` 保存服务端来源 IP，`ip` 保存回调用户/点击 IP；二者用途不同，均需按业务、审计和合规要求确定保留期限。
-2. `postback_conversions.raw_data/ip/devad_id` 与 `pending_postback_conversions.raw_data/ip/request_ip` 的统一 PII 生命周期仍需单独设计。当前没有自动清理这些字段，不应自行设置期限或删除历史数据。
-3. 10,000 条积压保护已改为单例 guard 行锁串行化容量检查；仍需在隔离 MySQL/InnoDB 环境验证多连接并发入队、锁等待超时、死锁回滚与事务释放。
-4. 应在部署环境验证可信代理配置，确保 `get_client_ip()` 只信任受控代理传入的来源 IP，不能直接信任任意客户端可伪造的转发头。
-5. 本次变更的真实 MySQL 迁移、Redis Lua 和端到端测试以 PR CI 结果为准；合并后还需在隔离环境进行部署验收。
+### 待审批记录的终态清理
+
+新增独立配置 `PENDING_POSTBACK_PII_RETENTION_DAYS`，默认 `0`（关闭），与第三方上报/下游转发日志的 `THIRD_PARTY_REPORT_PII_RETENTION_DAYS` 分离，避免不同业务数据被同一保留期限误伤。
+
+- 只允许清理创建时间超过独立保留期限且状态为 `approved` 或 `rejected` 的终态记录。
+- `pending` 状态永不由此任务清理，避免自动删除仍等待管理员处理的回调。
+- 清除设备广告 ID、操作系统/运营商、用户 IP、渠道 ID、Click ID/时间、原始 JSON、服务端请求 IP、Telegram 消息 ID/Chat ID。
+- 保留 `platform`、`conversion_id`、`event_name`、`dedupe_key`、金额/财务字段、状态、时间戳及记录 ID，以维持幂等去重、对账和审批审计关联。
+- `request_ip` 是非空列，清理时写空字符串；API/后台展示必须将空值视为“已按策略清理”，不得把空字符串解释为有效来源 IP。
+- 使用 `FOR UPDATE SKIP LOCKED`、按 `created_at,id` 排序、每日任务当前每次最多处理 200 条（服务接口允许配置 1–1,000 条），后续应监控积压并按数据库负载调整批量与执行频率，避免多个 Scheduler Worker 重复争抢同一批记录。该语法会跳过已锁定行，适合队列式并发消费，不应被用于要求完整一致视图的普通业务查询。
+- MySQL 官方明确指出 `NOWAIT/SKIP LOCKED` 对 statement-based replication 不安全；若生产启用 binlog/复制，部署前必须核验 `binlog_format=ROW`（或经 DBA 确认安全的 MIXED），不能使用纯 STATEMENT。
+- 每日 PII 任务独立执行此清理；第三方 Report 清理开关与待审批记录清理开关互不影响。
+
+新增迁移 `20261122_pending_postback_pii_retention`，只增加 `pii_scrubbed_at` 和 `(pii_scrubbed_at,status,created_at,id)` 索引，不改写历史 PII。全新基线 `sql/platform.sql` 同步包含字段和索引；旧库必须通过 Migration Runner 应用迁移。
+
+### 仍需业务/合规审批或专项设计
+
+1. `PENDING_POSTBACK_PII_RETENTION_DAYS` 与 `THIRD_PARTY_REPORT_PII_RETENTION_DAYS` 继续默认 0；未经业务/合规负责人批准，不得在生产启用任何自动清理期限。
+2. `pending` 状态记录没有自动过期策略；需要单独确定审批 SLA、超期拒绝/隔离规则、人工复核和上游重放处理，不得将未决记录直接按终态清理。
+3. `postback_conversions.raw_data/ip/devad_id` 正式转化数据仍需独立生命周期设计；待审批终态清理不代表正式业务记录也可清理。
+4. 审批通过后数据会复制到正式转化表；应明确两份记录的保留期限、对账要求、访问权限和备份副本保留期。
+5. 10,000 条积压保护已改为单例 guard 行锁串行化容量检查；仍需在隔离 MySQL/InnoDB 环境验证多连接并发入队、锁等待超时、死锁回滚与事务释放。
+6. 应在部署环境验证可信代理配置，确保 `get_client_ip()` 只信任受控代理传入的来源 IP，不能直接信任任意客户端可伪造的转发头。
+7. 本次变更的真实 MySQL 迁移、Redis Lua 和端到端测试以 PR CI 结果为准；合并后还需在隔离环境进行部署验收。
