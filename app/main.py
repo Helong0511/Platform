@@ -151,6 +151,8 @@ async def telegram_health_check():
     from app.core.telegram.polling_manager import get_polling_health_status
 
     health = get_polling_health_status()
+    if not health["is_owner"] and health["remote_owner_alive"]:
+        return {"status": "not_owner", **health}
     return {
         "status": "ok" if health["healthy"] else "degraded",
         **health,
