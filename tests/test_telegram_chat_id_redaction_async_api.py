@@ -188,3 +188,64 @@ async def test_reset_webhook_awaits_send_loop_calls(monkeypatch):
     await telegram_api.reset_webhook(SimpleNamespace(), object(), SimpleNamespace(username="admin"))
 
     assert calls == [20.0, 15.0]
+
+
+@pytest.mark.asyncio
+async def test_start_command_uses_throttled_sender_and_escapes_user_name(monkeypatch):
+    from app.core.telegram.command_handlers import start_command
+    from app.core.telegram.command_handlers import stats_command
+
+    send_async = AsyncMock(return_value=True)
+    monkeypatch.setattr(start_command, "send_telegram_message_async", send_async)
+    monkeypatch.setattr(stats_command, "send_stats_menu", lambda _chat_id: True)
+
+    update = SimpleNamespace(
+        effective_message=SimpleNamespace(chat_id=123456789),
+        effective_user=SimpleNamespace(first_name="<b>unsafe</b>"),
+    )
+    await start_command.cmd_start(update, SimpleNamespace())
+
+    send_async.assert_awaited_once()
+    sent_text = send_async.await_args.args[1]
+    assert "&lt;b&gt;unsafe&lt;/b&gt;" in sent_text
+    assert "<b>unsafe</b>" not in sent_text
+
+
+@pytest.mark.asyncio
+async def test_help_command_uses_throttled_sender(monkeypatch):
+    from app.core.telegram.command_handlers import help_command
+
+    send_async = AsyncMock(return_value=True)
+    monkeypatch.setattr(help_command, "send_telegram_message_async", send_async)
+    update = SimpleNamespace(effective_message=SimpleNamespace(chat_id=123456789))
+
+    await help_command.cmd_help(update, SimpleNamespace())
+
+    send_async.assert_awaited_once()
+    assert send_async.await_args.kwargs["parse_mode"] == "HTML"
+
+
+@pytest.mark.asyncio
+async def test_id_command_uses_throttled_sender_and_escapes_group_title(monkeypatch):
+    from app.core.telegram.command_handlers import id_command
+
+    send_async = AsyncMock(return_value=True)
+    monkeypatch.setattr(id_command, "send_telegram_message_async", send_async)
+    chat = SimpleNamespace(id=-1001234567890, type="supergroup", title="<b>unsafe group</b>")
+    message = SimpleNamespace(
+        chat=chat,
+        chat_id=chat.id,
+        message_id=7,
+        text="/id",
+        entities=[],
+    )
+    user = SimpleNamespace(username="admin", first_name="Admin", id=123456789)
+    context = SimpleNamespace(bot=SimpleNamespace(get_me=AsyncMock(return_value=SimpleNamespace(username="testbot"))))
+
+    await id_command.get_chat_id(SimpleNamespace(effective_message=message, effective_user=user), context)
+
+    send_async.assert_awaited_once()
+    sent_text = send_async.await_args.args[1]
+    assert "&lt;b&gt;unsafe group&lt;/b&gt;" in sent_text
+    assert "<b>unsafe group</b>" not in sent_text
+    assert send_async.await_args.kwargs["reply_to_message_id"] == 7
