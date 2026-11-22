@@ -799,3 +799,12 @@ CI 负责验证 unit 文件契约、CLI credential 读取与文档一致性；�
 - CI 的 2500 行数据只是恢复语义测试，不是生产容量/耗时基准；生产数据规模未知，不能据此宣称大表 DDL 已完成验收。
 
 结论：本次修复解决了大表回填单事务和中断后无法续跑的问题；真实生产数据规模、索引构建、metadata lock、备份恢复仍需隔离演练。
+
+
+## 2026-11-22 补充：DDL Metadata Lock 与 InnoDB 行锁等待预算
+
+- Migration Runner 的 GET_LOCK 超时仅控制多个 Runner 之间的互斥锁等待，不控制 ALTER TABLE 等 DDL 对表 metadata lock 的等待。
+- 当前 Runner 在获得 GET_LOCK 后、执行 ledger/业务 DDL 前，将当前专用连接的 SESSION lock_wait_timeout 与 innodb_lock_wait_timeout 均设置为 30 秒，并通过 @@SESSION 读取核验。
+- 任一变量设置/核验失败时 fail-closed，不继续执行 DDL；该设置仅作用于迁移连接，不污染应用连接池。
+- 30 秒限制的是等待锁的时间，不是 DDL 执行时长。已获得锁后的大表扫描、索引创建、数据回填、磁盘峰值和复制延迟仍需在目标 MySQL 版本及生产等价数据量副本演练。
+- 若特定迁移确需更长锁等待，必须在代码、测试、变更审批和本手册中同步明确预算；不得依赖 MySQL 默认超长 metadata lock 等待时间。

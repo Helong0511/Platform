@@ -28,6 +28,9 @@ _LEDGER_LOCK_PREFIX = "platform_migrations_"
 _MIN_MYSQL_VERSION = (8, 0, 16)
 _EVENT_KEY_BACKFILL_HANDLER = "third_party_report_event_key"
 _EVENT_KEY_BACKFILL_BATCH_SIZE = 1000
+# DDL metadata lock 与 InnoDB 行锁等待均必须有界，避免迁移长时间挂起。
+_MIGRATION_METADATA_LOCK_WAIT_SECONDS = 30
+_MIGRATION_INNODB_LOCK_WAIT_SECONDS = 30
 
 
 class MigrationRunnerError(RuntimeError):
@@ -74,6 +77,29 @@ def _migration_lock_name(database_name: str) -> str:
     """稳定且不超过 MySQL GET_LOCK 64 字符上限的数据库级锁名。"""
     digest = hashlib.sha256(database_name.encode("utf-8")).hexdigest()[:32]
     return f"{_LEDGER_LOCK_PREFIX}{digest}"
+
+
+async def _configure_migration_lock_timeouts(connection) -> None:
+    """为当前迁移物理连接设置并核验有界的 metadata/row lock 等待时间。"""
+    await connection.exec_driver_sql(
+        f"SET SESSION lock_wait_timeout = {_MIGRATION_METADATA_LOCK_WAIT_SECONDS}"
+    )
+    await connection.exec_driver_sql(
+        f"SET SESSION innodb_lock_wait_timeout = {_MIGRATION_INNODB_LOCK_WAIT_SECONDS}"
+    )
+    result = await connection.execute(
+        text(
+            "SELECT @@SESSION.lock_wait_timeout AS metadata_lock_wait_timeout, "
+            "@@SESSION.innodb_lock_wait_timeout AS innodb_lock_wait_timeout"
+        )
+    )
+    values = result.mappings().one()
+    if (
+        int(values["metadata_lock_wait_timeout"]) != _MIGRATION_METADATA_LOCK_WAIT_SECONDS
+        or int(values["innodb_lock_wait_timeout"]) != _MIGRATION_INNODB_LOCK_WAIT_SECONDS
+    ):
+        raise MigrationRunnerError("无法确认 migration metadata/row lock 等待超时已生效")
+    await connection.commit()
 
 
 def _parse_mysql_version(value: str) -> tuple[int, int, int]:
@@ -624,6 +650,9 @@ async def _apply_with_locked_connection(
     await connection.commit()
 
     try:
+        # GET_LOCK 只负责串行化 migration Runner；它不会限制 DDL 等待表的 metadata lock。
+        # 必须在执行任何 ledger/业务 DDL 前设置独立的 session lock wait budget。
+        await _configure_migration_lock_timeouts(connection)
         session_info = (
             await connection.execute(
                 text(
