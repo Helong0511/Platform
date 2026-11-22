@@ -107,3 +107,34 @@ def test_bot_lock_does_not_allow_same_process_reentry(tmp_path):
     assert file_lock.acquire_bot_lock(lock_path) is True
     assert file_lock.acquire_bot_lock(lock_path) is False
     file_lock.release_bot_lock()
+
+
+
+def test_restart_checks_all_existing_polling_threads(monkeypatch):
+    class Thread:
+        name = "TelegramBot"
+
+        def __init__(self, exits):
+            self.exits = exits
+            self.joined = False
+
+        def is_alive(self):
+            return not (self.joined and self.exits)
+
+        def join(self, timeout=None):
+            self.joined = True
+
+    first = Thread(exits=True)
+    second = Thread(exits=False)
+    monkeypatch.setattr(threading, "enumerate", lambda: [first, second])
+    monkeypatch.setattr(manager, "stop_polling_application", lambda **_kwargs: True)
+    monkeypatch.setattr(manager, "release_bot_lock", lambda: None)
+    monkeypatch.setattr(manager, "start_bot_thread", lambda: True)
+
+    result = manager.restart_bot_thread(join_timeout=0)
+
+    assert first.joined is True
+    assert second.joined is True
+    assert result["thread_joined"] is False
+    assert result["started"] is False
+    assert result["restarted"] is False
