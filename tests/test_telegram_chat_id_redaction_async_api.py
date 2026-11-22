@@ -70,7 +70,7 @@ async def test_admin_send_endpoint_awaits_async_sender_and_masks_audit_chat_id(m
     from app.api_v1.external import telegram as telegram_api
 
     monkeypatch.setattr(telegram_api.settings, "TELEGRAM_ENABLE", True)
-    monkeypatch.setattr(telegram_api, "bot_initialized", True)
+    monkeypatch.setattr(telegram_api.telegram_bot_state, "bot_initialized", True)
     send_async = AsyncMock(return_value=True)
     monkeypatch.setattr(telegram_api, "send_telegram_message_async", send_async)
     audit = AsyncMock()
@@ -97,7 +97,7 @@ async def test_admin_test_endpoint_awaits_async_sender(monkeypatch):
 
     monkeypatch.setattr(telegram_api.settings, "TELEGRAM_ENABLE", True)
     monkeypatch.setattr(telegram_api.settings, "TIMEZONE", "UTC", raising=False)
-    monkeypatch.setattr(telegram_api, "bot_initialized", True)
+    monkeypatch.setattr(telegram_api.telegram_bot_state, "bot_initialized", True)
     monkeypatch.setattr(
         telegram_api,
         "get_app_now",
