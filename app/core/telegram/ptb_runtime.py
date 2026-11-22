@@ -39,6 +39,10 @@ _loop_start_lock = threading.Lock()
 _send_bot_lock = threading.Lock()
 _SEND_LOOP_READY = threading.Event()
 
+# 发送 Bot 是进程级单例，所有调用方必须共享一致的 HTTPX 超时配置。
+SEND_BOT_CONNECT_TIMEOUT_SECONDS = 3.0
+SEND_BOT_READ_TIMEOUT_SECONDS = 30.0
+
 
 def _send_loop_worker() -> None:
     """发送专用事件循环线程入口。"""
@@ -84,29 +88,26 @@ def run_on_send_loop(coro, *, timeout: Optional[float] = None):
     return future.result(timeout=timeout)
 
 
-async def _create_send_bot(token: str, *, connect_timeout: float, read_timeout: float):
+async def _create_send_bot(token: str):
     from telegram import Bot
     from telegram.request import HTTPXRequest
 
     request = HTTPXRequest(
-        connect_timeout=connect_timeout,
-        read_timeout=read_timeout,
-        write_timeout=read_timeout,
+        connect_timeout=SEND_BOT_CONNECT_TIMEOUT_SECONDS,
+        read_timeout=SEND_BOT_READ_TIMEOUT_SECONDS,
+        write_timeout=SEND_BOT_READ_TIMEOUT_SECONDS,
     )
     bot = Bot(token=token, request=request)
     await bot.initialize()
     return bot
 
 
-def get_send_bot(
-    token: str,
-    *,
-    connect_timeout: float = 3.0,
-    read_timeout: float = 30.0,
-):
+def get_send_bot(token: str):
     """
     获取（或重建）发送专用 Bot 实例，绑定在发送 loop 上。
 
+    发送 Bot 是按 Token 缓存的进程级单例，因此使用统一的 3s connect / 30s read
+    超时；不要让先创建实例的诊断调用把正式发送超时缩短。
     注意：不得在持有锁时调用 run_on_send_loop（会与 ensure_send_loop 死锁）。
     """
     global _send_bot, _send_bot_token
@@ -125,15 +126,14 @@ def get_send_bot(
                 await old_bot.shutdown()
             except Exception as exc:
                 logger.debug("关闭旧发送 Bot 失败（可忽略）；error_type=%s", type(exc).__name__)
-        return await _create_send_bot(
-            token,
-            connect_timeout=connect_timeout,
-            read_timeout=read_timeout,
-        )
+        return await _create_send_bot(token)
 
     new_bot = run_on_send_loop(
         _build(),
-        timeout=max(10.0, connect_timeout + read_timeout),
+        timeout=max(
+            10.0,
+            SEND_BOT_CONNECT_TIMEOUT_SECONDS + SEND_BOT_READ_TIMEOUT_SECONDS,
+        ),
     )
 
     with _send_bot_lock:
