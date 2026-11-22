@@ -43,7 +43,8 @@ MIN_GROUP_SEND_INTERVAL = 3.1  # Telegram 群组每分钟最多约 20 条消息
 INTER_CHAT_DELAY = 1.1
 # 全局（跨 Chat）最小间隔（互斥锁内再节流）
 MIN_GLOBAL_SEND_INTERVAL = 0.2
-MAX_RATE_LIMIT_WAIT = 120  # 429 限流时最长等待秒数
+MAX_RATE_LIMIT_WAIT = 120  # 单次请求内同步等待 429 的最长秒数
+MAX_SERVER_BACKOFF_SECONDS = 7 * 24 * 3600  # Redis 共享服务端 retry_after 的最大保留时间（7 天）
 _GATE_SPIN_SECONDS = 0.02  # 闸门刚过期时的短睡，避免空转烧 CPU
 _REDIS_BACKOFF_GLOBAL = "telegram:send:backoff:__global__"
 _REDIS_GATE_GLOBAL = "telegram:send:gate:__global__"
@@ -277,7 +278,7 @@ def _sleep_with_jitter(base: float, *, max_extra: float = 1.0) -> None:
 
 def _note_rate_limited(chat_id: str, retry_after: int) -> None:
     """把 429 退避写入 Redis，让其它 worker 一起停发，避免惊群重试。"""
-    wait = max(1, min(int(retry_after), MAX_RATE_LIMIT_WAIT))
+    wait = max(1, min(int(retry_after), MAX_SERVER_BACKOFF_SECONDS))
     redis_client = _get_sync_redis()
     if not redis_client:
         return
@@ -641,8 +642,19 @@ def send_telegram_message_result(
 
                     if _is_rate_limit_error(error_msg) or getattr(e, "retry_after", None) is not None:
                         retry_after = _rate_limit_seconds_from_exc(e) or 60
-                        retry_after = min(retry_after, MAX_RATE_LIMIT_WAIT)
                         _note_rate_limited(chat_id, retry_after)
+                        if retry_after > MAX_RATE_LIMIT_WAIT:
+                            # 不得把 Telegram 明确要求的等待时间截短后提前重试。
+                            # 共享 Redis backoff 保留完整 retry_after，其它 worker 会等待或 fail closed。
+                            logger.warning(
+                                "Telegram 服务端要求等待 %s 秒，超过单次重试预算 %s 秒；停止本次发送重试；error_type=%s",
+                                retry_after,
+                                MAX_RATE_LIMIT_WAIT,
+                                type(e).__name__,
+                            )
+                            last_error = "Telegram 限流等待超过当前请求预算，已停止提前重试"
+                            # 这是全局 backoff；不能继续向后续 chat 发送。
+                            return False, last_error
                         if attempt < MAX_RETRIES - 1:
                             logger.warning(
                                 f"发送 Telegram 消息到 {chat_id} 触发限流，"
@@ -809,8 +821,14 @@ def send_telegram_message_with_buttons(
 
                     if _is_rate_limit_error(error_msg) or getattr(e, "retry_after", None) is not None:
                         retry_after = _rate_limit_seconds_from_exc(e) or 60
-                        retry_after = min(retry_after, MAX_RATE_LIMIT_WAIT)
                         _note_rate_limited(str(chat_id), retry_after)
+                        if retry_after > MAX_RATE_LIMIT_WAIT:
+                            logger.warning(
+                                "Telegram 带按钮消息的服务端 retry_after=%s 秒，超过单次等待预算；停止提前重试；error_type=%s",
+                                retry_after,
+                                type(e).__name__,
+                            )
+                            return False, None
                         if attempt < MAX_RETRIES - 1:
                             logger.warning(
                                 f"发送带按钮的 Telegram 消息触发限流，"
@@ -929,7 +947,6 @@ def call_telegram_api_throttled(
             error_msg = str(e)
             if _is_rate_limit_error(error_msg) or getattr(e, "retry_after", None) is not None:
                 retry_after = _rate_limit_seconds_from_exc(e) or 60
-                retry_after = min(retry_after, MAX_RATE_LIMIT_WAIT)
                 _note_rate_limited(str(chat_id or "__global__"), retry_after)
             raise
     finally:

@@ -304,3 +304,113 @@ def test_wait_before_send_applies_group_interval_to_redis_gate(monkeypatch):
 
     group_gate = ms._REDIS_GATE_CHAT.format(chat_id="-1001234567890")
     assert (group_gate, 3.1) in observed
+
+
+
+def test_note_rate_limited_preserves_server_retry_after_above_inline_budget(monkeypatch):
+    calls = []
+
+    class _FakeRedis:
+        def setex(self, key, seconds, value):
+            calls.append((key, seconds, value))
+
+    monkeypatch.setattr(ms, "_get_sync_redis", lambda: _FakeRedis())
+
+    ms._note_rate_limited("-1001234567890", 300)
+
+    assert (ms._REDIS_BACKOFF_GLOBAL, 300, "1") in calls
+    assert (
+        ms._REDIS_BACKOFF_CHAT.format(chat_id="-1001234567890"),
+        300,
+        "1",
+    ) in calls
+
+
+def test_send_message_does_not_retry_before_long_retry_after(monkeypatch):
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    calls = []
+    noted = []
+    released = []
+
+    class _RetryAfterError(Exception):
+        def __init__(self):
+            super().__init__("Flood control exceeded")
+            self.retry_after = timedelta(seconds=300)
+
+    class _FakeBot:
+        def send_message(self, **_kwargs):
+            calls.append("send")
+            return object()
+
+    monkeypatch.setattr(ms, "settings", SimpleNamespace(TELEGRAM_ENABLE=True))
+    monkeypatch.setattr(ms, "_check_bot_available", lambda: (True, "ok"))
+    monkeypatch.setattr(ms, "_get_send_bot", lambda: _FakeBot())
+    monkeypatch.setattr(ms, "_acquire_send_mutex", lambda: "mutex-token")
+    monkeypatch.setattr(ms, "_wait_before_send", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(ms, "_sync_bot_call", lambda *_args, **_kwargs: (_ for _ in ()).throw(_RetryAfterError()))
+    monkeypatch.setattr(ms, "_note_rate_limited", lambda chat_id, seconds: noted.append((chat_id, seconds)))
+    monkeypatch.setattr(ms, "_release_send_mutex", lambda token: released.append(token))
+    monkeypatch.setattr(
+        ms,
+        "_sleep_with_jitter",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not sleep/retry early")),
+    )
+
+    ok, error = ms.send_telegram_message_result(
+        "123456789,987654321",
+        "test message",
+    )
+
+    assert ok is False
+    assert "超过当前请求预算" in error
+    assert calls == ["send"]
+    assert noted == [("123456789", 300)]
+    assert released == ["mutex-token"]
+
+
+
+def test_send_message_with_buttons_does_not_retry_before_long_retry_after(monkeypatch):
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    calls = []
+    noted = []
+    released = []
+
+    class _RetryAfterError(Exception):
+        def __init__(self):
+            super().__init__("Flood control exceeded")
+            self.retry_after = timedelta(seconds=300)
+
+    class _FakeBot:
+        def send_message(self, **_kwargs):
+            calls.append("send")
+            return object()
+
+    monkeypatch.setattr(ms, "settings", SimpleNamespace(TELEGRAM_ENABLE=True))
+    monkeypatch.setattr(ms, "_check_bot_available", lambda: (True, "ok"))
+    monkeypatch.setattr(ms, "_get_send_bot", lambda: _FakeBot())
+    monkeypatch.setattr(ms, "_acquire_send_mutex", lambda: "mutex-token")
+    monkeypatch.setattr(ms, "_wait_before_send", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(ms, "_sync_bot_call", lambda *_args, **_kwargs: (_ for _ in ()).throw(_RetryAfterError()))
+    monkeypatch.setattr(ms, "_note_rate_limited", lambda chat_id, seconds: noted.append((chat_id, seconds)))
+    monkeypatch.setattr(ms, "_release_send_mutex", lambda token: released.append(token))
+    monkeypatch.setattr(
+        ms,
+        "_sleep_with_jitter",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not sleep/retry early")),
+    )
+
+    ok, message_id = ms.send_telegram_message_with_buttons(
+        "123456789",
+        "test message",
+        [[{"text": "Approve", "callback_data": "approve_1"}]],
+    )
+
+    assert ok is False
+    assert message_id is None
+    assert calls == ["send"]
+    assert noted == [("123456789", 300)]
+    assert released == ["mutex-token"]
