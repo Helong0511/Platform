@@ -113,10 +113,10 @@ def process_pending_conversion(
         if not token:
             raise RuntimeError("Telegram token is not configured")
         bot = get_send_bot(str(token).strip())
-    
+
         SessionLocal = get_sync_session_factory()
-    
-    
+
+
         with SessionLocal() as db:
             result = db.execute(
                 build_pending_for_update_statement(
