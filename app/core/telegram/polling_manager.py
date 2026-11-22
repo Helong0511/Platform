@@ -266,6 +266,7 @@ async def _on_error(update, context) -> None:
     _last_polling_error_at = time.time()
     msg = str(error)
     if is_telegram_conflict_error(msg):
+        _last_polling_exit_reason = "conflict"
         logger.error("检测到 Telegram 轮询冲突（409），请求 run_polling 优雅退出；error_type=%s", type(error).__name__)
         try:
             # 此错误处理器运行在 Application 事件循环内；stop_running 会让 run_polling
