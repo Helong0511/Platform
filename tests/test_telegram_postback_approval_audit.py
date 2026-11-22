@@ -379,8 +379,20 @@ def test_telegram_approval_initialization_failure_uses_callback_bot(monkeypatch)
             return object()
 
     monkeypatch.setattr(handler, "_api", lambda _chat_id, _coro: None)
+    monkeypatch.setattr(
+        handler.asyncio,
+        "run_coroutine_threadsafe",
+        lambda _coro, _loop: SimpleNamespace(result=lambda timeout: None),
+    )
     handler.process_pending_conversion(
-        77, "approve", "callback-init-failed", -100123, 8, 555129, FallbackBot()
+        77,
+        "approve",
+        "callback-init-failed",
+        -100123,
+        8,
+        555129,
+        FallbackBot(),
+        SimpleNamespace(is_running=lambda: True),
     )
 
     assert delivered == [{
