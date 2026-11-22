@@ -115,7 +115,7 @@ def _index_columns(cursor, table_name: str, index_name: str) -> list[str]:
 
 def _column_metadata(cursor, table_name: str, column_name: str):
     """读取字段类型、NULL 和默认值，核对迁移结果而不只核对字段名。"""
-    allowed_tables = {"third_party_report_logs", "postback_forward_logs", "pending_postback_conversions"}
+    allowed_tables = {"third_party_report_logs", "postback_forward_logs", "pending_postback_conversions", "clicks_archive"}
     if table_name not in allowed_tables:
         raise ValueError("unexpected migration test table")
     cursor.execute(f"SHOW COLUMNS FROM `{table_name}` LIKE %s", (column_name,))
@@ -129,6 +129,57 @@ def _event_key(source: str, adsid: str, event: str, conversion_id: str | None) -
     parts = (source or "", adsid or "", event or "", identity_conversion_id)
     identity = "".join(f"{len(part)}:{part}" for part in parts)
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def test_click_archive_url_fields_migration_is_idempotent_and_preserves_existing_rows():
+    """既有归档表只增加 URL 列；重复执行不得改写历史记录。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS clicks_archive")
+            cursor.execute(
+                "CREATE TABLE clicks_archive ("
+                "id INT NOT NULL AUTO_INCREMENT, all_headers TEXT NULL, "
+                "PRIMARY KEY (id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            cursor.execute(
+                "INSERT INTO clicks_archive (all_headers) VALUES (%s)",
+                ('{"x-test":"kept"}',),
+            )
+
+            migration = "sql/migrations/20261122_click_archive_url_fields.sql"
+            _run_sql_file(cursor, migration)
+            _run_sql_file(cursor, migration)
+
+            original = _column_metadata(cursor, "clicks_archive", "original_request_url")
+            final = _column_metadata(cursor, "clicks_archive", "final_redirect_url")
+            assert original is not None and original[1].lower() == "text" and original[2] == "YES"
+            assert final is not None and final[1].lower() == "text" and final[2] == "YES"
+
+            cursor.execute(
+                "SELECT id, all_headers, original_request_url, final_redirect_url "
+                "FROM clicks_archive ORDER BY id"
+            )
+            assert cursor.fetchall() == ((1, '{"x-test":"kept"}', None, None),)
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS clicks_archive")
+        connection.close()
+
+
+def test_click_archive_url_fields_migration_skips_when_archive_table_is_absent():
+    """归档表尚未创建时 migration 应安全跳过，后续由服务完整 DDL 建表。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS clicks_archive")
+            _run_sql_file(cursor, "sql/migrations/20261122_click_archive_url_fields.sql")
+            cursor.execute("SHOW TABLES LIKE 'clicks_archive'")
+            assert cursor.fetchone() is None
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS clicks_archive")
+        connection.close()
 
 
 def test_pending_postback_pii_retention_migration_is_idempotent_and_preserves_history():
