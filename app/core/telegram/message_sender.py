@@ -22,7 +22,12 @@ from datetime import timedelta
 from urllib.parse import urlsplit
 from typing import Optional, List, Dict, Any
 
-from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH, validate_chat_id
+from app.core.telegram_utils import (
+    truncate_message,
+    MAX_TELEGRAM_MESSAGE_LENGTH,
+    validate_chat_id,
+    mask_telegram_chat_id,
+)
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -631,7 +636,8 @@ def send_telegram_message_result(
                         send_kwargs["parse_mode"] = parse_mode
                     _sync_bot_call(bot.send_message(**send_kwargs))
                     logger.info(
-                        f"已发送 Telegram 消息到：{chat_id}（尝试 {attempt + 1}/{MAX_RETRIES}）"
+                        "已发送 Telegram 消息到：%s（尝试 %s/%s）",
+                        mask_telegram_chat_id(chat_id), attempt + 1, MAX_RETRIES,
                     )
                     success = True
                     break
@@ -657,8 +663,8 @@ def send_telegram_message_result(
                             return False, last_error
                         if attempt < MAX_RETRIES - 1:
                             logger.warning(
-                                f"发送 Telegram 消息到 {chat_id} 触发限流，"
-                                f"{retry_after}秒后重试（{attempt + 1}/{MAX_RETRIES}）"
+                                "发送 Telegram 消息到 %s 触发限流，%s 秒后重试（%s/%s）",
+                                mask_telegram_chat_id(chat_id), retry_after, attempt + 1, MAX_RETRIES,
                             )
                             # 持锁睡眠 + 抖动：其它 worker 排队等互斥锁，避免同时撞 429
                             _refresh_send_mutex(mutex_token, retry_after + 60)
@@ -780,7 +786,10 @@ def send_telegram_message_with_buttons(
         return False, None
 
     if not chat_id or not validate_chat_id(str(chat_id).strip()):
-        logger.warning(f"无效的 Telegram Chat ID，无法发送带按钮消息: {chat_id!r}")
+        logger.warning(
+            "无效的 Telegram Chat ID，无法发送带按钮消息：%s",
+            mask_telegram_chat_id(chat_id),
+        )
         return False, None
 
     try:
@@ -811,8 +820,8 @@ def send_telegram_message_with_buttons(
                         send_kwargs["parse_mode"] = parse_mode
                     sent_message = _sync_bot_call(bot.send_message(**send_kwargs))
                     logger.info(
-                        f"已发送带按钮的 Telegram 消息到：{chat_id}"
-                        f"（尝试 {attempt + 1}/{MAX_RETRIES}）"
+                        "已发送带按钮的 Telegram 消息到：%s（尝试 %s/%s）",
+                        mask_telegram_chat_id(chat_id), attempt + 1, MAX_RETRIES,
                     )
                     return True, sent_message.message_id
 
@@ -831,8 +840,8 @@ def send_telegram_message_with_buttons(
                             return False, None
                         if attempt < MAX_RETRIES - 1:
                             logger.warning(
-                                f"发送带按钮的 Telegram 消息触发限流，"
-                                f"{retry_after}秒后重试（{attempt + 1}/{MAX_RETRIES}）"
+                                "发送带按钮的 Telegram 消息触发限流，%s 秒后重试（%s/%s）",
+                                retry_after, attempt + 1, MAX_RETRIES,
                             )
                             _refresh_send_mutex(mutex_token, retry_after + 60)
                             _sleep_with_jitter(retry_after, max_extra=2.0)
