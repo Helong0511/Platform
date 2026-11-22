@@ -103,27 +103,17 @@ async def _record_update_received(_update, _context) -> None:
     _last_update_received_at = time.time()
 
 
-def _instrument_get_updates(application) -> None:
-    """包装 Bot.get_updates，记录成功返回时间，不改变 PTB 内部重试策略。"""
-    bot = getattr(application, "bot", None)
-    original_get_updates = getattr(bot, "get_updates", None)
-    if not callable(original_get_updates):
-        logger.warning("Telegram polling Bot 不支持 get_updates 心跳包装")
-        return
+def _create_health_tracked_bot_class(base_bot_class):
+    """通过 Bot 子类记录 getUpdates 成功返回；PTB Bot 使用 __slots__，不能实例 monkeypatch。"""
 
-    async def tracked_get_updates(*args, **kwargs):
-        global _last_get_updates_success_at
-        result = await original_get_updates(*args, **kwargs)
-        _last_get_updates_success_at = time.time()
-        return result
+    class HealthTrackedBot(base_bot_class):
+        async def get_updates(self, *args, **kwargs):
+            global _last_get_updates_success_at
+            result = await super().get_updates(*args, **kwargs)
+            _last_get_updates_success_at = time.time()
+            return result
 
-    try:
-        bot.get_updates = tracked_get_updates
-    except (AttributeError, TypeError) as exc:
-        logger.warning(
-            "Telegram getUpdates 心跳包装失败；error_type=%s",
-            type(exc).__name__,
-        )
+    return HealthTrackedBot
 
 
 def _notify_supervisor_failure(reason: str) -> None:
@@ -162,8 +152,8 @@ def _polling_health_watchdog() -> None:
 
 
 def _build_polling_application(token: str):
-    """构建 PTB Application，并显式配置 getUpdates 独立连接超时。"""
-    from telegram.ext import Application
+    """构建带成功心跳的 PTB Application，并显式配置 getUpdates 独立连接超时。"""
+    from telegram.ext import Application, ExtBot
     from telegram.request import HTTPXRequest
 
     request = HTTPXRequest(
@@ -172,14 +162,21 @@ def _build_polling_application(token: str):
         write_timeout=60.0,
         pool_timeout=5.0,
     )
+    get_updates_request = HTTPXRequest(
+        connect_timeout=3.0,
+        read_timeout=POLLING_GET_UPDATES_READ_TIMEOUT_SECONDS,
+        write_timeout=60.0,
+        pool_timeout=5.0,
+    )
+    tracked_bot_class = _create_health_tracked_bot_class(ExtBot)
+    bot = tracked_bot_class(
+        token=token,
+        request=request,
+        get_updates_request=get_updates_request,
+    )
     return (
         Application.builder()
-        .token(token)
-        .request(request)
-        .get_updates_connect_timeout(3.0)
-        .get_updates_read_timeout(POLLING_GET_UPDATES_READ_TIMEOUT_SECONDS)
-        .get_updates_write_timeout(60.0)
-        .get_updates_pool_timeout(5.0)
+        .bot(bot)
         # APScheduler 是项目自身调度依赖；Telegram 未使用 PTB JobQueue，禁止自动创建额外调度器。
         .job_queue(None)
         .post_init(_post_init)
@@ -475,7 +472,6 @@ def _start_polling_with_lock(current_pid: int, token: str) -> bool:
         logger.warning(f"[PID:{current_pid}] 验证时发生错误，但继续启动；error_type={type(e).__name__}")
 
     application = _build_polling_application(token)
-    _instrument_get_updates(application)
     _handlers_registered = False
     register_handlers(application)
     application.add_error_handler(_on_error)
