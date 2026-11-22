@@ -82,7 +82,7 @@ Windows 本机如果没有启动 Redis，非白名单请求也会 fail-closed。
 - 清除设备广告 ID、操作系统/运营商、用户 IP、渠道 ID、Click ID/时间、原始 JSON、服务端请求 IP、Telegram 消息 ID/Chat ID。
 - 保留 `platform`、`conversion_id`、`event_name`、`dedupe_key`、金额/财务字段、状态、时间戳及记录 ID，以维持幂等去重、对账和审批审计关联。
 - `request_ip` 是非空列，清理时写空字符串；API/后台展示必须将空值视为“已按策略清理”，不得把空字符串解释为有效来源 IP。
-- 使用 `FOR UPDATE SKIP LOCKED`、按 `created_at,id` 排序、每批最多 1,000 条，避免多个 Scheduler Worker 重复争抢同一批记录。该语法会跳过已锁定行，适合队列式并发消费，不应被用于要求完整一致视图的普通业务查询。
+- 使用 `FOR UPDATE SKIP LOCKED`、按 `created_at,id` 排序、每日任务当前每次最多处理 200 条（服务接口允许配置 1–1,000 条），后续应监控积压并按数据库负载调整批量与执行频率，避免多个 Scheduler Worker 重复争抢同一批记录。该语法会跳过已锁定行，适合队列式并发消费，不应被用于要求完整一致视图的普通业务查询。
 - MySQL 官方明确指出 `NOWAIT/SKIP LOCKED` 对 statement-based replication 不安全；若生产启用 binlog/复制，部署前必须核验 `binlog_format=ROW`（或经 DBA 确认安全的 MIXED），不能使用纯 STATEMENT。
 - 每日 PII 任务独立执行此清理；第三方 Report 清理开关与待审批记录清理开关互不影响。
 
