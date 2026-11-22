@@ -653,8 +653,8 @@ def send_telegram_message_result(
                                 type(e).__name__,
                             )
                             last_error = "Telegram 限流等待超过当前请求预算，已停止提前重试"
-                            all_success = False
-                            break
+                            # 这是全局 backoff；不能继续向后续 chat 发送。
+                            return False, last_error
                         if attempt < MAX_RETRIES - 1:
                             logger.warning(
                                 f"发送 Telegram 消息到 {chat_id} 触发限流，"
