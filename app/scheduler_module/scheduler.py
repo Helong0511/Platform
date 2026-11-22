@@ -94,6 +94,7 @@ def _task_lock_timeout_seconds(task_name: str) -> int:
     """按任务最坏执行预算设置 DB 锁超时；Redis 锁额外保留 60 秒缓冲。"""
     if task_name in {
         "点击记录队列批量处理",
+        "点击记录归档",
         THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
     }:
         return 900
