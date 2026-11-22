@@ -86,32 +86,35 @@ def process_pending_conversion(
     chat_id: int,
     message_id: int,
     actor_telegram_user_id: int | None = None,
+    fallback_bot=None,
 ):
     """处理待确认转化记录（同步操作，在后台线程执行）。"""
     if action not in {"approve", "reject"}:
         logger.warning("拒绝未知 Telegram Postback 审批动作")
         return
 
-    from app.core.config import settings
-    from app.core.telegram.ptb_runtime import get_send_bot
-    from sqlalchemy import select as sync_select
-    from app.models.models import (
-        PendingPostbackConversion,
-        PostbackConversion,
-        Click,
-        TelegramPostbackApprovalAudit,
-    )
-    from app.core.tracking.click_token import resolve_click_from_token
-
-    token = getattr(settings, "TELEGRAM_TOKEN", None)
-    if not token:
-        logger.error("[回调查询处理器] TELEGRAM_TOKEN 未配置")
-        return
-    bot = get_send_bot(str(token).strip())
-
-    SessionLocal = get_sync_session_factory()
-
+    bot = fallback_bot
+    business_committed = False
     try:
+        from app.core.config import settings
+        from app.core.telegram.ptb_runtime import get_send_bot
+        from sqlalchemy import select as sync_select
+        from app.models.models import (
+            PendingPostbackConversion,
+            PostbackConversion,
+            Click,
+            TelegramPostbackApprovalAudit,
+        )
+        from app.core.tracking.click_token import resolve_click_from_token
+    
+        token = getattr(settings, "TELEGRAM_TOKEN", None)
+        if not token:
+            raise RuntimeError("Telegram token is not configured")
+        bot = get_send_bot(str(token).strip())
+    
+        SessionLocal = get_sync_session_factory()
+    
+    
         with SessionLocal() as db:
             result = db.execute(
                 build_pending_for_update_statement(
@@ -145,6 +148,7 @@ def process_pending_conversion(
                     new_status=None,
                 )
                 db.commit()
+                business_committed = True
                 try:
                     _api(
                         chat_id,
@@ -429,17 +433,34 @@ def process_pending_conversion(
                 logger.info(f"管理员拒绝了待确认转化记录：pending_id={pending_id}")
 
     except Exception as e:
-        logger.error("处理待确认转化记录失败：error_type=%s", type(e).__name__)
-        try:
-            _api(
-                chat_id,
-                bot.answer_callback_query(
-                    callback_query_id=callback_query_id,
-                    text="处理失败，请稍后重试",
-                ),
+        logger.error(
+            "处理 Telegram Postback 审批失败：pending_id=%s committed=%s error_type=%s",
+            pending_id,
+            business_committed,
+            type(e).__name__,
+        )
+        if bot is not None:
+            try:
+                # 已提交业务不能误报为审批失败；仅提示消息状态需要刷新。
+                final_text = (
+                    "审批已完成，但消息更新失败，请刷新记录状态"
+                    if business_committed
+                    else "处理失败，请稍后重试"
+                )
+                _api(
+                    chat_id,
+                    bot.answer_callback_query(
+                        callback_query_id=callback_query_id,
+                        text=final_text,
+                    ),
+                )
+            except Exception as err:
+                logger.warning("发送回调确认时出错：error_type=%s", type(err).__name__)
+        else:
+            logger.error(
+                "Telegram 审批初始化失败且没有可用 Bot 发送最终回调：pending_id=%s",
+                pending_id,
             )
-        except Exception as err:
-            logger.warning("发送回调确认时出错：error_type=%s", type(err).__name__)
 
 
 async def handle_postback_approval(update, context):
@@ -513,7 +534,7 @@ async def handle_postback_approval(update, context):
 
     thread = threading.Thread(
         target=process_pending_conversion,
-        args=(pending_id, action, callback_query_id, chat_id, message_id, user_id),
+        args=(pending_id, action, callback_query_id, chat_id, message_id, user_id, getattr(context, "bot", None)),
         daemon=True,
     )
     thread.start()
