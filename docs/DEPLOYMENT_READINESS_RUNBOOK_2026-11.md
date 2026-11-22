@@ -1522,3 +1522,4 @@ sudo systemctl restart Platform-scheduler.service
 - 正式 `postback_conversions` 的 raw_data、IP、设备 ID 仍未纳入该清理函数，需要单独定义业务与合规保留规则。
 - 两个新旧 PII 配置均保持默认关闭，只有业务/合规负责人书面批准后才能设置正整数。
 - SQL migration、真实 MySQL 大表 ALTER 锁影响、备份恢复和生产 Scheduler 多 Worker 演练仍需 CI/隔离环境/生产变更窗口分别验收。
+- MySQL 官方说明 `NOWAIT/SKIP LOCKED` 不适用于 statement-based replication；若生产使用 binlog/复制，部署前核验 `binlog_format`，要求 ROW 或经 DBA 评估的 MIXED，禁止纯 STATEMENT。
