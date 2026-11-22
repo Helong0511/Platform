@@ -251,7 +251,7 @@ def test_large_json_string_is_omitted_instead_of_truncated():
 
 
 def test_redacts_percent_encoded_json_with_utf8_bom():
-    raw_json = "\\ufeff" + json.dumps({
+    raw_json = "\ufeff" + json.dumps({
         "email": "bom@example.com",
         "click_id": "bom-click-preserved",
     }, separators=(",", ":"))
