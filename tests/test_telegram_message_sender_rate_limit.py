@@ -414,3 +414,91 @@ def test_send_message_with_buttons_does_not_retry_before_long_retry_after(monkey
     assert calls == ["send"]
     assert noted == [("123456789", 300)]
     assert released == ["mutex-token"]
+
+
+
+def test_chat_target_log_category_never_returns_raw_identifier():
+    assert ms._chat_target_type_for_log("-1001234567890") == "group_or_channel"
+    assert ms._chat_target_type_for_log("123456789") == "private_user"
+    assert ms._chat_target_type_for_log("@admin_channel") == "unknown"
+
+
+def test_send_message_logs_do_not_expose_chat_id(monkeypatch, caplog):
+    import logging
+    from types import SimpleNamespace
+
+    secret_chat_id = "-1001234567890"
+
+    class _FakeBot:
+        def send_message(self, **_kwargs):
+            return object()
+
+    monkeypatch.setattr(ms, "settings", SimpleNamespace(TELEGRAM_ENABLE=True))
+    monkeypatch.setattr(ms, "_check_bot_available", lambda: (True, "ok"))
+    monkeypatch.setattr(ms, "_get_send_bot", lambda: _FakeBot())
+    monkeypatch.setattr(ms, "_acquire_send_mutex", lambda: "mutex-token")
+    monkeypatch.setattr(ms, "_wait_before_send", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(ms, "_sync_bot_call", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(ms, "_release_send_mutex", lambda _token: None)
+
+    with caplog.at_level(logging.INFO, logger=ms.logger.name):
+        ok, _error = ms.send_telegram_message_result(secret_chat_id, "test")
+
+    assert ok is True
+    assert secret_chat_id not in caplog.text
+    assert "target_type=group_or_channel" in caplog.text
+
+
+def test_button_message_logs_do_not_expose_chat_id(monkeypatch, caplog):
+    import logging
+    from types import SimpleNamespace
+    from app.core.telegram import ptb_runtime
+
+    secret_chat_id = "-1009876543210"
+
+    class _FakeBot:
+        def send_message(self, **_kwargs):
+            return object()
+
+    monkeypatch.setattr(ms, "_check_bot_available", lambda: (True, "ok"))
+    monkeypatch.setattr(ms, "_get_send_bot", lambda: _FakeBot())
+    monkeypatch.setattr(ptb_runtime, "build_inline_keyboard", lambda _buttons: "markup")
+    monkeypatch.setattr(ms, "_acquire_send_mutex", lambda: "mutex-token")
+    monkeypatch.setattr(ms, "_wait_before_send", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        ms,
+        "_sync_bot_call",
+        lambda *_args, **_kwargs: SimpleNamespace(message_id=123),
+    )
+    monkeypatch.setattr(ms, "_release_send_mutex", lambda _token: None)
+
+    with caplog.at_level(logging.INFO, logger=ms.logger.name):
+        ok, message_id = ms.send_telegram_message_with_buttons(
+            secret_chat_id,
+            "test",
+            [[{"text": "Approve", "callback_data": "approve_1"}]],
+        )
+
+    assert ok is True
+    assert message_id == 123
+    assert secret_chat_id not in caplog.text
+    assert "target_type=group_or_channel" in caplog.text
+
+
+def test_invalid_button_chat_id_is_not_written_to_logs(monkeypatch, caplog):
+    import logging
+
+    secret_invalid_id = "private-chat-id-do-not-log"
+    monkeypatch.setattr(ms, "_check_bot_available", lambda: (True, "ok"))
+
+    with caplog.at_level(logging.WARNING, logger=ms.logger.name):
+        ok, message_id = ms.send_telegram_message_with_buttons(
+            secret_invalid_id,
+            "test",
+            [[{"text": "Approve", "callback_data": "approve_1"}]],
+        )
+
+    assert ok is False
+    assert message_id is None
+    assert secret_invalid_id not in caplog.text
+    assert "target_type=unknown" in caplog.text
