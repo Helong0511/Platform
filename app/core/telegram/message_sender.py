@@ -28,6 +28,15 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _chat_target_type_for_log(chat_id: Any) -> str:
+    """只记录目标类型，不把 Telegram 用户/群组 ID 写入应用日志。"""
+    try:
+        numeric_chat_id = int(str(chat_id).strip())
+    except (TypeError, ValueError):
+        return "unknown"
+    return "group_or_channel" if numeric_chat_id < 0 else "private_user"
+
+
 def is_telegram_enabled() -> bool:
     """全局开关：TELEGRAM_ENABLE=false 时关闭轮询、发送、告警等全部 Telegram 能力。"""
     return bool(getattr(settings, "TELEGRAM_ENABLE", True))
@@ -631,7 +640,10 @@ def send_telegram_message_result(
                         send_kwargs["parse_mode"] = parse_mode
                     _sync_bot_call(bot.send_message(**send_kwargs))
                     logger.info(
-                        f"已发送 Telegram 消息到：{chat_id}（尝试 {attempt + 1}/{MAX_RETRIES}）"
+                        "已发送 Telegram 消息；target_type=%s（尝试 %s/%s）",
+                        _chat_target_type_for_log(chat_id),
+                        attempt + 1,
+                        MAX_RETRIES,
                     )
                     success = True
                     break
@@ -657,8 +669,11 @@ def send_telegram_message_result(
                             return False, last_error
                         if attempt < MAX_RETRIES - 1:
                             logger.warning(
-                                f"发送 Telegram 消息到 {chat_id} 触发限流，"
-                                f"{retry_after}秒后重试（{attempt + 1}/{MAX_RETRIES}）"
+                                "Telegram 消息触发限流；target_type=%s，%s 秒后重试（尝试 %s/%s）",
+                                _chat_target_type_for_log(chat_id),
+                                retry_after,
+                                attempt + 1,
+                                MAX_RETRIES,
                             )
                             # 持锁睡眠 + 抖动：其它 worker 排队等互斥锁，避免同时撞 429
                             _refresh_send_mutex(mutex_token, retry_after + 60)
@@ -780,7 +795,10 @@ def send_telegram_message_with_buttons(
         return False, None
 
     if not chat_id or not validate_chat_id(str(chat_id).strip()):
-        logger.warning(f"无效的 Telegram Chat ID，无法发送带按钮消息: {chat_id!r}")
+        logger.warning(
+            "无效的 Telegram Chat ID，无法发送带按钮消息；target_type=%s",
+            _chat_target_type_for_log(chat_id),
+        )
         return False, None
 
     try:
@@ -811,8 +829,10 @@ def send_telegram_message_with_buttons(
                         send_kwargs["parse_mode"] = parse_mode
                     sent_message = _sync_bot_call(bot.send_message(**send_kwargs))
                     logger.info(
-                        f"已发送带按钮的 Telegram 消息到：{chat_id}"
-                        f"（尝试 {attempt + 1}/{MAX_RETRIES}）"
+                        "已发送带按钮的 Telegram 消息；target_type=%s（尝试 %s/%s）",
+                        _chat_target_type_for_log(chat_id),
+                        attempt + 1,
+                        MAX_RETRIES,
                     )
                     return True, sent_message.message_id
 
