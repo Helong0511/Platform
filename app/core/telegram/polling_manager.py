@@ -199,7 +199,8 @@ def register_handlers(application) -> None:
         logger.info("处理器已注册，跳过重复注册")
         return
 
-    from telegram.ext import CallbackQueryHandler, CommandHandler
+    from telegram import Update
+    from telegram.ext import CallbackQueryHandler, CommandHandler, TypeHandler
     from app.core.telegram.command_handlers.id_command import get_chat_id
     from app.core.telegram.command_handlers.start_command import cmd_start
     from app.core.telegram.command_handlers.help_command import cmd_help
@@ -208,6 +209,8 @@ def register_handlers(application) -> None:
     from app.core.telegram.callback_handlers.stats_callbacks import handle_stats_callbacks
     from app.core.telegram.callback_handlers.postback_approval import handle_postback_approval
 
+    # 负 group 仅记录 Update 心跳；不抢占默认 group 中的业务 Handler。
+    application.add_handler(TypeHandler(Update, _record_update_received), group=-1)
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("help", cmd_help))
     application.add_handler(CommandHandler("id", get_chat_id))
