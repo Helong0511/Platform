@@ -175,6 +175,7 @@ class PostbackPendingService:
             )
 
             for pending in pending_list:
+                pending_id = pending.id
                 row_outcome = None
                 row_conversion_id = None
                 previous_status = pending.status
@@ -196,7 +197,7 @@ class PostbackPendingService:
 
                         add_postback_approval_audit(
                             db,
-                            pending_conversion_id=pending.id,
+                            pending_conversion_id=pending_id,
                             conversion_id=row_conversion_id,
                             actor_type="system_user",
                             actor_id=current_user.id,
@@ -214,7 +215,7 @@ class PostbackPendingService:
                         result["skipped_count"] += 1
                     elif row_outcome == "approved":
                         result["approved_count"] += 1
-                        result["approved_ids"].append(pending.id)
+                        result["approved_ids"].append(pending_id)
                 except Exception as row_error:
                     # SAVEPOINT 回滚后若外层事务也已失效，不能继续处理后续记录。
                     if not db.is_active:
@@ -222,7 +223,7 @@ class PostbackPendingService:
                     result["failed_count"] += 1
                     logger.warning(
                         "自动批准待确认记录失败: pending_id=%s error_type=%s",
-                        pending.id,
+                        pending_id,
                         type(row_error).__name__,
                     )
 
