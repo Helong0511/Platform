@@ -1427,3 +1427,52 @@ sudo systemctl restart Platform-scheduler.service
 - Redis Scheduler 锁是有限 TTL，MySQL Scheduler 锁也是时间租约；任务超过租约后旧 Worker 可能继续运行。Outbox 等有外部副作用的任务必须另有自己的 lease token/fencing 与幂等键。
 - Outbox 单批网络预算上限按 549 秒估算（3 条 × 每条 3 次 60 秒请求 + 3 秒退避），900 秒 MySQL 锁和 960 秒 Redis TTL 只提供理论余量，不代表数据库/生产环境压测结果。
 - 详见 `docs/OUTBOX_SCHEDULER_LOCK_BUDGET_AUDIT_2026-11-19.md` 第 38 节。
+
+
+## 39. 2026-11-22：公开仓库敏感文件路径与历史提交盘点
+
+本节只记录文件路径、Git 元数据和处置要求；审计过程没有读取、复制或输出任何私钥、服务账号 JSON、数据库密码或 Token 的内容。
+
+### 39.1 当前 main Git Tree 盘点
+
+2026-11-22 对 main 的递归 Git Tree 核验结果：
+
+| 路径 | 当前是否跟踪 | 处理判断 |
+|---|---:|---|
+| keys/private_key.pem | 是 | JWT RS256 私钥，必须轮换后移除 Git 跟踪 |
+| nginx/btfrx.online/client.btfrx.online.key | 是 | TLS 私钥，必须核验线上证书指纹并轮换后移除 Git 跟踪 |
+| secrets/gam-23347342743.json | 是 | GAM 服务账号私钥凭据，必须吊销/轮换并迁移到仓库外 |
+| secrets/gam-23348711678.json | 是 | GAM 服务账号私钥凭据，必须吊销/轮换并迁移到仓库外 |
+| nginx/btfrx.online/client.btfrx.online_bundle.pem | 是 | PEM 首行类型为 BEGIN CERTIFICATE，属于证书链材料，不是私钥；仍应确认是否已过期及是否被 Nginx 实际引用 |
+| keys/public_key.pem | 是 | 公钥文件，不属于私钥泄露；轮换 JWT 密钥对时必须同步替换 |
+| .env.example | 是 | 模板文件；继续确保只含占位值，不得放真实凭据 |
+| .env | 否 | 当前 Tree 不跟踪，但历史路径仍需清理 |
+
+### 39.2 Git 历史元数据核验
+
+按 GitHub commits-by-path 元数据统计（仅统计路径关联提交，不读取文件内容）：
+
+| 路径 | 路径关联提交数 | 最早提交日期（UTC） | 最近提交日期（UTC） |
+|---|---:|---|---|
+| keys/private_key.pem | 5 | 2026-06-10 | 2026-08-10 |
+| nginx/btfrx.online/client.btfrx.online.key | 10 | 2025-11-26 | 2026-08-10 |
+| secrets/gam-23347342743.json | 5 | 2026-07-03 | 2026-08-10 |
+| secrets/gam-23348711678.json | 5 | 2026-07-03 | 2026-08-10 |
+| .env | 66 | 2026-03-14 | 2026-11-18 |
+
+说明：路径关联提交数不等于每个提交都包含相同的有效秘密，也不代表凭据只在这些提交出现；这是确定需要进一步历史扫描的最低证据。.env 在当前 main Tree 中已不存在，但路径历史仍有 66 个关联提交，不能把“当前文件已删除”误判为“Git 历史已清除”。
+
+### 39.3 强制处置顺序
+
+1. **先吊销/轮换**：JWT RSA 私钥、公网 TLS 私钥、两个 GAM 服务账号密钥分别由其服务/云端所有者轮换；旧凭据必须确认已失效。仅在 Git 删除文件不构成泄露处置。
+2. **先迁移再删文件**：JWT 使用仓库外只读密钥路径；GAM 使用受控 GAM_SECRETS_DIR；TLS 使用 Certbot/目标主机证书路径。先在目标环境验证 Backend、Scheduler、GAM 拉数和 HTTPS 握手。
+3. **再移除当前 Tree 跟踪**：独立 PR 删除已轮换的私钥文件和 GAM JSON，保留证书链/公钥等确有用途的公开材料；同步检查部署脚本、Nginx/systemd 配置和测试夹具。
+4. **最后清理历史**：在轮换完成后使用经过复核的历史重写方案清理所有受影响 ref；清理分支、Tag、PR 引用、Release/Actions artifacts，并要求所有部署机和开发者重新克隆。历史重写需要协调 force-push 和备份，不得在轮换前执行。
+5. **复验**：对当前 Tree、所有 refs、Git 历史、GitHub Actions 日志/Artifacts、Fork 和部署副本执行只输出路径/命中类型的秘密扫描；不得在报告中回显命中值。
+
+### 39.4 当前上线结论
+
+- 上述四份真实私钥/凭据文件仍在公开仓库 main Tree 中跟踪；这是 P0 上线阻断项。
+- .env 当前已从 Tree 移除，但历史路径尚未清理。
+- 本轮未读取任何密钥内容、未访问云端密钥管理系统、未轮换/吊销任何凭据、未修改生产主机，也未重写 Git 历史。
+- 在服务所有者完成轮换、仓库外注入、线上验证和历史清理之前，不得将凭据风险标记为已解决，也不得宣称系统可安全上线。
