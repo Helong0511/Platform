@@ -356,6 +356,8 @@ CREATE TABLE IF NOT EXISTS `clicks_archive`  (
   `device_model` VARCHAR(100) NULL DEFAULT NULL COMMENT '设备型号',
   `url_params` TEXT NULL COMMENT 'URL参数（JSON格式）',
   `all_headers` TEXT NULL COMMENT '所有请求头（JSON格式）',
+  `original_request_url` TEXT NULL COMMENT '原始点击URL（用户访问的短链接URL）',
+  `final_redirect_url` TEXT NULL COMMENT '最终跳转URL（系统重定向后的URL）',
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_click_id`(`click_id` ASC) USING BTREE,
   INDEX `idx_offer_id`(`offer_id` ASC) USING BTREE,
