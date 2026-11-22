@@ -4,6 +4,7 @@ from fastapi import APIRouter, Query, Depends, Request, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit_log import log_update, commit_audit_log
+from app.api_v1.postback.audit import audit_postback_pii_read
 from app.core.database import get_db
 from app.core.security import require_admin
 from app.models.models import User
@@ -11,33 +12,6 @@ from app.models.models import User
 from ..handlers import conversion_handler, stats_handler, duplicate_handler
 
 router = APIRouter()
-
-async def _audit_postback_pii_read(
-    *,
-    db: AsyncSession,
-    current_user: User,
-    request: Request,
-    resource_name: str,
-    details: dict,
-) -> None:
-    """记录管理员读取 Postback 敏感数据的审计事件；审计写入失败时拒绝返回数据。"""
-    await log_user_action(
-        db=db,
-        action_type="API_ACCESS",
-        user=current_user,
-        resource_type="POSTBACK_PII_ACCESS",
-        resource_name=resource_name,
-        request_method=request.method,
-        request_path=request.url.path,
-        status_code=200,
-        success=True,
-        details=details,
-        strict=True,
-    )
-    await commit_audit_log(db)
-
-
-
 
 @router.get("/postback/conversions", summary="查询 PostBack 转化记录（管理员，已融合转化日志功能）")
 async def get_postback_conversions(
@@ -63,7 +37,7 @@ async def get_postback_conversions(
         click_id, offer_id, publisher_id, advertiser_id, conversion_status,
         start_date, end_date, page, page_size, db, current_user,
     )
-    await _audit_postback_pii_read(
+    await audit_postback_pii_read(
         db=db,
         current_user=current_user,
         request=request,
@@ -109,7 +83,7 @@ async def get_postback_stats(
         db=db,
         current_user=current_user,
     )
-    await _audit_postback_pii_read(
+    await audit_postback_pii_read(
         db=db,
         current_user=current_user,
         request=request,
@@ -164,7 +138,7 @@ async def check_duplicate_conversions(
     result = await duplicate_handler.check_duplicate_conversions(
         platform, conversion_id, db, current_user,
     )
-    await _audit_postback_pii_read(
+    await audit_postback_pii_read(
         db=db,
         current_user=current_user,
         request=request,
