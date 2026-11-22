@@ -50,7 +50,7 @@
 
 除 `/send` 与 `/test` 外，`/status` 同步调用状态探测，`/diagnostic` 和 `/reset_webhook` 也直接调用同步 `run_on_send_loop`。这些同步等待都可能阻塞 ASGI 事件循环。
 
-新增 `run_on_send_loop_async`，通过工作线程等待发送 loop；状态探测也通过 `asyncio.to_thread` 执行。管理路由中的 Telegram API 网络等待均改为异步等待，不在请求事件循环中直接执行同步等待。异步 `send_admin_notification` 也改为 await 异步发送器；应用关闭阶段的服务停止通知移至工作线程，避免 lifespan 事件循环被同步网络发送阻塞。
+新增 `run_on_send_loop_async`，通过工作线程等待发送 loop；状态探测也通过 `asyncio.to_thread` 执行。管理路由中的 Telegram API 网络等待均改为异步等待，不在请求事件循环中直接执行同步等待。异步 `send_admin_notification` 也改为 await 异步发送器；应用关闭阶段的服务停止通知移至工作线程，避免 lifespan 事件循环被同步网络发送阻塞。BFT fire-and-forget 通知增加 task done callback，发送返回 False 或抛出异常时记录安全的 error_type 日志。
 
 `POST /telegram/send` 与 `POST /telegram/test` 是异步路由，但此前直接调用同步发送函数。同步发送会通过线程安全事件循环等待网络请求，并可能执行多轮退避与重试；直接在 async 路由中调用会占住当前 FastAPI 事件循环。
 
@@ -75,6 +75,10 @@
 4. Telegram 发送请求超时存在“服务端已接收但客户端未收到响应”的不确定窗口；Bot API sendMessage 没有通用幂等键，通知语义仍是 best effort，不能宣称 exactly-once。
 5. 当前 requirements.txt 固定直接依赖，但没有完整锁定所有传递依赖的 lockfile/hash。两条 Python CI workflow 已加入 `python -m pip check`，用于阻止已安装依赖元数据冲突；生产构建仍应记录实际解析结果，并逐步建立可复现的依赖锁定/制品校验流程。
 6. `/id` 会在聊天消息中显示 Chat ID 和 User ID，这是命令本身的用途；应确保 Bot 仅在预期私聊/群组中使用，避免把命令消息转发到公开频道。
+7. BFT 通知仍使用 request-scoped fire-and-forget task，没有持久化队列或 shutdown drain；高峰期可能积累任务，worker 重启时也可能取消未完成通知。通知不得作为转化入库/回调成功的前置条件；后续如需可靠送达，应建设有界队列、限流、重试与可观测的通知 outbox。
+8. `send_telegram_message_async` 使用默认线程池执行同步兼容发送器；高并发突发时多个通知可能占用线程等待 Redis 发送锁。若通知量明显增长，应改为有界的单消费者/多消费者发送队列，而不是继续增加线程数。
+9. Telegram Bot API 的 `sendMessage` 没有通用幂等键；网络超时可能发生在 Telegram 已接收消息但客户端未收到响应之后，自动重试可能重复通知。当前只能 best effort，不能承诺 exactly-once。
+10. 发送专用事件循环和 Bot HTTPX client 当前没有独立的 lifespan shutdown/close 流程；进程退出会回收资源，但优雅停机时应补齐 task drain、Bot.shutdown、loop.stop/join。
 
 ## 验收
 
