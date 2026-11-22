@@ -298,5 +298,5 @@ async def check_cap_consistency_api(
             logger.exception("记录 Cap 一致性检查失败审计日志时发生异常")
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"检查Cap计数一致性失败: {str(e)}",
+            detail="检查Cap计数一致性失败，请稍后重试或联系系统管理员。",
         )
