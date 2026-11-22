@@ -58,7 +58,7 @@ async def test_cap_consistency_api_redacts_internal_exception_details(monkeypatc
     # 使用真实审计写入边界，验证凭据在持久化前被脱敏。
     assert len(db.records) == 1
     assert db.records[0].success is False
-    assert db.records[0].error_message == "redis://internal-host:6379 password=[REDACTED]"
+    assert db.records[0].error_message == "异常类型：RuntimeError"
     assert secret_detail not in db.records[0].error_message
 
     # 日志不得输出原始异常消息或异常堆栈中的凭据。
