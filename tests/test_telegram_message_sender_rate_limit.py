@@ -345,8 +345,11 @@ def test_note_rate_limited_preserves_server_retry_after_above_inline_budget(monk
     calls = []
 
     class _FakeRedis:
-        def setex(self, key, seconds, value):
+        def eval(self, script, numkeys, key, seconds, value):
+            assert script == ms._UPDATE_BACKOFF_MAX_TTL_LUA
+            assert numkeys == 1
             calls.append((key, seconds, value))
+            return int(seconds) * 1000
 
     monkeypatch.setattr(ms, "_get_sync_redis", lambda: _FakeRedis())
 
