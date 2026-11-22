@@ -393,14 +393,13 @@ def restart_bot_thread(
 
     stopped = stop_polling_application(timeout=stop_timeout)
 
-    bot_thread = next(
-        (thread for thread in threading.enumerate() if thread.name == "TelegramBot"),
-        None,
-    )
-    thread_joined = True
-    if bot_thread is not None and bot_thread.is_alive():
-        bot_thread.join(timeout=join_timeout)
-        thread_joined = not bot_thread.is_alive()
+    bot_threads = [
+        thread for thread in threading.enumerate() if thread.name == "TelegramBot"
+    ]
+    for bot_thread in bot_threads:
+        if bot_thread.is_alive():
+            bot_thread.join(timeout=join_timeout)
+    thread_joined = all(not thread.is_alive() for thread in bot_threads)
 
     if not thread_joined:
         logger.error(
