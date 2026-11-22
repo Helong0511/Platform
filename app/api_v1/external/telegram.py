@@ -5,6 +5,7 @@
 - 测试连接。
 
 说明：对外开放接口，含客户 API（密钥+签名鉴权）与 Telegram 管理。"""
+import asyncio
 import logging
 import threading
 from typing import Optional, List
@@ -108,7 +109,7 @@ async def get_bot_status(
     try:
 
         # 获取详细状态信息
-        status_info = get_bot_status_info()
+        status_info = await asyncio.to_thread(get_bot_status_info)
 
         token_configured = status_info.get("token_configured", False)
         admin_configured = status_info.get("admin_configured", False)
@@ -377,7 +378,7 @@ async def diagnostic_bot(
         from app.core.telegram.ptb_runtime import (
             count_application_handlers,
             get_send_bot,
-            run_on_send_loop,
+            run_on_send_loop_async,
         )
 
         send_bot = get_send_bot(str(token).strip())
@@ -386,7 +387,7 @@ async def diagnostic_bot(
         webhook_url = None
         # ---------- 异常处理 ----------
         try:
-            webhook_info = run_on_send_loop(send_bot.get_webhook_info(), timeout=15.0)
+            webhook_info = await run_on_send_loop_async(send_bot.get_webhook_info(), timeout=15.0)
             webhook_url = webhook_info.url if webhook_info.url else None
             # ---------- 条件分支 ----------
             if webhook_url:
@@ -407,7 +408,7 @@ async def diagnostic_bot(
         connection_test = "未测试"
         # ---------- 异常处理 ----------
         try:
-            bot_info = run_on_send_loop(send_bot.get_me(), timeout=15.0)
+            bot_info = await run_on_send_loop_async(send_bot.get_me(), timeout=15.0)
             connection_test = f"成功: @{bot_info.username} (ID: {bot_info.id})"
         except Exception as e:
             connection_test = "失败：请检查 Bot 配置和网络连接"
@@ -480,18 +481,18 @@ async def reset_webhook(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE
             )
 
-        from app.core.telegram.ptb_runtime import get_send_bot, run_on_send_loop
+        from app.core.telegram.ptb_runtime import get_send_bot, run_on_send_loop_async
 
         send_bot = get_send_bot(str(token).strip())
 
         # 删除 webhook
-        run_on_send_loop(
+        await run_on_send_loop_async(
             send_bot.delete_webhook(drop_pending_updates=True),
             timeout=20.0,
         )
 
         # 检查确认
-        webhook_info = run_on_send_loop(send_bot.get_webhook_info(), timeout=15.0)
+        webhook_info = await run_on_send_loop_async(send_bot.get_webhook_info(), timeout=15.0)
 
         # ---------- 条件分支 ----------
         if webhook_info.url:
