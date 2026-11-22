@@ -39,6 +39,7 @@ BASE_RETRY_DELAY = 2  # 基础重试延迟（秒）
 TIMEOUT_SECONDS = 30  # 超时时间（秒），适当增大避免网络波动导致误判
 # 同 Chat 约 1 条/秒；多 Chat 批量发送时也按此间隔错开
 MIN_SEND_INTERVAL = 1.1
+MIN_GROUP_SEND_INTERVAL = 3.1  # Telegram 群组每分钟最多约 20 条消息
 INTER_CHAT_DELAY = 1.1
 # 全局（跨 Chat）最小间隔（互斥锁内再节流）
 MIN_GLOBAL_SEND_INTERVAL = 0.2
@@ -72,7 +73,7 @@ def estimate_telegram_send_timeout_seconds(chat_count: int = 1) -> float:
     per_chat = (
         TIMEOUT_SECONDS * MAX_RETRIES
         + MAX_RATE_LIMIT_WAIT * (MAX_RETRIES - 1)
-        + MIN_SEND_INTERVAL * 2
+        + max(MIN_SEND_INTERVAL, MIN_GROUP_SEND_INTERVAL) * 2
     )
     return float(per_chat * n + INTER_CHAT_DELAY * n + 30.0)
 
@@ -368,6 +369,16 @@ def _release_send_mutex(token: Optional[str]) -> None:
         _mark_sync_redis_failed()
 
 
+def _chat_send_interval(chat_id: Optional[str]) -> float:
+    """私聊按约 1 条/秒；负数 Chat ID（群组/超级群组/频道）按 20 条/分钟保守限速。"""
+    try:
+        if chat_id is not None and int(str(chat_id).strip()) < 0:
+            return MIN_GROUP_SEND_INTERVAL
+    except (TypeError, ValueError):
+        pass
+    return MIN_SEND_INTERVAL
+
+
 def _wait_before_send(chat_id: Optional[str] = None) -> None:
     """
     发送前限速：进程内串行 +（可选）Redis 跨进程 per-chat/全局闸门与 429 共享退避。
@@ -376,6 +387,7 @@ def _wait_before_send(chat_id: Optional[str] = None) -> None:
     """
     global _last_send_monotonic
     chat_key = (str(chat_id).strip() if chat_id else "__default__") or "__default__"
+    chat_interval = _chat_send_interval(chat_id)
     deadline = time.monotonic() + max(MAX_RATE_LIMIT_WAIT * 2, 30.0)
 
     while time.monotonic() < deadline:
@@ -404,7 +416,7 @@ def _wait_before_send(chat_id: Optional[str] = None) -> None:
                 elif not _try_acquire_redis_gate(
                     redis_client,
                     _REDIS_GATE_CHAT.format(chat_id=chat_key),
-                    MIN_SEND_INTERVAL,
+                    chat_interval,
                 ):
                     wait = _redis_wait_seconds(
                         redis_client,
@@ -429,8 +441,8 @@ def _wait_before_send(chat_id: Optional[str] = None) -> None:
 
             last_chat = _last_send_by_chat.get(chat_key, 0.0)
             elapsed_chat = now - last_chat
-            if elapsed_chat < MIN_SEND_INTERVAL:
-                time.sleep(MIN_SEND_INTERVAL - elapsed_chat)
+            if elapsed_chat < chat_interval:
+                time.sleep(chat_interval - elapsed_chat)
                 now = time.monotonic()
 
             _last_send_monotonic = now
