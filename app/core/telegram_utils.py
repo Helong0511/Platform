@@ -234,6 +234,30 @@ def validate_chat_id(chat_id: Union[str, int]) -> bool:
         return chat_id.isdigit()
 
 
+def mask_telegram_chat_id(chat_id: Any) -> str:
+    """对日志/审计记录中的 Telegram Chat ID 脱敏；支持逗号分隔的多个 ID。"""
+    if chat_id is None:
+        return "[未提供]"
+
+    masked_ids = []
+    for item in str(chat_id).split(","):
+        raw = item.strip()
+        if not validate_chat_id(raw):
+            masked_ids.append("[已隐藏]" if raw else "[未提供]")
+            continue
+
+        sign = "-" if raw.startswith("-") else ""
+        digits = raw[1:] if sign else raw
+        if len(digits) <= 4:
+            masked_ids.append(sign + ("*" * len(digits)))
+        elif sign and digits.startswith("100"):
+            masked_ids.append(f"-100****{digits[-4:]}")
+        else:
+            masked_ids.append(f"{sign}{digits[:2]}***{digits[-4:]}")
+
+    return ",".join(masked_ids)
+
+
 def parse_chat_id(chat_id: Union[str, int]) -> Optional[int]:
     """
     解析 Chat ID 为整数
