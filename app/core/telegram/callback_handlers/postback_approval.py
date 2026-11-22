@@ -176,6 +176,7 @@ def process_pending_conversion(
                     telegram_callback_query_id=callback_query_id,
                 )
                 db.commit()
+                business_committed = True
                 try:
                     _api(
                         chat_id,
@@ -203,6 +204,7 @@ def process_pending_conversion(
                     telegram_callback_query_id=callback_query_id,
                 )
                 db.commit()
+                business_committed = True
                 try:
                     _api(
                         chat_id,
@@ -245,6 +247,7 @@ def process_pending_conversion(
                         telegram_callback_query_id=callback_query_id,
                     )
                     db.commit()
+                    business_committed = True
                     try:
                         _api(
                             chat_id,
@@ -350,6 +353,7 @@ def process_pending_conversion(
                     telegram_callback_query_id=callback_query_id,
                 )
                 db.commit()
+                business_committed = True
                 db.refresh(conversion)
 
                 try:
@@ -402,7 +406,7 @@ def process_pending_conversion(
                     telegram_callback_query_id=callback_query_id,
                 )
                 db.commit()
-
+                business_committed = True
                 try:
                     _api(
                         chat_id,
