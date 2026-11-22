@@ -218,3 +218,31 @@ def test_preserves_non_sensitive_percent_encoded_business_values():
     result = sanitize_postback_raw_data({"click_id": original})
 
     assert result["click_id"] == original
+
+
+
+def test_redacts_url_encoded_json_nested_inside_outer_json_string():
+    inner = json.dumps({
+        "email": "nested-encoded@example.com",
+        "click_id": "nested-click-preserved",
+    }, separators=(",", ":"))
+    outer = json.dumps({
+        "payload": quote(inner, safe=""),
+        "event_name": "purchase",
+    }, separators=(",", ":"))
+
+    result = sanitize_postback_raw_data(outer)
+    decoded_outer = json.loads(result)
+    decoded_inner = json.loads(decoded_outer["payload"])
+
+    assert decoded_outer["event_name"] == "purchase"
+    assert decoded_inner == {"click_id": "nested-click-preserved"}
+    assert "nested-encoded@example.com" not in result
+
+
+def test_large_json_string_is_omitted_instead_of_truncated():
+    raw = json.dumps({"event_name": "x" * 5000})
+
+    result = sanitize_postback_raw_data(raw)
+
+    assert result == "[structured payload omitted: exceeds string limit]"
