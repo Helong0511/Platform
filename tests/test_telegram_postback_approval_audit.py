@@ -413,6 +413,8 @@ def test_telegram_approval_session_factory_failure_returns_final_callback(monkey
             delivered.append(kwargs)
             return object()
 
+    from app.core.telegram import ptb_runtime
+    monkeypatch.setattr(ptb_runtime, "get_send_bot", lambda *_args, **_kwargs: FakeBot())
     monkeypatch.setattr(
         handler,
         "get_sync_session_factory",
