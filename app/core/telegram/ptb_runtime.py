@@ -35,9 +35,12 @@ _send_loop: Optional[asyncio.AbstractEventLoop] = None
 _send_thread: Optional[threading.Thread] = None
 _send_bot: Any = None
 _send_bot_token: Optional[str] = None
-# 启动 loop 用短锁；Bot 创建用独立锁，禁止在持锁时 future.result()（会死锁）
+# 事件循环启动锁只保护线程创建；Bot 缓存锁只保护引用读写。
+# Bot 重建锁串行化“旧实例关闭 -> 新实例创建 -> 缓存发布”整个生命周期；
+# 不持有缓存锁等待 future.result()，避免把慢网络操作放进短临界区。
 _loop_start_lock = threading.Lock()
 _send_bot_lock = threading.Lock()
+_send_bot_rebuild_lock = threading.Lock()
 _SEND_LOOP_READY = threading.Event()
 
 # 发送 Bot 是进程级单例，所有调用方必须共享一致的 HTTPX 超时配置。
@@ -119,53 +122,49 @@ def get_send_bot(token: str):
     """
     获取（或重建）发送专用 Bot 实例，绑定在发送 loop 上。
 
-    发送 Bot 是按 Token 缓存的进程级单例，因此使用统一的 3s connect / 30s read
-    超时；不要让先创建实例的诊断调用把正式发送超时缩短。
-    注意：不得在持有锁时调用 run_on_send_loop（会与 ensure_send_loop 死锁）。
+    重建锁串行化旧 Bot shutdown、新 Bot 创建和缓存发布，避免不同 Token 的
+    并发调用互相关闭/覆盖实例。缓存锁只用于短暂读写，不跨越网络等待。
     """
     global _send_bot, _send_bot_token
     if not token or not str(token).strip():
         raise ValueError("Telegram token 为空")
     token = token.strip()
 
-    with _send_bot_lock:
-        if _send_bot is not None and _send_bot_token == token:
-            return _send_bot
-        old_bot = _send_bot
+    with _send_bot_rebuild_lock:
+        with _send_bot_lock:
+            if _send_bot is not None and _send_bot_token == token:
+                return _send_bot
+            old_bot = _send_bot
+            # 先解除旧缓存引用；即使新实例构建失败，也不会把已 shutdown 的 Bot
+            # 继续作为可用实例返回给后续调用。
+            _send_bot = None
+            _send_bot_token = None
 
-    async def _build():
-        if old_bot is not None:
-            try:
-                await old_bot.shutdown()
-            except Exception as exc:
-                logger.debug("关闭旧发送 Bot 失败（可忽略）；error_type=%s", type(exc).__name__)
-        return await _create_send_bot(token)
-
-    new_bot = run_on_send_loop(
-        _build(),
-        timeout=max(
-            10.0,
-            SEND_BOT_CONNECT_TIMEOUT_SECONDS + SEND_BOT_READ_TIMEOUT_SECONDS + 7.0,
-        ),
-    )
-
-    with _send_bot_lock:
-        if _send_bot is not None and _send_bot_token == token:
-            # 其它线程已抢先建好，丢弃本次实例
-            async def _shutdown_dup():
+        async def _build():
+            if old_bot is not None:
                 try:
-                    await new_bot.shutdown()
-                except Exception:
-                    pass
+                    await old_bot.shutdown()
+                except Exception as exc:
+                    logger.warning(
+                        "关闭旧发送 Bot 失败；error_type=%s",
+                        type(exc).__name__,
+                    )
+            return await _create_send_bot(token)
 
-            try:
-                run_on_send_loop(_shutdown_dup(), timeout=5.0)
-            except Exception:
-                pass
-            return _send_bot
-        _send_bot = new_bot
-        _send_bot_token = token
-        return _send_bot
+        new_bot = run_on_send_loop(
+            _build(),
+            timeout=max(
+                10.0,
+                SEND_BOT_CONNECT_TIMEOUT_SECONDS
+                + SEND_BOT_READ_TIMEOUT_SECONDS
+                + 7.0,
+            ),
+        )
+
+        with _send_bot_lock:
+            _send_bot = new_bot
+            _send_bot_token = token
+        return new_bot
 
 
 def build_inline_keyboard(buttons: list[list[dict[str, Any]]]):
