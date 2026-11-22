@@ -115,3 +115,75 @@ async def test_admin_test_endpoint_awaits_async_sender(monkeypatch):
     )
 
     send_async.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_on_send_loop_async_offloads_blocking_wait(monkeypatch):
+    from app.core.telegram import ptb_runtime
+
+    calls = []
+    monkeypatch.setattr(
+        ptb_runtime,
+        "run_on_send_loop",
+        lambda coro, *, timeout=None: calls.append((coro, timeout)) or "done",
+    )
+
+    marker = object()
+    result = await ptb_runtime.run_on_send_loop_async(marker, timeout=7.0)
+
+    assert result == "done"
+    assert calls == [(marker, 7.0)]
+
+
+@pytest.mark.asyncio
+async def test_telegram_diagnostic_awaits_send_loop_calls(monkeypatch):
+    from app.api_v1.external import telegram as telegram_api
+    from app.core.telegram import ptb_runtime
+
+    monkeypatch.setattr(telegram_api.telegram_bot_state, "bot_initialized", True)
+    monkeypatch.setattr(telegram_api.telegram_bot_state, "TELEBOT_AVAILABLE", True)
+    monkeypatch.setattr(telegram_api.telegram_bot_state, "application", None)
+    monkeypatch.setattr(telegram_api.settings, "TELEGRAM_TOKEN", "configured-token", raising=False)
+    monkeypatch.setattr(
+        telegram_api.threading,
+        "enumerate",
+        lambda: [SimpleNamespace(name="TelegramBot", is_alive=lambda: True)],
+    )
+    fake_bot = SimpleNamespace(get_webhook_info=lambda: object(), get_me=lambda: object())
+    monkeypatch.setattr(ptb_runtime, "get_send_bot", lambda _token: fake_bot)
+    monkeypatch.setattr(ptb_runtime, "count_application_handlers", lambda _app: 2)
+    run_async = AsyncMock(side_effect=[SimpleNamespace(url=""), SimpleNamespace(username="testbot", id=123)])
+    monkeypatch.setattr(ptb_runtime, "run_on_send_loop_async", run_async)
+
+    await telegram_api.diagnostic_bot(SimpleNamespace())
+
+    assert run_async.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_reset_webhook_awaits_send_loop_calls(monkeypatch):
+    from app.api_v1.external import telegram as telegram_api
+    from app.core.telegram import ptb_runtime
+
+    monkeypatch.setattr(telegram_api.telegram_bot_state, "bot_initialized", True)
+    monkeypatch.setattr(telegram_api.telegram_bot_state, "TELEBOT_AVAILABLE", True)
+    monkeypatch.setattr(telegram_api.settings, "TELEGRAM_TOKEN", "configured-token", raising=False)
+    fake_bot = SimpleNamespace(
+        delete_webhook=lambda **_kwargs: asyncio.sleep(0),
+        get_webhook_info=lambda: asyncio.sleep(0),
+    )
+    monkeypatch.setattr(ptb_runtime, "get_send_bot", lambda _token: fake_bot)
+    calls = []
+
+    async def fake_run(coro, *, timeout=None):
+        calls.append(timeout)
+        coro.close()
+        return None if timeout == 20.0 else SimpleNamespace(url="")
+
+    monkeypatch.setattr(ptb_runtime, "run_on_send_loop_async", fake_run)
+    monkeypatch.setattr(telegram_api, "log_user_action", AsyncMock())
+    monkeypatch.setattr(telegram_api, "commit_audit_log", AsyncMock())
+
+    await telegram_api.reset_webhook(SimpleNamespace(), object(), SimpleNamespace(username="admin"))
+
+    assert calls == [20.0, 15.0]
