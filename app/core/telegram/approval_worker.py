@@ -43,11 +43,12 @@ def _run_task(
     started_at = time.monotonic()
     with _lock:
         _active_workers += 1
+        active_workers = _active_workers
     logger.info(
         "Telegram 审批任务开始：pending_id=%s queue_wait_ms=%s active_workers=%s",
         pending_id,
         int((started_at - submitted_at) * 1000),
-        _active_workers,
+        active_workers,
     )
     try:
         processor(*args)
@@ -81,6 +82,10 @@ def _task_done(pending_id: int, future: Future) -> None:
             _failed_count += 1
         pending_count = len(_pending_ids)
         active_workers = _active_workers
+        queue_depth = max(0, pending_count - active_workers)
+        completed_count = _completed_count
+        failed_count = _failed_count
+        rejected_count = _rejected_count
     if error is not None:
         logger.error(
             "Telegram 审批 worker 出现未处理异常：pending_id=%s error_type=%s",
@@ -88,12 +93,13 @@ def _task_done(pending_id: int, future: Future) -> None:
             type(error).__name__,
         )
     logger.info(
-        "Telegram 审批队列状态：pending_tasks=%s active_workers=%s completed=%s failed=%s rejected=%s",
+        "Telegram 审批队列状态：pending_tasks=%s queue_depth=%s active_workers=%s completed=%s failed=%s rejected=%s",
         pending_count,
+        queue_depth,
         active_workers,
-        _completed_count,
-        _failed_count,
-        _rejected_count,
+        completed_count,
+        failed_count,
+        rejected_count,
     )
 
 
