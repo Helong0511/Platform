@@ -275,6 +275,14 @@ async def _on_error(update, context) -> None:
         except Exception as stop_err:
             logger.warning("409 冲突时停止轮询失败；error_type=%s", type(stop_err).__name__)
         return
+    if is_permanent_telegram_auth_error(error):
+        _last_polling_exit_reason = "permanent_auth_error"
+        logger.error("Telegram 轮询认证失败，停止自动重试；error_type=%s", type(error).__name__)
+        try:
+            context.application.stop_running()
+        except Exception as stop_err:
+            logger.warning("认证失败时停止轮询失败；error_type=%s", type(stop_err).__name__)
+        return
     if is_transient_telegram_network_error(error):
         logger.warning("Telegram 轮询临时网络错误，将自动重试；error_type=%s", type(error).__name__)
         return
