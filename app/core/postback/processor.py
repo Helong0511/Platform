@@ -818,7 +818,13 @@ class PostbackProcessor:
         elif reason == "duplicate":
             message = "重复 Postback，待审批记录已存在"
         elif reason == "rate_limited":
-            message = "来源请求频率超过待审批入队限制"
+            # 限流拒绝不能向上游返回 200，否则合法转化可能被上游标记成功并永久丢失。
+            await db.rollback()
+            return {
+                "success": False,
+                "message": "来源请求频率超过待审批入队限制，请稍后重试",
+                "retryable": True,
+            }
         elif reason == "payload_too_large":
             message = "Postback 请求数据超过待审批存储限制"
         elif reason == "queue_backlog_full":
@@ -831,8 +837,23 @@ class PostbackProcessor:
             }
         elif reason in {"invalid_fields", "invalid_payload", "invalid_platform"}:
             message = "Postback 字段校验失败，未进入待审批队列"
+        elif reason in {"missing_source_ip", "invalid_source_ip"}:
+            # 来源 IP 是服务端安全上下文；无法确认时 fail-closed，不能假装接收成功。
+            await db.rollback()
+            return {
+                "success": False,
+                "message": "Postback 来源 IP 无法确认，请稍后重试",
+                "retryable": True,
+            }
         else:
-            message = "Postback 来源 IP 无法确认，未进入待审批队列"
+            # 未识别的入队结果同样不能返回成功，避免意外丢弃回调。
+            await db.rollback()
+            logger.error("待审批 Postback 入队返回未知结果：reason=%s", reason)
+            return {
+                "success": False,
+                "message": "待审批队列处理失败，请重试",
+                "retryable": True,
+            }
 
         try:
             await db.commit()
