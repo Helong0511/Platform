@@ -13,18 +13,23 @@ def _run_supervisor_and_join(monkeypatch, fake_start):
     monkeypatch.setattr(manager, "POLLING_SUPERVISOR_BASE_DELAY_SECONDS", 0.0)
     monkeypatch.setattr(manager, "POLLING_SUPERVISOR_MAX_DELAY_SECONDS", 0.0)
     monkeypatch.setattr(manager, "POLLING_SUPERVISOR_JITTER_SECONDS", 0.0)
+    entered = threading.Event()
+    continue_run = threading.Event()
+
+    def controlled_start():
+        entered.set()
+        assert continue_run.wait(timeout=2.0)
+        fake_start()
+
+    monkeypatch.setattr(manager, "start_polling", controlled_start)
     assert manager.start_bot_thread() is True
-    deadline = time.monotonic() + 3.0
-    thread = None
-    while time.monotonic() < deadline:
-        thread = next(
-            (item for item in threading.enumerate() if item.name == "TelegramBot"),
-            None,
-        )
-        if thread is not None:
-            break
-        time.sleep(0.01)
+    assert entered.wait(timeout=2.0)
+    thread = next(
+        (item for item in threading.enumerate() if item.name == "TelegramBot"),
+        None,
+    )
     assert thread is not None
+    continue_run.set()
     thread.join(timeout=3.0)
     assert not thread.is_alive()
 
