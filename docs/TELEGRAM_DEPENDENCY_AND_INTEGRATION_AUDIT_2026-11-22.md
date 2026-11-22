@@ -79,3 +79,16 @@
 - 完整 backend/frontend CI 全部成功后才合并。
 - 必须通过现有 scheduler 注册、任务同步、时区和 Telegram polling/限流回归测试。
 - 生产发布前用专用测试 Bot 验证 getUpdates、群组发送、429 RetryAfter、409 冲突恢复和 Redis 中断降级；不能在生产 Bot 上进行压测。
+
+
+## 官方核验来源
+
+- PTB 22.8 总览、Bot API 10.0、Python 支持范围与依赖约束：https://docs.python-telegram-bot.org/en/v22.8/
+- PTB ApplicationBuilder 的 request/getUpdates request 与 JobQueue 配置：https://docs.python-telegram-bot.org/en/v22.8/telegram.ext.applicationbuilder.html
+- PTB 官方发布与版本记录：https://github.com/python-telegram-bot/python-telegram-bot/releases
+- APScheduler 3.x 官方版本历史：https://apscheduler.readthedocs.io/en/3.x/versionhistory.html
+- APScheduler 3.11.3 PyPI 发布及 provenance：https://pypi.org/project/APScheduler/3.11.3/
+- HTTPX 0.28.1 PyPI 元数据、依赖、许可证、发布文件与 SHA-256：https://pypi.org/project/httpx/0.28.1/
+- redis-py 8.1.0 PyPI 发布元数据：https://pypi.org/project/redis/8.1.0/
+- Telegram Bot API 官方文档：https://core.telegram.org/bots/api
+- Telegram Bot FAQ 与速率限制说明：https://core.telegram.org/bots/faq
