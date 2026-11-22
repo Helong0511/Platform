@@ -1,6 +1,8 @@
 """Redis 缓存后端故障切换与自动恢复回归测试。"""
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from app.core.infrastructure import cache as cache_module
@@ -14,7 +16,7 @@ class FakeRedis:
 async def test_cache_backend_recovers_when_redis_becomes_available(monkeypatch):
     """应用启动时 Redis 不可用，后续恢复后应自动切回共享 Redis 后端。"""
     state = {"client": None}
-    loop = __import__("asyncio").get_running_loop()
+    loop = asyncio.get_running_loop()
 
     async def fake_get_redis_client():
         return state["client"]
