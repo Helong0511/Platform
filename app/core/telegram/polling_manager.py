@@ -237,7 +237,7 @@ def start_polling():
     from app.core.telegram.ptb_runtime import get_send_bot, run_on_send_loop
 
     try:
-        send_bot = get_send_bot(token, connect_timeout=3.0, read_timeout=30.0)
+        send_bot = get_send_bot(token)
         me = run_on_send_loop(send_bot.get_me(), timeout=15.0)
         logger.info(f"[PID:{current_pid}] 验证成功，Bot 可以正常运行：@{me.username}")
         current_state = get_shared_state()
