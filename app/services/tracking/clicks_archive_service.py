@@ -7,6 +7,7 @@
 
 默认保留 90 天；由定时任务 archive_old_clicks 调用模块单例 clicks_archive_service。
 """
+import asyncio
 import logging
 from datetime import timedelta
 from typing import Any, Dict
@@ -14,6 +15,7 @@ from typing import Any, Dict
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.db_errors import get_mysql_errno
 from app.core.tracking.click_persist import should_persist_clicks_to_db
 from app.core.utils import get_app_now_naive
 
@@ -191,68 +193,91 @@ class ClicksArchiveService:
         batch_count = 0
 
         while True:
-            try:
-                # 当前事务内锁定这一批源记录，避免并发归档/删除修改已选中的记录。
-                ids_result = await db.execute(
-                    select_ids_stmt,
-                    {
-                        "archive_date": archive_date,
-                        "high_water_id": high_water_id,
-                        "batch_size": batch_size,
-                    },
-                )
-                click_ids = [int(value) for value in ids_result.scalars().all()]
+            retry_attempt = 0
+            stop_after_empty_batch = False
+            while True:
+                try:
+                    # 当前事务内锁定这一批源记录，避免并发归档/删除修改已选中的记录。
+                    ids_result = await db.execute(
+                        select_ids_stmt,
+                        {
+                            "archive_date": archive_date,
+                            "high_water_id": high_water_id,
+                            "batch_size": batch_size,
+                        },
+                    )
+                    click_ids = [int(value) for value in ids_result.scalars().all()]
 
-                if not click_ids:
-                    # 结束本轮空读事务；本轮高水位之后的新点击留待下一轮处理。
+                    if not click_ids:
+                        # 结束本轮空读事务；本轮高水位之后的新点击留待下一轮处理。
+                        await db.commit()
+                        stop_after_empty_batch = True
+                        break
+
+                    expected_count = len(click_ids)
+                    archive_result = await db.execute(
+                        insert_stmt,
+                        {"click_ids": click_ids, "archive_date": archive_date},
+                    )
+                    archived_count = int(archive_result.rowcount or 0)
+                    if archived_count != expected_count:
+                        raise RuntimeError(
+                            "点击归档批次写入数量不一致，已中止删除源记录："
+                            f"批次={batch_count + 1}，待归档={expected_count}，实际写入={archived_count}"
+                        )
+
+                    delete_result = await db.execute(
+                        delete_stmt,
+                        {"click_ids": click_ids, "archive_date": archive_date},
+                    )
+                    deleted_count = int(delete_result.rowcount or 0)
+                    if deleted_count != expected_count:
+                        raise RuntimeError(
+                            "点击归档批次删除数量不一致，当前批次事务已回滚："
+                            f"批次={batch_count + 1}，待删除={expected_count}，实际删除={deleted_count}"
+                        )
+
+                    # 每批提交一次，限制事务持续时间、锁持有行数及 undo/redo 压力。
                     await db.commit()
+                    archived_total += archived_count
+                    deleted_total += deleted_count
+                    batch_count += 1
+
+                    if batch_count == 1 or batch_count % 10 == 0:
+                        logger.info(
+                            "点击归档批次进度：batches=%s archived=%s high_water_id=%s",
+                            batch_count,
+                            archived_total,
+                            high_water_id,
+                        )
                     break
+                except Exception as exc:
+                    # 仅回滚当前批次；此前已提交批次保持完整，下一次运行可从主表剩余记录续跑。
+                    await db.rollback()
+                    mysql_errno = get_mysql_errno(exc)
+                    if mysql_errno in (1205, 1213) and retry_attempt < 3:
+                        retry_attempt += 1
+                        delay = 0.1 * (2 ** (retry_attempt - 1))
+                        logger.warning(
+                            "点击归档批次遇到 MySQL 锁等待超时/死锁，rollback 后重试："
+                            "batch=%s attempt=%s/3 errno=%s delay=%.2fs",
+                            batch_count + 1,
+                            retry_attempt,
+                            mysql_errno,
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
 
-                expected_count = len(click_ids)
-                archive_result = await db.execute(
-                    insert_stmt,
-                    {"click_ids": click_ids, "archive_date": archive_date},
-                )
-                archived_count = int(archive_result.rowcount or 0)
-                if archived_count != expected_count:
-                    raise RuntimeError(
-                        "点击归档批次写入数量不一致，已中止删除源记录："
-                        f"批次={batch_count + 1}，待归档={expected_count}，实际写入={archived_count}"
-                    )
-
-                delete_result = await db.execute(
-                    delete_stmt,
-                    {"click_ids": click_ids, "archive_date": archive_date},
-                )
-                deleted_count = int(delete_result.rowcount or 0)
-                if deleted_count != expected_count:
-                    raise RuntimeError(
-                        "点击归档批次删除数量不一致，当前批次事务已回滚："
-                        f"批次={batch_count + 1}，待删除={expected_count}，实际删除={deleted_count}"
-                    )
-
-                # 每批提交一次，限制事务持续时间、锁持有行数及 undo/redo 压力。
-                await db.commit()
-                archived_total += archived_count
-                deleted_total += deleted_count
-                batch_count += 1
-
-                if batch_count == 1 or batch_count % 10 == 0:
-                    logger.info(
-                        "点击归档批次进度：batches=%s archived=%s high_water_id=%s",
-                        batch_count,
+                    logger.exception(
+                        "点击归档批次失败：batch=%s archived_before_failure=%s",
+                        batch_count + 1,
                         archived_total,
-                        high_water_id,
                     )
-            except Exception:
-                # 仅回滚当前批次；此前已提交批次保持完整，下一次运行可从剩余主表记录续跑。
-                await db.rollback()
-                logger.exception(
-                    "点击归档批次失败：batch=%s archived_before_failure=%s",
-                    batch_count + 1,
-                    archived_total,
-                )
-                raise
+                    raise
+
+            if stop_after_empty_batch:
+                break
 
         return {
             "archived_count": archived_total,
