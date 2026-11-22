@@ -44,7 +44,7 @@ INTER_CHAT_DELAY = 1.1
 # 全局（跨 Chat）最小间隔（互斥锁内再节流）
 MIN_GLOBAL_SEND_INTERVAL = 0.2
 MAX_RATE_LIMIT_WAIT = 120  # 单次请求内同步等待 429 的最长秒数
-MAX_SERVER_BACKOFF_SECONDS = 86400  # Redis 共享服务端 retry_after 的最大保留时间（24 小时）
+MAX_SERVER_BACKOFF_SECONDS = 7 * 24 * 3600  # Redis 共享服务端 retry_after 的最大保留时间（7 天）
 _GATE_SPIN_SECONDS = 0.02  # 闸门刚过期时的短睡，避免空转烧 CPU
 _REDIS_BACKOFF_GLOBAL = "telegram:send:backoff:__global__"
 _REDIS_GATE_GLOBAL = "telegram:send:gate:__global__"
