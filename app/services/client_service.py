@@ -190,6 +190,8 @@ class ClientService(BaseService[Client]):
         client = Client(**client_data)
         self.db.add(client)
         await self.db.flush()
+        from app.services.cache_invalidation_outbox import advance_cache_generation
+        await advance_cache_generation(self.db)
         if client.id is not None:
             return await self.get_client_by_id(client.id, current_user, include_user=True)
         return client
@@ -228,6 +230,8 @@ class ClientService(BaseService[Client]):
                 setattr(client, key, value)
 
         await self.db.flush()
+        from app.services.cache_invalidation_outbox import advance_cache_generation
+        await advance_cache_generation(self.db)
         return await self.get_client_by_id(client_id, current_user, include_user=True)
 
     async def delete_client(
@@ -272,3 +276,5 @@ class ClientService(BaseService[Client]):
 
         await self.db.delete(client)
         await self.db.flush()
+        from app.services.cache_invalidation_outbox import advance_cache_generation
+        await advance_cache_generation(self.db)
