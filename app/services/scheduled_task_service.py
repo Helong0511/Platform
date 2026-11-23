@@ -35,7 +35,11 @@ from app.models.models import ScheduledTask, User
 from app.scheduler_module import get_scheduler, init_scheduled_tasks
 from app.scheduler_module.scheduler import format_job_next_run_time
 from app.scheduler_module.scheduler import register_scheduled_task, execute_task_with_lock
-from app.scheduler_module.task_queue import get_task_queue
+from app.scheduler_module.task_queue import (
+    get_task_queue,
+    QueueFullError,
+    QueueShuttingDownError,
+)
 from app.scheduler_module.task_registry import get_task_function_by_name_or_path
 
 logger = logging.getLogger(__name__)
@@ -469,12 +473,23 @@ class ScheduledTaskService:
                 )
                 raise
 
-        # 异步触发任务（不等待完成）
-        asyncio.create_task(trigger_task())
+        # 直接等待到队列确认接收；execute_task_with_lock 在成功入队后即返回，
+        # 不会等待实际任务执行完成。这样队列满/关闭时不会提前向管理员报告成功。
+        try:
+            await trigger_task()
+        except QueueFullError as exc:
+            raise HTTPException(
+                status_code=429,
+                detail="任务等待队列已满，请稍后重试",
+            ) from exc
+        except QueueShuttingDownError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="任务调度器正在关闭，暂时无法接收新任务",
+            ) from exc
 
-        logger.info(f"管理员 {current_user.username} 手动触发了定时任务: {task_name}")
-
-        return {"message": "任务已触发，正在后台执行"}
+        logger.info("管理员 %s 手动触发任务已被队列接收: task_name=%s", current_user.username, task_name)
+        return {"message": "任务已被执行队列接收，正在后台等待执行"}
 
     async def reload_scheduled_task(
             self,
