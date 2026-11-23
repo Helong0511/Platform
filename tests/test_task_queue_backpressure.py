@@ -84,3 +84,9 @@ async def test_zero_timeout_does_not_wait_indefinitely():
 
     release.set()
     await asyncio.wait_for(queue.wait_for_completion(timeout=2), timeout=3)
+
+
+@pytest.mark.asyncio
+async def test_zero_timeout_returns_immediately_when_queue_is_idle():
+    queue = TaskQueue(max_concurrent_tasks=1, max_pending_tasks=0)
+    await queue.wait_for_completion(timeout=0)
