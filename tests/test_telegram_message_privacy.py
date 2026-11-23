@@ -9,13 +9,15 @@ def test_register_handlers_does_not_add_catch_all_message_handler(monkeypatch):
         def __init__(self):
             self.handlers = []
 
-        def add_handler(self, handler):
-            self.handlers.append(handler)
+        def add_handler(self, handler, group=0):
+            self.handlers.append((handler, group))
 
     application = FakeApplication()
     polling_manager.register_handlers(application)
 
-    handler_types = [type(handler).__name__ for handler in application.handlers]
+    handler_types = [type(handler).__name__ for handler, _group in application.handlers]
     assert handler_types.count("CommandHandler") == 4
     assert handler_types.count("CallbackQueryHandler") == 3
+    assert handler_types.count("TypeHandler") == 1
+    assert next(group for handler, group in application.handlers if type(handler).__name__ == "TypeHandler") == -1
     assert "MessageHandler" not in handler_types

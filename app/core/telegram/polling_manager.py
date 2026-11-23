@@ -4,15 +4,20 @@ Telegram Bot 轮询管理模块
 使用 python-telegram-bot Application.run_polling 做长轮询（守护线程）。
 """
 import asyncio
-import os
-import time
 import logging
+import os
 import random
+import threading
+import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from app.core.telegram.file_lock import acquire_bot_lock, release_bot_lock
+from app.core.telegram.file_lock import (
+    acquire_bot_lock,
+    release_bot_lock,
+    is_lock_held,
+)
 from app.core.telegram.shared_state import (
     get_shared_state,
     set_shared_state,
@@ -20,6 +25,7 @@ from app.core.telegram.shared_state import (
 )
 from app.core.config import settings
 from app.core.telegram.polling_exception_handler import (
+    is_permanent_telegram_auth_error,
     is_telegram_conflict_error,
     is_transient_telegram_network_error,
 )
@@ -37,9 +43,154 @@ POLLING_GET_UPDATES_READ_TIMEOUT_SECONDS = 65.0
 POLLING_BOOTSTRAP_RETRIES = 3
 
 
+# 运行期 supervisor：PTB bootstrap 重试耗尽/异常退出后，由唯一 TelegramBot 线程有限恢复。
+POLLING_SUPERVISOR_MAX_RESTARTS = 5
+POLLING_SUPERVISOR_BASE_DELAY_SECONDS = 2.0
+POLLING_SUPERVISOR_MAX_DELAY_SECONDS = 60.0
+POLLING_SUPERVISOR_JITTER_SECONDS = 1.0
+POLLING_HEALTH_STALE_AFTER_SECONDS = 180.0
+POLLING_HEALTH_CHECK_INTERVAL_SECONDS = 30.0
+
+_supervisor_stop_event = threading.Event()
+_supervisor_running = False
+_last_polling_exit_reason = "not_started"
+_last_polling_error_at: Optional[float] = None
+_last_get_updates_success_at: Optional[float] = None
+_last_update_received_at: Optional[float] = None
+_supervisor_restart_count = 0
+
+
+def get_polling_health_status() -> dict:
+    """返回轮询线程与 getUpdates 成功心跳；线程存活本身不等于健康。"""
+    now = time.time()
+    thread_alive = any(
+        thread.name == "TelegramBot" and thread.is_alive()
+        for thread in threading.enumerate()
+    )
+    shared_state = get_shared_state()
+    shared_pid = shared_state.get("current_pid")
+    remote_owner_alive = bool(
+        shared_state.get("bot_running")
+        and shared_pid is not None
+        and shared_pid != os.getpid()
+        and is_bot_running()
+    )
+    is_owner = is_lock_held()
+    success_at = _last_get_updates_success_at
+    success_age = None if success_at is None else max(0.0, now - success_at)
+    healthy = bool(
+        is_owner
+        and thread_alive
+        and _supervisor_running
+        and success_age is not None
+        and success_age <= POLLING_HEALTH_STALE_AFTER_SECONDS
+    )
+    return {
+        "is_owner": is_owner,
+        "remote_owner_alive": remote_owner_alive,
+        "thread_alive": thread_alive,
+        "supervisor_running": _supervisor_running,
+        "healthy": healthy,
+        "last_exit_reason": _last_polling_exit_reason,
+        "last_error_at": _last_polling_error_at,
+        "last_get_updates_success_at": success_at,
+        "last_get_updates_success_age_seconds": success_age,
+        "last_update_received_at": _last_update_received_at,
+        "restart_count": _supervisor_restart_count,
+    }
+
+
+async def _record_update_received(_update, _context) -> None:
+    """记录最近一次成功收到并交给 PTB 处理的 Update 时间。"""
+    global _last_update_received_at
+    _last_update_received_at = time.time()
+
+
+def _create_health_tracked_bot_class(base_bot_class):
+    """通过 Bot 子类记录 getUpdates 成功返回；PTB Bot 使用 __slots__，不能实例 monkeypatch。"""
+
+    class HealthTrackedBot(base_bot_class):
+        async def get_updates(self, *args, **kwargs):
+            global _last_get_updates_success_at
+            result = await super().get_updates(*args, **kwargs)
+            _last_get_updates_success_at = time.time()
+            return result
+
+    return HealthTrackedBot
+
+
+def _notify_supervisor_failure(reason: str) -> None:
+    """通过现有去重通知通道发送不含 Token/异常正文的 supervisor 告警。"""
+    try:
+        from app.core.telegram.runtime_error_notify import notify_runtime_error_sync
+
+        safe_reason = (
+            reason
+            if reason in {
+                "conflict",
+                "permanent_auth_error",
+                "maximum restart attempts reached",
+                "getUpdates heartbeat stale",
+                "disabled",
+                "dependency_unavailable",
+                "configuration_error",
+                "unknown exit state",
+            }
+            else "unexpected"
+        )
+        notify_runtime_error_sync(
+            error_type=f"TelegramPollingSupervisor:{safe_reason}",
+            error_message="Telegram polling supervisor stopped or circuit-opened",
+            location={
+                "module": "app.core.telegram.polling_manager",
+                "function": "start_bot_thread",
+            },
+        )
+    except Exception as exc:
+        logger.warning(
+            "Telegram polling supervisor 告警调度失败；error_type=%s",
+            type(exc).__name__,
+        )
+
+
+def _request_polling_restart_for_stale_heartbeat() -> bool:
+    """在 PTB 原事件循环中请求优雅停止，让 supervisor 以退避策略重建 polling。"""
+    app = _active_application
+    loop = _polling_loop
+    if app is None or loop is None or not loop.is_running():
+        logger.warning("getUpdates 心跳超时，但当前 PTB Application/事件循环不可用")
+        return False
+    try:
+        loop.call_soon_threadsafe(app.stop_running)
+        logger.warning("getUpdates 心跳超时，已请求 PTB 优雅停止并交由 supervisor 恢复")
+        return True
+    except Exception as exc:
+        logger.warning(
+            "getUpdates 心跳超时后请求停止失败；error_type=%s",
+            type(exc).__name__,
+        )
+        return False
+
+
+def _polling_health_watchdog() -> None:
+    """运行期网络重试若长期没有成功 getUpdates，告警并触发一次受控重启。"""
+    alert_sent = False
+    while not _supervisor_stop_event.wait(POLLING_HEALTH_CHECK_INTERVAL_SECONDS):
+        success_at = _last_get_updates_success_at
+        if success_at is None:
+            continue
+        stale = time.time() - success_at > POLLING_HEALTH_STALE_AFTER_SECONDS
+        if stale and not alert_sent:
+            _notify_supervisor_failure("getUpdates heartbeat stale")
+            _request_polling_restart_for_stale_heartbeat()
+            alert_sent = True
+        elif not stale:
+            alert_sent = False
+
+
 def _build_polling_application(token: str):
-    """构建 PTB Application，并显式配置 getUpdates 独立连接超时。"""
-    from telegram.ext import Application
+    """构建带成功心跳的 PTB Application，并显式配置 getUpdates 独立连接超时。"""
+    from telegram.ext import Application, ExtBot
     from telegram.request import HTTPXRequest
 
     request = HTTPXRequest(
@@ -48,14 +199,21 @@ def _build_polling_application(token: str):
         write_timeout=60.0,
         pool_timeout=5.0,
     )
+    get_updates_request = HTTPXRequest(
+        connect_timeout=3.0,
+        read_timeout=POLLING_GET_UPDATES_READ_TIMEOUT_SECONDS,
+        write_timeout=60.0,
+        pool_timeout=5.0,
+    )
+    tracked_bot_class = _create_health_tracked_bot_class(ExtBot)
+    bot = tracked_bot_class(
+        token=token,
+        request=request,
+        get_updates_request=get_updates_request,
+    )
     return (
         Application.builder()
-        .token(token)
-        .request(request)
-        .get_updates_connect_timeout(3.0)
-        .get_updates_read_timeout(POLLING_GET_UPDATES_READ_TIMEOUT_SECONDS)
-        .get_updates_write_timeout(60.0)
-        .get_updates_pool_timeout(5.0)
+        .bot(bot)
         # APScheduler 是项目自身调度依赖；Telegram 未使用 PTB JobQueue，禁止自动创建额外调度器。
         .job_queue(None)
         .post_init(_post_init)
@@ -73,7 +231,8 @@ def _check_bot_ready_for_polling() -> bool:
 
 def _cleanup_on_polling_conflict(current_pid: int) -> None:
     """409 冲突时清理共享状态；OS 锁由 start_polling 外层 finally 统一释放。"""
-    global _bot_started, _active_application
+    global _bot_started, _active_application, _last_polling_exit_reason
+    _last_polling_exit_reason = "conflict"
     _bot_started = False
     _active_application = None
     set_shared_state(
@@ -96,7 +255,8 @@ def register_handlers(application) -> None:
         logger.info("处理器已注册，跳过重复注册")
         return
 
-    from telegram.ext import CallbackQueryHandler, CommandHandler
+    from telegram import Update
+    from telegram.ext import CallbackQueryHandler, CommandHandler, TypeHandler
     from app.core.telegram.command_handlers.id_command import get_chat_id
     from app.core.telegram.command_handlers.start_command import cmd_start
     from app.core.telegram.command_handlers.help_command import cmd_help
@@ -105,6 +265,8 @@ def register_handlers(application) -> None:
     from app.core.telegram.callback_handlers.stats_callbacks import handle_stats_callbacks
     from app.core.telegram.callback_handlers.postback_approval import handle_postback_approval
 
+    # 负 group 仅记录 Update 心跳；不抢占默认 group 中的业务 Handler。
+    application.add_handler(TypeHandler(Update, _record_update_received), group=-1)
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("help", cmd_help))
     application.add_handler(CommandHandler("id", get_chat_id))
@@ -143,11 +305,14 @@ async def _post_init(application) -> None:
 
 async def _on_error(update, context) -> None:
     """Application 全局错误处理：冲突停轮询，临时网络仅 warning。"""
+    global _last_polling_exit_reason, _last_polling_error_at
     error = context.error
     if error is None:
         return
+    _last_polling_error_at = time.time()
     msg = str(error)
     if is_telegram_conflict_error(msg):
+        _last_polling_exit_reason = "conflict"
         logger.error("检测到 Telegram 轮询冲突（409），请求 run_polling 优雅退出；error_type=%s", type(error).__name__)
         try:
             # 此错误处理器运行在 Application 事件循环内；stop_running 会让 run_polling
@@ -155,6 +320,14 @@ async def _on_error(update, context) -> None:
             context.application.stop_running()
         except Exception as stop_err:
             logger.warning("409 冲突时停止轮询失败；error_type=%s", type(stop_err).__name__)
+        return
+    if is_permanent_telegram_auth_error(error):
+        _last_polling_exit_reason = "permanent_auth_error"
+        logger.error("Telegram 轮询认证失败，停止自动重试；error_type=%s", type(error).__name__)
+        try:
+            context.application.stop_running()
+        except Exception as stop_err:
+            logger.warning("认证失败时停止轮询失败；error_type=%s", type(stop_err).__name__)
         return
     if is_transient_telegram_network_error(error):
         logger.warning("Telegram 轮询临时网络错误，将自动重试；error_type=%s", type(error).__name__)
@@ -170,14 +343,21 @@ def start_polling():
         bool: 是否成功启动并正常结束（冲突返回 False）
     """
     global _bot_started, _active_application, _handlers_registered, _polling_loop
+    global _last_polling_exit_reason, _last_get_updates_success_at, _last_polling_error_at
 
+    if threading.current_thread().name != "TelegramBot":
+        _supervisor_stop_event.clear()
+    _last_polling_exit_reason = "starting"
+    _last_get_updates_success_at = None
     current_pid = os.getpid()
 
     if _bot_started:
+        _last_polling_exit_reason = "already_running"
         logger.info(f"[PID:{current_pid}] Telegram Bot 已经启动，跳过重复启动...")
         return False
 
     if is_bot_running():
+        _last_polling_exit_reason = "already_running"
         logger.info(f"[PID:{current_pid}] Telegram Bot 已在其他进程中运行，跳过启动...")
         return False
 
@@ -185,12 +365,14 @@ def start_polling():
 
     telegram_enabled = getattr(settings, "TELEGRAM_ENABLE", True)
     if not telegram_enabled:
+        _last_polling_exit_reason = "disabled"
         logger.info(
             f"[PID:{current_pid}] Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过启动"
         )
         return False
 
     if not PTB_AVAILABLE:
+        _last_polling_exit_reason = "dependency_unavailable"
         logger.error(
             f"[PID:{current_pid}] python-telegram-bot 未安装，无法启动 Bot"
         )
@@ -198,6 +380,7 @@ def start_polling():
 
     token = getattr(settings, "TELEGRAM_TOKEN", None)
     if not token or not str(token).strip():
+        _last_polling_exit_reason = "configuration_error"
         logger.error(f"[PID:{current_pid}] Telegram token 未配置，无法启动")
         return False
     token = str(token).strip()
@@ -209,6 +392,7 @@ def start_polling():
     logger.info(f"[PID:{current_pid}] 尝试获取 Telegram Bot 启动锁...")
     lock_acquired = acquire_bot_lock()
     if not lock_acquired:
+        _last_polling_exit_reason = "lock_not_acquired"
         logger.info(
             f"[PID:{current_pid}] 其他进程已启动 Telegram Bot，或无法获取锁，跳过启动..."
         )
@@ -219,12 +403,30 @@ def start_polling():
     entered_runtime = False
     try:
         if is_bot_running():
+            _last_polling_exit_reason = "already_running"
             logger.info(
                 f"[PID:{current_pid}] Telegram Bot 已在其他进程中运行，跳过启动..."
             )
             return False
         entered_runtime = True
-        return _start_polling_with_lock(current_pid, token)
+        try:
+            result = _start_polling_with_lock(current_pid, token)
+            if _last_polling_exit_reason == "starting":
+                _last_polling_exit_reason = (
+                    "stopped" if _supervisor_stop_event.is_set() else "unexpected_return"
+                )
+            return result
+        except Exception as exc:
+            _last_polling_error_at = time.time()
+            if is_telegram_conflict_error(str(exc)):
+                _last_polling_exit_reason = "conflict"
+            elif is_permanent_telegram_auth_error(exc):
+                _last_polling_exit_reason = "permanent_auth_error"
+            elif is_transient_telegram_network_error(exc):
+                _last_polling_exit_reason = "transient_network_error"
+            else:
+                _last_polling_exit_reason = "unexpected_exception"
+            raise
     finally:
         # 无论导入、Bot 探测、Application 构建、Handler 注册还是 run_polling 抛错，
         # 都必须释放当前进程刚取得的 OS 锁。状态清理只在本次启动已进入运行阶段时执行。
@@ -261,6 +463,7 @@ def start_polling():
 def _start_polling_with_lock(current_pid: int, token: str) -> bool:
     """调用方已持有 OS 锁；执行 Bot 验证、构建、注册和轮询。"""
     global _bot_started, _active_application, _handlers_registered, _polling_loop
+    global _last_polling_exit_reason, _last_polling_error_at
 
     _bot_started = True
     logger.info(f"[PID:{current_pid}] 成功获取锁，标记 Bot 为已启动状态")
@@ -329,49 +532,170 @@ def _start_polling_with_lock(current_pid: int, token: str) -> bool:
             stop_signals=None,
         )
     except Exception as e:
+        _last_polling_error_at = time.time()
         if is_telegram_conflict_error(str(e)):
+            _last_polling_exit_reason = "conflict"
             logger.error(f"[PID:{current_pid}] 轮询过程中检测到其他 Bot 实例；error_type={type(e).__name__}")
             _cleanup_on_polling_conflict(current_pid)
             return False
-        if is_transient_telegram_network_error(e):
+        if is_permanent_telegram_auth_error(e):
+            _last_polling_exit_reason = "permanent_auth_error"
+            logger.error(f"轮询认证失败，停止自动重试；error_type={type(e).__name__}")
+        elif is_transient_telegram_network_error(e):
+            _last_polling_exit_reason = "transient_network_error"
             logger.warning(f"轮询意外退出，临时网络错误；error_type={type(e).__name__}")
         else:
+            _last_polling_exit_reason = "unexpected_exception"
             logger.error(f"轮询意外退出；error_type={type(e).__name__}")
 
     return True
 
 
+def _run_polling_supervisor() -> None:
+    """唯一 TelegramBot 线程监督 polling 生命周期，并对可恢复退出做有限退避。"""
+    global _supervisor_running, _supervisor_restart_count, _last_polling_exit_reason
+    global _last_polling_error_at
+
+    _supervisor_running = True
+    _supervisor_restart_count = 0
+    watchdog = threading.Thread(
+        target=_polling_health_watchdog,
+        name="TelegramPollingHealthWatchdog",
+        daemon=True,
+    )
+
+    try:
+        watchdog.start()
+        while not _supervisor_stop_event.is_set():
+            try:
+                start_polling()
+            except Exception as exc:
+                _last_polling_error_at = time.time()
+                if is_telegram_conflict_error(str(exc)):
+                    _last_polling_exit_reason = "conflict"
+                elif is_permanent_telegram_auth_error(exc):
+                    _last_polling_exit_reason = "permanent_auth_error"
+                elif is_transient_telegram_network_error(exc):
+                    _last_polling_exit_reason = "transient_network_error"
+                else:
+                    _last_polling_exit_reason = "unexpected_exception"
+                logger.error(
+                    "Telegram polling supervisor 捕获启动异常；reason=%s error_type=%s",
+                    _last_polling_exit_reason,
+                    type(exc).__name__,
+                )
+
+            reason = _last_polling_exit_reason
+            if _supervisor_stop_event.is_set() or reason == "stopped":
+                break
+
+            if reason in {"conflict", "permanent_auth_error"}:
+                logger.error(
+                    "Telegram polling supervisor 进入停止/熔断状态：reason=%s",
+                    reason,
+                )
+                _notify_supervisor_failure(reason)
+                break
+
+            if reason in {"disabled", "dependency_unavailable", "configuration_error"}:
+                logger.error(
+                    "Telegram polling supervisor 配置不可用，停止自动重试：reason=%s",
+                    reason,
+                )
+                _notify_supervisor_failure(reason)
+                break
+
+            if reason in {"already_running", "lock_not_acquired"}:
+                logger.info(
+                    "Telegram polling supervisor 未取得启动所有权，不进行重试：reason=%s",
+                    reason,
+                )
+                break
+
+            if reason not in {
+                "transient_network_error",
+                "unexpected_return",
+                "unexpected_exception",
+            }:
+                logger.error(
+                    "Telegram polling supervisor 遇到未知退出状态，停止自动重试：reason=%s",
+                    reason,
+                )
+                _notify_supervisor_failure("unknown exit state")
+                break
+
+            if _supervisor_restart_count >= POLLING_SUPERVISOR_MAX_RESTARTS:
+                logger.error(
+                    "Telegram polling supervisor 达到最大恢复次数，进入熔断：restarts=%s",
+                    _supervisor_restart_count,
+                )
+                _notify_supervisor_failure("maximum restart attempts reached")
+                break
+
+            attempt = _supervisor_restart_count + 1
+            delay = min(
+                POLLING_SUPERVISOR_BASE_DELAY_SECONDS * (2 ** (attempt - 1)),
+                POLLING_SUPERVISOR_MAX_DELAY_SECONDS,
+            ) + random.uniform(0.0, POLLING_SUPERVISOR_JITTER_SECONDS)
+            _supervisor_restart_count = attempt
+            logger.warning(
+                "Telegram polling 将在退避后重启：attempt=%s/%s delay_seconds=%.2f reason=%s",
+                attempt,
+                POLLING_SUPERVISOR_MAX_RESTARTS,
+                delay,
+                reason,
+            )
+            if _supervisor_stop_event.wait(delay):
+                break
+    finally:
+        _supervisor_stop_event.set()
+        _supervisor_running = False
+        logger.info(
+            "Telegram polling supervisor 已结束：last_reason=%s restarts=%s",
+            _last_polling_exit_reason,
+            _supervisor_restart_count,
+        )
+
+
 def start_bot_thread():
     """
-    在独立线程中启动 Bot 轮询
+    在独立线程中启动 Telegram polling supervisor。
 
     Returns:
-        bool: 线程是否成功启动（不代表一定获取到锁）
+        bool: supervisor 线程是否成功启动（不代表已经取得 OS 锁或轮询健康）。
     """
-    import threading
+    global _last_polling_exit_reason
 
     if not _check_bot_ready_for_polling():
+        reason = "dependency_unavailable" if not PTB_AVAILABLE else "configuration_error"
+        _last_polling_exit_reason = reason
         logger.error("python-telegram-bot 不可用或 Token 未配置，无法启动轮询线程")
+        _notify_supervisor_failure(reason)
         return False
 
     for thread in threading.enumerate():
-        if thread.name == "TelegramBot":
+        if thread.name == "TelegramBot" and thread.is_alive():
             logger.info("Telegram Bot 轮询线程已经在运行，跳过重复启动...")
             return False
 
-    def run_polling():
-        logger.info("Telegram Bot 轮询线程开始运行")
-        try:
-            start_polling()
-        except Exception as e:
-            logger.error(f"Telegram Bot 轮询线程出错；error_type={type(e).__name__}")
-        logger.info("Telegram Bot 轮询线程已结束")
-
-    thread = threading.Thread(target=run_polling, daemon=True, name="TelegramBot")
-    thread.start()
-    logger.info("Telegram Bot 轮询线程已启动")
+    _supervisor_stop_event.clear()
+    thread = threading.Thread(
+        target=_run_polling_supervisor,
+        daemon=True,
+        name="TelegramBot",
+    )
+    try:
+        thread.start()
+    except Exception as exc:
+        _last_polling_exit_reason = "unexpected_exception"
+        logger.error(
+            "Telegram polling supervisor 线程启动失败；error_type=%s",
+            type(exc).__name__,
+        )
+        _notify_supervisor_failure("unexpected")
+        return False
+    logger.info("Telegram Bot polling supervisor 线程已启动")
     return True
-
 
 def stop_polling_application(timeout: float = 10.0) -> bool:
     """
@@ -379,6 +703,7 @@ def stop_polling_application(timeout: float = 10.0) -> bool:
 
     timeout 参数保留兼容旧调用方；停止完成由 restart_bot_thread 的 join 确认。
     """
+    _supervisor_stop_event.set()
     app = _active_application
     if app is None:
         from app.core.telegram import bot_state
@@ -409,9 +734,6 @@ def restart_bot_thread(
     如果旧线程无法在 join_timeout 内退出，则 fail closed：不释放其锁、不清状态、
     不启动第二个轮询线程。
     """
-    import threading
-    import time
-
     global _bot_started, _handlers_registered
 
     stopped = stop_polling_application(timeout=stop_timeout)
