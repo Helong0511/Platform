@@ -291,10 +291,11 @@ class ScheduledTaskService:
                                 f"任务 '{task.task_name}' 已重新注册到调度器 "
                                 f"(Cron: {task.cron_expression}, 函数路径: {task.function_path or '注册表'}, 启用: {task.is_active})"
                             )
-                        except Exception as e:
+                        except Exception as exc:
                             logger.error(
-                                f"重新注册任务 '{task.task_name}' 失败: {e}",
-                                exc_info=True
+                                "重新注册任务失败: task_name=%s error_type=%s",
+                                task.task_name,
+                                type(exc).__name__,
                             )
 
             logger.info(f"管理员 {current_user.username} 更新了定时任务状态: {task_name} (Active: {task.is_active})")
