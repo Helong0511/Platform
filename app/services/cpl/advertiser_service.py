@@ -316,6 +316,9 @@ class AdvertiserService(BaseService[Advertiser]):
         )
         await commit_audit_log(self.db)
 
+        # 事务提交后再次失效，清除提交前并发请求可能回填的旧广告主缓存。
+        await CacheInvalidator.invalidate_advertiser_cache(advertiser_id)
+
         logger.info(f"广告主已更新: {advertiser.advertiser_name} (ID: {advertiser.id})")
         return advertiser
 
@@ -367,5 +370,9 @@ class AdvertiserService(BaseService[Advertiser]):
         # 删除广告主
         await self.db.delete(advertiser)
         await self.db.flush()
+        await commit_audit_log(self.db)
+
+        # 删除成功并提交事务后，清除详情及依赖广告主数据的列表缓存。
+        await CacheInvalidator.invalidate_advertiser_cache(advertiser_id)
 
         logger.info(f"广告主已删除: {advertiser.advertiser_name} (ID: {advertiser_id})")
