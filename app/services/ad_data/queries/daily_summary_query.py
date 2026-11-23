@@ -232,6 +232,7 @@ class DailySummaryQuery:
             payload = await _produce_payload()
         else:
             payload = await ad_data_get_or_set(
+                self.db,
                 cache_key,
                 _produce_payload,
                 ttl=ad_data_daily_summary_cache_ttl(),
@@ -281,8 +282,9 @@ class DailySummaryQuery:
         )
 
         async def _load_grand_total() -> Dict[str, Any]:
-            async def _compute_grand() -> Dict[str, Any]:
-                async with AsyncSessionLocal() as session:
+            # 缓存版本读取与汇总查询必须使用同一个数据库快照。
+            async with AsyncSessionLocal() as session:
+                async def _compute_grand() -> Dict[str, Any]:
                     gt = await DailySummaryQuery(session).fetch_grand_totals(
                         current_user=current_user,
                         start_date=start_date,
@@ -294,18 +296,19 @@ class DailySummaryQuery:
                         dimension=dim,
                         use_assignment_table=use_assignment_table,
                     )
-                return {"grand_total": gt}
+                    return {"grand_total": gt}
 
-            if skip_cache:
-                return (await _compute_grand())["grand_total"]
+                if skip_cache:
+                    return (await _compute_grand())["grand_total"]
 
-            wrapped = await ad_data_get_or_set(
-                grand_cache_key,
-                _compute_grand,
-                ttl=ad_data_daily_summary_cache_ttl(),
-                is_valid=lambda c: isinstance(c, dict) and "grand_total" in c,
-            )
-            return wrapped["grand_total"]
+                wrapped = await ad_data_get_or_set(
+                    session,
+                    grand_cache_key,
+                    _compute_grand,
+                    ttl=ad_data_daily_summary_cache_ttl(),
+                    is_valid=lambda c: isinstance(c, dict) and "grand_total" in c,
+                )
+                return wrapped["grand_total"]
 
         # 全量合计走独立会话，与列表/计数并行，缩短冷路径墙钟时间
         grand_task = asyncio.create_task(_load_grand_total())
