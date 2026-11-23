@@ -19,8 +19,8 @@ from app.models.models import CacheInvalidationOutbox
 from app.services.ad_data.query_cache import AD_DATA_QUERY_CACHE_NS
 
 logger = logging.getLogger(__name__)
-CACHE_INVALIDATION_LEASE_SECONDS = 90
-CACHE_INVALIDATION_BATCH_SIZE = 20
+CACHE_INVALIDATION_LEASE_SECONDS = 300
+CACHE_INVALIDATION_BATCH_SIZE = 5
 CACHE_INVALIDATION_MAX_BACKOFF_SECONDS = 3600
 
 
@@ -36,6 +36,35 @@ async def process_cache_invalidation_outbox(
     claimed: list[tuple[int, str, int, int]] = []
 
     async with AsyncSessionLocal() as db:
+        # 最后一次尝试后若 Worker 崩溃，租约到期时必须收敛为 failed，不能永久卡在 processing。
+        await db.execute(
+            update(CacheInvalidationOutbox)
+            .where(
+                CacheInvalidationOutbox.status == "processing",
+                CacheInvalidationOutbox.lease_until <= get_app_now_sql_expression(),
+                CacheInvalidationOutbox.attempt_count >= CacheInvalidationOutbox.max_attempts,
+            )
+            .values(
+                status="failed",
+                completed_at=get_app_now_sql_expression(),
+                locked_by=None,
+                lease_token=None,
+                lease_until=None,
+                last_error_type="lease_expired_after_max_attempts",
+            )
+        )
+        await db.execute(
+            update(CacheInvalidationOutbox)
+            .where(
+                CacheInvalidationOutbox.status == "pending",
+                CacheInvalidationOutbox.attempt_count >= CacheInvalidationOutbox.max_attempts,
+            )
+            .values(
+                status="failed",
+                completed_at=get_app_now_sql_expression(),
+                last_error_type="retry_budget_exhausted",
+            )
+        )
         rows = (
             await db.execute(
                 select(CacheInvalidationOutbox)
