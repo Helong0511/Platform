@@ -31,5 +31,7 @@ async def test_cleanup_failure_redacts_database_exception(monkeypatch, caplog):
     assert result == "清理失败（RuntimeError）"
     assert secret not in result
     assert secret not in caplog.text
+    assert secret not in str(captured.value)
+    assert captured.value.deleted_count == 0
     db.rollback.assert_awaited_once()
     db.close.assert_awaited_once()
