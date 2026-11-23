@@ -209,9 +209,9 @@ async def test_sync_fails_closed_when_global_lock_acquisition_errors(monkeypatch
     db = FakeDb()
     monkeypatch.setattr(counter, "get_redis_client", fake_get_redis_client)
 
-    synced = await counter.sync_click_counts_to_db(db)
+    with pytest.raises(counter.ClickCounterSyncError):
+        await counter.sync_click_counts_to_db(db)
 
-    assert synced == 0
     assert db.executed is False
 
 
@@ -394,9 +394,9 @@ async def test_sync_fails_closed_when_redis_client_lookup_raises(monkeypatch):
     db = FakeDb()
     monkeypatch.setattr(counter, "get_redis_client", broken_redis_client)
 
-    synced = await counter.sync_click_counts_to_db(db)
+    with pytest.raises(counter.ClickCounterSyncError):
+        await counter.sync_click_counts_to_db(db)
 
-    assert synced == 0
     assert db.executed is False
 
 
@@ -448,9 +448,9 @@ async def test_db_prevalidation_failure_preserves_redis_click_counter(monkeypatc
     monkeypatch.setattr(counter, "get_redis_client", fake_get_redis_client)
     monkeypatch.setattr(counter, "_scan_click_counter_keys", fake_scan)
 
-    synced = await counter.sync_click_counts_to_db(db)
+    with pytest.raises(counter.ClickCounterSyncError):
+        await counter.sync_click_counts_to_db(db)
 
-    assert synced == 0
     # 一次预验证失败；后续账本清理也因 DB 故障安全跳过。
     assert db.execute_calls == 2
     assert db.rollback_calls == 2
