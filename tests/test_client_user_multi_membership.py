@@ -36,6 +36,9 @@ class _DB:
 
     async def execute(self, statement):
         self.statements.append(statement)
+        # Generation 递增是 UPDATE，不消耗业务查询的 mock 返回值。
+        if getattr(statement, "is_update", False):
+            return _Result(None)
         return _Result(self.values.pop(0))
 
     async def scalar(self, statement):
@@ -59,7 +62,7 @@ async def test_client_can_be_reassigned_to_user_with_existing_client_membership(
         is_active=True,
     )
     new_user = SimpleNamespace(id=2)
-    db = _DB([client, new_user, client, None])
+    db = _DB([client, new_user, client])
 
     async def no_op(*args, **kwargs):
         return None
