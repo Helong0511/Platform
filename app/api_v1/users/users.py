@@ -755,10 +755,11 @@ async def delete_user(
     # 使用服务层（业务逻辑在UserService中）
     user_service: UserService = await get_user_service(db)
     
-    # 获取用户信息（用于记录删除日志）
+    # 先执行完整业务删除与关联数据校验；失败时不得写入成功审计。
     user = await user_service.get_user_by_id(user_id, current_user, include_client=True)
-    
-    # 记录删除操作（在删除前记录，因为删除后user对象可能无法访问）
+    await user_service.delete_user(user_id, current_user)
+
+    # 删除已 flush 成功后，再把审计写入同一事务，最后统一提交。
     await log_delete(
         db=db,
         user=current_user,
@@ -772,9 +773,6 @@ async def delete_user(
         }
     )
     await commit_audit_log(db)
-    
-    # 调用服务层删除用户（服务层会检查关联数据）
-    await user_service.delete_user(user_id, current_user)
 
     # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data={"message": "用户已成功删除"})
