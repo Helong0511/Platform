@@ -7,6 +7,7 @@
 """
 import logging
 import json
+import hashlib
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 from app.core.redis_client import get_redis_client
@@ -118,16 +119,16 @@ async def enqueue_click(click_data: Dict[str, Any]) -> bool:
         return False
 
 
-def _decode_click_payload(click_json: str) -> Optional[Dict[str, Any]]:
+def _payload_fingerprint(raw: str) -> str:\n    """返回不可逆的载荷摘要，日志不得输出点击载荷或其字段片段。"""\n    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:16]\n\n\ndef _decode_click_payload(click_json: str) -> Optional[Dict[str, Any]]:
     """解析队列中的 JSON 载荷；失败返回 None。"""
     try:
         payload = json.loads(click_json)
         if not isinstance(payload, dict):
-            logger.warning("点击队列载荷不是 JSON object，移入死信: %s", click_json[:100])
+            logger.warning(\n                "点击队列载荷不是 JSON object，移入死信: payload_sha256=%s payload_bytes=%s",\n                _payload_fingerprint(click_json),\n                len(click_json.encode("utf-8", errors="replace")),\n            )
             return None
         return payload
     except (json.JSONDecodeError, TypeError) as e:
-        logger.warning("反序列化点击记录失败: %s, error=%s", str(click_json)[:100], e)
+        logger.warning(\n            "反序列化点击记录失败: payload_sha256=%s payload_bytes=%s error_type=%s",\n            _payload_fingerprint(str(click_json)),\n            len(str(click_json).encode("utf-8", errors="replace")),\n            type(e).__name__,\n        )
         return None
 
 
@@ -160,7 +161,7 @@ async def move_to_dead_letter(raw: str, reason: str = "") -> bool:
             json.dumps(envelope, default=str),
         )
         if moved:
-            logger.error("点击消息已入死信队列: reason=%s raw=%s", reason, raw[:120])
+            logger.error(\n                "点击消息已入死信队列: reason=%s payload_sha256=%s payload_bytes=%s",\n                reason,\n                _payload_fingerprint(raw),\n                len(raw.encode("utf-8", errors="replace")),\n            )
         return bool(moved)
     except Exception as e:
         logger.error("原子写入点击死信队列失败: %s", e, exc_info=True)
