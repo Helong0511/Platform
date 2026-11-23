@@ -215,6 +215,8 @@ async def import_ad_data_handler(
         )
 
         if int(result.get("success_rows") or 0) > 0:
+            from app.services.cache_invalidation_outbox import advance_cache_generation
+            await advance_cache_generation(db)
             try:
                 from app.services.ad_data.query_cache import invalidate_ad_data_query_caches
 
