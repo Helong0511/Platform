@@ -298,7 +298,7 @@ async def _increment_click_count_in_db(
                 await ack_db.execute(
                     update(ShortLinkClickSyncBatch)
                     .where(ShortLinkClickSyncBatch.batch_id == batch_id)
-                    .values(acknowledged_at=datetime.now(timezone.utc).replace(tzinfo=None))
+                    .values(acknowledged_at=get_app_now_naive())
                 )
                 await ack_db.commit()
         except Exception as ack_exc:
@@ -683,7 +683,7 @@ async def _acknowledge_click_batch(db: AsyncSession, redis, batch_id: str, pendi
         await db.execute(
             update(ShortLinkClickSyncBatch)
             .where(ShortLinkClickSyncBatch.batch_id == batch_id)
-            .values(acknowledged_at=datetime.now(timezone.utc).replace(tzinfo=None))
+            .values(acknowledged_at=get_app_now_naive())
         )
         await db.commit()
     except Exception as exc:
