@@ -23,6 +23,7 @@ from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.pagination import calculate_pagination_offset
 from app.core.postback.transformers.click_associator import ClickAssociator
+from app.core.postback.transformers.normalizer import normalize_event_name
 from app.core.tracking.click_token import resolve_click_from_token
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from app.core.postback.pending_lock import build_pending_for_update_statement
@@ -76,11 +77,14 @@ class PostbackPendingService:
 
         返回主键而非布尔值，使重复审批审计也能准确关联既有转化记录。
         """
+        # 历史待审批记录可能仍为 NULL/空白；审批时必须与新流量的 default 规范一致。
+        event_name = normalize_event_name(pending.event_name)
+        pending.event_name = event_name
         existing = await db.execute(
             select(PostbackConversion.id).where(
                 PostbackConversion.platform == pending.platform,
                 PostbackConversion.conversion_id == pending.conversion_id,
-                PostbackConversion.event_name == pending.event_name,
+                PostbackConversion.event_name == event_name,
             )
         )
         return existing.scalars().first()
@@ -99,13 +103,15 @@ class PostbackPendingService:
             已 add 至 session 的 PostbackConversion（status=Pending）
         """
         click_assoc = await self._resolve_click_assoc(pending, db)
+        event_name = normalize_event_name(pending.event_name)
+        pending.event_name = event_name
         conversion = PostbackConversion(
             platform=pending.platform,
             conversion_id=pending.conversion_id,
             click_id=pending.click_id,
             click_time=pending.click_time
             or (click_assoc.get("click_time") if click_assoc else None),
-            event_name=pending.event_name,
+            event_name=event_name,
             event_value=pending.event_value,
             original_payout=pending.original_payout,
             payout=pending.payout,
