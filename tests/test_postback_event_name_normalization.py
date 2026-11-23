@@ -3,10 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.postback.transformers.normalizer import (
-    DataNormalizer,
-    normalize_event_name,
-)
+from app.core.postback.transformers.normalizer import DataNormalizer
+from app.core.postback_event_name import normalize_event_name
 from app.core.postback.validators.duplicate_checker import DuplicateChecker
 from app.services.cpl.postback_pending_service import PostbackPendingService
 
