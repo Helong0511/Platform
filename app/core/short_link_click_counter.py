@@ -13,6 +13,7 @@ from datetime import datetime, timezone, timedelta
 from app.core.redis_client import get_redis_client
 from app.core.database import AsyncSessionLocal
 from app.core.short_link_cache import invalidate_short_link_cache
+from app.core.utils import get_app_now_naive
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import delete, update, text
@@ -841,7 +842,8 @@ async def _cleanup_click_sync_batch_ledger(
     对 DB 已提交但 Redis DEL 响应丢失的记录，账本行本身证明 DB 已入账；
     若 pending key 已不存在，可安全补记 ACK。未确认 ACK 的行绝不按时间直接删除。
     """
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # 数据库 DATETIME 使用应用时区的 naive 时间，必须与写入/监控口径一致。
+    now = get_app_now_naive()
     try:
         unacked_result = await db.execute(
             select(
