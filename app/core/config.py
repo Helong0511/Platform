@@ -1180,6 +1180,12 @@ class Settings(BaseSettings):
         description="扣量故障时是否 fail-open；生产环境默认 fail-close",
     )
 
+    # 客户开放 API 仅在显式兼容时接受旧 MD5；生产环境默认仅允许 HMAC-SHA256。
+    CLIENT_API_ALLOW_MD5: bool = Field(
+        default_factory=_resolve_client_api_allow_md5,
+        description="是否兼容客户 API 的旧 MD5 签名；生产环境默认关闭",
+    )
+
     # 已废弃：斗篷配置已迁移至数据库表 cloak_configs（系统服务 -> 斗篷管理）
     # 该字段仅保留兼容，业务逻辑不再依赖此映射。
     FACEBOOK_PIXEL_CONFIG: ClassVar[Dict[str, Dict[str, str]]] = {}
