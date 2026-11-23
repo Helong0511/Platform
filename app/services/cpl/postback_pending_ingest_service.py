@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.redis_client import get_redis_client
 from app.core.utils import get_app_now_naive
 from app.models.models import PendingPostbackConversion, PendingPostbackQueueGuard
-from app.core.postback.transformers.normalizer import normalize_event_name
+from app.core.postback_event_name import normalize_event_name
 
 logger = logging.getLogger(__name__)
 
