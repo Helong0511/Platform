@@ -221,18 +221,32 @@ class CacheManager:
             if not cache_keys:
                 return 0
             
-            # 删除所有缓存键
+            # 删除所有缓存键；任何一个键删除失败，都必须保留标签集合以便后续重试。
             deleted_count = 0
+            failed_keys = []
             for cache_key in cache_keys:
                 try:
                     if await redis.delete(cache_key):
                         deleted_count += 1
                 except Exception as e:
-                    logger.warning(f"删除缓存键失败: {cache_key}, error={e}")
-            
-            # 删除标签键
+                    failed_keys.append(cache_key)
+                    logger.warning(
+                        "删除缓存键失败，保留标签供重试: cache_key=%s, error=%s",
+                        cache_key,
+                        e,
+                    )
+
+            if failed_keys:
+                logger.error(
+                    "缓存标签失效未完成: tag=%s, failed_count=%s；标签集合保留供重试",
+                    tag,
+                    len(failed_keys),
+                )
+                return deleted_count
+
+            # 只有所有成员键均已确认删除（或本来不存在）后，才移除标签集合。
             await redis.delete(tag_key)
-            
+
             logger.info(f"按标签清除缓存: tag={tag}, 清除 {deleted_count} 个缓存键")
             return deleted_count
         except Exception as e:
