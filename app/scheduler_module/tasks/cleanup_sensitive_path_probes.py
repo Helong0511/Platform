@@ -18,7 +18,7 @@ from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive
 from app.models.models import SensitivePathProbeLog
 from app.scheduler_module.task_result_store import get_task_result, set_task_result
-from app.scheduler_module.task_utils import log_task_error, log_task_result, log_task_start
+from app.scheduler_module.task_utils import log_task_error, log_task_start
 
 logger = logging.getLogger(__name__)
 TASK_NAME = "清理敏感路径拦截日志"
