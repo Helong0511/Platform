@@ -175,7 +175,12 @@ async def move_to_dead_letter(raw: str, reason: str = "") -> bool:
             json.dumps(envelope, default=str),
         )
         if moved:
-            logger.error(\n                "点击消息已入死信队列: reason=%s payload_sha256=%s payload_bytes=%s",\n                reason,\n                _payload_fingerprint(raw),\n                len(raw.encode("utf-8", errors="replace")),\n            )
+            logger.error(
+                "点击消息已入死信队列: reason=%s payload_sha256=%s payload_bytes=%s",
+                reason,
+                _payload_fingerprint(raw),
+                len(raw.encode("utf-8", errors="replace")),
+            )
         return bool(moved)
     except Exception as e:
         logger.error("原子写入点击死信队列失败: %s", e, exc_info=True)
