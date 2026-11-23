@@ -157,6 +157,7 @@ async def test_click_sync_ledger_cleanup_uses_application_timezone_for_ack_and_r
     class _Result:
         def __init__(self, kind):
             self.kind = kind
+            self.rowcount = 1
 
         def fetchall(self):
             return _Rows().fetchall()
@@ -177,6 +178,9 @@ async def test_click_sync_ledger_cleanup_uses_application_timezone_for_ack_and_r
             if len(self.statements) == 1:
                 return _Result("unacked")
             return _Result("other")
+
+        def add(self, _state):
+            return None
 
         async def commit(self):
             self.committed = True
