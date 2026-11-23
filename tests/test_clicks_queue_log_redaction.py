@@ -1,3 +1,9 @@
+"""点击队列日志不得泄露原始载荷中的个人信息。"""
+import pytest
+
+from app.core import clicks_queue
+
+
 """点击记录队列可靠性回归测试；全部使用 Fake Redis/DB，不连接外部服务。"""
 from contextlib import asynccontextmanager
 from datetime import datetime
