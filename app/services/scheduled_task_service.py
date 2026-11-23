@@ -36,7 +36,6 @@ from app.scheduler_module import get_scheduler, init_scheduled_tasks
 from app.scheduler_module.scheduler import format_job_next_run_time
 from app.scheduler_module.scheduler import register_scheduled_task, execute_task_with_lock
 from app.scheduler_module.task_queue import (
-    get_task_queue,
     QueueFullError,
     QueueShuttingDownError,
 )
