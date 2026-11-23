@@ -363,6 +363,8 @@ async def create_client(
 
         db.add(client)
         await db.flush()
+        from app.services.cache_invalidation_outbox import advance_cache_generation
+        await advance_cache_generation(db)
 
         logger.info(f"创建客户: {client.company_name} (ID: {client.id}), 关联用户: {user.username} (ID: {user.id})")
 
@@ -495,6 +497,8 @@ async def update_client(
             detail="更新客户失败，请检查提交内容或联系管理员",
         )
 
+    from app.services.cache_invalidation_outbox import advance_cache_generation
+    await advance_cache_generation(db)
     logger.info(f"Client {client.company_name} updated by {current_user.username}")
 
     wrote_audit = False
@@ -726,6 +730,9 @@ async def delete_client(
 
     # 删除客户
     await db.delete(client)
+    await db.flush()
+    from app.services.cache_invalidation_outbox import advance_cache_generation
+    await advance_cache_generation(db)
     # 注意：不需要手动提交事务，get_db 依赖会自动处理
 
     logger.info(f"Client {client.company_name} deleted by {current_user.username}")
