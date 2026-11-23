@@ -952,3 +952,36 @@ async def test_redis_scan_failure_is_not_treated_as_empty_queue():
             BrokenRedis(), pattern=f"{counter.CLICK_COUNTER_PREFIX}*",
             raise_on_error=True,
         )
+
+
+
+@pytest.mark.asyncio
+async def test_click_batch_ack_db_commit_failure_is_reported_as_unacknowledged():
+    """Redis pending 删除成功但 DB ACK 提交失败时，不能把批次报告为成功。"""
+    class AckCommitFailureDB:
+        def __init__(self):
+            self.committed = False
+            self.rolled_back = False
+
+        async def execute(self, statement):
+            return _LedgerResult(rowcount=1)
+
+        async def commit(self):
+            self.committed = True
+            raise OSError("simulated ACK commit response failure")
+
+        async def rollback(self):
+            self.rolled_back = True
+
+    db = AckCommitFailureDB()
+    redis = _PendingRedis()
+    pending_key = f"{counter.CLICK_COUNTER_PREFIX}pending:ack-db-failure:{'c' * 32}"
+
+    acknowledged = await counter._acknowledge_click_batch(
+        db, redis, "c" * 32, pending_key
+    )
+
+    assert acknowledged is False
+    assert redis.deleted == [pending_key]
+    assert db.committed is True
+    assert db.rolled_back is True
