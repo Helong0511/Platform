@@ -33,8 +33,8 @@ def _csrf_violation_log_level(request: Request) -> int:
         return logging.INFO
     return logging.WARNING
 
-# CSRF令牌存储（内存降级；OrderedDict 保证 LRU 淘汰不依赖 dict 插入顺序语义）
-_csrf_tokens: OrderedDict[str, str] = OrderedDict()
+# CSRF令牌仅在 Redis 不可用时降级到进程内存储；每条记录携带单调时钟过期时间。
+_csrf_tokens: OrderedDict[str, tuple[str, float]] = OrderedDict()
 # 内存令牌存储最大大小
 _MEMORY_TOKEN_STORE_MAX_SIZE = 10000
 # 内存令牌清理阈值（当达到最大大小的80%时触发清理）
@@ -376,61 +376,65 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     
     async def _retrieve_csrf_token(self, session_id: str, request: Request) -> Optional[str]:
         """
-        从存储中检索CSRF令牌
-        优先从Redis获取，然后从内存存储获取
+        Redis 可用时以 Redis 为唯一权威；只有 Redis 不可用/访问失败时才读取内存降级记录。
+        Redis 明确返回 miss 时必须清除本地旧副本，不能用内存备份复活已过期令牌。
         """
         redis_client = await get_redis_client()
         csrf_key = f"csrf_token:{session_id}"
-        
-        # 尝试从Redis获取
+
         if redis_client:
             try:
                 stored_token = await redis_client.get(csrf_key)
                 if stored_token:
-                    stored_token = stored_token.decode('utf-8') if isinstance(stored_token, bytes) else stored_token
-                    # 更新内存存储（作为备份，并标记为最近使用）
-                    _csrf_tokens[session_id] = stored_token
-                    _csrf_tokens.move_to_end(session_id)
-                    return stored_token
+                    return (
+                        stored_token.decode("utf-8")
+                        if isinstance(stored_token, bytes)
+                        else stored_token
+                    )
+                # Redis 成功响应且 key 不存在：这是权威 miss，不允许回退到旧内存副本。
+                _csrf_tokens.pop(session_id, None)
+                return None
             except Exception as e:
-                logger.warning(f"Redis CSRF令牌获取失败: {str(e)}，将检查内存存储")
-        
-        # 尝试从内存存储获取
-        token = _csrf_tokens.get(session_id)
-        if token is not None:
-            _csrf_tokens.move_to_end(session_id)
+                logger.warning(
+                    "Redis CSRF令牌获取失败: %s，将尝试未过期的本地降级记录",
+                    type(e).__name__,
+                )
+
+        # 仅在 Redis 不可用或访问异常时使用内存降级；过期时间使用单调时钟。
+        cached = _csrf_tokens.get(session_id)
+        if cached is None:
+            return None
+        token, expires_at = cached
+        if expires_at <= time.monotonic():
+            _csrf_tokens.pop(session_id, None)
+            return None
+        _csrf_tokens.move_to_end(session_id)
         return token
-    
+
     async def _store_csrf_token(self, session_id: str, csrf_token: str, request: Request) -> None:
         """
-        存储CSRF令牌
-        优先使用Redis，Redis不可用时使用内存存储
-        实现内存令牌存储的大小限制和自动清理
+        Redis 可用时只写 Redis；不可用时写入带 TTL 的进程内存降级存储。
+        避免 Redis key 过期后旧内存副本继续被当作有效令牌。
         """
         redis_client = await get_redis_client()
         csrf_key = f"csrf_token:{session_id}"
-        
+        ttl = max(1, int(settings.CSRF_TOKEN_EXPIRE_SECONDS))
+
         if redis_client:
             try:
-                await redis_client.setex(
-                    csrf_key,
-                    settings.CSRF_TOKEN_EXPIRE_SECONDS,
-                    csrf_token
-                )
-                # 同时更新内存存储（作为备份）
-                self._cleanup_memory_tokens_if_needed()
-                _csrf_tokens[session_id] = csrf_token
-                _csrf_tokens.move_to_end(session_id)
+                await redis_client.setex(csrf_key, ttl, csrf_token)
+                _csrf_tokens.pop(session_id, None)
+                return
             except Exception as e:
-                logger.warning(f"Redis CSRF令牌存储失败: {str(e)}，使用内存存储")
-                self._cleanup_memory_tokens_if_needed()
-                _csrf_tokens[session_id] = csrf_token
-                _csrf_tokens.move_to_end(session_id)
-        else:
-            self._cleanup_memory_tokens_if_needed()
-            _csrf_tokens[session_id] = csrf_token
-            _csrf_tokens.move_to_end(session_id)
-    
+                logger.warning(
+                    "Redis CSRF令牌存储失败: %s，使用带 TTL 的本地降级存储",
+                    type(e).__name__,
+                )
+
+        self._cleanup_memory_tokens_if_needed()
+        _csrf_tokens[session_id] = (csrf_token, time.monotonic() + ttl)
+        _csrf_tokens.move_to_end(session_id)
+
     def _cleanup_memory_tokens_if_needed(self) -> None:
         """
         检查并清理内存令牌存储。
