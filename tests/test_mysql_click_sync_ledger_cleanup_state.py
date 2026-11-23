@@ -117,17 +117,27 @@ async def test_mysql_redis_unknown_persists_degraded_state_without_ack(monkeypat
         assert result["redis_check_failures"] == 1
         assert result["acknowledged_count"] == 0
 
-        async with factory() as db:
-            state = await db.get(ShortLinkClickSyncLedgerMaintenanceState, 1)
-            acknowledged_at = await db.scalar(
-                select(ShortLinkClickSyncBatch.acknowledged_at)
-                .where(ShortLinkClickSyncBatch.batch_id == "batch-redis-fail")
+        async with engine.connect() as connection:
+            state = (
+                await connection.execute(
+                    text(
+                        "SELECT status, consecutive_failure_count, total_failure_count, "
+                        "last_failure_at, last_error_type "
+                        "FROM short_link_click_sync_ledger_maintenance WHERE id=1"
+                    )
+                )
+            ).mappings().one()
+            acknowledged_at = await connection.scalar(
+                text(
+                    "SELECT acknowledged_at FROM short_link_click_sync_batches "
+                    "WHERE batch_id='batch-redis-fail'"
+                )
             )
-        assert state.status == "degraded"
-        assert state.consecutive_failure_count == 1
-        assert state.total_failure_count == 1
-        assert state.last_failure_at == now
-        assert state.last_error_type == "redis_exists:ConnectionError"
+        assert state["status"] == "degraded"
+        assert state["consecutive_failure_count"] == 1
+        assert state["total_failure_count"] == 1
+        assert state["last_failure_at"] == now
+        assert state["last_error_type"] == "redis_exists:ConnectionError"
         assert acknowledged_at is None
     finally:
         await _drop_tables(engine)
