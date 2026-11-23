@@ -292,7 +292,8 @@ async def _post_init(application) -> None:
     """Application 启动后：删 webhook、设置命令菜单。"""
     from telegram import BotCommand
 
-    await application.bot.delete_webhook(drop_pending_updates=True)
+    # 保留 Telegram 服务器上尚未处理的 Updates，避免 Bot 停机期间的审批回调被启动流程静默丢弃。
+    await application.bot.delete_webhook(drop_pending_updates=False)
     commands = [
         BotCommand("start", "启动 Bot"),
         BotCommand("help", "显示帮助信息"),
@@ -527,7 +528,8 @@ def _start_polling_with_lock(current_pid: int, token: str) -> bool:
             timeout=POLLING_LONG_POLL_TIMEOUT_SECONDS,
             bootstrap_retries=POLLING_BOOTSTRAP_RETRIES,
             allowed_updates=["message", "callback_query"],
-            drop_pending_updates=True,
+            # 保留停机期间积压的审批回调；业务幂等由数据库状态与 callback ID 约束保障。
+            drop_pending_updates=False,
             close_loop=True,
             stop_signals=None,
         )
