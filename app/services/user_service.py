@@ -264,6 +264,9 @@ class UserService(BaseService[User]):
                 await self.db.flush()
 
         await self.db.flush()
+        if user_data.get("company_name"):
+            from app.services.cache_invalidation_outbox import advance_cache_generation
+            await advance_cache_generation(self.db)
 
         # 若创建了客户，重新加载用户以包含客户信息（避免异步懒加载）
         if user_data.get('company_name'):
@@ -306,6 +309,7 @@ class UserService(BaseService[User]):
         # 获取用户
         user = await self.get_user_by_id(user_id, current_user, include_client=False)
         old_is_active = user.is_active
+        cache_display_changed = "username" in user_data or "full_name" in user_data
 
         # 非管理员：剥离 role，且只能改自己
         if current_user.role != UserRole.ADMIN:
@@ -377,6 +381,9 @@ class UserService(BaseService[User]):
                 setattr(user, key, value)
 
         await self.db.flush()
+        if cache_display_changed:
+            from app.services.cache_invalidation_outbox import advance_cache_generation
+            await advance_cache_generation(self.db)
 
         user = await self.get_user_by_id(user_id, current_user, include_client=False)
 
