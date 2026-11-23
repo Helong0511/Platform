@@ -82,3 +82,66 @@ async def test_click_sync_ledger_cleanup_log_redacts_exception_text(caplog):
     assert "error_type=OSError" in caplog.text
     assert "must-not-appear" not in caplog.text
     assert "password=" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_click_sync_ledger_cleanup_uses_application_timezone_for_ack_and_retention(monkeypatch):
+    from datetime import datetime, timedelta
+    from app.core import short_link_click_counter as counter
+
+    fixed_now = datetime(2026, 11, 23, 12, 34, 56)
+    monkeypatch.setattr(counter, "get_app_now_naive", lambda: fixed_now)
+
+    class _Rows:
+        def fetchall(self):
+            return [("batch-id", "short-code")]
+
+    class _Scalars:
+        def all(self):
+            return []
+
+    class _Result:
+        def __init__(self, kind):
+            self.kind = kind
+
+        def fetchall(self):
+            return _Rows().fetchall()
+
+        def scalars(self):
+            return _Scalars()
+
+    class _DB:
+        def __init__(self):
+            self.statements = []
+            self.committed = False
+
+        async def execute(self, statement):
+            self.statements.append(statement)
+            if len(self.statements) == 1:
+                return _Result("unacked")
+            return _Result("other")
+
+        async def commit(self):
+            self.committed = True
+
+        async def rollback(self):
+            raise AssertionError("unexpected rollback")
+
+    class _Redis:
+        async def exists(self, key):
+            return 0
+
+    async def invalidate(_short_code):
+        return True
+
+    monkeypatch.setattr(counter, "invalidate_short_link_cache", invalidate)
+    db = _DB()
+
+    await counter._cleanup_click_sync_batch_ledger(db, _Redis())
+
+    assert db.committed is True
+    # 第二条 SQL 是 ACK 补记；第三条 SQL 是已 ACK 历史记录清理查询。
+    ack_params = db.statements[1].compile().params
+    retention_params = db.statements[2].compile().params
+    assert fixed_now in ack_params.values()
+    assert fixed_now - timedelta(days=30) in retention_params.values()
