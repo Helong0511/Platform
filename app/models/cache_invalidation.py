@@ -8,8 +8,8 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
-    Text,
     UniqueConstraint,
+    text,
 )
 
 from app.core.utils import get_app_now_naive
@@ -27,7 +27,7 @@ class CacheNamespaceGeneration(Base):
         DateTime,
         nullable=False,
         default=get_app_now_naive,
-        server_default="CURRENT_TIMESTAMP",
+        server_default=text("CURRENT_TIMESTAMP"),
         comment="版本更新时间",
     )
 
