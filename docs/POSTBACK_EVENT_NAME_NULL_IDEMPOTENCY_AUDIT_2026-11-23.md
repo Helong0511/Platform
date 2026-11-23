@@ -78,7 +78,25 @@ GROUP BY platform, conversion_id,
 HAVING COUNT(*) > 1;
 ```
 
-执行前应在生产只读副本或只读账号下运行；不得先执行 UPDATE/ALTER。还需检查正式表与待审批表之间的跨表重复。
+正式表与待审批表之间的跨表重复也必须预检：
+
+```sql
+SELECT p.platform,
+       p.conversion_id,
+       COALESCE(NULLIF(TRIM(p.event_name), ''), 'default') AS normalized_event_name,
+       p.id AS pending_id,
+       c.id AS conversion_id
+FROM pending_postback_conversions AS p
+JOIN postback_conversions AS c
+  ON c.platform = p.platform
+ AND c.conversion_id = p.conversion_id
+ AND COALESCE(NULLIF(TRIM(c.event_name), ''), 'default')
+     = COALESCE(NULLIF(TRIM(p.event_name), ''), 'default')
+WHERE p.status = 'pending'
+ORDER BY p.platform, p.conversion_id, p.id, c.id;
+```
+
+执行前应在生产只读副本或只读账号下运行；不得先执行 UPDATE/ALTER。以上查询中的规范化表达式仅用于发现潜在冲突，不会修改任何记录。
 
 只有在历史 NULL/空白和规范化后重复组已核实、处置并备份后，才可准备迁移：
 1. 对规范化后会冲突的历史组逐条业务确认；
