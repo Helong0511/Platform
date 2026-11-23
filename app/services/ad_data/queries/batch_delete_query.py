@@ -1,9 +1,10 @@
-"""
+""" 
 广告数据批量删除前的归属查询。
 
 功能说明：
 - 按 ID 列表加载 AdData 及客户归属
 - 按用户角色过滤出可删除记录
+- 客户只能操作其名下仍启用的 Client 主体对应的数据
 
 在系统中的位置：
 - 被 ``AdDataService.batch_delete_ad_data`` 调用
@@ -52,6 +53,15 @@ class BatchDeleteQuery:
         query = join_product_and_client(query, use_assignment_table)
         query = query.where(AdData.id.in_(data_ids))
 
+        # 客户的批量删除范围必须与详情读取、导出等接口一致：
+        # 只允许当前用户名下仍启用的 Client，不能因账号还有其它启用主体
+        # 就继续操作已经停用的 Client 数据。
+        if not is_admin(current_user):
+            query = query.where(
+                Client.user_id == current_user.id,
+                Client.is_active.is_(True),
+            )
+
         all_data = (await self.db.execute(query)).unique().all()
         if not all_data:
             return BatchDeleteResolution(matched_count=0, deletable=[])
@@ -70,7 +80,8 @@ class BatchDeleteQuery:
             else:
                 ad_data, _product, client = row
 
-            if client.user_id == current_user.id:
+            # SQL 已限制 user_id 与 is_active；保留对象级二次防线。
+            if client.user_id == current_user.id and client.is_active:
                 deletable.append(ad_data)
             else:
                 logger.warning(
