@@ -1065,6 +1065,16 @@ class Settings(BaseSettings):
     SENSITIVE_PATH_PROBE_RETENTION_DAYS: int = int(
         os.getenv("SENSITIVE_PATH_PROBE_RETENTION_DAYS", "90")
     )
+    # 敏感路径日志清理每批行数、批次数和单轮运行预算均有硬上限。
+    SENSITIVE_PATH_PROBE_CLEANUP_BATCH_SIZE: int = int(
+        os.getenv("SENSITIVE_PATH_PROBE_CLEANUP_BATCH_SIZE", "500")
+    )
+    SENSITIVE_PATH_PROBE_CLEANUP_MAX_BATCHES: int = int(
+        os.getenv("SENSITIVE_PATH_PROBE_CLEANUP_MAX_BATCHES", "20")
+    )
+    SENSITIVE_PATH_PROBE_CLEANUP_MAX_RUNTIME_SECONDS: int = int(
+        os.getenv("SENSITIVE_PATH_PROBE_CLEANUP_MAX_RUNTIME_SECONDS", "20")
+    )
     SENSITIVE_PATH_HIT_WINDOW_SECONDS: int = int(
         os.getenv("SENSITIVE_PATH_HIT_WINDOW_SECONDS", "1800")
     )

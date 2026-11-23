@@ -24,12 +24,14 @@ async def test_cleanup_failure_redacts_database_exception(monkeypatch, caplog):
     monkeypatch.setattr(cleanup_module, "AsyncSessionLocal", lambda: db)
 
     with caplog.at_level(logging.ERROR):
-        with pytest.raises(RuntimeError, match="mysql://"):
+        with pytest.raises(cleanup_module.SensitivePathProbeCleanupError) as captured:
             await cleanup_module.cleanup_sensitive_path_probe_logs(retention_days=30)
 
     result = get_task_result(cleanup_module.TASK_NAME)
-    assert result == "清理失败（RuntimeError）"
+    assert result.startswith("清理失败（RuntimeError）")
     assert secret not in result
     assert secret not in caplog.text
+    assert secret not in str(captured.value)
+    assert captured.value.deleted_count == 0
     db.rollback.assert_awaited_once()
     db.close.assert_awaited_once()

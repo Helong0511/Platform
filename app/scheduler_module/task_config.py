@@ -122,7 +122,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
     "清理敏感路径拦截日志": {
         "task_name": "清理敏感路径拦截日志",
         "task_module": "app.scheduler_module.tasks.cleanup_sensitive_path_probes",
-        "task_function": "cleanup_sensitive_path_probe_logs",
+        "task_function": "cleanup_sensitive_path_probe_logs_task",
         "result_getter_module": "app.scheduler_module.tasks.cleanup_sensitive_path_probes",
         "result_getter_function": "get_task_result",
         # 数据库配置
