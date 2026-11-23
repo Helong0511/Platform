@@ -15,6 +15,7 @@ from app.core.utils import get_app_now_naive
 from app.core.telegram.sync_db import get_sync_session_factory
 from app.core.postback.pending_lock import build_pending_for_update_statement
 from app.core.postback.approval_audit import add_postback_approval_audit
+from app.core.postback_event_name import normalize_event_name
 from app.core.postback.savers.conversion_saver import sanitize_postback_raw_data
 
 
@@ -219,6 +220,9 @@ def process_pending_conversion(
                 return
 
             if action == "approve":
+                # 历史待审批行可能 event_name 为 NULL；统一为 default 后再查重和入库。
+                event_name = normalize_event_name(pending.event_name)
+                pending.event_name = event_name
                 # 与 PostbackPendingService 保持一致：批准前检查正式记录，防止 Telegram
                 # 回调路径绕过幂等保护重复创建同一转化。
                 existing_conversion_id = db.execute(
@@ -226,7 +230,7 @@ def process_pending_conversion(
                     .where(
                         PostbackConversion.platform == pending.platform,
                         PostbackConversion.conversion_id == pending.conversion_id,
-                        PostbackConversion.event_name == pending.event_name,
+                        PostbackConversion.event_name == event_name,
                     )
                     .limit(1)
                 ).scalar_one_or_none()
@@ -310,7 +314,7 @@ def process_pending_conversion(
                 conversion = PostbackConversion(
                     platform=pending.platform,
                     conversion_id=pending.conversion_id,
-                    event_name=pending.event_name,
+                    event_name=event_name,
                     event_value=pending.event_value,
                     original_payout=pending.original_payout,
                     payout=pending.payout,

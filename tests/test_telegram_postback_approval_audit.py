@@ -203,13 +203,13 @@ class _FakeTelegramSession:
         self.rollback_count += 1
 
 
-def _fake_pending():
+def _fake_pending(event_name="install"):
     return SimpleNamespace(
         id=77,
         status="pending",
         platform="bft",
         conversion_id="conversion-77",
-        event_name="install",
+        event_name=event_name,
         event_value=None,
         original_payout=None,
         payout=None,
@@ -458,3 +458,23 @@ def test_post_commit_refresh_failure_does_not_report_approval_as_failed(monkeypa
         "callback_query_id": "callback-post-commit-refresh-failed",
         "text": "审批已完成，但消息更新失败，请刷新记录状态",
     }]
+
+
+
+def test_telegram_approval_normalizes_legacy_null_event_name(monkeypatch):
+    pending = _fake_pending(event_name=None)
+    db = _FakeTelegramSession(pending)
+    handler = _patch_telegram_processor(monkeypatch, db)
+
+    handler.process_pending_conversion(
+        77, "approve", "callback-legacy-null-event-77", -100123, 8, 555132
+    )
+
+    conversions = [
+        event for event in db.events
+        if event.__class__.__name__ == "PostbackConversion"
+    ]
+    assert db.committed is True
+    assert pending.event_name == "default"
+    assert len(conversions) == 1
+    assert conversions[0].event_name == "default"

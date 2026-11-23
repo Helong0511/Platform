@@ -7,6 +7,8 @@ import logging
 from decimal import Decimal, InvalidOperation
 from typing import Dict, Any, Optional
 
+from app.core.postback_event_name import normalize_event_name
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,7 +42,7 @@ class DataNormalizer:
         if payout_raw is None or str(payout_raw).strip() == '':
             payout_raw = raw_data.get('amount')
 
-        event_name = str(raw_data.get('event_name') or 'default').strip() or 'default'
+        event_name = normalize_event_name(raw_data.get('event_name'))
         normalized = {
             'platform': platform,
             'conversion_id': str(conversion_id or '').strip(),
