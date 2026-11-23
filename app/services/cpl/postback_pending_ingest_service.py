@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.redis_client import get_redis_client
 from app.core.utils import get_app_now_naive
 from app.models.models import PendingPostbackConversion, PendingPostbackQueueGuard
+from app.core.postback.transformers.normalizer import normalize_event_name
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +154,7 @@ class PendingPostbackIngestService:
         if isinstance(event_value_raw, (dict, list, tuple, set, bytes, bytearray)):
             return {"queued": False, "reason": "invalid_fields"}
         conversion_id = str(conversion_value or "").strip()
-        event_name = str(event_value_raw or "default").strip() or "default"
+        event_name = normalize_event_name(event_value_raw)
         if not conversion_id or len(conversion_id) > 200 or len(event_name) > 100:
             return {"queued": False, "reason": "invalid_fields"}
 
