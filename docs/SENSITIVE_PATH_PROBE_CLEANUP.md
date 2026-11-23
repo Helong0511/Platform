@@ -27,6 +27,7 @@ Full Audit CI 使用隔离的本机 MySQL 8 / `platform_ci` 数据库运行 `tes
 - 真实 MySQL 8 的 `EXPLAIN` 检查，确认按 `created_at` 过滤时使用 `idx_sensitive_probe_created_at`；
 - 每批删除上限、固定 cutoff 边界与部分完成状态；
 - 第二批提交失败时第一批仍保留已提交结果，当前批次回滚；
+- 慢提交超过运行预算时，取消当前批次并回滚，确认本批未计入已提交数量；
 - SQLite 单测只验证业务逻辑，不替代 MySQL 锁、事务和执行计划验证。
 
 本次实现未修改表结构，因此不新增 SQL Migration，也不对生产环境执行索引删除或数据清理。生产部署后如需确认现有表索引，请在维护窗口只读执行 `SHOW INDEX FROM sensitive_path_probe_logs` 并核对 `idx_sensitive_probe_created_at`；不得仅凭 ORM 变更执行 `DROP INDEX`。
