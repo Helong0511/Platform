@@ -23,7 +23,7 @@ from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.pagination import calculate_pagination_offset
 from app.core.postback.transformers.click_associator import ClickAssociator
-from app.core.postback.transformers.normalizer import normalize_event_name
+from app.core.postback_event_name import normalize_event_name
 from app.core.tracking.click_token import resolve_click_from_token
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from app.core.postback.pending_lock import build_pending_for_update_statement
