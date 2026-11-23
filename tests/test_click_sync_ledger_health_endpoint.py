@@ -105,6 +105,7 @@ async def test_click_sync_ledger_health_reports_persistent_cleanup_failures():
     result = await monitoring.get_click_sync_ledger_health(_FakeDB((0, None), state))
     assert result["status"] == "degraded"
     assert result["cleanup"]["status"] == "degraded"
+    assert result["cleanup"]["alert_required"] is True
     assert result["cleanup"]["consecutive_failure_count"] == 2
     assert result["cleanup"]["total_failure_count"] == 7
     assert result["cleanup"]["last_error_type"] == "redis_exists:ConnectionError"
