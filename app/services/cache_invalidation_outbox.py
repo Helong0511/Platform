@@ -10,6 +10,7 @@ import hashlib
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.utils import get_app_now_sql_expression
 from app.models.models import CacheInvalidationOutbox, CacheNamespaceGeneration
 
 AD_DATA_CACHE_NAMESPACE = "ad_data"
@@ -68,6 +69,7 @@ async def advance_cache_generation(
             status="pending",
             attempt_count=0,
             max_attempts=12,
+            next_retry_time=get_app_now_sql_expression(),
         )
     )
     await db.flush()
