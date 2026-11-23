@@ -182,9 +182,9 @@ async def test_redis_outage_does_not_replay_legacy_non_idempotent_snapshot(monke
 
     monkeypatch.setattr(counter, "get_redis_client", no_redis)
     db = FakeDb()
-    synced = await counter.sync_click_counts_to_db(db)
+    with pytest.raises(counter.ClickCounterSyncError):
+        await counter.sync_click_counts_to_db(db)
 
-    assert synced == 0
     assert db.executed is False
     async with counter._counter_lock:
         assert counter._click_counters == {"legacy-outage-code": 4}
@@ -209,9 +209,9 @@ async def test_sync_fails_closed_when_global_lock_acquisition_errors(monkeypatch
     db = FakeDb()
     monkeypatch.setattr(counter, "get_redis_client", fake_get_redis_client)
 
-    synced = await counter.sync_click_counts_to_db(db)
+    with pytest.raises(counter.ClickCounterSyncError):
+        await counter.sync_click_counts_to_db(db)
 
-    assert synced == 0
     assert db.executed is False
 
 
@@ -394,9 +394,9 @@ async def test_sync_fails_closed_when_redis_client_lookup_raises(monkeypatch):
     db = FakeDb()
     monkeypatch.setattr(counter, "get_redis_client", broken_redis_client)
 
-    synced = await counter.sync_click_counts_to_db(db)
+    with pytest.raises(counter.ClickCounterSyncError):
+        await counter.sync_click_counts_to_db(db)
 
-    assert synced == 0
     assert db.executed is False
 
 
@@ -440,7 +440,7 @@ async def test_db_prevalidation_failure_preserves_redis_click_counter(monkeypatc
     async def fake_get_redis_client():
         return redis
 
-    async def fake_scan(redis_client, max_keys, pattern=None):
+    async def fake_scan(redis_client, max_keys, pattern=None, **kwargs):
         if pattern and ":pending:" in pattern:
             return []
         return [f"{counter.CLICK_COUNTER_PREFIX}preserve-on-db-error"]
@@ -448,9 +448,9 @@ async def test_db_prevalidation_failure_preserves_redis_click_counter(monkeypatc
     monkeypatch.setattr(counter, "get_redis_client", fake_get_redis_client)
     monkeypatch.setattr(counter, "_scan_click_counter_keys", fake_scan)
 
-    synced = await counter.sync_click_counts_to_db(db)
+    with pytest.raises(counter.ClickCounterSyncError):
+        await counter.sync_click_counts_to_db(db)
 
-    assert synced == 0
     # 一次预验证失败；后续账本清理也因 DB 故障安全跳过。
     assert db.execute_calls == 2
     assert db.rollback_calls == 2
@@ -892,3 +892,63 @@ def test_short_link_click_sync_batch_matches_migration_contract():
         "idx_short_click_batch_code_created": ("short_code", "created_at"),
         "idx_short_click_batch_ack_created": ("acknowledged_at", "created_at"),
     }
+
+
+
+@pytest.mark.asyncio
+async def test_sync_reports_lock_contention_as_normal_skipped_result(monkeypatch):
+    class ContendedRedis:
+        async def set(self, *args, **kwargs):
+            return False
+
+    async def fake_get_redis_client():
+        return ContendedRedis()
+
+    monkeypatch.setattr(counter, "get_redis_client", fake_get_redis_client)
+
+    result = await counter.sync_click_counts_to_db(object())
+
+    assert result == 0
+    assert isinstance(result, counter.ClickCounterSyncSkipped)
+    assert result.reason == "lock_contended"
+
+
+@pytest.mark.asyncio
+async def test_pending_batch_failure_is_not_reported_as_success(monkeypatch):
+    class FakeRedis:
+        async def get(self, key):
+            return "3"
+
+    async def fake_scan(redis_client, max_keys, pattern=None, **kwargs):
+        if pattern and ":pending:" in pattern:
+            return [f"{counter.CLICK_COUNTER_PREFIX}pending:short-code:{'d' * 32}"]
+        return []
+
+    async def failed_process(*args, **kwargs):
+        return False, False
+
+    async def no_cleanup(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(counter, "_scan_click_counter_keys", fake_scan)
+    monkeypatch.setattr(counter, "_process_pending_click_batch", failed_process)
+    monkeypatch.setattr(counter, "_cleanup_click_sync_batch_ledger", no_cleanup)
+
+    with pytest.raises(counter.ClickCounterSyncError, match="failed=1"):
+        await counter._sync_redis_click_counter_batches(
+            object(), FakeRedis()
+        )
+
+
+
+@pytest.mark.asyncio
+async def test_redis_scan_failure_is_not_treated_as_empty_queue():
+    class BrokenRedis:
+        async def scan(self, cursor, match=None, count=None):
+            raise OSError("simulated SCAN failure")
+
+    with pytest.raises(counter.ClickCounterSyncError, match="扫描不完整"):
+        await counter._scan_click_counter_keys(
+            BrokenRedis(), pattern=f"{counter.CLICK_COUNTER_PREFIX}*",
+            raise_on_error=True,
+        )

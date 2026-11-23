@@ -17,7 +17,10 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from app.core.database import AsyncSessionLocal
-from app.core.short_link_click_counter import sync_click_counts_to_db
+from app.core.short_link_click_counter import (
+    ClickCounterSyncSkipped,
+    sync_click_counts_to_db,
+)
 from app.scheduler_module.tasks.clicks_batch_processor import process_clicks_queue
 from app.models.models import ShortLink
 from app.scheduler_module.task_result_store import get_task_result, set_task_result
@@ -40,15 +43,23 @@ async def sync_short_link_clicks_task():
         logger.info("开始执行短链接点击次数同步任务...")
         async with AsyncSessionLocal() as db:
             synced_count = await sync_click_counts_to_db(db)
+            if isinstance(synced_count, ClickCounterSyncSkipped):
+                logger.info("短链接点击次数同步正常跳过: reason=%s", synced_count.reason)
+                set_task_result(TASK_SYNC_CLICKS, f"正常跳过: {synced_count.reason}")
+                return
             if synced_count > 0:
-                logger.info(f"✅ 短链接点击次数同步成功: 更新了 {synced_count} 条记录")
+                logger.info("短链接点击次数同步成功: 更新了 %s 条记录", synced_count)
             else:
-                logger.debug("ℹ️ 短链接点击次数同步: 没有需要更新的记录（Redis中可能没有待同步的计数器）")
+                logger.debug("短链接点击次数同步完成: 没有待同步的计数器")
         set_task_result(TASK_SYNC_CLICKS, f"执行成功: 同步 {synced_count} 条")
         logger.debug("短链接点击次数同步任务执行成功")
     except Exception as e:
-        # 错误日志会输出到 app.log（WARNING 级别）
-        logger.error(f"❌ 短链接点击次数同步任务执行失败: {e}", exc_info=True)
+        # 失败状态覆盖上一次成功结果，避免运维界面继续显示陈旧成功。
+        set_task_result(TASK_SYNC_CLICKS, f"执行失败: {type(e).__name__}")
+        logger.error(
+            "短链接点击次数同步任务执行失败: error_type=%s",
+            type(e).__name__,
+        )
         raise
 
 
