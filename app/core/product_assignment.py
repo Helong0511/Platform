@@ -1017,6 +1017,11 @@ async def cleanup_invalid_assignments(
                                 errors.append(error_msg)
                                 logger.error(error_msg)
         
+        # 任何影响产品归属历史的清理，必须与 Generation/Outbox 同事务提交。
+        if deleted_count > 0:
+            from app.services.cache_invalidation_outbox import advance_cache_generation
+            await advance_cache_generation(db)
+
         # 提交删除操作
         await db.commit()
 
