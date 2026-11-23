@@ -43,6 +43,7 @@ from app.core.short_link_click_counter import (
     get_deadlock_stats
 )
 from app.core.redis_client import get_redis_client
+from app.core.short_link_cache import invalidate_short_link_cache
 from app.models.models import User, UserRole, ShortLink, Offer, Publisher, Click
 from app.schemas.short_link import (
     ShortLinkCreate,
@@ -636,7 +637,8 @@ async def update_short_link(
             details={"updated_fields": list(update_data.keys())},
         )
         await commit_audit_log(db)
-        # 服务层先行失效一次；事务提交后再失效，避免并发读取在 commit 前重建旧配置缓存。
+        # 服务层在 flush 后先行失效；事务提交后再次失效，清除并发请求可能回填的旧短链缓存。
+        await invalidate_short_link_cache(short_link.short_code)
         from app.services.cloak_pixel_mapping import invalidate_cloak_cache
         invalidate_cloak_cache(short_code=short_link.short_code)
 
@@ -683,7 +685,8 @@ async def delete_short_link(
         request=request,
     )
     await commit_audit_log(db)
-    # 删除事务提交后再次失效，避免并发请求重建已删除短链的旧像素配置缓存。
+    # 删除事务提交后再次失效，避免并发请求重建已删除短链的旧跳转缓存。
+    await invalidate_short_link_cache(short_code)
     from app.services.cloak_pixel_mapping import invalidate_cloak_cache
     invalidate_cloak_cache(short_code=short_code)
 
