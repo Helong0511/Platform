@@ -413,7 +413,7 @@ async def _execute_task_with_lock_internal(
                 task_description = task_record.description
                 task_cron_expression = task_record.cron_expression
         except Exception as e:
-            logger.warning(f"查询任务信息失败（不影响任务执行）: {e}")
+            logger.warning("查询任务信息失败（不影响任务执行）: error_type=%s", type(e).__name__)
 
         log_scheduled_task_start(
             task_name,
@@ -753,7 +753,7 @@ async def init_scheduled_tasks() -> None:
                     db
                 )
             except Exception as e:
-                logger.warning(f"注册任务进程分配失败: {e}")
+                logger.warning("注册任务进程分配失败: error_type=%s", type(e).__name__)
 
             # 注册任务
             try:
@@ -767,27 +767,25 @@ async def init_scheduled_tasks() -> None:
             except ValueError as e:
                 # 参数错误（如无效的 cron 表达式）
                 logger.error(
-                    f"注册任务 '{task_record.task_name}' 失败（参数错误）: {e}"
+                    "注册任务失败（参数错误）: task=%s error_type=%s", task_record.task_name, type(e).__name__
                 )
                 skipped_count += 1
             except Exception as e:
                 # 其他异常
                 logger.error(
-                    f"注册任务 '{task_record.task_name}' 失败: {e}",
-                    exc_info=True
+                    "注册任务失败: task=%s error_type=%s", task_record.task_name, type(e).__name__
                 )
                 skipped_count += 1
 
     except Exception as e:
         logger.error(
-            f"从数据库读取任务配置失败: {e}",
-            exc_info=True
+            "从数据库读取任务配置失败: error_type=%s", type(e).__name__
         )
     finally:
         try:
             await db.close()
         except Exception as e:
-            logger.warning(f"关闭数据库会话时出错: {e}")
+            logger.warning("关闭调度器数据库会话失败: error_type=%s", type(e).__name__)
 
     # 输出初始化结果
     worker_pid = os.getpid()
@@ -853,8 +851,8 @@ async def start_scheduler() -> None:
                     f"请检查数据库中的 scheduled_tasks 表，确保有启用的任务（is_active=True）"
                 )
         except Exception as e:
-            logger.error(f"启动调度器失败: {e}", exc_info=True)
-            raise RuntimeError(f"启动调度器失败: {e}") from e
+            logger.error("启动调度器失败: error_type=%s", type(e).__name__)
+            raise RuntimeError("启动调度器失败，请检查服务端日志") from e
     else:
         logger.warning("调度器已经在运行中")
 
@@ -876,6 +874,6 @@ async def shutdown_scheduler() -> None:
             # 应用关闭时任务被取消是正常的，不需要记录错误
             logger.debug("调度器关闭时任务被取消（正常关闭流程）")
         except Exception as e:
-            logger.error(f"关闭调度器时出错: {e}", exc_info=True)
+            logger.error("关闭调度器时出错: error_type=%s", type(e).__name__)
     else:
         logger.info("调度器未运行，无需关闭")
