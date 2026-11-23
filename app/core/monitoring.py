@@ -1801,10 +1801,10 @@ async def get_click_sync_ledger_health(db: AsyncSession = Depends(get_db)):
         ),
     }
 
-    if unacked_count:
-        overall_status = "backlog"
-    elif cleanup_status in {"degraded", "failed"}:
+    if cleanup_status in {"degraded", "failed"}:
         overall_status = "degraded"
+    elif unacked_count:
+        overall_status = "backlog"
     elif cleanup_status == "unknown":
         overall_status = "unknown"
     else:
