@@ -122,7 +122,7 @@ async def test_click_sync_ledger_health_does_not_hide_database_errors():
 
 
 @pytest.mark.asyncio
-async def test_click_sync_ledger_cleanup_log_redacts_exception_text(caplog):
+async def test_click_sync_ledger_cleanup_log_redacts_exception_text(caplog, monkeypatch):
     from app.core import short_link_click_counter as counter
 
     class BrokenDB:
@@ -132,6 +132,17 @@ async def test_click_sync_ledger_cleanup_log_redacts_exception_text(caplog):
         async def rollback(self):
             return None
 
+    class BrokenStatusDB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def execute(self, statement):
+            raise RuntimeError("dsn=password=must-not-appear")
+
+    monkeypatch.setattr(counter, "AsyncSessionLocal", lambda: BrokenStatusDB())
     await counter._cleanup_click_sync_batch_ledger(BrokenDB(), object())
 
     assert "error_type=OSError" in caplog.text
