@@ -66,3 +66,23 @@ async def test_advance_generation_fails_if_namespace_row_is_missing():
 
     db.add.assert_not_called()
     db.flush.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ad_data_get_or_set_uses_database_generation_in_cache_key(monkeypatch):
+    from app.services.ad_data import query_cache
+
+    db = MagicMock()
+    db.scalar = AsyncMock(return_value=23)
+    single_flight = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(query_cache, "get_or_set_single_flight", single_flight)
+
+    result = await query_cache.ad_data_get_or_set(
+        db,
+        "ad_data:summary:abc",
+        AsyncMock(return_value={"ok": True}),
+        ttl=60,
+    )
+
+    assert result == {"ok": True}
+    assert single_flight.await_args.args[0] == "ad_data:summary:abc:g23"
