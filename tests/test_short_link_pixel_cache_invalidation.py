@@ -92,15 +92,25 @@ def test_short_link_api_reinvalidates_pixel_cache_after_commit():
 
     source = Path("app/api_v1/tracking/short_links.py").read_text(encoding="utf-8")
     update_commit = source.index("await commit_audit_log(db)", source.index("async def update_short_link"))
-    update_invalidate = source.index(
+    update_redirect_invalidate = source.index(
+        "await invalidate_short_link_cache(short_link.short_code)",
+        update_commit,
+    )
+    update_pixel_invalidate = source.index(
         "invalidate_cloak_cache(short_code=short_link.short_code)",
         update_commit,
     )
     delete_commit = source.index("await commit_audit_log(db)", source.index("async def delete_short_link"))
-    delete_invalidate = source.index(
+    delete_redirect_invalidate = source.index(
+        "await invalidate_short_link_cache(short_code)",
+        delete_commit,
+    )
+    delete_pixel_invalidate = source.index(
         "invalidate_cloak_cache(short_code=short_code)",
         delete_commit,
     )
 
-    assert update_invalidate > update_commit
-    assert delete_invalidate > delete_commit
+    assert update_redirect_invalidate > update_commit
+    assert update_pixel_invalidate > update_commit
+    assert delete_redirect_invalidate > delete_commit
+    assert delete_pixel_invalidate > delete_commit
