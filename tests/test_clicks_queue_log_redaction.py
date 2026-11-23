@@ -2,6 +2,7 @@
 import pytest
 
 from app.core import clicks_queue
+from app.scheduler_module.tasks import clicks_batch_processor as processor
 
 
 def test_invalid_click_payload_logs_fingerprint_without_payload(caplog):
@@ -37,3 +38,21 @@ async def test_dead_letter_log_uses_fingerprint_not_raw_payload(monkeypatch, cap
     assert "private-click" not in output
     assert "203.0.113.56" not in output
     assert "PRIVATE-UA" not in output
+
+
+@pytest.mark.asyncio
+async def test_click_database_exception_log_hides_exception_text_and_traceback(caplog):
+    secret_parameter = "PRIVATE-CLICK-IP-198.51.100.77"
+
+    class BrokenDB:
+        async def execute(self, statement):
+            raise RuntimeError(secret_parameter)
+
+    click = {"click_id": "safe-test-id", "offer_id": 17}
+    with caplog.at_level("ERROR", logger="app.scheduler_module.tasks.clicks_batch_processor"):
+        with pytest.raises(RuntimeError, match=secret_parameter):
+            await processor._validate_offer_ids(BrokenDB(), [click])
+
+    assert secret_parameter not in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert "Traceback" not in caplog.text
