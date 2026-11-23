@@ -2,11 +2,10 @@
 
 from datetime import datetime, timedelta
 
-from app.core.utils import get_app_now_naive
-
 import pytest
 
 from app.core import monitoring
+from app.core.utils import get_app_now_naive
 
 
 class _AggregateResult:
