@@ -43,6 +43,8 @@ class AdDataDeleteCommand:
 
         await self.db.delete(ad_data)
         await self.db.flush()
+        from app.services.cache_invalidation_outbox import advance_cache_generation
+        await advance_cache_generation(self.db)
         logger.info("广告数据已删除: ID=%s", data_id)
         try:
             from app.services.ad_data.query_cache import invalidate_ad_data_query_caches
@@ -84,6 +86,8 @@ class AdDataBatchDeleteCommand:
             result = await self.db.execute(delete(AdData).where(AdData.id.in_(deletable_ids)))
             deleted_count = result.rowcount
             await self.db.flush()
+            from app.services.cache_invalidation_outbox import advance_cache_generation
+            await advance_cache_generation(self.db)
             logger.info(
                 "Batch deleted %s ad data records by %s",
                 deleted_count,
