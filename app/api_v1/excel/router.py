@@ -157,10 +157,10 @@ async def export_ad_data(
         return response
     except HTTPException:
         raise
-    except Exception as e:
-        # 如果已经是通过raise_api_exception抛出的异常，会由异常处理器处理
-        # 这里捕获其他未预期的异常
+    except Exception:
+        # 详细异常仅写入服务端日志；禁止把 SQL、连接信息或驱动错误返回给调用方。
+        logger.exception("Excel 广告数据导出失败")
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
-            detail=f"导出数据失败：{str(e)}"
+            detail="导出数据失败，请稍后重试",
         )
