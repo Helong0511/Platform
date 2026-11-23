@@ -77,7 +77,7 @@ async def _reset_tables(engine, batches):
         )
         await connection.run_sync(ShortLinkClickSyncBatch.__table__.drop, checkfirst=True)
         await connection.run_sync(ShortLinkClickSyncBatch.__table__.create)
-        await connection.run_sync(ShortLinkClickLedgerMaintenanceState.__table__.create)
+        await connection.run_sync(ShortLinkClickSyncLedgerMaintenanceState.__table__.create)
         if batches:
             await connection.execute(ShortLinkClickSyncBatch.__table__.insert(), batches)
 
