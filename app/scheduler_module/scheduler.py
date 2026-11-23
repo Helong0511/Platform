@@ -183,13 +183,13 @@ def _resolve_task_result_message(task_name: str) -> Optional[str]:
     try:
         result_message = get_task_result(task_name)
     except Exception as e:
-        logger.debug("从任务结果注册表获取结果失败: %s", e)
+        logger.debug("从任务结果注册表获取结果失败: error_type=%s", type(e).__name__)
 
     if not result_message:
         try:
             result_message = get_store_task_result(task_name)
         except Exception as e:
-            logger.debug("从 task_result_store 获取结果失败: %s", e)
+            logger.debug("从 task_result_store 获取结果失败: error_type=%s", type(e).__name__)
 
     if result_message:
         text = str(result_message).strip()
@@ -304,10 +304,10 @@ async def execute_task_with_lock(
             log_scheduled_task_skip(
                 task_name,
                 "数据库不可用",
-                detail=str(e),
+                detail=f"error_type={type(e).__name__}",
             )
             return
-        logger.warning(f"查询任务信息失败: {e}，将直接执行")
+        logger.warning("查询任务信息失败，将直接执行: error_type=%s", type(e).__name__)
         cron_expression = None
     finally:
         await db.close()
@@ -483,15 +483,16 @@ async def _execute_task_with_lock_internal(
             except Exception as log_error:
                 # 日志记录失败不应该影响任务执行，但需要详细记录错误信息
                 logger.error(
-                    f"记录任务 '{task_name}' 执行审计日志失败（成功）: {log_error}",
-                    exc_info=True
+                    "记录定时任务成功审计日志失败: task=%s error_type=%s",
+                    task_name,
+                    type(log_error).__name__,
                 )
             finally:
                 if audit_db:
                     try:
                         await audit_db.close()
                     except Exception as close_error:
-                        logger.warning(f"关闭审计日志数据库会话失败: {close_error}")
+                        logger.warning("关闭审计日志数据库会话失败: error_type=%s", type(close_error).__name__)
 
             # 上游 API 拉数任务结束后：若本轮全部完成则发重点关注 Telegram
             try:
@@ -502,9 +503,9 @@ async def _execute_task_with_lock_internal(
                 await on_upstream_api_task_finished(task_name)
             except Exception as watch_err:
                 logger.warning(
-                    "重点关注收尾钩子失败（不影响任务）: %s: %s",
+                    "重点关注收尾钩子失败（不影响任务）: task=%s error_type=%s",
                     task_name,
-                    watch_err,
+                    type(watch_err).__name__,
                 )
 
         except Exception as e:
@@ -572,15 +573,16 @@ async def _execute_task_with_lock_internal(
             except Exception as log_error:
                 # 日志记录失败不应该影响任务执行，但需要详细记录错误信息
                 logger.error(
-                    f"记录任务 '{task_name}' 执行审计日志失败（失败）: {log_error}",
-                    exc_info=True
+                    "记录定时任务失败审计日志失败: task=%s error_type=%s",
+                    task_name,
+                    type(log_error).__name__,
                 )
             finally:
                 if audit_db:
                     try:
                         await audit_db.close()
                     except Exception as close_error:
-                        logger.warning(f"关闭审计日志数据库会话失败: {close_error}")
+                        logger.warning("关闭审计日志数据库会话失败: error_type=%s", type(close_error).__name__)
 
             # 失败也算本轮「已跑完」，避免卡死重点关注汇总通知
             try:
@@ -591,9 +593,9 @@ async def _execute_task_with_lock_internal(
                 await on_upstream_api_task_finished(task_name)
             except Exception as watch_err:
                 logger.warning(
-                    "重点关注收尾钩子失败（不影响任务）: %s: %s",
+                    "重点关注收尾钩子失败（不影响任务）: task=%s error_type=%s",
                     task_name,
-                    watch_err,
+                    type(watch_err).__name__,
                 )
 
     finally:
@@ -603,12 +605,12 @@ async def _execute_task_with_lock_internal(
                 await lock_db.close()
             except Exception as e:
                 logger.warning(
-                    f"关闭任务 '{task_name}' 的数据库会话时出错: {e}"
+                    "关闭定时任务数据库会话失败: task=%s error_type=%s", task_name, type(e).__name__
                 )
         try:
             await release_redis_scheduler_lock(task_name, redis_token)
         except Exception as e:
-            logger.debug("释放 Redis 调度锁异常: %s", e)
+            logger.debug("释放 Redis 调度锁异常: error_type=%s", type(e).__name__)
 
 
 def register_scheduled_task(
