@@ -42,7 +42,12 @@ from app.scheduler_module.lock import (
     CURRENT_HOST,
     DEFAULT_TIMEOUT_SECONDS,
 )
-from app.scheduler_module.task_queue import submit_task_to_queue, TaskPriority
+from app.scheduler_module.task_queue import (
+    submit_task_to_queue,
+    TaskPriority,
+    get_task_queue,
+    QueueShuttingDownError,
+)
 from app.scheduler_module.task_names import THIRD_PARTY_REPORT_OUTBOX_TASK_NAME
 from app.scheduler_module.process_allocator import (
     should_execute_in_current_process, register_task_process_assignment
@@ -217,12 +222,7 @@ async def execute_task_with_lock(
         **kwargs: 任务函数关键字参数
     """
     if is_scheduler_shutting_down():
-        log_scheduled_task_skip(
-            task_name,
-            "调度器正在关闭",
-            detail=f"pid={os.getpid()} host={CURRENT_HOST}",
-        )
-        return
+        raise QueueShuttingDownError("调度器正在关闭，拒绝接收新任务")
 
     # 如果跳过进程检查（手动触发），直接执行
     if skip_process_check:
@@ -864,6 +864,8 @@ async def shutdown_scheduler() -> None:
     等待所有正在执行的任务完成后再关闭
     """
     mark_scheduler_shutting_down()
+    queue = get_task_queue()
+    await queue.stop_accepting()
     sched = get_scheduler()
     if sched.running:
         try:
@@ -877,3 +879,19 @@ async def shutdown_scheduler() -> None:
             logger.error("关闭调度器时出错: error_type=%s", type(e).__name__)
     else:
         logger.info("调度器未运行，无需关闭")
+
+    # TaskQueue 使用独立 asyncio.Task 执行器，不受 APScheduler shutdown(wait=True) 管理。
+    # 先停止接收，再有限等待已接收任务；超时只报告真实积压，不伪报排空成功。
+    drain_timeout = getattr(settings, "SCHEDULED_TASK_SHUTDOWN_TIMEOUT_SECONDS", 60)
+    try:
+        await queue.wait_for_completion(timeout=drain_timeout)
+        logger.info("定时任务执行队列已排空")
+    except asyncio.TimeoutError:
+        status = await queue.get_queue_status()
+        logger.error(
+            "定时任务队列排空超时: running=%s queued=%s running_tasks=%s queued_tasks=%s",
+            status["current_running"],
+            status["queue_length"],
+            status["running_tasks"],
+            status["queued_tasks"],
+        )
