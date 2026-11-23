@@ -1729,6 +1729,46 @@ class AlertRuleCreateBody(BaseModel):
 
 monitoring_router = APIRouter(tags=["系统监控"], dependencies=[Depends(require_admin)])
 
+@monitoring_router.get("/metrics/click-sync-ledger", summary="获取短链接点击刷盘账本健康状态")
+async def get_click_sync_ledger_health(db: AsyncSession = Depends(get_db)):
+    """
+    查询短链接点击刷盘账本的未 ACK 积压情况。
+
+    仅返回聚合数据，不暴露短链代码、batch_id 或点击明细。
+    数据库不可用时让请求失败，避免把未知状态伪装成健康。
+    """
+    from sqlalchemy import func, select
+    from app.models.postback import ShortLinkClickSyncBatch
+
+    result = await db.execute(
+        select(
+            func.count(ShortLinkClickSyncBatch.batch_id),
+            func.min(ShortLinkClickSyncBatch.created_at),
+        ).where(ShortLinkClickSyncBatch.acknowledged_at.is_(None))
+    )
+    unacked_count, oldest_unacked_at = result.one()
+    observed_at = dt.now(timezone.utc).replace(tzinfo=None)
+
+    oldest_age_seconds = None
+    if oldest_unacked_at is not None:
+        # MySQL DATETIME 通常返回 naive 时间；若驱动返回 aware 时间，统一按 UTC 计算。
+        if oldest_unacked_at.tzinfo is not None:
+            oldest_unacked_at = oldest_unacked_at.astimezone(timezone.utc).replace(tzinfo=None)
+        oldest_age_seconds = max(0, int((observed_at - oldest_unacked_at).total_seconds()))
+
+    return {
+        "status": "backlog" if unacked_count else "healthy",
+        "unacknowledged_count": int(unacked_count or 0),
+        "oldest_unacknowledged_at": (
+            oldest_unacked_at.replace(tzinfo=timezone.utc).isoformat()
+            if oldest_unacked_at is not None else None
+        ),
+        "oldest_unacknowledged_age_seconds": oldest_age_seconds,
+        "observed_at": observed_at.replace(tzinfo=timezone.utc).isoformat(),
+        "source": "mysql_ledger",
+    }
+
+
 @monitoring_router.get("/metrics", summary="获取实时监控指标")
 async def get_metrics():
     """
