@@ -7,6 +7,7 @@ from app.scheduler_module.task_queue import (
     QueueFullError,
     QueueShuttingDownError,
     TaskQueue,
+    TaskPriority,
 )
 
 
@@ -90,3 +91,28 @@ async def test_zero_timeout_does_not_wait_indefinitely():
 async def test_zero_timeout_returns_immediately_when_queue_is_idle():
     queue = TaskQueue(max_concurrent_tasks=1, max_pending_tasks=0)
     await queue.wait_for_completion(timeout=0)
+
+
+@pytest.mark.asyncio
+async def test_priority_order_is_preserved_with_bounded_queue():
+    queue = TaskQueue(max_concurrent_tasks=1, max_pending_tasks=2)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    execution_order = []
+
+    async def first_task():
+        started.set()
+        await release.wait()
+        execution_order.append("running")
+
+    async def record_task(label):
+        execution_order.append(label)
+
+    await queue.submit("running", first_task)
+    await asyncio.wait_for(started.wait(), timeout=2)
+    await queue.submit("low", record_task, TaskPriority.LOW, "low")
+    await queue.submit("high", record_task, TaskPriority.HIGH, "high")
+
+    release.set()
+    await asyncio.wait_for(queue.wait_for_completion(timeout=2), timeout=3)
+    assert execution_order == ["running", "high", "low"]
