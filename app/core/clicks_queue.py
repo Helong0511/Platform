@@ -120,7 +120,7 @@ async def enqueue_click(click_data: Dict[str, Any]) -> bool:
 
 
 def _payload_fingerprint(raw: str) -> str:
-    """返回不可逆的载荷摘要，日志不得输出点击载荷或其字段片段。"""
+    """生成用于关联同一载荷的摘要标识；日志不得输出点击载荷或其字段片段。"""
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
