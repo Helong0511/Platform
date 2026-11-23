@@ -149,7 +149,7 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     Migration(
         revision="20261123_click_sync_ledger_cleanup_state",
         path="sql/migrations/20261123_click_sync_ledger_cleanup_state.sql",
-        sha256="8af658789fcad3c81a7f0138d36f63ea857c81086edf98cb6a60603b2893862f",
+        sha256="fc21405197f0057ac829ad6bc2806bb49b36d03c1efa9be21964512ae27cdcbc",
     ),
 
 )
