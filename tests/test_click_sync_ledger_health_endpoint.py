@@ -3,6 +3,7 @@
 import ast
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,14 +19,38 @@ class _AggregateResult:
         return self._row
 
 
+class _StateResult:
+    def __init__(self, state):
+        self.state = state
+
+    def scalar_one_or_none(self):
+        return self.state
+
+
 class _FakeDB:
-    def __init__(self, row):
+    def __init__(self, row, cleanup_state=None):
         self.row = row
-        self.statement = None
+        self.cleanup_state = cleanup_state or SimpleNamespace(
+            status="healthy",
+            consecutive_failure_count=0,
+            total_failure_count=0,
+            last_attempt_at=None,
+            last_success_at=None,
+            last_failure_at=None,
+            last_error_type=None,
+            last_unacked_scanned_count=0,
+            last_acknowledged_count=0,
+            last_deleted_count=0,
+            last_redis_check_failures=0,
+            last_cache_invalidation_failures=0,
+        )
+        self.statements = []
 
     async def execute(self, statement):
-        self.statement = statement
-        return _AggregateResult(self.row)
+        self.statements.append(statement)
+        if len(self.statements) == 1:
+            return _AggregateResult(self.row)
+        return _StateResult(self.cleanup_state)
 
 
 @pytest.mark.asyncio
@@ -39,7 +64,8 @@ async def test_click_sync_ledger_health_reports_empty_ledger_as_healthy():
     assert result["oldest_unacknowledged_at"] is None
     assert result["oldest_unacknowledged_age_seconds"] is None
     assert result["source"] == "mysql_ledger"
-    sql = str(db.statement).lower()
+    assert result["cleanup"]["status"] == "healthy"
+    sql = str(db.statements[0]).lower()
     assert "short_link_click_sync_batches" in sql
     assert "acknowledged_at is null" in sql
 
@@ -56,6 +82,34 @@ async def test_click_sync_ledger_health_reports_oldest_unacknowledged_age():
     assert datetime.fromisoformat(result["oldest_unacknowledged_at"]).tzinfo is not None
     assert 14 * 60 <= result["oldest_unacknowledged_age_seconds"] <= 16 * 60
     assert result["source"] == "mysql_ledger"
+    assert result["cleanup"]["status"] == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_click_sync_ledger_health_reports_persistent_cleanup_failures():
+    failure_time = get_app_now_naive() - timedelta(minutes=3)
+    state = SimpleNamespace(
+        status="degraded",
+        consecutive_failure_count=2,
+        total_failure_count=7,
+        last_attempt_at=get_app_now_naive(),
+        last_success_at=get_app_now_naive() - timedelta(hours=1),
+        last_failure_at=failure_time,
+        last_error_type="redis_exists:ConnectionError",
+        last_unacked_scanned_count=4,
+        last_acknowledged_count=1,
+        last_deleted_count=12,
+        last_redis_check_failures=2,
+        last_cache_invalidation_failures=0,
+    )
+    result = await monitoring.get_click_sync_ledger_health(_FakeDB((0, None), state))
+    assert result["status"] == "degraded"
+    assert result["cleanup"]["status"] == "degraded"
+    assert result["cleanup"]["alert_required"] is True
+    assert result["cleanup"]["consecutive_failure_count"] == 2
+    assert result["cleanup"]["total_failure_count"] == 7
+    assert result["cleanup"]["last_error_type"] == "redis_exists:ConnectionError"
+    assert datetime.fromisoformat(result["cleanup"]["last_failure_at"]).tzinfo is not None
 
 
 @pytest.mark.asyncio
@@ -69,7 +123,7 @@ async def test_click_sync_ledger_health_does_not_hide_database_errors():
 
 
 @pytest.mark.asyncio
-async def test_click_sync_ledger_cleanup_log_redacts_exception_text(caplog):
+async def test_click_sync_ledger_cleanup_log_redacts_exception_text(caplog, monkeypatch):
     from app.core import short_link_click_counter as counter
 
     class BrokenDB:
@@ -79,6 +133,17 @@ async def test_click_sync_ledger_cleanup_log_redacts_exception_text(caplog):
         async def rollback(self):
             return None
 
+    class BrokenStatusDB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def execute(self, statement):
+            raise RuntimeError("dsn=password=must-not-appear")
+
+    monkeypatch.setattr(counter, "AsyncSessionLocal", lambda: BrokenStatusDB())
     await counter._cleanup_click_sync_batch_ledger(BrokenDB(), object())
 
     assert "error_type=OSError" in caplog.text
@@ -104,12 +169,16 @@ async def test_click_sync_ledger_cleanup_uses_application_timezone_for_ack_and_r
     class _Result:
         def __init__(self, kind):
             self.kind = kind
+            self.rowcount = 1
 
         def fetchall(self):
             return _Rows().fetchall()
 
         def scalars(self):
             return _Scalars()
+
+        def scalar_one_or_none(self):
+            return None
 
     class _DB:
         def __init__(self):
@@ -121,6 +190,9 @@ async def test_click_sync_ledger_cleanup_uses_application_timezone_for_ack_and_r
             if len(self.statements) == 1:
                 return _Result("unacked")
             return _Result("other")
+
+        def add(self, _state):
+            return None
 
         async def commit(self):
             self.committed = True
