@@ -895,7 +895,10 @@ async def _cleanup_click_sync_batch_ledger(
             await db.rollback()
         except Exception:
             pass
-        logger.warning("短链接点击刷盘幂等账本清理失败（不影响 pending 重试）: %s", exc, exc_info=True)
+        logger.warning(
+            "短链接点击刷盘幂等账本清理失败（不影响 pending 重试）: error_type=%s",
+            type(exc).__name__,
+        )
 
 
 
