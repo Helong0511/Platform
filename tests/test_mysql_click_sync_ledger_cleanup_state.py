@@ -249,3 +249,45 @@ async def test_mysql_db_commit_failure_persists_failed_state_in_separate_session
     finally:
         await _drop_tables(engine)
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_mysql_cache_invalidation_unconfirmed_persists_degraded_and_keeps_unacked(monkeypatch):
+    engine = _engine()
+    now = datetime(2026, 11, 23, 12, 0, 0)
+    monkeypatch.setattr(counter, "get_app_now_naive", lambda: now)
+
+    class Redis:
+        async def exists(self, _key):
+            return 0
+
+    async def invalidate(_short_code):
+        return False
+
+    monkeypatch.setattr(counter, "invalidate_short_link_cache", invalidate)
+    try:
+        await _reset_tables(engine, [{
+            "batch_id": "batch-cache-fail",
+            "short_code": "short-c",
+            "click_count": 4,
+            "created_at": now - timedelta(minutes=5),
+            "acknowledged_at": None,
+        }])
+        factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with factory() as db:
+            result = await counter._cleanup_click_sync_batch_ledger(db, Redis())
+
+        assert result["status"] == "degraded"
+        assert result["cache_invalidation_failures"] == 1
+        assert result["acknowledged_count"] == 0
+
+        async with factory() as db:
+            state = await db.get(ShortLinkClickSyncLedgerMaintenanceState, 1)
+            row = await db.get(ShortLinkClickSyncBatch, "batch-cache-fail")
+        assert state.status == "degraded"
+        assert state.last_cache_invalidation_failures == 1
+        assert state.last_error_type == "cache_invalidation:unconfirmed"
+        assert row.acknowledged_at is None
+    finally:
+        await _drop_tables(engine)
+        await engine.dispose()
