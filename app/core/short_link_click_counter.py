@@ -601,6 +601,10 @@ async def _scan_click_counter_keys(
                     len(keys),
                     cursor,
                 )
+                if raise_on_error:
+                    raise ClickCounterSyncError(
+                        f"Redis SCAN 达到最大迭代次数，扫描结果不完整；已收集 {len(keys)} 个键"
+                    )
                 break
             if cursor == 0:
                 break
