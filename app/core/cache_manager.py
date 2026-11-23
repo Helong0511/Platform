@@ -15,7 +15,6 @@ from app.core.redis_client import get_redis_client
 from app.core.offer_cache import (
     get_offer_cache_entry,
     set_offer_cache,
-    get_offer_advertiser_id,
     invalidate_offer_cache,
 )
 from app.core.short_link_cache import (
