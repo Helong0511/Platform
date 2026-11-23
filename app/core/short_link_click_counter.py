@@ -695,6 +695,9 @@ async def _acknowledge_click_batch(db: AsyncSession, redis, batch_id: str, pendi
             await db.rollback()
         except Exception:
             pass
+        # Redis pending 已删除，但 DB ACK 未确认；本轮必须报告失败，
+        # 账本保留为未 ACK 状态，由清理/恢复任务在后续轮次核验。
+        return False
     return True
 
 
