@@ -49,7 +49,7 @@ class CacheInvalidationOutbox(Base):
     lease_token = Column(CHAR(32, collation="ascii_bin"), nullable=True)
     lease_until = Column(DateTime, nullable=True)
     last_error_type = Column(String(128), nullable=True, comment="仅记录异常类型，不保存异常原文")
-    created_at = Column(DateTime, nullable=False, default=get_app_now_naive, server_default="CURRENT_TIMESTAMP")
+    created_at = Column(DateTime, nullable=False, default=get_app_now_naive, server_default=text("CURRENT_TIMESTAMP"))
     completed_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
