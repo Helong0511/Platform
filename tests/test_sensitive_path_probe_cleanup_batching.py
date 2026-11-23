@@ -146,3 +146,31 @@ async def test_failed_batch_preserves_committed_progress_and_redacts_error(fixed
 async def test_cleanup_rejects_invalid_budget_configuration(kwargs):
     with pytest.raises(ValueError):
         await cleanup.cleanup_sensitive_path_probe_logs(**kwargs)
+
+
+@pytest.mark.asyncio
+async def test_cleanup_timeout_reports_unknown_batch_without_false_success(monkeypatch, fixed_now):
+    import asyncio
+
+    class TimeoutDB:
+        async def execute(self, _statement):
+            raise AssertionError("wait_for timeout should occur before database execution")
+
+        rollback = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock()
+        close = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock()
+
+    async def timeout_immediately(awaitable, timeout):
+        awaitable.close()
+        raise asyncio.TimeoutError()
+
+    monkeypatch.setattr(cleanup.asyncio, "wait_for", timeout_immediately)
+    db = TimeoutDB()
+    with pytest.raises(cleanup.SensitivePathProbeCleanupError) as captured:
+        await cleanup.cleanup_sensitive_path_probe_logs(
+            retention_days=30, db=db, batch_size=10, max_batches=10, max_runtime_seconds=1
+        )
+    assert captured.value.error_type == "TimeoutError"
+    assert captured.value.complete is False
+    assert captured.value.remaining_possible is True
+    assert captured.value.deleted_count == 0
+    db.rollback.assert_awaited_once()
