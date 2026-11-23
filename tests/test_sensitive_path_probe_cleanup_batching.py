@@ -191,3 +191,24 @@ async def test_cleanup_empty_table_is_complete(fixed_now):
         assert result["remaining_possible"] is False
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_entry_raises_for_partial_cleanup(monkeypatch):
+    async def partial_result(**_kwargs):
+        return {
+            "deleted_count": 25,
+            "batch_count": 1,
+            "cutoff": "2026-10-24 12:00:00",
+            "complete": False,
+            "remaining_possible": True,
+        }
+
+    monkeypatch.setattr(cleanup, "cleanup_sensitive_path_probe_logs", partial_result)
+    with pytest.raises(cleanup.SensitivePathProbeCleanupIncomplete) as captured:
+        await cleanup.cleanup_sensitive_path_probe_logs_task()
+
+    assert captured.value.deleted_count == 25
+    assert captured.value.batch_count == 1
+    assert captured.value.complete is False
+    assert captured.value.remaining_possible is True
