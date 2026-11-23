@@ -2,7 +2,7 @@
 
 ## 行为与事务边界
 
-`cleanup_sensitive_path_probe_logs()` 在任务开始时只计算一次应用时区 cutoff，并在本轮所有批次中复用。每批按主键升序选择有限数量的过期记录，使用 MySQL 8 `FOR UPDATE SKIP LOCKED` 避免并发清理实例重复等待同一批行，再按主键和固定 cutoff 删除。
+`cleanup_sensitive_path_probe_logs()` 在任务开始时只计算一次应用时区 cutoff，并在本轮所有批次中复用。每批按主键升序选择有限数量的过期记录，使用 MySQL 8 `FOR UPDATE` 锁定当前批次，再按主键和固定 cutoff 删除。这里刻意不使用 `SKIP LOCKED`：被其它清理实例锁住的记录不能被误当作“没有剩余记录”；并发实例可以等待锁释放，单批等待受总运行预算约束。
 
 每批独立提交。外部注入的 `AsyncSession` 仍由调用方负责关闭，但提交行为与旧实现一致；提交粒度从整轮一次变为每批一次。因此调用方不得把其它需要原子提交的业务写入混入该 Session 后再调用清理任务。
 
