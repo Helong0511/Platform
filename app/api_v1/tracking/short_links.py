@@ -58,6 +58,32 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+async def _scan_click_counter_keys_for_stats(
+    redis,
+    pattern: str,
+    *,
+    max_iterations: int = 100,
+    batch_size: int = 100,
+) -> tuple[list, bool, Optional[str]]:
+    """有界扫描点击计数器；失败时保留部分结果，不使用阻塞式 KEYS。"""
+    keys = []
+    cursor = 0
+    for _ in range(max(1, int(max_iterations))):
+        try:
+            cursor, batch_keys = await redis.scan(
+                cursor,
+                match=pattern,
+                count=max(1, int(batch_size)),
+            )
+        except Exception as exc:
+            # 只返回异常类型，避免把连接串、凭据等底层信息写入 API 响应。
+            return keys, False, type(exc).__name__
+        keys.extend(batch_keys)
+        if cursor == 0:
+            return keys, True, None
+    return keys, False, "max_iterations"
+
+
 # ==================== 短链接工具接口（必须在动态路径之前） ====================
 
 @router.get("/generate-code",
@@ -330,6 +356,8 @@ async def check_click_count_stats(
     
     stats = {
         "redis_available": False,
+        "redis_scan_complete": None,
+        "redis_scan_error": None,
         "redis_counters": 0,
         "redis_counter_details": [],
         "memory_counters": memory_stats["total_counters"],
@@ -344,69 +372,37 @@ async def check_click_count_stats(
     # ---------- 条件分支 ----------
     if redis:
         stats["redis_available"] = True
-        # ---------- 异常处理 ----------
-        try:
-            # 使用SCAN而不是KEYS，避免在生产环境阻塞
-            pattern = f"{CLICK_COUNTER_PREFIX}*"
-            keys = []
-            cursor = 0
-            max_iterations = 100  # 限制迭代次数，避免长时间阻塞（最多10000个键）
-            iteration = 0
-            # ---------- 异常处理 ----------
+        keys, scan_complete, scan_error = await _scan_click_counter_keys_for_stats(
+            redis,
+            f"{CLICK_COUNTER_PREFIX}*",
+            max_iterations=100,
+            batch_size=100,
+        )
+        stats["redis_scan_complete"] = scan_complete
+        stats["redis_scan_error"] = scan_error
+        stats["redis_counters"] = len(keys)
+
+        # 获取每个计数器的详细信息（最多显示20个）
+        for key in keys[:20]:
+            if not key.startswith(CLICK_COUNTER_PREFIX):
+                continue
+            short_code = key[len(CLICK_COUNTER_PREFIX):]
+            if not short_code:
+                continue
             try:
-                while True:
-                    cursor, batch_keys = await redis.scan(cursor, match=pattern, count=100)
-                    keys.extend(batch_keys)
-                    iteration += 1
-                    
-                    # 安全检查：防止无限循环
-                    # ---------- 条件分支 ----------
-                    if iteration >= max_iterations:
-                        logger.warning(
-                            f"Redis SCAN达到最大迭代次数 {max_iterations}，停止扫描。"
-                            f"已收集 {len(keys)} 个键"
-                        )
-                        break
-                    
-                    # ---------- 条件分支 ----------
-                    if cursor == 0:
-                        break
-            except Exception as scan_error:
-                # 如果SCAN失败，降级使用KEYS（仅用于监控端点，影响较小）
-                logger.warning("Redis SCAN失败，降级使用KEYS: error_type=%s", type(scan_error).__name__)
-                keys = await redis.keys(pattern)
-            
-            stats["redis_counters"] = len(keys)
-            
-            # 获取每个计数器的详细信息（最多显示20个）
-            # ---------- 循环处理 ----------
-            for key in keys[:20]:
-                # 安全地提取 short_code：使用 startswith 检查并移除前缀
-                # ---------- 条件分支 ----------
-                if not key.startswith(CLICK_COUNTER_PREFIX):
-                    continue
-                
-                short_code = key[len(CLICK_COUNTER_PREFIX):]
-                
-                # 验证 short_code 不为空
-                # ---------- 条件分支 ----------
-                if not short_code:
-                    continue
-                
-                # ---------- 异常处理 ----------
-                try:
-                    count = await redis.get(key)
-                    count_value = int(count) if count else 0
-                    stats["redis_counter_details"].append({
-                        "short_code": short_code,
-                        "count": count_value,
-                        "key": key
-                    })
-                except Exception as get_error:
-                    logger.debug("获取Redis计数器值失败: error_type=%s", type(get_error).__name__)
-        except Exception as e:
-            stats["redis_error"] = "Redis 查询失败，请检查服务状态"
-    
+                count = await redis.get(key)
+                count_value = int(count) if count else 0
+                stats["redis_counter_details"].append({
+                    "short_code": short_code,
+                    "count": count_value,
+                    "key": key,
+                })
+            except Exception as get_error:
+                logger.debug(
+                    "获取Redis计数器值失败: error_type=%s",
+                    type(get_error).__name__,
+                )
+
     # 获取数据库中的总点击次数
     # ---------- 异常处理 ----------
     try:
