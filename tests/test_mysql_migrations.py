@@ -2321,7 +2321,7 @@ def test_ad_data_cache_generation_migration_rejects_wrong_existing_outbox_table(
                 "id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
             )
-            with pytest.raises(pymysql.err.OperationalError):
+            with pytest.raises(pymysql.err.ProgrammingError):
                 _run_sql_file(
                     cursor,
                     "sql/migrations/20261123_ad_data_cache_generation_outbox.sql",
