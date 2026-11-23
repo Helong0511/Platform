@@ -2329,3 +2329,95 @@ def test_ad_data_cache_generation_migration_rejects_wrong_existing_outbox_table(
             cursor.execute("DROP TABLE IF EXISTS cache_invalidation_outbox")
             cursor.execute("DROP TABLE IF EXISTS cache_namespace_generations")
         connection.close()
+
+
+
+@pytest.mark.asyncio
+async def test_mysql_cache_generation_updates_are_serialized_and_outbox_is_transactional():
+    """真实 MySQL 并发递增不得丢版本；回滚必须同时撤销 Generation 与 Outbox。"""
+    from urllib.parse import quote_plus
+
+    from sqlalchemy import func, select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.models.models import CacheInvalidationOutbox, CacheNamespaceGeneration
+    from app.services.cache_invalidation_outbox import advance_cache_generation
+
+    connection = _connect()
+    engine = None
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cache_invalidation_outbox")
+            cursor.execute("DROP TABLE IF EXISTS cache_namespace_generations")
+            _run_sql_file(
+                cursor,
+                "sql/migrations/20261123_ad_data_cache_generation_outbox.sql",
+            )
+
+        password = quote_plus(os.getenv("MYSQL_INTEGRATION_PASSWORD", ""))
+        user = quote_plus(os.getenv("MYSQL_INTEGRATION_USER", "root"))
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{HOST}:"
+            f"{int(os.getenv('MYSQL_INTEGRATION_PORT', '3306'))}/{DATABASE}?charset=utf8mb4",
+            pool_pre_ping=True,
+            pool_size=10,
+            max_overflow=0,
+        )
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+
+        async def bump_generation():
+            async with session_factory() as session:
+                generation = await advance_cache_generation(session)
+                await session.commit()
+                return generation
+
+        generations = await asyncio.gather(*(bump_generation() for _ in range(8)))
+        assert sorted(generations) == list(range(2, 10))
+
+        async with session_factory() as session:
+            current_generation = await session.scalar(
+                select(CacheNamespaceGeneration.generation).where(
+                    CacheNamespaceGeneration.namespace == "ad_data"
+                )
+            )
+            outbox_count = await session.scalar(
+                select(func.count(CacheInvalidationOutbox.id))
+            )
+            event_generations = (
+                await session.scalars(
+                    select(CacheInvalidationOutbox.generation).order_by(
+                        CacheInvalidationOutbox.generation
+                    )
+                )
+            ).all()
+            assert current_generation == 9
+            assert outbox_count == 8
+            assert event_generations == list(range(2, 10))
+
+        async with session_factory() as session:
+            rolled_back_generation = await advance_cache_generation(session)
+            assert rolled_back_generation == 10
+            await session.rollback()
+
+        async with session_factory() as session:
+            current_generation = await session.scalar(
+                select(CacheNamespaceGeneration.generation).where(
+                    CacheNamespaceGeneration.namespace == "ad_data"
+                )
+            )
+            outbox_count = await session.scalar(
+                select(func.count(CacheInvalidationOutbox.id))
+            )
+            assert current_generation == 9
+            assert outbox_count == 8
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cache_invalidation_outbox")
+            cursor.execute("DROP TABLE IF EXISTS cache_namespace_generations")
+        connection.close()
