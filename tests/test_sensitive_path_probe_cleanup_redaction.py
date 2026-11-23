@@ -24,7 +24,7 @@ async def test_cleanup_failure_redacts_database_exception(monkeypatch, caplog):
     monkeypatch.setattr(cleanup_module, "AsyncSessionLocal", lambda: db)
 
     with caplog.at_level(logging.ERROR):
-        with pytest.raises(RuntimeError, match="mysql://"):
+        with pytest.raises(cleanup_module.SensitivePathProbeCleanupError) as captured:
             await cleanup_module.cleanup_sensitive_path_probe_logs(retention_days=30)
 
     result = get_task_result(cleanup_module.TASK_NAME)
