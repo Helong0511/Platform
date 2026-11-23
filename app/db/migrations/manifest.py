@@ -147,15 +147,15 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     ),
 
     Migration(
-        revision="20261123_click_sync_ledger_cleanup_state",
-        path="sql/migrations/20261123_click_sync_ledger_cleanup_state.sql",
-        sha256="2389eb4aa10774170ce4994a82bb220b2d6a28bce0dda3f6416d9976d334e643",
-    ),
-
-    Migration(
         revision="20261123_ad_data_cache_generation_outbox",
         path="sql/migrations/20261123_ad_data_cache_generation_outbox.sql",
         sha256="95ab872bd8810808f234105296fa7d3d9a7d86001be7799da488feabaa2cb943",
+    ),
+
+    Migration(
+        revision="20261123_click_sync_ledger_cleanup_state",
+        path="sql/migrations/20261123_click_sync_ledger_cleanup_state.sql",
+        sha256="2389eb4aa10774170ce4994a82bb220b2d6a28bce0dda3f6416d9976d334e643",
     ),
 
 )
