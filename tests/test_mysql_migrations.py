@@ -3,6 +3,7 @@
 只连接 CI 显式注入的临时 MySQL 服务；未配置时跳过。
 禁止从应用生产配置读取数据库连接串。
 """
+import asyncio
 from __future__ import annotations
 
 import hashlib
