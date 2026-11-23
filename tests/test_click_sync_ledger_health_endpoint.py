@@ -1,6 +1,8 @@
 """短链接点击刷盘账本监控 API 回归测试。"""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+
+from app.core.utils import get_app_now_naive
 
 import pytest
 
@@ -43,14 +45,14 @@ async def test_click_sync_ledger_health_reports_empty_ledger_as_healthy():
 
 @pytest.mark.asyncio
 async def test_click_sync_ledger_health_reports_oldest_unacknowledged_age():
-    oldest = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=15)
+    oldest = get_app_now_naive() - timedelta(minutes=15)
     db = _FakeDB((3, oldest))
 
     result = await monitoring.get_click_sync_ledger_health(db)
 
     assert result["status"] == "backlog"
     assert result["unacknowledged_count"] == 3
-    assert result["oldest_unacknowledged_at"].endswith("+00:00")
+    assert datetime.fromisoformat(result["oldest_unacknowledged_at"]).tzinfo is not None
     assert 14 * 60 <= result["oldest_unacknowledged_age_seconds"] <= 16 * 60
     assert result["source"] == "mysql_ledger"
 
