@@ -130,7 +130,9 @@ class AdDataUpdateCommand:
                 ErrorCode.OPERATION_FAILED,
                 detail=f"更新广告数据失败：{error_msg}。请检查数据格式或联系管理员",
             )
-        from app.services.cache_invalidation_outbox import advance_cache_generation\n        await advance_cache_generation(self.db)\n        logger.info("广告数据已更新: ID=%s", data_id)
+        from app.services.cache_invalidation_outbox import advance_cache_generation
+        await advance_cache_generation(self.db)
+        logger.info("广告数据已更新: ID=%s", data_id)
         try:
             from app.services.ad_data.query_cache import invalidate_ad_data_query_caches
 
