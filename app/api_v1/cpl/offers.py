@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.config import settings
+from app.core.audit_log import commit_audit_log
+from app.core.infrastructure.cache import CacheInvalidator
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.database import get_db
 from app.core.dependencies import get_offer_service
@@ -574,6 +576,10 @@ async def create_offer(
     # 调用服务层创建Offer（服务层会处理渠道分配和短链接创建）
     offer, short_link_info = await offer_service.create_offer(offer_data, current_user)
 
+    # 先提交业务数据与审计日志，再次失效缓存，避免并发请求在提交前回填旧数据。
+    await commit_audit_log(db)
+    await CacheInvalidator.invalidate_offer_cache(offer.id)
+
     # 重新加载以获取广告主信息
     offer = await offer_service.get_offer_by_id(offer.id, current_user, include_advertiser=True,
                                                 include_assignments=False)
@@ -974,6 +980,10 @@ async def update_offer(
         offer_id, update_data, current_user
     )
 
+    # 提交业务数据与审计日志后再次失效，关闭提交前并发回填旧缓存的窗口。
+    await commit_audit_log(db)
+    await CacheInvalidator.invalidate_offer_cache(offer.id)
+
     # 重新加载关联信息（使用服务层方法）
     offer = await offer_service.get_offer_by_id(offer.id, current_user, include_advertiser=True,
                                                 include_assignments=False)
@@ -1049,5 +1059,9 @@ async def delete_offer(
 
     # 调用服务层删除Offer（服务层会检查关联数据、记录审计日志）
     await offer_service.delete_offer(offer_id, current_user)
+
+    # 删除事务提交后再次失效，避免提交前并发请求重新写入已删除 Offer 的缓存。
+    await commit_audit_log(db)
+    await CacheInvalidator.invalidate_offer_cache(offer_id)
 
     return ResponseBaseSchema.success(data={"message": "Offer已删除"})
