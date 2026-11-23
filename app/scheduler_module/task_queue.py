@@ -223,11 +223,18 @@ class TaskQueue:
         """
         if timeout is None:
             await self._wait_all_tasks()
-        else:
-            await asyncio.wait_for(
-                self._wait_all_tasks(),
-                timeout=max(0.0, timeout),
-            )
+            return
+
+        if timeout <= 0:
+            async with self.lock:
+                if self.current_running == 0 and not self.queue:
+                    return
+            raise asyncio.TimeoutError
+
+        await asyncio.wait_for(
+            self._wait_all_tasks(),
+            timeout=timeout,
+        )
 
     async def _wait_all_tasks(self) -> None:
         """等待所有任务完成（内部方法）"""
