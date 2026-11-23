@@ -117,7 +117,8 @@ def verify_signature(
     # MD5（向后兼容；未配置时生产默认关闭，开发默认开启；可用 CLIENT_API_ALLOW_MD5 显式覆盖）
     try:
         from app.core.config import settings
-        allow_md5 = bool(getattr(settings, "CLIENT_API_ALLOW_MD5", True))
+        # 配置字段缺失时必须拒绝弱签名，不能默认放开 MD5。
+        allow_md5 = bool(settings.CLIENT_API_ALLOW_MD5)
     except Exception:
         # 配置读取失败时必须拒绝弱签名，避免异常路径重新放开 MD5。
         logger.exception("读取 CLIENT_API_ALLOW_MD5 配置失败，已拒绝 MD5 签名")
