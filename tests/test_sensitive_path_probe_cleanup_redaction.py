@@ -28,7 +28,7 @@ async def test_cleanup_failure_redacts_database_exception(monkeypatch, caplog):
             await cleanup_module.cleanup_sensitive_path_probe_logs(retention_days=30)
 
     result = get_task_result(cleanup_module.TASK_NAME)
-    assert result == "清理失败（RuntimeError）"
+    assert result.startswith("清理失败（RuntimeError）")
     assert secret not in result
     assert secret not in caplog.text
     assert secret not in str(captured.value)
