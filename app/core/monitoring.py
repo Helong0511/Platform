@@ -1778,6 +1778,7 @@ async def get_click_sync_ledger_health(db: AsyncSession = Depends(get_db)):
     cleanup_status = cleanup_state.status if cleanup_state is not None else "unknown"
     cleanup_health = {
         "status": cleanup_status,
+        "alert_required": cleanup_status in {"degraded", "failed"},
         "consecutive_failure_count": (
             int(cleanup_state.consecutive_failure_count or 0) if cleanup_state else 0
         ),
