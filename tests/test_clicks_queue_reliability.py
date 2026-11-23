@@ -314,3 +314,30 @@ async def test_acknowledge_reserved_reports_redis_failure(monkeypatch):
 
     monkeypatch.setattr(clicks_queue, "get_redis_client", no_redis)
     assert await clicks_queue.acknowledge_reserved(["raw-a"]) is False
+
+
+@pytest.mark.asyncio
+async def test_clicks_queue_task_fails_when_ack_is_not_confirmed(monkeypatch):
+    from app.scheduler_module.tasks import short_link_tasks
+
+    async def fake_process_clicks_queue():
+        return {
+            "processed": 3,
+            "inserted": 3,
+            "deduplicated": 0,
+            "failed": 0,
+            "ack_failed": 1,
+            "queue_remaining": 0,
+            "processing_remaining": 1,
+            "dead_letter": 0,
+        }
+
+    results = []
+    monkeypatch.setattr(short_link_tasks, "process_clicks_queue", fake_process_clicks_queue)
+    monkeypatch.setattr(short_link_tasks, "set_task_result", lambda name, value: results.append((name, value)))
+
+    with pytest.raises(RuntimeError, match="ACK失败=1"):
+        await short_link_tasks.process_clicks_queue_task()
+
+    assert results
+    assert "执行失败: RuntimeError" in results[-1][1]
