@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import delete, update, text
 from sqlalchemy.exc import OperationalError, IntegrityError
-from app.models.models import ShortLink, ShortLinkClickSyncBatch
+from app.models.models import ShortLink, ShortLinkClickSyncBatch, ShortLinkClickSyncLedgerMaintenanceState
 import uuid
 import json
 import hashlib
@@ -828,6 +828,76 @@ async def _process_pending_click_batch(
     return acknowledged, inserted
 
 
+async def _save_click_sync_ledger_cleanup_state(
+    db: AsyncSession,
+    *,
+    status: str,
+    now: datetime,
+    stats: dict,
+    error_type: str | None,
+) -> None:
+    """在当前事务中持久化账本清理状态；错误摘要只允许安全类别名称。"""
+    result = await db.execute(
+        select(ShortLinkClickSyncLedgerMaintenanceState)
+        .where(ShortLinkClickSyncLedgerMaintenanceState.id == 1)
+        .with_for_update()
+    )
+    state = result.scalar_one_or_none()
+    if state is None:
+        state = ShortLinkClickSyncLedgerMaintenanceState(id=1)
+        db.add(state)
+
+    state.status = status
+    state.last_attempt_at = now
+    state.last_unacked_scanned_count = int(stats.get("unacked_scanned_count", 0))
+    state.last_acknowledged_count = int(stats.get("acknowledged_count", 0))
+    state.last_deleted_count = int(stats.get("deleted_count", 0))
+    state.last_redis_check_failures = int(stats.get("redis_check_failures", 0))
+    state.last_cache_invalidation_failures = int(stats.get("cache_invalidation_failures", 0))
+    state.last_error_type = error_type
+    state.updated_at = now
+
+    if status in {"degraded", "failed"}:
+        state.consecutive_failure_count = int(state.consecutive_failure_count or 0) + 1
+        state.total_failure_count = int(state.total_failure_count or 0) + 1
+        state.last_failure_at = now
+    else:
+        state.consecutive_failure_count = 0
+        state.last_success_at = now
+
+
+async def _persist_click_sync_ledger_cleanup_failure(
+    *,
+    now: datetime,
+    error_type: str,
+) -> bool:
+    """主事务失败回滚后，使用独立 Session 尝试持久化失败状态。"""
+    stats = {
+        "unacked_scanned_count": 0,
+        "acknowledged_count": 0,
+        "deleted_count": 0,
+        "redis_check_failures": 0,
+        "cache_invalidation_failures": 0,
+    }
+    try:
+        async with AsyncSessionLocal() as status_db:
+            await _save_click_sync_ledger_cleanup_state(
+                status_db,
+                status="failed",
+                now=now,
+                stats=stats,
+                error_type=error_type,
+            )
+            await status_db.commit()
+        return True
+    except Exception as persist_exc:
+        logger.error(
+            "短链接点击刷盘账本清理失败状态持久化失败: error_type=%s",
+            type(persist_exc).__name__,
+        )
+        return False
+
+
 async def _cleanup_click_sync_batch_ledger(
     db: AsyncSession,
     redis,
@@ -835,15 +905,25 @@ async def _cleanup_click_sync_batch_ledger(
     max_unacked: int = 100,
     max_delete: int = 500,
     retention_days: int = 30,
-) -> None:
+) -> dict:
     """
-    有界清理已确认 ACK 的账本记录。
+    有界清理已确认 ACK 的账本记录，并独立持久化清理健康状态。
 
     对 DB 已提交但 Redis DEL 响应丢失的记录，账本行本身证明 DB 已入账；
     若 pending key 已不存在，可安全补记 ACK。未确认 ACK 的行绝不按时间直接删除。
+    Redis 状态未知或缓存失效失败只记录到清理状态，不影响点击主入账结果。
     """
     # 数据库 DATETIME 使用应用时区的 naive 时间，必须与写入/监控口径一致。
     now = get_app_now_naive()
+    stats = {
+        "unacked_scanned_count": 0,
+        "acknowledged_count": 0,
+        "deleted_count": 0,
+        "redis_check_failures": 0,
+        "cache_invalidation_failures": 0,
+    }
+    error_types: set[str] = set()
+
     try:
         unacked_result = await db.execute(
             select(
@@ -854,26 +934,40 @@ async def _cleanup_click_sync_batch_ledger(
             .order_by(ShortLinkClickSyncBatch.created_at)
             .limit(max_unacked)
         )
-        for batch_id, short_code in unacked_result.fetchall():
+        unacked_rows = unacked_result.fetchall()
+        stats["unacked_scanned_count"] = len(unacked_rows)
+
+        for batch_id, short_code in unacked_rows:
             pending_key = f"{CLICK_COUNTER_PREFIX}pending:{short_code}:{batch_id}"
             try:
                 pending_exists = await redis.exists(pending_key)
-            except Exception:
-                # Redis 状态未知时不猜测 ACK 状态。
+            except Exception as exc:
+                # Redis 状态未知时不猜测 ACK 状态，也不删除账本。
+                stats["redis_check_failures"] += 1
+                error_types.add(f"redis_exists:{type(exc).__name__}")
                 continue
+
             if not pending_exists:
                 # DB 账本证明点击数已入账；pending 已消失后补做缓存失效，再标记 ACK。
                 try:
                     cache_invalidated = await invalidate_short_link_cache(short_code)
-                except Exception:
+                except Exception as exc:
                     cache_invalidated = False
+                    error_types.add(f"cache_invalidation:{type(exc).__name__}")
                 if not cache_invalidated:
+                    stats["cache_invalidation_failures"] += 1
+                    error_types.add("cache_invalidation:unconfirmed")
                     continue
-                await db.execute(
+
+                ack_result = await db.execute(
                     update(ShortLinkClickSyncBatch)
-                    .where(ShortLinkClickSyncBatch.batch_id == batch_id)
+                    .where(
+                        ShortLinkClickSyncBatch.batch_id == batch_id,
+                        ShortLinkClickSyncBatch.acknowledged_at.is_(None),
+                    )
                     .values(acknowledged_at=now)
                 )
+                stats["acknowledged_count"] += max(0, int(ack_result.rowcount or 0))
 
         cutoff = now - timedelta(days=max(1, retention_days))
         old_ack_result = await db.execute(
@@ -887,20 +981,81 @@ async def _cleanup_click_sync_batch_ledger(
         )
         old_ids = old_ack_result.scalars().all()
         if old_ids:
-            await db.execute(
+            delete_result = await db.execute(
                 delete(ShortLinkClickSyncBatch)
-                .where(ShortLinkClickSyncBatch.batch_id.in_(old_ids))
+                .where(
+                    ShortLinkClickSyncBatch.batch_id.in_(old_ids),
+                    ShortLinkClickSyncBatch.acknowledged_at.is_not(None),
+                    ShortLinkClickSyncBatch.acknowledged_at < cutoff,
+                )
             )
+            stats["deleted_count"] = max(0, int(delete_result.rowcount or 0))
+
+        has_partial_failures = bool(
+            stats["redis_check_failures"] or stats["cache_invalidation_failures"]
+        )
+        status = "degraded" if has_partial_failures else "healthy"
+        safe_error_type = ",".join(sorted(error_types))[:128] or None
+        await _save_click_sync_ledger_cleanup_state(
+            db,
+            status=status,
+            now=now,
+            stats=stats,
+            error_type=safe_error_type,
+        )
         await db.commit()
+
+        result = {
+            "status": status,
+            **stats,
+            "error_type": safe_error_type,
+        }
+        if has_partial_failures:
+            logger.warning(
+                "短链接点击刷盘账本清理部分失败: redis_check_failures=%s "
+                "cache_invalidation_failures=%s",
+                stats["redis_check_failures"],
+                stats["cache_invalidation_failures"],
+            )
+        else:
+            logger.info(
+                "短链接点击刷盘账本清理完成: scanned=%s acknowledged=%s deleted=%s",
+                stats["unacked_scanned_count"],
+                stats["acknowledged_count"],
+                stats["deleted_count"],
+            )
+        return result
+
     except Exception as exc:
         try:
             await db.rollback()
-        except Exception:
-            pass
-        logger.warning(
-            "短链接点击刷盘幂等账本清理失败（不影响 pending 重试）: error_type=%s",
-            type(exc).__name__,
+        except Exception as rollback_exc:
+            logger.error(
+                "短链接点击刷盘账本清理回滚失败: error_type=%s",
+                type(rollback_exc).__name__,
+            )
+
+        # DB 主事务失败后，本轮实际 ACK/DELETE 数量未知，不能计入已确认结果。
+        persisted = await _persist_click_sync_ledger_cleanup_failure(
+            now=now,
+            error_type=type(exc).__name__,
         )
+        logger.warning(
+            "短链接点击刷盘账本清理失败（不影响 pending 重试）: "
+            "error_type=%s failure_state_persisted=%s",
+            type(exc).__name__,
+            persisted,
+        )
+        return {
+            "status": "failed",
+            "unacked_scanned_count": stats["unacked_scanned_count"],
+            "acknowledged_count": 0,
+            "deleted_count": 0,
+            "redis_check_failures": stats["redis_check_failures"],
+            "cache_invalidation_failures": stats["cache_invalidation_failures"],
+            "error_type": type(exc).__name__,
+            "failure_state_persisted": persisted,
+        }
 
 
 
