@@ -63,3 +63,21 @@ async def test_click_sync_ledger_health_does_not_hide_database_errors():
 
     with pytest.raises(OSError, match="database unavailable"):
         await monitoring.get_click_sync_ledger_health(BrokenDB())
+
+
+@pytest.mark.asyncio
+async def test_click_sync_ledger_cleanup_log_redacts_exception_text(caplog):
+    from app.core import short_link_click_counter as counter
+
+    class BrokenDB:
+        async def execute(self, statement):
+            raise OSError("password=must-not-appear")
+
+        async def rollback(self):
+            return None
+
+    await counter._cleanup_click_sync_batch_ledger(BrokenDB(), object())
+
+    assert "error_type=OSError" in caplog.text
+    assert "must-not-appear" not in caplog.text
+    assert "password=" not in caplog.text
