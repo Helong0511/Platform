@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.models.models import PostbackConversion
-from app.core.postback.transformers.normalizer import normalize_event_name
+from app.core.postback_event_name import normalize_event_name
 
 logger = logging.getLogger(__name__)
 
