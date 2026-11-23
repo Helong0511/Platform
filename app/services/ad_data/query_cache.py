@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable, Optional
 
-from app.core.infrastructure.cache_compat import (
+from app.services.cache_invalidation_outbox import get_cache_generation\n\nfrom app.core.infrastructure.cache_compat import (
     generate_cache_key,
     get_or_set_single_flight,
     invalidate_cache,
