@@ -575,7 +575,20 @@ class Settings(BaseSettings):
     #   - 1：严格顺序执行，适合资源紧张或任务相互依赖的场景
     #   - 2-3：推荐值，充分利用进程资源，适合大多数场景
     #   - 4+：仅当任务执行时间很短且系统资源充足时使用
-    MAX_CONCURRENT_SCHEDULED_TASKS: int = int(os.getenv("MAX_CONCURRENT_SCHEDULED_TASKS", "2"))
+    MAX_CONCURRENT_SCHEDULED_TASKS: int = Field(
+        default=2, ge=1, le=64,
+        description="单进程最大并发定时任务数",
+    )
+    # 等待队列容量；0 表示只允许立即执行，不允许积压等待任务。
+    MAX_PENDING_SCHEDULED_TASKS: int = Field(
+        default=100, ge=0, le=10000,
+        description="单进程定时任务最大等待数",
+    )
+    # 进程优雅关闭时等待内部任务队列排空的最长秒数。
+    SCHEDULED_TASK_SHUTDOWN_TIMEOUT_SECONDS: int = Field(
+        default=60, ge=1, le=3600,
+        description="定时任务队列关闭排空超时秒数",
+    )
 
     # ====== 日志配置 ======
     # 根日志级别：DEBUG / INFO / WARNING / ERROR / CRITICAL（app.log 仍默认只收 WARNING+）
