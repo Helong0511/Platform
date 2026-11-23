@@ -54,8 +54,12 @@ async def sync_short_link_clicks_task():
         set_task_result(TASK_SYNC_CLICKS, f"执行成功: 同步 {synced_count} 条")
         logger.debug("短链接点击次数同步任务执行成功")
     except Exception as e:
-        # 错误日志会输出到 app.log（WARNING 级别）
-        logger.error(f"❌ 短链接点击次数同步任务执行失败: {e}", exc_info=True)
+        # 失败状态覆盖上一次成功结果，避免运维界面继续显示陈旧成功。
+        set_task_result(TASK_SYNC_CLICKS, f"执行失败: {type(e).__name__}")
+        logger.error(
+            "短链接点击次数同步任务执行失败: error_type=%s",
+            type(e).__name__,
+        )
         raise
 
 
