@@ -175,3 +175,27 @@ retryable -> cancelled
 - [ ] 更新部署 runbook、README、监控告警和运维恢复手册。
 
 **当前结论：** PR #162 解决的是进程内队列容量和正常关闭排空，不解决进程崩溃后的持久化恢复。Issue #159 继续保持 open，直到上述设计评审、实现、隔离测试和运维验收完成。
+
+
+## 附录 A：首批任务源码核查（2026-11-23）
+
+本附录只记录已打开并核对的具体实现，不代表所有任务已审完。
+
+| 任务 | 源码核查结果 | 当前接入结论 |
+|---|---|---|
+| 点击记录队列批量处理 | `tasks/clicks_batch_processor.py` 先将 Redis 主队列原子 reserve 到 processing；DB 批次提交成功后才 ACK；DB 异常 rollback 后 requeue；重复 click_id 由数据库唯一约束去重；启动时恢复 processing。每轮最多 10 批/约 30 秒。 | 不应把点击记录本身复制到通用 execution ledger。Redis 队列与 Click 唯一键是业务事实；通用账本最多记录一次批处理运行摘要。仍需专项核查 Redis 持久化/淘汰、ACK 失败、dead-letter 和 COMMIT 结果不确定场景。 |
+| 短链接点击计数同步 | `core/short_link_click_counter.py` 已有 Redis 计数器、pending batch、`ShortLinkClickSyncBatch` 数据库批次账本；DB 确认入账后再用 Lua 扣减本轮增量，并包含死锁/锁等待重试。 | 已存在独立批次事实源，不再创建通用计数同步队列。通用账本仅作为可选调度审计；必须继续验证 Redis key 与 DB batch 的崩溃窗口和补偿语义。 |
+| 点击记录归档 | `ClicksArchiveService` 使用固定 high-water ID、按稳定主键/时间排序分批 `FOR UPDATE`，同一批 INSERT archive 与 DELETE source 在单事务内完成；每批提交，死锁/锁等待超时 rollback 后有限重试；此前已提交批次可由下一轮继续处理。 | 可列为通用执行账本候选；任务重跑以剩余源记录为准，不能重做已提交批次。接入前仍需验证归档表唯一约束、DDL 建表职责、并发归档保护及大表演练。 |
+| Cap Reservation Recovery | `services/cap_reservation_recovery.py` 已有 CapReservation 行锁 `SKIP LOCKED`、随机 owner、lease expiry、续租、状态 fencing 和 Redis token 状态判定；UNKNOWN 不执行猜测性 DECR，而转人工对账。 | 不纳入通用自动恢复队列。它自身就是专用恢复账本；通用账本不得覆盖或重新驱动单条 reservation。 |
+| Third-party Report Outbox | `services/third_party_report_outbox.py` 由独立 Outbox 记录驱动；任务每批最多 3 条，业务层管理 retryable/failed/exhausted 等状态。 | 不纳入通用执行账本的业务执行队列；只允许可选记录 Cron 调度运行摘要。 |
+| 每日打开短链接 | `tasks/short_link_tasks.py` 查询 inactive 短链，检查关联 Offer active 与 Cap 后批量更新 active。 | 需进一步核查并发 Cap 变化、更新条件是否应在 UPDATE 中重验，以及多次执行语义；在此之前不批准自动重试。 |
+| 每日 Cap 重置 / Cap 计数同步 | `tasks/cpl_tasks.py` 调用业务重置和 Redis->DB synchronizer；计数同步遇到 Redis key 缺失会显式 warning，异常会抛出。 | 暂缓接入。必须继续核查日切边界、业务时区、重复 reset 的安全性、Redis/DB 对账与缺失 key 语义。 |
+| Third-party PII retention | `tasks/third_party_report_tasks.py` 调用有独立保留配置的分批脱敏服务；默认配置未批准时安全跳过，终态记录与 pending 审批流程分别处理。 | 不需要通用业务队列；可选记录调度运行历史。接入前确认删除/脱敏不可逆边界、批次续跑和保留策略审批。 |
+
+### 本轮明确的待查点
+
+1. `process_clicks_queue_task` 目前在 `failed` 非零时抛错；`ack_failed` 或 `dead_letter` 非零会记录 warning，但任务包装层不因这两项单独抛错。需要确认这是预期告警等级，还是应升级为失败/人工对账状态。
+2. 点击批处理的 DB COMMIT 结果不确定时整批回队，依赖 click_id 唯一约束去重；必须验证连接断开后 COMMIT 实际成功/失败两种结果都不会丢记录或重复计数。
+3. 点击队列使用 Redis 主队列/processing/dead-letter；通用 execution ledger 不能替代 Redis 自身的持久化配置、备份、淘汰策略和队列恢复检查。
+4. `sync_short_link_clicks_task` 当前调用有独立 batch ledger 的同步服务；应审查其恢复状态与通用调度器任务状态是否需要关联 ID，而不是再造第二份批次账本。
+5. 归档任务的批次提交是局部原子，不是整轮原子；监控与重试应以高水位、已提交批次和剩余源记录为准。
