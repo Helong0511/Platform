@@ -54,7 +54,7 @@ class TaskQueue:
         self.current_running = 0  # 当前正在执行的任务数
         self.queue: deque = deque()  # 任务队列（按优先级排序）
         self.lock = asyncio.Lock()  # 队列操作锁
-        self.running_tasks: Dict[str, asyncio.Task] = {}  # 正在执行的任务字典
+        self.running_tasks: Dict[asyncio.Task, str] = {}  # 以 Task 实例为键，允许同名任务独立跟踪
 
     async def submit(
             self,
@@ -83,7 +83,7 @@ class TaskQueue:
                 task = asyncio.create_task(
                     self._execute_task(task_name, task_func, *args, **kwargs)
                 )
-                self.running_tasks[task_name] = task
+                self.running_tasks[task] = task_name
                 logger.debug(
                     f"任务 '{task_name}' 立即并发执行 "
                     f"（当前运行: {self.current_running}/{self.max_concurrent_tasks}，"
@@ -144,8 +144,9 @@ class TaskQueue:
             # 任务执行完成，从运行列表中移除
             async with self.lock:
                 self.current_running -= 1
-                if task_name in self.running_tasks:
-                    del self.running_tasks[task_name]
+                current_task = asyncio.current_task()
+                if current_task is not None:
+                    self.running_tasks.pop(current_task, None)
 
                 # 尝试执行队列中的下一个任务
                 await self._process_queue()
@@ -191,7 +192,7 @@ class TaskQueue:
         task = asyncio.create_task(
             self._execute_task(task_name, task_func, *args, **kwargs)
         )
-        self.running_tasks[task_name] = task
+        self.running_tasks[task] = task_name
 
     async def wait_for_completion(self, timeout: Optional[float] = None) -> None:
         """
@@ -218,7 +219,7 @@ class TaskQueue:
 
         # 等待所有运行中的任务完成
         if self.running_tasks:
-            await asyncio.gather(*self.running_tasks.values(), return_exceptions=True)
+            await asyncio.gather(*self.running_tasks.keys(), return_exceptions=True)
 
     async def get_queue_status(self) -> Dict[str, Any]:
         """
@@ -255,7 +256,7 @@ class TaskQueue:
                 'current_running': self.current_running,
                 'max_concurrent': self.max_concurrent_tasks,
                 'queue_length': len(self.queue),
-                'running_tasks': list(self.running_tasks.keys()),
+                'running_tasks': list(self.running_tasks.values()),
                 'queued_tasks': [item['task_name'] for item in self.queue],
                 'queue_details': queue_details
             }
