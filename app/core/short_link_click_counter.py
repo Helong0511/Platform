@@ -563,7 +563,11 @@ async def increment_click_count_async(
 
 
 async def _scan_click_counter_keys(
-    redis, max_keys: int = MAX_KEYS_PER_SYNC, pattern: str | None = None
+    redis,
+    max_keys: int = MAX_KEYS_PER_SYNC,
+    pattern: str | None = None,
+    *,
+    raise_on_error: bool = False,
 ) -> list:
     """有界扫描 Redis key；去重 SCAN 可能重复返回的键，失败时不调用阻塞式 KEYS。"""
     pattern = pattern or f"{CLICK_COUNTER_PREFIX}*"
@@ -604,10 +608,14 @@ async def _scan_click_counter_keys(
         # SCAN 失败时不能用 KEYS 扫描整个 keyspace；已收集的键仍可安全处理，
         # 未扫描到的键留在 Redis 中，等待下一轮任务重试。
         logger.warning(
-            "Redis SCAN 失败，保留未扫描计数器供下轮重试；已收集 %s 个键：%s",
+            "Redis SCAN 失败，保留未扫描计数器供下轮重试；已收集 %s 个键：error_type=%s",
             len(keys),
-            exc,
+            type(exc).__name__,
         )
+        if raise_on_error:
+            raise ClickCounterSyncError(
+                f"Redis SCAN 失败，当前批次扫描不完整；已收集 {len(keys)} 个键"
+            ) from exc
 
     return keys
 
@@ -895,7 +903,9 @@ async def _sync_redis_click_counter_batches(
     inserted_codes: set[str] = set()
     failures: list[str] = []
     pending_pattern = f"{CLICK_COUNTER_PREFIX}pending:*"
-    pending_keys = await _scan_click_counter_keys(redis, max_keys, pattern=pending_pattern)
+    pending_keys = await _scan_click_counter_keys(
+        redis, max_keys, pattern=pending_pattern, raise_on_error=True
+    )
     pending_seen = set(pending_keys)
 
     # 优先处理上轮遗留 pending；这些 key 可能已在 DB 入账，只差 ACK。
@@ -927,7 +937,9 @@ async def _sync_redis_click_counter_batches(
             failures.append("pending_process")
 
     # 再把 active counter 原子切换成 pending；切换后并发新点击写入新的 active key。
-    active_keys = await _scan_click_counter_keys(redis, max_keys, pattern=f"{CLICK_COUNTER_PREFIX}*")
+    active_keys = await _scan_click_counter_keys(
+        redis, max_keys, pattern=f"{CLICK_COUNTER_PREFIX}*", raise_on_error=True
+    )
     for active_key in active_keys:
         if ":pending:" in active_key or active_key in pending_seen:
             continue
@@ -1001,6 +1013,9 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
         )
         raise ClickCounterSyncError("Redis 客户端不可用，无法确认同步锁状态") from exc
 
+    if redis is None:
+        raise ClickCounterSyncError("Redis 客户端不可用，无法安全获取分布式同步锁")
+
     # 使用分布式锁，确保同一时间只有一个进程在执行同步
     lock_key = f"{SYNC_LOCK_PREFIX}global"
     lock_value = str(uuid.uuid4())
@@ -1032,16 +1047,7 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
         raise ClickCounterSyncError("无法确认短链接点击同步锁状态") from e
     
     try:
-        if not redis:
-            # 新版点击写入在 Redis 不可用时直接走 DB 原子自增。
-            # 旧版本地快照缺少稳定幂等键，禁止自动刷盘，避免 COMMIT 结果不确定时重复累计。
-            async with _counter_lock:
-                has_legacy_snapshot = bool(_click_counters)
-            if has_legacy_snapshot:
-                await _sync_in_memory_counters_to_db(db, short_codes)
-            return 0
-
-        # Redis 恢复后先补写历史进程内快照；随后使用 pending batch + DB 唯一账本刷盘。
+        # Redis 恢复后先核对旧版进程内快照；随后使用 pending batch + DB 唯一账本刷盘。
         await _sync_in_memory_counters_to_db(db, short_codes)
         await persist_counters()
         return await _sync_redis_click_counter_batches(db, redis, short_codes)
