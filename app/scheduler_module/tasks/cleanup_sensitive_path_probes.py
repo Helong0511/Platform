@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import timedelta
@@ -115,26 +116,39 @@ async def cleanup_sensitive_path_probe_logs(
 
             # MySQL 8 使用 SKIP LOCKED 避免并发清理实例长期争抢相同记录。
             # SQLite 方言会忽略 FOR UPDATE，仅用于逻辑单测，不替代 MySQL 集成验证。
-            selected = await db.execute(
-                select(SensitivePathProbeLog.id)
-                .where(SensitivePathProbeLog.created_at < cutoff_dt)
-                .order_by(SensitivePathProbeLog.id.asc())
-                .limit(batch_size)
-                .with_for_update(skip_locked=True)
+            async def _commit_one_batch() -> int | None:
+                selected = await db.execute(
+                    select(SensitivePathProbeLog.id)
+                    .where(SensitivePathProbeLog.created_at < cutoff_dt)
+                    .order_by(SensitivePathProbeLog.id.asc())
+                    .limit(batch_size)
+                    .with_for_update(skip_locked=True)
+                )
+                ids = list(selected.scalars().all())
+                if not ids:
+                    return None
+
+                result = await db.execute(
+                    delete(SensitivePathProbeLog).where(
+                        SensitivePathProbeLog.id.in_(ids),
+                        SensitivePathProbeLog.created_at < cutoff_dt,
+                    )
+                )
+                batch_deleted = max(0, int(result.rowcount or 0))
+                await db.commit()
+                return batch_deleted
+
+            # 单批查询、删除和提交共享剩余运行预算；避免慢 SQL/锁等待突破总时限。
+            remaining_budget = max_runtime_seconds - (time.monotonic() - started)
+            if remaining_budget <= 0:
+                break
+            batch_deleted = await asyncio.wait_for(
+                _commit_one_batch(),
+                timeout=remaining_budget,
             )
-            ids = list(selected.scalars().all())
-            if not ids:
+            if batch_deleted is None:
                 complete = True
                 break
-
-            result = await db.execute(
-                delete(SensitivePathProbeLog).where(
-                    SensitivePathProbeLog.id.in_(ids),
-                    SensitivePathProbeLog.created_at < cutoff_dt,
-                )
-            )
-            batch_deleted = max(0, int(result.rowcount or 0))
-            await db.commit()
             deleted_count += batch_deleted
             batch_count += 1
 
