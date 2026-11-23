@@ -124,7 +124,6 @@ async def test_failed_batch_preserves_committed_progress_and_redacts_error(fixed
         assert "SELECT" not in str(error)
 
         async with factory() as db:
-            remaining = await db.scalar(select(SensitivePathProbeLog.id).count()) if False else None
             rows = list((await db.execute(select(SensitivePathProbeLog.id))).scalars())
         assert len(rows) == 3
     finally:
