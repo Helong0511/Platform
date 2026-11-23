@@ -19,7 +19,7 @@ MySQL UNIQUE 索引允许同一组合中包含 NULL 的多行，因此不能依�
 
 ## 本次代码修复
 
-新增统一函数 `normalize_event_name(value)`：
+新增轻量独立模块 `app/core/postback_event_name.py` 提供统一函数 `normalize_event_name(value)`。该模块不导入 `app.core.postback`，避免待审批入队服务提前触发 Postback 包初始化和处理器注册。规范规则：
 
 - NULL、空字符串、纯空白统一为 `default`；
 - 非空值去除首尾空白；
