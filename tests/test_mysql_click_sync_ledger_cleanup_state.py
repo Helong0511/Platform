@@ -123,7 +123,7 @@ async def test_mysql_redis_unknown_persists_degraded_state_without_ack(monkeypat
                     select(ShortLinkClickSyncLedgerMaintenanceState)
                     .where(ShortLinkClickSyncLedgerMaintenanceState.id == 1)
                 )
-            ).scalar_one()
+            ).scalars().one()
             acknowledged_at = await connection.scalar(
                 text(
                     "SELECT acknowledged_at FROM short_link_click_sync_batches "
