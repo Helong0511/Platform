@@ -1,9 +1,8 @@
 """短链接点击刷盘账本监控 API 回归测试。"""
 
 import ast
-from pathlib import Path
-
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -89,7 +88,6 @@ async def test_click_sync_ledger_cleanup_log_redacts_exception_text(caplog):
 
 @pytest.mark.asyncio
 async def test_click_sync_ledger_cleanup_uses_application_timezone_for_ack_and_retention(monkeypatch):
-    from datetime import datetime, timedelta
     from app.core import short_link_click_counter as counter
 
     fixed_now = datetime(2026, 11, 23, 12, 34, 56)
