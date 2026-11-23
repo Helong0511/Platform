@@ -9,6 +9,7 @@ import time
 import hashlib
 import logging
 from collections import OrderedDict
+from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from datetime import date, datetime
 from decimal import Decimal
@@ -17,6 +18,17 @@ from functools import wraps
 from app.core.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class CacheInvalidationResult:
+    """缓存失效执行结果；明确区分本地清理与共享 Redis 确认。"""
+
+    operation_succeeded: bool
+    shared_store_confirmed: bool
+    deleted_count: int
+    backend: str
+    error_code: Optional[str] = None
 
 
 def _json_default(obj: Any) -> Any:
@@ -55,6 +67,27 @@ class CacheBackend(ABC):
         """按模式删除缓存（返回删除数量）"""
         pass
     
+    async def delete_pattern_checked(self, pattern: str) -> CacheInvalidationResult:
+        """兼容后端的严格失效结果；未显式实现共享确认的后端不得标记为已确认。"""
+        try:
+            deleted = await self.delete_pattern(pattern)
+            return CacheInvalidationResult(
+                operation_succeeded=True,
+                shared_store_confirmed=False,
+                deleted_count=int(deleted),
+                backend=type(self).__name__,
+                error_code="shared_store_unverified",
+            )
+        except Exception as exc:
+            logger.warning("缓存按模式删除失败: backend=%s pattern=%s error=%s", type(self).__name__, pattern, exc)
+            return CacheInvalidationResult(
+                operation_succeeded=False,
+                shared_store_confirmed=False,
+                deleted_count=0,
+                backend=type(self).__name__,
+                error_code=type(exc).__name__,
+            )
+
     @abstractmethod
     async def exists(self, key: str) -> bool:
         """检查键是否存在"""
@@ -148,6 +181,42 @@ class RedisCacheBackend(CacheBackend):
             logger.warning(f"Redis按模式删除缓存失败: pattern={pattern}, error={e}")
             return 0
     
+    async def delete_pattern_checked(self, pattern: str) -> CacheInvalidationResult:
+        """按模式删除并明确报告 Redis 共享存储是否确认完成。"""
+        if self.redis is None:
+            return CacheInvalidationResult(
+                operation_succeeded=False,
+                shared_store_confirmed=False,
+                deleted_count=0,
+                backend="redis",
+                error_code="redis_unavailable",
+            )
+
+        try:
+            deleted_count = 0
+            cursor = 0
+            while True:
+                cursor, keys = await self.redis.scan(cursor, match=pattern, count=100)
+                if keys:
+                    deleted_count += int(await self.redis.delete(*keys))
+                if cursor == 0:
+                    break
+            return CacheInvalidationResult(
+                operation_succeeded=True,
+                shared_store_confirmed=True,
+                deleted_count=deleted_count,
+                backend="redis",
+            )
+        except Exception as exc:
+            logger.warning("Redis 严格按模式删除失败: pattern=%s error=%s", pattern, exc)
+            return CacheInvalidationResult(
+                operation_succeeded=False,
+                shared_store_confirmed=False,
+                deleted_count=deleted_count,
+                backend="redis",
+                error_code=type(exc).__name__,
+            )
+
     async def exists(self, key: str) -> bool:
         """检查Redis键是否存在"""
         if not self.redis:
@@ -233,6 +302,26 @@ class MemoryCacheBackend(CacheBackend):
             logger.warning(f"内存缓存按模式删除失败: pattern={pattern}, error={e}")
             return 0
     
+    async def delete_pattern_checked(self, pattern: str) -> CacheInvalidationResult:
+        """只清理当前进程内缓存；不能声称共享 Redis 已失效。"""
+        try:
+            deleted = await self.delete_pattern(pattern)
+            return CacheInvalidationResult(
+                operation_succeeded=True,
+                shared_store_confirmed=False,
+                deleted_count=int(deleted),
+                backend="memory",
+                error_code="local_only",
+            )
+        except Exception as exc:
+            return CacheInvalidationResult(
+                operation_succeeded=False,
+                shared_store_confirmed=False,
+                deleted_count=0,
+                backend="memory",
+                error_code=type(exc).__name__,
+            )
+
     async def exists(self, key: str) -> bool:
         """检查内存键是否存在"""
         if key not in self._cache:
