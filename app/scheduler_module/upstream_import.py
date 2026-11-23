@@ -70,6 +70,10 @@ async def finalize_upstream_import(
     """
     # ---------- 事务提交 ----------
     try:
+        if int(result.get("inserted_count") or 0) > 0 or int(result.get("updated_count") or 0) > 0:
+            from app.services.cache_invalidation_outbox import advance_cache_generation
+
+            await advance_cache_generation(db)
         logger.info("开始提交主事务...")
         await db.commit()
         logger.info("主事务提交成功")
