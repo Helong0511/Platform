@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -156,8 +157,8 @@ async def test_cleanup_timeout_reports_unknown_batch_without_false_success(monke
         async def execute(self, _statement):
             raise AssertionError("wait_for timeout should occur before database execution")
 
-        rollback = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock()
-        close = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock()
+        rollback = AsyncMock()
+        close = AsyncMock()
 
     async def timeout_immediately(awaitable, timeout):
         awaitable.close()
