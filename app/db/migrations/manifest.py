@@ -146,6 +146,12 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         sha256="c6ea68d66dd0a69105d25afb6b50b4d659aac3f9423f914d8ac49a010c3269d7",
     ),
 
+    Migration(
+        revision="20261123_click_sync_ledger_cleanup_state",
+        path="sql/migrations/20261123_click_sync_ledger_cleanup_state.sql",
+        sha256="8af658789fcad3c81a7f0138d36f63ea857c81086edf98cb6a60603b2893862f",
+    ),
+
 )
 
 _REVISION_PATTERN = re.compile(r"^20[0-9]{6}_[a-z0-9_]+$")
