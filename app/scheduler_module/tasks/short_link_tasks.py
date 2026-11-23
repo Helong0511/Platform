@@ -13,8 +13,6 @@
 2. 短链大量活跃时监控任务耗时，必要时拆分同步与队列处理 Cron
 """
 import logging
-from datetime import datetime, timezone
-from typing import Optional
 
 from app.core.database import AsyncSessionLocal
 from app.core.short_link_click_counter import (
@@ -23,7 +21,7 @@ from app.core.short_link_click_counter import (
 )
 from app.scheduler_module.tasks.clicks_batch_processor import process_clicks_queue
 from app.models.models import ShortLink
-from app.scheduler_module.task_result_store import get_task_result, set_task_result
+from app.scheduler_module.task_result_store import set_task_result
 from sqlalchemy import update, select, and_, exists
 
 logger = logging.getLogger(__name__)
