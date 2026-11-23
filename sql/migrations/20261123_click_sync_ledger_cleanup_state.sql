@@ -16,7 +16,6 @@ CREATE TABLE IF NOT EXISTS short_link_click_sync_ledger_maintenance (
     last_cache_invalidation_failures INT NOT NULL DEFAULT 0 COMMENT '最近一轮缓存失效失败数',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '状态更新时间',
     PRIMARY KEY (id),
-    CONSTRAINT chk_click_sync_ledger_maintenance_singleton CHECK (id = 1),
     CONSTRAINT chk_click_sync_ledger_maintenance_status
         CHECK (status IN ('unknown', 'healthy', 'degraded', 'failed'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
