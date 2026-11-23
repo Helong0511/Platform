@@ -684,7 +684,8 @@ class ProductService(BaseService[Product]):
             return {
                 "transferred": True,
                 "message": f"产品已转移到临时挂靠（该产品关联了 {ad_data_count} 条广告数据）",
-                "new_client_id": admin_default_client.id
+                "new_client_id": admin_default_client.id,
+                "ad_data_count": ad_data_count,
             }
         else:
             # 没有关联广告数据：直接删除产品
@@ -704,5 +705,6 @@ class ProductService(BaseService[Product]):
 
             return {
                 "transferred": False,
-                "message": "产品已成功删除"
+                "message": "产品已成功删除",
+                "ad_data_count": 0,
             }
