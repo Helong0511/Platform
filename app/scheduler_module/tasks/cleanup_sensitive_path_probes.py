@@ -189,7 +189,7 @@ async def cleanup_sensitive_path_probe_logs(
         }
         if complete:
             msg = f"清理完成：删除 {deleted_count} 条，执行 {batch_count} 批，保留最近 {days} 天"
-            log_task_result(TASK_NAME, msg, level="info")
+            logger.info("%s 执行完成: %s", TASK_NAME, msg)
             set_task_result(TASK_NAME, msg)
         else:
             msg = (
