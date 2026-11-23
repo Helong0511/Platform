@@ -457,6 +457,63 @@ class ShortLinkClickSyncBatch(Base):
 
 # ==================== CPL 系统数据模型 ====================
 
+class ShortLinkClickSyncLedgerMaintenanceState(Base):
+    """
+    短链接点击刷盘账本清理的独立健康状态。
+
+    仅保存聚合计数、应用时区时间和安全错误类别；不与点击主入账状态混用。
+    由 migration 预置 id=1 单例行，清理任务每轮更新该行。
+    """
+    __tablename__ = "short_link_click_sync_ledger_maintenance"
+
+    id = Column(Integer, primary_key=True, comment="固定单例主键，唯一允许值为 1")
+    status = Column(
+        String(16), nullable=False, default="unknown", server_default=text("'unknown'"),
+        comment="状态：unknown/healthy/degraded/failed",
+    )
+    consecutive_failure_count = Column(
+        Integer, nullable=False, default=0, server_default=text("0"), comment="连续失败轮数",
+    )
+    total_failure_count = Column(
+        BigInteger, nullable=False, default=0, server_default=text("0"), comment="累计失败轮数",
+    )
+    last_attempt_at = Column(DateTime, nullable=True, comment="最近一次清理尝试时间（应用时区）")
+    last_success_at = Column(DateTime, nullable=True, comment="最近一次无错误清理完成时间（应用时区）")
+    last_failure_at = Column(DateTime, nullable=True, comment="最近一次清理异常时间（应用时区）")
+    last_error_type = Column(String(128), nullable=True, comment="安全错误类别摘要，不保存异常原文")
+    last_unacked_scanned_count = Column(
+        Integer, nullable=False, default=0, server_default=text("0"), comment="最近一轮扫描的未 ACK 账本数",
+    )
+    last_acknowledged_count = Column(
+        Integer, nullable=False, default=0, server_default=text("0"), comment="最近一轮补记 ACK 数量",
+    )
+    last_deleted_count = Column(
+        Integer, nullable=False, default=0, server_default=text("0"), comment="最近一轮删除的历史 ACK 数量",
+    )
+    last_redis_check_failures = Column(
+        Integer, nullable=False, default=0, server_default=text("0"), comment="最近一轮 Redis 状态检查失败数",
+    )
+    last_cache_invalidation_failures = Column(
+        Integer, nullable=False, default=0, server_default=text("0"), comment="最近一轮缓存失效失败数",
+    )
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=get_app_now_naive,
+        server_default=text("CURRENT_TIMESTAMP"),
+        onupdate=get_app_now_naive,
+        comment="状态更新时间",
+    )
+
+    __table_args__ = (
+        CheckConstraint("id = 1", name="chk_click_sync_ledger_maintenance_singleton"),
+        CheckConstraint(
+            "status IN ('unknown', 'healthy', 'degraded', 'failed')",
+            name="chk_click_sync_ledger_maintenance_status",
+        ),
+    )
+
+
 class PendingPostbackConversion(Base):
     """
     待确认 Postback 转化记录模型
