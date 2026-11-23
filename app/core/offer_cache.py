@@ -7,7 +7,8 @@ Offer 信息 Redis 缓存模块。
 import logging
 import json
 import random
-from typing import Optional
+from dataclasses import dataclass
+from typing import Literal, Optional
 from datetime import datetime, timezone
 from app.core.redis_client import get_redis_client
 
@@ -24,27 +25,77 @@ def _ttl_with_jitter(base: int = CACHE_TTL, jitter_max: int = 300) -> int:
     return max(1, int(base) + random.randint(1, max(1, jitter_max)))
 
 
-async def get_offer_advertiser_id(offer_id: int) -> Optional[int]:
-    """从缓存获取 Offer 的 advertiser_id；命中空值标记返回 None。"""
-    redis = await get_redis_client()
+@dataclass(frozen=True)
+class OfferCacheEntry:
+    """Offer 缓存读取结果，明确区分命中、负缓存、未命中和 Redis 故障。"""
+
+    status: Literal["hit", "negative", "miss", "unavailable"]
+    advertiser_id: Optional[int] = None
+
+
+async def get_offer_cache_entry(offer_id: int) -> OfferCacheEntry:
+    """读取 Offer 缓存并返回明确状态，避免把 Redis 故障误判为缓存未命中。"""
+    try:
+        redis = await get_redis_client()
+    except Exception as exc:
+        logger.warning(
+            "获取 Redis 客户端失败，跳过 Offer 缓存读取: offer_id=%s error_type=%s",
+            offer_id,
+            type(exc).__name__,
+        )
+        return OfferCacheEntry(status="unavailable")
+
     if not redis:
-        return None
+        return OfferCacheEntry(status="unavailable")
+
+    cache_key = f"{OFFER_CACHE_PREFIX}{offer_id}"
+    try:
+        cached_data = await redis.get(cache_key)
+    except Exception as exc:
+        logger.warning(
+            "读取 Offer 缓存失败: offer_id=%s error_type=%s",
+            offer_id,
+            type(exc).__name__,
+        )
+        return OfferCacheEntry(status="unavailable")
+
+    if cached_data is None:
+        return OfferCacheEntry(status="miss")
 
     try:
-        cache_key = f"{OFFER_CACHE_PREFIX}{offer_id}"
-        cached_data = await redis.get(cache_key)
-        if not cached_data:
-            return None
         if isinstance(cached_data, bytes):
             cached_data = cached_data.decode("utf-8")
         if cached_data == NONE_MARKER:
-            return None
-        data = json.loads(cached_data)
-        return data.get("advertiser_id")
-    except Exception as e:
-        logger.debug(f"从缓存获取Offer信息失败: offer_id={offer_id}, error={e}")
+            return OfferCacheEntry(status="negative")
 
-    return None
+        data = json.loads(cached_data)
+        if not isinstance(data, dict):
+            raise ValueError("Offer cache payload must be a JSON object")
+
+        advertiser_id = data.get("advertiser_id")
+        if advertiser_id is None:
+            return OfferCacheEntry(status="negative")
+        if isinstance(advertiser_id, bool) or not isinstance(advertiser_id, int):
+            raise ValueError("Offer cache advertiser_id must be an integer")
+        return OfferCacheEntry(status="hit", advertiser_id=advertiser_id)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError, TypeError) as exc:
+        # 仅将缓存载荷解析/校验错误视为未命中；Redis 读操作异常始终是 unavailable。
+        try:
+            await redis.delete(cache_key)
+        except Exception:
+            logger.debug("清理损坏的 Offer 缓存失败: offer_id=%s", offer_id)
+        logger.warning(
+            "Offer 缓存数据无效，按未命中处理: offer_id=%s error_type=%s",
+            offer_id,
+            type(exc).__name__,
+        )
+        return OfferCacheEntry(status="miss")
+
+
+async def get_offer_advertiser_id(offer_id: int) -> Optional[int]:
+    """兼容旧调用方：只返回有效 advertiser_id，其余状态仍返回 None。"""
+    entry = await get_offer_cache_entry(offer_id)
+    return entry.advertiser_id if entry.status == "hit" else None
 
 
 async def set_offer_cache(

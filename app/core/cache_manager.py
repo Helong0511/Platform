@@ -12,7 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.redis_client import get_redis_client
-from app.core.offer_cache import set_offer_cache, get_offer_advertiser_id, invalidate_offer_cache
+from app.core.offer_cache import (
+    get_offer_cache_entry,
+    set_offer_cache,
+    invalidate_offer_cache,
+)
 from app.core.short_link_cache import (
     get_short_link_from_cache,
     serialize_short_link,
@@ -110,9 +114,9 @@ class CacheManager:
             warmed_count = 0
             for offer in offers:
                 try:
-                    # 检查是否已在缓存中
-                    cached = await CacheManager.get_offer_cache(offer.id)
-                    if not cached:
+                    # 负缓存也属于有效命中；Redis 故障时跳过回填，避免故障恢复后写入不确定数据。
+                    cache_entry = await get_offer_cache_entry(offer.id)
+                    if cache_entry.status == "miss":
                         written = await set_offer_cache(
                             offer.id,
                             offer.advertiser_id,
@@ -120,6 +124,11 @@ class CacheManager:
                         )
                         if written:
                             warmed_count += 1
+                    elif cache_entry.status == "unavailable":
+                        logger.debug(
+                            "Redis 不可用，跳过 Offer 缓存预热: offer_id=%s",
+                            offer.id,
+                        )
                 except Exception as e:
                     logger.warning(f"预热Offer失败: offer_id={offer.id}, error={e}")
             
@@ -331,8 +340,8 @@ class CacheManager:
         Returns:
             缓存的Offer信息，如果不存在则返回None
         """
-        advertiser_id = await get_offer_advertiser_id(offer_id)
-        if advertiser_id:
-            return {"advertiser_id": advertiser_id}
-        return None
+        cache_entry = await get_offer_cache_entry(offer_id)
+        if cache_entry.status != "hit" or cache_entry.advertiser_id is None:
+            return None
+        return {"advertiser_id": cache_entry.advertiser_id}
 
