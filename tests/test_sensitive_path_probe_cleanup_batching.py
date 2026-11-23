@@ -175,3 +175,19 @@ async def test_cleanup_timeout_reports_unknown_batch_without_false_success(monke
     assert captured.value.remaining_possible is True
     assert captured.value.deleted_count == 0
     db.rollback.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_empty_table_is_complete(fixed_now):
+    engine, factory = await _make_db()
+    try:
+        async with factory() as db:
+            result = await cleanup.cleanup_sensitive_path_probe_logs(
+                retention_days=30, db=db, batch_size=10, max_batches=2, max_runtime_seconds=5
+            )
+        assert result["deleted_count"] == 0
+        assert result["batch_count"] == 0
+        assert result["complete"] is True
+        assert result["remaining_possible"] is False
+    finally:
+        await engine.dispose()
