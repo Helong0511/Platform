@@ -253,3 +253,45 @@ async def test_mysql_insert_between_batches_does_not_expand_fixed_cutoff(monkeyp
     finally:
         await _drop_table(engine)
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_mysql_runtime_budget_cancels_slow_batch_and_rolls_back(monkeypatch):
+    import asyncio
+
+    engine = _engine()
+    now = datetime(2026, 11, 23, 12, 0, 0)
+    monkeypatch.setattr(cleanup, "get_app_now_naive", lambda: now)
+
+    class SlowCommitSession(AsyncSession):
+        async def commit(self):
+            # DELETE 已在真实 MySQL 事务中执行，但提交延迟超过预算。
+            await asyncio.sleep(2)
+            await super().commit()
+
+    try:
+        await _reset_table(engine, _rows(now, old_count=5, recent_count=2))
+        factory = async_sessionmaker(engine, class_=SlowCommitSession, expire_on_commit=False)
+        async with factory() as db:
+            with pytest.raises(cleanup.SensitivePathProbeCleanupError) as captured:
+                await cleanup.cleanup_sensitive_path_probe_logs(
+                    retention_days=30,
+                    db=db,
+                    batch_size=5,
+                    max_batches=5,
+                    max_runtime_seconds=1,
+                )
+
+        assert captured.value.error_type == "TimeoutError"
+        assert captured.value.deleted_count == 0
+        assert captured.value.batch_count == 0
+
+        async with engine.connect() as connection:
+            old_remaining = await connection.scalar(
+                text("SELECT COUNT(*) FROM sensitive_path_probe_logs WHERE created_at < :cutoff"),
+                {"cutoff": now - timedelta(days=30)},
+            )
+        assert old_remaining == 5
+    finally:
+        await _drop_table(engine)
+        await engine.dispose()
