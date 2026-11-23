@@ -194,3 +194,62 @@ async def test_mysql_failed_second_batch_keeps_first_commit(monkeypatch):
     finally:
         await _drop_table(engine)
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_mysql_insert_between_batches_does_not_expand_fixed_cutoff(monkeypatch):
+    engine = _engine()
+    now = datetime(2026, 11, 23, 12, 0, 0)
+    cutoff = now - timedelta(days=30)
+    monkeypatch.setattr(cleanup, "get_app_now_naive", lambda: now)
+    plain_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    class InsertAfterFirstCommitSession(AsyncSession):
+        commit_count = 0
+
+        async def commit(self):
+            await super().commit()
+            self.commit_count += 1
+            if self.commit_count == 1:
+                # 模拟另一请求在批次之间写入一条新日志；它必须留在 cutoff 之后。
+                async with plain_factory() as writer:
+                    writer.add(
+                        SensitivePathProbeLog(
+                            request_path="/inserted-between-batches",
+                            created_at=now,
+                        )
+                    )
+                    await writer.commit()
+
+    try:
+        await _reset_table(engine, [
+            {
+                "request_path": f"/old/{index}",
+                "created_at": cutoff - timedelta(seconds=1),
+            }
+            for index in range(2)
+        ])
+        factory = async_sessionmaker(
+            engine, class_=InsertAfterFirstCommitSession, expire_on_commit=False
+        )
+        async with factory() as db:
+            result = await cleanup.cleanup_sensitive_path_probe_logs(
+                retention_days=30,
+                db=db,
+                batch_size=1,
+                max_batches=10,
+                max_runtime_seconds=20,
+            )
+
+        assert result["deleted_count"] == 2
+        assert result["complete"] is True
+        async with engine.connect() as connection:
+            paths = (
+                await connection.execute(
+                    text("SELECT request_path FROM sensitive_path_probe_logs")
+                )
+            ).scalars().all()
+        assert paths == ["/inserted-between-batches"]
+    finally:
+        await _drop_table(engine)
+        await engine.dispose()
