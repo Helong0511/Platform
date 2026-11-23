@@ -10,6 +10,12 @@ from typing import Dict, Any, Optional
 logger = logging.getLogger(__name__)
 
 
+def normalize_event_name(value: Any) -> str:
+    """将缺失/空白事件名统一映射为 default，确保各入库路径使用同一幂等键。"""
+    normalized = str(value).strip() if value is not None else ""
+    return normalized or "default"
+
+
 class DataNormalizer:
     """数据标准化转换器"""
     
@@ -40,7 +46,7 @@ class DataNormalizer:
         if payout_raw is None or str(payout_raw).strip() == '':
             payout_raw = raw_data.get('amount')
 
-        event_name = str(raw_data.get('event_name') or 'default').strip() or 'default'
+        event_name = normalize_event_name(raw_data.get('event_name'))
         normalized = {
             'platform': platform,
             'conversion_id': str(conversion_id or '').strip(),
