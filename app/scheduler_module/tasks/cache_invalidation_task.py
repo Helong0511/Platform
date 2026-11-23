@@ -13,7 +13,7 @@ async def process_ad_data_cache_invalidation_task():
     """每分钟处理持久化失效事件；Redis 未确认共享失效时保留重试。"""
     started = datetime.now(timezone.utc)
     try:
-        stats = await process_cache_invalidation_outbox(batch_size=20)
+        stats = await process_cache_invalidation_outbox(batch_size=5)
         duration = (datetime.now(timezone.utc) - started).total_seconds()
         message = (
             f"执行完成：claimed={stats['claimed']} success={stats['success']} "
