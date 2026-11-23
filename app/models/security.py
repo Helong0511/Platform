@@ -35,7 +35,7 @@ class SensitivePathProbeLog(Base):
         comment="预警等级：1低危 2中危 3高危 4危急",
     )
     action_taken = Column(String(64), nullable=True, comment="处置动作：blocked_404/auto_blocked_ip等")
-    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment="创建时间")
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment="创建时间")
 
     __table_args__ = (
         Index("idx_sensitive_probe_created_at", "created_at"),
