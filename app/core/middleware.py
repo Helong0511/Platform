@@ -203,6 +203,13 @@ def _rate_limit_bucket(path: str, method: str) -> str:
     return "api"
 
 
+def _should_fail_closed_rate_limit(
+    *, is_production: bool, bucket: str, redis_counted: bool
+) -> bool:
+    """生产登录限流必须由 Redis 跨 Worker 计数；Redis 不可用时拒绝放行。"""
+    return bool(is_production and bucket == "login" and not redis_counted)
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
     API限流中间件
@@ -318,6 +325,25 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             response.headers["X-RateLimit-Reset"] = str(int((now + timedelta(seconds=window)).timestamp()))
             return response
         
+        # 生产登录接口不能在 Redis 故障时退化为各 Worker 独立计数，否则可通过多进程分散请求绕过暴力破解限制。
+        if _should_fail_closed_rate_limit(
+            is_production=settings.is_production,
+            bucket=bucket,
+            redis_counted=redis_counted,
+        ):
+            logger.error(
+                "生产登录限流不可用，拒绝请求以避免跨 Worker 限流失效: IP=%s",
+                client_ip,
+            )
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content=create_error_response(
+                    ErrorCode.SERVICE_UNAVAILABLE,
+                    message="登录服务暂时不可用，请稍后重试",
+                ),
+                headers={"Retry-After": "5"},
+            )
+
         # ====== 使用内存存储进行限流（Redis不可用时；多进程不共享） ======
         _evict_rate_limit_store_if_needed(now, window)
         client_requests = _rate_limit_store[client_ip]
