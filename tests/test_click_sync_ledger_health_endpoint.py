@@ -1,5 +1,8 @@
 """短链接点击刷盘账本监控 API 回归测试。"""
 
+import ast
+from pathlib import Path
+
 from datetime import datetime, timedelta
 
 import pytest
@@ -145,3 +148,27 @@ async def test_click_sync_ledger_cleanup_uses_application_timezone_for_ack_and_r
     retention_params = db.statements[2].compile().params
     assert fixed_now in ack_params.values()
     assert fixed_now - timedelta(days=30) in retention_params.values()
+
+
+
+def test_all_click_sync_ledger_ack_timestamps_use_application_timezone():
+    source = Path("app/core/short_link_click_counter.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    assignments = [
+        keyword
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "values"
+        for keyword in node.keywords
+        if keyword.arg == "acknowledged_at"
+    ]
+
+    assert len(assignments) == 3
+    for assignment in assignments:
+        assert any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "get_app_now_naive"
+            for node in ast.walk(assignment.value)
+        )
