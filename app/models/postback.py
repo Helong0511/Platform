@@ -506,7 +506,6 @@ class ShortLinkClickSyncLedgerMaintenanceState(Base):
     )
 
     __table_args__ = (
-        CheckConstraint("id = 1", name="chk_click_sync_ledger_maintenance_singleton"),
         CheckConstraint(
             "status IN ('unknown', 'healthy', 'degraded', 'failed')",
             name="chk_click_sync_ledger_maintenance_status",
