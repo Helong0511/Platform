@@ -7,13 +7,9 @@ import logging
 from decimal import Decimal, InvalidOperation
 from typing import Dict, Any, Optional
 
+from app.core.postback_event_name import normalize_event_name
+
 logger = logging.getLogger(__name__)
-
-
-def normalize_event_name(value: Any) -> str:
-    """将缺失/空白事件名统一映射为 default，确保各入库路径使用同一幂等键。"""
-    normalized = str(value).strip() if value is not None else ""
-    return normalized or "default"
 
 
 class DataNormalizer:
