@@ -91,7 +91,7 @@ def get_task_result(task_name: str) -> Optional[str]:
         try:
             return get_result_func(task_name)
         except Exception as e:
-            logger.debug(f"获取任务 '{task_name}' 的执行结果失败: {e}")
+            logger.debug("获取任务结果失败: task=%s error_type=%s", task_name, type(e).__name__)
             return None
     return None
 
@@ -141,16 +141,16 @@ def auto_register_task_results() -> None:
             logger.debug(f"已注册任务结果获取函数: {task_name}")
 
         except KeyError as e:
-            logger.error(f"任务配置 '{config_key}' 缺少必要字段: {e}")
+            logger.error("任务结果配置缺少必要字段: config_key=%s error_type=%s", config_key, type(e).__name__)
             failed_count += 1
         except ImportError as e:
-            logger.warning(f"无法导入任务结果获取函数模块 '{result_getter_module}': {e}")
+            logger.warning("导入任务结果获取函数模块失败: task=%s error_type=%s", task_name, type(e).__name__)
             failed_count += 1
         except AttributeError as e:
-            logger.error(f"任务模块 '{result_getter_module}' 中不存在函数 '{result_getter_function}': {e}")
+            logger.error("任务结果获取函数不存在: task=%s error_type=%s", task_name, type(e).__name__)
             failed_count += 1
         except Exception as e:
-            logger.error(f"注册任务结果获取函数 '{config_key}' 失败: {e}", exc_info=True)
+            logger.error("注册任务结果获取函数失败: config_key=%s error_type=%s", config_key, type(e).__name__)
             failed_count += 1
 
     logger.info(f"任务结果获取函数注册完成: 成功 {registered_count} 个, 失败 {failed_count} 个")

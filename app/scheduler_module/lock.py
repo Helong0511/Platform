@@ -72,7 +72,7 @@ async def acquire_redis_scheduler_lock(task_name: str, ttl_seconds: Optional[int
             return None
         return token
     except Exception as exc:
-        logger.warning("获取 Redis 调度锁失败（回退仅 MySQL）: task=%s err=%s", task_name, exc)
+        logger.warning("获取 Redis 调度锁失败（回退仅 MySQL）: task=%s error_type=%s", task_name, type(exc).__name__)
         return "noop-redis-error"
 
 
@@ -96,7 +96,7 @@ async def release_redis_scheduler_lock(task_name: str, token: Optional[str]) -> 
     try:
         await redis.eval(script, 1, key, token)
     except Exception as exc:
-        logger.debug("释放 Redis 调度锁失败: task=%s err=%s", task_name, exc)
+        logger.debug("释放 Redis 调度锁失败: task=%s error_type=%s", task_name, type(exc).__name__)
 
 # 时区配置（从统一配置读取）
 UTC_TZ = pytz.UTC
@@ -309,7 +309,7 @@ async def acquire_task_lock(
             await db.close()
             return False, None
 
-        logger.error("获取任务锁失败: %s, 错误: %s", task_name, e, exc_info=True)
+        logger.error("获取任务锁失败: task=%s error_type=%s", task_name, type(e).__name__)
         await db.rollback()
         await db.close()
         return False, None
@@ -433,11 +433,11 @@ async def release_task_lock(
                 await asyncio.sleep(0.2 * attempt)  # 递增退避
                 continue
             # 非死锁错误或重试耗尽，跳出
-            logger.error(f"释放任务锁失败: {task_name}, 错误: {e}", exc_info=True)
+            logger.error("释放任务锁失败: task=%s error_type=%s", task_name, type(e).__name__)
             return
 
         except Exception as e:
             await db.rollback()
-            logger.error(f"释放任务锁失败: {task_name}, 错误: {e}", exc_info=True)
+            logger.error("释放任务锁失败: task=%s error_type=%s", task_name, type(e).__name__)
             # 即使释放锁失败，也不抛出异常，避免影响任务执行结果
             return
