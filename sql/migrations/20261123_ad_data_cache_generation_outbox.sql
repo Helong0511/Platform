@@ -44,6 +44,87 @@ CREATE TABLE IF NOT EXISTS cache_invalidation_outbox (
 INSERT IGNORE INTO cache_namespace_generations (namespace, generation)
 VALUES ('ad_data', 1);
 
+-- 已存在的同名表必须具备本迁移要求的完整结构；不能把 CREATE IF NOT EXISTS 的警告当作成功。
+SET @generation_schema_valid = (
+    SELECT
+        (SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cache_namespace_generations'
+           AND ((COLUMN_NAME = 'namespace' AND COLUMN_TYPE = 'varchar(64)' AND IS_NULLABLE = 'NO')
+             OR (COLUMN_NAME = 'generation' AND COLUMN_TYPE = 'bigint' AND IS_NULLABLE = 'NO')
+             OR (COLUMN_NAME = 'updated_at' AND COLUMN_TYPE = 'datetime' AND IS_NULLABLE = 'NO'))) = 3
+        AND (SELECT COUNT(*) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cache_namespace_generations'
+               AND INDEX_NAME = 'PRIMARY' AND COLUMN_NAME = 'namespace' AND SEQ_IN_INDEX = 1) = 1
+        AND (SELECT COUNT(*) FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cache_namespace_generations'
+               AND ENGINE = 'InnoDB' AND TABLE_COLLATION = 'utf8mb4_unicode_ci') = 1
+        AND (SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+             WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'cache_namespace_generations'
+               AND CONSTRAINT_NAME = 'chk_cache_namespace_generation_positive'
+               AND CONSTRAINT_TYPE = 'CHECK') = 1
+);
+SET @ddl = IF(
+    @generation_schema_valid = 1,
+    'SELECT 1',
+    'SELECT * FROM __cache_namespace_generations_schema_mismatch__'
+);
+PREPARE migration_stmt FROM @ddl;
+EXECUTE migration_stmt;
+DEALLOCATE PREPARE migration_stmt;
+
+SET @outbox_schema_valid = (
+    SELECT
+        (SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cache_invalidation_outbox'
+           AND COLUMN_NAME IN (
+               'id', 'event_key', 'namespace', 'generation', 'status',
+               'attempt_count', 'max_attempts', 'next_retry_time', 'locked_by',
+               'lease_token', 'lease_until', 'last_error_type', 'created_at', 'completed_at'
+           )) = 14
+        AND (SELECT COUNT(*) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cache_invalidation_outbox'
+               AND INDEX_NAME = 'PRIMARY' AND COLUMN_NAME = 'id' AND SEQ_IN_INDEX = 1) = 1
+        AND (SELECT COUNT(*) FROM (
+             SELECT INDEX_NAME FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cache_invalidation_outbox'
+               AND INDEX_NAME = 'uq_cache_invalidation_event_key'
+             GROUP BY INDEX_NAME
+             HAVING MAX(NON_UNIQUE) = 0
+                AND GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') = 'event_key'
+        ) AS valid_event_key_index) = 1
+        AND (SELECT COUNT(*) FROM (
+             SELECT INDEX_NAME FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cache_invalidation_outbox'
+               AND INDEX_NAME = 'idx_cache_invalidation_due'
+             GROUP BY INDEX_NAME
+             HAVING MAX(NON_UNIQUE) = 1
+                AND GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') = 'status,next_retry_time,lease_until,id'
+        ) AS valid_due_index) = 1
+        AND (SELECT COUNT(*) FROM (
+             SELECT INDEX_NAME FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cache_invalidation_outbox'
+               AND INDEX_NAME = 'idx_cache_invalidation_namespace_generation'
+             GROUP BY INDEX_NAME
+             HAVING MAX(NON_UNIQUE) = 1
+                AND GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') = 'namespace,generation'
+        ) AS valid_namespace_index) = 1
+        AND (SELECT COUNT(*) FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cache_invalidation_outbox'
+               AND ENGINE = 'InnoDB' AND TABLE_COLLATION = 'utf8mb4_unicode_ci') = 1
+        AND (SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+             WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'cache_invalidation_outbox'
+               AND CONSTRAINT_NAME IN ('chk_cache_invalidation_status', 'chk_cache_invalidation_counters')
+               AND CONSTRAINT_TYPE = 'CHECK') = 2
+);
+SET @ddl = IF(
+    @outbox_schema_valid = 1,
+    'SELECT 1',
+    'SELECT * FROM __cache_invalidation_outbox_schema_mismatch__'
+);
+PREPARE migration_stmt FROM @ddl;
+EXECUTE migration_stmt;
+DEALLOCATE PREPARE migration_stmt;
+
 -- 迁移后核验：命名空间初始化必须存在且版本为正数。
 SELECT namespace, generation
 FROM cache_namespace_generations
