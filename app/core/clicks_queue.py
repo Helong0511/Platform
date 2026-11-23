@@ -78,7 +78,7 @@ async def enqueue_click(click_data: Dict[str, Any]) -> bool:
     try:
         redis = await get_redis_client()
     except Exception as e:
-        logger.error("获取 Redis 客户端失败，点击队列入队不可用: %s", e, exc_info=True)
+        logger.error("获取 Redis 客户端失败，点击队列入队不可用: error_type=%s", type(e).__name__)
         return False
     if not redis:
         logger.warning("Redis不可用，无法使用队列缓冲，点击记录将走 DB 备用写入")
@@ -183,7 +183,7 @@ async def move_to_dead_letter(raw: str, reason: str = "") -> bool:
             )
         return bool(moved)
     except Exception as e:
-        logger.error("原子写入点击死信队列失败: %s", e, exc_info=True)
+        logger.error("原子写入点击死信队列失败: error_type=%s", type(e).__name__)
         return False
 
 
@@ -222,7 +222,7 @@ async def reserve_clicks(count: int = BATCH_SIZE) -> list[tuple[str, Dict[str, A
             logger.debug("从队列预留 %s 条点击记录（processing）", len(reserved))
         return reserved
     except Exception as e:
-        logger.error("预留点击记录失败: error=%s", e, exc_info=True)
+        logger.error("预留点击记录失败: error_type=%s", type(e).__name__)
         return []
 
 
@@ -233,7 +233,7 @@ async def acknowledge_reserved(raw_items: list[str]) -> bool:
     try:
         redis = await get_redis_client()
     except Exception as e:
-        logger.error("获取 Redis 客户端失败，无法 ACK 已入库点击记录: %s", e, exc_info=True)
+        logger.error("获取 Redis 客户端失败，无法 ACK 已入库点击记录: error_type=%s", type(e).__name__)
         return False
     if not redis:
         logger.error("Redis 不可用，无法 ACK %s 条已入库点击记录；等待恢复后幂等重放", len(raw_items))
@@ -333,7 +333,7 @@ async def get_dead_letter_length() -> int:
     try:
         return await redis.llen(CLICKS_DLQ_KEY)
     except Exception as e:
-        logger.error("获取死信队列长度失败: error=%s", e)
+        logger.error("获取死信队列长度失败: error_type=%s", type(e).__name__)
         return 0
 
 
@@ -357,7 +357,7 @@ async def recover_processing_queue() -> int:
             logger.info("已从 processing 队列原子恢复 %s 条记录到主队列", recovered)
         return recovered
     except Exception as e:
-        logger.error("原子恢复 processing 点击队列失败: %s", e, exc_info=True)
+        logger.error("原子恢复 processing 点击队列失败: error_type=%s", type(e).__name__)
         return recovered
 
 
@@ -384,7 +384,7 @@ async def get_queue_length() -> int:
     try:
         return await redis.llen(CLICKS_QUEUE_KEY)
     except Exception as e:
-        logger.error("获取队列长度失败: error=%s", e)
+        logger.error("获取队列长度失败: error_type=%s", type(e).__name__)
         return 0
 
 
@@ -396,7 +396,7 @@ async def get_processing_queue_length() -> int:
     try:
         return await redis.llen(CLICKS_PROCESSING_KEY)
     except Exception as e:
-        logger.error("获取 processing 队列长度失败: error=%s", e)
+        logger.error("获取 processing 队列长度失败: error_type=%s", type(e).__name__)
         return 0
 
 
