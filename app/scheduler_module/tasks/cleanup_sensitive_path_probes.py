@@ -180,7 +180,7 @@ async def cleanup_sensitive_path_probe_logs(
                 f"清理未完成：已提交删除 {deleted_count} 条，执行 {batch_count} 批；"
                 "已达到本轮批次或运行预算，仍可能存在待清理数据"
             )
-            log_task_result(TASK_NAME, msg, level="warning")
+            logger.warning("[定时任务未完成] %s: %s", TASK_NAME, msg)
             set_task_result(TASK_NAME, msg)
         return {**result_data, "message": msg}
 
