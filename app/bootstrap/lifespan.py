@@ -1085,8 +1085,9 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     try:
-        if settings.should_run_scheduler():
-            await shutdown_scheduler()
+        # 所有 worker 都可能接收手动触发任务；无论是否运行 APScheduler，
+        # 都必须停止并排空本进程的 TaskQueue。
+        await shutdown_scheduler()
     except asyncio.CancelledError:
         # 应用关闭时任务被取消是正常的，不需要记录错误
         logger.debug("定时任务调度器关闭时任务被取消（正常关闭流程）")

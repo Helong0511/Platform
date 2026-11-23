@@ -33,6 +33,14 @@ class TaskPriority(IntEnum):
     CRITICAL = 0  # 最高优先级
 
 
+class QueueFullError(RuntimeError):
+    """任务等待队列已满，调用方应明确反馈并稍后重试。"""
+
+
+class QueueShuttingDownError(RuntimeError):
+    """任务队列已停止接收新任务。"""
+
+
 class TaskQueue:
     """
     任务执行队列管理器
@@ -43,14 +51,22 @@ class TaskQueue:
     - 任务排队等待执行
     """
 
-    def __init__(self, max_concurrent_tasks: int = 1):
+    def __init__(self, max_concurrent_tasks: int = 1, max_pending_tasks: Optional[int] = None):
         """
         初始化任务队列
         
         Args:
             max_concurrent_tasks: 最大并发任务数（默认1，即同一时间只执行一个任务）
         """
+        if max_concurrent_tasks < 1:
+            raise ValueError("max_concurrent_tasks 必须大于 0")
+        if max_pending_tasks is None:
+            max_pending_tasks = getattr(settings, 'MAX_PENDING_SCHEDULED_TASKS', 100)
+        if max_pending_tasks < 0:
+            raise ValueError("max_pending_tasks 不能小于 0")
         self.max_concurrent_tasks = max_concurrent_tasks
+        self.max_pending_tasks = max_pending_tasks
+        self.accepting = True
         self.current_running = 0  # 当前正在执行的任务数
         self.queue: deque = deque()  # 任务队列（按优先级排序）
         self.lock = asyncio.Lock()  # 队列操作锁
@@ -75,6 +91,8 @@ class TaskQueue:
             **kwargs: 任务函数关键字参数（如果task_func是协程对象，则忽略）
         """
         async with self.lock:
+            if not self.accepting:
+                raise QueueShuttingDownError("任务队列已停止接收新任务")
             # 如果当前运行的任务数小于最大值，直接执行
             if self.current_running < self.max_concurrent_tasks:
                 can_execute_immediately = True
@@ -90,7 +108,9 @@ class TaskQueue:
                     f"队列: {len(self.queue)}）"
                 )
             else:
-                # 任务需要排队等待
+                # 任务需要排队等待；达到容量时明确拒绝，绝不静默丢弃已有任务。
+                if len(self.queue) >= self.max_pending_tasks:
+                    raise QueueFullError("任务等待队列已满")
                 self.queue.append({
                     'task_name': task_name,
                     'task_func': task_func,
@@ -201,13 +221,20 @@ class TaskQueue:
         Args:
             timeout: 超时时间（秒），None表示无限等待
         """
-        if timeout:
-            await asyncio.wait_for(
-                self._wait_all_tasks(),
-                timeout=timeout
-            )
-        else:
+        if timeout is None:
             await self._wait_all_tasks()
+            return
+
+        if timeout <= 0:
+            async with self.lock:
+                if self.current_running == 0 and not self.queue:
+                    return
+            raise asyncio.TimeoutError
+
+        await asyncio.wait_for(
+            self._wait_all_tasks(),
+            timeout=timeout,
+        )
 
     async def _wait_all_tasks(self) -> None:
         """等待所有任务完成（内部方法）"""
@@ -220,6 +247,11 @@ class TaskQueue:
         # 等待所有运行中的任务完成
         if self.running_tasks:
             await asyncio.gather(*self.running_tasks.keys(), return_exceptions=True)
+
+    async def stop_accepting(self) -> None:
+        """原子停止接收新任务；已接收任务继续按队列顺序执行。"""
+        async with self.lock:
+            self.accepting = False
 
     async def get_queue_status(self) -> Dict[str, Any]:
         """
@@ -255,6 +287,8 @@ class TaskQueue:
             return {
                 'current_running': self.current_running,
                 'max_concurrent': self.max_concurrent_tasks,
+                'max_pending': self.max_pending_tasks,
+                'accepting': self.accepting,
                 'queue_length': len(self.queue),
                 'running_tasks': list(self.running_tasks.values()),
                 'queued_tasks': [item['task_name'] for item in self.queue],
@@ -276,9 +310,13 @@ def get_task_queue() -> TaskQueue:
     global _task_queue
     if _task_queue is None:
         max_concurrent = getattr(settings, 'MAX_CONCURRENT_SCHEDULED_TASKS', 1)
-        _task_queue = TaskQueue(max_concurrent_tasks=max_concurrent)
+        max_pending = getattr(settings, 'MAX_PENDING_SCHEDULED_TASKS', 100)
+        _task_queue = TaskQueue(
+            max_concurrent_tasks=max_concurrent,
+            max_pending_tasks=max_pending,
+        )
         logger.info(
-            f"任务队列已初始化（最大并发数: {max_concurrent}）"
+            f"任务队列已初始化（最大并发数: {max_concurrent}, 最大等待数: {max_pending}）"
         )
     return _task_queue
 
