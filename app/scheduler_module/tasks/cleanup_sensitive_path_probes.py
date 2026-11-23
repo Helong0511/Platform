@@ -114,7 +114,8 @@ async def cleanup_sensitive_path_probe_logs(
             if time.monotonic() - started >= max_runtime_seconds:
                 break
 
-            # MySQL 8 使用 SKIP LOCKED 避免并发清理实例长期争抢相同记录。
+            # 使用锁定读而不使用 SKIP LOCKED：空结果才能证明没有剩余过期行。
+            # 并发清理实例可等待当前批次提交；wait_for 会限制锁等待时间。
             # SQLite 方言会忽略 FOR UPDATE，仅用于逻辑单测，不替代 MySQL 集成验证。
             async def _commit_one_batch() -> int | None:
                 selected = await db.execute(
@@ -122,7 +123,7 @@ async def cleanup_sensitive_path_probe_logs(
                     .where(SensitivePathProbeLog.created_at < cutoff_dt)
                     .order_by(SensitivePathProbeLog.id.asc())
                     .limit(batch_size)
-                    .with_for_update(skip_locked=True)
+                    .with_for_update()
                 )
                 ids = list(selected.scalars().all())
                 if not ids:
