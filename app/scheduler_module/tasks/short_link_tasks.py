@@ -84,12 +84,24 @@ async def process_clicks_queue_task():
             logger.warning("点击队列处理存在失败/死信: %s", summary)
         elif result.get('processed', 0):
             logger.info("点击队列处理完成: %s", summary)
+        if result.get("failed", 0) or result.get("ack_failed", 0):
+            # DB 入账后 ACK 未确认时，记录可能仍留在 processing；必须让调度器显示失败，
+            # 由队列恢复机制在下一轮核对，不能把“DB 已提交”误报成整批任务成功。
+            raise RuntimeError(
+                "点击队列本轮未完全成功: "
+                f"处理失败={result.get('failed', 0)}, "
+                f"ACK失败={result.get('ack_failed', 0)}；"
+                f"队列状态: {summary}"
+            )
         set_task_result(TASK_PROCESS_QUEUE, f"执行完成: {summary}")
-        if result.get("failed", 0):
-            # 已回队等待下一轮重试，但本轮不是完全成功；让调度器记录失败状态。
-            raise RuntimeError(f"点击队列本轮有 {result['failed']} 条处理失败，已回队/等待恢复: {summary}")
     except Exception as e:
-        logger.error("点击队列批量处理任务执行失败: %s", e, exc_info=True)
+        # 失败状态必须覆盖旧的成功状态，避免运维界面误报本轮执行成功。
+        set_task_result(TASK_PROCESS_QUEUE, f"执行失败: {type(e).__name__}")
+        logger.error(
+            "点击队列批量处理任务执行失败: error_type=%s",
+            type(e).__name__,
+            exc_info=True,
+        )
         raise
 
 
