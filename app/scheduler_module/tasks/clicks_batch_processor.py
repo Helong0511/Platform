@@ -169,8 +169,9 @@ async def process_clicks_queue() -> Dict[str, int]:
                     await db.rollback()
                     batch_failed = True
                     logger.error(
-                        f"批量插入点击记录失败（第 {batch_count} 批）: error={e}",
-                        exc_info=True
+                        "批量插入点击记录失败（第 %s 批）: error_type=%s",
+                        batch_count,
+                        type(e).__name__,
                     )
                     # 整批回队，按本次失败批次统计；不要沿用上批 valid_clicks 的局部状态。
                     result['failed'] += len(clicks)
@@ -188,7 +189,7 @@ async def process_clicks_queue() -> Dict[str, int]:
         # 注意：处理结果日志由调用方（short_link_tasks.py）统一输出，避免重复
 
     except Exception as e:
-        logger.error(f"处理点击队列异常: error={e}", exc_info=True)
+        logger.error("处理点击队列异常: error_type=%s", type(e).__name__)
         raise
 
     return result
@@ -233,7 +234,7 @@ async def _enrich_clicks_with_advertiser_id(db: AsyncSession, clicks: List[Dict[
                 # 缓存Offer信息
                 await set_offer_cache(offer_id, advertiser_id, offer_name)
         except Exception as e:
-            logger.error("批量查询 Offer 失败，保留原始队列记录并重试: %s", e, exc_info=True)
+            logger.error("批量查询 Offer 失败，保留原始队列记录并重试: error_type=%s", type(e).__name__)
             raise
 
     # 补充advertiser_id到点击记录
@@ -348,7 +349,7 @@ async def _validate_offer_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) ->
         return clicks
     except Exception as e:
         # DB 查询失败时真实有效性未知；不能把关联 ID 清空后继续入库，否则会永久丢失归因。
-        logger.error("验证 Offer ID 失败，保留原始记录并回队重试: %s", e, exc_info=True)
+        logger.error("验证 Offer ID 失败，保留原始记录并回队重试: error_type=%s", type(e).__name__)
         raise
 
 
@@ -390,7 +391,7 @@ async def _validate_short_link_ids(db: AsyncSession, clicks: List[Dict[str, Any]
                 click['short_link_id'] = None
     except Exception as e:
         # DB 查询失败不等于短链不存在；清空 FK 会造成无法恢复的归因数据丢失。
-        logger.error("验证 short_link_id 失败，保留原始记录并回队重试: %s", e, exc_info=True)
+        logger.error("验证 short_link_id 失败，保留原始记录并回队重试: error_type=%s", type(e).__name__)
         raise
 
 
@@ -523,5 +524,5 @@ async def _batch_insert_clicks(
             return inserted_count, duplicate_count
 
     except Exception as e:
-        logger.error("批量插入点击记录失败: error=%s", e, exc_info=True)
+        logger.error("批量插入点击记录失败: error_type=%s", type(e).__name__)
         raise
