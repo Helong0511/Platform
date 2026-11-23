@@ -18,7 +18,7 @@ import weakref
 from functools import wraps
 from typing import Any, Awaitable, Callable, Dict, Optional
 
-from app.core.infrastructure.cache import get_cache_backend
+from app.core.infrastructure.cache import CacheInvalidationResult, get_cache_backend
 from app.core.infrastructure.cache_metrics import get_metrics_collector
 
 logger = logging.getLogger(__name__)
@@ -140,6 +140,35 @@ async def legacy_set_cached(
         ttl=ttl,
         key_prefix=key_prefix,
     )
+
+
+async def invalidate_cache_checked(pattern: str) -> CacheInvalidationResult:
+    """严格失效 query_cache 命名空间，并返回共享存储确认状态。
+
+    MemoryCacheBackend 只能清理当前进程；Redis Outbox Worker 必须要求
+    shared_store_confirmed=True 才能把持久化任务标记为完成。
+    """
+    full_pattern = f"{CACHE_PREFIX}{pattern}*"
+    try:
+        cache = await get_cache_backend()
+        result = await cache.delete_pattern_checked(full_pattern)
+        if not result.shared_store_confirmed:
+            logger.warning(
+                "查询缓存失效未获共享存储确认: pattern=%s backend=%s error=%s",
+                full_pattern,
+                result.backend,
+                result.error_code,
+            )
+        return result
+    except Exception as exc:
+        logger.warning("严格查询缓存失效失败: pattern=%s error=%s", full_pattern, exc)
+        return CacheInvalidationResult(
+            operation_succeeded=False,
+            shared_store_confirmed=False,
+            deleted_count=0,
+            backend="unavailable",
+            error_code=type(exc).__name__,
+        )
 
 
 async def invalidate_cache(pattern: str) -> int:
