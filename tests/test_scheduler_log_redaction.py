@@ -1,6 +1,5 @@
 """调度锁与任务结果注册表的异常日志必须隐藏原始错误内容。"""
 import logging
-from types import SimpleNamespace
 
 import pytest
 
@@ -101,3 +100,4 @@ def test_auto_register_does_not_log_import_exception_details(monkeypatch, caplog
 
     assert SECRET not in caplog.text
     assert "ImportError" in caplog.text
+}
