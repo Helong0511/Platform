@@ -466,7 +466,7 @@ class ShortLinkClickSyncLedgerMaintenanceState(Base):
     """
     __tablename__ = "short_link_click_sync_ledger_maintenance"
 
-    id = Column(Integer, primary_key=True, comment="固定单例主键，唯一允许值为 1")
+    id = Column(Integer, primary_key=True, autoincrement=False, comment="固定单例主键，唯一允许值为 1")
     status = Column(
         String(16), nullable=False, default="unknown", server_default=text("'unknown'"),
         comment="状态：unknown/healthy/degraded/failed",
