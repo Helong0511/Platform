@@ -6,6 +6,7 @@
 
 说明：Excel 批量导入/导出，支持广告数据等业务的表格批处理。"""
 from datetime import date
+import logging
 
 from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException
 from fastapi import Request
@@ -22,6 +23,7 @@ from app.schemas.excel import ExcelImportResponse
 from .export_handler import export_ad_data_handler
 from .import_handler import import_ad_data_handler
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
