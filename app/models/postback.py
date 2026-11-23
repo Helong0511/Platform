@@ -500,9 +500,8 @@ class ShortLinkClickSyncLedgerMaintenanceState(Base):
         DateTime,
         nullable=False,
         default=get_app_now_naive,
-        server_default=text("CURRENT_TIMESTAMP"),
+        server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
         onupdate=get_app_now_naive,
-        server_onupdate=text("CURRENT_TIMESTAMP"),
         comment="状态更新时间",
     )
 
