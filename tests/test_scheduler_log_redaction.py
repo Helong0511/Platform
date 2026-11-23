@@ -100,4 +100,3 @@ def test_auto_register_does_not_log_import_exception_details(monkeypatch, caplog
 
     assert SECRET not in caplog.text
     assert "ImportError" in caplog.text
-}
