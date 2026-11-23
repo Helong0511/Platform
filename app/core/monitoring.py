@@ -1739,6 +1739,7 @@ async def get_click_sync_ledger_health(db: AsyncSession = Depends(get_db)):
     """
     from sqlalchemy import func, select
     from app.models.postback import ShortLinkClickSyncBatch
+    from app.core.utils import APP_TIMEZONE, get_app_now_naive
 
     result = await db.execute(
         select(
@@ -1747,27 +1748,26 @@ async def get_click_sync_ledger_health(db: AsyncSession = Depends(get_db)):
         ).where(ShortLinkClickSyncBatch.acknowledged_at.is_(None))
     )
     unacked_count, oldest_unacked_at = result.one()
-    observed_at = dt.now(timezone.utc).replace(tzinfo=None)
+    # 数据库 DATETIME 使用应用时区的 naive 时间，必须用同一时区计算年龄。
+    observed_at = get_app_now_naive()
 
     oldest_age_seconds = None
     if oldest_unacked_at is not None:
-        # MySQL DATETIME 通常返回 naive 时间；若驱动返回 aware 时间，统一按 UTC 计算。
         if oldest_unacked_at.tzinfo is not None:
-            oldest_unacked_at = oldest_unacked_at.astimezone(timezone.utc).replace(tzinfo=None)
+            oldest_unacked_at = oldest_unacked_at.astimezone(APP_TIMEZONE).replace(tzinfo=None)
         oldest_age_seconds = max(0, int((observed_at - oldest_unacked_at).total_seconds()))
 
     return {
         "status": "backlog" if unacked_count else "healthy",
         "unacknowledged_count": int(unacked_count or 0),
         "oldest_unacknowledged_at": (
-            oldest_unacked_at.replace(tzinfo=timezone.utc).isoformat()
+            APP_TIMEZONE.localize(oldest_unacked_at).isoformat()
             if oldest_unacked_at is not None else None
         ),
         "oldest_unacknowledged_age_seconds": oldest_age_seconds,
-        "observed_at": observed_at.replace(tzinfo=timezone.utc).isoformat(),
+        "observed_at": APP_TIMEZONE.localize(observed_at).isoformat(),
         "source": "mysql_ledger",
     }
-
 
 @monitoring_router.get("/metrics", summary="获取实时监控指标")
 async def get_metrics():
