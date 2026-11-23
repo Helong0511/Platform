@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.models.models import PostbackConversion
+from app.core.postback.transformers.normalizer import normalize_event_name
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class DuplicateChecker:
             logger.debug("conversion_id 为空，跳过重复检测")
             return False
 
-        normalized_event = event_name or ""
+        normalized_event = normalize_event_name(event_name)
 
         result = await db.execute(
             select(PostbackConversion.id)
