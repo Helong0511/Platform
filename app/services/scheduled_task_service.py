@@ -300,12 +300,17 @@ class ScheduledTaskService:
             logger.info(f"管理员 {current_user.username} 更新了定时任务状态: {task_name} (Active: {task.is_active})")
 
             return task
-        except Exception as e:
+        except Exception as exc:
             await self.db.rollback()
-            logger.error(f"更新定时任务状态失败: {str(e)}", exc_info=True)
+            # 数据库/驱动异常可能包含 SQL、连接串和参数；日志仅记录异常类型。
+            logger.error(
+                "更新定时任务状态失败: task_name=%s error_type=%s",
+                task_name,
+                type(exc).__name__,
+            )
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"更新定时任务状态失败: {str(e)}"
+                detail="更新定时任务状态失败，请稍后重试",
             )
 
     async def trigger_scheduled_task(
@@ -403,18 +408,27 @@ class ScheduledTaskService:
                         ErrorCode.OPERATION_FAILED,
                         detail=f"任务 '{task_name}' 重新注册失败，请检查日志"
                     )
-            except ValueError as e:
+            except ValueError as exc:
+                logger.warning(
+                    "任务重新注册参数校验失败: task_name=%s error_type=%s",
+                    task_name,
+                    type(exc).__name__,
+                )
                 raise_api_exception(
                     ErrorCode.INVALID_PARAMETER,
-                    detail=f"任务 '{task_name}' 重新注册失败（参数错误）: {str(e)}"
+                    detail="任务重新注册失败，请检查任务配置后重试",
                 )
             except HTTPException:
                 raise
-            except Exception as e:
-                logger.error(f"任务 '{task_name}' 重新注册失败: {e}", exc_info=True)
+            except Exception as exc:
+                logger.error(
+                    "任务重新注册失败: task_name=%s error_type=%s",
+                    task_name,
+                    type(exc).__name__,
+                )
                 raise_api_exception(
                     ErrorCode.OPERATION_FAILED,
-                    detail=f"任务 '{task_name}' 重新注册失败: {str(e)}"
+                    detail="任务重新注册失败，请稍后重试",
                 )
 
         # 获取任务函数并手动执行
@@ -446,8 +460,12 @@ class ScheduledTaskService:
                     **task_kwargs  # 传递日期参数
                 )
                 logger.info(f"手动触发任务 '{task_name}' 已提交到执行队列")
-            except Exception as e:
-                logger.error(f"手动触发任务执行失败: {e}", exc_info=True)
+            except Exception as exc:
+                logger.error(
+                    "手动触发任务执行失败: task_name=%s error_type=%s",
+                    task_name,
+                    type(exc).__name__,
+                )
                 raise
 
         # 异步触发任务（不等待完成）
@@ -668,10 +686,14 @@ class ScheduledTaskService:
             logger.warning(f"管理员 {current_user.username} 手动释放了任务锁: {task_name}")
 
             return {"message": "任务锁已释放"}
-        except Exception as e:
+        except Exception as exc:
             await self.db.rollback()
-            logger.error(f"释放任务锁失败: {str(e)}", exc_info=True)
+            logger.error(
+                "释放任务锁失败: task_name=%s error_type=%s",
+                task_name,
+                type(exc).__name__,
+            )
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"释放任务锁失败: {str(e)}"
+                detail="释放任务锁失败，请稍后重试",
             )
