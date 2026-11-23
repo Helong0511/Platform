@@ -26,6 +26,20 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
+class ClickCounterSyncError(RuntimeError):
+    """短链接点击计数同步未能完整完成；上层调度必须记录失败。"""
+
+
+class ClickCounterSyncSkipped(int):
+    """未执行同步的正常跳过结果，保留 int(0) 兼容性并携带原因。"""
+
+    def __new__(cls, reason: str):
+        instance = int.__new__(cls, 0)
+        instance.reason = reason
+        return instance
+
+
 # 死锁重试配置
 MAX_DEADLOCK_RETRIES = 5  # 增加重试次数
 DEADLOCK_RETRY_BASE_DELAY = 0.3  # 增加基础延迟（秒），减少并发冲突
@@ -879,6 +893,7 @@ async def _sync_redis_click_counter_batches(
     """通过 Redis pending batch + DB 唯一账本完成可恢复的短链接点击刷盘。"""
     processed = 0
     inserted_codes: set[str] = set()
+    failures: list[str] = []
     pending_pattern = f"{CLICK_COUNTER_PREFIX}pending:*"
     pending_keys = await _scan_click_counter_keys(redis, max_keys, pattern=pending_pattern)
     pending_seen = set(pending_keys)
@@ -893,10 +908,12 @@ async def _sync_redis_click_counter_batches(
             raw_count = await redis.get(pending_key)
             click_count = int(raw_count) if raw_count is not None else 0
         except Exception as exc:
-            logger.error("读取 pending 点击批次失败，保留待下轮处理: key=%s error=%s", pending_key, exc)
+            logger.error("读取 pending 点击批次失败，保留待下轮处理: key=%s error_type=%s", pending_key, type(exc).__name__)
+            failures.append("pending_read")
             continue
         if click_count <= 0:
-            logger.error("pending 点击批次数值无效，保留人工核验: key=%s value=%s", pending_key, raw_count)
+            logger.error("pending 点击批次数值无效，保留人工核验: key=%s", pending_key)
+            failures.append("pending_invalid")
             continue
         ok, inserted = await _process_pending_click_batch(
             db, redis, short_code=short_code, batch_id=batch_id,
@@ -906,6 +923,8 @@ async def _sync_redis_click_counter_batches(
             processed += 1
             if inserted:
                 inserted_codes.add(short_code)
+        else:
+            failures.append("pending_process")
 
     # 再把 active counter 原子切换成 pending；切换后并发新点击写入新的 active key。
     active_keys = await _scan_click_counter_keys(redis, max_keys, pattern=f"{CLICK_COUNTER_PREFIX}*")
@@ -924,9 +943,10 @@ async def _sync_redis_click_counter_batches(
         except Exception as exc:
             # Redis 执行结果不确定时，pending 可能已创建；下轮扫描 pending 自动恢复。
             logger.error(
-                "切换短链接点击计数为 pending 结果不确定: short_code=%s batch_id=%s error=%s",
-                short_code, batch_id, exc, exc_info=True,
+                "切换短链接点击计数为 pending 结果不确定: short_code=%s batch_id=%s error_type=%s",
+                short_code, batch_id, type(exc).__name__,
             )
+            failures.append("active_claim")
             continue
         if claimed <= 0:
             continue
@@ -939,12 +959,20 @@ async def _sync_redis_click_counter_batches(
             processed += 1
             if inserted:
                 inserted_codes.add(short_code)
+        else:
+            failures.append("active_process")
 
     await _cleanup_click_sync_batch_ledger(db, redis)
     logger.info(
-        "短链接点击幂等刷盘完成: processed_batches=%s newly_updated_links=%s",
-        processed, len(inserted_codes),
+        "短链接点击幂等刷盘结束: processed_batches=%s newly_updated_links=%s failed_batches=%s",
+        processed, len(inserted_codes), len(failures),
     )
+    if failures:
+        failure_summary = ",".join(sorted(set(failures)))
+        raise ClickCounterSyncError(
+            f"短链接点击刷盘存在未完成批次: processed={processed}, "
+            f"failed={len(failures)}, categories={failure_summary}"
+        )
     return len(inserted_codes)
 
 
@@ -967,8 +995,11 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
     except Exception as exc:
         # 无法确认 Redis 状态时也无法确认全局锁是否可用。
         # 旧的进程内计数仅是兼容恢复路径，不能在多 Worker 下无锁同步。
-        logger.error("获取 Redis 客户端失败，跳过短链接计数同步以避免无锁并发入账: %s", exc)
-        return 0
+        logger.error(
+            "获取 Redis 客户端失败，短链接计数同步未执行: error_type=%s",
+            type(exc).__name__,
+        )
+        raise ClickCounterSyncError("Redis 客户端不可用，无法确认同步锁状态") from exc
 
     # 使用分布式锁，确保同一时间只有一个进程在执行同步
     lock_key = f"{SYNC_LOCK_PREFIX}global"
@@ -987,15 +1018,18 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
             )
             
             if not lock_acquired:
-                logger.info("另一个进程正在执行同步，跳过本次同步以避免并发死锁")
-                return 0
+                logger.info("另一个进程持有短链接点击同步锁，本轮正常跳过")
+                return ClickCounterSyncSkipped("lock_contended")
             else:
                 logger.debug("成功获取同步锁，开始执行同步")
     except Exception as e:
         # Redis 已连接但分布式锁操作失败时，无法证明当前进程拥有同步权。
         # 必须 fail-closed；继续执行会让多个 Worker 同时读取同一批计数并重复入账。
-        logger.error("获取短链接点击同步分布式锁失败，本轮安全跳过并等待下次重试: %s", e)
-        return 0
+        logger.error(
+            "获取短链接点击同步分布式锁失败，本轮标记失败: error_type=%s",
+            type(e).__name__,
+        )
+        raise ClickCounterSyncError("无法确认短链接点击同步锁状态") from e
     
     try:
         if not redis:
@@ -1013,8 +1047,11 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
         return await _sync_redis_click_counter_batches(db, redis, short_codes)
 
     except Exception as e:
-        logger.error(f"同步点击次数到数据库失败: {e}", exc_info=True)
-        return 0
+        logger.error(
+            "同步点击次数到数据库失败: error_type=%s",
+            type(e).__name__,
+        )
+        raise ClickCounterSyncError("短链接点击计数同步失败") from e
     finally:
         # 释放分布式锁
         if redis and lock_acquired:
