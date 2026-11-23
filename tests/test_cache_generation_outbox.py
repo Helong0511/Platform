@@ -51,7 +51,7 @@ async def test_advance_generation_and_outbox_share_callers_transaction():
     assert event.event_key == hashlib.sha256(b"ad_data:18").hexdigest()
     db.flush.assert_awaited_once()
     # 事务所有权属于业务调用方，登记服务不得自行提交。
-    assert not hasattr(db, "commit") or not getattr(db.commit, "assert_awaited", lambda: None)()
+    db.commit.assert_not_called()
 
 
 @pytest.mark.asyncio
