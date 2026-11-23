@@ -73,24 +73,20 @@ def log_scheduled_task_failure(
         extra: Optional[dict[str, Any]] = None,
 ) -> str:
     """
-    统一记录定时任务执行失败（ERROR，写入 scheduler.log / app.log）。
+    统一记录定时任务执行失败。
 
+    第三方异常消息、SQL、连接串和任意 extra 值可能包含凭据或个人数据，
+    因此日志和 last_error 仅保留异常类型及固定摘要，不输出原始异常/traceback。
     Returns:
-        截断后的错误摘要，可供 last_error 入库。
+        可安全写入 last_error 的错误摘要。
     """
-    if isinstance(error, BaseException):
-        error_type = type(error).__name__
-        error_msg = str(error) or repr(error)
-    else:
-        error_type = "Error"
-        error_msg = str(error)
-
-    truncated = truncate_task_error_message(error_msg)
+    error_type = type(error).__name__ if isinstance(error, BaseException) else "Error"
+    safe_summary = f"{error_type}: 任务执行失败，详细错误信息已隐藏"
     parts = [
         f"[定时任务失败] task={task_name}",
         f"trigger={trigger}",
         f"error_type={error_type}",
-        f"message={truncated}",
+        "message=任务执行失败，详细错误信息已隐藏",
     ]
     if duration_seconds is not None:
         parts.append(f"duration_sec={duration_seconds:.2f}")
@@ -101,15 +97,11 @@ def log_scheduled_task_failure(
     if cron_expression:
         parts.append(f"cron={cron_expression}")
     if extra:
-        for key, value in extra.items():
-            parts.append(f"{key}={value}")
+        # 仅保留额外字段名，避免任意值携带令牌、连接串或用户数据。
+        parts.append("extra_keys=" + ",".join(sorted(str(key) for key in extra)))
 
-    log_line = " | ".join(parts)
-    if isinstance(error, BaseException) and exc_info:
-        logger.error(log_line, exc_info=error)
-    else:
-        logger.error(log_line)
-    return truncated
+    logger.error(" | ".join(parts))
+    return truncate_task_error_message(safe_summary)
 
 
 def log_scheduled_task_failure_recorded(
@@ -121,13 +113,14 @@ def log_scheduled_task_failure_recorded(
         run_count: Optional[int] = None,
 ) -> None:
     """任务失败状态已写入 scheduled_tasks 表后的补充日志。"""
+    # last_error 可能来自第三方任务摘要，禁止将原文再次写入普通日志。
     logger.warning(
-        "[定时任务失败已入库] task=%s | error_count=%s | success_count=%s | run_count=%s | last_error=%s",
+        "[定时任务失败已入库] task=%s | error_count=%s | success_count=%s | run_count=%s | last_error_present=%s",
         task_name,
         error_count,
         success_count if success_count is not None else "-",
         run_count if run_count is not None else "-",
-        truncate_task_error_message(result_message or "未知错误", 500),
+        bool(result_message),
     )
 
 
