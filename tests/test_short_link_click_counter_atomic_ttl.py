@@ -182,9 +182,9 @@ async def test_redis_outage_does_not_replay_legacy_non_idempotent_snapshot(monke
 
     monkeypatch.setattr(counter, "get_redis_client", no_redis)
     db = FakeDb()
-    synced = await counter.sync_click_counts_to_db(db)
+    with pytest.raises(counter.ClickCounterSyncError):
+        await counter.sync_click_counts_to_db(db)
 
-    assert synced == 0
     assert db.executed is False
     async with counter._counter_lock:
         assert counter._click_counters == {"legacy-outage-code": 4}
@@ -440,7 +440,7 @@ async def test_db_prevalidation_failure_preserves_redis_click_counter(monkeypatc
     async def fake_get_redis_client():
         return redis
 
-    async def fake_scan(redis_client, max_keys, pattern=None):
+    async def fake_scan(redis_client, max_keys, pattern=None, **kwargs):
         if pattern and ":pending:" in pattern:
             return []
         return [f"{counter.CLICK_COUNTER_PREFIX}preserve-on-db-error"]
@@ -919,7 +919,7 @@ async def test_pending_batch_failure_is_not_reported_as_success(monkeypatch):
         async def get(self, key):
             return "3"
 
-    async def fake_scan(redis_client, max_keys, pattern=None):
+    async def fake_scan(redis_client, max_keys, pattern=None, **kwargs):
         if pattern and ":pending:" in pattern:
             return [f"{counter.CLICK_COUNTER_PREFIX}pending:short-code:{'d' * 32}"]
         return []
@@ -937,4 +937,18 @@ async def test_pending_batch_failure_is_not_reported_as_success(monkeypatch):
     with pytest.raises(counter.ClickCounterSyncError, match="failed=1"):
         await counter._sync_redis_click_counter_batches(
             object(), FakeRedis()
+        )
+
+
+
+@pytest.mark.asyncio
+async def test_redis_scan_failure_is_not_treated_as_empty_queue():
+    class BrokenRedis:
+        async def scan(self, cursor, match=None, count=None):
+            raise OSError("simulated SCAN failure")
+
+    with pytest.raises(counter.ClickCounterSyncError, match="扫描不完整"):
+        await counter._scan_click_counter_keys(
+            BrokenRedis(), pattern=f"{counter.CLICK_COUNTER_PREFIX}*",
+            raise_on_error=True,
         )
