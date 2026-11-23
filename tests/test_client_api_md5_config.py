@@ -10,13 +10,13 @@ from app.core import api_auth, config
 
 
 def test_md5_compatibility_defaults_off_in_production(monkeypatch):
-    monkeypatch.setenv("PRODUCTION_ENV", "production")
+    monkeypatch.setattr(config, "detect_production_env", lambda explicit=None: "production")
     monkeypatch.delenv("CLIENT_API_ALLOW_MD5", raising=False)
     assert config._resolve_client_api_allow_md5() is False
 
 
 def test_md5_compatibility_defaults_on_in_development(monkeypatch):
-    monkeypatch.setenv("PRODUCTION_ENV", "development")
+    monkeypatch.setattr(config, "detect_production_env", lambda explicit=None: "development")
     monkeypatch.delenv("CLIENT_API_ALLOW_MD5", raising=False)
     assert config._resolve_client_api_allow_md5() is True
 
