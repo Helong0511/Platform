@@ -1,10 +1,11 @@
 """Excel 导出异常响应不得泄露数据库或内部驱动细节。"""
+import importlib
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
-from app.api_v1.excel import router as excel_router
+excel_router = importlib.import_module("app.api_v1.excel.router")
 
 
 @pytest.mark.asyncio
