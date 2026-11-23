@@ -477,45 +477,18 @@ async def delete_product(
         current_user: User = Depends(require_admin)
 ):
     """
-    删除产品（已重构使用服务层）
-    - 仅管理员可删除产品
-    - 客户无权限删除产品，只能查看
-    - 删除规则：
-      1. 如果产品关联了广告数据 → 将产品的 client_id 改为「临时挂靠」（不删除产品）
-      2. 如果没有关联广告数据 → 直接删除产品
+    删除产品；实际删除/转移结果确定后，再写入同一事务的审计日志。
     """
-    # ---------- 入口：参数与依赖准备 ----------
-    # 使用服务层（业务逻辑在ProductService中）
     product_service: ProductService = await get_product_service(db)
-
     product = await product_service.get_product_by_id(
         product_id, current_user, include_client=False
     )
 
-    count_result = await db.execute(
-        select(func.count(AdData.id)).where(AdData.product_id == product_id)
-    )
-    ad_data_count = count_result.scalar() or 0
-
-    # ---------- 条件分支 ----------
-    if ad_data_count == 0:
-        await log_delete(
-            db=db,
-            user=current_user,
-            resource_type="PRODUCT",
-            resource_id=product_id,
-            resource_name=product.name,
-            request=request,
-            details={
-                "client_id": product.client_id,
-                "deleted": True
-            }
-        )
-        await commit_audit_log(db)
-
+    # Service 在当前事务中完成关联检查、删除或转移及 flush。
+    # 并发写入导致数据库约束失败时，下面的审计不会被写入。
     result = await product_service.delete_product(product_id, current_user)
+    ad_data_count = int(result.get("ad_data_count", 0) or 0)
 
-    # ---------- 条件分支 ----------
     if result.get("transferred"):
         await log_update(
             db=db,
@@ -527,15 +500,28 @@ async def delete_product(
             details={
                 "action": "transfer_to_admin_default_client",
                 "new_client_id": result.get("new_client_id"),
-                "ad_data_count": ad_data_count
-            }
+                "ad_data_count": ad_data_count,
+            },
         )
         await commit_audit_log(db)
         return ResponseBaseSchema.success(data={
             "message": result["message"],
             "transferred": True,
-            "new_client_id": result.get("new_client_id")
+            "new_client_id": result.get("new_client_id"),
         })
 
-    # ---------- 构建响应 ----------
+    await log_delete(
+        db=db,
+        user=current_user,
+        resource_type="PRODUCT",
+        resource_id=product_id,
+        resource_name=product.name,
+        request=request,
+        details={
+            "client_id": product.client_id,
+            "deleted": True,
+            "ad_data_count": ad_data_count,
+        },
+    )
+    await commit_audit_log(db)
     return ResponseBaseSchema.success(data={"message": result["message"]})
