@@ -380,37 +380,29 @@ async def check_click_count_stats(
         )
         stats["redis_scan_complete"] = scan_complete
         stats["redis_scan_error"] = scan_error
-            stats["redis_counters"] = len(keys)
-            
-            # 获取每个计数器的详细信息（最多显示20个）
-            # ---------- 循环处理 ----------
-            for key in keys[:20]:
-                # 安全地提取 short_code：使用 startswith 检查并移除前缀
-                # ---------- 条件分支 ----------
-                if not key.startswith(CLICK_COUNTER_PREFIX):
-                    continue
-                
-                short_code = key[len(CLICK_COUNTER_PREFIX):]
-                
-                # 验证 short_code 不为空
-                # ---------- 条件分支 ----------
-                if not short_code:
-                    continue
-                
-                # ---------- 异常处理 ----------
-                try:
-                    count = await redis.get(key)
-                    count_value = int(count) if count else 0
-                    stats["redis_counter_details"].append({
-                        "short_code": short_code,
-                        "count": count_value,
-                        "key": key
-                    })
-                except Exception as get_error:
-                    logger.debug("获取Redis计数器值失败: error_type=%s", type(get_error).__name__)
-        except Exception as e:
-            stats["redis_error"] = "Redis 查询失败，请检查服务状态"
-    
+        stats["redis_counters"] = len(keys)
+
+        # 获取每个计数器的详细信息（最多显示20个）
+        for key in keys[:20]:
+            if not key.startswith(CLICK_COUNTER_PREFIX):
+                continue
+            short_code = key[len(CLICK_COUNTER_PREFIX):]
+            if not short_code:
+                continue
+            try:
+                count = await redis.get(key)
+                count_value = int(count) if count else 0
+                stats["redis_counter_details"].append({
+                    "short_code": short_code,
+                    "count": count_value,
+                    "key": key,
+                })
+            except Exception as get_error:
+                logger.debug(
+                    "获取Redis计数器值失败: error_type=%s",
+                    type(get_error).__name__,
+                )
+
     # 获取数据库中的总点击次数
     # ---------- 异常处理 ----------
     try:
