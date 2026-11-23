@@ -226,8 +226,15 @@ async def cleanup_sensitive_path_probe_logs(
 
 
 async def cleanup_sensitive_path_probe_logs_task(**kwargs) -> dict:
-    """正式调度入口：将预算耗尽的部分清理报告为调度失败/未完成。"""
-    result = await cleanup_sensitive_path_probe_logs(**kwargs)
+    """正式调度入口：将配置/执行失败及预算耗尽的部分清理明确报告给调度器。"""
+    try:
+        result = await cleanup_sensitive_path_probe_logs(**kwargs)
+    except SensitivePathProbeCleanupError:
+        raise
+    except Exception as exc:
+        # 配置校验、会话创建等发生在批次事务之前，也必须覆盖旧的成功状态。
+        set_task_result(TASK_NAME, f"清理失败（{type(exc).__name__}）")
+        raise
     if not result["complete"]:
         raise SensitivePathProbeCleanupIncomplete(result)
     return result
