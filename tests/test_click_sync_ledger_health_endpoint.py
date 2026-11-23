@@ -163,10 +163,28 @@ def test_all_click_sync_ledger_ack_timestamps_use_application_timezone():
     ]
 
     assert len(assignments) == 3
-    for assignment in assignments:
-        assert any(
+    direct_helper_calls = [
+        assignment
+        for assignment in assignments
+        if any(
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
             and node.func.id == "get_app_now_naive"
             for node in ast.walk(assignment.value)
         )
+    ]
+    assert len(direct_helper_calls) == 2
+
+    # 批量清理路径在函数开始时固定一次应用时区时间，再复用该快照。
+    assert any(
+        isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "now" for target in node.targets)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "get_app_now_naive"
+        for node in ast.walk(tree)
+    )
+    assert any(
+        isinstance(assignment.value, ast.Name) and assignment.value.id == "now"
+        for assignment in assignments
+    )
