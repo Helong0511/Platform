@@ -51,8 +51,18 @@ async def get_offer_cache_entry(offer_id: int) -> OfferCacheEntry:
     cache_key = f"{OFFER_CACHE_PREFIX}{offer_id}"
     try:
         cached_data = await redis.get(cache_key)
-        if cached_data is None:
-            return OfferCacheEntry(status="miss")
+    except Exception as exc:
+        logger.warning(
+            "读取 Offer 缓存失败: offer_id=%s error_type=%s",
+            offer_id,
+            type(exc).__name__,
+        )
+        return OfferCacheEntry(status="unavailable")
+
+    if cached_data is None:
+        return OfferCacheEntry(status="miss")
+
+    try:
         if isinstance(cached_data, bytes):
             cached_data = cached_data.decode("utf-8")
         if cached_data == NONE_MARKER:
@@ -67,28 +77,19 @@ async def get_offer_cache_entry(offer_id: int) -> OfferCacheEntry:
             return OfferCacheEntry(status="negative")
         if isinstance(advertiser_id, bool) or not isinstance(advertiser_id, int):
             raise ValueError("Offer cache advertiser_id must be an integer")
-
         return OfferCacheEntry(status="hit", advertiser_id=advertiser_id)
-    except Exception as exc:
-        # 缓存损坏按未命中处理；Redis 操作异常则标记 unavailable，避免错误回填。
-        if isinstance(exc, (json.JSONDecodeError, UnicodeDecodeError, ValueError, TypeError)):
-            try:
-                await redis.delete(cache_key)
-            except Exception:
-                logger.debug("清理损坏的 Offer 缓存失败: offer_id=%s", offer_id)
-            logger.warning(
-                "Offer 缓存数据无效，按未命中处理: offer_id=%s error_type=%s",
-                offer_id,
-                type(exc).__name__,
-            )
-            return OfferCacheEntry(status="miss")
-
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError, TypeError) as exc:
+        # 仅将缓存载荷解析/校验错误视为未命中；Redis 读操作异常始终是 unavailable。
+        try:
+            await redis.delete(cache_key)
+        except Exception:
+            logger.debug("清理损坏的 Offer 缓存失败: offer_id=%s", offer_id)
         logger.warning(
-            "读取 Offer 缓存失败: offer_id=%s error_type=%s",
+            "Offer 缓存数据无效，按未命中处理: offer_id=%s error_type=%s",
             offer_id,
             type(exc).__name__,
         )
-        return OfferCacheEntry(status="unavailable")
+        return OfferCacheEntry(status="miss")
 
 
 async def get_offer_advertiser_id(offer_id: int) -> Optional[int]:
