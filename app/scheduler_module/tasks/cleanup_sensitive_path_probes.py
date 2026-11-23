@@ -47,6 +47,22 @@ class SensitivePathProbeCleanupError(RuntimeError):
         )
 
 
+
+class SensitivePathProbeCleanupIncomplete(RuntimeError):
+    """单轮预算耗尽；用于让调度器将部分清理记录为未完成而非成功。"""
+
+    def __init__(self, result: dict):
+        self.deleted_count = int(result["deleted_count"])
+        self.batch_count = int(result["batch_count"])
+        self.cutoff = str(result["cutoff"])
+        self.complete = False
+        self.remaining_possible = bool(result["remaining_possible"])
+        super().__init__(
+            f"敏感路径日志清理未完成：已提交删除 {self.deleted_count} 条，"
+            f"完成 {self.batch_count} 批；剩余数据将在后续计划任务处理"
+        )
+
+
 def _positive_int(name: str, value: Any, *, maximum: int) -> int:
     """严格验证整数配置，拒绝 bool、隐式转换和超出硬上限的值。"""
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0 or value > maximum:
@@ -209,8 +225,18 @@ async def cleanup_sensitive_path_probe_logs(
             await db.close()
 
 
+async def cleanup_sensitive_path_probe_logs_task(**kwargs) -> dict:
+    """正式调度入口：将预算耗尽的部分清理报告为调度失败/未完成。"""
+    result = await cleanup_sensitive_path_probe_logs(**kwargs)
+    if not result["complete"]:
+        raise SensitivePathProbeCleanupIncomplete(result)
+    return result
+
+
 __all__ = [
     "SensitivePathProbeCleanupError",
+    "SensitivePathProbeCleanupIncomplete",
     "cleanup_sensitive_path_probe_logs",
+    "cleanup_sensitive_path_probe_logs_task",
     "get_task_result",
 ]
