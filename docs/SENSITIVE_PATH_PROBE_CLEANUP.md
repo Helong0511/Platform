@@ -17,7 +17,7 @@
 | `SENSITIVE_PATH_PROBE_CLEANUP_MAX_BATCHES` | 20 | 1–1000 | 单轮最大批次数 |
 | `SENSITIVE_PATH_PROBE_CLEANUP_MAX_RUNTIME_SECONDS` | 20 | 1–300 | 单轮总运行预算；单批查询、删除和提交共享剩余预算 |
 
-达到批次数或运行预算时返回 `complete=false`、`remaining_possible=true`，并将任务结果记录为“清理未完成”，不能显示为成功完成。下一次正常 Cron 运行会继续处理仍符合固定保留策略的记录；任务不执行即时自动重试。
+达到批次数或运行预算时，清理核心函数返回 `complete=false`、`remaining_possible=true`，并将任务结果记录为“清理未完成”。正式调度入口 `cleanup_sensitive_path_probe_logs_task()` 会抛出携带已提交进度的 `SensitivePathProbeCleanupIncomplete`，使调度器将本轮标记为未完成/失败，而不是正常成功。下一次正常 Cron 运行会继续处理仍符合固定保留策略的记录；任务不执行即时自动重试。
 
 ## MySQL 验收
 
