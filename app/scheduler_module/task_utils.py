@@ -113,13 +113,14 @@ def log_scheduled_task_failure_recorded(
         run_count: Optional[int] = None,
 ) -> None:
     """任务失败状态已写入 scheduled_tasks 表后的补充日志。"""
+    # last_error 可能来自第三方任务摘要，禁止将原文再次写入普通日志。
     logger.warning(
-        "[定时任务失败已入库] task=%s | error_count=%s | success_count=%s | run_count=%s | last_error=%s",
+        "[定时任务失败已入库] task=%s | error_count=%s | success_count=%s | run_count=%s | last_error_present=%s",
         task_name,
         error_count,
         success_count if success_count is not None else "-",
         run_count if run_count is not None else "-",
-        truncate_task_error_message(result_message or "未知错误", 500),
+        bool(result_message),
     )
 
 
