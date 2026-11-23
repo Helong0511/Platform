@@ -50,6 +50,7 @@ from app.models.security import (
     PostbackIpWhitelist,
 )
 from app.models.third_party import ThirdPartyReportLog
+from app.models.cache_invalidation import CacheNamespaceGeneration, CacheInvalidationOutbox
 from app.models.session import UserSession, TokenBlacklist
 
 __all__ = [
@@ -95,6 +96,8 @@ __all__ = [
     "SensitiveBlockedIP",
     "PostbackIpWhitelist",
     "ThirdPartyReportLog",
+    "CacheNamespaceGeneration",
+    "CacheInvalidationOutbox",
     "UserSession",
     "TokenBlacklist",
 ]
