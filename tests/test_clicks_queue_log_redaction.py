@@ -56,3 +56,22 @@ async def test_click_database_exception_log_hides_exception_text_and_traceback(c
     assert secret_parameter not in caplog.text
     assert "RuntimeError" in caplog.text
     assert "Traceback" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_redis_exception_log_hides_connection_error_text(monkeypatch, caplog):
+    secret_connection_detail = "redis://operator:PRIVATE-PASSWORD@cache.internal:6379"
+
+    class BrokenRedis:
+        async def eval(self, *args):
+            raise RuntimeError(secret_connection_detail)
+
+    async def fake_redis():
+        return BrokenRedis()
+
+    monkeypatch.setattr(clicks_queue, "get_redis_client", fake_redis)
+    with caplog.at_level("ERROR", logger="app.core.clicks_queue"):
+        assert await clicks_queue.move_to_dead_letter('{"click_id":"safe-id"}', "test_reason") is False
+
+    assert secret_connection_detail not in caplog.text
+    assert "RuntimeError" in caplog.text
