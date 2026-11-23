@@ -1738,7 +1738,10 @@ async def get_click_sync_ledger_health(db: AsyncSession = Depends(get_db)):
     数据库不可用时让请求失败，避免把未知状态伪装成健康。
     """
     from sqlalchemy import func, select
-    from app.models.postback import ShortLinkClickSyncBatch
+    from app.models.postback import (
+        ShortLinkClickSyncBatch,
+        ShortLinkClickSyncLedgerMaintenanceState,
+    )
     from app.core.utils import APP_TIMEZONE, get_app_now_naive
 
     result = await db.execute(
@@ -1757,15 +1760,63 @@ async def get_click_sync_ledger_health(db: AsyncSession = Depends(get_db)):
             oldest_unacked_at = oldest_unacked_at.astimezone(APP_TIMEZONE).replace(tzinfo=None)
         oldest_age_seconds = max(0, int((observed_at - oldest_unacked_at).total_seconds()))
 
-    return {
-        "status": "backlog" if unacked_count else "healthy",
-        "unacknowledged_count": int(unacked_count or 0),
-        "oldest_unacknowledged_at": (
-            APP_TIMEZONE.localize(oldest_unacked_at).isoformat()
-            if oldest_unacked_at is not None else None
+    cleanup_result = await db.execute(
+        select(ShortLinkClickSyncLedgerMaintenanceState)
+        .where(ShortLinkClickSyncLedgerMaintenanceState.id == 1)
+    )
+    cleanup_state = cleanup_result.scalar_one_or_none()
+
+    def _to_app_iso(value):
+        if value is None:
+            return None
+        if value.tzinfo is not None:
+            value = value.astimezone(APP_TIMEZONE)
+        else:
+            value = APP_TIMEZONE.localize(value)
+        return value.isoformat()
+
+    cleanup_status = cleanup_state.status if cleanup_state is not None else "unknown"
+    cleanup_health = {
+        "status": cleanup_status,
+        "consecutive_failure_count": (
+            int(cleanup_state.consecutive_failure_count or 0) if cleanup_state else 0
         ),
+        "total_failure_count": int(cleanup_state.total_failure_count or 0) if cleanup_state else 0,
+        "last_attempt_at": _to_app_iso(cleanup_state.last_attempt_at) if cleanup_state else None,
+        "last_success_at": _to_app_iso(cleanup_state.last_success_at) if cleanup_state else None,
+        "last_failure_at": _to_app_iso(cleanup_state.last_failure_at) if cleanup_state else None,
+        "last_error_type": cleanup_state.last_error_type if cleanup_state else None,
+        "last_unacked_scanned_count": (
+            int(cleanup_state.last_unacked_scanned_count or 0) if cleanup_state else 0
+        ),
+        "last_acknowledged_count": (
+            int(cleanup_state.last_acknowledged_count or 0) if cleanup_state else 0
+        ),
+        "last_deleted_count": int(cleanup_state.last_deleted_count or 0) if cleanup_state else 0,
+        "last_redis_check_failures": (
+            int(cleanup_state.last_redis_check_failures or 0) if cleanup_state else 0
+        ),
+        "last_cache_invalidation_failures": (
+            int(cleanup_state.last_cache_invalidation_failures or 0) if cleanup_state else 0
+        ),
+    }
+
+    if unacked_count:
+        overall_status = "backlog"
+    elif cleanup_status in {"degraded", "failed"}:
+        overall_status = "degraded"
+    elif cleanup_status == "unknown":
+        overall_status = "unknown"
+    else:
+        overall_status = "healthy"
+
+    return {
+        "status": overall_status,
+        "unacknowledged_count": int(unacked_count or 0),
+        "oldest_unacknowledged_at": _to_app_iso(oldest_unacked_at),
         "oldest_unacknowledged_age_seconds": oldest_age_seconds,
-        "observed_at": APP_TIMEZONE.localize(observed_at).isoformat(),
+        "observed_at": _to_app_iso(observed_at),
+        "cleanup": cleanup_health,
         "source": "mysql_ledger",
     }
 
