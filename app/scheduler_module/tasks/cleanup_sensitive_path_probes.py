@@ -80,8 +80,9 @@ async def cleanup_sensitive_path_probe_logs(
         }
     except Exception as exc:
         await db.rollback()
-        err = f"清理失败: {exc}"
-        log_task_error(TASK_NAME, err, exc_info=True)
+        # 异常原文可能包含 SQL、连接地址或凭据；任务结果只保存安全摘要。
+        err = f"清理失败（{type(exc).__name__}）"
+        log_task_error(TASK_NAME, err, exc_info=False)
         set_task_result(TASK_NAME, err)
         raise
     finally:
