@@ -26,7 +26,9 @@ def test_every_deduction_config_mutation_advances_generation_in_business_session
 
 def test_deduction_cache_generation_is_reused_for_cache_fill():
     source = Path("app/core/deduction/deduction_cache.py").read_text(encoding="utf-8")
-    assert 'get_cache_generation(self.db, namespace="cpl:deduction_config")' in source
+    assert "get_cache_generation(" in source
+    assert 'namespace="cpl:deduction_config"' in source
+    assert "async def _get_generation(self)" in source
     assert "await self._save_to_cache(level, target_id, config, generation)" in source
     assert "generation: int," in source
 
