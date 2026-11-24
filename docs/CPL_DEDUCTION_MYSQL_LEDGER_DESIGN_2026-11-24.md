@@ -494,3 +494,70 @@ ORDER BY TABLE_NAME, ORDINAL_POSITION;
 ```
 
 不得仅通过修改 ORM Column 定义推断现有表已变更；必须由受控 migration 显式修改数据库列 collation，并在迁移前扫描新旧 collation 下的身份冲突。统一采用何种 collation（binary、明确的 *_as_cs，或业务批准的大小写不敏感规则）须结合上游 ID 契约、MySQL 版本和索引长度决定，不在本轮猜测。
+
+
+## 17. 无配置事件与配置创建并发：稳定 Scope Mutex 协议（2026-11-24）
+
+第 5.1 节指出“配置不存在时不能依赖不存在的 config row”。本节将该要求具体化，避免 no_config 事件与首次创建/启用配置并发时漏入 24h 基线。
+
+### 17.1 为什么只锁命中的配置行不够
+
+假设 Offer 还没有扣量配置：
+- Postback A 关联该 Offer，查询不到配置，准备写入 `no_config` 事件；
+- 管理员同时创建 Offer 级扣量配置；
+- 若 A 没有锁任何稳定 scope 行，配置创建与 A 的 ledger commit 可以交错；
+- 新配置生效后的首个 Postback 可能在 A commit 前完成统计查询，从而漏掉 A；A 虽然稍后进入账本，但此前的决策已按不完整基线执行。
+
+因此，只有“命中配置行 SELECT FOR UPDATE”无法保护无配置事件和配置首次创建之间的竞态。
+
+### 17.2 推荐的稳定 Scope Lock 表
+
+建议新增轻量 mutex 表（不是第二张事件账本）：
+
+```sql
+CREATE TABLE conversion_deduction_scope_locks (
+    scope_type VARCHAR(16) NOT NULL,
+    scope_id BIGINT NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (scope_type, scope_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+
+最终字符集/collation 应按项目统一 schema 规范确定；scope_type 建议使用受控 ASCII 值。锁表只存稳定锁键，不存统计数据或财务决策。
+
+### 17.3 事件事务锁定协议
+
+每个 Postback 在当前 MySQL 事务中：
+1. 根据服务端可信归因，收集所有非空候选 scope：Offer、Advertiser、Publisher。
+2. 按固定顺序（例如 scope_type 字典序，再按 scope_id 升序）处理，避免不同请求采用不同锁顺序。
+3. 对每个 scope 执行幂等建行（`INSERT ... ON DUPLICATE KEY UPDATE`，更新值必须保持无业务副作用），随后 `SELECT ... FOR UPDATE` 锁定该 scope lock row。
+4. 完成 scope locks 后，再重新从数据库读取当前有效配置并锁定命中配置行；不能使用配置缓存对象作为锁。
+5. 在持有锁期间写入 no_config 或正式决策账本终态，并与 Postback 其它记录一起提交。
+
+一个事件最多锁定 3 个候选 scope；未归因的直连事件没有可匹配的当前三层配置，不得伪造 scope ID。
+
+### 17.4 配置 CRUD 必须遵守相同协议
+
+创建、启用、停用、修改比例/策略、改变层级归属和删除配置的服务必须：
+- 先锁定该配置所属的同一个稳定 scope lock row；
+- 再执行配置行写入/更新/删除；
+- 与事件路径使用相同的锁顺序；
+- 提交后再清理配置缓存（缓存失效不能代替数据库锁）。
+
+这样：
+- 若 no_config 事件先获得 scope lock，配置创建必须等待事件账本提交；新配置后续决策能读到该事件。
+- 若配置创建先获得 scope lock，事件必须等待配置提交；事件随后读取新配置并按新配置处理。
+- 配置变更与事件决策在同一 scope 上具有明确的串行顺序。
+
+### 17.5 必测并发场景
+
+- 首次创建 Offer 配置与同 Offer no_config Postback 并发；
+- 首次创建 Advertiser 配置与归因事件并发；
+- 首次创建 Publisher 配置与归因事件并发；
+- 配置启用/停用与 Postback 并发；
+- 同一事件携带多个归因 ID，不同请求以不同到达顺序竞争锁；
+- 两个事件以相反输入顺序锁定不同 scope，验证固定排序避免死锁；
+- scope lock 行首次创建的 2/10/50 并发；
+- 锁超时/死锁回滚后事件重试不产生残留计数。
+
+如果现有配置 CRUD 路径无法统一接入此锁协议，则账本上线前必须暂停并发配置变更或提供维护窗口，不能只在 Postback 路径加锁后宣称竞态已解决。
