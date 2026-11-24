@@ -269,3 +269,41 @@ Postback pipeline 的 `step_associate_click()` 直接接收该返回值。后续
 5. 用自动化测试对所有模板做静态/运行时契约校验，确保每个模板只调用统一客户端，并验证 HTTP 错误、超时、重复提交、导航取消、load/click 区分和无存储权限场景。
 
 **本节结论：** 桥页模板存在多个实现代际，HTTP 确认、重试和 fbclid 持久化行为不一致。前端本地标记不能作为持久化凭据；在统一 POST + 稳定事件 ID + MySQL inbox/outbox 协议完成前，不应将 /report 统计称为可靠、幂等或 exactly-once。
+
+### 5.7 /report 实际计数写入链路与现有原子计数器的调用断层（Head 38026d7）
+
+本轮直接复核 `cloak_report.py`、`cloak_report_service.py`、`cloak_click_persist.py`、`app/core/tracking/click_persist.py` 与 `app/core/short_link_click_counter.py` 的调用关系，确认以下实现事实：
+
+**1. /report 没有复用现有原子计数器**
+
+- `record_cloak_click_count()` 没有调用 `increment_click_count_async()`。
+- 缓存命中路径执行 `get_short_link_from_cache()` 后，对返回的 JSON 对象执行 `click_count + 1`，再调用 `update_short_link_cache()` 写回。这是 Redis 读—改—写，不是 Lua 原子自增；两个并发请求可能读取相同旧值并互相覆盖。
+- 缓存未命中路径通过普通 SELECT 读取 ShortLink，再在 ORM 对象上执行 `click_count + 1` 并 commit。它不是 SQL `click_count = COALESCE(click_count, 0) + 1` 原子更新；并发事务可能丢失增量。
+- 主短链重定向已经调用的 `increment_click_count_async(short_code, click_id)` 具有 Lua marker/INCR、pending batch 和 MySQL 唯一账本等机制，但该机制不能自动保护另一个没有调用它的 /report 路径。
+
+**2. 缓存命中和未命中路径的计数提交语义不同**
+
+- 缓存命中时先写 Redis 缓存，随后仅在存在 FastAPI BackgroundTasks 时排队执行 `persist_cloak_report_click(..., sync_short_link_click_count=True)`；该后台函数重新查询 ShortLink 并再次执行 ORM `click_count + 1`，之后才尝试持久化 Click 明细。
+- 缓存未命中时，路由请求内先执行 ORM `click_count + 1` 并 commit，再排队 Click 明细持久化（`sync_short_link_click_count=False`）。
+- 因而计数与 Click 明细不是同一事务；缓存命中路径的 Redis 写入与 DB 写入也不是同一事务。后台任务丢失/失败时，缓存与 DB 或计数与明细可能分离。
+- `persist_cloak_report_click()` 捕获异常后 rollback 并只记录日志；异常不会反馈给已经返回的 HTTP 请求。其 Click 明细后续进入 `persist_click_record()`，该函数会优先 Redis 队列、失败时转 DB 备用写入，但这不能弥补前置计数与明细的事务断裂。
+
+**3. 不能直接把现有计数器接入 /report 而不先定义事件身份**
+
+`increment_click_count_async()` 的可靠重试保护依赖调用方传入同一逻辑事件可复用的 `click_id`。当前 /report 请求没有稳定 event_id；`cloak_click_persist.py` 在后台任务中生成的 click_id 是新生成的追踪 ID，不是前端重试可复用的事件 ID。若每次重试重新生成 ID，仍会重复计数；若直接用 session_id，则会把同一 session 的多个真实按钮动作错误合并，除非业务明确规定每个 session 只计一次。
+
+**4. 当前测试覆盖与风险边界**
+
+- 当前 `tests/test_cloak_bridge_atomic_write.py` 只覆盖桥页文件写入、路径遍历、符号链接和静态资源路径。
+- 仓库有 `test_short_link_click_counter_atomic_ttl.py` 等主短链计数器测试，但这些测试不能证明 /report 的 Redis JSON 读改写或 ORM 读改写是原子的。
+- 当前未发现专门覆盖 /report 缓存命中/未命中并发计数、后台任务失败、Click 明细失败、计数与明细原子性或稳定 event_id 重试的测试。
+
+**5. 修复验收要求**
+
+1. 先定义业务语义：每次真实 click 都计数，还是同一 session 仅计一次；明确 load 与 click 的事件身份边界。
+2. 前端生成并持久复用稳定 event_id；后端按 short_link + phase + event_id 建立唯一身份。不能用每次新生成的 fbclid UUID 或临时 click_id 代替。
+3. MySQL 事务中先插入唯一 inbox/ledger 事件，再执行 SQL 原子计数更新，并将 Click 明细持久队列/outbox 写入同一事务；重复事件返回已接收但不再次计数。
+4. Redis 仅做可恢复缓存/加速；DB 提交成功后再做缓存失效或异步刷新，不能把 Redis JSON get-modify-set 作为计数真相。
+5. 对缓存命中/未命中、相同 event_id 并发、不同 event_id 并发、Redis 不可用、DB rollback、commit-unknown、BackgroundTasks 进程退出、Click 队列失败和恢复分别做真实 MySQL + Redis 集成测试。
+
+**本节结论：** /report 当前绕过了项目已有的主短链原子计数器，并且缓存命中与未命中采用不同的计数提交路径。该问题是已定位的代码路径缺陷，不是单纯测试缺失。当前仍未修改业务代码；在稳定事件 ID 和持久 inbox 设计完成前，不应把现有计数器直接接入后宣称修复。
