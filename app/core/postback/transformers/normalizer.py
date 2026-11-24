@@ -32,11 +32,7 @@ class DataNormalizer:
         """
         # 与 BFT 等平台别名对齐
         click_id_raw = DataNormalizer._extract_click_id(raw_data)
-        conversion_id = (
-            raw_data.get('conversion_id')
-            or raw_data.get('conversionId')
-            or click_id_raw
-        )
+        conversion_id = DataNormalizer._extract_conversion_id(raw_data)
 
         payout_raw = raw_data.get('payout')
         if payout_raw is None or str(payout_raw).strip() == '':
@@ -64,8 +60,18 @@ class DataNormalizer:
         return normalized
     
     @staticmethod
+    def _extract_conversion_id(raw_data: Dict[str, Any]) -> Optional[str]:
+        """提取显式 conversion_id；空白值视为缺失，再兼容回退 click_id。"""
+        for key in ('conversion_id', 'conversionId'):
+            value = raw_data.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+        return DataNormalizer._extract_click_id(raw_data)
+
+    @staticmethod
     def _extract_click_id(raw_data: Dict[str, Any]) -> Optional[str]:
         """从 Postback 原始字段提取 click_id（多别名）。"""
+
         for key in (
             'click_id', 'clk_id', 'cid', 'clickid', 'clickId', 'ClickId',
             'aff_click_id', 'AFF_CLICK_ID', 'affclickid',
