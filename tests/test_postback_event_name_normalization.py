@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.postback.transformers.normalizer import DataNormalizer
+from app.core.postback import pipeline as postback_pipeline
 from app.core.postback_event_name import normalize_event_name
 from app.core.postback.validators.duplicate_checker import DuplicateChecker
 from app.services.cpl.postback_pending_service import PostbackPendingService
@@ -213,3 +214,48 @@ async def test_pending_approval_normalizes_legacy_null_before_lookup_and_insert(
     assert pending.event_name == "default"
     assert pending.status == "approved"
     assert db.added == [conversion]
+
+
+
+@pytest.mark.asyncio
+async def test_pipeline_passes_canonical_event_name_into_deduction_identity(monkeypatch):
+    from decimal import Decimal
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(
+        postback_pipeline.ConversionSaver,
+        "resolve_trusted_attribution",
+        AsyncMock(return_value=(12, 34)),
+    )
+    calculate = AsyncMock(return_value=(Decimal("10.00"), None, False))
+    monkeypatch.setattr(postback_pipeline.DiscountChecker, "calculate", calculate)
+
+    ctx = SimpleNamespace(
+        normalized_data={
+            "payout": "10.00",
+            "click_id": "click-1",
+            "conversion_id": "conversion-1",
+            "event_name": "   ",
+            "event_identity_verified": True,
+        },
+        click_association={
+            "offer_id": 7,
+            "publisher_id": 8,
+            "advertiser_id": 9,
+        },
+        platform="partner_a",
+        db=object(),
+        trusted_client_id=None,
+        trusted_product_id=None,
+        trusted_attribution_resolved=False,
+        final_payout=Decimal("0"),
+        skip_save_and_forward=False,
+    )
+
+    await postback_pipeline.step_apply_discount(ctx)
+
+    assert calculate.await_args.kwargs["event_identity"] == {
+        "platform": "partner_a",
+        "conversion_id": "conversion-1",
+        "event_name": "default",
+    }
