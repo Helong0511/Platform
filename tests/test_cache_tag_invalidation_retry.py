@@ -6,17 +6,21 @@ from app.core import cache_manager
 
 class FakeRedis:
     def __init__(self):
+        active_key = f"{cache_manager.TAG_TO_KEYS_PREFIX}offer:7"
         self.sets = {
-            f"{cache_manager.TAG_TO_KEYS_PREFIX}offer:7": {
+            active_key: {
                 "cache:good",
                 "cache:bad",
             }
         }
         self.deleted = []
-        self.expiries = {}
+        self.expiries = {active_key: 7 * 24 * 3600}
         self.fail_key = "cache:bad"
         self.fail_srem_once = False
         self.inject_concurrent_add = False
+        self.fail_rotate_pending_sadd_once = False
+        self.fail_rotate_persist_once = False
+        self.fail_rotate_rename_once = False
 
     async def eval(self, script, numkeys, *args):
         if script == cache_manager._ADD_TAG_MEMBER_LUA:
@@ -28,8 +32,19 @@ class FakeRedis:
         if script == cache_manager._ROTATE_TAG_BATCH_LUA:
             active_key, pending_key, batch_key = args
             if active_key in self.sets:
-                self.sets[batch_key] = self.sets.pop(active_key)
+                if self.fail_rotate_pending_sadd_once:
+                    self.fail_rotate_pending_sadd_once = False
+                    raise RuntimeError("simulated pending SADD failure")
                 self.sets.setdefault(pending_key, set()).add(batch_key)
+                if self.fail_rotate_persist_once:
+                    self.fail_rotate_persist_once = False
+                    raise RuntimeError("simulated PERSIST failure")
+                # PERSIST 必须在 RENAME 前执行，避免批次仍携带活动集合 TTL。
+                self.expiries.pop(active_key, None)
+                if self.fail_rotate_rename_once:
+                    self.fail_rotate_rename_once = False
+                    raise RuntimeError("simulated RENAME failure")
+                self.sets[batch_key] = self.sets.pop(active_key)
                 # 模拟另一个请求在 Lua 轮转完成后立即向新活动集合写入。
                 if self.inject_concurrent_add:
                     self.sets.setdefault(active_key, set()).add("cache:new")
@@ -172,3 +187,63 @@ async def test_add_cache_tag_uses_atomic_add_and_expiry(redis_client):
     tag_key = f"{cache_manager.TAG_TO_KEYS_PREFIX}offer:7"
     assert redis_client.sets[tag_key] == {"cache:good", "cache:bad", "cache:one"}
     assert redis_client.expiries[tag_key] == 7 * 24 * 3600
+
+
+@pytest.mark.asyncio
+async def test_rotation_pending_registration_failure_keeps_active_members(redis_client):
+    redis = redis_client
+    redis.fail_rotate_pending_sadd_once = True
+    active_key = f"{cache_manager.TAG_TO_KEYS_PREFIX}offer:7"
+    pending_key = f"{cache_manager.TAG_BATCHES_PREFIX}offer:7"
+
+    deleted = await cache_manager.CacheManager.invalidate_by_tag("offer:7")
+
+    assert deleted == 0
+    assert redis.sets[active_key] == {"cache:good", "cache:bad"}
+    assert pending_key not in redis.sets
+
+
+@pytest.mark.asyncio
+async def test_rotation_persist_failure_keeps_active_members_and_retry_recovers(redis_client):
+    redis = redis_client
+    redis.fail_rotate_persist_once = True
+    active_key = f"{cache_manager.TAG_TO_KEYS_PREFIX}offer:7"
+    pending_key = f"{cache_manager.TAG_BATCHES_PREFIX}offer:7"
+
+    first_deleted = await cache_manager.CacheManager.invalidate_by_tag("offer:7")
+
+    assert first_deleted == 0
+    assert redis.sets[active_key] == {"cache:good", "cache:bad"}
+    assert redis.expiries[active_key] == 7 * 24 * 3600
+    assert len(redis.sets[pending_key]) == 1
+
+    redis.fail_key = None
+    second_deleted = await cache_manager.CacheManager.invalidate_by_tag("offer:7")
+
+    assert second_deleted == 2
+    assert "cache:good" in redis.deleted
+    assert "cache:bad" in redis.deleted
+    assert pending_key not in redis.sets
+
+
+@pytest.mark.asyncio
+async def test_rotation_rename_failure_keeps_active_members_and_retry_recovers(redis_client):
+    redis = redis_client
+    redis.fail_rotate_rename_once = True
+    active_key = f"{cache_manager.TAG_TO_KEYS_PREFIX}offer:7"
+    pending_key = f"{cache_manager.TAG_BATCHES_PREFIX}offer:7"
+
+    first_deleted = await cache_manager.CacheManager.invalidate_by_tag("offer:7")
+
+    assert first_deleted == 0
+    assert redis.sets[active_key] == {"cache:good", "cache:bad"}
+    assert active_key not in redis.expiries
+    assert len(redis.sets[pending_key]) == 1
+
+    redis.fail_key = None
+    second_deleted = await cache_manager.CacheManager.invalidate_by_tag("offer:7")
+
+    assert second_deleted == 2
+    assert "cache:good" in redis.deleted
+    assert "cache:bad" in redis.deleted
+    assert pending_key not in redis.sets

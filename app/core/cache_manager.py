@@ -32,15 +32,18 @@ TAG_TO_KEYS_PREFIX = "tag_keys:"
 TAG_BATCHES_PREFIX = "tag_batches:"
 TAG_BATCH_PREFIX = "tag_batch:"
 
-# 标签集合轮转、持久化批次登记必须在同一 Lua 原子操作内完成。
+# 先登记恢复索引、再持久化活动集合、最后轮转；RENAME 后不再执行写命令。
+# Redis Lua 遇到运行时命令错误不会回滚此前写入，因此必须保证 RENAME 成功前
+# 活动集合仍在原位置，且批次索引已预登记。中途失败最多留下可清理的悬空索引，
+# 不会出现已轮转批次没有 pending 索引、或成员集合因 TTL 到期而丢失的窗口。
 _ROTATE_TAG_BATCH_LUA = """
 local active_key = KEYS[1]
 local pending_key = KEYS[2]
 local batch_key = ARGV[1]
 if redis.call('EXISTS', active_key) == 1 then
-    redis.call('RENAME', active_key, batch_key)
-    redis.call('PERSIST', batch_key)
     redis.call('SADD', pending_key, batch_key)
+    redis.call('PERSIST', active_key)
+    redis.call('RENAME', active_key, batch_key)
 end
 return redis.call('SMEMBERS', pending_key)
 """
