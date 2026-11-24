@@ -22,6 +22,7 @@ from app.schemas.cpl.deduction import (
     DeductionStatsResponse,
 )
 from app.services.base_service import BaseService
+from app.services.cache_invalidation_outbox import advance_cache_generation
 from app.services.cpl.deduction import helpers as deduction_helpers
 from app.services.cpl.deduction import mappers as deduction_mappers
 from app.services.cpl.deduction.helpers import ConfigLevel, resolve_config_level_target
@@ -68,7 +69,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             self.db.add(config)
             await self.db.flush()
             await self.db.refresh(config)
-            await deduction_helpers.invalidate_config_cache(level, target_id)
+            await advance_cache_generation(self.db, namespace="cpl:deduction_config")
             config = await deduction_helpers.load_config_with_relations(self.db, config.id)
             logger.info(
                 "扣减配置创建成功: config_id=%s, level=%s, target_id=%s",
