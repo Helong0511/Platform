@@ -523,8 +523,8 @@ class OfferService(BaseService[Offer]):
                     f"error={error_msg[:200]}"
                 )
 
-        # 失效相关缓存
-        await CacheInvalidator.invalidate_offer_cache(offer.id)
+        # 在 Offer 业务事务内登记立即清理与延迟复查；事务提交/回滚由调用方负责。
+        await enqueue_offer_cache_invalidation(self.db, offer.id)
 
         # 记录审计日志
         await log_user_action(
