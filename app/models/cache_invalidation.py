@@ -92,7 +92,7 @@ class OfferCacheInvalidationOutbox(Base):
     max_attempts = Column(Integer, nullable=False, default=12, server_default=text("12"))
     run_at = Column(DateTime, nullable=False, default=get_app_now_naive)
     locked_by = Column(String(128), nullable=True)
-    lease_token = Column(CHAR(32, collation="ascii_bin"), nullable=True)
+    lease_token = Column(CHAR(32), nullable=True)
     lease_until = Column(DateTime, nullable=True)
     last_error_type = Column(String(128), nullable=True, comment="仅记录异常类型，不保存异常原文")
     created_at = Column(DateTime, nullable=False, default=get_app_now_naive, server_default=text("CURRENT_TIMESTAMP"))
