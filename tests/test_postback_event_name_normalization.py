@@ -33,8 +33,11 @@ def test_data_normalizer_never_emits_null_or_blank_event_name():
 
 
 class _ExecuteResult:
+    def __init__(self, existing=None):
+        self.existing = existing
+
     def scalar_one_or_none(self):
-        return None
+        return self.existing
 
     def scalars(self):
         return self
@@ -43,17 +46,39 @@ class _ExecuteResult:
         return None
 
 
+class _NestedTransaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+
 class _QueryCaptureDB:
-    def __init__(self):
+    def __init__(self, results=None):
         self.statement = None
+        self.statements = []
         self.added = []
+        self.results = list(results or [_ExecuteResult(), _ExecuteResult()])
 
     async def execute(self, statement):
         self.statement = statement
+        self.statements.append(statement)
+        if self.results:
+            return self.results.pop(0)
         return _ExecuteResult()
 
     def add(self, value):
         self.added.append(value)
+
+    async def flush(self):
+        return None
+
+    async def delete(self, value):
+        self.deleted = value
+
+    def begin_nested(self):
+        return _NestedTransaction()
 
 
 @pytest.mark.asyncio
@@ -68,6 +93,59 @@ async def test_duplicate_checker_queries_default_for_missing_event_name():
     )
 
     assert duplicate is False
+    assert "default" in db.statement.compile().params.values()
+    assert len(db.added) == 1
+    assert db.added[0].event_name == "default"
+    assert len(db.statements) == 2
+
+
+@pytest.mark.asyncio
+async def test_duplicate_checker_rejects_existing_durable_receipt(monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+
+    class _ReceiptConflictDB(_QueryCaptureDB):
+        async def flush(self):
+            raise IntegrityError("INSERT", {}, Exception("duplicate receipt"))
+
+    db = _ReceiptConflictDB(results=[_ExecuteResult()])
+    duplicate = await DuplicateChecker.is_duplicate(
+        platform="partner_a",
+        conversion_id="conversion-duplicate",
+        event_name="install",
+        db=db,
+    )
+
+    assert duplicate is True
+    assert len(db.statements) == 1
+
+
+@pytest.mark.asyncio
+async def test_duplicate_checker_closes_race_with_committed_normal_conversion():
+    db = _QueryCaptureDB(results=[_ExecuteResult(), _ExecuteResult(existing=91)])
+    duplicate = await DuplicateChecker.is_duplicate(
+        platform="partner_a",
+        conversion_id="conversion-race",
+        event_name="purchase",
+        db=db,
+    )
+
+    assert duplicate is True
+    assert len(db.statements) == 2
+    assert db.deleted is db.added[0]
+
+
+@pytest.mark.asyncio
+async def test_release_receipt_normalizes_event_name_and_targets_receipt_table():
+    db = _QueryCaptureDB()
+    await DuplicateChecker.release_receipt(
+        platform="partner_a",
+        conversion_id="conversion-1",
+        event_name=None,
+        db=db,
+    )
+
+    sql = str(db.statement)
+    assert "postback_event_receipts" in sql
     assert "default" in db.statement.compile().params.values()
 
 
