@@ -73,7 +73,10 @@ class DuplicateChecker:
         # 若本事务等待了另一个“普通转化”事务释放收据，正式转化此时已提交。
         # 二次查询封闭“临时收据删除后，第二个请求才成功插入”的竞态窗口。
         result = await db.execute(
-            select(PostbackConversion.id).where(*identity).limit(1)
+            select(PostbackConversion.id)
+            .where(*identity)
+            .limit(1)
+            .with_for_update()
         )
         if result.scalar_one_or_none() is not None:
             await db.delete(receipt)
