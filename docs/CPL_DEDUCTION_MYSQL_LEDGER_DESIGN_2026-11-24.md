@@ -919,3 +919,57 @@ GROUP BY publisher_id HAVING COUNT(*) > 1;
 **本轮没有执行分支同步或强制更新。** 当前可用 GitHub 工具虽支持创建 Git tree/commit 和更新 ref，但没有安全的自动 merge-tree 冲突解析动作；直接重建 tree 或 force update 会有丢失 PR #205 文件改动的风险。因此先保留现状，待能够逐项构造并核对合并树后再同步。
 
 **当前结论：** PR #205 仍为 Draft；即使 GitHub 显示 mergeable，也必须先把 PR #206 的 receipt 实现真正集成到该分支，再做完整回归验收。
+
+## 25. PR #205 已同步 main 与 PR #206 收据实现（2026-11-24 追加）
+
+本节更新第 24 节记录的历史状态。第 24 节描述的是同步前状态；本节记录实际完成的同步结果。
+
+### 25.1 同步提交
+
+- 同步前 PR #205 Head：`1df7c5c2c99ba900ef7fc38b144d40d6f79b79a7`。
+- main 基线（PR #206 merge commit）：`1c0857a35f01ae46eee520e8934a41dc24410393`。
+- 同步提交：`e0767af13d125393343b7cec575488fcdcab280c`。
+- 同步提交第一父提交为 main 基线，第二父提交为同步前 PR Head；不是 squash、不是 force push，也没有改写原 PR 历史。
+- 同步树以 main tree 为基础，将 PR #205 相对 main 的 13 个变更文件应用到树中；检查了 PR #205 的文件变更清单，未发现删除文件或缺失文件。7 个路径与 main 同时修改，最终保留 PR #205 对这些路径的版本；PR #206 的 receipt 改动位于其它路径，因此保留在同步树中。
+- GitHub Compare 确认 PR 分支相对 main：ahead 53、behind 0；GitHub PR 返回 mergeable=true。
+
+### 25.2 PR #206 收据代码同步后核验
+
+在同步 Head 上重新读取文件，确认以下内容存在：
+
+- `app/models/postback.py`：`PostbackEventReceipt` 模型和复合唯一索引。
+- `app/core/postback/validators/duplicate_checker.py`：savepoint 内插入收据、唯一键冲突识别、正式转化二次查询及 `release_receipt`。
+- `app/core/postback/pipeline.py`：`step_release_event_receipt`。
+- `app/core/postback/processor.py`：正式转化保存后调用释放步骤；扣量提前返回分支不调用。
+- `app/db/migrations/manifest.py`：包含 `20261124_postback_event_deduction_receipts` migration revision。
+
+以上只确认代码已同步，不替代真实数据库测试，也不代表第 22、23 节财务阻断项已解决。
+
+### 25.3 同步 Head CI 验收
+
+精确 Head `e0767af13d125393343b7cec575488fcdcab280c` 对应：
+
+- Full Audit CI #959：6/6 Jobs success（Backend、Frontend、Python 3.10/3.11/3.13 Telegram dependency compatibility、Python 3.13 password hash compatibility）。
+- Emergency Security CI #2949：2/2 Jobs success（Frontend lint/build、Backend security configuration tests）。
+
+因此，同步提交已通过这两项现有 CI。该结果不代表尚未纳入 CI 的生产 MySQL 财务一致性场景全部通过。
+
+### 25.4 同步后仍未解决的阻断项
+
+静态复核同步后代码仍确认：
+
+1. `step_apply_discount` 只向 `DiscountChecker.calculate` 传递 `click_id`；没有传递完整 `platform + conversion_id + normalized event_name`。
+2. `DiscountChecker.calculate` 仍只向 `apply_deduction` 传递 click_id；扣量决策身份与 PR #206 receipt 身份尚未统一。
+3. `DeductionManager._get_stats_for_decision`、`_reserve_volume_deduction`、`_incr_decision_deducted` 仍使用 Redis Lua 更新决策序号/扣量计数，写入早于 Postback MySQL 事务最终提交。
+4. 通用 Normalizer 与 BFT Handler 的 click_id/conversion_id 混用问题仍存在；BFT 映射必须取得官方协议或脱敏样例后再改，不能猜测。
+5. 24 小时 MySQL 统计窗口与 Redis 48 小时决策状态 TTL 的语义不一致仍未解决。
+
+### 25.5 当前 PR 状态与处置
+
+- PR #205 仍为 open、Draft、未合并。
+- 当前 Head 为 `e0767af13d125393343b7cec575488fcdcab280c`。
+- 当前分支 ahead 53 / behind 0，GitHub mergeable=true。
+- CI #959 与 #2949 已成功，但不能以此作为解除 Draft 或合并的充分条件。
+- 下一步应先实现规范事件身份贯穿和 MySQL 权威决策账本，再补真实 MySQL 事务/并发测试。财务决策 Redis 原子计数在 MySQL commit 前发生的问题仍是上线阻断项。
+
+**审计结论：** 本节只关闭“PR #205 未同步 PR #206”的基线问题；不关闭事件身份、财务事务原子性、滑动窗口一致性和 BFT 字段语义等问题。
