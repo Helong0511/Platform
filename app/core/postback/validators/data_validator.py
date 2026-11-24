@@ -54,7 +54,7 @@ class DataValidator:
         """
         errors = []
         
-        # 与标准化器保持一致，接受 click_id / conversion_id 及平台常见别名。
+        # click_id 只负责归因；conversion_id 必须显式提供，二者分别校验。
         explicit_conversion_id = DataNormalizer._extract_explicit_conversion_id(raw_data)
         click_id = DataNormalizer._extract_click_id(raw_data) or explicit_conversion_id
         if not click_id or not str(click_id).strip():
