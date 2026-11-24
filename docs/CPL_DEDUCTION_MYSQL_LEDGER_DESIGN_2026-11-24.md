@@ -1055,3 +1055,73 @@ GROUP BY publisher_id HAVING COUNT(*) > 1;
 - 不得仅凭本次单元测试或 CI 全绿解除 PR Draft。
 - 部署前必须确认所有平台均能提供稳定事件 ID；BFT 需先核对官方协议。
 - MySQL 事件决策账本、scope lock、窗口统计与 Redis 降级方案仍需按前述章节设计实施并用真实 MySQL 验证。
+
+
+## 27. 第二阶段代码复核：CI 全绿不等于财务事务闭环（2026-11-24 追加）
+
+本节基于 PR #205 当前 Head `76e39452ce52348c6bc81d5a919145c243023532` 的源码复核。该 Head 对应 Full Audit CI 6/6、Emergency Security CI 2/2 均成功；这些工作流未覆盖下述所有真实 MySQL 财务一致性场景。
+
+### 27.1 现有扣量决策仍然依赖 Redis 非事务计数
+
+文件：`app/core/deduction/deduction_manager.py`
+
+- `_get_stats_for_decision()` 先读取 MySQL 统计，再调用 `_DECISION_STATS_LUA` 对 Redis `decision_seq` 执行 INCR，并读取 Redis `decision_deducted`。
+- 命中扣量后，`_reserve_volume_deduction()` 或 `_incr_decision_deducted()` 再次直接修改 Redis。
+- 这些 Redis 写操作发生在 Postback 外层 MySQL 事务提交之前；数据库回滚无法回滚 Redis。
+- `get_recent_stats(strict=True)` 当前统计来源仍是 `postback_conversions` 与 `conversion_deduction_logs` 的组合，并非完整事件决策账本。
+- `ConversionDeductionLog` 没有外部平台、外部 conversion_id、规范 event_name、stable event_key 或未扣量决策状态；不能单独作为所有事件的幂等决策账本。
+
+**结论：** 当前代码仍存在 Redis ghost sequence / ghost reservation 风险。不能通过简单 DECR 补偿解决 COMMIT 结果未知、进程崩溃或重复补偿问题。必须把事件决策、scope 统计、扣量名额和终态记录迁移到同一 MySQL 事务。
+
+### 27.2 当前收据不是完整决策账本
+
+文件：`app/core/postback/validators/duplicate_checker.py`、`app/models/postback.py`
+
+- `PostbackEventReceipt` 的唯一键为 `platform + conversion_id + event_name`，能为扣量事件保留防重收据。
+- 普通转化保存后，`release_receipt()` 会在同一事务删除临时收据，长期防重依赖 `postback_conversions` 唯一键。
+- 收据没有保存 should_deduct / should_not_deduct、配置版本、命中原因、统计窗口、扣量数量/金额等决策结果。
+- 对重复请求，现有逻辑返回“重复转化，已跳过”，不是读取并返回原事件的财务决策快照。
+
+**实施要求：** 新增事件决策账本或等价扩展，所有事件（扣量、未扣量、金额扣减、跳过扣量）都必须保存终态；唯一事件身份冲突时读取既有终态，不重新计算。收据、决策账本、转化、扣量日志及必要 Outbox 必须明确处于同一个事务边界。
+
+### 27.3 事件决策键与收据身份尚未完全规范化为同一协议
+
+文件：`app/core/deduction/deduction_manager.py`、`app/core/postback/pipeline.py`、`app/core/postback/validators/duplicate_checker.py`
+
+- 收据身份通过 `normalize_event_name(event_name)` 规范化事件名称。
+- Pipeline 传给 `event_identity` 的 event_name 当前直接取标准化数据字段；`_build_event_decision_key()` 只做 strip，不调用同一事件名称规范化函数。
+- 因此决策哈希键与收据唯一键目前不是由同一个 canonical identity 函数产生。即使收据先阻断重复事件，也不应把两套规范化实现长期并存。
+- `PostbackConversion.event_name` ORM 仍允许 NULL，而收据 event_name 不允许 NULL；历史 NULL 数据与默认事件名称的映射仍需冲突扫描。
+- `postback_conversions` 与 `postback_event_receipts` 的数据库 collation 仍需在生产库核实，避免大小写/重音比较规则不一致。
+
+**实施要求：** 建立单一 canonical identity 模块，输出 platform、conversion_id、event_name 的规范值及版本；DuplicateChecker、receipt、decision ledger、哈希键全部消费同一结果。上线迁移前执行真实 MySQL collation 冲突预扫描，不自动合并或改写历史记录。
+
+### 27.4 扣量配置写路径尚无与决策路径共用的 scope mutex
+
+文件：`app/services/cpl/conversion_deduction_service.py`
+
+当前检查到以下写路径仍是先读取/修改配置并 flush，没有统一的 scope lock 协议：
+
+- `create_deduction_config()`：检查已有配置后插入，检查与插入之间存在并发竞态。
+- `update_deduction_config()`：允许更新配置字段；当前路径未在 scope mutex 下重新读取并验证同 scope 活跃配置。
+- `update_deduction_config_status()`：启用配置前未串行化同 scope 的其它 active 配置。
+- `batch_update_status()`：批量启停没有按 scope 去重、排序、加锁后再验证。
+- `delete_deduction_config()`、`batch_delete()`：删除路径也未与扣量决策共享同一 scope mutex。
+
+配置创建/启用与 Postback 的 no_config 决策并发时，可能出现决策读到无配置、同时另一事务创建并启用配置的竞态；多个 active config 也可能并存。仅在决策路径加锁不够，所有配置 CRUD 和相关父实体删除必须遵守同一锁协议。
+
+**实施要求：** 配置 CRUD 与 Postback 决策使用相同的 `(scope_type, scope_id)` 锁表；多 scope 批量操作按固定字典序获取锁，再 current-read 重新检查。配合唯一约束/生成列方案前，先扫描历史重复 active config，不自动删除。Offer、Advertiser、Publisher 的父实体删除也必须阻止或协调级联删除配置。
+
+### 27.5 本轮复核结论与下一阶段验收门槛
+
+当前 PR #205 的身份第一阶段修复和现有 CI 均通过，但不能据此合并。下一阶段必须一次性闭环以下内容：
+
+1. 单一规范事件身份模块及平台协议清单；BFT 字段仍需官方协议或脱敏 payload 证据。
+2. MySQL 事件决策账本，保存所有事件终态和可复用决策结果。
+3. MySQL scope mutex；决策和所有配置 CRUD 共享锁顺序与事务语义。
+4. 使用 MySQL 已提交账本计算统计窗口，Redis 不再参与权威序号/扣量额度计数。
+5. 固定单次决策时间，明确 24 小时窗口按接收时间还是上游 event_time 计算，并使用半开区间。
+6. 真实 MySQL 8.0 REPEATABLE READ 多连接测试：2/10/50 并发同事件、同 scope 不同事件、配置首行创建竞态、rollback、COMMIT 结果未知、Outbox/日志插入失败、死锁/锁超时、Redis 断开/重启/清空。
+7. migration manifest checksum、升级/回滚策略、生产数据预检查与可观测性全部完成。
+
+**当前处置：** PR #205 保持 Draft。不能以 CI 全绿、GitHub mergeable=true 或单元测试通过代替财务事务验收。
