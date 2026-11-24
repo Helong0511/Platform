@@ -25,9 +25,14 @@ async def enqueue_offer_cache_invalidation(
     使用固定事件类型和 Offer 主键，不接受外部传入 Redis key 或 glob，
     避免把任意键删除能力暴露给业务输入。
     """
-    if isinstance(offer_id, bool) or int(offer_id) < 1:
+    if isinstance(offer_id, bool) or not isinstance(offer_id, int) or offer_id < 1:
         raise ValueError("offer_id must be a positive integer")
-    if second_pass_delay_seconds < 1 or second_pass_delay_seconds > 300:
+    if (
+        isinstance(second_pass_delay_seconds, bool)
+        or not isinstance(second_pass_delay_seconds, int)
+        or second_pass_delay_seconds < 1
+        or second_pass_delay_seconds > 300
+    ):
         raise ValueError("second_pass_delay_seconds must be between 1 and 300")
 
     now = get_app_now_naive()
@@ -39,7 +44,7 @@ async def enqueue_offer_cache_invalidation(
         events.append(
             OfferCacheInvalidationOutbox(
                 event_key=secrets.token_hex(32),
-                offer_id=int(offer_id),
+                offer_id=offer_id,
                 phase=phase,
                 status="pending",
                 attempt_count=0,
