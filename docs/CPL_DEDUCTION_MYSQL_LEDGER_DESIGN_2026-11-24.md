@@ -1438,3 +1438,46 @@ PostbackProcessor.process() 在拿到 click_association=None 后没有因“请�
 
 本轮没有修改上述业务代码，也没有新增数据库字段或 migration。该项属于新的财务归因正确性阻断项，应与第 29 节的 MySQL 权威决策账本、scope mutex、CRUD 同锁协议一起设计和实现。不得只在 ClickAssociator 中简单增加 rollback 后继续重试，也不得只新增 client_id 字段而不处理历史数据、Offer/Publisher 迁移、Cap/报表一致性及真实 MySQL 并发测试。
 
+### 31. 第六阶段源码复核：令牌模式下 Click 可不落库，且令牌不包含 Client 快照
+
+本轮继续检查 app/core/tracking/click_persist.py、app/core/tracking/click_token.py、app/api_v1/tracking/tracking.py、app/routes/short_link/cloak_click_persist.py、app/core/postback/transformers/click_associator.py 与 ConversionSaver。
+
+#### 31.1 Click 落库不是所有环境下的必选路径
+
+`should_persist_clicks_to_db()` 的行为为：
+
+- `PERSIST_CLICKS_TO_DB=true` 时强制写库；
+- `PERSIST_CLICKS_TO_DB=false` 时强制不写库；
+- 未设置时，`USE_TRACKING_TOKEN=true` 默认不写 clicks 表；否则默认写库。
+
+因此不能把 Click 表当作所有 Postback 都必定存在的归因事实来源。令牌模式下，Postback 可能完全依靠签名令牌中的归因字段继续处理。任何归因快照方案都必须同时覆盖“Click DB 行存在”和“仅令牌归因”两种模式，不能只给 Click 表新增字段。
+
+#### 31.2 当前追踪令牌只编码 Offer/Publisher/Advertiser/ShortLink 等标识，不包含 Client ID
+
+`click_token.py` 的令牌身份字段包括 offer_id、publisher_id、advertiser_id、short_link_id，未包含 client_id。`association_from_parsed()` 也只还原这些 ID 与 URL 参数。
+
+当令牌模式下 Click 没有落库时，`ClickAssociator.associate()` 会尝试 `_enrich_association()`，通过当前 Publisher 记录读取 `Publisher.client_id`。该 enrichment 捕获所有异常后仍返回原 token association。此时 Postback 可能继续处理，但 association 中没有可信 client_id；`ConversionSaver.resolve_trusted_attribution()` 可能因此无法建立客户/产品 scope。
+
+这意味着第 30 节风险需要扩展：仅给 Click 表增加 client_id_at_click 仍不够。必须为令牌模式设计可验证、可版本化且不暴露敏感租户数据的客户归属快照；或者明确要求所有需要客户/产品扣量的 Click 强制落库并且在 DB 归因验证失败时拒绝处理。不能让令牌模式悄悄退化成“缺少 Client scope 但照常扣量/保存”。
+
+#### 31.3 普通追踪入口与斗篷入口的归因字段完整性不同
+
+- `app/api_v1/tracking/tracking.py` 的普通追踪入口在生成令牌和 Click 数据时，传入 offer_id、publisher_id、advertiser_id。
+- `app/routes/short_link/cloak_click_persist.py` 的斗篷点击落库数据显式写入 `advertiser_id=None`，即使 Offer 可能有关联广告主；其归因是否由 `resolve_cloak_click_offer_and_publisher()` 补全需要单独核对，不得假设与普通入口一致。
+- 斗篷路径在更新 short_links.click_count 后会先 commit，再调用 persist_click_record；点击计数与 Click 落库/队列入队不是一个原子事务。队列或 DB 备用写入失败时可能出现点击计数已增加、Click 记录缺失的差异。
+
+应明确 Click persistence 的 SLA、队列积压/丢弃监控、重放/修复机制，以及点击计数的统计口径。扣量归因不可依赖异步 Click 行在 Postback 到达前必定完成。
+
+#### 31.4 必须补充的测试
+
+1. `USE_TRACKING_TOKEN=true` 且 `PERSIST_CLICKS_TO_DB` 未设置：Click 不写 DB，Postback 仍能获得完整可信归因快照。
+2. Token 中的 offer/publisher/advertiser ID 与数据库当前对象归属不一致：按明确版本/快照策略 fail closed，不静默覆盖。
+3. Token enrichment 数据库异常：客户/产品扣量不得在缺失 trusted_client_id 时被误当作完整归因成功。
+4. `PERSIST_CLICKS_TO_DB=false` 与 `true` 两种模式的行为均有集成测试。
+5. 斗篷入口 advertiser_id 的来源与普通追踪入口一致性测试；若业务上允许为空，必须明确哪些扣量 scope 不适用。
+6. Click queue 入队失败、后台 DB fallback 失败、队列延迟/重复写入时，点击计数和 Click 记录差异可监控、可恢复，且不污染财务决策身份。
+
+#### 31.5 本节结论
+
+本轮没有修改 Click/token/persistence 代码，也没有新增 migration 或测试。当前 PR 的 Click 归因存在双模式（持久化 Click / 仅令牌）和多入口字段完整性差异。MySQL 权威扣量账本实现前，必须统一定义 canonical attribution snapshot，覆盖两种存储模式和所有 Click 入口；不能只依赖当前 Publisher/Offer 表回查，也不能把缺失客户归属默认为无配置。
+
