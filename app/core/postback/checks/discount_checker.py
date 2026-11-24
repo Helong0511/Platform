@@ -53,6 +53,7 @@ class DiscountChecker:
         advertiser_id: Optional[int],
         click_id: Optional[str],
         db: AsyncSession,
+        event_identity: Optional[Dict[str, str]] = None,
     ) -> Tuple[Decimal, Dict[str, Any], bool]:
         """
         计算扣量后的金额。
@@ -120,6 +121,7 @@ class DiscountChecker:
                     advertiser_id=scope_advertiser_id,
                     offer_id=scope_offer_id,
                     publisher_id=scope_publisher_id,
+                    event_identity=event_identity,
                 )
                 deduction_info["deduction_config"] = result
 
