@@ -1,7 +1,7 @@
 """
 统一缓存管理模块。
 
-职责：短链/Offer 预热、按标签批量失效、维护 Redis 标签→键映射，供管理端与定时任务使用。
+职责：短链预热、Offer 旧缓存兼容清理、按标签批量失效及维护 Redis 标签→键映射。
 
 在系统中的位置：``app.core.cache_manager.CacheManager``，协调 ``offer_cache`` 与 ``short_link_cache``。
 """
