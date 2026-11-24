@@ -1020,3 +1020,38 @@ GROUP BY publisher_id HAVING COUNT(*) > 1;
 - MySQL 实际唯一键、字符集、collation 和字段长度边界必须与应用规范化逻辑一致。
 
 **当前结论：** 事件身份修复需要先建立逐平台协议清单和兼容指标，不能只改一个 Normalizer 函数。当前代码与测试明确允许 click_id 充当 conversion_id；在新旧语义切换方案确定前，不应盲目更改入口必填规则或 BFT 字段优先级。该项仍是财务扣量上线阻断项。
+
+
+## 26. 事件身份贯通第一阶段修复（2026-11-24）
+
+本节记录当前分支已提交的防御性代码改动。它只解决“把 click_id 当作扣量事件身份”的一部分问题，**不代表 MySQL 财务账本与 Redis 事务不一致问题已经解决**。
+
+### 26.1 显式事件身份与点击归因分离
+
+- 通用 `DataNormalizer` 新增只读取 `conversion_id/conversionId` 的显式提取方法。
+- 为兼容历史入库字段，缺少显式 ID 时仍暂时允许 `conversion_id` 字段回退为 click ID；但同时标记 `event_identity_verified=false`。
+- 通用入口 `DataValidator` 已改为要求显式 `conversion_id/conversionId`，只有 click_id 的新回调会在入库前拒绝，避免继续把一次点击误当作一笔转化事件。
+- BFT handler 分别提取 click_id 与显式 conversion_id；两个值不同的时候分别保存，不再把 click_id 覆盖到 conversion_id。
+- BFT 缺少显式 conversion_id 时拒绝新回调。历史标准化函数仍保留 click ID 回退值，但标记身份未验证，不能进入财务扣量决策。
+- BFT 的 `clk_id/cid` 等字段究竟代表 click ID 还是 conversion ID，尚无已核实的 BFT 官方协议；本次没有宣称这些字段已被正确映射。上线前必须取得官方字段定义或脱敏真实请求样例。
+
+### 26.2 扣量决策键
+
+- Postback pipeline 只在 `event_identity_verified=true` 时向 DiscountChecker 传递 `platform + conversion_id + normalized event_name`。
+- DeductionManager 对三字段做长度边界校验，并用长度前缀编码后计算 SHA-256 事件键；避免简单字符串拼接的歧义。
+- click_id 不再参与确定性哈希键；缺少可信事件身份时跳过 volume deduction。
+- proportional / round_robin 顺序策略依赖 Redis 递增序号，尚无事务级重试幂等保障；在 MySQL ledger 落地前暂时跳过这些策略的扣量。金额扣减路径不受此门控影响。
+
+### 26.3 当前明确未解决的阻断项
+
+1. **Redis 与 MySQL 仍非原子事务**：随机/哈希策略仍会在 MySQL commit 前使用 Redis 统计和预留。DB rollback 仍可能遗留 Redis 计数；本次事件键只能让同一事件的哈希结论稳定，不能把 Redis 预留纳入 MySQL 事务。
+2. **历史兼容标准化路径仍有回退字段**：直接调用标准化器而绕过 DataValidator 的旧调用方，可能仍获得 click ID 回退的 conversion_id。该字段不能被视为稳定事件 ID；必须确保生产入口都经过 validator。
+3. **事件收据与无效身份的历史数据**：旧数据可能已经把 click ID 存入 conversion_id。不能自动推断或批量重写；需按平台与时间范围做冲突扫描。
+4. **BFT 协议未确认**：当前缺少显式 conversion_id 的 BFT 请求会被拒绝。这是防止财务事件错误合并的 fail-closed 行为；如 BFT 官方确认 `clk_id` 本身就是每笔转化唯一 ID，需先提供协议证据，再单独调整映射和测试。
+5. **真实 MySQL 并发测试未完成**：本次新增的是身份与策略门控单元测试；没有执行 MySQL 8.0 REPEATABLE READ 多连接并发、rollback、COMMIT 结果未知和 Redis 重启测试。
+
+### 26.4 上线约束
+
+- 不得仅凭本次单元测试或 CI 全绿解除 PR Draft。
+- 部署前必须确认所有平台均能提供稳定事件 ID；BFT 需先核对官方协议。
+- MySQL 事件决策账本、scope lock、窗口统计与 Redis 降级方案仍需按前述章节设计实施并用真实 MySQL 验证。
