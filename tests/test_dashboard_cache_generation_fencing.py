@@ -68,6 +68,7 @@ def test_dashboard_permission_and_data_mutations_advance_fenced_namespaces():
     ad_data_delete = Path("app/services/ad_data/commands/delete_command.py").read_text(encoding="utf-8")
 
     assert "await self.invalidate_user_stats_cache()" in user_service
+    assert 'namespace="user_stats"' in user_service
     assert 'advance_cache_generation(self.db, namespace="user_stats")' in client_service
     assert "await advance_cache_generation(self.db)" in client_service
     assert "await advance_cache_generation(self.db)" in product_service
