@@ -617,7 +617,7 @@ class DeductionManager:
         """构建稳定的事件级决策键；禁止使用 click_id 或递增序号替代事件身份。"""
         if not isinstance(event_identity, dict):
             return None
-        platform = str(event_identity.get("platform") or "").strip().casefold()
+        platform = str(event_identity.get("platform") or "").strip()
         conversion_id = str(event_identity.get("conversion_id") or "").strip()
         event_name = str(event_identity.get("event_name") or "").strip()
         # 与数据库字段宽度一致，提前拒绝可能被截断或产生碰撞的身份字段。
