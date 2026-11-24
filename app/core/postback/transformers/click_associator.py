@@ -131,7 +131,7 @@ class ClickAssociator:
         db: AsyncSession,
     ) -> Optional[Dict[str, Any]]:
         """
-        通过 clicks 表关联（兼容旧版随机 click_id 及异步落库延迟）。
+        通过 clicks 表关联（兼容旧版随机 click_id 及异步落库延迟）。仅对明确的未命中重试；数据库异常回滚后向上传播，避免伪装成 not-found。
         """
         if not click_id:
             logger.debug("Click ID 为空，无法关联")
@@ -171,12 +171,20 @@ class ClickAssociator:
                         logger.debug(f"等待 {delay:.2f} 秒后重试...")
                         await asyncio.sleep(delay)
             except Exception as e:
-                logger.error("第 %s 次尝试查询 Click 记录失败：%s", attempt + 1, type(e).__name__)
-                if attempt < max_attempts - 1:
-                    # 指数退避：delay = base_delay * (2 ** attempt)
-                    delay = base_delay * (2 ** attempt)
-                    logger.debug(f"等待 {delay:.2f} 秒后重试...")
-                    await asyncio.sleep(delay)
+                # 查询异常不等于 Click 不存在。SQLAlchemy 事务失败后 Session 可能进入
+                # failed state，不能在同一 Session 上继续重试，更不能把 DB 故障降级成 None。
+                logger.error(
+                    "查询 Click 记录失败，终止归因并交由接收层返回可重试错误：error_type=%s",
+                    type(e).__name__,
+                )
+                try:
+                    await db.rollback()
+                except Exception as rollback_error:
+                    logger.critical(
+                        "Click 查询失败后的事务回滚也失败：error_type=%s",
+                        type(rollback_error).__name__,
+                    )
+                raise
         
         if not click:
             logger.error("多次尝试后仍未找到 Click 记录")
