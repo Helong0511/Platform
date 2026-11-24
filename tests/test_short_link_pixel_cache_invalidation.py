@@ -8,6 +8,12 @@ from app.services.short_link_service import ShortLinkService
 
 
 class FakeDB:
+    def __init__(self):
+        self.outbox_events = []
+
+    def add_all(self, events):
+        self.outbox_events.extend(events)
+
     async def flush(self):
         return None
 
