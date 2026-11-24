@@ -55,10 +55,13 @@ class DataValidator:
         errors = []
         
         # 与标准化器保持一致，接受 click_id / conversion_id 及平台常见别名。
-        conversion_id = DataNormalizer._extract_conversion_id(raw_data)
-        click_id = DataNormalizer._extract_click_id(raw_data) or conversion_id
+        explicit_conversion_id = DataNormalizer._extract_explicit_conversion_id(raw_data)
+        click_id = DataNormalizer._extract_click_id(raw_data) or explicit_conversion_id
         if not click_id or not str(click_id).strip():
             errors.append("缺少必填字段：click_id 或 conversion_id")
+        if not explicit_conversion_id:
+            # click_id 仅用于归因；没有稳定事件 ID 时无法安全去重与重试。
+            errors.append("缺少稳定转化事件 ID：必须提供 conversion_id 或 conversionId，不能仅使用 click_id")
 
         # 同时检查 conversion_id 与 click_id，避免其中一个较短掩盖另一个超长字段。
         id_candidates = [
