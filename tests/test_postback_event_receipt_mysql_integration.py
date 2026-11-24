@@ -189,16 +189,22 @@ async def _run_scenario(scenario: str) -> None:
             assert duplicate is False
 
             if scenario == "volume_deducted":
-                # 命中扣量：不插入正式转化，只提交持久收据。
-                await first.commit()
-
-                async with session_factory() as retry:
-                    duplicate_retry = await DuplicateChecker.is_duplicate(
-                        **identity,
-                        db=retry,
+                # 命中扣量：不插入正式转化，只提交持久收据；并发重试必须等待唯一键仲裁。
+                retry_started = asyncio.Event()
+                retry_connection_id = {}
+                waiting = asyncio.create_task(
+                    _concurrent_normal_retry(
+                        session_factory,
+                        identity,
+                        retry_started,
+                        retry_connection_id,
                     )
-                    assert duplicate_retry is True
-                    await retry.rollback()
+                )
+                await asyncio.wait_for(retry_started.wait(), timeout=5)
+                await _wait_for_mysql_lock_wait(retry_connection_id["value"])
+                await first.commit()
+                duplicate_retry = await asyncio.wait_for(waiting, timeout=10)
+                assert duplicate_retry is True
                 return
 
             # 普通转化：正式记录插入与临时收据删除必须在同一事务提交。
