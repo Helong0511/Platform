@@ -47,6 +47,7 @@ from typing import Dict, Any
 from app.scheduler_module.task_names import (
     CAP_RESERVATION_RECOVERY_TASK_NAME,
     OFFER_CACHE_INVALIDATION_TASK_NAME,
+    SHORT_LINK_CACHE_INVALIDATION_TASK_NAME,
     THIRD_PARTY_REPORT_OUTBOX_TASK_NAME,
     THIRD_PARTY_REPORT_PII_RETENTION_TASK_NAME,
 )
@@ -508,6 +509,17 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "result_getter_function": "get_task_result",
         "cron_expression": "*/1 * * * *",
         "description": "每分钟消费 Offer 热点缓存失效 Outbox；仅删除精确 Offer 缓存键，Redis 故障时自动退避重试",
+    },
+
+    # ========== 短链接缓存失效 Outbox ==========
+    SHORT_LINK_CACHE_INVALIDATION_TASK_NAME: {
+        "task_name": SHORT_LINK_CACHE_INVALIDATION_TASK_NAME,
+        "task_module": "app.scheduler_module.tasks.short_link_cache_invalidation_task",
+        "task_function": "process_short_link_cache_invalidation_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "*/1 * * * *",
+        "description": "每分钟消费短链接缓存失效 Outbox；只删除 short_link:{short_code} 精确键，Redis 故障时自动退避重试",
     },
 
     # ========== 广告数据缓存失效 Outbox ==========

@@ -36,6 +36,7 @@ from app.core.short_link.generator import (
     generate_unique_short_code
 )
 from app.core.short_link_cache import invalidate_short_link_cache
+from app.services.short_link_cache_invalidation_outbox import enqueue_short_link_cache_invalidation
 from app.core.short_link_click_counter import cleanup_click_counter
 import logging
 
@@ -423,6 +424,8 @@ class ShortLinkService(BaseService[ShortLink]):
 
         await self.db.flush()
         await self.db.refresh(short_link)
+        # 与短链接更新共用事务登记两阶段失效，覆盖提交前后的并发旧值回填。
+        await enqueue_short_link_cache_invalidation(self.db, short_link.short_code)
 
         # 清除跳转缓存与像素配置缓存，确保 URL、启停状态、有效期及凭据轮换即时生效。
         await invalidate_short_link_cache(short_link.short_code)
@@ -456,6 +459,8 @@ class ShortLinkService(BaseService[ShortLink]):
         # 删除短链接
         await self.db.delete(short_link)
         await self.db.flush()
+        # 删除后的缓存失效事件与业务删除共用事务，短码快照不依赖已删除的外键行。
+        await enqueue_short_link_cache_invalidation(self.db, short_code)
 
         # 清除跳转缓存和像素配置缓存，避免已删除短链继续使用旧 Pixel/token。
         await invalidate_short_link_cache(short_code)

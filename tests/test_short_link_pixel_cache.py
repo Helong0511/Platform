@@ -81,10 +81,16 @@ async def test_expired_cached_pixel_config_is_not_returned(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_short_link_update_and_delete_invalidate_pixel_config_cache(monkeypatch):
-    link = SimpleNamespace(short_code="short-cache-lifecycle")
+    link = SimpleNamespace(short_code="short-cache-life")
     invalidated = []
 
     class FakeDB:
+        def __init__(self):
+            self.outbox_events = []
+
+        def add_all(self, events):
+            self.outbox_events.extend(events)
+
         async def flush(self):
             return None
 
@@ -129,7 +135,7 @@ async def test_short_link_update_and_delete_invalidate_pixel_config_cache(monkey
     )
     await service.delete_short_link(link_id=7, current_user=user)
 
-    assert invalidated == ["short-cache-lifecycle", "short-cache-lifecycle"]
+    assert invalidated == ["short-cache-life", "short-cache-life"]
 
 
 @pytest.mark.asyncio

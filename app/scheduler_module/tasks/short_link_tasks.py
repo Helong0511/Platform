@@ -22,6 +22,7 @@ from app.core.short_link_click_counter import (
 from app.scheduler_module.tasks.clicks_batch_processor import process_clicks_queue
 from app.models.models import ShortLink
 from app.scheduler_module.task_result_store import set_task_result
+from app.services.short_link_cache_invalidation_outbox import enqueue_short_link_cache_invalidation
 from sqlalchemy import update, select, and_, exists
 
 logger = logging.getLogger(__name__)
@@ -127,7 +128,7 @@ async def open_closed_short_links_task():
             )
 
             result = await db.execute(
-                select(ShortLink.id, ShortLink.offer_id, ShortLink.channel_id)
+                select(ShortLink.id, ShortLink.offer_id, ShortLink.channel_id, ShortLink.short_code)
                 .where(
                     and_(
                         ShortLink.is_active == False,
@@ -137,7 +138,7 @@ async def open_closed_short_links_task():
             )
             candidates = result.all()
 
-            for sl_id, offer_id, channel_id in candidates:
+            for sl_id, offer_id, channel_id, short_code in candidates:
                 if not offer_id:
                     continue
                 cap_ok, _ = await check_cap(
@@ -152,8 +153,12 @@ async def open_closed_short_links_task():
                     .where(ShortLink.id == sl_id)
                     .values(is_active=True)
                 )
+                # 定时自动重新启用也必须与失效事件同事务提交，不能绕过短链接缓存 Outbox。
+                await enqueue_short_link_cache_invalidation(db, short_code, flush=False)
                 opened += 1
 
+            if opened > 0:
+                await db.flush()
             await db.commit()
             if opened > 0:
                 logger.info(f"✅ 成功打开 {opened} 个短链接（Cap 有余量）")

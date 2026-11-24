@@ -50,7 +50,7 @@ from app.models.security import (
     PostbackIpWhitelist,
 )
 from app.models.third_party import ThirdPartyReportLog
-from app.models.cache_invalidation import CacheNamespaceGeneration, CacheInvalidationOutbox, OfferCacheInvalidationOutbox
+from app.models.cache_invalidation import CacheNamespaceGeneration, CacheInvalidationOutbox, OfferCacheInvalidationOutbox, ShortLinkCacheInvalidationOutbox
 from app.models.session import UserSession, TokenBlacklist
 
 __all__ = [
@@ -99,6 +99,7 @@ __all__ = [
     "CacheNamespaceGeneration",
     "CacheInvalidationOutbox",
     "OfferCacheInvalidationOutbox",
+    "ShortLinkCacheInvalidationOutbox",
     "UserSession",
     "TokenBlacklist",
 ]
