@@ -1,7 +1,7 @@
 # 缓存使用指南
 
-**版本：** 2.0  
-**更新日期：** 2026-03-14  
+**版本：** 2.1  
+**更新日期：** 2026-11-24  
 **作者：** 钳钳 🦀
 
 ---
@@ -75,12 +75,12 @@ await set_with_jitter(
     f"user:{user_id}",
     user_data,
     base_ttl=300,
-    jitter_range=30  # ±30 秒随机
+    jitter_range=30  # 基础 TTL 正向增加 1–30 秒
 )
 ```
 
 **效果：**
-- ✅ TTL 在 270-330 秒之间随机
+- ✅ TTL 在 301-330 秒之间随机（base_ttl + [1, jitter_range]）
 - ✅ 避免同时过期
 - ✅ 系统负载更平稳
 
@@ -290,24 +290,18 @@ async def periodic_cache_metrics_report():
 
 **场景：** 数据库更新了，缓存还是旧的
 
-**解决方案：**
-1. **主动失效** - 数据更新时删除缓存
-   ```python
-   await cache.delete(f"user:{user_id}")
-   ```
+**解决方案与边界：**
+1. **数据库事务内登记持久化失效事件（强一致性场景优先）**。业务数据变更与 Outbox 事件必须使用同一个数据库事务提交；Worker 使用租约、随机 fencing token 和有限退避重试。不要在业务事务提交后才单独写 Outbox。
+2. **Generation 版本隔离**。广告数据查询缓存与用户统计缓存通过数据库 Generation 生成新键；旧请求即使迟到回填，也不能覆盖新 Generation 的读取结果。
+3. **Offer 热点缓存**。Offer 创建、更新、删除在业务事务内登记 first/second 两阶段事件；提交后 API 尝试立即删除 `offer:cache:{offer_id}`，Outbox 再负责持久化重试和后续复查。
+4. **普通短 TTL 缓存**可接受短暂陈旧时，可使用合理 TTL，但必须明确业务允许的陈旧窗口。
+5. **不要把进程内延迟双删当成可靠保证**。`asyncio.create_task()` 在进程重启、事件循环关闭时会丢失；`asyncio.sleep()` 也不能持久化任务。历史 `CacheInvalidator` 的延迟双删只属于 best-effort 兼容路径，不能代替事务性 Outbox。
 
-2. **短 TTL** - 让缓存自动过期
-   ```python
-   await set_cached(key, data, ttl=300)
-   ```
-
-3. **延迟双删** - 更新 DB 后删缓存，延迟后再删一次
-   ```python
-   await db.update(...)
-   await cache.delete(key)
-   await asyncio.sleep(0.5)
-   await cache.delete(key)
-   ```
+**当前已接入持久化失效的范围（以代码为准）：**
+- `ad_data`：数据库 Generation + Outbox。
+- `user_stats`：数据库 Generation + Outbox。
+- Offer 热点键 `offer:cache:{offer_id}`：专用两阶段 Outbox。
+- 不要据此推断所有 `query_cache:` 缓存、Advertiser 或其他业务域均已获得持久化失效保证。
 
 ### Q4: 如何监控缓存性能？
 
@@ -336,6 +330,27 @@ await report_metrics_to_redis()
 | 雪崩防护 | 50ms | 500ms* | 50ms |
 
 *无保护情况下的高负载
+
+
+## 🔐 缓存一致性与故障降级（2026-11-24）
+
+### Redis 不可用时
+- `get_cache_backend()` 可能退化为当前进程的 `MemoryCacheBackend`；它不是跨 Worker 共享缓存。
+- 对持久化 Outbox，必须确认真实 Redis 共享存储成功后才能将事件标记为 `success`。仅清理本机内存缓存不算成功。
+- Offer Outbox 直接获取 Redis 客户端；Redis 返回不可用或删除命令异常时保留任务并按退避策略重试。
+- 缓存故障应尽量 fail-open，不得把可由数据库完成的正常业务操作误判为失败；权限、财务和状态判断必须回到数据库权威数据。
+
+### 缓存键与失效模式
+- `cache_query()` 使用参数 JSON 的 MD5 摘要作为键，最终形态为 `query_cache:{md5}`。只按可读业务名称（例如 `offer:list:*`）清理，不能命中这种哈希键。
+- 广告数据专用键通过 `build_ad_data_query_cache_key()` 生成 `ad_data:{kind}:{md5}`，便于按 `query_cache:ad_data:` 命名空间失效。
+- 旧兼容 API 的 `key_prefix` 主要用于指标分类；不要假设它必然成为 Redis key 的可读前缀。
+- Offer 热点缓存 `offer:cache:{id}` 与查询缓存 `query_cache:` 是两个独立键空间，必须分别清理。
+
+### Outbox 运维
+- Offer 与广告数据缓存失效任务当前按每分钟调度；Offer 第二阶段须等第一阶段结束后在后续调度轮次执行，不是精确 1 秒实时执行。
+- 关注任务结果中的 `retryable`、`failed`、`lease_lost`。持续失败应进入日志/监控告警处置，不能手工把事件直接改成 success。
+- 不允许使用 `FLUSHDB`、`KEYS *` 或无边界全库清理来解决缓存不一致。
+- 新增缓存域时，必须先梳理读写者、键格式、业务事务边界和回填路径，再决定采用 Generation、精确键 Outbox 或其他可验证方案。
 
 ---
 
@@ -376,5 +391,5 @@ async def get_hot_user_profile(user_id: int):
 
 ---
 
-_文档版本：2.0_  
-_最后更新：2026-03-14_
+_文档版本：2.1_  
+_最后更新：2026-11-24_
