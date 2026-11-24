@@ -1579,3 +1579,53 @@ await db_session.commit()
 修复建议仍是：在确认该分支确实承担唯一计数责任后，将其改为 SQL 原子增量；若计数可能已由 Redis/主计数器完成，则必须先统一计数所有权和幂等事件键，避免简单原子加一造成重复计数。
 
 本轮仅补充调用条件核查，没有改动业务代码或测试。
+
+### 35. 第十阶段复核：扣量配置唯一性存在并发写入旁路
+
+本轮直接复核 `ConversionDeductionService`、`app/services/cpl/deduction/helpers.py` 与扣量管理 API，确认“同一作用域只能有一条激活配置”目前主要依赖应用层先查后写，尚未形成并发安全的数据库约束和统一锁协议。
+
+#### 35.1 创建配置是典型 check-then-insert 竞态
+
+`create_deduction_config()` 当前依次执行：
+1. `validate_target_exists()`；
+2. `check_existing_config()` 查询同一 level/target 的激活配置；
+3. 创建 ORM 对象并 flush。
+
+`check_existing_config()` 是普通 SELECT，不持有目标作用域互斥锁；数据库模型/当前迁移也未证明存在覆盖“激活配置唯一性”的唯一约束。两个并发事务可同时查到无激活配置，再分别插入两条 `is_active=true` 配置。事务隔离级别为 REPEATABLE READ 时，普通查询也不能替代明确的锁协议。
+
+#### 35.2 单条与批量状态更新都能绕过创建时检查
+
+- `update_deduction_config()` 对传入字段直接 setattr；只要 Update Schema 接受 `is_active`，更新接口即可直接把现有配置启用，而不调用 `check_existing_config()`。
+- `update_deduction_config_status()` 直接设置 `config.is_active` 并 flush，没有重新检查目标作用域是否已有另一条激活配置。
+- `batch_update_status()` 先按 ID 普通查询，再用批量 UPDATE 直接修改 `is_active`；它没有按 scope 排序加锁，也没有在锁后重新读取当前激活集合。
+- 因而即使创建接口的预检查在单请求场景有效，单条更新和批量启用仍可能形成重复激活配置。
+
+#### 35.3 删除与缓存 generation 也缺少同一作用域互斥
+
+单条删除先普通读取配置，再 delete/flush 并推进 generation；批量删除也需核对其具体写入实现。创建、更新、启用、禁用、删除如果没有共享同一 scope mutex，可能与 Postback 决策同时发生，造成配置选择和 generation 快照不一致。只推进 generation 不等于阻止并发配置写入，也不等于锁定正在进行的财务决策。
+
+#### 35.4 必须采用数据库级唯一性 + 所有写入口统一锁
+
+建议按以下顺序实施，不得只在 API 层补一个 SELECT：
+
+1. 明确唯一业务键：`(scope_type, scope_id)`，scope_type 分别为 advertiser / offer / publisher；同一作用域最多一条激活配置。
+2. 上线前执行只读碰撞扫描，列出每个 scope 的多条 active 配置及其 ID、创建时间、优先级、扣量策略。存在冲突时停止迁移，由业务确认保留项，禁止自动随意停用。
+3. 设计可验证的 generated active-scope key + UNIQUE 约束（或经 MySQL 版本验证的等价方案）；inactive 行的键必须为 NULL，且需验证 MySQL 多 NULL 唯一索引语义、字段长度、字符集和生成列表达式。
+4. 所有单条和批量 create/update/status/delete 入口必须先按固定顺序锁定 scope mutex，再执行 current read 重新校验唯一性，最后写配置并在同一事务推进 generation。
+5. 批量操作先去重 config IDs，再解析 scope、排序去重后统一加锁；锁后重新读取记录和父实体状态，不可依赖加锁前的 ORM 对象快照。
+6. Offer / Advertiser / Publisher 的删除或级联删除也必须遵循同一锁协议；不能让父实体删除绕过配置唯一性维护。
+7. 对配置 CRUD 与 Postback 决策并发时，统一定义锁顺序和隔离级别；避免只锁 scope 表，却仍使用旧 REPEATABLE READ consistent snapshot 读取配置。
+
+#### 35.5 最低测试验收矩阵
+
+必须用真实 MySQL 多连接、独立 Session 验证：
+- 两个并发 create 同一 scope，只允许一个 active；
+- 两条 inactive 配置并发 enable，只允许一个成功；
+- batch enable 包含同 scope 多条记录时整批按定义失败或明确处理，不能留下重复 active；
+- batch update 与单条 create/update/status/delete 并发；
+- 两个批量请求以相反 ID 顺序操作时不产生永久死锁，死锁重试有界；
+- 父实体删除与配置创建/启用并发；
+- active unique 约束拒绝直接 SQL 写入的重复配置；
+- generation 推进与 Postback 读取在 REPEATABLE READ 下不存在旧快照误用。
+
+**本轮结论：** 该风险已由当前源码路径确认，不是推测。重复 active 配置会使 `get_config()` 的优先级选择变得不稳定，并可能让财务扣量规则随查询顺序/缓存状态变化。此项仍是 PR #205 财务阻断项；本轮仅增加审计证据，没有修改业务代码、没有新增 migration，也没有执行真实 MySQL 并发测试。
