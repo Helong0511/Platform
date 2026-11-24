@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.core import deduction_manager as _unused  # noqa: F401
 from app.core.deduction import deduction_manager as deduction_manager_module
 from app.core.deduction.deduction_manager import ConversionStats, DeductionManager
 
