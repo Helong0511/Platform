@@ -11,14 +11,14 @@
 """
 import logging
 import hashlib
-from typing import Optional, Tuple, Dict, Any, Protocol
+from typing import Optional, Tuple, Dict, Any
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import and_, func
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from app.models.models import (
     ConversionDeductionConfig, 
