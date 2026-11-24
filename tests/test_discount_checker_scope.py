@@ -31,6 +31,7 @@ async def test_apply_deduction_receives_only_final_config_scope(
         "should_deduct_amount": False,
         "final_amount": Decimal("10.00"),
     })
+    monkeypatch.setattr(module, "calculate_discount", AsyncMock(return_value=(Decimal("10.00"), Decimal("0"), None)))
     monkeypatch.setattr(module, "find_deduction_config", AsyncMock(return_value=config))
     monkeypatch.setattr(module, "apply_deduction", apply_mock)
 
