@@ -176,3 +176,37 @@ Postback pipeline 的 `step_associate_click()` 直接接收该返回值。后续
 #### F. 当前结论
 
 斗篷 /report 计数目前仍有 P1 级数据完整性风险：Redis 去重 fail-open、先去重后持久化导致无法补偿、无 session_id 时不去重、DB read-modify-write 丢增量、BackgroundTasks 非持久化，以及 success 响应可能早于可靠持久化。该路径应在上线前修复。此项与 PR #205 的 CPL Redis/DB 扣量一致性是两个独立问题，不能用其中一个的修复替代另一个。
+
+
+### 5.4 与现有点击账本、CAPI Outbox 的边界复核（Head 320861d）
+
+本轮进一步检查了 `app/core/short_link_click_counter.py`、`app/routes/short_link/handlers.py`、`app/core/third_party_report.py`、`app/services/third_party_report_outbox.py` 及对应迁移，发现仓库已经存在可复用的基础设施，修复时不能重复造一套相互竞争的计数器或发送队列。
+
+**1. 正常短链重定向（/s/{short_code}）与斗篷 /report 是两条不同路径**
+
+- `handlers.py` 的缓存命中和 DB 未命中两条重定向路径，都会生成本次 `click_id`，先创建 Click 记录，再调用 `increment_click_count_async(short_code, click_id=click_id)`。
+- `short_link_click_counter.py` 已有 Redis Lua 原子 marker + INCR、Redis pending batch、MySQL `short_link_click_sync_batches` 唯一账本，以及 Redis 不可用时“唯一账本插入 + SQL 原子 UPDATE”的 DB 降级路径；还处理 commit-unknown 查询账本、缓存失效确认和账本 ACK。
+- 因此不能把“主短链点击计数完全没有原子/幂等设施”作为结论。该路径仍需单独检查 Redis marker TTL、pending batch 刷盘/清理边界，但它不是本轮确认的 ORM lost-update 路径。
+- `/report` 的 `record_cloak_click_count()` 并未调用这个计数器，仍使用 Redis JSON get-modify-set 和 ORM 读改写；这是本轮 P1 风险的实际边界。
+
+**2. 现有 CAPI Outbox 不等于 /report 已经进入持久 Outbox**
+
+- `third_party_report_logs` 已扩展 `outbox_enqueued`、`short_link_id`、`cloak_name`、`short_code`、`click_time`、`next_retry_time` 等字段，并有 `third_party_report_outbox` worker、租约、重试、身份绑定和 PII retention 机制。
+- 但 `schedule_cloak_facebook_report()` 把 `send_third_party_report` 直接加入 FastAPI `BackgroundTasks`，调用时没有传入转化事务创建的 `report_log_id`。直接发送路径随后调用 `create_report_log()` 创建 `identity_scope='unscoped'` 的日志；该创建路径没有把 `outbox_enqueued` 置为 True。
+- 因此现有 outbox worker 的持久重试能力不能自动覆盖这个 /report 直接发送路径。若进程在 BackgroundTask 开始前退出，连日志都不会创建；若任务已创建 unscoped 日志后中断，不能据此认定平台作用域 Outbox worker 会接管。
+- 不能简单把该路径改为 `outbox_enqueued=True`：现有平台 Outbox 对 `platform`、`destination_pixel_id`、`event_key`、PII 清理状态和租约令牌有严格约束；必须复用现有 enqueue/worker 契约，或为 unscoped 直接发送设计独立且明确的持久接管机制，不能混淆两种身份作用域。
+
+**3. 稳定事件身份仍是 /report 改造的前置条件**
+
+当前路由仅接收 query 参数 `id`、`fbclid`、`email`、`phone`、`dp`、`phase`；click 去重键仅在存在 `session_id` cookie 时构造。没有客户端稳定 `event_id` / Idempotency-Key。服务端每次生成新 UUID 不能解决网络重试的幂等问题；`fbclid` 也不能在缺失时用每次新生成的 UUID 占位后再当作稳定事件身份。
+
+**4. 推荐实施顺序**
+
+1. 先确定 /report 的业务计数语义：同一 session 是“只计一次”还是每次真实按钮点击都计数；明确 load 与 click 是否分别幂等。不能在代码层擅自改变当前业务统计口径。
+2. 修改桥页与路由协议，让同一逻辑 click 的重试复用客户端生成的稳定事件 ID；服务端校验长度、字符集和作用域。若必须兼容旧桥页，明确旧请求的降级语义，并将无法证明唯一身份的情况标记为 legacy，而非假装 exactly-once。
+3. 在 MySQL 中复用或扩展合适的持久事件账本：唯一身份插入、短链原子计数更新、Click 明细 outbox enqueue 应在一个事务内完成。先做 schema/唯一键碰撞预检查，迁移不能破坏既有 `short_link_click_sync_batches` 语义。
+4. CAPI 事件在同一接收事务中写入可被 worker 接管的持久记录；按现有 Outbox 的身份作用域、PII retention、目的地快照、租约与重试约束实现，不再把 FastAPI BackgroundTasks 当作唯一调度保证。
+5. Redis 只承担缓存或可恢复加速；DB 提交成功后通过现有缓存失效机制处理缓存一致性。不可用 Redis 的去重标记决定是否 ACK 一次尚未持久化的点击。
+6. 真实 MySQL + Redis 测试覆盖并发重复 event_id、不同 event_id 并发、commit-unknown、Redis SET NX 成功后 DB 回滚、Redis 不可用、旧桥页兼容、Click outbox 与 CAPI worker 崩溃恢复。
+
+**本轮修正后的结论：** 主短链重定向点击计数已有专门的原子计数与 MySQL 账本设计；斗篷 /report 是独立且绕过该基础设施的路径。CAPI 仓库已有事务性 Outbox，但 /report 当前调用的是 BackgroundTasks 直接发送路径，不能把已有 Outbox 的可靠性算到该路径上。本节是代码审计结论，不代表 /report 已完成修复。
