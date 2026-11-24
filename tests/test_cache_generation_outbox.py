@@ -86,3 +86,21 @@ async def test_ad_data_get_or_set_uses_database_generation_in_cache_key(monkeypa
 
     assert result == {"ok": True}
     assert single_flight.await_args.args[0] == "ad_data:summary:abc:g23"
+
+
+@pytest.mark.asyncio
+async def test_advance_user_stats_generation_registers_user_stats_namespace():
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=SimpleNamespace(rowcount=1))
+    db.scalar = AsyncMock(return_value=9)
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+
+    generation = await advance_cache_generation(db, namespace="user_stats")
+
+    assert generation == 9
+    event = db.add.call_args.args[0]
+    assert event.namespace == "user_stats"
+    assert event.generation == 9
+    assert event.event_key == hashlib.sha256(b"user_stats:9").hexdigest()
+    db.commit.assert_not_called()
