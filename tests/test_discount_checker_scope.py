@@ -44,8 +44,12 @@ async def test_apply_deduction_receives_only_final_config_scope(
         advertiser_id=11,
         click_id="stable-click",
         db=object(),
+        event_identity={"platform": "bft", "conversion_id": "event-1", "event_name": "purchase"},
     )
 
+    assert apply_mock.await_args.kwargs["event_identity"] == {
+        "platform": "bft", "conversion_id": "event-1", "event_name": "purchase"
+    }
     assert apply_mock.await_args.kwargs["advertiser_id"] == expected_scope["advertiser_id"]
     assert apply_mock.await_args.kwargs["offer_id"] == expected_scope["offer_id"]
     assert apply_mock.await_args.kwargs["publisher_id"] == expected_scope["publisher_id"]
