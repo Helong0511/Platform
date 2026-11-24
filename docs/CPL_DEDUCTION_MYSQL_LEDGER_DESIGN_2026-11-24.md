@@ -439,3 +439,24 @@ GROUP BY a.platform, a.conversion_id;
 MySQL 官方依据：CREATE INDEX / CREATE TABLE 对 UNIQUE index 允许多个 NULL 的说明：  
 https://dev.mysql.com/doc/refman/8.4/en/create-index.html  
 https://dev.mysql.com/doc/refman/8.4/en/create-table.html
+
+
+## 16. 当前确定性策略键的重试稳定性缺陷（2026-11-24）
+
+进一步检查 PR #205 分支 `DeductionManager.apply_deduction()` 和 `DeterministicHashDeductionStrategy.should_deduct()`，确认当前决策键仍不是事件级身份：
+
+1. `apply_deduction()` 当前使用 `decision_key = click_id`；同一 click 下的多个不同 conversion/event 会得到相同 hash bucket，无法作为独立事件进行确定性抽样。
+2. 当 click_id 缺失时，fallback 为 `offer:{offer_id}:seq:{stats.processed}`。而 `_get_stats_for_decision()` 在 Redis Lua 中先执行 INCR，返回的 seq 每次请求都会增长；同一事件重试会获得新的 sequence fallback，可能改变 hash 结果。
+3. sequence 本身在 DB commit 前已递增；若本次事件后续回滚，重试仍会拿到新 sequence。即使 MySQL receipt 已在同事务回滚，也不能保证扣量决策重放一致。
+4. Proportional / Round Robin 直接使用 `stats.processed + 1`，其序号同样依赖 Redis 请求次数，而非已提交的唯一事件账本数量。
+
+### 必须满足的修复条件
+
+- 决策键只能由规范事件身份构造，建议包含 decision_version、scope_type、scope_id、platform、conversion_id、event_name；字段编码必须无歧义（长度前缀/规范 JSON 等），不得简单拼接可能含分隔符的原始字符串。
+- click_id 只用于点击归因，不能替代 event identity。
+- 无稳定 event identity 的事件不得生成伪造的 sequence fallback；按平台批准的身份策略拒绝/隔离或禁止 volume deduction。
+- 顺序策略的 processed 必须是当前 24h 窗口内已提交账本事件数，并在数据库 scope 锁内计算；不能把每次 HTTP 请求次数当作事件序号。
+- 同一事件的重试必须在决策前命中唯一账本并返回已提交决策；任何未提交事件都不得影响后续事件统计。
+- 增加回归测试：同 click 两个 conversion 的决策输入不同；缺失 click 不允许 fallback 到 request sequence；同一事件 rollback 后重试身份一致；同事件并发只产生一次决策；顺序策略只计入已提交事件。
+
+在 MySQL 账本方案完成前，当前 deterministic hash 只能保证“相同 click_id 的哈希结果相同”，不能保证“相同 Postback 事件重试结果相同”，也不能正确区分同一 click 下的不同事件。
