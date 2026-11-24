@@ -302,7 +302,6 @@ class CacheManager:
                         2,
                         current_batch_key,
                         pending_key,
-                        current_batch_key,
                     )
                 except Exception as e:
                     logger.warning(
