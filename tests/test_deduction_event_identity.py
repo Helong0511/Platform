@@ -25,6 +25,11 @@ def test_event_decision_key_is_bound_to_platform_conversion_and_event():
         "event_name": "purchase",
     })
     same = DeductionManager._build_event_decision_key({
+        "platform": "BFT",
+        "conversion_id": "conversion-1",
+        "event_name": "purchase",
+    })
+    different_platform = DeductionManager._build_event_decision_key({
         "platform": "bft",
         "conversion_id": "conversion-1",
         "event_name": "purchase",
@@ -42,6 +47,7 @@ def test_event_decision_key_is_bound_to_platform_conversion_and_event():
 
     assert key is not None
     assert key == same
+    assert key != different_platform
     assert key != different_conversion
     assert key != different_event
 
