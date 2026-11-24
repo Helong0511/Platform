@@ -203,7 +203,8 @@ def test_token_payload_preserves_click_time_client_snapshot():
     assert association["client_id"] == 55
 
 
-def test_token_enrichment_does_not_replace_client_snapshot_with_current_publisher():
+@pytest.mark.asyncio
+async def test_token_enrichment_does_not_replace_client_snapshot_with_current_publisher():
     class _Publisher:
         client_id = 99
 
@@ -221,8 +222,7 @@ def test_token_enrichment_does_not_replace_client_snapshot_with_current_publishe
         "advertiser_id": None,
     }
 
-    import asyncio
-    enriched = asyncio.run(
-        ClickAssociator._enrich_association(association, _NoQuerySession())
+    enriched = await ClickAssociator._enrich_association(
+        association, _NoQuerySession()
     )
     assert enriched["client_id"] == 55
