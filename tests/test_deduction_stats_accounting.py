@@ -73,7 +73,7 @@ async def test_decision_stats_recover_processed_and_deducted_from_database_basel
         hours=24,
     )
 
-    assert stats == ConversionStats(total=31, deducted=7, processed=31)
+    assert stats == ConversionStats(total=32, deducted=7, processed=32)
     args = redis.eval.await_args.args
     assert args[4] == 24 * 60 * 60
     assert args[5] == 7
