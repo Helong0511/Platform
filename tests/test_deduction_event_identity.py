@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.core.deduction.deduction_manager import DeductionManager
+from app.core.deduction.deduction_manager import ConversionStats, DeductionManager
 
 
 def _config(strategy="random"):
@@ -111,9 +111,14 @@ async def test_hash_strategy_uses_event_key_instead_of_click_id():
     }
     captured = {}
     manager._get_stats_for_decision = AsyncMock(
-        return_value=__import__("app.core.deduction.deduction_manager", fromlist=["ConversionStats"]).ConversionStats(total=0, deducted=0, processed=0)
+        return_value=ConversionStats(total=0, deducted=0, processed=0)
     )
-    manager.should_deduct_volume = lambda config, stats, decision_key="": captured.setdefault("key", decision_key) or True
+
+    def capture_decision_key(config, stats, decision_key=""):
+        captured["key"] = decision_key
+        return True
+
+    manager.should_deduct_volume = capture_decision_key
     manager._incr_decision_deducted = AsyncMock(return_value=True)
 
     result = await manager.apply_deduction(
