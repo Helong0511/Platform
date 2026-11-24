@@ -18,6 +18,7 @@ from app.core.postback.checks.discount_checker import DiscountChecker
 from app.core.postback.savers.conversion_saver import ConversionSaver
 from app.core.postback.transformers.click_associator import ClickAssociator
 from app.core.postback.validators.duplicate_checker import DuplicateChecker
+from app.core.postback_event_name import normalize_event_name
 from app.models.models import Offer, PostbackConversion, ShortLink
 
 logger = logging.getLogger(__name__)
@@ -229,7 +230,7 @@ async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[Decimal, An
             {
                 "platform": ctx.platform,
                 "conversion_id": ctx.normalized_data.get("conversion_id"),
-                "event_name": ctx.normalized_data.get("event_name"),
+                "event_name": normalize_event_name(ctx.normalized_data.get("event_name")),
             }
             if ctx.normalized_data.get("event_identity_verified") is True
             else None
