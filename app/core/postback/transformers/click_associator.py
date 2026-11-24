@@ -43,9 +43,31 @@ class ClickAssociator:
         token_assoc: Dict[str, Any],
     ) -> Dict[str, Any]:
         """合并数据库点击行与令牌解析结果，url_params 做键级合并。"""
+        # 数据库点击快照与签名 Token 的身份字段必须一致；Token 不得静默覆盖 DB。
+        identity_fields = (
+            "click_id",
+            "offer_id",
+            "publisher_id",
+            "advertiser_id",
+            "short_link_id",
+        )
+        conflicts = [
+            key
+            for key in identity_fields
+            if db_assoc.get(key) is not None
+            and token_assoc.get(key) is not None
+            and str(db_assoc.get(key)) != str(token_assoc.get(key))
+        ]
+        if conflicts:
+            logger.error(
+                "Click Token 与数据库身份快照冲突，拒绝归因：fields=%s",
+                ",".join(conflicts),
+            )
+            raise ValueError("Click attribution identity conflict")
+
         merged = dict(db_assoc)
         for key, value in token_assoc.items():
-            if value is None or key == "url_params":
+            if value is None or key == "url_params" or key in identity_fields:
                 continue
             merged[key] = value
         merged["url_params"] = merge_association_url_params(
