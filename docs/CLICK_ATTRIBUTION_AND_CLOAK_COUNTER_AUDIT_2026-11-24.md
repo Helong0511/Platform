@@ -134,3 +134,45 @@ Postback pipeline 的 `step_associate_click()` 直接接收该返回值。后续
 **上线顺序：** 先备份并执行新增列迁移，再部署包含新 ORM/Token/归因逻辑的应用。迁移前不得部署新代码；迁移完成后再逐步切换实例。新旧实例短暂混跑时，旧实例新写入的 Click 可能没有 `client_id`，但签名 Token 仍包含快照；若旧实例生成的 Token 也不含快照，则该事件客户归属保持 NULL，属于安全降级，不得用当前 Publisher 值补猜。
 
 **验证范围：** 已新增 Token 载荷保留/解析、DB 缺失快照时签名 Token 补充、客户快照冲突拒绝、enrichment 不覆盖快照，以及 ConversionSaver 不回退当前 Publisher 的测试。代码已提交，必须以最终提交 SHA 的 CI 结果为准；尚未执行生产 MySQL migration，也没有声称历史数据已回填。
+
+
+### 5.3 斗篷 /report 去重与计数一致性复核（Head 6206e2d）
+
+本节基于当前 PR Head 的 `cloak_report.py`、`cloak_report_service.py`、`cloak_click_persist.py`、`short_link_cache.py` 复核。仅记录代码事实与风险；本轮未修改计数业务逻辑，也未执行真实 MySQL/Redis 故障注入测试。
+
+#### A. Redis 去重故障时 fail-open
+
+`try_mark_report_dedupe()` 在 Redis 客户端不存在或 `SET NX` 抛异常时返回 False；路由将 False 解释为“首次请求”，继续执行 click 计数和 CAPI 调度。因此 Redis 故障期间，同一 session 的重复请求可能重复计数/重复上报。
+
+反向故障窗口也存在：Redis `SET NX` 成功后，后续 DB 计数失败或任务未执行，去重键仍保留 24 小时；客户端重试会被当作重复请求直接返回成功，无法补偿未完成的计数。
+
+#### B. click 去重身份并不总是存在
+
+`build_dedupe_key()` 对 click 阶段仅在存在 cookie `session_id` 时返回去重键；无 session_id 时返回 None，完全不去重。load 阶段则回退到 fbclid 或 anon。必须明确 click 事件的可信稳定身份，不能把缺少 session cookie 的请求视为天然唯一。
+
+#### C. HTTP 成功响应与持久化结果脱节
+
+`record_cloak_click_count()` 在 DB 查询不到短链时只记录 warning 并 return；DB commit 捕获 `StaleDataError` 后 rollback 并继续 return。路由随后仍可能返回 `status=success`，并调度 CAPI。另有 Click 明细写入通过 FastAPI BackgroundTasks 执行，`persist_cloak_report_click()` 捕获异常后只记录日志，不向调用方传播，也没有持久 outbox 可恢复。
+
+因此接口 success 当前不等价于“计数已可靠提交且明细已持久化”。必须明确 API 接收语义：若改为持久化确认，需 DB 事务成功后才返回 success；若采用异步接收，则必须先把事件和幂等身份写入持久 inbox/outbox，再 ACK。
+
+#### D. DB 计数仍有两个 read-modify-write 入口
+
+- 缓存未命中：`record_cloak_click_count()` 读取 ShortLink ORM 对象，赋值 `(click_count or 0) + 1` 后 commit。
+- 缓存命中：先对 Redis 缓存 JSON 做 get-modify-set；随后 BackgroundTasks 中 `persist_cloak_report_click(sync_short_link_click_count=True)` 再读取 ORM 值并加一提交。
+
+两者都不是 DB 原子递增；并发事务可能覆盖增量。缓存命中分支还存在 Redis JSON 覆盖写丢更新风险。不能仅将 Redis 更新替换为 INCR 就认为 DB 计数已正确。
+
+#### E. 建议的目标语义与修复架构
+
+1. 为一次 click 定义稳定的 `event_id`（由桥页生成并重试复用，服务端校验格式/长度）；若客户端无法提供，需定义可验证的替代身份，不能用每次请求新生成的 UUID 作为重试幂等键。
+2. MySQL 建立持久事件 inbox/ledger，至少包含 `event_id` 唯一键、`short_link_id`、接收时间、处理状态、必要的脱敏审计字段；唯一键冲突表示已接收，不能再次计数。
+3. 在同一 MySQL 事务中插入事件身份并执行 `UPDATE short_links SET click_count = COALESCE(click_count, 0) + 1 WHERE id = :id`；检查 rowcount，事务提交后才标记事件完成。并发重试通过唯一键保证 exactly-once effect。
+4. 若 Click 明细也必须可靠，使用同事务 outbox；独立 worker 幂等消费 outbox，不能仅依赖 FastAPI BackgroundTasks。明确 outbox 状态、重试、死信、监控和人工重放机制。
+5. Redis 只作为可重建缓存/非权威加速层。DB 事务成功后失效短链缓存；失效失败记录可重试 outbox 或依靠短 TTL 明确最终一致窗口。禁止把 Redis 去重结果作为财务/统计唯一幂等凭证。
+6. 定义接口 ACK：持久 inbox 事务提交后才返回“已接收”；若 DB 不可用返回可重试错误。CAPI 外部调用采用独立 outbox 和外部事件幂等键，不能因 DB 成功但外部请求失败而丢失重试。
+7. 对 `session_id` 缺失、Redis unavailable、SET NX 成功后 DB rollback、commit unknown、并发重复 event_id、不同 event_id 同时到达、缓存 hit/miss、outbox worker 崩溃/重启等场景做真实 MySQL + Redis 集成/故障注入测试。
+
+#### F. 当前结论
+
+斗篷 /report 计数目前仍有 P1 级数据完整性风险：Redis 去重 fail-open、先去重后持久化导致无法补偿、无 session_id 时不去重、DB read-modify-write 丢增量、BackgroundTasks 非持久化，以及 success 响应可能早于可靠持久化。该路径应在上线前修复。此项与 PR #205 的 CPL Redis/DB 扣量一致性是两个独立问题，不能用其中一个的修复替代另一个。
