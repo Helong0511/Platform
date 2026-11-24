@@ -35,6 +35,16 @@ class DeductionConfigCache:
             db: 异步数据库会话，缓存未命中时从此加载 ConversionDeductionConfig
         """
         self.db = db
+        # 同一扣量决策会按 Offer/广告主/渠道逐级查询，单个请求只读取一次 Generation。
+        self._generation: Optional[int] = None
+
+    async def _get_generation(self) -> int:
+        """在当前请求的 AsyncSession 内复用数据库权威版本，避免逐层重复查询。"""
+        if self._generation is None:
+            self._generation = await get_cache_generation(
+                self.db, namespace="cpl:deduction_config"
+            )
+        return self._generation
     
     async def get_config(
         self,
@@ -52,7 +62,7 @@ class DeductionConfigCache:
             配置对象或 None
         """
         # 尝试从缓存获取
-        generation = await get_cache_generation(self.db, namespace="cpl:deduction_config")
+        generation = await self._get_generation()
         cache_key = f"{CONFIG_CACHE_PREFIX}{level}:{target_id}:g{generation}"
         cached_data = await get_cached(cache_key, key_prefix='deduction')
         
