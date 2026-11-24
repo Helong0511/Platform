@@ -167,6 +167,8 @@ class Click(Base):
     click_id = Column(String(255), unique=True, nullable=False, comment='点击ID（系统生成，唯一标识）')
     offer_id = Column(Integer, ForeignKey("offers.id", ondelete="SET NULL"), nullable=True, comment='关联的Offer ID')
     publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="SET NULL"), nullable=True, comment='关联的渠道ID')
+    # 点击时客户归属快照：不设置外键，客户后续变更/删除不得改写历史归属。
+    client_id = Column(Integer, nullable=True, comment='点击时客户ID快照（不可随渠道归属变更）')
     advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="SET NULL"), nullable=True, comment='关联的广告主ID')
     short_link_id = Column(Integer, ForeignKey("short_links.id", ondelete="SET NULL"), nullable=True, comment='关联的短链接ID')
     click_time = Column(DateTime, nullable=False, comment='点击时间')
