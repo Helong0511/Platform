@@ -80,7 +80,7 @@ await set_with_jitter(
 ```
 
 **效果：**
-- ✅ TTL 在 270-330 秒之间随机
+- ✅ TTL 在 301-330 秒之间随机（base_ttl + [1, jitter_range]）
 - ✅ 避免同时过期
 - ✅ 系统负载更平稳
 
