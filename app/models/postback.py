@@ -87,6 +87,37 @@ class PostbackConversion(Base):
         UniqueConstraint("platform", "conversion_id", "event_name", name="uq_postback_platform_conversion_event"),
     )
 
+class PostbackEventReceipt(Base):
+    """
+    Postback 事件幂等收据。
+
+    正常转化的收据会在转化记录同一事务写入后删除；被扣量、不会写入
+    postback_conversions 的事件保留收据，确保后续重试仍能识别为重复事件。
+    """
+    __tablename__ = "postback_event_receipts"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True, comment="收据 ID")
+    platform = Column(String(50), nullable=False, comment="平台标识")
+    conversion_id = Column(String(255), nullable=False, comment="上游转化唯一标识")
+    event_name = Column(String(100), nullable=False, comment="规范化事件名称")
+    created_at = Column(
+        DateTime,
+        default=get_app_now_naive,
+        nullable=False,
+        comment="收据创建时间（应用时区）",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "platform",
+            "conversion_id",
+            "event_name",
+            name="uq_postback_event_receipt_identity",
+        ),
+        Index("idx_postback_event_receipt_created_at", "created_at"),
+    )
+
+
 class PostbackForwardLog(Base):
     """
     Postback 下游转发日志

@@ -30,6 +30,7 @@ from app.core.postback.pipeline import (
     step_associate_click,
     step_check_duplicate,
     step_save_conversion,
+    step_release_event_receipt,
     step_validate_offer_status,
     deactivate_short_links_on_cap_exceeded,
     conversion_status_for_cap,
@@ -358,6 +359,10 @@ class PostbackProcessor:
             logger.info(
                 f"转化记录保存成功：ID={conversion.id}"
             )
+
+            # 正式转化已写入本事务；释放临时收据前，正式表唯一键已成为持久幂等凭证。
+            # volume-deducted 分支提前返回，不执行此步骤，因此其收据会随扣量日志一起提交。
+            await step_release_event_receipt(pipe_ctx)
 
             # 转发任务与转化记录在同一事务入队，避免提交后进程崩溃造成首次转发丢失。
             should_forward_pub = bool(
