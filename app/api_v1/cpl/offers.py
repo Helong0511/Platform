@@ -982,7 +982,7 @@ async def update_offer(
 
     # 提交业务数据与审计日志后立即清理热点键；失败由事务内 Outbox 持久化重试。
     await commit_audit_log(db)
-    await CacheInvalidator.invalidate_offer_cache(offer.id)
+    await invalidate_hot_offer_cache(offer.id)
 
     # 重新加载关联信息（使用服务层方法）
     offer = await offer_service.get_offer_by_id(offer.id, current_user, include_advertiser=True,
