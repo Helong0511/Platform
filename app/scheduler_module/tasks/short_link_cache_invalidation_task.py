@@ -15,7 +15,7 @@ async def process_short_link_cache_invalidation_task():
     """定期消费短链接缓存失效事件，Redis 故障时由 Outbox 自动重试。"""
     started = datetime.now(timezone.utc)
     try:
-        stats = await process_short_link_cache_invalidation_outbox(batch_size=20)
+        stats = await process_short_link_cache_invalidation_outbox(batch_size=100)
         duration = (datetime.now(timezone.utc) - started).total_seconds()
         message = (
             f"执行完成：claimed={stats['claimed']} success={stats['success']} "
