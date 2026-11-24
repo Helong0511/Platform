@@ -38,7 +38,9 @@ async def test_deduction_log_persistence_failure_is_fail_closed_even_when_redis_
     monkeypatch.setattr(
         discount_checker_module,
         "find_deduction_config",
-        AsyncMock(return_value=SimpleNamespace(id=7)),
+        AsyncMock(return_value=SimpleNamespace(
+            id=7, advertiser_id=12, offer_id=None, publisher_id=None
+        )),
     )
     monkeypatch.setattr(
         discount_checker_module,
