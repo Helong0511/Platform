@@ -6,14 +6,15 @@ from app.core import cache_manager
 
 class FakeRedis:
     def __init__(self):
+        active_key = f"{cache_manager.TAG_TO_KEYS_PREFIX}offer:7"
         self.sets = {
-            f"{cache_manager.TAG_TO_KEYS_PREFIX}offer:7": {
+            active_key: {
                 "cache:good",
                 "cache:bad",
             }
         }
         self.deleted = []
-        self.expiries = {}
+        self.expiries = {active_key: 7 * 24 * 3600}
         self.fail_key = "cache:bad"
         self.fail_srem_once = False
         self.inject_concurrent_add = False
@@ -39,6 +40,7 @@ class FakeRedis:
                     self.fail_rotate_persist_once = False
                     raise RuntimeError("simulated PERSIST failure")
                 # PERSIST 必须在 RENAME 前执行，避免批次仍携带活动集合 TTL。
+                self.expiries.pop(active_key, None)
                 if self.fail_rotate_rename_once:
                     self.fail_rotate_rename_once = False
                     raise RuntimeError("simulated RENAME failure")
@@ -212,6 +214,7 @@ async def test_rotation_persist_failure_keeps_active_members_and_retry_recovers(
 
     assert first_deleted == 0
     assert redis.sets[active_key] == {"cache:good", "cache:bad"}
+    assert redis.expiries[active_key] == 7 * 24 * 3600
     assert len(redis.sets[pending_key]) == 1
 
     redis.fail_key = None
@@ -234,6 +237,7 @@ async def test_rotation_rename_failure_keeps_active_members_and_retry_recovers(r
 
     assert first_deleted == 0
     assert redis.sets[active_key] == {"cache:good", "cache:bad"}
+    assert active_key not in redis.expiries
     assert len(redis.sets[pending_key]) == 1
 
     redis.fail_key = None
