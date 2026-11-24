@@ -10,7 +10,8 @@ import os
 import secrets
 import socket
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import exists, or_, select, update
+from sqlalchemy.orm import aliased
 
 from app.core.database import AsyncSessionLocal
 from app.core.redis_client import get_redis_client
@@ -38,6 +39,8 @@ async def process_offer_cache_invalidation_outbox(
 
     async with AsyncSessionLocal() as db:
         # 最后一次执行后进程崩溃，租约过期时必须收敛为 terminal failed。
+        # 第二阶段必须等第一阶段已完成（success/failed），且只能在后续调度轮次认领，
+        # 避免同一轮把两个阶段连续执行，失去延迟复查的意义。
         await db.execute(
             update(OfferCacheInvalidationOutbox)
             .where(
@@ -67,20 +70,34 @@ async def process_offer_cache_invalidation_outbox(
             )
         )
 
+        first_pass = aliased(OfferCacheInvalidationOutbox)
+        first_pass_finished = exists(
+            select(1).where(
+                first_pass.offer_id == OfferCacheInvalidationOutbox.offer_id,
+                first_pass.phase == "first",
+                first_pass.status.in_(("success", "failed")),
+            )
+        )
+        pending_due = (
+            (OfferCacheInvalidationOutbox.status == "pending")
+            & (OfferCacheInvalidationOutbox.run_at <= get_app_now_sql_expression())
+            & (
+                (OfferCacheInvalidationOutbox.phase == "first")
+                | (
+                    (OfferCacheInvalidationOutbox.phase == "second")
+                    & first_pass_finished
+                )
+            )
+        )
+        expired_lease = (
+            (OfferCacheInvalidationOutbox.status == "processing")
+            & (OfferCacheInvalidationOutbox.lease_until <= get_app_now_sql_expression())
+        )
         rows = (
             await db.execute(
                 select(OfferCacheInvalidationOutbox)
                 .where(
-                    or_(
-                        (
-                            (OfferCacheInvalidationOutbox.status == "pending")
-                            & (OfferCacheInvalidationOutbox.run_at <= get_app_now_sql_expression())
-                        ),
-                        (
-                            (OfferCacheInvalidationOutbox.status == "processing")
-                            & (OfferCacheInvalidationOutbox.lease_until <= get_app_now_sql_expression())
-                        ),
-                    ),
+                    or_(pending_due, expired_lease),
                     OfferCacheInvalidationOutbox.attempt_count
                     < OfferCacheInvalidationOutbox.max_attempts,
                 )
