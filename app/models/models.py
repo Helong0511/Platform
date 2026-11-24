@@ -14,7 +14,7 @@ from app.models.cap_reservation import CapReservation
 from app.models.deduction import ConversionDeductionConfig, ConversionDeductionLog
 from app.models.security import SensitivePathProbeLog, SensitiveBlockedIP, PostbackIpWhitelist
 from app.models.third_party import ThirdPartyReportLog, ThirdPartyReportIdentityLock
-from app.models.cache_invalidation import CacheNamespaceGeneration, CacheInvalidationOutbox
+from app.models.cache_invalidation import CacheNamespaceGeneration, CacheInvalidationOutbox, OfferCacheInvalidationOutbox
 
 __all__ = [
     "Base", "UserRole",
@@ -61,4 +61,5 @@ __all__ = [
     "ThirdPartyReportIdentityLock",
     "CacheNamespaceGeneration",
     "CacheInvalidationOutbox",
+    "OfferCacheInvalidationOutbox",
 ]
