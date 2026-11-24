@@ -117,6 +117,11 @@ class OfferCacheInvalidationOutbox(Base):
             "idx_offer_cache_invalidation_due",
             "status",
             "run_at",
+            "id",
+        ),
+        Index(
+            "idx_offer_cache_invalidation_lease",
+            "status",
             "lease_until",
             "id",
         ),
