@@ -501,8 +501,8 @@ async def update_client(
 
     from app.services.cache_invalidation_outbox import advance_cache_generation
     await advance_cache_generation(db)
-        # Client 创建、关联用户调整或删除会影响用户统计中的客户关联人数。
-        await advance_cache_generation(db, namespace="user_stats")
+    # Client 创建、关联用户调整或删除会影响用户统计中的客户关联人数。
+    await advance_cache_generation(db, namespace="user_stats")
     logger.info(f"Client {client.company_name} updated by {current_user.username}")
 
     wrote_audit = False
