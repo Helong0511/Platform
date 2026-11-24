@@ -12,6 +12,7 @@ from sqlalchemy.future import select
 from sqlalchemy import and_
 
 from app.models.models import ConversionDeductionConfig
+from app.services.cache_invalidation_outbox import get_cache_generation
 from app.core.infrastructure.cache_compat import (
     invalidate_cache,
     legacy_get_cached as get_cached,
@@ -51,7 +52,8 @@ class DeductionConfigCache:
             配置对象或 None
         """
         # 尝试从缓存获取
-        cache_key = f"{CONFIG_CACHE_PREFIX}{level}:{target_id}"
+        generation = await get_cache_generation(self.db, namespace="cpl:deduction_config")
+        cache_key = f"{CONFIG_CACHE_PREFIX}{level}:{target_id}:g{generation}"
         cached_data = await get_cached(cache_key, key_prefix='deduction')
         
         if cached_data and isinstance(cached_data, dict):
@@ -131,7 +133,8 @@ class DeductionConfigCache:
     
     async def _save_to_cache(self, level: str, target_id: int, config: ConversionDeductionConfig):
         """保存配置到缓存"""
-        cache_key = f"{CONFIG_CACHE_PREFIX}{level}:{target_id}"
+        generation = await get_cache_generation(self.db, namespace="cpl:deduction_config")
+        cache_key = f"{CONFIG_CACHE_PREFIX}{level}:{target_id}:g{generation}"
         
         # 序列化为字典（避免 SQLAlchemy 对象序列化问题）
         config_dict = {
