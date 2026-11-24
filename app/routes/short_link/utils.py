@@ -23,7 +23,6 @@ from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.offer_cache import set_offer_cache
 from app.core.utils import get_app_now_naive
 from app.models.models import Offer, OfferPublisherAssignment
 
@@ -74,7 +73,6 @@ async def resolve_offer_id(offer_id: Optional[int], db: AsyncSession) -> tuple[O
                     offer.id, offer.is_active, offer.status,
                 )
                 return None, None
-            await set_offer_cache(offer.id, offer.advertiser_id, offer.offer_name)
             return offer.id, offer.advertiser_id
     except Exception as e:
         logger.warning(f"查询Offer失败: offer_id={offer_id}, error={e}")
