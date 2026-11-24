@@ -854,3 +854,45 @@ GROUP BY publisher_id HAVING COUNT(*) > 1;
 6. 测试必须覆盖真实 MySQL 唯一约束和 collation；SQLite/mock 测试不能替代 MySQL 身份比较语义验证。
 
 **验收结论：** 当前 PR #205 仍不能解除 Draft。即使 Full Audit 与 Emergency Security CI 通过，也不能证明 BFT/通用入口已经具备事件级身份正确性。只有身份提取、receipt 唯一键、扣量决策键和 MySQL 账本使用同一规范事件身份，并通过真实 MySQL 并发/重试测试后，才可重新评估。
+
+
+## 23. 扣量决策发生在 Postback 数据库提交之前，Redis 状态没有事务补偿（2026-11-24 追加）
+
+本节对 PR #205 当前 Head `2fac90ce25a8eb0a6be03d5a09718613d4bf021e` 的运行链路进行逐段核查。文件与代码位置均已从该 Head 读取确认。
+
+### 23.1 事件身份在调用链中被缩减为 click_id
+
+- `app/core/postback/pipeline.py::step_apply_discount` 调用 `DiscountChecker.calculate(..., click_id=ctx.normalized_data.get("click_id"))`，没有传入 platform、conversion_id、event_name。
+- `app/core/postback/checks/discount_checker.py::DiscountChecker.calculate` 的接口只有 click_id；命中配置后调用 `apply_deduction(..., click_id=click_id)`。
+- `app/core/deduction/deduction_manager.py::DeductionManager.apply_deduction` 构造 `decision_key = click_id or offer:{offer_id}:seq:{stats.processed}`。
+- 因而 PR #206 receipt 虽然可以保护 `platform + conversion_id + event_name` 的事件重复身份，但扣量决策仍不使用该身份；receipt 的存在本身不会让扣量决策变成事件幂等。
+
+### 23.2 Redis 写入早于正式转化事务提交
+
+`DeductionManager` 当前扣量路径的顺序：
+
+1. `_get_stats_for_decision()` 先查询 MySQL 统计，再执行 Redis Lua `_DECISION_STATS_LUA` 获取序号/扣量计数。
+2. 命中扣量时，`_reserve_volume_deduction()` 或 `_incr_decision_deducted()` 立即写 Redis。
+3. `DiscountChecker.calculate()` 随后写数据库扣量日志。
+4. `PostbackProcessor.process()` 才继续执行 Cap 预留、保存正式转化、Outbox 入队及事务提交。
+
+若第 3/4 步失败，或后续事务回滚，Redis 中的 sequence/reservation 不会随 MySQL rollback 自动撤销。当前代码只对 Cap reservation 有单独补偿流程，未见对 deduction decision sequence/reservation 的等价事务化补偿。
+
+### 23.3 失败与重试可能产生永久统计漂移
+
+- 在 Redis Lua 成功后、MySQL commit 前发生异常，Redis 已经把请求计入 sequence；重试会再次增加序号。
+- 哈希策略使用 click_id 时，同一 click 的多个 conversion/event 仍共享决策键；无 click_id 时 fallback sequence 会在重试时变化。
+- 预留扣量名额成功、DB 事务回滚时，Redis deducted 仍保留；之后的请求可能被错误地拒绝扣量或导致比例偏离。
+- 反向情况也需验证：Redis key 过期/重启后，MySQL 已提交的历史统计与新序列初始化如何衔接，避免重复预留或额度突然重置。
+
+### 23.4 修复验收必须满足的事务边界
+
+1. 在同一个 MySQL 事务内，以规范事件身份取得/创建唯一 decision ledger 行，并锁定对应 scope 计数行。
+2. 重复事件必须读取并返回已提交的既有决策；不能再次推进统计序号或再次预留。
+3. 统计分子/分母只统计已经提交的唯一事件终态；事务回滚不能改变后续请求可见的统计结果。
+4. 正式转化、扣量日志、事件 receipt、decision ledger 终态以及需要原子保证的 Outbox 必须有明确且一致的提交边界。
+5. Redis 只能作为可重建缓存、通知或非权威加速层；不得以 Redis INCR/TTL 作为财务账本或不可回滚的扣量名额来源。
+6. 真实 MySQL 测试必须覆盖：扣量决策后日志插入失败、正式转化插入失败、Outbox 插入失败、COMMIT 失败/连接中断、回滚后同事件重试、不同事件并发、Redis 重启/清空/过期，以及 2/10/50 并发下账本计数和扣量比例。
+7. 测试需在目标 MySQL 版本及生产隔离级别执行；SQLite、mock Redis、单元测试不能证明锁、隔离级别和事务提交边界正确。
+
+**当前结论：** PR #205 的 Redis 决策序号与扣量预留在 MySQL 事务提交前发生，是明确的财务一致性阻断项。不能通过延长 TTL、在异常时简单 DECR，或仅增加重试测试解决；必须以 MySQL 事件级账本作为唯一权威来源后再验收。
