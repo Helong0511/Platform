@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.core import deduction
 from app.core.deduction.deduction_cache import DeductionConfigCache
 from app.core.infrastructure import cache_compat
 from app.services.cpl.deduction import helpers as deduction_helpers
