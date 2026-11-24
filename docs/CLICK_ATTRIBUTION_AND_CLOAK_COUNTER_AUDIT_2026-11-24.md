@@ -221,3 +221,51 @@ Postback pipeline 的 `step_associate_click()` 直接接收该返回值。后续
 3. **load/click 两阶段身份需分开设计。** 同一桥页的 load 与 click 是不同业务事件；不能只以 session_id 或 fbclid 做全局唯一键而误把 click 阶段吞掉。幂等键至少要包含阶段/事件类型、短链范围和客户端稳定事件 ID；若业务定义“同一 session 的 click 只计一次”，也必须明确该规则与 Meta event_id 的关系。
 
 **新增验收测试：** 对 DB commit 异常、短链不存在、Redis 去重服务异常、后台任务调度失败分别断言真实 HTTP status；模拟相同逻辑请求缺失 fbclid 的多次重试，验证不会因新 UUID 产生多个业务事件；模拟 load 与 click 共用 session，验证二者不会互相去重。
+
+
+### 5.6 桥页模板请求确认与版本漂移审计（Head 320861d）
+
+检查仓库全部 `scripts/*.html` 桥页模板：`master.html`、`109.html`、`111.html`、`113.html`、`145.html`、`146.html`、`149.html`、`150.html`。这些模板没有统一调用同一个前端报告客户端，事件确认与重试逻辑存在明显版本漂移。
+
+**1. click 请求是否检查 HTTP 状态并不一致**
+
+- `master.html`、`109.html`、`145.html`、`149.html`：直接 `await fetch(reportUrl)`，只要 Promise resolve 就写入 `click_reported=true`，不检查 `response.ok`，HTTP 4xx/5xx 也会被标记成功。
+- `111.html`、`113.html`、`146.html`：首次请求检查 `response.ok`，失败时启动一次后台重试；后台重试没有统一持久确认机制，且跳转不等待重试完成。
+- `150.html`：首次请求检查 `response.ok`，后台重试成功时才设置标记；但重试仍通过即将跳转页面的定时任务发起，浏览器导航可能中止请求，不能视为可靠投递。
+- load 注入脚本 `CLOAK_LOAD_REPORT_INJECT` 仅在 `r.ok` 时写入 `cloak_load_fb_done`，但同样只做单次请求，没有稳定事件 ID 和可靠重试队列。
+
+因此，不能笼统认为所有桥页都忽略状态码；准确结论是：旧模板存在“HTTP 错误被当成功”，较新模板虽检查首次响应，但后台重试仍不能保证送达。模板之间行为不一致本身就是上线风险。
+
+**2. fbclid 与业务事件 ID 混用**
+
+- `master.html`、`109.html`、`111.html`、`113.html`、`145.html`、`149.html` 的 `getFbclid()` 在 URL 无 fbclid 时直接生成新 UUID，且没有统一持久到 sessionStorage。
+- `146.html`、`150.html` 会将 fbclid 存入 sessionStorage 并复用；`CLOAK_LOAD_REPORT_INJECT` 也会保存 `ad_event_fbclid`。
+- 即使复用 fbclid，它仍然是广告点击标识，不应被当作一个明确的 load/click 业务事件幂等 ID。一次桥页展示可产生 load 和 click 两个独立事件，二者必须有不同的稳定事件身份。
+
+**3. 前端无持久重试队列**
+
+当前重试均为内存中的 `setTimeout`，页面跳转、关闭、崩溃或网络离线都可能中止；sessionStorage 的成功标记只是浏览器本地状态，不能证明服务端已把事件和计数提交到 MySQL。失败后台重试也没有统一可观测状态或后续恢复入口。
+
+**4. GET 请求携带用户字段并产生写操作**
+
+桥页使用 `GET /report?id=...&fbclid=...&email=...&phone=...` 触发计数和 CAPI 副作用。查询参数可能进入反向代理、访问日志、APM、浏览器历史及错误跟踪；GET 还容易被预取/重放机制意外触发。即使 email/phone 当前多为页面生成值，也不应把用户字段放在 URL query 中。应迁移为 POST JSON，配置明确的请求大小/字段长度限制、内容类型、CSRF/Origin 策略、速率限制和日志脱敏；兼容期不得把 GET 当作安全、幂等的只读请求。
+
+**5. 模板测试缺口**
+
+当前 `tests/` 中可见的 `test_cloak_bridge_atomic_write.py` 覆盖的是桥页文件原子替换、路径遍历和静态资源路径，不覆盖报告事件。没有发现覆盖上述 8 个桥页模板的行为一致性测试，也没有验证：
+- 请求返回 4xx/5xx 时不写入成功标记；
+- 首次请求超时但服务端已提交、随后重试时不会重复计数；
+- 后台重试在页面跳转前后的实际行为；
+- load 与 click 的稳定事件 ID 相互隔离；
+- sessionStorage 不可用/配额异常时仍有明确降级语义；
+- POST 请求和 URL 中不含 email/phone 的隐私约束。
+
+**修复建议（先统一协议，再迁移模板）：**
+
+1. 抽取单一桥页报告客户端脚本，由服务端统一注入/版本化；不要在 8 份 HTML 中继续维护 8 套复制粘贴的请求逻辑。
+2. 每次桥页展示持久生成一个 `page_event_id`；load 使用 `load:{page_event_id}`，用户实际点击时生成并保存 `click:{page_event_id}:{action_id}`。同一逻辑事件重试必须复用原 ID；不同用户动作不得共享 ID。ID 应由安全随机源生成，服务端校验格式、长度、短链和 phase 作用域。
+3. 前端只在服务端返回明确的 `accepted=true` 且 HTTP 2xx 后写成功标记；后台重试必须检查响应，页面导航前使用有限等待策略，但真正可靠性仍由服务端持久 inbox/outbox 保证，不能依赖浏览器留在页面。
+4. 将 `GET` 改为 `POST` JSON；服务端不要把 email/phone、原始 URL 或 token 放进日志；代理层也要关闭该接口请求体记录或执行字段脱敏。
+5. 用自动化测试对所有模板做静态/运行时契约校验，确保每个模板只调用统一客户端，并验证 HTTP 错误、超时、重复提交、导航取消、load/click 区分和无存储权限场景。
+
+**本节结论：** 桥页模板存在多个实现代际，HTTP 确认、重试和 fbclid 持久化行为不一致。前端本地标记不能作为持久化凭据；在统一 POST + 稳定事件 ID + MySQL inbox/outbox 协议完成前，不应将 /report 统计称为可靠、幂等或 exactly-once。
