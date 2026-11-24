@@ -521,13 +521,14 @@ class DeductionManager:
             end_time = get_app_now_naive()
             start_time = end_time - timedelta(hours=hours)
 
+            # 使用半开区间 [start_time, end_time)，避免相邻窗口边界事件重复计数。
             conversion_conditions = [
                 PostbackConversion.created_at >= start_time,
-                PostbackConversion.created_at <= end_time,
+                PostbackConversion.created_at < end_time,
             ]
             volume_log_conditions = [
                 ConversionDeductionLog.created_at >= start_time,
-                ConversionDeductionLog.created_at <= end_time,
+                ConversionDeductionLog.created_at < end_time,
                 ConversionDeductionLog.deducted_volume > 0,
                 ConversionDeductionLog.conversion_id.is_(None),
             ]
