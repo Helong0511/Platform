@@ -171,3 +171,58 @@ def test_click_client_snapshot_conflict_is_rejected():
         ClickAssociator._merge_token_and_db_association(
             db_association, token_association
         )
+
+def test_token_payload_preserves_click_time_client_snapshot():
+    from app.core.tracking.click_token import (
+        REASON_OK,
+        _build_generation_attempts,
+        association_from_parsed,
+    )
+
+    attempts = _build_generation_attempts(
+        offer_id=10,
+        publisher_id=20,
+        advertiser_id=30,
+        short_link_id=None,
+        url_params=None,
+        extra={"client_id": 55},
+    )
+    assert attempts[0]["client_id"] == 55
+
+    association = association_from_parsed({
+        "valid": True,
+        "reason": REASON_OK,
+        "userinfo": {
+            "oid": 10,
+            "pub": 20,
+            "aid": 30,
+            "client_id": 55,
+        },
+        "sysinfo": {},
+    })
+    assert association["client_id"] == 55
+
+
+def test_token_enrichment_does_not_replace_client_snapshot_with_current_publisher():
+    class _Publisher:
+        client_id = 99
+
+    class _NoQuerySession:
+        async def execute(self, statement):
+            raise AssertionError("publisher is already attached; no query expected")
+
+    association = {
+        "_from_token": True,
+        "click_id": "click-123",
+        "publisher_id": 20,
+        "publisher": _Publisher(),
+        "client_id": 55,
+        "offer_id": None,
+        "advertiser_id": None,
+    }
+
+    import asyncio
+    enriched = asyncio.run(
+        ClickAssociator._enrich_association(association, _NoQuerySession())
+    )
+    assert enriched["client_id"] == 55
