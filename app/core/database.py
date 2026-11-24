@@ -277,6 +277,10 @@ async def init_db():
             admin.set_password(settings.FIRST_SUPERUSER_PASSWORD)
             session.add(admin)
             try:
+                # 首次创建管理员也会改变用户统计，版本与用户记录必须同事务提交。
+                from app.services.cache_invalidation_outbox import advance_cache_generation
+
+                await advance_cache_generation(session, namespace="user_stats")
                 await session.commit()
                 logger.info(f"默认管理员账户已创建: {settings.FIRST_SUPERUSER}")
             except IntegrityError as exc:
