@@ -13,6 +13,7 @@ class FakeRedis:
             }
         }
         self.deleted = []
+        self.expiries = {}
         self.fail_key = "cache:bad"
         self.fail_srem_once = False
         self.inject_concurrent_add = False
@@ -21,6 +22,7 @@ class FakeRedis:
         if script == cache_manager._ADD_TAG_MEMBER_LUA:
             key, member, ttl = args
             self.sets.setdefault(key, set()).add(member)
+            self.expiries[key] = int(ttl)
             return 1
 
         if script == cache_manager._ROTATE_TAG_BATCH_LUA:
@@ -167,8 +169,6 @@ async def test_add_cache_tag_uses_atomic_add_and_expiry(redis_client):
     result = await cache_manager.CacheManager.add_cache_tag("cache:one", ["offer:7"])
 
     assert result is True
-    assert redis.sets[f"{cache_manager.TAG_TO_KEYS_PREFIX}offer:7"] == {
-        "cache:good",
-        "cache:bad",
-        "cache:one",
-    }
+    tag_key = f"{cache_manager.TAG_TO_KEYS_PREFIX}offer:7"
+    assert redis.sets[tag_key] == {"cache:good", "cache:bad", "cache:one"}
+    assert redis.expiries[tag_key] == 7 * 24 * 3600
