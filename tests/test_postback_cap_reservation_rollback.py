@@ -296,6 +296,9 @@ async def test_postback_precommit_queue_failure_rolls_back_cap_reservation_once(
         async def rollback(self):
             self.rollback_calls += 1
 
+        async def execute(self, statement):
+            return _Result(scalar=None)
+
     class FakeHandler:
         async def validate(self, raw_data):
             return True, None
