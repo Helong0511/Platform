@@ -224,6 +224,16 @@ async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[Decimal, An
         advertiser_id=advertiser_id,
         click_id=ctx.normalized_data.get("click_id"),
         db=ctx.db,
+        # 财务决策身份必须来自显式 conversion_id；click_id 只用于归因。
+        event_identity=(
+            {
+                "platform": ctx.platform,
+                "conversion_id": ctx.normalized_data.get("conversion_id"),
+                "event_name": ctx.normalized_data.get("event_name"),
+            }
+            if ctx.normalized_data.get("event_identity_verified") is True
+            else None
+        ),
     )
     ctx.final_payout = final_payout
     ctx.skip_save_and_forward = skip_save
