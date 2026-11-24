@@ -138,6 +138,28 @@ def _initialize_schema(database: str) -> None:
         connection.close()
 
 
+async def _wait_for_mysql_lock_wait(thread_id: int) -> None:
+    """等待第二个 MySQL 事务确实阻塞在唯一收据键上，再提交第一个事务。"""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 8
+    while loop.time() < deadline:
+        connection = _admin_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT trx_state FROM information_schema.innodb_trx "
+                    "WHERE trx_mysql_thread_id = %s",
+                    (thread_id,),
+                )
+                row = cursor.fetchone()
+        finally:
+            connection.close()
+        if row and row[0] == "LOCK WAIT":
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError("第二个 MySQL 事务未进入唯一收据锁等待状态")
+
+
 async def _run_scenario(scenario: str) -> None:
     database = _create_database()
     engine = None
@@ -180,11 +202,19 @@ async def _run_scenario(scenario: str) -> None:
                 return
 
             # 普通转化：正式记录插入与临时收据删除必须在同一事务提交。
+            retry_started = asyncio.Event()
+            retry_connection_id = {}
+
             waiting = asyncio.create_task(
-                _concurrent_normal_retry(session_factory, identity)
+                _concurrent_normal_retry(
+                    session_factory,
+                    identity,
+                    retry_started,
+                    retry_connection_id,
+                )
             )
-            # 给第二个连接时间完成首次普通 SELECT 并阻塞在唯一收据 INSERT。
-            await asyncio.sleep(0.25)
+            await asyncio.wait_for(retry_started.wait(), timeout=5)
+            await _wait_for_mysql_lock_wait(retry_connection_id["value"])
             await first.execute(
                 text(
                     "INSERT INTO postback_conversions "
@@ -204,8 +234,15 @@ async def _run_scenario(scenario: str) -> None:
         _drop_database(database)
 
 
-async def _concurrent_normal_retry(session_factory, identity) -> bool:
+async def _concurrent_normal_retry(
+    session_factory,
+    identity,
+    started: asyncio.Event,
+    connection_id: dict,
+) -> bool:
     async with session_factory() as session:
+        connection_id["value"] = await session.scalar(text("SELECT CONNECTION_ID()"))
+        started.set()
         duplicate = await DuplicateChecker.is_duplicate(**identity, db=session)
         await session.commit()
         return duplicate
