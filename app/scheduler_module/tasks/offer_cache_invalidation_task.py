@@ -15,7 +15,7 @@ async def process_offer_cache_invalidation_task():
     """定期消费 Offer 热点缓存失效事件，Redis 故障时由 Outbox 自动重试。"""
     started = datetime.now(timezone.utc)
     try:
-        stats = await process_offer_cache_invalidation_outbox(batch_size=50)
+        stats = await process_offer_cache_invalidation_outbox(batch_size=10)
         duration = (datetime.now(timezone.utc) - started).total_seconds()
         message = (
             f"执行完成：claimed={stats['claimed']} success={stats['success']} "
