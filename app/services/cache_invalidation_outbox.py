@@ -74,7 +74,7 @@ async def advance_cache_generation(
 ) -> int:
     """原子递增版本并登记 Outbox；调用方负责提交业务事务。
 
-    Migration 会预置 ad_data 单例行。UPDATE 锁定该行并串行化同一命名空间
+    对应迁移必须预置该命名空间单例行。UPDATE 锁定该行并串行化同一命名空间
     的并发变更；Outbox event_key 唯一约束防止重复登记。
     """
     result = await db.execute(

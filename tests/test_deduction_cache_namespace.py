@@ -64,14 +64,17 @@ async def test_deduction_config_read_write_and_invalidation_share_query_namespac
         created_at=None,
         updated_at=None,
     )
-    service = DeductionConfigCache(db=object())
+    db = SimpleNamespace(scalar=AsyncMock(return_value=17))
+    service = DeductionConfigCache(db=db)
     service._load_from_db = AsyncMock(return_value=config)
 
     await service.get_config("offer", 7)
 
-    expected_key = "query_cache:cpl:deduction_config:offer:7"
+    expected_key = "query_cache:cpl:deduction_config:offer:7:g17"
     assert cache.get_keys == [expected_key]
     assert cache.set_keys == [expected_key]
+    # 读取与缓存回填必须复用同一数据库 Generation，不能在回填时重新取版本。
+    db.scalar.assert_awaited_once()
 
     # 两条现有失效入口都必须命中与读写相同的 Redis 键空间。
     await service.invalidate("offer", 7)
@@ -79,3 +82,25 @@ async def test_deduction_config_read_write_and_invalidation_share_query_namespac
 
     expected_pattern = "query_cache:cpl:deduction_config:offer:7*"
     assert cache.patterns == [expected_pattern, expected_pattern]
+
+
+@pytest.mark.asyncio
+async def test_deduction_cache_reads_generation_once_for_all_priority_levels(monkeypatch):
+    cache = _Cache()
+
+    async def get_backend():
+        return cache
+
+    monkeypatch.setattr(cache_compat, "get_cache_backend", get_backend)
+    monkeypatch.setattr(cache_compat, "get_metrics_collector", lambda: _Metrics())
+
+    db = SimpleNamespace(scalar=AsyncMock(return_value=29))
+    service = DeductionConfigCache(db=db)
+    service._load_from_db = AsyncMock(return_value=None)
+
+    await service.get_config("offer", 7)
+    await service.get_config("advertiser", 3)
+    await service.get_config("publisher", 11)
+
+    db.scalar.assert_awaited_once()
+    assert service._generation == 29

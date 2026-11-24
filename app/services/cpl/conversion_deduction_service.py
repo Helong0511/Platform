@@ -22,6 +22,7 @@ from app.schemas.cpl.deduction import (
     DeductionStatsResponse,
 )
 from app.services.base_service import BaseService
+from app.services.cache_invalidation_outbox import advance_cache_generation
 from app.services.cpl.deduction import helpers as deduction_helpers
 from app.services.cpl.deduction import mappers as deduction_mappers
 from app.services.cpl.deduction.helpers import ConfigLevel, resolve_config_level_target
@@ -68,7 +69,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             self.db.add(config)
             await self.db.flush()
             await self.db.refresh(config)
-            await deduction_helpers.invalidate_config_cache(level, target_id)
+            await advance_cache_generation(self.db, namespace="cpl:deduction_config")
             config = await deduction_helpers.load_config_with_relations(self.db, config.id)
             logger.info(
                 "扣减配置创建成功: config_id=%s, level=%s, target_id=%s",
@@ -150,7 +151,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             await self.db.flush()
             await self.db.refresh(config)
             if level and target_id:
-                await deduction_helpers.invalidate_config_cache(level, target_id)
+                await advance_cache_generation(self.db, namespace="cpl:deduction_config")
             config = await deduction_helpers.load_config_with_relations(self.db, config_id)
             logger.info("扣减配置更新成功: config_id=%s", config_id)
             return config
@@ -189,7 +190,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             await self.db.flush()
             await self.db.refresh(config)
             if level and target_id:
-                await deduction_helpers.invalidate_config_cache(level, target_id)
+                await advance_cache_generation(self.db, namespace="cpl:deduction_config")
             logger.info(
                 "扣减配置状态更新成功: config_id=%s, is_active=%s",
                 config_id,
@@ -238,7 +239,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             await self.db.delete(config)
             await self.db.flush()
             if level and target_id:
-                await deduction_helpers.invalidate_config_cache(level, target_id)
+                await advance_cache_generation(self.db, namespace="cpl:deduction_config")
             logger.info("扣减配置删除成功: config_id=%s", config_id)
         except Exception as e:
             await self.db.rollback()
@@ -289,10 +290,9 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             )
             await self.db.flush()
 
-            for config in configs:
-                level, target_id = resolve_config_level_target(config)
-                if level and target_id:
-                    await deduction_helpers.invalidate_config_cache(level, target_id)
+            if configs:
+                # 批量变更只推进一次全局扣量配置 Generation，避免逐条重复写 Outbox。
+                await advance_cache_generation(self.db, namespace="cpl:deduction_config")
 
             logger.info(
                 "批量更新扣减配置状态成功: config_ids=%s, is_active=%s, count=%s",
@@ -360,10 +360,9 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             )
             await self.db.flush()
 
-            for config in configs:
-                level, target_id = resolve_config_level_target(config)
-                if level and target_id:
-                    await deduction_helpers.invalidate_config_cache(level, target_id)
+            if configs:
+                # 批量删除只推进一次全局扣量配置 Generation。
+                await advance_cache_generation(self.db, namespace="cpl:deduction_config")
 
             logger.info(
                 "批量删除扣减配置成功: config_ids=%s, count=%s",

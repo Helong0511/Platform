@@ -12,6 +12,7 @@ from sqlalchemy.future import select
 from sqlalchemy import and_
 
 from app.models.models import ConversionDeductionConfig
+from app.services.cache_invalidation_outbox import get_cache_generation
 from app.core.infrastructure.cache_compat import (
     invalidate_cache,
     legacy_get_cached as get_cached,
@@ -34,6 +35,16 @@ class DeductionConfigCache:
             db: 异步数据库会话，缓存未命中时从此加载 ConversionDeductionConfig
         """
         self.db = db
+        # 同一扣量决策会按 Offer/广告主/渠道逐级查询，单个请求只读取一次 Generation。
+        self._generation: Optional[int] = None
+
+    async def _get_generation(self) -> int:
+        """在当前请求的 AsyncSession 内复用数据库权威版本，避免逐层重复查询。"""
+        if self._generation is None:
+            self._generation = await get_cache_generation(
+                self.db, namespace="cpl:deduction_config"
+            )
+        return self._generation
     
     async def get_config(
         self,
@@ -51,7 +62,8 @@ class DeductionConfigCache:
             配置对象或 None
         """
         # 尝试从缓存获取
-        cache_key = f"{CONFIG_CACHE_PREFIX}{level}:{target_id}"
+        generation = await self._get_generation()
+        cache_key = f"{CONFIG_CACHE_PREFIX}{level}:{target_id}:g{generation}"
         cached_data = await get_cached(cache_key, key_prefix='deduction')
         
         if cached_data and isinstance(cached_data, dict):
@@ -85,7 +97,7 @@ class DeductionConfigCache:
         
         if config:
             # 写入缓存
-            await self._save_to_cache(level, target_id, config)
+            await self._save_to_cache(level, target_id, config, generation)
         
         return config
     
@@ -129,9 +141,15 @@ class DeductionConfigCache:
             logger.error(f"从数据库加载配置失败：{e}", exc_info=True)
             return None
     
-    async def _save_to_cache(self, level: str, target_id: int, config: ConversionDeductionConfig):
-        """保存配置到缓存"""
-        cache_key = f"{CONFIG_CACHE_PREFIX}{level}:{target_id}"
+    async def _save_to_cache(
+        self,
+        level: str,
+        target_id: int,
+        config: ConversionDeductionConfig,
+        generation: int,
+    ):
+        """使用读取配置时的同一 Generation 保存，避免并发更新后的旧值写入新版本键。"""
+        cache_key = f"{CONFIG_CACHE_PREFIX}{level}:{target_id}:g{generation}"
         
         # 序列化为字典（避免 SQLAlchemy 对象序列化问题）
         config_dict = {
