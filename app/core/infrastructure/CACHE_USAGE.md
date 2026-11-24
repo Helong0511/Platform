@@ -331,6 +331,27 @@ await report_metrics_to_redis()
 
 *无保护情况下的高负载
 
+
+## 🔐 缓存一致性与故障降级（2026-11-24）
+
+### Redis 不可用时
+- `get_cache_backend()` 可能退化为当前进程的 `MemoryCacheBackend`；它不是跨 Worker 共享缓存。
+- 对持久化 Outbox，必须确认真实 Redis 共享存储成功后才能将事件标记为 `success`。仅清理本机内存缓存不算成功。
+- Offer Outbox 直接获取 Redis 客户端；Redis 返回不可用或删除命令异常时保留任务并按退避策略重试。
+- 缓存故障应尽量 fail-open，不得把可由数据库完成的正常业务操作误判为失败；权限、财务和状态判断必须回到数据库权威数据。
+
+### 缓存键与失效模式
+- `cache_query()` 使用参数 JSON 的 MD5 摘要作为键，最终形态为 `query_cache:{md5}`。只按可读业务名称（例如 `offer:list:*`）清理，不能命中这种哈希键。
+- 广告数据专用键通过 `build_ad_data_query_cache_key()` 生成 `ad_data:{kind}:{md5}`，便于按 `query_cache:ad_data:` 命名空间失效。
+- 旧兼容 API 的 `key_prefix` 主要用于指标分类；不要假设它必然成为 Redis key 的可读前缀。
+- Offer 热点缓存 `offer:cache:{id}` 与查询缓存 `query_cache:` 是两个独立键空间，必须分别清理。
+
+### Outbox 运维
+- Offer 与广告数据缓存失效任务当前按每分钟调度；Offer 第二阶段须等第一阶段结束后在后续调度轮次执行，不是精确 1 秒实时执行。
+- 关注任务结果中的 `retryable`、`failed`、`lease_lost`。持续失败应进入日志/监控告警处置，不能手工把事件直接改成 success。
+- 不允许使用 `FLUSHDB`、`KEYS *` 或无边界全库清理来解决缓存不一致。
+- 新增缓存域时，必须先梳理读写者、键格式、业务事务边界和回填路径，再决定采用 Generation、精确键 Outbox 或其他可验证方案。
+
 ---
 
 ## 🎯 总结
