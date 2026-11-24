@@ -341,14 +341,16 @@ class DeductionManager:
             redis.call('EXPIRE', deducted_key, ttl)
         end
     end
-    local seq = redis.call('INCR', seq_key)
-    if seq == 1 then
+    local existing_seq = redis.call('GET', seq_key)
+    local init_processed = tonumber(ARGV[3]) or 0
+    if not existing_seq then
+        redis.call('SET', seq_key, init_processed)
         redis.call('EXPIRE', seq_key, ttl)
-    else
-        local seq_ttl = redis.call('TTL', seq_key)
-        if seq_ttl < 0 or seq_ttl > ttl then
-            redis.call('EXPIRE', seq_key, ttl)
-        end
+    end
+    local seq = redis.call('INCR', seq_key)
+    local seq_ttl = redis.call('TTL', seq_key)
+    if seq_ttl < 0 or seq_ttl > ttl then
+        redis.call('EXPIRE', seq_key, ttl)
     end
     local deducted = tonumber(redis.call('GET', deducted_key) or '0')
     return {seq, deducted}
@@ -409,11 +411,12 @@ class DeductionManager:
                 deducted_key,
                 self._decision_ttl(hours),
                 int(base_stats.deducted or 0),
+                int(base_stats.processed or 0),
             )
             seq = int(result[0])
             redis_deducted = int(result[1])
-            # Redis 重启或计数器过期后，以数据库窗口基线恢复，不从 0 重新轮询。
-            processed = max(seq - 1, int(base_stats.processed or 0))
+            # Redis 重启或计数器过期后，Lua 从数据库窗口基线继续递增。
+            processed = seq
             total = max(seq, int(base_stats.total or 0))
             deducted = max(redis_deducted, int(base_stats.deducted or 0))
             return ConversionStats(
