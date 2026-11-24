@@ -142,9 +142,9 @@ async def _wait_for_mysql_lock_wait(thread_id: int) -> None:
     """等待第二个 MySQL 事务确实阻塞在唯一收据键上，再提交第一个事务。"""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + 8
-    while loop.time() < deadline:
-        connection = _admin_connection()
-        try:
+    connection = _admin_connection()
+    try:
+        while loop.time() < deadline:
             with connection.cursor() as cursor:
                 cursor.execute(
                     "SELECT trx_state FROM information_schema.innodb_trx "
@@ -152,11 +152,11 @@ async def _wait_for_mysql_lock_wait(thread_id: int) -> None:
                     (thread_id,),
                 )
                 row = cursor.fetchone()
-        finally:
-            connection.close()
-        if row and row[0] == "LOCK WAIT":
-            return
-        await asyncio.sleep(0.05)
+            if row and row[0] == "LOCK WAIT":
+                return
+            await asyncio.sleep(0.05)
+    finally:
+        connection.close()
     raise AssertionError("第二个 MySQL 事务未进入唯一收据锁等待状态")
 
 
