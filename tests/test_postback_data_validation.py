@@ -144,3 +144,40 @@ async def test_bft_handler_rejects_overlong_conversion_and_event_ids():
     assert "过长" in error_id
     assert valid_event is False
     assert "event_name" in error_event
+
+
+
+@pytest.mark.parametrize(
+    "payload, expected_conversion_id",
+    [
+        (
+            {"conversion_id": "   ", "click_id": "click-fallback", "payout": "1.0000"},
+            "click-fallback",
+        ),
+        (
+            {"conversion_id": "", "conversionId": "conversion-camel", "click_id": "click-1", "payout": "1.0000"},
+            "conversion-camel",
+        ),
+        (
+            {"conversion_id": "conversion-explicit", "click_id": "click-1", "payout": "1.0000"},
+            "conversion-explicit",
+        ),
+    ],
+)
+def test_blank_conversion_id_is_ignored_before_fallback(payload, expected_conversion_id):
+    valid, errors = DataValidator.validate(payload, "test-platform")
+    normalized = DataNormalizer.normalize(payload, "test-platform")
+
+    assert valid is True
+    assert errors == []
+    assert normalized["conversion_id"] == expected_conversion_id
+
+
+def test_validator_rejects_blank_conversion_id_without_click_id():
+    valid, errors = DataValidator.validate(
+        {"conversion_id": "   ", "payout": "1.0000"},
+        "test-platform",
+    )
+
+    assert valid is False
+    assert "缺少必填字段：click_id 或 conversion_id" in errors
