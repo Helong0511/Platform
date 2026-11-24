@@ -319,10 +319,7 @@ class DeductionManager:
         )
         return result.scalars().first()
     
-    @staticmethod
-    def _decision_ttl(hours: int) -> int:
-        """决策计数器按统计窗口过期，避免 24 小时统计混入两天历史。"""
-        return max(60, int(hours) * 3600)
+    DECISION_SEQ_TTL = 86400 * 2  # 决策序号缓存 2 天
 
     # Lua：初始化 deducted（NX）+ INCR processed 序号，返回 seq 与 deducted
     _DECISION_STATS_LUA = """
@@ -330,27 +327,12 @@ class DeductionManager:
     local deducted_key = KEYS[2]
     local ttl = tonumber(ARGV[1])
     local init_deducted = tonumber(ARGV[2]) or 0
-    local existing_deducted = redis.call('GET', deducted_key)
-    local current_deducted = tonumber(existing_deducted or '0')
-    -- Redis 计数低于数据库窗口基线时向上校准，不能让预留计数倒退。
-    if (not existing_deducted) or current_deducted < init_deducted then
+    if redis.call('EXISTS', deducted_key) == 0 then
         redis.call('SET', deducted_key, init_deducted)
         redis.call('EXPIRE', deducted_key, ttl)
-    else
-        local deducted_ttl = redis.call('TTL', deducted_key)
-        if deducted_ttl < 0 or deducted_ttl > ttl then
-            redis.call('EXPIRE', deducted_key, ttl)
-        end
-    end
-    local existing_seq = redis.call('GET', seq_key)
-    local init_processed = tonumber(ARGV[3]) or 0
-    if not existing_seq then
-        redis.call('SET', seq_key, init_processed)
-        redis.call('EXPIRE', seq_key, ttl)
     end
     local seq = redis.call('INCR', seq_key)
-    local seq_ttl = redis.call('TTL', seq_key)
-    if seq_ttl < 0 or seq_ttl > ttl then
+    if seq == 1 then
         redis.call('EXPIRE', seq_key, ttl)
     end
     local deducted = tonumber(redis.call('GET', deducted_key) or '0')
@@ -410,16 +392,13 @@ class DeductionManager:
                 2,
                 seq_key,
                 deducted_key,
-                self._decision_ttl(hours),
+                self.DECISION_SEQ_TTL,
                 int(base_stats.deducted or 0),
-                int(base_stats.processed or 0),
             )
             seq = int(result[0])
-            redis_deducted = int(result[1])
-            # Redis 重启或计数器过期后，Lua 从数据库窗口基线继续递增。
-            processed = seq
-            total = max(seq, int(base_stats.total or 0))
-            deducted = max(redis_deducted, int(base_stats.deducted or 0))
+            deducted = int(result[1])
+            processed = seq - 1
+            total = max(seq, base_stats.total)
             return ConversionStats(
                 total=total,
                 deducted=deducted,
@@ -458,7 +437,7 @@ class DeductionManager:
                 1,
                 deducted_key,
                 int(limit),
-                self._decision_ttl(hours),
+                self.DECISION_SEQ_TTL,
             )
             return int(new_val) > 0
         except Exception as e:
@@ -486,7 +465,7 @@ class DeductionManager:
         try:
             val = await redis.incr(deducted_key)
             if val == 1:
-                await redis.expire(deducted_key, self._decision_ttl(hours))
+                await redis.expire(deducted_key, self.DECISION_SEQ_TTL)
         except Exception as e:
             logger.debug("同步 decision_deducted 失败（可忽略）: %s", e)
 
@@ -562,7 +541,6 @@ class DeductionManager:
             )
             volume_log_count = int(volume_log_count_result.scalar_one() or 0)
 
-            # 已扣量数量包括未入库的扣量日志；金额扣减日志不增加扣量数量。
             deducted_conversion_conditions = [
                 *conversion_conditions,
                 PostbackConversion.deducted_volume > 0,
@@ -611,7 +589,7 @@ class DeductionManager:
         if publisher_id:
             parts.append(f"pub:{publisher_id}")
         parts.append(f"hours:{hours}")
-        # 新键空间隔离旧版 48 小时计数，部署后从数据库窗口基线安全冷启动。
+        # 新键空间隔离旧统计口径缓存，避免继续使用仅含扣减日志的旧结果。
         parts.append("schema:v2")
         return ":".join(parts)
     
