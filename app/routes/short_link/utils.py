@@ -2,7 +2,7 @@
 短链接重定向工具函数模块。
 
 功能说明：
-- ``resolve_offer_id``：按主键或上游 Offer ID 从数据库解析 Offer 与广告主，不写入无业务读取者的热点缓存
+- ``resolve_offer_id``：按主键或上游 Offer ID 解析 Offer 与广告主，并回写 Offer 缓存
 - ``offer_id_from_numeric_dp``：斗篷场景下纯数字 dp 与平台 Offer 主键对齐
 - ``resolve_cloak_click_offer_and_publisher``：/report 写入 clicks 时的 offer、渠道归因（含分配校验）
 - ``resolve_default_publisher_for_offer``：短链未绑渠道时按产品分配回退 publisher
@@ -23,6 +23,7 @@ from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.offer_cache import set_offer_cache
 from app.core.utils import get_app_now_naive
 from app.models.models import Offer, OfferPublisherAssignment
 
@@ -73,6 +74,7 @@ async def resolve_offer_id(offer_id: Optional[int], db: AsyncSession) -> tuple[O
                     offer.id, offer.is_active, offer.status,
                 )
                 return None, None
+            await set_offer_cache(offer.id, offer.advertiser_id, offer.offer_name)
             return offer.id, offer.advertiser_id
     except Exception as e:
         logger.warning(f"查询Offer失败: offer_id={offer_id}, error={e}")
