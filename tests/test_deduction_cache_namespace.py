@@ -64,12 +64,13 @@ async def test_deduction_config_read_write_and_invalidation_share_query_namespac
         created_at=None,
         updated_at=None,
     )
-    service = DeductionConfigCache(db=object())
+    db = SimpleNamespace(scalar=AsyncMock(return_value=17))
+    service = DeductionConfigCache(db=db)
     service._load_from_db = AsyncMock(return_value=config)
 
     await service.get_config("offer", 7)
 
-    expected_key = "query_cache:cpl:deduction_config:offer:7"
+    expected_key = "query_cache:cpl:deduction_config:offer:7:g17"
     assert cache.get_keys == [expected_key]
     assert cache.set_keys == [expected_key]
 
