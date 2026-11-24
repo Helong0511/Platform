@@ -154,9 +154,11 @@ async def open_closed_short_links_task():
                     .values(is_active=True)
                 )
                 # 定时自动重新启用也必须与失效事件同事务提交，不能绕过短链接缓存 Outbox。
-                await enqueue_short_link_cache_invalidation(db, short_code)
+                await enqueue_short_link_cache_invalidation(db, short_code, flush=False)
                 opened += 1
 
+            if opened > 0:
+                await db.flush()
             await db.commit()
             if opened > 0:
                 logger.info(f"✅ 成功打开 {opened} 个短链接（Cap 有余量）")
