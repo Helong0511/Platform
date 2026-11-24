@@ -1,4 +1,5 @@
 """Postback event_name must use one non-NULL canonical value across ingest and approval."""
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -148,6 +149,27 @@ async def test_release_receipt_normalizes_event_name_and_targets_receipt_table()
     sql = str(db.statement)
     assert "postback_event_receipts" in sql
     assert "default" in db.statement.compile().params.values()
+
+
+def test_processor_releases_temporary_receipt_only_after_formal_conversion_save():
+    processor_source = (
+        Path(__file__).resolve().parents[1]
+        / "app"
+        / "core"
+        / "postback"
+        / "processor.py"
+    ).read_text(encoding="utf-8")
+
+    skip_branch = processor_source.index("if skip_save_and_forward:")
+    save_conversion = processor_source.index(
+        "conversion = await step_save_conversion(pipe_ctx)"
+    )
+    release_receipt = processor_source.index(
+        "await step_release_event_receipt(pipe_ctx)"
+    )
+
+    # 被扣量分支提前提交并返回；只有正式转化成功写入后才释放临时收据。
+    assert skip_branch < save_conversion < release_receipt
 
 
 @pytest.mark.asyncio
