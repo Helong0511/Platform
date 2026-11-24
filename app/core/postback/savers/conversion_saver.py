@@ -172,12 +172,10 @@ class ConversionSaver:
         db: AsyncSession,
     ) -> tuple[Optional[int], Optional[int]]:
         """仅从服务器侧点击/渠道关系确定客户，并验证产品属于该客户。"""
+        # 只能使用点击时保存/签名的客户归属快照；禁止从 Publisher 当前配置回填历史点击。
         trusted_client_id = (
             click_association.get('client_id') if click_association else None
         )
-        if trusted_client_id is None and click_association:
-            trusted_publisher = click_association.get('publisher')
-            trusted_client_id = getattr(trusted_publisher, 'client_id', None)
 
         supplied_client_id = normalized_data.get('client_id')
         if supplied_client_id is not None:
