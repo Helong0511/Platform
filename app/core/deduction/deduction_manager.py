@@ -33,6 +33,7 @@ from app.core.infrastructure.cache_compat import (
 )
 from app.core.redis_client import get_redis_client
 from app.core.config import settings
+from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -521,7 +522,7 @@ class DeductionManager:
             # 正常转化不一定有 ConversionDeductionLog；扣金额日志对应的转化已在
             # postback_conversions 中，不能再重复计数。仅将 conversion_id 为空且
             # deducted_volume > 0 的日志作为“未入库扣量转化”补入统计。
-            end_time = datetime.now()
+            end_time = get_app_now_naive()
             start_time = end_time - timedelta(hours=hours)
 
             conversion_conditions = [
