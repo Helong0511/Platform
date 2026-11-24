@@ -1,6 +1,7 @@
 """CPL 扣量统计窗口和 Redis 冷启动基线回归测试。"""
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from datetime import datetime
 
 import pytest
 
@@ -24,6 +25,11 @@ async def test_recent_stats_counts_saved_conversions_and_only_unpersisted_volume
         AsyncMock(return_value=None),
     )
     monkeypatch.setattr(deduction_manager_module, "set_cached", AsyncMock())
+    monkeypatch.setattr(
+        deduction_manager_module,
+        "get_app_now_naive",
+        lambda: datetime(2026, 11, 24, 12, 0, 0),
+    )
 
     db = SimpleNamespace(
         execute=AsyncMock(
