@@ -70,7 +70,7 @@ async def test_offer_invalidation_commit_persists_first_and_second_pass():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("offer_id", [0, -1, True])
+@pytest.mark.parametrize("offer_id", [0, -1, True, 1.5, "42"])
 async def test_offer_invalidation_rejects_invalid_ids(offer_id):
     class NoWriteSession:
         def add_all(self, events):
