@@ -111,11 +111,11 @@ class DiscountChecker:
                             deduction_reason="postback_volume_deduction",
                         )
                     except Exception as log_exc:
-                        logger.warning("记录扣量日志失败：%s", log_exc)
-                        if not settings.DEDUCTION_FAIL_OPEN:
-                            raise DeductionProcessingError(
-                                f"记录扣量日志失败: {log_exc}"
-                            ) from log_exc
+                        # DB 扣量审计日志是财务凭证；Redis fail-open 不能吞掉持久化失败。
+                        logger.error("记录扣量日志失败，回滚本次 Postback：%s", log_exc)
+                        raise DeductionProcessingError(
+                            f"记录扣量日志失败: {log_exc}"
+                        ) from log_exc
                     logger.info(
                         "转化扣量命中：offer_id=%s publisher_id=%s，跳过入库与转发",
                         offer_id,
@@ -136,11 +136,11 @@ class DiscountChecker:
                                 deduction_reason="postback_amount_deduction",
                             )
                         except Exception as log_exc:
-                            logger.warning("记录扣金额日志失败：%s", log_exc)
-                            if not settings.DEDUCTION_FAIL_OPEN:
-                                raise DeductionProcessingError(
-                                    f"记录扣金额日志失败: {log_exc}"
-                                ) from log_exc
+                            # DB 扣金额审计日志是财务凭证；持久化失败必须回滚并重试。
+                            logger.error("记录扣金额日志失败，回滚本次 Postback：%s", log_exc)
+                            raise DeductionProcessingError(
+                                f"记录扣金额日志失败: {log_exc}"
+                            ) from log_exc
         except DeductionProcessingError:
             raise
         except Exception as exc:
