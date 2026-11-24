@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS offer_cache_invalidation_outbox (
     completed_at DATETIME(6) NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uq_offer_cache_invalidation_event_key (event_key),
-    KEY idx_offer_cache_invalidation_due (status, run_at, lease_until, id),
+    KEY idx_offer_cache_invalidation_due (status, run_at, id),
+    KEY idx_offer_cache_invalidation_lease (status, lease_until, id),
     UNIQUE KEY uq_offer_cache_invalidation_group_phase (group_key, phase),
     KEY idx_offer_cache_invalidation_offer (offer_id, phase, status),
     CONSTRAINT chk_offer_cache_invalidation_phase
