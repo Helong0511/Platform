@@ -279,6 +279,7 @@ CREATE TABLE IF NOT EXISTS `clicks`  (
   `click_id` VARCHAR(255) NOT NULL COMMENT '点击ID（系统生成，唯一标识）',
   `offer_id` INT NULL DEFAULT NULL COMMENT '关联的Offer ID',
   `publisher_id` INT NULL DEFAULT NULL COMMENT '关联的渠道ID',
+  `client_id` INT NULL DEFAULT NULL COMMENT '点击时客户ID快照（不设外键，保留历史归属）',
   `advertiser_id` INT NULL DEFAULT NULL COMMENT '关联的广告主ID',
   `short_link_id` INT NULL DEFAULT NULL COMMENT '关联的短链接ID',
   `click_time` DATETIME NOT NULL COMMENT '点击时间',
