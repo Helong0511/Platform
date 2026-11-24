@@ -42,7 +42,9 @@ async def test_get_cache_generations_fails_closed_when_namespace_is_missing():
         {"ad_data": 17, "user_stats": 10},
     ],
 )
-def test_dashboard_cache_key_changes_when_data_or_permission_generation_changes(changed):
+def test_dashboard_cache_key_changes_when_data_or_permission_generation_changes(
+    changed,
+):
     original = {"ad_data": 17, "user_stats": 9}
 
     old_key = _build_dashboard_cache_key("dashboard_stats", "month", 123, original)
@@ -64,8 +66,12 @@ def test_dashboard_permission_and_data_mutations_advance_fenced_namespaces():
     user_service = Path("app/services/user_service.py").read_text(encoding="utf-8")
     client_service = Path("app/services/client_service.py").read_text(encoding="utf-8")
     product_service = Path("app/services/product_service.py").read_text(encoding="utf-8")
-    ad_data_update = Path("app/services/ad_data/commands/update_command.py").read_text(encoding="utf-8")
-    ad_data_delete = Path("app/services/ad_data/commands/delete_command.py").read_text(encoding="utf-8")
+    ad_data_update = Path(
+        "app/services/ad_data/commands/update_command.py"
+    ).read_text(encoding="utf-8")
+    ad_data_delete = Path(
+        "app/services/ad_data/commands/delete_command.py"
+    ).read_text(encoding="utf-8")
 
     assert "await self.invalidate_user_stats_cache()" in user_service
     assert 'namespace="user_stats"' in user_service
