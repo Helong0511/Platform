@@ -1240,15 +1240,13 @@ if settings.is_production:
     if settings.USE_TRACKING_TOKEN:
         from app.core.tracking.ad_tracking_codec import AdTrackingCodec
 
-        key_hex = settings.AD_TRACKING_MASTER_KEY_HEX.strip()
-        if not key_hex:
-            logger.error(
-                "生产环境 USE_TRACKING_TOKEN=true 必须设置 AD_TRACKING_MASTER_KEY_HEX"
+        try:
+            AdTrackingCodec.validate_production_master_key(
+                settings.AD_TRACKING_MASTER_KEY_HEX
             )
-        elif key_hex == AdTrackingCodec._DEFAULT_KEY_HEX:
-            logger.error(
-                "生产环境不得使用 AdTrackingCodec 内置开发默认密钥，请配置独立密钥"
-            )
+        except ValueError as exc:
+            # 追踪令牌密钥错误会影响归因真实性，生产环境必须拒绝启动。
+            raise RuntimeError(f"生产环境追踪令牌密钥配置不安全：{exc}") from exc
     if not settings.HUGUANG_API_KEY.strip():
         logger.warning("生产环境未配置 HUGUANG_API_KEY，Huguang 定时任务将跳过")
     if not settings.TQT_APP_KEY.strip():
