@@ -644,7 +644,7 @@ class DeductionManager:
         Args:
             config: 扣减配置
             stats: 转化统计信息
-            decision_key: 确定性键（click_id），保证多进程一致
+            decision_key: 由 platform + conversion_id + event_name 构建的稳定事件键
             
         Returns:
             是否应该扣减
@@ -696,7 +696,7 @@ class DeductionManager:
         Args:
             conversion_data: 转化数据字典
             config: 扣减配置
-            click_id: 点击ID
+            click_id: 点击归因 ID（不参与事件决策键）
             advertiser_id: 广告主ID
             offer_id: Offer ID
             publisher_id: 渠道ID
@@ -742,7 +742,7 @@ class DeductionManager:
                 logger.warning("扣量统计不可用，本次跳过扣量但继续计算扣金额: %s", exc)
                 volume_decision_available = False
 
-        # 判断是否扣量（确定性哈希 / 间隔策略 + Redis 原子预留防超扣）
+        # 仅可信事件身份的随机/哈希策略可进入决策；顺序策略等待 MySQL 账本。
         if volume_decision_available:
             decision_key = event_decision_key or ""
             want_deduct = self.should_deduct_volume(config, stats, decision_key=decision_key)
