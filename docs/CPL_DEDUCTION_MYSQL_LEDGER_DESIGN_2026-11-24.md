@@ -671,3 +671,48 @@ API 路由位于 `app/api_v1/cpl/conversions/deductions.py`。上述六条服务
 
 **当前结论：** 已确认异常吞噬路径存在于代码；尚未修改运行时代码，也未声称该缺陷已修复。该问题必须在 PR #205 的财务事务重构/配置读取重构中一并关闭。
 
+### 18.6 补充确认：单条更新/启用也可顺序制造重复 active 配置
+
+进一步核对 `ConversionDeductionConfigUpdate` 与两个更新方法后，发现重复 active 配置不只来自并发创建：
+
+- `app/schemas/cpl/deduction.py::ConversionDeductionConfigUpdate` 允许传入 `is_active`。
+- `ConversionDeductionService.update_deduction_config()` 对传入字段直接 setattr；没有在 `is_active` 从 false 变 true 时调用 `check_existing_config()`。
+- `update_deduction_config_status()` 同样直接设置 `config.is_active = is_active`，没有检查同 scope 是否已有另一条 active 配置。
+- 因此即使没有并发，只要同 scope 已有 active 配置 A，再把 inactive 配置 B 启用，当前服务也可能成功产生两条 active 配置。
+
+修复时不能只给 create 路径加锁/检查。创建、通用 PUT 更新中的 is_active 变更、PATCH status 启用、批量启用必须共用同一个 scope lock 和唯一性校验；批量启用应先验证整个目标集合不会在同一 scope 内互相冲突，也不会与集合外已有 active 配置冲突，再统一更新。停用操作则需同样持锁，避免与并发启用/决策交错。
+
+建议在目标 MySQL 执行以下只读检查，迁移前保存结果并人工处理冲突：
+
+```sql
+-- 发现 scope 字段不是“恰好一个非 NULL”的历史配置
+SELECT id, advertiser_id, offer_id, publisher_id,
+       (advertiser_id IS NOT NULL)
+       + (offer_id IS NOT NULL)
+       + (publisher_id IS NOT NULL) AS scope_count,
+       is_active
+FROM conversion_deduction_configs
+WHERE (advertiser_id IS NOT NULL)
+    + (offer_id IS NOT NULL)
+    + (publisher_id IS NOT NULL) <> 1;
+
+-- 查找重复的 active Advertiser / Offer / Publisher 配置
+SELECT 'advertiser' AS scope_type, advertiser_id AS scope_id,
+       COUNT(*) AS active_count
+FROM conversion_deduction_configs
+WHERE is_active = 1 AND advertiser_id IS NOT NULL
+GROUP BY advertiser_id HAVING COUNT(*) > 1
+UNION ALL
+SELECT 'offer', offer_id, COUNT(*)
+FROM conversion_deduction_configs
+WHERE is_active = 1 AND offer_id IS NOT NULL
+GROUP BY offer_id HAVING COUNT(*) > 1
+UNION ALL
+SELECT 'publisher', publisher_id, COUNT(*)
+FROM conversion_deduction_configs
+WHERE is_active = 1 AND publisher_id IS NOT NULL
+GROUP BY publisher_id HAVING COUNT(*) > 1;
+```
+
+这些 SQL 只检查当前数据库快照，不会自动修复；生产执行前应确认只读权限、备份查询结果，并由业务方确定保留哪条策略。不能按最高 priority 自动删除其它财务配置。
+
