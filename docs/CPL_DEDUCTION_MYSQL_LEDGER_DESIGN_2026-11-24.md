@@ -1481,3 +1481,54 @@ PostbackProcessor.process() 在拿到 click_association=None 后没有因“请�
 
 本轮没有修改 Click/token/persistence 代码，也没有新增 migration 或测试。当前 PR 的 Click 归因存在双模式（持久化 Click / 仅令牌）和多入口字段完整性差异。MySQL 权威扣量账本实现前，必须统一定义 canonical attribution snapshot，覆盖两种存储模式和所有 Click 入口；不能只依赖当前 Publisher/Offer 表回查，也不能把缺失客户归属默认为无配置。
 
+
+
+### 32. 第七阶段源码复核：令牌与 DB 归因合并优先级、斗篷计数并发更新
+
+本轮对当前 PR Head 的以下文件逐段复核：`app/core/postback/transformers/click_associator.py`、`app/core/tracking/click_token.py`、`app/routes/short_link/cloak_click_persist.py`、`app/services/cpl/offer_service.py`、`app/services/cpl/publisher_service.py`。
+
+#### 32.1 Token 与 DB 同时存在时，Token 非空字段覆盖 DB 归因字段
+
+`ClickAssociator._merge_token_and_db_association()` 先复制 DB association，再遍历 token association；除 None 和 url_params 外，Token 中所有非空字段都会覆盖 DB 字段。这包括 offer_id、publisher_id、advertiser_id、short_link_id。
+
+这本身不一定错误：签名令牌可以是点击时身份来源。但当前代码没有在覆盖前验证 Token 与 Click 行的身份字段是否一致，也没有 attribution_version 或冲突审计。若 Click 行被修改、令牌由不同的点击上下文产生，或数据发生异常，系统会静默选择 Token 值；而 client_id 又来自 DB 当前 Publisher，可能形成“Token 的 publisher_id + DB 当前 Publisher.client_id”的混合归因。
+
+要求：合并时必须逐字段比较不可变身份字段；一致才形成可信快照。不一致时不得静默覆盖，应返回明确的 attribution_conflict 并 fail closed/进入人工调查。若设计选择 Token 为权威来源，则所有下游字段必须从同一个已验证 Token 快照取得，不能再混用 DB 当前关联关系。
+
+#### 32.2 Token 解析成功后，DB 查询异常仍可能被当成 DB 未命中
+
+`associate()` 在 Token 解析成功后仍调用 `associate_from_db()`，目的是补充 url_params、IP/UA 等字段。但 `associate_from_db()` 会捕获查询异常并最终返回 None。于是上层无法区分“DB 确实没有 Click 行”和“DB 查询失败”。
+
+随后 `associate()` 会将 Token association 交给 `_enrich_association()`；后者也捕获所有异常并继续返回原 association。最终可能在 Click DB 查询和 Publisher/Client enrichment 均失败时，仍返回看似成功的 Token association。
+
+要求：归因结果应显式携带验证状态，例如 token_signature_valid、db_record_found、db_identity_consistent、tenant_scope_verified、attribution_version；不得用一个 Optional[dict] 同时表达未提供 Click、真实未命中、DB 不可用、Token-only 已验证和归因冲突。凡扣量 scope 需要 Client/Publisher/Offer 当前状态验证时，未验证状态必须阻止相应财务决策，不能被当成“没有配置”。
+
+#### 32.3 Offer 与 Publisher 的可变关系已存在普通更新入口
+
+进一步确认：
+- `OfferService.update_offer()` 接受 advertiser_id 变更，验证目标 Advertiser 存在后直接修改 Offer.advertiser_id。
+- `PublisherService.update_publisher()` 接受 client_id 变更并直接修改 Publisher.client_id。
+- 两条路径当前均未显示与 Click 归因快照/版本栅栏共享的锁协议。
+
+因此第 30 节提出的历史归因漂移是可由正常管理 API 触发的业务场景，不是仅需考虑 DBA 手工改库的边界情况。实现时必须把这两条更新路径纳入归因锁/版本协议，并定义变更对历史 Click、Postback、Cap、扣量、报表和转发的统一语义。
+
+#### 32.4 斗篷点击计数存在并发丢增量风险
+
+`persist_cloak_report_click()` 当前先查询 ShortLink ORM 行，再执行 Python read-modify-write：`short_link.click_count = (short_link.click_count or 0) + 1`，随后 commit。查询没有使用 `SELECT ... FOR UPDATE`，更新也不是数据库原子表达式。
+
+多个并发请求可能同时读到相同旧值，再分别写入旧值 + 1，造成计数丢增量。该问题独立于 Click 队列是否成功：即使所有请求都正常执行，也可能发生统计不准确。
+
+要求：改为数据库原子增量（例如 `UPDATE short_links SET click_count = COALESCE(click_count, 0) + 1 WHERE id = ...`），并根据数据库方言/驱动决定是否使用 RETURNING；如需与 Click 落库保持一致，应采用可靠 Outbox/事件流水与幂等消费者，而不是将 DB 计数更新与异步队列入队误认为原子事务。测试应使用真实 MySQL 多连接并发执行 2/10/50 请求，验证最终计数精确等于成功请求数，并覆盖事务回滚和重复投递。
+
+#### 32.5 本节结论与修复顺序
+
+本轮没有修改业务代码、没有增加 migration，也没有执行本地或真实 MySQL 测试。新增风险包括 Token/DB 身份冲突未检测、Token-only enrichment 异常被吞、归因可变关系更新缺少共享栅栏，以及斗篷点击计数并发丢增量。
+
+建议顺序：
+1. 先定义单一 AttributionSnapshot 与显式状态枚举，统一 Token、Click DB、直连 Postback 的可信边界。
+2. 让 Token 与 DB 归因字段冲突显式失败；禁止静默混合两个不同来源的租户归属。
+3. 将 Offer.advertiser_id 与 Publisher.client_id 修改路径纳入归因锁/版本协议。
+4. 将斗篷计数改成 MySQL 原子增量，并定义 Click 事件持久化的可靠 Outbox/幂等恢复策略。
+5. 再与第 29 节 MySQL 权威事件决策账本、scope mutex、配置 CRUD 互斥合并实施，配套真实 MySQL 并发/故障测试。
+
+这些问题仍属于上线前阻断项。不能把文档设计或 CI 通过当作代码修复完成。
