@@ -15,7 +15,7 @@ def _config(*, volume=True, amount=False):
         enable_amount_deduction=amount,
         volume_deduction_ratio=Decimal("1.0") if volume else Decimal("0"),
         amount_deduction_ratio=Decimal("0.1") if amount else Decimal("0"),
-        deduction_strategy="proportional",
+        deduction_strategy="random",
     )
 
 
@@ -80,6 +80,7 @@ async def test_fail_close_rejects_volume_decision_when_redis_is_unavailable(monk
         await manager.apply_deduction(
             {"original_payout": "10.00"},
             _config(volume=True, amount=False),
+            event_identity={"platform": "test", "conversion_id": "event-1", "event_name": "default"},
         )
 
 
@@ -153,6 +154,7 @@ async def test_fail_open_skips_volume_deduction_when_redis_increment_eval_fails(
         _config(volume=True, amount=False),
         click_id="click-redis-eval-failure",
         offer_id=2,
+        event_identity={"platform": "test", "conversion_id": "event-redis-eval-failure", "event_name": "default"},
     )
 
     assert result.should_deduct_volume is False
@@ -189,6 +191,7 @@ async def test_fail_open_skips_volume_deduction_when_reservation_eval_fails(monk
         config,
         click_id="click-redis-reservation-failure",
         offer_id=2,
+        event_identity={"platform": "test", "conversion_id": "event-redis-reservation-failure", "event_name": "default"},
     )
 
     assert result.should_deduct_volume is False
