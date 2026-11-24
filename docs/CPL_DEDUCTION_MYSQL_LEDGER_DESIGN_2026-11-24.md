@@ -561,3 +561,65 @@ CREATE TABLE conversion_deduction_scope_locks (
 - 锁超时/死锁回滚后事件重试不产生残留计数。
 
 如果现有配置 CRUD 路径无法统一接入此锁协议，则账本上线前必须暂停并发配置变更或提供维护窗口，不能只在 Postback 路径加锁后宣称竞态已解决。
+
+## 18. 配置 CRUD 未接入 Scope Mutex，且激活配置唯一性仅靠应用层检查（2026-11-24）
+
+本轮直接检查了扣量配置 ORM、DDL、服务层、API 路由、配置缓存和 Postback 配置查找路径。第 17 节的 Scope Mutex 目前仍只是设计要求，当前运行时代码没有实现该协议。
+
+### 18.1 已核实的配置写入入口
+
+当前扣量配置写入集中在 `app/services/cpl/conversion_deduction_service.py`：
+
+| 操作 | 服务方法 | 当前行为 |
+|---|---|---|
+| 创建 | `create_deduction_config` | 先检查目标和激活配置，再 INSERT/flush |
+| 单条更新 | `update_deduction_config` | 先按 ID 读取配置，再修改字段并 flush |
+| 单条启停 | `update_deduction_config_status` | 先按 ID 读取配置，再修改 is_active 并 flush |
+| 单条删除 | `delete_deduction_config` | 先读取配置，再 DELETE/flush |
+| 批量启停 | `batch_update_status` | 先批量读取配置，再执行 UPDATE ... WHERE id IN (...) |
+| 批量删除 | `batch_delete` | 先批量读取配置，再执行 DELETE ... WHERE id IN (...) |
+
+API 路由位于 `app/api_v1/cpl/conversions/deductions.py`。上述六条服务写路径均未获取 `conversion_deduction_scope_locks` 行锁，也没有在锁内重新校验目标 scope 与配置状态。批量操作尤其不能遗漏：必须先读取并规范化全部目标 scope，去重后按统一顺序加锁，再执行批量 DML。
+
+配置缓存的 Generation 失效不能替代数据库互斥锁。当前配置读取会先读 Generation，再按 Offer/Advertiser/Publisher 查询缓存或数据库；缓存对象本身也不能提供事务锁定语义。
+
+### 18.2 新发现：同一 scope 的激活配置可能并发重复创建
+
+创建路径调用 `deduction_helpers.check_existing_config()`，其逻辑是先 SELECT 是否存在同 scope 的 active 配置，再 INSERT。检查与插入之间没有 scope 锁，也没有数据库唯一约束。
+
+仓库 `sql/platform.sql` 的 `conversion_deduction_configs` 表定义目前只有主键、三个 scope 普通索引、状态/优先级索引和外键，没有对“每个 scope 最多一条 active 配置”实施唯一约束。ORM `__table_args__` 同样只有普通索引。
+
+因此两个并发创建请求可以同时：
+1. 查询到该 scope 尚无 active 配置；
+2. 分别通过 `check_existing_config()`；
+3. 插入两条 active 配置并提交。
+
+随后 `DeductionConfigCache._load_from_db()` 使用 `ORDER BY priority DESC LIMIT 1` 取其中一条；若优先级相同，当前查询没有稳定的第二排序键，命中配置可能随执行计划/数据布局变化。该问题会让同一 scope 的扣量比例和策略不确定，属于财务决策正确性风险。
+
+### 18.3 修复要求
+
+实现账本前，必须同时完成：
+
+1. 六条配置写路径全部接入第 17 节 Scope Mutex。单条更新/删除先读取旧 scope，再加锁并重新读取行；若允许改变 scope（当前 Update Schema 暴露 level/target_id 字段，但 service 当前忽略这两个字段），必须同时锁旧、新 scope 并按统一顺序排序。若不支持迁移 scope，应在 API schema 明确禁止，而不是静默忽略。
+2. 批量启停/删除先加载所有配置，收集 scope 键、去重、排序后统一加锁；锁内重新读取并确认目标集合未变化，再执行 UPDATE/DELETE。
+3. 创建路径必须在目标 scope lock 内执行“检查 active 配置 + INSERT”，并且 Postback 的 no_config 事件路径也使用同一把锁。
+4. 对广告主、Offer、Publisher 父实体的删除路径做全仓库审计。当前配置外键使用 `ON DELETE CASCADE`，父实体删除可能绕过这六条配置服务方法而直接级联删除配置。父实体删除必须遵循相同 Scope Mutex，或在扣量配置存在时拒绝删除并要求先显式处理配置。
+5. 增加数据库层防御，避免未来漏接锁的写入口再次制造重复 active 配置。可评估 MySQL 支持版本后使用 enforced CHECK 约束保证三个 scope 字段恰好一个非空，并使用 generated active-scope key + UNIQUE 约束（inactive 行生成 NULL）实现每个 scope 最多一条 active 配置；迁移前必须检测并人工处理现存零/多 scope 和重复 active 数据。不能直接加唯一索引后让生产 DDL 失败或自动删除配置。
+6. 配置查找查询增加确定性排序（例如 priority DESC, id ASC），作为异常数据尚未完全清理期间的稳定性保护；但这只是兜底，不替代唯一性约束。
+7. 配置写入、scope lock、Generation Outbox 变更必须处于同一个 MySQL 事务；缓存刷新在事务提交后执行或通过现有可靠 Outbox 完成。
+
+### 18.4 必测场景
+
+- 同一 Offer/Advertiser/Publisher scope 并发创建 2/10/50 次，最终最多一条 active 配置；
+- 两个创建请求不同 priority 并发，结果不允许出现重复 active 配置；
+- 单条比例更新与同 scope Postback 决策并发；
+- 单条启停/删除与 Postback 决策并发；
+- 批量启停/删除同时覆盖多个 scope，验证统一排序、无死锁且不漏锁；
+- 两个批量操作包含相同 scope 但输入 ID 顺序相反，验证无死锁；
+- 父实体删除与 no_config Postback/配置决策并发，验证级联删除不会绕过 scope 锁；
+- DB rollback 后配置和 Generation 均不变；
+- 迁移前重复 active 数据扫描、清理审计与数据库约束验证；
+- 缓存命中旧 Generation、缓存写入与配置提交交错时，Postback 最终只能使用锁内确认的配置版本。
+
+**当前结论：** 该风险已由仓库代码与 DDL 静态核查确认；不是已经修复的运行时问题。第 17 节 Scope Mutex 不能标记为完成，直到六条服务写路径、父实体级联删除路径和数据库唯一性防线均已实现并通过真实 MySQL 并发测试。
+
