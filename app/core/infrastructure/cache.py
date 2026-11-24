@@ -434,11 +434,20 @@ def cached(key_pattern: str, ttl: int = 300):
 class CacheInvalidator:
     """缓存失效管理器（支持延迟双删）。"""
 
+    QUERY_CACHE_PREFIX = "query_cache:"
+
+    @staticmethod
+    def _query_cache_pattern(pattern: str) -> str:
+        """旧查询缓存统一存储在 query_cache: 命名空间，失效时必须使用相同键空间。"""
+        if pattern.startswith(CacheInvalidator.QUERY_CACHE_PREFIX):
+            return pattern
+        return f"{CacheInvalidator.QUERY_CACHE_PREFIX}{pattern}"
+
     @staticmethod
     async def _delete_patterns(patterns: list[str]) -> None:
         cache = await get_cache_backend()
         for pattern in patterns:
-            await cache.delete_pattern(pattern)
+            await cache.delete_pattern(CacheInvalidator._query_cache_pattern(pattern))
 
     @staticmethod
     async def _delayed_double_delete(patterns: list[str], extra_coros=None) -> None:
