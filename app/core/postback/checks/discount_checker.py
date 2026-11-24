@@ -21,6 +21,29 @@ class DiscountChecker:
     """扣量计算器"""
 
     @staticmethod
+    def _resolve_config_scope(config: Any) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+        """只使用最终命中配置自身的唯一层级 ID 作为扣量统计范围。
+
+        请求归因中的另外两个 ID 仅用于配置查找和审计日志，不能把同一配置
+        的 24 小时统计拆成多个子范围。数据库旧表没有三选一 CHECK 约束，
+        因此遇到零个或多个 scope 时必须 fail-closed，避免静默选错财务口径。
+        """
+        scope = (
+            getattr(config, "advertiser_id", None),
+            getattr(config, "offer_id", None),
+            getattr(config, "publisher_id", None),
+        )
+        populated = [value for value in scope if value is not None]
+        if len(populated) != 1 or any(
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            for value in populated
+        ):
+            raise DeductionProcessingError(
+                "扣量配置层级数据异常：advertiser_id、offer_id、publisher_id 必须且只能设置一个正整数"
+            )
+        return scope
+
+    @staticmethod
     async def calculate(
         original_payout: Decimal | float | int | str,
         offer_id: Optional[int],
@@ -84,15 +107,19 @@ class DiscountChecker:
                 publisher_id=publisher_id,
             )
             if config:
+                # 统计范围由最终命中的配置层级决定，不使用请求归因的完整 ID 组合。
+                scope_advertiser_id, scope_offer_id, scope_publisher_id = (
+                    DiscountChecker._resolve_config_scope(config)
+                )
                 conversion_data = {"original_payout": final_payout}
                 result = await apply_deduction(
                     db=db,
                     conversion_data=conversion_data,
                     config=config,
                     click_id=click_id,
-                    advertiser_id=advertiser_id,
-                    offer_id=offer_id,
-                    publisher_id=publisher_id,
+                    advertiser_id=scope_advertiser_id,
+                    offer_id=scope_offer_id,
+                    publisher_id=scope_publisher_id,
                 )
                 deduction_info["deduction_config"] = result
 
@@ -136,7 +163,7 @@ class DiscountChecker:
                                 deduction_reason="postback_amount_deduction",
                             )
                         except Exception as log_exc:
-                            # DB 扣金额审计日志是财务凭证；持久化失败必须回滚并重试。
+                            # DB 扣金额日志是财务凭证；持久化失败必须回滚并重试。
                             logger.error("记录扣金额日志失败，回滚本次 Postback：%s", log_exc)
                             raise DeductionProcessingError(
                                 f"记录扣金额日志失败: {log_exc}"
