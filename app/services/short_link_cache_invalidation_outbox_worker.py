@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import secrets
 import socket
 
@@ -24,6 +25,7 @@ SHORT_LINK_CACHE_INVALIDATION_LEASE_SECONDS = 300
 SHORT_LINK_CACHE_INVALIDATION_BATCH_SIZE = 20
 SHORT_LINK_CACHE_INVALIDATION_MAX_BACKOFF_SECONDS = 3600
 SHORT_LINK_CACHE_KEY_PREFIX = "short_link:"
+_SHORT_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,20}$")
 
 
 async def process_short_link_cache_invalidation_outbox(
@@ -140,6 +142,9 @@ async def process_short_link_cache_invalidation_outbox(
             if owned is None:
                 stats["lease_lost"] += 1
                 continue
+
+            if not _SHORT_CODE_PATTERN.fullmatch(short_code):
+                raise ValueError("invalid_short_code_in_outbox")
 
             redis = await get_redis_client()
             if redis is None:
