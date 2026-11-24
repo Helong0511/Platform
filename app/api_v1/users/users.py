@@ -237,7 +237,7 @@ async def get_user_stats(
         cache = await get_cache_backend()
         # 版本必须来自当前 DB 事务快照；旧请求即使晚回填，也只能写入旧版本键。
         generation = await get_cache_generation(db, namespace="user_stats")
-        cache_key = f"user_stats:g{generation}"
+        cache_key = f"query_cache:user_stats:g{generation}"
 
         cached_data = await cache.get(cache_key)
         if cached_data:
