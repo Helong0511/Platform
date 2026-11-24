@@ -131,6 +131,7 @@ async def test_duplicate_checker_closes_race_with_committed_normal_conversion():
 
     assert duplicate is True
     assert len(db.statements) == 2
+    assert "FOR UPDATE" in str(db.statements[1]).upper()
     assert db.deleted is db.added[0]
 
 
