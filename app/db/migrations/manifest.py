@@ -161,7 +161,7 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     Migration(
         revision="20261124_offer_cache_invalidation_outbox",
         path="sql/migrations/20261124_offer_cache_invalidation_outbox.sql",
-        sha256="48ff49532fbb604046ab10727383f5d6681e298267fe4290a4b7002484170e65",
+        sha256="ddd9bb68ab745f8f89805b16a7153e202e23b01ef3d1f048a9f659dea500e95c",
     ),
 
     Migration(
