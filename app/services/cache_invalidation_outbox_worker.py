@@ -17,7 +17,7 @@ from app.core.utils import get_app_now_sql_expression
 from app.models.models import CacheInvalidationOutbox
 from app.services.ad_data.query_cache import AD_DATA_QUERY_CACHE_NS
 
-SUPPORTED_CACHE_INVALIDATION_NAMESPACES = {AD_DATA_QUERY_CACHE_NS, "user_stats"}
+SUPPORTED_CACHE_INVALIDATION_NAMESPACES = {AD_DATA_QUERY_CACHE_NS, "user_stats", "cpl:deduction_config"}
 
 logger = logging.getLogger(__name__)
 CACHE_INVALIDATION_LEASE_SECONDS = 300
