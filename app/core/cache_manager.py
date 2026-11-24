@@ -22,7 +22,7 @@ from app.core.short_link_cache import (
     serialize_short_link,
     set_short_link_to_cache,
 )
-from app.models.models import Offer, ShortLink
+from app.models.models import ShortLink
 
 logger = logging.getLogger(__name__)
 
