@@ -192,6 +192,8 @@ class ClientService(BaseService[Client]):
         await self.db.flush()
         from app.services.cache_invalidation_outbox import advance_cache_generation
         await advance_cache_generation(self.db)
+        # Client 关系变化会影响 user_stats.with_client_info。
+        await advance_cache_generation(self.db, namespace="user_stats")
         if client.id is not None:
             return await self.get_client_by_id(client.id, current_user, include_user=True)
         return client
@@ -232,6 +234,8 @@ class ClientService(BaseService[Client]):
         await self.db.flush()
         from app.services.cache_invalidation_outbox import advance_cache_generation
         await advance_cache_generation(self.db)
+        # Client 关系变化会影响 user_stats.with_client_info。
+        await advance_cache_generation(self.db, namespace="user_stats")
         return await self.get_client_by_id(client_id, current_user, include_user=True)
 
     async def delete_client(
@@ -278,3 +282,5 @@ class ClientService(BaseService[Client]):
         await self.db.flush()
         from app.services.cache_invalidation_outbox import advance_cache_generation
         await advance_cache_generation(self.db)
+        # Client 关系变化会影响 user_stats.with_client_info。
+        await advance_cache_generation(self.db, namespace="user_stats")

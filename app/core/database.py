@@ -277,6 +277,8 @@ async def init_db():
             admin.set_password(settings.FIRST_SUPERUSER_PASSWORD)
             session.add(admin)
             try:
+                # 初始化阶段只负责创建基础管理员；此时业务迁移可能尚未完成。
+                # 首次统计读取会直接查询数据库，不能在这里依赖缓存 Outbox 表。
                 await session.commit()
                 logger.info(f"默认管理员账户已创建: {settings.FIRST_SUPERUSER}")
             except IntegrityError as exc:

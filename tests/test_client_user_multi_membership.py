@@ -92,8 +92,13 @@ async def test_client_can_be_reassigned_to_user_with_existing_client_membership(
 
     assert client.user_id == 2
     assert response.data == {"id": 101, "user_id": 2}
-    # 三次业务读取后，在同一事务内递增缓存 Generation 并读取新版本。
-    assert len(db.statements) == 5
+    # 三次业务读取分别对应 ad_data 与 user_stats 两个事务性 Generation 更新。
+    assert len(db.statements) == 7
+    generation_updates = [
+        statement for statement in db.statements
+        if getattr(statement, "is_update", False)
+    ]
+    assert len(generation_updates) == 2
 
 
 

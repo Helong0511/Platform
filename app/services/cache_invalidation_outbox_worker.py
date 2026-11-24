@@ -17,6 +17,8 @@ from app.core.utils import get_app_now_sql_expression
 from app.models.models import CacheInvalidationOutbox
 from app.services.ad_data.query_cache import AD_DATA_QUERY_CACHE_NS
 
+SUPPORTED_CACHE_INVALIDATION_NAMESPACES = {AD_DATA_QUERY_CACHE_NS, "user_stats"}
+
 logger = logging.getLogger(__name__)
 CACHE_INVALIDATION_LEASE_SECONDS = 300
 CACHE_INVALIDATION_BATCH_SIZE = 5
@@ -113,7 +115,7 @@ async def process_cache_invalidation_outbox(
                     continue
                 namespace = event.namespace
 
-            if namespace != AD_DATA_QUERY_CACHE_NS:
+            if namespace not in SUPPORTED_CACHE_INVALIDATION_NAMESPACES:
                 raise ValueError("unsupported_cache_namespace")
 
             from app.core.infrastructure.cache_compat import invalidate_cache_checked

@@ -83,11 +83,12 @@ def test_manifest_rejects_unknown_or_forward_dependency(tmp_path: Path):
 
 
 def test_manifest_is_explicit_and_contains_no_unreviewed_files():
-    assert len(MIGRATION_MANIFEST) == 22
+    assert len(MIGRATION_MANIFEST) == 23
     assert any(item.revision == "20261120_telegram_postback_approval_audit" for item in MIGRATION_MANIFEST)
     assert any(item.revision == "20261121_postback_pending_dedupe" for item in MIGRATION_MANIFEST)
     assert any(item.revision == "20261121_postback_pending_queue_guard" for item in MIGRATION_MANIFEST)
     assert any(item.revision == "20261123_ad_data_cache_generation_outbox" for item in MIGRATION_MANIFEST)
+    assert any(item.revision == "20261124_user_stats_cache_generation" for item in MIGRATION_MANIFEST)
     assert all(item.path.startswith("sql/migrations/") for item in MIGRATION_MANIFEST)
 
 def test_manifest_rejects_revision_path_mismatch(tmp_path: Path):

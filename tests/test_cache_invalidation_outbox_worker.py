@@ -38,10 +38,10 @@ def _session_factory(sessions):
     return factory
 
 
-def _claimed_event():
+def _claimed_event(namespace="ad_data"):
     return SimpleNamespace(
         id=41,
-        namespace="ad_data",
+        namespace=namespace,
         status="pending",
         attempt_count=0,
         max_attempts=12,
@@ -52,11 +52,17 @@ def _claimed_event():
 
 
 @pytest.mark.asyncio
-async def test_outbox_worker_marks_success_only_after_shared_store_confirmation(monkeypatch):
+@pytest.mark.parametrize(
+    ("namespace", "expected_prefix"),
+    [("ad_data", "ad_data:"), ("user_stats", "user_stats:")],
+)
+async def test_outbox_worker_marks_success_only_after_shared_store_confirmation(
+    monkeypatch, namespace, expected_prefix
+):
     from app.core.infrastructure import cache_compat
     from app.services import cache_invalidation_outbox_worker as worker
 
-    event = _claimed_event()
+    event = _claimed_event(namespace)
     claim_db = MagicMock()
     claim_db.execute = AsyncMock(side_effect=[
         _RowsResult(),
@@ -98,6 +104,7 @@ async def test_outbox_worker_marks_success_only_after_shared_store_confirmation(
     }
     claim_db.commit.assert_awaited_once()
     finish_db.commit.assert_awaited_once()
+    cache_compat.invalidate_cache_checked.assert_awaited_once_with(expected_prefix)
 
 
 @pytest.mark.asyncio

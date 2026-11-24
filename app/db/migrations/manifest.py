@@ -158,6 +158,13 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         sha256="2389eb4aa10774170ce4994a82bb220b2d6a28bce0dda3f6416d9976d334e643",
     ),
 
+    Migration(
+        revision="20261124_user_stats_cache_generation",
+        path="sql/migrations/20261124_user_stats_cache_generation.sql",
+        sha256="81110a9f80a191f7463fb723571252cde2c589f22075170d30a87f95a17b3408",
+        depends_on=("20261123_ad_data_cache_generation_outbox",),
+    ),
+
 )
 
 _REVISION_PATTERN = re.compile(r"^20[0-9]{6}_[a-z0-9_]+$")

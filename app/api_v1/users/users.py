@@ -92,6 +92,7 @@ from app.core.utils import optimize_page_size_for_device, get_app_now_naive
 from app.core.dependencies import get_user_service
 from app.services.user_service import UserService
 from app.core.infrastructure.cache import get_cache_backend
+from app.services.cache_invalidation_outbox import get_cache_generation
 from app.core.validation import validate_username, validate_email, validate_password_strength
 from app.models.models import User, UserRole, Client, Publisher
 from app.schemas.user import UserCreate, UserUpdate, UserResponse, PasswordChange
@@ -234,8 +235,10 @@ async def get_user_stats(
         # 使用缓存（如果服务层方法使用了@cached装饰器，会自动缓存）
         # 这里手动使用缓存，因为服务层方法可能没有装饰器
         cache = await get_cache_backend()
-        cache_key = "user_stats"
-        
+        # 版本必须来自当前 DB 事务快照；旧请求即使晚回填，也只能写入旧版本键。
+        generation = await get_cache_generation(db, namespace="user_stats")
+        cache_key = f"query_cache:user_stats:g{generation}"
+
         cached_data = await cache.get(cache_key)
         if cached_data:
             logger.debug("缓存命中: user_stats")
