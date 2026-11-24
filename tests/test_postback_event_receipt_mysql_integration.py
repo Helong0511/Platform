@@ -215,19 +215,25 @@ async def _run_scenario(scenario: str) -> None:
             )
             await asyncio.wait_for(retry_started.wait(), timeout=5)
             await _wait_for_mysql_lock_wait(retry_connection_id["value"])
-            await first.execute(
-                text(
-                    "INSERT INTO postback_conversions "
-                    "(platform, conversion_id, event_name) "
-                    "VALUES (:platform, :conversion_id, :event_name)"
-                ),
-                identity,
-            )
-            await DuplicateChecker.release_receipt(**identity, db=first)
-            await first.commit()
+            if scenario == "normal_conversion":
+                await first.execute(
+                    text(
+                        "INSERT INTO postback_conversions "
+                        "(platform, conversion_id, event_name) "
+                        "VALUES (:platform, :conversion_id, :event_name)"
+                    ),
+                    identity,
+                )
+                await DuplicateChecker.release_receipt(**identity, db=first)
+                await first.commit()
+                expected_duplicate = True
+            else:
+                # 首个处理事务回滚时，等待者必须成功取得收据并继续处理。
+                await first.rollback()
+                expected_duplicate = False
 
             duplicate_retry = await asyncio.wait_for(waiting, timeout=10)
-            assert duplicate_retry is True
+            assert duplicate_retry is expected_duplicate
     finally:
         if engine is not None:
             await engine.dispose()
@@ -256,3 +262,8 @@ async def test_mysql_receipt_prevents_replay_of_volume_deducted_event():
 @pytest.mark.asyncio
 async def test_mysql_repeatable_read_closes_normal_conversion_receipt_release_race():
     await _run_scenario("normal_conversion")
+
+
+@pytest.mark.asyncio
+async def test_mysql_rolled_back_receipt_does_not_block_retry():
+    await _run_scenario("rollback")
