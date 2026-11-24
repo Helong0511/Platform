@@ -109,8 +109,8 @@ class DashboardService:
         """
         获取仪表盘核心指标卡片数据（含环比趋势）。
 
-        流程：读缓存 → 解析周期起止日期 → 聚合当前周期 → 聚合上一周期 →
-        计算各指标环比% → 按角色组装 stats 列表与 ROI。
+        流程：解析周期起止日期 → 聚合当前周期 → 聚合上一周期 →
+        计算各指标环比% → 按角色组装 stats 列表与 ROI。缓存由公开方法的 single-flight 包装负责。
 
         Args:
             period: 时间周期，支持 day / week / month / last_month
