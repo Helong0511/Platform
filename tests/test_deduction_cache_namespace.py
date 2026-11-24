@@ -82,3 +82,17 @@ async def test_deduction_config_read_write_and_invalidation_share_query_namespac
 
     expected_pattern = "query_cache:cpl:deduction_config:offer:7*"
     assert cache.patterns == [expected_pattern, expected_pattern]
+
+
+@pytest.mark.asyncio
+async def test_deduction_cache_reads_generation_once_for_all_priority_levels():
+    db = SimpleNamespace(scalar=AsyncMock(return_value=29))
+    service = DeductionConfigCache(db=db)
+    service._load_from_db = AsyncMock(return_value=None)
+
+    await service.get_config("offer", 7)
+    await service.get_config("advertiser", 3)
+    await service.get_config("publisher", 11)
+
+    db.scalar.assert_awaited_once()
+    assert service._generation == 29
