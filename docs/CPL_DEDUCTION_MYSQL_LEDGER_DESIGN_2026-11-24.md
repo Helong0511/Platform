@@ -388,3 +388,54 @@ PR #205 必须继续保持 Draft，直到账本实现与迁移完成、平台身
 - 在 BFT 身份契约完成前，不对现有历史 BFT receipt 做自动重键、合并或回填。
 
 这项发现是独立于通用 DataNormalizer 空白值修复的 adapter 级问题，不能因为 PR #205 的通用路径测试通过而视为已解决。
+
+
+## 15. 历史 NULL event_name 与唯一键防重缺口（2026-11-24）
+
+对照 main 的 `app/models/postback.py`、`app/core/postback_event_name.py`、`app/core/postback/validators/duplicate_checker.py` 和 receipt migration，发现正式转化表与 receipt 的身份列约束并不完全一致：
+
+1. `PostbackConversion.event_name` 在 ORM 中为 nullable；正式转化唯一约束是 `(platform, conversion_id, event_name)`。
+2. MySQL 官方文档明确说明：包含可空列的 UNIQUE index 允许存在多条 NULL 值。因此，正式转化表的复合唯一键不能阻止同一 platform/conversion_id 对应多条 event_name=NULL 的历史记录。
+3. `normalize_event_name(None)` 会把新请求的空事件名映射为 `default`；DuplicateChecker 也只按规范化后的 `default` 查询，不会匹配历史 `event_name IS NULL` 的记录。
+4. receipt migration 将 `event_name` 定义为 NOT NULL，和正式转化表的历史可空语义不同。只依赖两张表各自的唯一键，无法自动封闭旧 NULL 行的重放窗口。
+
+### 迁移前必须执行的只读检查
+
+```sql
+-- 历史 NULL 事件名数量
+SELECT COUNT(*) AS null_event_name_rows
+FROM postback_conversions
+WHERE event_name IS NULL;
+
+-- NULL 事件名是否已有同一 platform/conversion_id 多条记录
+SELECT platform, conversion_id, COUNT(*) AS row_count
+FROM postback_conversions
+WHERE event_name IS NULL
+GROUP BY platform, conversion_id
+HAVING COUNT(*) > 1;
+
+-- 将 NULL 映射为 default 后是否会与现有 default 记录冲突
+SELECT a.platform, a.conversion_id,
+       COUNT(*) AS conflicting_rows
+FROM postback_conversions a
+JOIN postback_conversions b
+  ON b.platform = a.platform
+ AND b.conversion_id = a.conversion_id
+ AND b.event_name = 'default'
+WHERE a.event_name IS NULL
+GROUP BY a.platform, a.conversion_id;
+```
+
+以上检查必须在真实生产数据库执行并保存结果；当前无法从仓库源码推断生产数据中是否确实存在这些行。
+
+### 修复/迁移约束
+
+- 不得在未检测冲突前直接批量执行 `UPDATE ... SET event_name='default' WHERE event_name IS NULL`。
+- 若 NULL 与 default 发生冲突，必须人工确认历史事件语义和保留记录，不能自动合并财务事件。
+- 对确认可映射的历史行，在维护窗口/事务化迁移方案中统一成明确的非空默认值，再将 ORM 和数据库列约束改为 NOT NULL。
+- 迁移后必须测试缺失 event_name 的重复回调，确保历史事件、receipt 和 conversion 表对同一身份采用一致规则。
+- 若业务决定 NULL 与 default 代表不同事件，必须改用显式、稳定且全链路一致的身份编码；不能让 MySQL NULL 唯一键语义隐式决定业务规则。
+
+MySQL 官方依据：CREATE INDEX / CREATE TABLE 对 UNIQUE index 允许多个 NULL 的说明：  
+https://dev.mysql.com/doc/refman/8.4/en/create-index.html  
+https://dev.mysql.com/doc/refman/8.4/en/create-table.html
