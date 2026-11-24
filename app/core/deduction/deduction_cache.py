@@ -89,8 +89,8 @@ class DeductionConfigCache:
                 logger.debug(f"缓存命中：deduction_config:{level}:{target_id}")
                 return config
             except Exception as e:
-                logger.warning(f"从缓存重建配置失败：{e}")
-                return None
+                # 缓存是非权威数据：反序列化失败必须回源数据库，不能伪装成无配置。
+                logger.warning(f"从缓存重建配置失败，忽略损坏缓存并回源数据库：{e}", exc_info=True)
         
         # 缓存未命中，从数据库加载
         config = await self._load_from_db(level, target_id)
@@ -138,8 +138,10 @@ class DeductionConfigCache:
             return result.scalars().first()
         
         except Exception as e:
+            # 数据库查询失败与“查询成功但无配置”语义不同，必须向上传递，
+            # 由 DeductionManager 按 DEDUCTION_FAIL_OPEN 策略统一处理。
             logger.error(f"从数据库加载配置失败：{e}", exc_info=True)
-            return None
+            raise
     
     async def _save_to_cache(
         self,
