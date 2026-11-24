@@ -300,6 +300,7 @@ async def periodic_cache_metrics_report():
 **当前已接入持久化失效的范围（以代码为准）：**
 - `ad_data`：数据库 Generation + Outbox。
 - `user_stats`：数据库 Generation + Outbox。
+- CPL 扣量配置 `cpl:deduction_config`：数据库 Generation + Outbox；扣量配置读写键包含当前事务读取的 Generation，所有单条/批量 CRUD 在业务事务内推进版本。
 - Offer 热点键 `offer:cache:{offer_id}`：专用两阶段 Outbox。
 - 短链接键 `short_link:{short_code}`：短链接更新/删除在业务事务内登记专用两阶段 Outbox；API 提交后尝试立即删除，Worker 只删除精确短码键。
 - 不要据此推断所有 `query_cache:` 缓存、Advertiser 或其他业务域均已获得持久化失效保证。
@@ -345,7 +346,7 @@ await report_metrics_to_redis()
 - `cache_query()` 使用参数 JSON 的 MD5 摘要作为键，最终形态为 `query_cache:{md5}`。只按可读业务名称（例如 `offer:list:*`）清理，不能命中这种哈希键。
 - 广告数据专用键通过 `build_ad_data_query_cache_key()` 生成 `ad_data:{kind}:{md5}`，便于按 `query_cache:ad_data:` 命名空间失效。
 - 旧兼容 API 的 `key_prefix` 主要用于指标分类；不要假设它必然成为 Redis key 的可读前缀。
-- Offer 热点缓存 `offer:cache:{id}`、短链接缓存 `short_link:{short_code}` 与查询缓存 `query_cache:` 是独立键空间，必须分别清理。
+- Offer 热点缓存 `offer:cache:{id}`、短链接缓存 `short_link:{short_code}` 与查询缓存 `query_cache:` 是独立键空间，必须分别清理。CPL 扣量配置位于 `query_cache:cpl:deduction_config:`，由独立 Generation 隔离版本。
 
 ### Outbox 运维
 - Offer、广告数据与短链接缓存失效任务当前按每分钟调度；Offer/短链接第二阶段须等第一阶段结束后在后续调度轮次执行，不是精确 1 秒实时执行。
