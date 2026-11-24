@@ -99,3 +99,31 @@ async def test_ordered_strategies_are_paused_until_mysql_ledger_is_authoritative
     assert result.should_deduct_volume is False
     assert result.final_volume == 1
     manager._get_stats_for_decision.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_hash_strategy_uses_event_key_instead_of_click_id():
+    manager = DeductionManager(db=object())
+    identity = {
+        "platform": "bft",
+        "conversion_id": "conversion-hash-1",
+        "event_name": "purchase",
+    }
+    captured = {}
+    manager._get_stats_for_decision = AsyncMock(
+        return_value=__import__("app.core.deduction.deduction_manager", fromlist=["ConversionStats"]).ConversionStats(total=0, deducted=0, processed=0)
+    )
+    manager.should_deduct_volume = lambda config, stats, decision_key="": captured.setdefault("key", decision_key) or True
+    manager._incr_decision_deducted = AsyncMock(return_value=True)
+
+    result = await manager.apply_deduction(
+        {"original_payout": "10.00"},
+        _config(strategy="hash"),
+        click_id="attribution-click-not-event-id",
+        offer_id=7,
+        event_identity=identity,
+    )
+
+    assert captured["key"] == DeductionManager._build_event_decision_key(identity)
+    assert result.should_deduct_volume is True
+    manager._incr_decision_deducted.assert_awaited_once()
