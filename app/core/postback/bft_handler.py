@@ -21,10 +21,11 @@ class BftPostbackHandler(PostbackHandler):
     
     async def validate(self, data: Dict[str, Any]) -> tuple[bool, Optional[str]]:
         """验证 BFT 回调字段；金额校验与通用入口使用同一 Decimal 规则。"""
-        clk_id = self._first_non_empty(
-            data,
-            "clk_id", "click_id", "cid", "clickid", "clickId", "ClickId",
-            "conversion_id", "conversionId",
+        # BFT 字段协议尚未得到官方确认；此处只保证显式 conversion_id 优先，
+        # click-like aliases 仅用于兼容校验/归因，不能据此宣称其为事件唯一 ID。
+        clk_id = (
+            DataNormalizer._extract_explicit_conversion_id(data)
+            or DataNormalizer._extract_click_id(data)
         )
         if clk_id is None:
             return False, "clk_id 或 click_id 或 cid 参数不能为空"
@@ -47,11 +48,10 @@ class BftPostbackHandler(PostbackHandler):
 
     async def normalize(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """标准化 BFT 回调；金额使用 Decimal，避免 float 精度损失。"""
-        conversion_id = self._first_non_empty(
-            data,
-            "clk_id", "click_id", "cid", "clickid", "clickId", "ClickId",
-            "conversion_id", "conversionId",
-        )
+        explicit_conversion_id = DataNormalizer._extract_explicit_conversion_id(data)
+        click_id = DataNormalizer._extract_click_id(data)
+        # 未经协议确认的 clk_id/cid 只保留为历史兼容 conversion_id，明确标记身份未验证。
+        conversion_id = explicit_conversion_id or click_id
         event_name_raw = self._first_non_empty(data, "event_name", "event_id")
         event_name = str(event_name_raw).strip() if event_name_raw is not None else "default"
         event_name = event_name or "default"
@@ -64,6 +64,7 @@ class BftPostbackHandler(PostbackHandler):
         return {
             "platform": self.platform_name,
             "conversion_id": str(conversion_id).strip() if conversion_id is not None else None,
+            "event_identity_verified": bool(explicit_conversion_id),
             "event_name": event_name,
             "event_value": DataNormalizer._parse_decimal(data.get("event_value")),
             "payout": DataNormalizer._parse_decimal(payout),
@@ -74,7 +75,7 @@ class BftPostbackHandler(PostbackHandler):
             "gid": self._to_str(data.get("gid")),
             "product_id": self._to_int(data.get("product_id")),
             "client_id": self._to_int(data.get("client_id")),
-            "click_id": str(conversion_id).strip() if conversion_id is not None else None,
+            "click_id": str(click_id).strip() if click_id is not None else None,
             "raw_data": data,
         }
 
