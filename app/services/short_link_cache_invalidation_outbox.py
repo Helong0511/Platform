@@ -21,7 +21,6 @@ async def enqueue_short_link_cache_invalidation(
     short_code: str,
     *,
     second_pass_delay_seconds: int = SECOND_PASS_DELAY_SECONDS,
-    *,
     flush: bool = True,
 ) -> None:
     """在调用方事务内登记立即清理与延迟复查；本函数绝不提交事务。
