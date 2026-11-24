@@ -335,10 +335,20 @@ class DeductionManager:
     if (not existing_deducted) or current_deducted < init_deducted then
         redis.call('SET', deducted_key, init_deducted)
         redis.call('EXPIRE', deducted_key, ttl)
+    else
+        local deducted_ttl = redis.call('TTL', deducted_key)
+        if deducted_ttl < 0 or deducted_ttl > ttl then
+            redis.call('EXPIRE', deducted_key, ttl)
+        end
     end
     local seq = redis.call('INCR', seq_key)
     if seq == 1 then
         redis.call('EXPIRE', seq_key, ttl)
+    else
+        local seq_ttl = redis.call('TTL', seq_key)
+        if seq_ttl < 0 or seq_ttl > ttl then
+            redis.call('EXPIRE', seq_key, ttl)
+        end
     end
     local deducted = tonumber(redis.call('GET', deducted_key) or '0')
     return {seq, deducted}
@@ -597,6 +607,8 @@ class DeductionManager:
         if publisher_id:
             parts.append(f"pub:{publisher_id}")
         parts.append(f"hours:{hours}")
+        # 新键空间隔离旧版 48 小时计数，部署后从数据库窗口基线安全冷启动。
+        parts.append("schema:v2")
         return ":".join(parts)
     
     def should_deduct_volume(
