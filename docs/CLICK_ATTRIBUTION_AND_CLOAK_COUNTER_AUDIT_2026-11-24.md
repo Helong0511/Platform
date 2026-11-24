@@ -210,3 +210,14 @@ Postback pipeline 的 `step_associate_click()` 直接接收该返回值。后续
 6. 真实 MySQL + Redis 测试覆盖并发重复 event_id、不同 event_id 并发、commit-unknown、Redis SET NX 成功后 DB 回滚、Redis 不可用、旧桥页兼容、Click outbox 与 CAPI worker 崩溃恢复。
 
 **本轮修正后的结论：** 主短链重定向点击计数已有专门的原子计数与 MySQL 账本设计；斗篷 /report 是独立且绕过该基础设施的路径。CAPI 仓库已有事务性 Outbox，但 /report 当前调用的是 BackgroundTasks 直接发送路径，不能把已有 Outbox 的可靠性算到该路径上。本节是代码审计结论，不代表 /report 已完成修复。
+
+
+### 5.5 /report HTTP ACK 与 fbclid 占位符的额外风险（Head 320861d）
+
+进一步复核 `cloak_report.py` 与 `cloak_report_service.py`，补充两个会直接影响重试和事件去重的事实：
+
+1. **异常响应默认仍是 HTTP 200。** 路由在最外层捕获所有 Exception 后返回普通 dict：`{"status":"error","message":"Failed to process report"}`，没有设置 5xx 状态码；email/phone 参数校验失败也返回普通 dict。FastAPI 对普通 dict 默认返回 HTTP 200。客户端若按 HTTP 状态码判断是否重试，可能把服务端处理失败当成成功 ACK。必须定义明确响应契约：已持久接收才返回 2xx；数据库/持久化故障返回可重试 5xx；格式或身份冲突返回明确 4xx，并避免将异常原文、PII 写入响应。
+2. **缺失 fbclid 时生成的 UUID 不是重试稳定身份。** `ensure_fbclid()` 每次请求缺少 fbclid 都新建 UUID。CAPI 的直接发送日志幂等键以 adsid 等字段构造；Purchase 的 conversion_id 也包含 fbclid。相同逻辑事件在重试时若没有真实 fbclid，会得到不同 UUID，进而产生不同事件身份，不能依赖现有日志唯一键防止重复事件。该 UUID 只能视为一次请求的临时占位值，不能作为客户端事件身份或跨重试幂等键。
+3. **load/click 两阶段身份需分开设计。** 同一桥页的 load 与 click 是不同业务事件；不能只以 session_id 或 fbclid 做全局唯一键而误把 click 阶段吞掉。幂等键至少要包含阶段/事件类型、短链范围和客户端稳定事件 ID；若业务定义“同一 session 的 click 只计一次”，也必须明确该规则与 Meta event_id 的关系。
+
+**新增验收测试：** 对 DB commit 异常、短链不存在、Redis 去重服务异常、后台任务调度失败分别断言真实 HTTP status；模拟相同逻辑请求缺失 fbclid 的多次重试，验证不会因新 UUID 产生多个业务事件；模拟 load 与 click 共用 session，验证二者不会互相去重。
