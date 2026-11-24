@@ -84,6 +84,7 @@ class OfferCacheInvalidationOutbox(Base):
 
     id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
     event_key = Column(CHAR(64), nullable=False, comment="随机十六进制幂等标识；生产 SQL 迁移限制为 ASCII")
+    group_key = Column(CHAR(64), nullable=False, comment="同一业务变更的两阶段事件关联键")
     offer_id = Column(Integer, nullable=False, comment="Offer 主键快照；不建立外键以允许删除后清理")
     phase = Column(String(8), nullable=False, comment="first 或 second")
     status = Column(String(16), nullable=False, default="pending", server_default=text("'pending'"))
@@ -117,6 +118,12 @@ class OfferCacheInvalidationOutbox(Base):
             "run_at",
             "lease_until",
             "id",
+        ),
+        Index(
+            "idx_offer_cache_invalidation_group_phase",
+            "group_key",
+            "phase",
+            "status",
         ),
         Index(
             "idx_offer_cache_invalidation_offer",
