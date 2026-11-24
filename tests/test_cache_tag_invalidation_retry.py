@@ -170,5 +170,5 @@ async def test_add_cache_tag_uses_atomic_add_and_expiry(redis_client):
 
     assert result is True
     tag_key = f"{cache_manager.TAG_TO_KEYS_PREFIX}offer:7"
-    assert redis.sets[tag_key] == {"cache:good", "cache:bad", "cache:one"}
-    assert redis.expiries[tag_key] == 7 * 24 * 3600
+    assert redis_client.sets[tag_key] == {"cache:good", "cache:bad", "cache:one"}
+    assert redis_client.expiries[tag_key] == 7 * 24 * 3600
