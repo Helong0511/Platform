@@ -55,7 +55,7 @@ class DataValidator:
         errors = []
         
         # 与标准化器保持一致，接受 click_id / conversion_id 及平台常见别名。
-        conversion_id = raw_data.get('conversion_id') or raw_data.get('conversionId')
+        conversion_id = DataNormalizer._extract_conversion_id(raw_data)
         click_id = DataNormalizer._extract_click_id(raw_data) or conversion_id
         if not click_id or not str(click_id).strip():
             errors.append("缺少必填字段：click_id 或 conversion_id")
