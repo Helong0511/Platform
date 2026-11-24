@@ -32,7 +32,9 @@ class DataNormalizer:
         """
         # 与 BFT 等平台别名对齐
         click_id_raw = DataNormalizer._extract_click_id(raw_data)
-        conversion_id = DataNormalizer._extract_conversion_id(raw_data)
+        explicit_conversion_id = DataNormalizer._extract_explicit_conversion_id(raw_data)
+        # 兼容旧平台的入库/去重字段回退；是否可用于财务扣量身份由显式标记单独决定。
+        conversion_id = explicit_conversion_id or click_id_raw
 
         payout_raw = raw_data.get('payout')
         if payout_raw is None or str(payout_raw).strip() == '':
@@ -42,6 +44,7 @@ class DataNormalizer:
         normalized = {
             'platform': platform,
             'conversion_id': str(conversion_id or '').strip(),
+            'event_identity_verified': bool(explicit_conversion_id),
             'event_name': event_name,
             'event_value': DataNormalizer._parse_decimal(raw_data.get('event_value')),
             'payout': DataNormalizer._parse_decimal(payout_raw),
@@ -60,13 +63,24 @@ class DataNormalizer:
         return normalized
     
     @staticmethod
-    def _extract_conversion_id(raw_data: Dict[str, Any]) -> Optional[str]:
-        """提取显式 conversion_id；空白值视为缺失，再兼容回退 click_id。"""
+    def _extract_explicit_conversion_id(raw_data: Dict[str, Any]) -> Optional[str]:
+        """只提取明确命名的转化事件 ID，不把 click ID 冒充事件 ID。"""
         for key in ('conversion_id', 'conversionId'):
             value = raw_data.get(key)
             if value is not None and str(value).strip():
                 return str(value).strip()
-        return DataNormalizer._extract_click_id(raw_data)
+        return None
+
+    @staticmethod
+    def _extract_conversion_id(raw_data: Dict[str, Any]) -> Optional[str]:
+        """兼容旧入库流程：显式 conversion_id 缺失时回退 click_id。
+
+        财务扣量必须检查 event_identity_verified，不能把此兼容值视为稳定事件身份。
+        """
+        return (
+            DataNormalizer._extract_explicit_conversion_id(raw_data)
+            or DataNormalizer._extract_click_id(raw_data)
+        )
 
     @staticmethod
     def _extract_click_id(raw_data: Dict[str, Any]) -> Optional[str]:
