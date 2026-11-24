@@ -12,7 +12,11 @@ from sqlalchemy.future import select
 from sqlalchemy import and_
 
 from app.models.models import ConversionDeductionConfig
-from app.core.infrastructure.cache_compat import get_cached, set_cached
+from app.core.infrastructure.cache_compat import (
+    invalidate_cache,
+    legacy_get_cached as get_cached,
+    legacy_set_cached as set_cached,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,21 +161,13 @@ class DeductionConfigCache:
             level: 配置级别（可选，不传则失效所有）
             target_id: 目标 ID（可选）
         """
-        from app.core.infrastructure.cache import get_cache_backend
-        cache = await get_cache_backend()
-        
+        # 与 legacy_get_cached / legacy_set_cached 保持一致，统一清理 query_cache: 命名空间。
         if level and target_id:
-            # 失效单个配置
-            cache_key = f"{CONFIG_CACHE_PREFIX}{level}:{target_id}"
-            await cache.delete(cache_key)
-            logger.info(f"配置缓存已失效：{cache_key}")
+            pattern = f"{CONFIG_CACHE_PREFIX}{level}:{target_id}"
+            await invalidate_cache(pattern)
+            logger.info("配置缓存失效请求已提交：%s", pattern)
         else:
-            # 失效所有配置缓存
-            patterns = [
-                f"{CONFIG_CACHE_PREFIX}offer:*",
-                f"{CONFIG_CACHE_PREFIX}publisher:*",
-                f"{CONFIG_CACHE_PREFIX}advertiser:*"
-            ]
-            for pattern in patterns:
-                await cache.delete_pattern(pattern)
-            logger.info(f"所有配置缓存已失效")
+            for config_level in ("offer", "publisher", "advertiser"):
+                pattern = f"{CONFIG_CACHE_PREFIX}{config_level}:"
+                await invalidate_cache(pattern)
+            logger.info("所有扣量配置缓存失效请求已提交")
