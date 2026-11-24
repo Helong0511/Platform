@@ -50,6 +50,7 @@ class ClickAssociator:
             "publisher_id",
             "advertiser_id",
             "short_link_id",
+            "client_id",
         )
         conflicts = [
             key
@@ -70,6 +71,12 @@ class ClickAssociator:
             if value is None or key == "url_params" or key in identity_fields:
                 continue
             merged[key] = value
+        # 数据库有点击时快照优先；旧行缺少快照时仅接受签名 Token 的非空客户 ID。
+        merged["client_id"] = (
+            db_assoc.get("client_id")
+            if db_assoc.get("client_id") is not None
+            else token_assoc.get("client_id")
+        )
         merged["url_params"] = merge_association_url_params(
             db_assoc.get("url_params"),
             token_assoc.get("url_params"),
@@ -127,8 +134,7 @@ class ClickAssociator:
                     select(Publisher).where(Publisher.id == publisher_id).limit(1)
                 )
                 association["publisher"] = r.scalars().first()
-                if association["publisher"] is not None:
-                    association["client_id"] = association["publisher"].client_id
+                # 禁止用 Publisher 当前 client_id 回填历史点击归属；历史 Token/Click 缺快照时保持 None。
             if offer_id and association.get("offer") is None:
                 r = await db.execute(
                     select(Offer).where(Offer.id == offer_id).limit(1)
@@ -244,7 +250,7 @@ class ClickAssociator:
             'offer': click.offer,
             'publisher': click.publisher,
             # 客户归属以点击时的渠道配置为准，不能信任回调请求体中的 client_id。
-            'client_id': click.publisher.client_id if click.publisher else None,
+            'client_id': click.client_id,
             'advertiser': click.advertiser,
             'url_params': url_params,
         }
