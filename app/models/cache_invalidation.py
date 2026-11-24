@@ -167,7 +167,7 @@ class ShortLinkCacheInvalidationOutbox(Base):
             name="chk_short_link_cache_invalidation_status",
         ),
         CheckConstraint(
-            "attempt_count >= 0 AND max_attempts > 0 AND CHAR_LENGTH(short_code) BETWEEN 1 AND 20",
+            "attempt_count >= 0 AND max_attempts > 0 AND length(short_code) BETWEEN 1 AND 20",
             name="chk_short_link_cache_invalidation_attempts",
         ),
         Index(
