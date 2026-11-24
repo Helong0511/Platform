@@ -29,6 +29,7 @@ from app.core.infrastructure.cache_compat import (
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.query_utils import date_range_condition, check_use_assignment_table
+from app.services.cache_invalidation_outbox import get_cache_generations
 from app.core.utils import get_app_now_naive
 from app.models.models import User, AdData, Product, Client, UserRole
 from app.services.ad_data.queries.dimension_filter import kpi_mutual_source_filter
@@ -38,6 +39,22 @@ from app.services.ad_data.queries.join_helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _build_dashboard_cache_key(
+    cache_name: str,
+    period: str,
+    user_id: int,
+    generations: Dict[str, int],
+) -> str:
+    """缓存键绑定数据与权限版本，避免角色/租户范围变化命中旧统计结果。"""
+    return generate_cache_key(
+        cache_name,
+        period,
+        user_id,
+        generations["ad_data"],
+        generations["user_stats"],
+    )
 
 
 class DashboardService:
@@ -78,8 +95,11 @@ class DashboardService:
             含 stats（指标卡片列表）与 metrics（total_revenue、roi）的字典
         """
         # ====== 缓存优化 ======
-        # 生成缓存键（包含用户ID和周期）
-        cache_key = generate_cache_key("dashboard_stats", period, current_user.id)
+        # 数据或权限范围变化会递增对应 Generation；缓存键随版本变化而自然失效。
+        generations = await get_cache_generations(self.db, ("ad_data", "user_stats"))
+        cache_key = _build_dashboard_cache_key(
+            "dashboard_stats", period, current_user.id, generations
+        )
 
         # 尝试从缓存获取（缓存 1 分钟）
         cached = await get_cached(cache_key, key_prefix="dashboard")
@@ -487,8 +507,11 @@ class DashboardService:
         Returns:
             含 dates 与各指标 series 的字典
         """
-        # ====== 缓存优化 ======
-        cache_key = generate_cache_key("dashboard_trends", period, current_user.id)
+        # 数据或权限范围变化会递增对应 Generation；缓存键随版本变化而自然失效。
+        generations = await get_cache_generations(self.db, ("ad_data", "user_stats"))
+        cache_key = _build_dashboard_cache_key(
+            "dashboard_trends", period, current_user.id, generations
+        )
 
         cached = await get_cached(cache_key, key_prefix="dashboard")
         if cached:
