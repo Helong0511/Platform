@@ -22,8 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.infrastructure.cache_compat import (
     generate_cache_key,
-    legacy_get_cached as get_cached,
-    legacy_set_cached as set_cached,
+    get_or_set_single_flight,
 )
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
@@ -76,9 +75,36 @@ class DashboardService:
         )
 
     async def get_dashboard_stats(
-            self,
-            period: str,
-            current_user: User
+        self,
+        period: str,
+        current_user: User,
+    ) -> Dict[str, Any]:
+        """获取 Dashboard 指标；同一用户/周期/版本的并发 miss 只执行一次查询。"""
+        generations = await get_cache_generations(self.db, ("ad_data", "user_stats"))
+        cache_key = _build_dashboard_cache_key(
+            "dashboard_stats", period, current_user.id, generations
+        )
+
+        async def _load():
+            return await self._get_dashboard_stats_uncached(period, current_user)
+
+        return await get_or_set_single_flight(
+            cache_key,
+            _load,
+            ttl=60,
+            key_prefix="dashboard",
+            is_valid=lambda value: (
+                isinstance(value, dict)
+                and "stats" in value
+                and "metrics" in value
+            ),
+            wait_timeout=45,
+        )
+
+    async def _get_dashboard_stats_uncached(
+        self,
+        period: str,
+        current_user: User,
     ) -> Dict[str, Any]:
         """
         获取仪表盘核心指标卡片数据（含环比趋势）。
@@ -93,23 +119,6 @@ class DashboardService:
         Returns:
             含 stats（指标卡片列表）与 metrics（total_revenue、roi）的字典
         """
-        # ====== 缓存优化 ======
-        # 数据或权限范围变化会递增对应 Generation；缓存键随版本变化而自然失效。
-        generations = await get_cache_generations(self.db, ("ad_data", "user_stats"))
-        cache_key = _build_dashboard_cache_key(
-            "dashboard_stats", period, current_user.id, generations
-        )
-
-        # 尝试从缓存获取（缓存 1 分钟）
-        cached = await get_cached(cache_key, key_prefix="dashboard")
-        if cached:
-            try:
-                logger.debug(f"缓存命中: dashboard_stats, period={period}, user={current_user.id}")
-                return cached
-            except Exception as e:
-                logger.warning(f"缓存数据格式错误，将重新查询: {e}")
-                # 缓存数据格式错误，继续执行查询
-
         # ====== 确定时间范围 ======
         today = get_app_now_naive().date()
         if period == "day":
@@ -380,9 +389,6 @@ class DashboardService:
             }
         }
 
-        # 缓存结果（缓存 1 分钟）
-        await set_cached(cache_key, response_data, ttl=60, key_prefix="dashboard")
-
         return response_data
 
     async def get_recent_ad_data(
@@ -489,9 +495,36 @@ class DashboardService:
             }
 
     async def get_trend_data(
-            self,
-            period: str,
-            current_user: User
+        self,
+        period: str,
+        current_user: User,
+    ) -> Dict[str, Any]:
+        """获取 Dashboard 趋势；同一用户/周期/版本的并发 miss 只执行一次查询。"""
+        generations = await get_cache_generations(self.db, ("ad_data", "user_stats"))
+        cache_key = _build_dashboard_cache_key(
+            "dashboard_trends", period, current_user.id, generations
+        )
+
+        async def _load():
+            return await self._get_trend_data_uncached(period, current_user)
+
+        return await get_or_set_single_flight(
+            cache_key,
+            _load,
+            ttl=60,
+            key_prefix="dashboard",
+            is_valid=lambda value: (
+                isinstance(value, dict)
+                and "dates" in value
+                and "series" in value
+            ),
+            wait_timeout=45,
+        )
+
+    async def _get_trend_data_uncached(
+        self,
+        period: str,
+        current_user: User,
     ) -> Dict[str, Any]:
         """
         获取趋势折线图时序数据。
@@ -506,20 +539,6 @@ class DashboardService:
         Returns:
             含 dates 与各指标 series 的字典
         """
-        # 数据或权限范围变化会递增对应 Generation；缓存键随版本变化而自然失效。
-        generations = await get_cache_generations(self.db, ("ad_data", "user_stats"))
-        cache_key = _build_dashboard_cache_key(
-            "dashboard_trends", period, current_user.id, generations
-        )
-
-        cached = await get_cached(cache_key, key_prefix="dashboard")
-        if cached:
-            try:
-                logger.debug(f"缓存命中: dashboard_trends, period={period}, user={current_user.id}")
-                return cached
-            except Exception as e:
-                logger.warning(f"缓存数据格式错误，将重新查询: {e}")
-
         # 确定时间范围
         today = get_app_now_naive().date()
         if period == "day":
@@ -612,8 +631,5 @@ class DashboardService:
                 {"name": "转化数", "data": conversions}
             ]
         }
-
-        # 缓存结果（缓存 1 分钟）
-        await set_cached(cache_key, response_data, ttl=60, key_prefix="dashboard")
 
         return response_data
