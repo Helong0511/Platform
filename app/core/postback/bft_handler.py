@@ -27,8 +27,6 @@ class BftPostbackHandler(PostbackHandler):
         click_id = DataNormalizer._extract_click_id(data)
         if not explicit_conversion_id:
             return False, "缺少稳定转化事件 ID：必须提供 conversion_id 或 conversionId；click_id/clk_id/cid 仅用于归因"
-        if not click_id and not explicit_conversion_id:
-            return False, "缺少 click_id/clk_id/cid 或 conversion_id"
         # 两类 ID 分别检查，不能让较短的显式 conversion_id 掩盖超长 click_id。
         for id_value in (
             explicit_conversion_id,
