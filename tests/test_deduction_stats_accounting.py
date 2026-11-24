@@ -59,7 +59,7 @@ async def test_decision_stats_recover_processed_and_deducted_from_database_basel
     manager.get_recent_stats = AsyncMock(
         return_value=ConversionStats(total=31, deducted=7, processed=31)
     )
-    redis = SimpleNamespace(eval=AsyncMock(return_value=[4, 2]))
+    redis = SimpleNamespace(eval=AsyncMock(return_value=[32, 2]))
     monkeypatch.setattr(
         deduction_manager_module,
         "get_redis_client",
@@ -77,6 +77,7 @@ async def test_decision_stats_recover_processed_and_deducted_from_database_basel
     args = redis.eval.await_args.args
     assert args[4] == 24 * 60 * 60
     assert args[5] == 7
+    assert args[6] == 31
     assert "current_deducted < init_deducted" in args[0]
 
 
