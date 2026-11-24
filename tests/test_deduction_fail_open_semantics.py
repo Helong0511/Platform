@@ -127,3 +127,71 @@ async def test_strict_decision_stats_do_not_silently_return_zero_on_db_failure(m
     # 非决策用途仍保留既有 fail-open 返回行为。
     stats = await DeductionManager(db).get_recent_stats(strict=False)
     assert stats == ConversionStats()
+
+
+@pytest.mark.asyncio
+async def test_fail_open_skips_volume_deduction_when_redis_increment_eval_fails(monkeypatch):
+    monkeypatch.setattr(
+        deduction_manager_module.settings,
+        "DEDUCTION_FAIL_OPEN",
+        True,
+    )
+    redis = SimpleNamespace(
+        eval=AsyncMock(side_effect=RuntimeError("Redis eval unavailable"))
+    )
+    monkeypatch.setattr(
+        deduction_manager_module,
+        "get_redis_client",
+        AsyncMock(return_value=redis),
+    )
+    manager = DeductionManager(db=object())
+    manager._get_stats_for_decision = AsyncMock(return_value=ConversionStats())
+    manager.should_deduct_volume = lambda config, stats, decision_key="": True
+
+    result = await manager.apply_deduction(
+        {"original_payout": "10.00"},
+        _config(volume=True, amount=False),
+        click_id="click-redis-eval-failure",
+        offer_id=2,
+    )
+
+    assert result.should_deduct_volume is False
+    assert result.deducted_volume == 0
+    assert result.final_volume == 1
+    redis.eval.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fail_open_skips_volume_deduction_when_reservation_eval_fails(monkeypatch):
+    monkeypatch.setattr(
+        deduction_manager_module.settings,
+        "DEDUCTION_FAIL_OPEN",
+        True,
+    )
+    redis = SimpleNamespace(
+        eval=AsyncMock(side_effect=RuntimeError("Redis reservation unavailable"))
+    )
+    monkeypatch.setattr(
+        deduction_manager_module,
+        "get_redis_client",
+        AsyncMock(return_value=redis),
+    )
+    manager = DeductionManager(db=object())
+    manager._get_stats_for_decision = AsyncMock(
+        return_value=ConversionStats(total=10, deducted=0, processed=10)
+    )
+    manager.should_deduct_volume = lambda config, stats, decision_key="": True
+
+    config = _config(volume=True, amount=False)
+    config.deduction_strategy = "hash"
+    result = await manager.apply_deduction(
+        {"original_payout": "10.00"},
+        config,
+        click_id="click-redis-reservation-failure",
+        offer_id=2,
+    )
+
+    assert result.should_deduct_volume is False
+    assert result.deducted_volume == 0
+    assert result.final_volume == 1
+    redis.eval.assert_awaited_once()
