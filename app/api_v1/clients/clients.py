@@ -737,8 +737,8 @@ async def delete_client(
     await db.flush()
     from app.services.cache_invalidation_outbox import advance_cache_generation
     await advance_cache_generation(db)
-        # Client 创建、关联用户调整或删除会影响用户统计中的客户关联人数。
-        await advance_cache_generation(db, namespace="user_stats")
+    # Client 创建、关联用户调整或删除会影响用户统计中的客户关联人数。
+    await advance_cache_generation(db, namespace="user_stats")
     # 注意：不需要手动提交事务，get_db 依赖会自动处理
 
     logger.info(f"Client {client.company_name} deleted by {current_user.username}")
