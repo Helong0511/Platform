@@ -504,13 +504,15 @@ class DeductionManager:
             转化统计信息
         """
         try:
-            # 尝试从缓存获取
+            # strict 决策路径必须直接读取数据库权威统计；60 秒缓存仅供展示/非严格查询。
+            # 否则窗口内旧事件滚出后，缓存仍会污染扣量判断。
             cache_key = self._build_stats_cache_key(
                 advertiser_id, offer_id, publisher_id, hours
             )
-            cached_stats = await get_cached(cache_key)
-            if cached_stats:
-                return ConversionStats(**cached_stats)
+            if not strict:
+                cached_stats = await get_cached(cache_key)
+                if cached_stats:
+                    return ConversionStats(**cached_stats)
             
             # 统计窗口内的已入库转化 + 未入库的扣量命中。
             # 正常转化不一定有 ConversionDeductionLog；扣金额日志对应的转化已在
@@ -577,8 +579,9 @@ class DeductionManager:
                 processed=processed
             )
             
-            # 缓存统计结果（SETNX 风格由 cache 层负责；此处仅写）
-            await set_cached(cache_key, stats.to_dict(), STATS_CACHE_TTL)
+            # strict 决策统计不写入展示缓存，避免被后续非严格查询误认为权威数据。
+            if not strict:
+                await set_cached(cache_key, stats.to_dict(), STATS_CACHE_TTL)
             
             return stats
             
