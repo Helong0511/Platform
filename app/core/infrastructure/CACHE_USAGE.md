@@ -75,7 +75,7 @@ await set_with_jitter(
     f"user:{user_id}",
     user_data,
     base_ttl=300,
-    jitter_range=30  # ±30 秒随机
+    jitter_range=30  # 基础 TTL 正向增加 1–30 秒
 )
 ```
 
