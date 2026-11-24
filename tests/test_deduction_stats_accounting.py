@@ -54,6 +54,11 @@ async def test_recent_stats_counts_saved_conversions_and_only_unpersisted_volume
     volume_log_sql = str(volume_log_stmt)
     assert "postback_conversions" in conversion_sql
     assert "conversion_deduction_logs" in volume_log_sql
+    # 两类数据均使用 [start_time, end_time) 半开区间，防止相邻窗口重复计算边界事件。
+    assert " < " in conversion_sql
+    assert " <= " not in conversion_sql
+    assert " < " in volume_log_sql
+    assert " <= " not in volume_log_sql
     assert "deducted_volume" in volume_log_sql
     assert "conversion_id IS NULL" in volume_log_sql
 
