@@ -108,6 +108,16 @@ async def step_check_duplicate(ctx: PostbackPipelineContext) -> bool:
     )
 
 
+async def step_release_event_receipt(ctx: PostbackPipelineContext) -> None:
+    """正式转化已写入当前事务后释放临时收据；扣量跳过入库时不得调用。"""
+    await DuplicateChecker.release_receipt(
+        platform=ctx.platform,
+        conversion_id=ctx.normalized_data.get("conversion_id"),
+        event_name=ctx.normalized_data.get("event_name"),
+        db=ctx.db,
+    )
+
+
 def conversion_status_for_cap(cap_ok: bool) -> str:
     """返回数据库可存储且稳定的转化状态；详细超限原因单独用于日志/响应。"""
     return "Pending" if cap_ok else "CapReached"
