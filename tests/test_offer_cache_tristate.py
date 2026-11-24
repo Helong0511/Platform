@@ -176,3 +176,13 @@ async def test_offer_warmup_only_writes_on_confirmed_cache_miss(monkeypatch):
 
     assert await cache_manager.CacheManager.warmup_offers(FakeDB()) == 1
     assert len(written) == 1
+
+
+@pytest.mark.asyncio
+async def test_offer_cache_invalidation_handles_redis_client_failure(monkeypatch):
+    async def get_redis():
+        raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(offer_cache, "get_redis_client", get_redis)
+
+    assert await offer_cache.invalidate_offer_cache(17) is False
