@@ -37,5 +37,5 @@ def test_scheduled_short_link_reactivation_enqueues_invalidation_in_same_transac
     start = source.index("async def open_closed_short_links_task(")
     section = source[start:]
     assert "ShortLink.short_code" in section
-    assert "await enqueue_short_link_cache_invalidation(db, short_code)" in section
-    assert section.index("await enqueue_short_link_cache_invalidation(db, short_code)") < section.index("await db.commit()")
+    assert "await enqueue_short_link_cache_invalidation(db, short_code, flush=False)" in section
+    assert section.index("await enqueue_short_link_cache_invalidation(db, short_code, flush=False)") < section.index("await db.flush()") < section.index("await db.commit()")
