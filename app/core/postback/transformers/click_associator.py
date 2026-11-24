@@ -118,10 +118,20 @@ class ClickAssociator:
                 )
                 association["advertiser"] = r.scalars().first()
         except Exception as e:
-            logger.warning(
-                "令牌关联 ORM enrichment 失败（不影响 ID 归因）：%s",
+            # Enrichment 查询失败属于数据库故障，不等于关联对象不存在。
+            # 不得返回半截 Token 身份继续进入 Cap/扣量/转发流程。
+            logger.error(
+                "令牌关联 ORM enrichment 数据库查询失败，终止归因：error_type=%s",
                 type(e).__name__,
             )
+            try:
+                await db.rollback()
+            except Exception as rollback_error:
+                logger.critical(
+                    "令牌关联 ORM enrichment 失败后的事务回滚也失败：error_type=%s",
+                    type(rollback_error).__name__,
+                )
+            raise
 
         return association
 
