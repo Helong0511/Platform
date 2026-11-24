@@ -113,3 +113,24 @@ Postback pipeline 的 `step_associate_click()` 直接接收该返回值。后续
 - 当前冲突异常会中止 Postback pipeline；接收层将其作为非重试的请求拒绝处理（HTTP 400），不会继续进入 Cap、扣量、转化保存或转发。
 
 注意：此修复只解决 Token/DB 已同时存在时的字段冲突，不解决 DB 查无记录时的 Token-only 策略，也不解决历史 `client_id` 快照缺失。
+
+### 5.2 历史客户归属快照修复（本轮追加）
+
+**根因确认：** `clicks` 表原先没有客户 ID 快照。DB 归因从 `click.publisher.client_id` 读取当前值；Token-only enrichment 也会用当前 Publisher 值补齐；`ConversionSaver.resolve_trusted_attribution()` 还有一次相同的当前值 fallback。Publisher 的客户归属一旦从 A 改成 B，历史点击可能被归到 B。
+
+**修复内容：**
+
+- `clicks.client_id` 新增点击时客户 ID 快照字段；ORM 与 `sql/platform.sql` 同步。
+- 新增迁移 `sql/migrations/20261124_click_client_attribution_snapshot.sql`。该列不设置 clients 外键，避免客户后续删除/迁移清空已发生点击的历史归属。
+- `/track/click/{offer_id}` 在创建点击时将 `publisher.client_id` 同时写入 Click 记录和签名 Token。
+- Token 解析新增 `client_id` 字段；紧凑 Token 载荷优先保留该字段，碰撞重建 Token 时也保留快照。
+- DB 归因读取 `clicks.client_id`，不再读取 Publisher 当前 `client_id`。
+- Token enrichment 不再用 Publisher 当前归属补齐缺失快照。
+- Token 与 DB 合并时，双方非空客户 ID 不一致即拒绝；DB 快照存在时 DB 优先；DB 历史行缺失快照时可使用签名 Token 快照。
+- `ConversionSaver.resolve_trusted_attribution()` 不再回退读取 Publisher 当前 `client_id`。旧点击若 DB 与 Token 均无快照，客户归属保持 NULL，不信任请求体 client_id，也不猜测当前 Publisher 归属。
+
+**历史数据处理：** 不执行自动回填。旧 `clicks` 行没有足以证明点击时客户归属的字段，使用当前 Publisher 值回填会把已发生的 A→B 变更错误写入历史。历史 NULL 应保持 NULL，除非存在可信的外部历史快照或可验证审计记录。
+
+**上线顺序：** 先备份并执行新增列迁移，再部署包含新 ORM/Token/归因逻辑的应用。迁移前不得部署新代码；迁移完成后再逐步切换实例。新旧实例短暂混跑时，旧实例新写入的 Click 可能没有 `client_id`，但签名 Token 仍包含快照；若旧实例生成的 Token 也不含快照，则该事件客户归属保持 NULL，属于安全降级，不得用当前 Publisher 值补猜。
+
+**验证范围：** 已新增 Token 载荷保留/解析、DB 缺失快照时签名 Token 补充、客户快照冲突拒绝、enrichment 不覆盖快照，以及 ConversionSaver 不回退当前 Publisher 的测试。代码已提交，必须以最终提交 SHA 的 CI 结果为准；尚未执行生产 MySQL migration，也没有声称历史数据已回填。
