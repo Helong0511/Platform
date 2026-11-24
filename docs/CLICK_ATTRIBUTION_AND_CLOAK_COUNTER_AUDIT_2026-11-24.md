@@ -85,3 +85,22 @@ Postback pipeline 的 `step_associate_click()` 直接接收该返回值。后续
 在真实 MySQL（与生产相同主版本、InnoDB、事务隔离级别）上完成并发和故障注入测试；检查 migration、索引、锁顺序、事务回滚和 commit-unknown 恢复。单元测试或 SQLite 不能替代这些验证。
 
 本报告只记录已核实风险与修复验收标准，不代表问题已经修复。PR #205 仍应保持 Draft；在 Redis/MySQL 扣量权威账本、窗口算法、Click 归因 fail-closed 和真实 MySQL 并发测试完成前，不得合并上线。
+
+## 5. 2026-11-24 后续修复进展（以最新分支提交为准）
+
+本次追加修复：
+
+- `associate_from_db()`：数据库查询异常时回滚当前 Session 并向上抛出，不再在同一失败 Session 上重试，也不再把数据库故障折叠为 Click not-found。
+- `_enrich_association()`：此前会捕获 Token 关联 ORM enrichment 的数据库异常并返回部分 Token 身份。现改为记录异常类型、尝试回滚并重新抛出，避免数据库不可用时携带未完成校验的 Token 身份继续进入后续财务处理。
+- 新增 `test_token_enrichment_database_error_rolls_back_and_propagates`，验证 enrichment 查询异常只执行一次、回滚一次、异常向上传播且不返回部分 publisher 关联。
+
+以上改动已提交到 PR #205 分支；尚未由最新提交对应 CI 验证，本地未执行测试。接收层已将未捕获处理异常转换为 HTTP 503 retryable response。
+
+仍未解决：
+
+- Token 与 DB 同时存在时，`_merge_token_and_db_association()` 仍允许 Token 非空身份字段覆盖 DB 的 offer/publisher/advertiser/short_link 身份字段，尚未完成冲突检测。
+- DB 查无 Click 时是否允许 Token-only 仍是业务策略问题；不得将 DB unavailable 解释为 not-found。若允许 Token-only，必须明确其身份可信边界、审计状态及财务处理策略。
+- 历史 Publisher `client_id` 归属快照仍缺失，不能用当前 Publisher 值反推历史归属。
+- 斗篷计数、MySQL 权威扣量账本、Redis/MySQL 非原子边界及 24 小时窗口算法仍未解决。
+
+因此 PR #205 继续保持 Draft；本节记录的是代码提交状态，不代表测试通过或验收完成。
