@@ -1532,3 +1532,35 @@ PostbackProcessor.process() 在拿到 click_association=None 后没有因“请�
 5. 再与第 29 节 MySQL 权威事件决策账本、scope mutex、配置 CRUD 互斥合并实施，配套真实 MySQL 并发/故障测试。
 
 这些问题仍属于上线前阻断项。不能把文档设计或 CI 通过当作代码修复完成。
+
+
+### 33. 第八阶段复核：修正斗篷计数风险范围，并确认主计数器已有原子账本
+
+对第 32.4 节“斗篷点击计数并发丢增量”进行调用链反查后，需要收窄此前表述，避免把系统主计数路径与斗篷落库辅助路径混为一谈。
+
+#### 33.1 主短链计数器并非简单 ORM read-modify-write
+
+`app/core/short_link_click_counter.py` 已实现较完整的计数同步机制：
+- Redis 计数使用 Lua 原子操作；
+- Redis 不可用时，DB fallback 使用 `ShortLinkClickSyncBatch` 唯一事件账本；
+- DB 自增使用 SQL 表达式 `ShortLink.click_count + 1`，不是 Python 读-改-写；
+- COMMIT 结果不确定时，通过唯一 batch_id 在新 Session 查询账本，避免盲目重复自增；
+- 缓存失效确认后才 ACK 账本，失败保留待恢复状态。
+
+因此，不能笼统声称“短链点击计数整体存在并发丢增量”。主计数器有 Redis Lua 与 DB 原子账本保护，应继续针对其 Redis 执行结果不确定、事件 ID 生成稳定性、批次刷盘和恢复 Worker 做专项验收，但不能把已存在的原子机制遗漏。
+
+#### 33.2 风险仍存在于斗篷持久化模块的可选同步分支
+
+`app/routes/short_link/cloak_click_persist.py` 中，当 `sync_short_link_click_count` 为真时，仍执行：
+```python
+short_link.click_count = (short_link.click_count or 0) + 1
+await db_session.commit()
+```
+
+这是独立于 `short_link_click_counter.py` 的 ORM read-modify-write。若该分支与主计数器同时用于同一类点击，可能产生并发丢增量，也可能造成重复计数；是否实际启用及调用方是否已在外层计数，必须追踪 `sync_short_link_click_count` 的全部调用点后才能判定线上影响。
+
+修复前必须先确认计数责任唯一：同一个点击事件只能由一个路径负责增加 short_links.click_count。若保留该分支，应改为原子 SQL，并通过事件幂等键防止与主计数器重复入账；不能只替换为 SQL 原子加一而忽略双路径重复计数。
+
+#### 33.3 本节结论
+
+第 32.4 节的总体风险已修正为“斗篷模块可选同步分支存在非原子 read-modify-write”，不再扩展到整个短链计数系统。主计数器已有原子 Redis/DB 机制，后续审计重点转为调用链去重、同事件双路径计数和账本恢复验证。本轮仍未修改业务代码。
