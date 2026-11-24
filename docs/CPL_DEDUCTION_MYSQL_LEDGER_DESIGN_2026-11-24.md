@@ -896,3 +896,26 @@ GROUP BY publisher_id HAVING COUNT(*) > 1;
 7. 测试需在目标 MySQL 版本及生产隔离级别执行；SQLite、mock Redis、单元测试不能证明锁、隔离级别和事务提交边界正确。
 
 **当前结论：** PR #205 的 Redis 决策序号与扣量预留在 MySQL 事务提交前发生，是明确的财务一致性阻断项。不能通过延长 TTL、在异常时简单 DECR，或仅增加重试测试解决；必须以 MySQL 事件级账本作为唯一权威来源后再验收。
+
+
+## 24. PR #205 尚未集成 PR #206 的事件收据代码（2026-11-24 追加）
+
+再次比较 PR #205 当前分支与 main，确认：
+
+- PR #205 merge-base 仍为 `f3f28c50e615e80fff19487f5d0501c2629a0e24`。
+- main 已包含 PR #206 merge commit `1c0857a35f01ae46eee520e8934a41dc24410393`。
+- PR #205 相对 main 为 ahead 51 / behind 1，属于 diverged。
+- PR #206 的这一个 main-side merge commit 修改了以下关键文件：`app/core/postback/pipeline.py`、`app/core/postback/processor.py`、`app/core/postback/validators/duplicate_checker.py`、`app/models/postback.py`、`app/models/models.py`、migration manifest，以及新增 receipt migration 和真实 MySQL 集成测试。
+- PR #205 当前分支的 `pipeline.py` 仍未包含 `step_release_event_receipt`，`processor.py` 也没有导入/调用该步骤；main 已包含。PR #205 当前分支因此不能被描述为已经拥有 PR #206 的 receipt 保护。
+
+### 同步要求
+
+1. 先将 main 的 PR #206 merge commit 集成到 PR #205 分支，保留 PR #205 自身所有改动；不得 force push 丢弃分支历史。
+2. 对 pipeline/processor/duplicate checker/schema/migration manifest 的交叉变更逐文件审查，尤其确认扣量跳过入库时 receipt 被保留、正常入库时 receipt 在同一事务释放、rollback 后 receipt 可重试接管。
+3. 确认 migration 只执行一次，manifest revision/checksum 与 SQL 文件一致；不得因分支同步产生重复 migration 或覆盖 PR #206 已合并实现。
+4. 同步后重新运行 PR #205 的 Full Audit、Emergency Security 和真实 MySQL receipt tests；检查精确新 Head SHA。
+5. 同步只解决代码基线落后问题，不会自动解决本报告第 22、23 节的事件身份链路和 Redis/MySQL 财务原子性问题。
+
+**本轮没有执行分支同步或强制更新。** 当前可用 GitHub 工具虽支持创建 Git tree/commit 和更新 ref，但没有安全的自动 merge-tree 冲突解析动作；直接重建 tree 或 force update 会有丢失 PR #205 文件改动的风险。因此先保留现状，待能够逐项构造并核对合并树后再同步。
+
+**当前结论：** PR #205 仍为 Draft；即使 GitHub 显示 mergeable，也必须先把 PR #206 的 receipt 实现真正集成到该分支，再做完整回归验收。
