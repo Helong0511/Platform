@@ -29,8 +29,13 @@ class BftPostbackHandler(PostbackHandler):
         )
         if clk_id is None:
             return False, "clk_id 或 click_id 或 cid 参数不能为空"
-        if len(str(clk_id).strip()) > 200:
-            return False, "click_id/conversion_id 过长（最大 200 字符）"
+        # 两类 ID 分别检查，不能让较短的显式 conversion_id 掩盖超长 click_id。
+        for id_value in (
+            DataNormalizer._extract_explicit_conversion_id(data),
+            DataNormalizer._extract_click_id(data),
+        ):
+            if id_value is not None and len(str(id_value).strip()) > 200:
+                return False, "click_id/conversion_id 过长（最大 200 字符）"
 
         payout = self._first_non_empty(
             data,
