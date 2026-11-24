@@ -29,7 +29,6 @@ from app.core.infrastructure.cache_compat import (
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.query_utils import date_range_condition, check_use_assignment_table
-from app.services.cache_invalidation_outbox import get_cache_generations
 from app.core.utils import get_app_now_naive
 from app.models.models import User, AdData, Product, Client, UserRole
 from app.services.ad_data.queries.dimension_filter import kpi_mutual_source_filter
@@ -37,6 +36,7 @@ from app.services.ad_data.queries.join_helpers import (
     join_resolved_client,
     outerjoin_best_product_assignment,
 )
+from app.services.cache_invalidation_outbox import get_cache_generations
 
 logger = logging.getLogger(__name__)
 
