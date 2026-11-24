@@ -58,3 +58,14 @@ def test_dashboard_stats_and_trends_both_use_generation_fenced_keys():
         'get_cache_generations(self.db, ("ad_data", "user_stats"))'
     ) == 2
     assert source.count("_build_dashboard_cache_key(") == 3  # helper + stats + trends
+
+
+def test_dashboard_permission_and_data_mutations_advance_fenced_namespaces():
+    user_service = Path("app/services/user_service.py").read_text(encoding="utf-8")
+    client_service = Path("app/services/client_service.py").read_text(encoding="utf-8")
+    product_service = Path("app/services/product_service.py").read_text(encoding="utf-8")
+
+    assert "await self.invalidate_user_stats_cache()" in user_service
+    assert 'advance_cache_generation(self.db, namespace="user_stats")' in client_service
+    assert "await advance_cache_generation(self.db)" in client_service
+    assert "await advance_cache_generation(self.db)" in product_service
