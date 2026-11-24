@@ -460,3 +460,37 @@ https://dev.mysql.com/doc/refman/8.4/en/create-table.html
 - 增加回归测试：同 click 两个 conversion 的决策输入不同；缺失 click 不允许 fallback 到 request sequence；同一事件 rollback 后重试身份一致；同事件并发只产生一次决策；顺序策略只计入已提交事件。
 
 在 MySQL 账本方案完成前，当前 deterministic hash 只能保证“相同 click_id 的哈希结果相同”，不能保证“相同 Postback 事件重试结果相同”，也不能正确区分同一 click 下的不同事件。
+
+
+### 15.1 仓库 schema 快照与 receipt migration 的默认 collation 不一致
+
+继续检查 `sql/platform.sql` 中 `postback_conversions` 的建表定义，确认仓库 schema 快照使用：
+
+```sql
+ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+```
+
+而 main 的 `sql/migrations/20261124_postback_event_deduction_receipts.sql` 为 `postback_event_receipts` 显式指定：
+
+```sql
+ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+```
+
+因此仓库内两张事件身份表的默认字符串比较规则已经存在版本差异。不能假设两张表的唯一键对大小写、重音、Unicode 等价字符及排序权重拥有完全一致的判等语义。该差异是仓库 schema/migration 的确定事实；生产数据库是否与仓库快照一致仍需实际查询确认。
+
+迁移前必须在目标 MySQL 执行并保存：
+
+```sql
+SHOW CREATE TABLE postback_conversions;
+SHOW CREATE TABLE postback_event_receipts;
+
+SELECT TABLE_NAME, COLUMN_NAME, CHARACTER_SET_NAME, COLLATION_NAME,
+       IS_NULLABLE, COLUMN_TYPE
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME IN ('postback_conversions', 'postback_event_receipts')
+  AND COLUMN_NAME IN ('platform', 'conversion_id', 'event_name')
+ORDER BY TABLE_NAME, ORDINAL_POSITION;
+```
+
+不得仅通过修改 ORM Column 定义推断现有表已变更；必须由受控 migration 显式修改数据库列 collation，并在迁移前扫描新旧 collation 下的身份冲突。统一采用何种 collation（binary、明确的 *_as_cs，或业务批准的大小写不敏感规则）须结合上游 ID 契约、MySQL 版本和索引长度决定，不在本轮猜测。
