@@ -1202,3 +1202,155 @@ GROUP BY publisher_id HAVING COUNT(*) > 1;
 8. BFT 字段合同：取得官方协议或脱敏真实 payload 前，不得猜测 `clk_id/cid` 的事件唯一性语义。
 
 **当前处置：PR #205 继续保持 Draft，不合并。** 两项 CI 全绿和 GitHub mergeable=true 都不是财务一致性验收的替代品。
+
+## 29. 第四阶段：MySQL 权威事件决策账本事务协议（设计评审稿，未实施）
+
+本节将账本设计约束明确到事务顺序、身份唯一性、锁顺序、窗口统计和提交未知恢复。它是实施前的设计基线，不代表代码、DDL 或测试已经完成。
+
+### 29.1 设计目标与不可破坏的业务语义
+
+必须同时满足：
+
+- 一个规范事件身份最多产生一个终态决策；相同身份的重试只能重放原决策。
+- 事件终态、扣量日志、正常转化记录、必要的审计记录和 Outbox 在同一个 MySQL 事务中提交或回滚。
+- 扣量统计、扣量额度、顺序序号均以 MySQL 已提交账本为准；Redis 不再是权威计数器。
+- 配置变更和 Postback 决策通过相同的数据库 scope mutex 串行化。
+- 每个事件都要有持久终态，不得只记录命中扣量的事件。
+- 不能将“数据库提交结果未知”误判成回滚，也不能因此重新执行一遍扣量决策。
+
+### 29.2 建议的表职责
+
+建议新增两类核心表，而不是继续扩展临时 receipt 的职责：
+
+1. `conversion_deduction_event_decisions`：事件级决策账本，一条规范事件身份一行，保存完整决策快照和终态。
+2. `conversion_deduction_scope_locks`：广告主/Offer/Publisher 级互斥行，配置 CRUD、Postback 决策和父实体删除共用。
+
+决策账本建议字段（最终字段类型必须与项目 MySQL 版本、ORM 和历史数据核查结果一致）：
+
+- 主键：BIGINT 自增。
+- `event_key`：CHAR(64) CHARACTER SET ascii COLLATE ascii_bin，SHA-256 规范身份键，唯一。
+- `identity_fingerprint`：BINARY(64)，对规范身份独立计算 SHA-512，用于发现 event_key 碰撞并 fail closed。
+- `platform`、`conversion_id`、`event_name`：保存规范身份字段，采用明确的二进制比较语义；不得依赖数据库默认不区分大小写 collation。
+- `state`：事务内只允许临时 PENDING；提交前必须转为终态。建议终态至少包括 `ACCEPTED`、`VOLUME_DEDUCTED`、`AMOUNT_ADJUSTED`、`VOLUME_AND_AMOUNT_DEDUCTED`、`SKIPPED_FAIL_OPEN`、`SKIPPED_POLICY`。如果事件被拒绝或未进入扣量业务，是否创建终态需与业务入口契约明确，不可把校验失败伪装成成功转化。
+- Scope 快照：advertiser_id、offer_id、publisher_id；允许 NULL 的语义必须明确。
+- 决策快照：config_id、config_version/updated_at、strategy、ratio、amount ratio、原始/扣减/最终 volume 与 amount、reason、policy version。
+- 窗口快照：window_kind、window_start、decision_at、window_total_before、window_deducted_before、window_total_after、window_deducted_after；金额使用 DECIMAL，禁止 float 持久化。
+- 时间字段：received_at / decision_at / finalized_at 均由数据库 UTC 时钟生成；上游 event_time 另存，仅用于明确约定的业务分析，不可隐式替代接收时间。
+- 错误/降级字段只保存安全错误类别与受控摘要，不写入密钥、完整原始请求或未经脱敏的个人数据。
+
+索引建议：
+- UNIQUE(event_key)。
+- INDEX(scope/window/decision_at/event_key)，实际列序须通过真实查询计划验证。
+- INDEX(state, finalized_at, id) 仅在确实需要运维扫描时建立。
+- 不对长原始 ID 直接建立宽联合唯一索引；使用固定长度二进制键并保留 fingerprint collision guard。
+
+### 29.3 唯一身份生成规则
+
+必须提供一个 canonical identity 模块，作为所有事件入口的唯一身份实现：
+
+1. platform：按已确认的现有合同执行 strip，保留大小写；不得擅自 casefold。
+2. conversion_id：只接受明确的上游转化唯一 ID，不得回退到 click_id；空值、超长值和控制字符策略必须显式定义。
+3. event_name：只调用唯一的 `normalize_event_name()`，空值/空白映射 default。
+4. 采用 UTF-8 长度前缀编码后计算 SHA-256 event_key；另用独立 SHA-512 计算 fingerprint。
+5. 数据库中 event_key 用 ascii_bin；规范字段比较规则与 Python 规范化结果完全一致。
+6. 同 event_key 但 fingerprint 或规范字段不同，视为哈希碰撞/实现漂移，必须告警并 fail closed；禁止覆盖赢家记录。
+
+Canonical API 必须同时供 PostbackEventReceipt 迁移兼容层、decision ledger、PostbackConversion 查重及所有 DeductionManager 调用使用。不得在不同模块重复实现规范化规则。
+
+### 29.4 必须统一的事务与锁顺序
+
+推荐 Postback 主事务按以下顺序执行，任何入口不得另行变更顺序：
+
+1. 完成不涉及数据库写锁的请求结构/IP/平台字段校验；得到可信规范事件身份及归因候选 scope。
+2. 在主 MySQL 事务中尝试插入 PENDING decision ledger（唯一 event_key）。若唯一键冲突，等待竞争事务结束，再读取赢家终态；终态存在则原样重放，禁止再次计算。
+3. 对本次事件涉及的全部 scope key 去重后排序，按固定全局顺序逐一确保锁行存在，再逐一 `SELECT ... FOR UPDATE`。建议顺序固定为 advertiser → offer → publisher，层级内按数值 ID 升序。
+4. 锁定后以 current read 重新读取有效配置、父实体状态、配置版本及需要的历史终态；不允许使用锁前建立的旧 REPEATABLE READ snapshot。
+5. 从 MySQL decision ledger 读取同一 scope 和窗口内的已提交终态统计，计算本事件决策。当前事务内的 PENDING 行必须排除，或显式按“本事件 +1”计算，不能重复计数。
+6. 写入完整决策快照；若正常转化，写入 PostbackConversion；若扣量，写入 ConversionDeductionLog；同时写入审计/Outbox。所有写入必须在同一主事务。
+7. 将 decision ledger 从 PENDING 更新为且仅更新为一个终态；提交整个事务。
+8. commit 返回成功后才允许异步转发/通知；外部副作用通过 Outbox，不允许在事务提交前直接发送。
+
+锁表主键建议为 `(scope_type, scope_id)`，scope_type 使用固定枚举值；scope_id 必须为正整数。创建锁行使用幂等 INSERT（例如 INSERT ... ON DUPLICATE KEY UPDATE 的无业务字段变化形式），随后按排序逐行 current-read `FOR UPDATE`。锁行不设置 TTL，不得清理正在作为并发仲裁对象的锁行。
+
+### 29.5 配置 CRUD 和父实体删除必须遵守同一协议
+
+- create：先锁 scope，再 current-read active config，再插入；不能先普通 SELECT 检查后 INSERT。
+- update：先锁原 scope；若允许移动 scope，必须同时锁原 scope 和新 scope，按全局顺序锁定，重新读取记录后再更新。
+- enable/disable：先锁 scope，重新读取并检查同 scope 的 active 冲突，再更新。
+- batch enable/disable/delete：先读取目标的候选 scope，仅用于确定锁集合；去重排序锁定后必须重新 current-read 全部目标及冲突配置，最后执行批量写入。
+- Offer/Advertiser/Publisher 删除：不得依赖 ON DELETE CASCADE 静默删除扣量配置。删除前锁定目标 scope 与受影响子 scope，明确拒绝删除或在同事务执行已审批的配置停用/删除流程。
+- 配置缓存 Generation 只能在配置变更事务内更新；缓存失效/Outbox 失败不能绕过锁协议，也不能把数据库配置变更部分提交。
+
+### 29.6 REPEATABLE READ 的关键实现要求
+
+MySQL 默认 REPEATABLE READ 下，普通 SELECT 使用事务一致性快照，而 `SELECT ... FOR UPDATE` 使用当前锁定读。不能先做普通配置/Generation SELECT 建立旧 read view，再锁 scope，最后普通 SELECT 配置并假设看到最新值。
+
+实现必须选择并固定其中一种策略：
+- 整个扣量事务采用明确的 READ COMMITTED，并确认 binlog/部署配置兼容；或
+- 保留 REPEATABLE READ，但在锁定 scope 后，对配置、Generation、事件账本及窗口统计中要求最新状态的读取全部使用锁定读/current read，并避免混合旧 snapshot。
+
+不允许仅凭“已经 SELECT FOR UPDATE 过 scope lock row”就认为其他表的普通 SELECT 自动变成 current read。真实 MySQL 集成测试必须复现：事务 A 先普通读建立快照；事务 B 修改配置并提交；事务 A 再获取 scope 锁并读取配置，验证所选方案不会读到过期配置。官方依据见 MySQL 8.4 Transaction Isolation Levels 与 Consistent Nonlocking Reads。
+
+### 29.7 24 小时统计窗口与决策时间
+
+为保持当前实现的接收时间语义，初步建议决策窗口继续按数据库接收时间，而不是上游 event_time：
+
+- 每个事件在完成 scope 锁定后，从 MySQL 获取一次 `decision_at = UTC_TIMESTAMP(6)`；整个事件决策只使用该值。
+- 窗口定义为半开区间 `[decision_at - INTERVAL 24 HOUR, decision_at)`，按已提交事件 ledger 的 `decision_at` 统计。
+- 当前事件先处于 PENDING，不纳入“已处理”统计；决策时使用 `processed_before + 1` 作为当前事件序号。
+- 窗口滚动自然由 SQL 时间条件实现；不再依赖 Redis 48 小时 TTL，也不需要对 Redis counter 做过期递减。
+- 同一 scope 由 mutex 串行化后，窗口统计、序号和额度检查在同一事务中完成。
+- 若业务实际要求按上游事件发生时间扣量，必须另行定义 event_time 来源可信度、迟到事件、时区、回补和窗口重算规则；不能悄悄将现有 created_at 改成 event_time。
+- 比例舍入规则必须与现有业务行为做 characterization tests 后冻结；当前实现使用 `int(total * ratio)` 的截断语义，迁移时不得无意改成四舍五入或 ceil。
+
+### 29.8 Redis 移除后的策略语义
+
+- random/hash/deterministic：事件身份作为稳定输入；MySQL ledger 保存实际结果，重复事件不再重新抽样。
+- proportional/round_robin：使用同 scope 锁内的 MySQL processed_before/decision sequence；顺序定义为 scope 锁成功取得后的数据库决策顺序，而不是客户端发送时间或网络到达时间。
+- 所有策略的 quota/limit 均由 MySQL ledger 统计和 scope 锁保护；Redis 只可用于非权威展示缓存。
+- 迁移期间不得让一部分 Worker 使用 MySQL ledger、另一部分仍使用 Redis 做权威决策。必须通过停旧 Worker、排空队列、切换所有 Worker 的版本门禁完成单一写入权威切换。
+
+### 29.9 COMMIT 结果未知与恢复
+
+数据库连接在 COMMIT 请求发送后断开时，客户端无法仅凭异常判断事务是否提交。处理规则：
+
+1. 不得执行 Redis DECR（未来权威路径不应有此写入），不得生成第二条事件决策。
+2. 使用新的数据库连接按 event_key 查询 ledger。
+3. 若找到终态，按已提交处理并返回原决策；若唯一键仍被未完成事务持有，等待/有限退避后重查。
+4. 若明确确认不存在 ledger，才允许重新提交整个事件处理流程；仍由唯一 event_key 保证并发只会有一个赢家。
+5. 若数据库不可用或状态暂时无法判定，返回 retryable=true 的暂时失败，不能返回“成功扣量”或“成功未扣量”。
+6. 运维恢复任务只能修复可证明的非终态异常；不允许仅凭超时把一条未知事件改为 ROLLED_BACK。
+
+### 29.10 必须通过的真实 MySQL 测试矩阵
+
+必须连接 MySQL 8.0/目标生产兼容版本，不能用 SQLite 替代：
+
+- 同一 event_key 2/10/50 并发：只有一个决策行、一个终态、一个财务结果；所有请求重放完全相同的结果。
+- 同 scope 不同 event_key 2/10/50 并发：扣量总数不超过按既定舍入规则计算的 quota。
+- 不同 scope 并发：不发生不必要的全局串行化。
+- 首次 scope lock row 并发创建：所有事务锁定同一行，不产生重复锁记录。
+- create/enable/disable/update/delete 与 Postback 决策并发：配置快照与生效顺序符合锁协议。
+- 多 scope 反向请求：排序后不发生可复现死锁；仍需验证死锁重试仅重试完整事务。
+- 人为注入 flush 失败、日志失败、Outbox 失败、commit 前断连：事件决策、转化、日志均回滚。
+- 模拟 COMMIT 成功但客户端丢失响应：重连查询得到唯一终态，不重复扣量。
+- Redis 不可用、Redis 数据清空：权威决策结果不变。
+- 24 小时边界、窗口滚动、同一微秒/相同时间戳排序：计数和策略结果确定。
+- REPEATABLE READ 旧 snapshot/current read 场景：配置读取必须符合明确策略。
+- deadlock 1213、lock wait timeout 1205：只重试完整事务，设置有界退避；不可在失败事务中继续查询/写入。
+
+### 29.11 设计结论与当前禁止事项
+
+该协议仍处于设计评审阶段。尚未实现 ORM、DDL、migration manifest/checksum、服务层、scope mutex、MySQL 权威统计、回滚恢复及上述测试。因此：
+- 不得将 Redis 计数改成 MySQL 查询的局部替换视为完成。
+- 不得仅新增 decision 表却继续从 Redis 预留名额。
+- 不得先上线 schema 再让新旧 Worker 混合写入。
+- 不得自动补写历史事件终态；历史扣量事件缺少外部事件身份时不能安全回填。
+- PR #205 保持 Draft，直到完整实现和真实 MySQL 测试全部通过。
+
+### 29.12 官方参考
+
+- MySQL 8.4 Transaction Isolation Levels：<https://dev.mysql.com/doc/refman/8.4/en/innodb-transaction-isolation-levels.html>
+- MySQL 8.4 Consistent Nonlocking Reads：<https://dev.mysql.com/doc/refman/8.4/en/innodb-consistent-read.html>
+- MySQL 8.4 Locking Reads：<https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html>
+- MySQL 8.4 Locks Set by Different SQL Statements：<https://dev.mysql.com/doc/refman/8.4/en/innodb-locks-set.html>
+- MySQL 8.4 Internal Locking Methods / deadlock avoidance：<https://dev.mysql.com/doc/refman/8.4/en/internal-locking.html>
