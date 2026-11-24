@@ -1375,3 +1375,66 @@ scope mutex 能保护扣量配置，但前提是本事件取得的 scope 集合�
 - 仓库已有 `CapReservationLedger`，采用独立会话、租约、状态机和恢复 Worker 处理 Redis Cap token；该机制说明跨 Redis/MySQL 状态需要显式账本，但它不是扣量决策账本。CPL 事件决策必须与 Postback 主事务原子提交，不能照搬 Cap Reservation 的独立事务边界。
 - 当前 `ConversionDeductionConfig` 的三个目标 FK 均为 `ON DELETE CASCADE`；因此父实体删除路径若不显式纳入 mutex，确实可能绕过配置 CRUD 的互斥协议。
 - 当前 `check_existing_config()` 是普通 SELECT 后再由服务层 INSERT；它本身不具备并发互斥能力。不能将其当作唯一性保证。
+
+### 30. 第五阶段源码复核：归因关系可变与 Click 查询异常被降级
+
+本轮检查 click_associator.py、publisher_service.py、offer_service.py、cpl.py、pipeline.py，确认第 29.13 节提出的归因竞态不是纯理论风险，当前代码已经存在可变关系与异常降级路径。
+
+#### 30.1 Publisher.client_id 是可变归属，但 Click 没有客户归属快照
+
+已确认的代码事实：
+
+- Click 模型保存 offer_id、publisher_id、advertiser_id，但没有 client_id 快照字段。
+- Publisher.client_id 可通过 PublisherService.update_publisher() 修改。
+- ClickAssociator.associate_from_db() 通过 joinedload(Click.publisher) 取出当前 Publisher，并将 association['client_id'] 设置为 click.publisher.client_id。
+- ConversionSaver.resolve_trusted_attribution() 优先采用该 association.client_id，随后以该客户 ID 验证产品归属。
+- step_apply_discount() 将解析出的 trusted_client_id / trusted_product_id 传入 DiscountChecker.calculate()，因此客户级/产品级扣量配置会受当前 Publisher.client_id 影响。
+
+风险：点击发生后若 Publisher 被迁移到另一个 Client，历史 Click 的客户归属会随当前 Publisher 变化。历史 Postback 可能读取新客户的产品/扣量配置，而不是点击发生时的归属；这会改变历史事件的扣量 scope，造成跨客户数据归属错误。
+
+#### 30.2 Offer.advertiser_id 可变，Click 与当前 Offer 关系可能不一致
+
+已确认：
+
+- Offer.advertiser_id 可由 OfferService.update_offer() 更新。
+- Click 自身保存独立的 advertiser_id 与 offer_id。
+- Postback 关联时读取 Click 保存的 advertiser_id，同时也加载当前 Offer ORM 对象；Offer 状态校验读取当前 Offer 的 is_active/status。
+
+风险：Offer 归属迁移后，历史 Click 的 advertiser_id 快照、当前 Offer.advertiser_id 及 Offer 当前状态可能属于不同业务上下文。当前流程没有对这组关系做一致性校验，也没有归因版本栅栏。必须先确定业务规则：历史点击是否永久归属点击时广告主；如果是，扣量层级、报表、Cap 和转发均应统一使用点击快照；若允许历史关系追随迁移，则必须有明确迁移事件与版本规则，不能混用旧 advertiser_id 和当前 Offer 关系。
+
+#### 30.3 Click 查询异常被当成“没有找到 Click”
+
+ClickAssociator.associate_from_db() 当前对查询异常执行以下行为：
+
+- 捕获所有 Exception；
+- 使用同一个 AsyncSession 继续指数退避重试；
+- 不执行 rollback()，也不区分连接暂时错误、事务失效、SQL 错误与普通未命中；
+- 最终仍无 Click 时返回 None。
+
+PostbackProcessor.process() 在拿到 click_association=None 后没有因“请求提供了 click_id 但归因数据库查询失败”而停止处理，而是继续 Offer 状态校验、重复检测和扣量流程。无关联的直连 Postback 也是被允许的兼容路径。
+
+风险：真实的数据库故障可能被伪装成“Click 不存在”，导致系统把本应关联到某个 Offer/Publisher/Advertiser/Client 的事件按无归因事件继续处理，可能漏掉对应 scope 的扣量配置或 Cap 约束。对同一个已失败的 AsyncSession 继续查询也不构成可靠重试。
+
+必须修复的语义：
+
+1. 区分“没有提供 click_id”“Click 查询成功但确实未命中”“Click 查询/数据库事务失败”三种状态。
+2. 如果请求带有 click_id 且查询因数据库错误失败，必须向 Postback 主流程抛出可重试异常；不得降级成 None，也不得继续走直连路径。
+3. 数据库异常后的重试必须在回滚/关闭旧事务后使用全新 AsyncSession，或由上层事务边界统一重试整个 Postback；不得在失效事务中继续执行 SQL。
+4. 若查询成功但确实未命中，是否允许按直连 Postback 处理必须由平台接入策略显式决定。对要求 Click 归因的入口应 fail-closed；只有明确配置为 direct-postback 的平台/路由才可无 Click 继续。
+5. 令牌关联 _enrich_association() 当前也会捕获 ORM enrichment 异常并继续返回 token association。若后续业务需要数据库补充的 Publisher/Client 信息，必须把“ID 已解析但归属未能验证”作为独立状态，不能把不完整 enrichment 视为完整可信归因。
+
+#### 30.4 推荐的归因快照方案
+
+在实现 MySQL 决策账本前，先确定归因数据契约：
+
+- 对新 Click，在创建时保存 client_id_at_click（或明确版本化的归因快照），并保存 offer/publisher/advertiser 归属快照及 attribution_version。字段命名需与项目现有模型规范统一。
+- Click 归因快照创建后不可被普通 CRUD 修改；确需纠错时使用受审计的显式迁移流程，并产生版本变更。
+- 历史 Click 没有客户快照，不能通过当前 Publisher.client_id 无条件回填并声称是点击时真实归属。应标记为 legacy/unverified，按人工审查、可证明的历史记录回填或 fail-closed 策略处理。
+- Postback 在事务内锁定/读取 Click 归因快照及版本；扣量 scope、Cap、报表、转发使用同一份快照，不允许部分字段取历史 Click、部分字段取当前 Publisher/Offer。
+- Offer/Publisher/Advertiser 的修改、删除、客户迁移路径必须遵循统一归因版本/锁协议；对已有 Click 的父对象关系变更必须定义历史事件行为。
+- 测试至少覆盖：Publisher.client_id 变更前后历史 Click 的归属不漂移；Offer.advertiser_id 变更前后快照一致；Click 查询异常不会降级为 direct postback；事务失效后不复用 Session；令牌 enrichment 不完整时不会错误应用 scope；归因迁移与 Postback 并发。
+
+#### 30.5 本节结论
+
+本轮没有修改上述业务代码，也没有新增数据库字段或 migration。该项属于新的财务归因正确性阻断项，应与第 29 节的 MySQL 权威决策账本、scope mutex、CRUD 同锁协议一起设计和实现。不得只在 ClickAssociator 中简单增加 rollback 后继续重试，也不得只新增 client_id 字段而不处理历史数据、Offer/Publisher 迁移、Cap/报表一致性及真实 MySQL 并发测试。
+
