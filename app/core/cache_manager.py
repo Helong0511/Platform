@@ -15,7 +15,6 @@ from sqlalchemy.future import select
 from app.core.redis_client import get_redis_client
 from app.core.offer_cache import (
     get_offer_cache_entry,
-    set_offer_cache,
     invalidate_offer_cache,
 )
 from app.core.short_link_cache import (
@@ -126,62 +125,10 @@ class CacheManager:
     
     @staticmethod
     async def warmup_offers(db: AsyncSession, limit: int = 50) -> int:
-        """
-        预热Offer缓存
-        
-        加载活跃的Offer到缓存中
-        
-        Args:
-            db: 数据库会话
-            limit: 预热的Offer数量
-            
-        Returns:
-            成功预热的数量
-        """
-        try:
-            # 查询活跃的Offer
-            result = await db.execute(
-                select(Offer)
-                .where(
-                    Offer.status == "Active",
-                    Offer.is_active.is_(True),
-                )
-                .order_by(Offer.id.desc())
-                .limit(limit)
-            )
-            offers = result.scalars().all()
-            
-            warmed_count = 0
-            for offer in offers:
-                try:
-                    # 负缓存也属于有效命中；Redis 故障时跳过回填，避免故障恢复后写入不确定数据。
-                    cache_entry = await get_offer_cache_entry(offer.id)
-                    if cache_entry.status == "miss":
-                        written = await set_offer_cache(
-                            offer.id,
-                            offer.advertiser_id,
-                            offer.offer_name,
-                        )
-                        if written:
-                            warmed_count += 1
-                    elif cache_entry.status == "unavailable":
-                        logger.debug(
-                            "Redis 不可用，跳过 Offer 缓存预热: offer_id=%s",
-                            offer.id,
-                        )
-                except Exception as e:
-                    logger.warning(f"预热Offer失败: offer_id={offer.id}, error={e}")
-            
-            logger.info(
-                "Offer缓存预热完成: 实际写入 %s/%s 个Offer",
-                warmed_count,
-                len(offers),
-            )
-            return warmed_count
-        except Exception as e:
-            logger.error(f"Offer缓存预热失败: {e}", exc_info=True)
-            return 0
-    
+        """Offer 热点缓存没有业务读取者，禁用写入并保留接口兼容。"""
+        logger.info("跳过 Offer 缓存预热：短链解析直接使用数据库权威数据")
+        return 0
+
     @staticmethod
     async def warmup_all(db: AsyncSession) -> Dict[str, int]:
         """
