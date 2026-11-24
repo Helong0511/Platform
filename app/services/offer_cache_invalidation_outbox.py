@@ -36,6 +36,7 @@ async def enqueue_offer_cache_invalidation(
         raise ValueError("second_pass_delay_seconds must be between 1 and 300")
 
     now = get_app_now_naive()
+    group_key = secrets.token_hex(32)
     events = []
     for phase, run_at in (
         ("first", now),
@@ -44,6 +45,7 @@ async def enqueue_offer_cache_invalidation(
         events.append(
             OfferCacheInvalidationOutbox(
                 event_key=secrets.token_hex(32),
+                group_key=group_key,
                 offer_id=offer_id,
                 phase=phase,
                 status="pending",
