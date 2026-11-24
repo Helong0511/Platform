@@ -17,12 +17,13 @@ from dataclasses import dataclass
 from decimal import Decimal, ROUND_DOWN
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import and_, case, func
+from sqlalchemy import and_, func
 from datetime import datetime, timedelta
 
 from app.models.models import (
     ConversionDeductionConfig, 
     ConversionDeductionLog,
+    PostbackConversion,
 )
 from app.core.infrastructure.cache_compat import (
     CACHE_PREFIX,
@@ -317,7 +318,10 @@ class DeductionManager:
         )
         return result.scalars().first()
     
-    DECISION_SEQ_TTL = 86400 * 2  # 决策序号缓存 2 天
+    @staticmethod
+    def _decision_ttl(hours: int) -> int:
+        """决策计数器按统计窗口过期，避免 24 小时统计混入两天历史。"""
+        return max(60, int(hours) * 3600)
 
     # Lua：初始化 deducted（NX）+ INCR processed 序号，返回 seq 与 deducted
     _DECISION_STATS_LUA = """
@@ -390,13 +394,15 @@ class DeductionManager:
                 2,
                 seq_key,
                 deducted_key,
-                self.DECISION_SEQ_TTL,
+                self._decision_ttl(hours),
                 int(base_stats.deducted or 0),
             )
             seq = int(result[0])
-            deducted = int(result[1])
-            processed = seq - 1
-            total = max(seq, base_stats.total)
+            redis_deducted = int(result[1])
+            # Redis 重启或计数器过期后，以数据库窗口基线恢复，不从 0 重新轮询。
+            processed = max(seq - 1, int(base_stats.processed or 0))
+            total = max(seq, int(base_stats.total or 0))
+            deducted = max(redis_deducted, int(base_stats.deducted or 0))
             return ConversionStats(
                 total=total,
                 deducted=deducted,
@@ -435,7 +441,7 @@ class DeductionManager:
                 1,
                 deducted_key,
                 int(limit),
-                self.DECISION_SEQ_TTL,
+                self._decision_ttl(hours),
             )
             return int(new_val) > 0
         except Exception as e:
@@ -463,7 +469,7 @@ class DeductionManager:
         try:
             val = await redis.incr(deducted_key)
             if val == 1:
-                await redis.expire(deducted_key, self.DECISION_SEQ_TTL)
+                await redis.expire(deducted_key, self._decision_ttl(hours))
         except Exception as e:
             logger.debug("同步 decision_deducted 失败（可忽略）: %s", e)
 
@@ -495,45 +501,64 @@ class DeductionManager:
             if cached_stats:
                 return ConversionStats(**cached_stats)
             
-            # 计算时间范围
+            # 统计窗口内的已入库转化 + 未入库的扣量命中。
+            # 正常转化不一定有 ConversionDeductionLog；扣金额日志对应的转化已在
+            # postback_conversions 中，不能再重复计数。仅将 conversion_id 为空且
+            # deducted_volume > 0 的日志作为“未入库扣量转化”补入统计。
             end_time = datetime.now()
             start_time = end_time - timedelta(hours=hours)
-            
-            # 构建查询条件（统计扣减日志表，因为被扣量的转化不保存到主表）
-            conditions = [
-                ConversionDeductionLog.created_at >= start_time,
-                ConversionDeductionLog.created_at <= end_time
+
+            conversion_conditions = [
+                PostbackConversion.created_at >= start_time,
+                PostbackConversion.created_at <= end_time,
             ]
-            
+            volume_log_conditions = [
+                ConversionDeductionLog.created_at >= start_time,
+                ConversionDeductionLog.created_at <= end_time,
+                ConversionDeductionLog.deducted_volume > 0,
+                ConversionDeductionLog.conversion_id.is_(None),
+            ]
+
             if advertiser_id:
-                conditions.append(ConversionDeductionLog.advertiser_id == advertiser_id)
-            
+                conversion_conditions.append(PostbackConversion.advertiser_id == advertiser_id)
+                volume_log_conditions.append(ConversionDeductionLog.advertiser_id == advertiser_id)
+
             if offer_id:
-                conditions.append(ConversionDeductionLog.offer_id == offer_id)
-            
+                conversion_conditions.append(PostbackConversion.offer_id == offer_id)
+                volume_log_conditions.append(ConversionDeductionLog.offer_id == offer_id)
+
             if publisher_id:
-                conditions.append(ConversionDeductionLog.publisher_id == publisher_id)
-            
-            # 一次查出总数与已扣量数，避免同条件两次 COUNT
-            stats_row = await self.db.execute(
-                select(
-                    func.count(ConversionDeductionLog.id),
-                    func.coalesce(
-                        func.sum(
-                            case(
-                                (ConversionDeductionLog.deducted_volume > 0, 1),
-                                else_=0,
-                            )
-                        ),
-                        0,
-                    ),
-                ).where(and_(*conditions))
+                conversion_conditions.append(PostbackConversion.publisher_id == publisher_id)
+                volume_log_conditions.append(ConversionDeductionLog.publisher_id == publisher_id)
+
+            conversion_count_result = await self.db.execute(
+                select(func.count(PostbackConversion.id)).where(
+                    and_(*conversion_conditions)
+                )
             )
-            row = stats_row.one()
-            total = int(row[0] or 0)
-            deducted = int(row[1] or 0)
-            
-            # 已处理数量就是total（因为每条转化都会记录日志）
+            conversion_count = int(conversion_count_result.scalar_one() or 0)
+
+            volume_log_count_result = await self.db.execute(
+                select(func.count(ConversionDeductionLog.id)).where(
+                    and_(*volume_log_conditions)
+                )
+            )
+            volume_log_count = int(volume_log_count_result.scalar_one() or 0)
+
+            # 已扣量数量包括未入库的扣量日志；金额扣减日志不增加扣量数量。
+            deducted_conversion_conditions = [
+                *conversion_conditions,
+                PostbackConversion.deducted_volume > 0,
+            ]
+            deducted_conversion_result = await self.db.execute(
+                select(func.count(PostbackConversion.id)).where(
+                    and_(*deducted_conversion_conditions)
+                )
+            )
+            deducted_conversion_count = int(deducted_conversion_result.scalar_one() or 0)
+
+            total = conversion_count + volume_log_count
+            deducted = deducted_conversion_count + volume_log_count
             processed = total
             
             stats = ConversionStats(
