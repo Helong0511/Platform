@@ -159,6 +159,10 @@ async def test_bft_handler_rejects_overlong_conversion_and_event_ids():
             "conversion-camel",
         ),
         (
+            {"conversion_id": "   ", "conversionId": "conversion-camel-spaces", "click_id": "click-1", "payout": "1.0000"},
+            "conversion-camel-spaces",
+        ),
+        (
             {"conversion_id": "conversion-explicit", "click_id": "click-1", "payout": "1.0000"},
             "conversion-explicit",
         ),
