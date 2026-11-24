@@ -1296,8 +1296,9 @@ MySQL 默认 REPEATABLE READ 下，普通 SELECT 使用事务一致性快照，�
 为保持当前实现的接收时间语义，初步建议决策窗口继续按数据库接收时间，而不是上游 event_time：
 
 - 每个事件在完成 scope 锁定后，从 MySQL 获取一次 `decision_at = UTC_TIMESTAMP(6)`；整个事件决策只使用该值。
-- 窗口定义为半开区间 `[decision_at - INTERVAL 24 HOUR, decision_at)`，按已提交事件 ledger 的 `decision_at` 统计。
-- 当前事件先处于 PENDING，不纳入“已处理”统计；决策时使用 `processed_before + 1` 作为当前事件序号。
+- 窗口定义为 `[decision_at - INTERVAL 24 HOUR, decision_at]`，按已提交事件 ledger 的 `decision_at` 统计；窗口左边界包含，右边界包含当前时刻。
+- 当前事件先处于 PENDING，统计时显式排除当前 event_key；由于 scope mutex 已串行化，查询中不存在同 scope 尚未提交的其他决策。右边界必须包含，以免多个事务在微秒精度下取得相同 decision_at 时漏算先前已提交事件。
+- scope lock 行建议另设单调递增 `decision_seq`，在锁内事务中递增并与事件终态同事务提交，作为稳定审计顺序和相同时间戳的 tie-breaker；滚动窗口的 processed_before 仍由窗口内终态 ledger 统计，不能用永久序号冒充 24 小时窗口计数。
 - 窗口滚动自然由 SQL 时间条件实现；不再依赖 Redis 48 小时 TTL，也不需要对 Redis counter 做过期递减。
 - 同一 scope 由 mutex 串行化后，窗口统计、序号和额度检查在同一事务中完成。
 - 若业务实际要求按上游事件发生时间扣量，必须另行定义 event_time 来源可信度、迟到事件、时区、回补和窗口重算规则；不能悄悄将现有 created_at 改成 event_time。
@@ -1354,3 +1355,23 @@ MySQL 默认 REPEATABLE READ 下，普通 SELECT 使用事务一致性快照，�
 - MySQL 8.4 Locking Reads：<https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html>
 - MySQL 8.4 Locks Set by Different SQL Statements：<https://dev.mysql.com/doc/refman/8.4/en/innodb-locks-set.html>
 - MySQL 8.4 Internal Locking Methods / deadlock avoidance：<https://dev.mysql.com/doc/refman/8.4/en/internal-locking.html>
+
+### 29.13 归因快照与 scope 锁集合的竞态
+
+scope mutex 能保护扣量配置，但前提是本事件取得的 scope 集合本身可靠。Postback 通过 click_id 关联 Click、Offer、Publisher、Advertiser；如果归因关联或父对象状态允许并发修改，仅在解析后锁 advertiser/offer/publisher 仍可能锁错 scope。
+
+实施时必须明确以下约束：
+
+1. 在锁 scope 前解析归因，只能形成候选 scope 集合，不能直接视为最终可信快照。
+2. 若 Click → Offer/Publisher/Advertiser 关联在业务上不可变，必须通过数据库约束/服务层禁止修改，并以此作为设计前提。
+3. 若允许修改，必须先锁定归因源记录（例如 Click/assignment row），重新读取关联，再计算完整 scope 集合；随后按统一顺序锁 scope。所有修改归因关系的写路径必须先取得相同归因源锁，不能反向锁 scope 后再锁 Click。
+4. 若无法在不破坏全局锁顺序的情况下先锁归因源，则应在事务内读取归因版本，锁 scope 后再次 current-read 校验版本；版本变化时回滚整个事务并从头重试，禁止拿旧 scope 继续决策。
+5. 父实体删除、Offer 归属迁移、Publisher assignment 变更必须纳入相同的锁顺序与版本栅栏。
+6. 真实 MySQL 测试需覆盖归因解析与关系修改并发，确保一个事件不会在错误 scope 上计算扣量比例或读取错误层级配置。
+
+### 29.14 本轮源码复核的额外事实
+
+- 仓库已经存在 `third_party_report_identity_locks` 的设计与 migration，可参考其“固定身份锁行、永久保留、冲突时 fail closed”的做法；但该锁表只服务第三方上报身份，不是 CPL scope mutex，不能直接复用其业务键。
+- 仓库已有 `CapReservationLedger`，采用独立会话、租约、状态机和恢复 Worker 处理 Redis Cap token；该机制说明跨 Redis/MySQL 状态需要显式账本，但它不是扣量决策账本。CPL 事件决策必须与 Postback 主事务原子提交，不能照搬 Cap Reservation 的独立事务边界。
+- 当前 `ConversionDeductionConfig` 的三个目标 FK 均为 `ON DELETE CASCADE`；因此父实体删除路径若不显式纳入 mutex，确实可能绕过配置 CRUD 的互斥协议。
+- 当前 `check_existing_config()` 是普通 SELECT 后再由服务层 INSERT；它本身不具备并发互斥能力。不能将其当作唯一性保证。
