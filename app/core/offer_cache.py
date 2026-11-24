@@ -139,18 +139,14 @@ async def set_offer_cache(
 
 
 async def invalidate_offer_cache(offer_id: int) -> bool:
-    """清除 Offer 缓存；Redis 客户端获取或删除失败均返回 False。"""
-    try:
-        redis = await get_redis_client()
-        if not redis:
-            return False
+    """清除 Offer 缓存。"""
+    redis = await get_redis_client()
+    if not redis:
+        return False
 
+    try:
         await redis.delete(f"{OFFER_CACHE_PREFIX}{offer_id}")
         return True
     except Exception as e:
-        logger.warning(
-            "清除 Offer 缓存失败: offer_id=%s error_type=%s",
-            offer_id,
-            type(e).__name__,
-        )
+        logger.debug(f"清除Offer缓存失败: offer_id={offer_id}, error={e}")
         return False
