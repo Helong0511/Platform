@@ -49,3 +49,57 @@ async def test_token_enrichment_database_error_rolls_back_and_propagates():
     assert session.execute_calls == 1
     assert session.rollback_calls == 1
     assert "publisher" not in association
+
+def test_token_database_identity_conflict_is_rejected():
+    db_association = {
+        "click_id": "click-123",
+        "offer_id": 10,
+        "publisher_id": 20,
+        "advertiser_id": 30,
+        "short_link_id": 40,
+        "url_params": {},
+    }
+    token_association = {
+        "click_id": "click-123",
+        "offer_id": 11,
+        "publisher_id": 20,
+        "advertiser_id": 30,
+        "short_link_id": 40,
+        "url_params": {},
+    }
+
+    with pytest.raises(ValueError, match="identity conflict"):
+        ClickAssociator._merge_token_and_db_association(
+            db_association, token_association
+        )
+
+
+def test_matching_token_database_identity_keeps_database_snapshot():
+    db_association = {
+        "click_id": "click-123",
+        "offer_id": 10,
+        "publisher_id": 20,
+        "advertiser_id": 30,
+        "short_link_id": 40,
+        "client_id": 99,
+        "url_params": {},
+    }
+    token_association = {
+        "click_id": "click-123",
+        "offer_id": 10,
+        "publisher_id": 20,
+        "advertiser_id": 30,
+        "short_link_id": 40,
+        "client_id": 123,
+        "url_params": {},
+    }
+
+    merged = ClickAssociator._merge_token_and_db_association(
+        db_association, token_association
+    )
+
+    assert merged["offer_id"] == 10
+    assert merged["publisher_id"] == 20
+    assert merged["advertiser_id"] == 30
+    assert merged["short_link_id"] == 40
+    assert merged["client_id"] == 99
