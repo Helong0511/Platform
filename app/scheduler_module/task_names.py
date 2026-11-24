@@ -23,6 +23,7 @@ POSTBACK_FORWARD_QUEUE_TASK_NAME = "Postback转发队列处理"
 
 # 广告数据查询缓存失效 Outbox
 AD_DATA_CACHE_INVALIDATION_TASK_NAME = "广告数据缓存失效 Outbox"
+OFFER_CACHE_INVALIDATION_TASK_NAME = "Offer热点缓存失效 Outbox"
 
 # ==================== 任务名称常量定义 ====================
 # 数据归档任务
@@ -104,6 +105,7 @@ AD_DATA_HEALTH_SCAN_TASK_NAME = "广告数据健康巡检"
 TASK_NAME_MAP = {
     "forward_tasks": POSTBACK_FORWARD_QUEUE_TASK_NAME,
     "cache_invalidation_task": AD_DATA_CACHE_INVALIDATION_TASK_NAME,
+    "offer_cache_invalidation_task": OFFER_CACHE_INVALIDATION_TASK_NAME,
     "archive_old_data": ARCHIVE_DATA_TASK_NAME,
     "cleanup_old_logs": CLEANUP_LOGS_TASK_NAME,
     "cleanup_file_logs": CLEANUP_FILE_LOGS_TASK_NAME,
@@ -137,6 +139,7 @@ TASK_NAME_MAP = {
 ALL_TASK_NAMES = [
     POSTBACK_FORWARD_QUEUE_TASK_NAME,
     AD_DATA_CACHE_INVALIDATION_TASK_NAME,
+    OFFER_CACHE_INVALIDATION_TASK_NAME,
     ARCHIVE_DATA_TASK_NAME,
     CLEANUP_SESSIONS_TASK_NAME,
     CLEANUP_SENSITIVE_PROBES_TASK_NAME,
