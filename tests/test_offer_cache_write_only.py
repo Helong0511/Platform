@@ -27,3 +27,15 @@ def test_no_business_module_reads_offer_advertiser_cache():
         if "get_offer_advertiser_id(" in source:
             readers.append(path.as_posix())
     assert readers == []
+
+
+def test_no_application_module_calls_offer_cache_writer():
+    app_root = Path("app")
+    writers = []
+    for path in app_root.rglob("*.py"):
+        if path.as_posix() == "app/core/offer_cache.py":
+            continue
+        source = path.read_text(encoding="utf-8")
+        if "set_offer_cache(" in source:
+            writers.append(path.as_posix())
+    assert writers == []
