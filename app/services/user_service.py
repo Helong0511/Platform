@@ -33,7 +33,6 @@ from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.utils import get_app_now_naive
 from app.core.validation import validate_password_strength
 from app.core.permission_cache import invalidate_user_permission_cache
-from app.core.infrastructure.cache import get_cache_backend
 from app.services.session_service import SessionService
 import logging
 
@@ -52,14 +51,11 @@ class UserService(BaseService[User]):
         """注入数据库会话并绑定 User 模型。"""
         super().__init__(db, User)
 
-    @staticmethod
-    async def invalidate_user_stats_cache() -> None:
-        """写用户后失效管理端统计缓存。"""
-        try:
-            cache = await get_cache_backend()
-            await cache.delete("user_stats")
-        except Exception as e:
-            logger.warning("清除 user_stats 缓存失败: error_type=%s", type(e).__name__)
+    async def invalidate_user_stats_cache(self) -> None:
+        """在当前业务事务中递增用户统计缓存版本并登记持久化失效事件。"""
+        from app.services.cache_invalidation_outbox import advance_cache_generation
+
+        await advance_cache_generation(self.db, namespace="user_stats")
 
     async def _revoke_sessions_on_disable(
             self,
@@ -267,6 +263,8 @@ class UserService(BaseService[User]):
         if user_data.get("company_name"):
             from app.services.cache_invalidation_outbox import advance_cache_generation
             await advance_cache_generation(self.db)
+        # 用户总数/角色/状态统计与 User 创建处于同一事务。
+        await self.invalidate_user_stats_cache()
 
         # 若创建了客户，重新加载用户以包含客户信息（避免异步懒加载）
         if user_data.get('company_name'):
@@ -281,7 +279,6 @@ class UserService(BaseService[User]):
         except Exception as e:
             logger.warning("清除权限缓存失败: error_type=%s", type(e).__name__)
 
-        await self.invalidate_user_stats_cache()
 
         logger.info(f"用户已创建: {user.username} (ID: {user.id})")
         return user
@@ -384,6 +381,8 @@ class UserService(BaseService[User]):
         if cache_display_changed:
             from app.services.cache_invalidation_outbox import advance_cache_generation
             await advance_cache_generation(self.db)
+        # 角色、启用状态等统计字段的变化与缓存版本同事务提交。
+        await self.invalidate_user_stats_cache()
 
         user = await self.get_user_by_id(user_id, current_user, include_client=False)
 
@@ -397,7 +396,6 @@ class UserService(BaseService[User]):
         except Exception as e:
             logger.warning("清除权限缓存失败: error_type=%s", type(e).__name__)
 
-        await self.invalidate_user_stats_cache()
 
         logger.info(f"用户已更新: {user.username} (ID: {user.id})")
         return user
@@ -433,6 +431,7 @@ class UserService(BaseService[User]):
         # 删除用户
         await self.db.delete(user)
         await self.db.flush()
+        await self.invalidate_user_stats_cache()
 
         # 清除权限缓存（用户已删除）
         try:
@@ -440,7 +439,6 @@ class UserService(BaseService[User]):
         except Exception as e:
             logger.warning("清除权限缓存失败: error_type=%s", type(e).__name__)
 
-        await self.invalidate_user_stats_cache()
 
         logger.info(f"用户已删除: {user.username} (ID: {user_id})")
 
