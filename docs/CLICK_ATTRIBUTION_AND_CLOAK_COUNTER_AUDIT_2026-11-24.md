@@ -104,3 +104,12 @@ Postback pipeline 的 `step_associate_click()` 直接接收该返回值。后续
 - 斗篷计数、MySQL 权威扣量账本、Redis/MySQL 非原子边界及 24 小时窗口算法仍未解决。
 
 因此 PR #205 继续保持 Draft；本节记录的是代码提交状态，不代表测试通过或验收完成。
+
+### 5.1 Token 与 DB 身份冲突的后续修复
+
+- `_merge_token_and_db_association()` 现在对 `click_id`、`offer_id`、`publisher_id`、`advertiser_id`、`short_link_id` 做双边非空值一致性检查；任一身份字段不一致即抛出拒绝异常。
+- 合并时上述身份字段始终保留数据库点击快照，不再由 Token 覆盖。
+- 新增冲突拒绝测试，以及身份一致时数据库身份字段保持权威的回归测试。
+- 当前冲突异常会中止 Postback pipeline；接收层将其作为非重试的请求拒绝处理（HTTP 400），不会继续进入 Cap、扣量、转化保存或转发。
+
+注意：此修复只解决 Token/DB 已同时存在时的字段冲突，不解决 DB 查无记录时的 Token-only 策略，也不解决历史 `client_id` 快照缺失。
