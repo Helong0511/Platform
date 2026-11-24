@@ -805,3 +805,52 @@ GROUP BY publisher_id HAVING COUNT(*) > 1;
 - Session 因 SQLAlchemy 数据库异常进入 failed state：确认外层 rollback 后才允许重试。
 
 **当前结论：** PR 分支中的缓存 GET、DB SELECT、缓存 SET 三条路径仍未按上述边界隔离；`_load_from_db()` 的异常吞噬仍存在。该项属于运行时代码缺陷，本轮仅补充审计设计，未修改代码，不能标记为已修复。
+
+
+## 22. Postback 事件身份提取仍混淆 click_id 与 conversion_id（2026-11-24 追加）
+
+本节为对当前 PR Head `d4dc1c8e2b6db470f3507f303513f4f9ca08308c` 的再次静态核查结果。以下问题由当前分支代码直接确认，不能视为已修复。
+
+### 22.1 通用标准化器把点击 ID 回退成转化事件 ID
+
+文件：`app/core/postback/transformers/normalizer.py`
+
+- `_extract_conversion_id()` 首先读取显式 `conversion_id` / `conversionId`，未找到时直接返回 `_extract_click_id()`。
+- 因此缺少显式事件 ID 时，click_id 会被伪装成 conversion_id。
+- 同一点击对应多个购买/注册/激活事件时，多个真实事件可能被合并为同一个身份；这与 PR #206 的唯一事件身份 `platform + conversion_id + event_name` 不兼容。
+- `normalize()` 对缺失 conversion ID 使用 `str(conversion_id or '').strip()`，最终可能生成空字符串，而不是明确的缺失状态。
+
+### 22.2 BFT 专用处理器优先级错误且丢失独立 click_id
+
+文件：`app/core/postback/bft_handler.py`
+
+- `validate()` 与 `normalize()` 都把 `clk_id`、`click_id`、`cid`、`clickid` 等点击字段放在显式 `conversion_id` / `conversionId` 之前。
+- 当请求同时包含不同的 click ID 与 conversion ID 时，点击字段会抢先成为 conversion_id。
+- 输出字段 `click_id` 又直接复制该 conversion_id，两个不同概念被合并。
+- BFT 当前校验只保证其中某个字段非空，并不能证明它是事件级唯一 ID。字段语义必须依据 BFT 官方协议或经过脱敏的真实回调样例确认；在确认前不得仅靠调整字段优先级推断协议。
+
+### 22.3 数据库与入口缺失值语义不一致
+
+文件：`app/models/postback.py`、`app/core/postback/validators/duplicate_checker.py`
+
+- ORM 中 `PostbackConversion.conversion_id` 为 `String(255), nullable=False`。
+- 通用标准化器可能输出空字符串；DuplicateChecker 对 falsy conversion_id 直接跳过重复检测。
+- 空字符串不是 SQL NULL，且唯一约束 `(platform, conversion_id, event_name)` 会把同平台同事件的空字符串视为同一个键；可能出现入口放过、后续唯一键冲突的行为。
+- 不能把空字符串当成稳定事件身份，也不能把 click_id 的存在当作 conversion_id 已验证。
+
+### 22.4 必须完成的修复协议
+
+1. 将 `extract_click_id()` 与 `extract_conversion_id()` 分离；click_id 只用于点击归因，不得隐式成为事件身份。
+2. 事件身份必须规范化为同一份不可歧义的结构：平台规范值、显式 conversion_id、规范 event_name。字段 trim、大小写、空值、最大长度和字符集规则必须与唯一账本/数据库 collation 一致。
+3. 无显式稳定事件 ID 时，标记为 `identity_unverified`；不得生成空字符串键，不得执行依赖事件幂等性的 volume deduction。根据平台业务合同选择拒绝、隔离或仅允许不涉及扣量的安全路径。
+4. BFT 字段映射必须先取得官方字段合同或脱敏样例，明确 `clk_id` 是否为 click ID、是否存在独立 conversion/event ID；没有证据时保持未决并阻断该平台的事件级扣量，不得猜测。
+5. 为通用标准化器和 BFT handler 增加一致的参数化测试：
+   - click_id 与 conversion_id 同时存在且值不同；
+   - 同一 click_id 对应两个不同 conversion_id；
+   - 显式 conversion_id 缺失、空白、数值 0、超长 200/201/255/256 边界；
+   - event_name 缺失、空白、大小写差异及别名；
+   - 同一事件重试、不同事件并发、缺少稳定事件 ID；
+   - DuplicateChecker、PR #206 receipt、PostbackConversion 三者对规范身份得出相同判定。
+6. 测试必须覆盖真实 MySQL 唯一约束和 collation；SQLite/mock 测试不能替代 MySQL 身份比较语义验证。
+
+**验收结论：** 当前 PR #205 仍不能解除 Draft。即使 Full Audit 与 Emergency Security CI 通过，也不能证明 BFT/通用入口已经具备事件级身份正确性。只有身份提取、receipt 唯一键、扣量决策键和 MySQL 账本使用同一规范事件身份，并通过真实 MySQL 并发/重试测试后，才可重新评估。
