@@ -329,7 +329,10 @@ class DeductionManager:
     local deducted_key = KEYS[2]
     local ttl = tonumber(ARGV[1])
     local init_deducted = tonumber(ARGV[2]) or 0
-    if redis.call('EXISTS', deducted_key) == 0 then
+    local existing_deducted = redis.call('GET', deducted_key)
+    local current_deducted = tonumber(existing_deducted or '0')
+    -- Redis 计数低于数据库窗口基线时向上校准，不能让预留计数倒退。
+    if (not existing_deducted) or current_deducted < init_deducted then
         redis.call('SET', deducted_key, init_deducted)
         redis.call('EXPIRE', deducted_key, ttl)
     end
