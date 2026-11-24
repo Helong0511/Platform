@@ -1,6 +1,6 @@
 # 缓存使用指南
 
-**版本：** 2.1  
+**版本：** 2.4  
 **更新日期：** 2026-11-24  
 **作者：** 钳钳 🦀
 
@@ -348,6 +348,19 @@ await report_metrics_to_redis()
 - 旧兼容 API 的 `key_prefix` 主要用于指标分类；不要假设它必然成为 Redis key 的可读前缀。
 - Offer 热点缓存 `offer:cache:{id}`、短链接缓存 `short_link:{short_code}` 与查询缓存 `query_cache:` 是独立键空间，必须分别清理。CPL 扣量配置位于 `query_cache:cpl:deduction_config:`，由独立 Generation 隔离版本。
 
+### CPL 扣量统计口径（2026-11-24）
+
+- 扣量决策基础统计不能只统计 `conversion_deduction_logs`：正常入库的转化可能没有扣减日志。
+- 统计总量应包含统计窗口内的 `postback_conversions`，再补充 `conversion_id IS NULL AND deducted_volume > 0` 的未入库扣量日志。
+- 仅扣金额日志对应的转化已在 `postback_conversions` 中，不能再次作为一条转化计数。
+- 时间窗口必须使用 `get_app_now_naive()`，与 `created_at` 使用的应用配置时区保持一致；不能使用宿主机时区的 `datetime.now()`。
+- 统计缓存口径变更时必须切换缓存 schema/version，避免旧缓存结果继续参与扣量决策。
+- 仅扣金额配置不依赖 Redis 统计；不得因 Redis 故障阻断纯金额扣减。
+- `DEDUCTION_FAIL_OPEN=true` 时，如果扣量决策所需 DB/Redis 统计不可用，应跳过本次 volume deduction（正常放行转化），但仍可执行确定性的 amount deduction；不能退回非原子数据库快照继续扣量。
+- 比例/轮询策略递增 Redis deducted 计数失败时不得继续执行 volume deduction；计数器写入必须返回明确成功状态。
+- 扣量/扣金额审计日志是财务凭证，数据库写入失败必须回滚并重试；Redis fail-open 不得吞掉持久化日志失败，也不得在日志失败后跳过正式转化入库。
+- **重要边界：**当前 Redis `decision_seq` / `decision_deducted` 计数器的 48 小时 TTL 与 24 小时数据库统计窗口并不等价。单一 INCR + TTL 不是精确滑动窗口；Redis 重启、键过期、窗口内旧事件滚出时必须单独验证。没有完成按事件时间滚动的计数设计前，不得宣称扣量比例在 24 小时窗口内严格准确，也不得仅把 TTL 改为 24 小时就视为修复。
+
 ### Outbox 运维
 - Offer、广告数据与短链接缓存失效任务当前按每分钟调度；Offer/短链接第二阶段须等第一阶段结束后在后续调度轮次执行，不是精确 1 秒实时执行。
 - 关注任务结果中的 `retryable`、`failed`、`lease_lost`。持续失败应进入日志/监控告警处置，不能手工把事件直接改成 success。
@@ -393,5 +406,5 @@ async def get_hot_user_profile(user_id: int):
 
 ---
 
-_文档版本：2.1_  
+_文档版本：2.4_  
 _最后更新：2026-11-24_

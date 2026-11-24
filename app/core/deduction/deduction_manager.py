@@ -11,18 +11,19 @@
 """
 import logging
 import hashlib
-from typing import Optional, Tuple, Dict, Any, Protocol
+from typing import Optional, Tuple, Dict, Any
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import and_, case, func
-from datetime import datetime, timedelta
+from sqlalchemy import and_, func
+from datetime import timedelta
 
 from app.models.models import (
     ConversionDeductionConfig, 
     ConversionDeductionLog,
+    PostbackConversion,
 )
 from app.core.infrastructure.cache_compat import (
     CACHE_PREFIX,
@@ -32,6 +33,7 @@ from app.core.infrastructure.cache_compat import (
 )
 from app.core.redis_client import get_redis_client
 from app.core.config import settings
+from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -338,6 +340,14 @@ class DeductionManager:
     """
 
     # Lua：随机策略预留扣量名额；超比例则回退
+    _INCR_DECISION_DEDUCTED_LUA = """
+    local value = redis.call('INCR', KEYS[1])
+    if value == 1 then
+        redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
+    end
+    return value
+    """
+
     _RESERVE_DEDUCTED_LUA = """
     local deducted_key = KEYS[1]
     local limit = tonumber(ARGV[1])
@@ -372,11 +382,10 @@ class DeductionManager:
             offer_id=offer_id,
             publisher_id=publisher_id,
             hours=hours,
+            strict=True,
         )
         redis = await get_redis_client()
         if not redis:
-            if settings.DEDUCTION_FAIL_OPEN:
-                return base_stats
             raise RuntimeError("扣量决策需要 Redis，当前不可用")
 
         cache_key = self._build_stats_cache_key(
@@ -404,9 +413,7 @@ class DeductionManager:
             )
         except Exception as e:
             logger.warning("扣量决策 Redis 统计失败: %s", e)
-            if settings.DEDUCTION_FAIL_OPEN:
-                return base_stats
-            raise
+            raise RuntimeError(f"扣量决策 Redis 统计失败: {e}") from e
 
     async def _reserve_volume_deduction(
         self,
@@ -451,28 +458,38 @@ class DeductionManager:
         offer_id: Optional[int],
         publisher_id: Optional[int],
         hours: int,
-    ) -> None:
-        """比例/轮询策略命中后同步递增 Redis deducted（无上限校验）。"""
+    ) -> bool:
+        """比例/轮询策略命中后原子递增 Redis deducted；失败时不得继续扣量。"""
         redis = await get_redis_client()
         if not redis:
-            return
+            if settings.DEDUCTION_FAIL_OPEN:
+                return False
+            raise RuntimeError("同步扣量计数需要 Redis，当前不可用")
         cache_key = self._build_stats_cache_key(
             advertiser_id, offer_id, publisher_id, hours
         )
         deducted_key = f"{cache_key}:decision_deducted"
         try:
-            val = await redis.incr(deducted_key)
-            if val == 1:
-                await redis.expire(deducted_key, self.DECISION_SEQ_TTL)
+            value = await redis.eval(
+                self._INCR_DECISION_DEDUCTED_LUA,
+                1,
+                deducted_key,
+                self.DECISION_SEQ_TTL,
+            )
+            return int(value) > 0
         except Exception as e:
-            logger.debug("同步 decision_deducted 失败（可忽略）: %s", e)
+            logger.warning("同步 decision_deducted 失败: %s", e)
+            if settings.DEDUCTION_FAIL_OPEN:
+                return False
+            raise RuntimeError(f"同步扣量计数失败: {e}") from e
 
     async def get_recent_stats(
         self,
         advertiser_id: Optional[int] = None,
         offer_id: Optional[int] = None,
         publisher_id: Optional[int] = None,
-        hours: int = 24
+        hours: int = 24,
+        strict: bool = False,
     ) -> ConversionStats:
         """
         获取最近的转化统计信息（用于判断是否应该扣减）
@@ -487,53 +504,74 @@ class DeductionManager:
             转化统计信息
         """
         try:
-            # 尝试从缓存获取
+            # strict 决策路径必须直接读取数据库权威统计；60 秒缓存仅供展示/非严格查询。
+            # 否则窗口内旧事件滚出后，缓存仍会污染扣量判断。
             cache_key = self._build_stats_cache_key(
                 advertiser_id, offer_id, publisher_id, hours
             )
-            cached_stats = await get_cached(cache_key)
-            if cached_stats:
-                return ConversionStats(**cached_stats)
+            if not strict:
+                cached_stats = await get_cached(cache_key)
+                if cached_stats:
+                    return ConversionStats(**cached_stats)
             
-            # 计算时间范围
-            end_time = datetime.now()
+            # 统计窗口内的已入库转化 + 未入库的扣量命中。
+            # 正常转化不一定有 ConversionDeductionLog；扣金额日志对应的转化已在
+            # postback_conversions 中，不能再重复计数。仅将 conversion_id 为空且
+            # deducted_volume > 0 的日志作为“未入库扣量转化”补入统计。
+            end_time = get_app_now_naive()
             start_time = end_time - timedelta(hours=hours)
-            
-            # 构建查询条件（统计扣减日志表，因为被扣量的转化不保存到主表）
-            conditions = [
-                ConversionDeductionLog.created_at >= start_time,
-                ConversionDeductionLog.created_at <= end_time
+
+            # 使用半开区间 [start_time, end_time)，避免相邻窗口边界事件重复计数。
+            conversion_conditions = [
+                PostbackConversion.created_at >= start_time,
+                PostbackConversion.created_at < end_time,
             ]
-            
+            volume_log_conditions = [
+                ConversionDeductionLog.created_at >= start_time,
+                ConversionDeductionLog.created_at < end_time,
+                ConversionDeductionLog.deducted_volume > 0,
+                ConversionDeductionLog.conversion_id.is_(None),
+            ]
+
             if advertiser_id:
-                conditions.append(ConversionDeductionLog.advertiser_id == advertiser_id)
-            
+                conversion_conditions.append(PostbackConversion.advertiser_id == advertiser_id)
+                volume_log_conditions.append(ConversionDeductionLog.advertiser_id == advertiser_id)
+
             if offer_id:
-                conditions.append(ConversionDeductionLog.offer_id == offer_id)
-            
+                conversion_conditions.append(PostbackConversion.offer_id == offer_id)
+                volume_log_conditions.append(ConversionDeductionLog.offer_id == offer_id)
+
             if publisher_id:
-                conditions.append(ConversionDeductionLog.publisher_id == publisher_id)
-            
-            # 一次查出总数与已扣量数，避免同条件两次 COUNT
-            stats_row = await self.db.execute(
-                select(
-                    func.count(ConversionDeductionLog.id),
-                    func.coalesce(
-                        func.sum(
-                            case(
-                                (ConversionDeductionLog.deducted_volume > 0, 1),
-                                else_=0,
-                            )
-                        ),
-                        0,
-                    ),
-                ).where(and_(*conditions))
+                conversion_conditions.append(PostbackConversion.publisher_id == publisher_id)
+                volume_log_conditions.append(ConversionDeductionLog.publisher_id == publisher_id)
+
+            conversion_count_result = await self.db.execute(
+                select(func.count(PostbackConversion.id)).where(
+                    and_(*conversion_conditions)
+                )
             )
-            row = stats_row.one()
-            total = int(row[0] or 0)
-            deducted = int(row[1] or 0)
-            
-            # 已处理数量就是total（因为每条转化都会记录日志）
+            conversion_count = int(conversion_count_result.scalar_one() or 0)
+
+            volume_log_count_result = await self.db.execute(
+                select(func.count(ConversionDeductionLog.id)).where(
+                    and_(*volume_log_conditions)
+                )
+            )
+            volume_log_count = int(volume_log_count_result.scalar_one() or 0)
+
+            deducted_conversion_conditions = [
+                *conversion_conditions,
+                PostbackConversion.deducted_volume > 0,
+            ]
+            deducted_conversion_result = await self.db.execute(
+                select(func.count(PostbackConversion.id)).where(
+                    and_(*deducted_conversion_conditions)
+                )
+            )
+            deducted_conversion_count = int(deducted_conversion_result.scalar_one() or 0)
+
+            total = conversion_count + volume_log_count
+            deducted = deducted_conversion_count + volume_log_count
             processed = total
             
             stats = ConversionStats(
@@ -542,14 +580,15 @@ class DeductionManager:
                 processed=processed
             )
             
-            # 缓存统计结果（SETNX 风格由 cache 层负责；此处仅写）
-            await set_cached(cache_key, stats.to_dict(), STATS_CACHE_TTL)
+            # strict 决策统计不写入展示缓存，避免被后续非严格查询误认为权威数据。
+            if not strict:
+                await set_cached(cache_key, stats.to_dict(), STATS_CACHE_TTL)
             
             return stats
             
         except Exception as e:
             logger.error(f"获取转化统计失败: {str(e)}", exc_info=True)
-            if settings.DEDUCTION_FAIL_OPEN:
+            if settings.DEDUCTION_FAIL_OPEN and not strict:
                 return ConversionStats()
             raise
     
@@ -569,6 +608,8 @@ class DeductionManager:
         if publisher_id:
             parts.append(f"pub:{publisher_id}")
         parts.append(f"hours:{hours}")
+        # 新键空间隔离旧统计口径缓存，避免继续使用仅含扣减日志的旧结果。
+        parts.append("schema:v2")
         return ":".join(parts)
     
     def should_deduct_volume(
@@ -649,16 +690,29 @@ class DeductionManager:
             final_amount=Decimal(str(conversion_data.get('original_payout', 0) or 0)),
         )
         
-        # 获取转化统计（Redis 原子序号 + deducted，避免 60s 缓存竞态）
-        stats = await self._get_stats_for_decision(
-            advertiser_id=advertiser_id,
-            offer_id=offer_id,
-            publisher_id=publisher_id,
-            hours=24
+        # 纯扣金额不依赖 Redis；只有确实需要执行扣量策略时才读取共享统计。
+        volume_decision_available = bool(
+            config.enable_volume_deduction
+            and Decimal(str(config.volume_deduction_ratio or 0)) > 0
         )
-        
+        stats = ConversionStats()
+        if volume_decision_available:
+            try:
+                stats = await self._get_stats_for_decision(
+                    advertiser_id=advertiser_id,
+                    offer_id=offer_id,
+                    publisher_id=publisher_id,
+                    hours=24,
+                )
+            except Exception as exc:
+                if not settings.DEDUCTION_FAIL_OPEN:
+                    raise
+                # Fail-open 的语义是放行转化，不是使用非原子 DB 快照继续扣量。
+                logger.warning("扣量统计不可用，本次跳过扣量但继续计算扣金额: %s", exc)
+                volume_decision_available = False
+
         # 判断是否扣量（确定性哈希 / 间隔策略 + Redis 原子预留防超扣）
-        if config.enable_volume_deduction:
+        if volume_decision_available:
             strategy_name = (config.deduction_strategy or "random").lower()
             decision_key = (click_id or "").strip() or f"offer:{offer_id}:seq:{stats.processed}"
             want_deduct = self.should_deduct_volume(config, stats, decision_key=decision_key)
@@ -669,8 +723,7 @@ class DeductionManager:
                     limit = int(stats.total * ratio) if stats.total > 0 else 10**9
                     if stats.total <= 0:
                         # 无总量窗口时仅按哈希结论 + 递增 deducted
-                        result.should_deduct_volume = True
-                        await self._incr_decision_deducted(
+                        result.should_deduct_volume = await self._incr_decision_deducted(
                             advertiser_id=advertiser_id,
                             offer_id=offer_id,
                             publisher_id=publisher_id,
@@ -686,8 +739,7 @@ class DeductionManager:
                         )
                         result.should_deduct_volume = reserved
                 else:
-                    result.should_deduct_volume = True
-                    await self._incr_decision_deducted(
+                    result.should_deduct_volume = await self._incr_decision_deducted(
                         advertiser_id=advertiser_id,
                         offer_id=offer_id,
                         publisher_id=publisher_id,
