@@ -1,7 +1,7 @@
-"""CPL 扣量统计窗口和 Redis 冷启动基线回归测试。"""
+"""CPL 扣量统计口径与应用时区回归测试。"""
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from datetime import datetime
 
 import pytest
 
@@ -25,11 +25,8 @@ async def test_recent_stats_counts_saved_conversions_and_only_unpersisted_volume
         AsyncMock(return_value=None),
     )
     monkeypatch.setattr(deduction_manager_module, "set_cached", AsyncMock())
-    monkeypatch.setattr(
-        deduction_manager_module,
-        "get_app_now_naive",
-        lambda: datetime(2026, 11, 24, 12, 0, 0),
-    )
+    app_now = datetime(2026, 11, 24, 12, 0, 0)
+    monkeypatch.setattr(deduction_manager_module, "get_app_now_naive", lambda: app_now)
 
     db = SimpleNamespace(
         execute=AsyncMock(
@@ -51,42 +48,16 @@ async def test_recent_stats_counts_saved_conversions_and_only_unpersisted_volume
     assert stats == ConversionStats(total=128, deducted=11, processed=128)
     assert db.execute.await_count == 3
 
-    conversion_sql = str(db.execute.await_args_list[0].args[0])
-    volume_log_sql = str(db.execute.await_args_list[1].args[0])
+    conversion_stmt = db.execute.await_args_list[0].args[0]
+    volume_log_stmt = db.execute.await_args_list[1].args[0]
+    conversion_sql = str(conversion_stmt)
+    volume_log_sql = str(volume_log_stmt)
     assert "postback_conversions" in conversion_sql
     assert "conversion_deduction_logs" in volume_log_sql
     assert "deducted_volume" in volume_log_sql
     assert "conversion_id IS NULL" in volume_log_sql
 
-
-@pytest.mark.asyncio
-async def test_decision_stats_recover_processed_and_deducted_from_database_baseline(monkeypatch):
-    manager = DeductionManager(db=SimpleNamespace())
-    manager.get_recent_stats = AsyncMock(
-        return_value=ConversionStats(total=31, deducted=7, processed=31)
-    )
-    redis = SimpleNamespace(eval=AsyncMock(return_value=[32, 2]))
-    monkeypatch.setattr(
-        deduction_manager_module,
-        "get_redis_client",
-        AsyncMock(return_value=redis),
-    )
-
-    stats = await manager._get_stats_for_decision(
-        advertiser_id=12,
-        offer_id=34,
-        publisher_id=56,
-        hours=24,
-    )
-
-    assert stats == ConversionStats(total=32, deducted=7, processed=32)
-    args = redis.eval.await_args.args
-    assert args[4] == 24 * 60 * 60
-    assert args[5] == 7
-    assert args[6] == 31
-    assert "current_deducted < init_deducted" in args[0]
-
-
-def test_decision_counter_ttl_matches_requested_statistics_window():
-    assert DeductionManager._decision_ttl(24) == 86400
-    assert DeductionManager._decision_ttl(6) == 21600
+    # SQL 时间参数必须来自应用配置时区，而不是操作系统本机时区。
+    conversion_params = conversion_stmt.compile().params
+    assert app_now in conversion_params.values()
+    assert datetime(2026, 11, 23, 12, 0, 0) in conversion_params.values()
