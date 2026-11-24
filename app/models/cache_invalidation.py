@@ -100,6 +100,7 @@ class OfferCacheInvalidationOutbox(Base):
 
     __table_args__ = (
         UniqueConstraint("event_key", name="uq_offer_cache_invalidation_event_key"),
+        UniqueConstraint("group_key", "phase", name="uq_offer_cache_invalidation_group_phase"),
         CheckConstraint(
             "phase IN ('first', 'second')",
             name="chk_offer_cache_invalidation_phase",
@@ -118,12 +119,6 @@ class OfferCacheInvalidationOutbox(Base):
             "run_at",
             "lease_until",
             "id",
-        ),
-        Index(
-            "idx_offer_cache_invalidation_group_phase",
-            "group_key",
-            "phase",
-            "status",
         ),
         Index(
             "idx_offer_cache_invalidation_offer",
