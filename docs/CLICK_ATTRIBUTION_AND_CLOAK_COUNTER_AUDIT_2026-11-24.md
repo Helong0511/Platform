@@ -307,3 +307,44 @@ Postback pipeline 的 `step_associate_click()` 直接接收该返回值。后续
 5. 对缓存命中/未命中、相同 event_id 并发、不同 event_id 并发、Redis 不可用、DB rollback、commit-unknown、BackgroundTasks 进程退出、Click 队列失败和恢复分别做真实 MySQL + Redis 集成测试。
 
 **本节结论：** /report 当前绕过了项目已有的主短链原子计数器，并且缓存命中与未命中采用不同的计数提交路径。该问题是已定位的代码路径缺陷，不是单纯测试缺失。当前仍未修改业务代码；在稳定事件 ID 和持久 inbox 设计完成前，不应把现有计数器直接接入后宣称修复。
+
+### 5.8 现有 CAPI Outbox 的作用域硬约束与 /report 复用禁区（Head b9d4b4c）
+
+本轮检查 `app/services/third_party_report_outbox.py`、`app/models/third_party.py`、`app/core/third_party_report.py` 及相关迁移，确认现有 Outbox 并非通用发送队列，不能直接接管 /report 的 unscoped 事件。
+
+**1. 现有 Outbox 的数据库与 Worker 契约是 platform_scoped**
+
+- `enqueue_postback_report()` 明确要求非空 `platform`，创建 `identity_scope='platform_scoped'` 的记录，并使用平台作用域事件键。
+- `process_postback_report_outbox_item()` 读取待处理记录、认领租约、二次读取 PII 载荷时，均要求 `outbox_enqueued=1 AND identity_scope='platform_scoped' AND platform` 有效。
+- `process_postback_report_outbox()` 的 due scan、重试耗尽统计、终态失败统计也都限定 platform_scoped；对不符合作用域的 Outbox 记录仅统计为 scope_blocked，不会发送。
+- 数据模型的 CHECK 约束要求 unscoped / legacy_unresolved 记录的 platform 必须为 NULL；不能为了让 Worker 扫描到记录而给 /report 伪造 platform。
+- 因此，给 /report 的直接发送日志简单设置 `outbox_enqueued=True`，不会使它进入现有 Postback Worker；反而可能制造“已入队但永远不被扫描”的积压。
+
+**2. 现有直接发送日志与 Postback Outbox 是两种不同身份域**
+
+- `create_report_log()` 为直接发送路径创建 `identity_scope='unscoped'`、`platform=NULL` 的日志，并以 destination_pixel_id 约束目的地复用。
+- 该日志的创建与实际外部 HTTP 发送不是同一个数据库事务；它也没有通过 `enqueue_postback_report()` 写入平台作用域 Outbox。
+- Postback Outbox 的身份包含 platform，直接发送身份不包含 platform；历史身份仲裁代码还明确阻止同一基础身份在 unscoped 与 platform_scoped 之间不安全地并存。
+- 不得把 /report 的 unscoped 事件伪装成 postback 平台事件，也不得通过改写 platform 或 identity_scope 绕过现有唯一身份仲裁。
+
+**3. 两种可接受的实现方向**
+
+A. 在现有 `third_party_report_logs` 上增加独立的 unscoped Outbox 契约：
+- 先定义专用 enqueue 函数，要求明确的 destination_pixel_id、short_link_id 或 cloak_name + short_code 配置引用、稳定 event_key、事件类型和稳定事件时间。
+- 专用 Worker 必须只认领 `identity_scope='unscoped'`、`platform IS NULL` 的记录，并以 destination_pixel_id + lease_token + 数据库时钟验证认领权；不可与 Postback Worker 混用身份条件。
+- 单独定义 unscoped due scan、租约恢复、重试上限、PII retention、配置删除/停用处理、告警与指标。
+- enqueue 与 /report 的事件 inbox、短链计数更新必须处于同一个 MySQL 事务；外部 CAPI 请求只能由 Worker 执行。
+- 先审计现有 `unique_event_key`、历史 unscoped 日志与旧身份冲突，确保稳定事件键不会错误复用已发送或目的地不同的历史日志。
+
+B. 建立独立的 cloak_report_outbox 表与 Worker：
+- 适用于希望把桥页 load/click 事件身份与历史第三方发送日志彻底隔离的场景。
+- 必须复用或明确迁移 PII 加密/脱敏、目的地配置引用、租约、重试和监控能力；不能复制一份功能不完整的队列。
+- 必须保证 event inbox、click_count 原子更新与 outbox enqueue 同事务提交，外部调用不在请求线程执行。
+
+**4. 路由参数校验的事实修正**
+
+当前 GET 路由声明 `fbclid: str = Query(...)`，因此参数完全缺失时 FastAPI 会在进入 handler 前返回 422；`ensure_fbclid()` 生成 UUID 的分支只会在参数存在但为空字符串等情况下触发。不能笼统写成“缺失 fbclid 一定进入 handler 并生成 UUID”。不过空字符串/无真实 fbclid 的请求仍会得到每次请求新生成的 UUID，不能作为跨重试稳定事件身份。
+
+**5. 本轮结论**
+
+现有 Postback Outbox 已具备平台作用域的持久化、租约和重试机制，但不覆盖 /report 当前的 unscoped 直接发送路径。后续必须选择“专用 unscoped Outbox”或“独立 cloak_report_outbox”，并与稳定事件 inbox、短链计数事务一起设计。未经该契约改造，不得只设置 `outbox_enqueued=True`，不得声称 /report 已获得持久重试能力。
