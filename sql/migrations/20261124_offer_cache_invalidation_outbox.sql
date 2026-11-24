@@ -3,7 +3,7 @@
 CREATE TABLE IF NOT EXISTS offer_cache_invalidation_outbox (
     id BIGINT NOT NULL AUTO_INCREMENT,
     event_key CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    offer_id BIGINT NOT NULL,
+    offer_id INT NOT NULL,
     phase VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     status VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'pending',
     attempt_count INT NOT NULL DEFAULT 0,
