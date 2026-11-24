@@ -973,3 +973,66 @@ GROUP BY publisher_id HAVING COUNT(*) > 1;
 - 下一步应先实现规范事件身份贯穿和 MySQL 权威决策账本，再补真实 MySQL 事务/并发测试。财务决策 Redis 原子计数在 MySQL commit 前发生的问题仍是上线阻断项。
 
 **审计结论：** 本节只关闭“PR #205 未同步 PR #206”的基线问题；不关闭事件身份、财务事务原子性、滑动窗口一致性和 BFT 字段语义等问题。
+
+## 26. 事件身份缺失并非单纯代码遗漏：现有兼容测试明确允许 click_id 充当 conversion_id（2026-11-24 追加）
+
+本节基于同步后的实际代码与测试文件复核，进一步明确第 22 节修复时的兼容边界。
+
+### 26.1 当前测试把 click-only 回调定义为合法输入
+
+文件：`tests/test_postback_data_validation.py`
+
+当前参数化用例明确要求以下只有点击 ID 的 payload 通过通用验证：
+
+- `{"clk_id": "click-1", "amount": "1.2500"}`
+- `{"cid": "click-2", "payout": "2.0000"}`
+- `{"clickId": "click-4", "payout": "4"}`
+
+另有 `test_blank_conversion_id_is_ignored_before_fallback`，明确断言显式 conversion_id 为空时，使用 click_id 作为 normalized conversion_id。
+
+文件：`app/core/postback/validators/data_validator.py`
+
+- 验证逻辑把 `DataNormalizer._extract_conversion_id(raw_data)` 与 click_id fallback 组合使用。
+- 只要 click_id 或 conversion_id 任一存在，就允许进入处理流程。
+- 当前测试因此不是偶然漏测，而是把 click-only 兼容作为既有行为契约。
+
+### 26.2 当前通用标准化与扣量决策实际语义
+
+文件：`app/core/postback/transformers/normalizer.py`
+
+- `_extract_conversion_id()` 在显式 conversion_id 缺失时返回 `_extract_click_id()`。
+- `normalize()` 将该值写入 `conversion_id`，并将原始点击标识另写入 `click_id`。
+
+文件：`app/core/deduction/deduction_manager.py`
+
+- `apply_deduction()` 的决策键为 click_id；没有 click_id 时回退到 `offer:{offer_id}:seq:{stats.processed}`。
+- 同一 click_id 下多个不同 conversion/event 会共享相同的哈希决策键。
+- 无稳定事件身份时 sequence fallback 会因 Redis 计数变化而改变，不能保证重试决策稳定。
+
+### 26.3 为什么不能直接把 conversion_id 改为必填并删除 fallback
+
+直接删除 click_id fallback 会改变当前测试和平台接入契约，并可能使现有只提供点击 ID 的回调在数据库非空字段、唯一约束或入口验证处失败。对所有平台一刀切改为必填之前，需要逐个平台核实其事件 ID 合同和历史数据行为。
+
+但继续把 click_id 当成事件 ID 同样不安全：同一 click 可关联多个合法转化事件，receipt 唯一身份与财务决策身份可能错误合并。
+
+### 26.4 推荐分阶段兼容策略
+
+1. 在标准化结果中显式区分 `click_id`、`conversion_id`、`event_identity_verified`；不得仅因 click_id 存在就把身份标记为已验证。
+2. 逐个平台确认稳定事件 ID 字段、别名、大小写/空白规则、最大长度和唯一性范围；保存协议来源或脱敏样例作为审查依据。
+3. 对已经确认事件 ID 的平台，使用规范化的 `platform + conversion_id + event_name` 贯穿 DuplicateChecker、receipt、扣量决策及账本。
+4. 对暂时没有稳定事件 ID 的平台，保持 click 归因兼容，但将 volume deduction 标记为不可安全执行；按业务批准策略跳过扣量或隔离回调。不得把 click_id 或递增序号伪装成事件幂等键。
+5. 先增加兼容性指标，统计各平台 `identity_verified` / `identity_unverified` 比例；在明确受影响流量和业务决策后，再逐平台启用严格模式。
+6. 旧转换表唯一键与新 receipt 的身份规则必须一致；如需历史迁移，先做冲突扫描，不得直接批量改写 conversion_id。
+7. BFT 的 `clk_id` 字段语义仍需官方协议或脱敏样例确认；现有测试只证明当前实现接受 clk_id，不证明它是事件级唯一 ID。
+
+### 26.5 新增必须覆盖的测试
+
+- click-only 回调可以按批准的兼容策略继续归因，但不得获得 `event_identity_verified=True`。
+- 显式 conversion_id 与 click_id 不同，两个字段必须分别保留。
+- 同一 click_id 对应两个 conversion_id，必须形成两个独立事件身份。
+- 同一 conversion_id 在不同平台、不同 event_name 下的身份边界正确。
+- 缺失稳定事件 ID 时，volume deduction 不得执行；amount-only 行为按既有配置独立验证。
+- 已验证事件重复投递时，receipt 与财务 decision ledger 只产生一个终态。
+- MySQL 实际唯一键、字符集、collation 和字段长度边界必须与应用规范化逻辑一致。
+
+**当前结论：** 事件身份修复需要先建立逐平台协议清单和兼容指标，不能只改一个 Normalizer 函数。当前代码与测试明确允许 click_id 充当 conversion_id；在新旧语义切换方案确定前，不应盲目更改入口必填规则或 BFT 字段优先级。该项仍是财务扣量上线阻断项。
