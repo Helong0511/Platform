@@ -55,3 +55,15 @@ def test_no_business_module_reads_offer_cache_entry():
         if "get_offer_cache_entry(" in source:
             readers.append(path.as_posix())
     assert readers == []
+
+
+def test_no_business_module_accesses_offer_hot_cache_key_directly():
+    app_root = Path("app")
+    readers_or_writers = []
+    for path in app_root.rglob("*.py"):
+        if path.as_posix() == "app/core/offer_cache.py":
+            continue
+        source = path.read_text(encoding="utf-8")
+        if "offer:cache:" in source:
+            readers_or_writers.append(path.as_posix())
+    assert readers_or_writers == []
