@@ -185,3 +185,53 @@ def test_validator_rejects_blank_conversion_id_without_click_id():
 
     assert valid is False
     assert "缺少必填字段：click_id 或 conversion_id" in errors
+
+
+
+def test_normalizer_marks_only_explicit_conversion_id_as_verified_event_identity():
+    explicit = DataNormalizer.normalize(
+        {"conversion_id": "event-1", "click_id": "click-1", "payout": "1.0000"},
+        "test-platform",
+    )
+    legacy = DataNormalizer.normalize(
+        {"click_id": "click-1", "payout": "1.0000"},
+        "test-platform",
+    )
+
+    assert explicit["conversion_id"] == "event-1"
+    assert explicit["click_id"] == "click-1"
+    assert explicit["event_identity_verified"] is True
+    # 保留旧入库字段兼容，但不得将 click_id 回退值视为财务事件身份。
+    assert legacy["conversion_id"] == "click-1"
+    assert legacy["event_identity_verified"] is False
+
+
+@pytest.mark.asyncio
+async def test_bft_handler_keeps_click_and_explicit_conversion_ids_separate():
+    handler = BftPostbackHandler()
+    payload = {
+        "clk_id": "click-bft-1",
+        "conversion_id": "conversion-bft-1",
+        "payout": "1.0000",
+    }
+
+    valid, error = await handler.validate(payload)
+    normalized = await handler.normalize(payload)
+
+    assert valid is True
+    assert error is None
+    assert normalized["click_id"] == "click-bft-1"
+    assert normalized["conversion_id"] == "conversion-bft-1"
+    assert normalized["event_identity_verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_bft_click_alias_without_explicit_conversion_id_is_not_verified():
+    normalized = await BftPostbackHandler().normalize({
+        "clk_id": "click-bft-legacy",
+        "payout": "1.0000",
+    })
+
+    assert normalized["click_id"] == "click-bft-legacy"
+    assert normalized["conversion_id"] == "click-bft-legacy"
+    assert normalized["event_identity_verified"] is False
