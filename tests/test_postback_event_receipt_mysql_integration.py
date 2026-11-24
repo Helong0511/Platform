@@ -138,26 +138,30 @@ def _initialize_schema(database: str) -> None:
         connection.close()
 
 
-async def _wait_for_mysql_lock_wait(thread_id: int) -> None:
-    """等待第二个 MySQL 事务确实阻塞在唯一收据键上，再提交第一个事务。"""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + 8
-    connection = _admin_connection()
-    try:
-        while loop.time() < deadline:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT trx_state FROM information_schema.innodb_trx "
-                    "WHERE trx_mysql_thread_id = %s",
-                    (thread_id,),
-                )
-                row = cursor.fetchone()
-            if row and row[0] == "LOCK WAIT":
-                return
-            await asyncio.sleep(0.05)
-    finally:
-        connection.close()
-    raise AssertionError("第二个 MySQL 事务未进入唯一收据锁等待状态")
+class _FlushSignalSession:
+    """在真实 AsyncSession 外包装 flush 信号，确定并发请求已阻塞在唯一键写入。"""
+
+    def __init__(self, session, flush_started: asyncio.Event, flush_finished: asyncio.Event):
+        self._session = session
+        self._flush_started = flush_started
+        self._flush_finished = flush_finished
+
+    def add(self, value):
+        self._session.add(value)
+
+    def begin_nested(self):
+        return self._session.begin_nested()
+
+    async def execute(self, statement):
+        return await self._session.execute(statement)
+
+    async def delete(self, value):
+        return await self._session.delete(value)
+
+    async def flush(self):
+        self._flush_started.set()
+        await self._session.flush()
+        self._flush_finished.set()
 
 
 async def _run_scenario(scenario: str) -> None:
@@ -189,44 +193,54 @@ async def _run_scenario(scenario: str) -> None:
             duplicate = await DuplicateChecker.is_duplicate(**identity, db=first)
             assert duplicate is False
 
-            if scenario == "volume_deducted":
-                # 命中扣量：不插入正式转化，只提交持久收据；并发重试必须等待唯一键仲裁。
-                retry_started = asyncio.Event()
-                retry_connection_id = {}
-                waiting = asyncio.create_task(
-                    _concurrent_normal_retry(
-                        session_factory,
-                        identity,
-                        retry_started,
-                        retry_connection_id,
-                    )
-                )
-                await asyncio.wait_for(retry_started.wait(), timeout=5)
-                await _wait_for_mysql_lock_wait(retry_connection_id["value"])
-                await first.commit()
-                duplicate_retry = await asyncio.wait_for(waiting, timeout=10)
-                assert duplicate_retry is True
-                async with session_factory() as verify:
-                    receipt_count = await verify.scalar(
-                        text("SELECT COUNT(*) FROM postback_event_receipts")
-                    )
-                assert receipt_count == 1
-                return
-
-            # 普通转化：正式记录插入与临时收据删除必须在同一事务提交。
-            retry_started = asyncio.Event()
-            retry_connection_id = {}
-
+            flush_started = asyncio.Event()
+            flush_finished = asyncio.Event()
             waiting = asyncio.create_task(
-                _concurrent_normal_retry(
+                _concurrent_retry(
                     session_factory,
                     identity,
-                    retry_started,
-                    retry_connection_id,
+                    flush_started,
+                    flush_finished,
                 )
             )
-            await asyncio.wait_for(retry_started.wait(), timeout=5)
-            await _wait_for_mysql_lock_wait(retry_connection_id["value"])
+            await asyncio.wait_for(flush_started.wait(), timeout=5)
+            # 第一个事务仍持有唯一键时，第二个真实 INSERT 必须阻塞。
+            try:
+                await asyncio.wait_for(flush_finished.wait(), timeout=0.25)
+            except asyncio.TimeoutError:
+                pass
+            else:
+                raise AssertionError("第二个事务未阻塞在唯一收据键上")
+
+            if scenario == "volume_deducted":
+                # 命中扣量：不插入正式转化，只提交持久收据。
+                await first.commit()
+                expected_duplicate = True
+            elif scenario == "normal_conversion":
+                # 普通转化：正式记录插入与临时收据删除必须在同一事务提交。
+                await first.execute(
+                    text(
+                        "INSERT INTO postback_conversions "
+                        "(platform, conversion_id, event_name) "
+                        "VALUES (:platform, :conversion_id, :event_name)"
+                    ),
+                    identity,
+                )
+                await DuplicateChecker.release_receipt(**identity, db=first)
+                await first.commit()
+                expected_duplicate = True
+            else:
+                # 首个处理事务回滚时，等待者必须成功取得收据并继续处理。
+                await first.rollback()
+                expected_duplicate = False
+
+            duplicate_retry = await asyncio.wait_for(waiting, timeout=10)
+            assert duplicate_retry is expected_duplicate
+            async with session_factory() as verify:
+                receipt_count = await verify.scalar(
+                    text("SELECT COUNT(*) FROM postback_event_receipts")
+                )
+            assert receipt_count == (0 if scenario == "normal_conversion" else 1)
             if scenario == "normal_conversion":
                 await first.execute(
                     text(
@@ -263,16 +277,15 @@ async def _run_scenario(scenario: str) -> None:
         _drop_database(database)
 
 
-async def _concurrent_normal_retry(
+async def _concurrent_retry(
     session_factory,
     identity,
-    started: asyncio.Event,
-    connection_id: dict,
+    flush_started: asyncio.Event,
+    flush_finished: asyncio.Event,
 ) -> bool:
     async with session_factory() as session:
-        connection_id["value"] = await session.scalar(text("SELECT CONNECTION_ID()"))
-        started.set()
-        duplicate = await DuplicateChecker.is_duplicate(**identity, db=session)
+        proxy = _FlushSignalSession(session, flush_started, flush_finished)
+        duplicate = await DuplicateChecker.is_duplicate(**identity, db=proxy)
         await session.commit()
         return duplicate
 
