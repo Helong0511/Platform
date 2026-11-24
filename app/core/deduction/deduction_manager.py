@@ -612,6 +612,26 @@ class DeductionManager:
         parts.append("schema:v2")
         return ":".join(parts)
     
+    @staticmethod
+    def _build_event_decision_key(event_identity: Optional[Dict[str, str]]) -> Optional[str]:
+        """构建稳定的事件级决策键；禁止使用 click_id 或递增序号替代事件身份。"""
+        if not isinstance(event_identity, dict):
+            return None
+        platform = str(event_identity.get("platform") or "").strip().casefold()
+        conversion_id = str(event_identity.get("conversion_id") or "").strip()
+        event_name = str(event_identity.get("event_name") or "").strip()
+        # 与数据库字段宽度一致，提前拒绝可能被截断或产生碰撞的身份字段。
+        if (
+            not platform or len(platform) > 50
+            or not conversion_id or len(conversion_id) > 255
+            or not event_name or len(event_name) > 100
+        ):
+            return None
+        encoded_parts = [value.encode("utf-8") for value in (platform, conversion_id, event_name)]
+        # 长度前缀编码，避免简单拼接分隔符导致身份歧义。
+        payload = b"".join(len(part).to_bytes(4, "big") + part for part in encoded_parts)
+        return "event:v1:" + hashlib.sha256(payload).hexdigest()
+
     def should_deduct_volume(
         self,
         config: ConversionDeductionConfig,
@@ -667,7 +687,8 @@ class DeductionManager:
         click_id: Optional[str] = None,
         advertiser_id: Optional[int] = None,
         offer_id: Optional[int] = None,
-        publisher_id: Optional[int] = None
+        publisher_id: Optional[int] = None,
+        event_identity: Optional[Dict[str, str]] = None,
     ) -> DeductionResult:
         """
         应用扣减（可能同时扣量和扣金额）
@@ -695,6 +716,16 @@ class DeductionManager:
             config.enable_volume_deduction
             and Decimal(str(config.volume_deduction_ratio or 0)) > 0
         )
+        strategy_name = (config.deduction_strategy or "random").lower()
+        event_decision_key = self._build_event_decision_key(event_identity)
+        if volume_decision_available and not event_decision_key:
+            # 无法证明事件唯一身份时不得按 click_id/seq 扣量，避免同点击多转化误合并。
+            logger.warning("扣量事件身份未验证，本次跳过扣量：scope_offer_id=%s", offer_id)
+            volume_decision_available = False
+        if volume_decision_available and strategy_name not in ("random", "hash", "deterministic"):
+            # 顺序策略依赖 Redis 递增序号，尚未迁移到 MySQL 事务账本前不提供重试幂等保证。
+            logger.warning("顺序扣量策略尚未具备事务级事件幂等，本次跳过扣量：strategy=%s", strategy_name)
+            volume_decision_available = False
         stats = ConversionStats()
         if volume_decision_available:
             try:
@@ -713,8 +744,7 @@ class DeductionManager:
 
         # 判断是否扣量（确定性哈希 / 间隔策略 + Redis 原子预留防超扣）
         if volume_decision_available:
-            strategy_name = (config.deduction_strategy or "random").lower()
-            decision_key = (click_id or "").strip() or f"offer:{offer_id}:seq:{stats.processed}"
+            decision_key = event_decision_key or ""
             want_deduct = self.should_deduct_volume(config, stats, decision_key=decision_key)
             if want_deduct:
                 if strategy_name in ("random", "hash", "deterministic"):
@@ -936,12 +966,19 @@ async def apply_deduction(
     click_id: Optional[str] = None,
     advertiser_id: Optional[int] = None,
     offer_id: Optional[int] = None,
-    publisher_id: Optional[int] = None
+    publisher_id: Optional[int] = None,
+    event_identity: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """应用扣减（向后兼容）"""
     manager = DeductionManager(db)
     result = await manager.apply_deduction(
-        conversion_data, config, click_id, advertiser_id, offer_id, publisher_id
+        conversion_data,
+        config,
+        click_id,
+        advertiser_id,
+        offer_id,
+        publisher_id,
+        event_identity=event_identity,
     )
     return result.to_dict()
 
