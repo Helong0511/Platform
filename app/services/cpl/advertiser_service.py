@@ -3,7 +3,7 @@
 
 功能说明：
 - 广告主 CRUD、分页搜索、关联 Offer 统计
-- 变更后失效相关基础设施缓存（Offer、Cap 等）
+- 广告主信息以数据库为权威来源；当前没有独立的广告主缓存读写路径
 
 在系统中的位置：
 - 被管理端广告主 API 调用；写操作记录审计日志
@@ -24,7 +24,6 @@ from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.pagination import calculate_pagination_offset
-from app.core.infrastructure.cache import CacheInvalidator
 from app.models.models import (
     Advertiser,
     User,
@@ -300,9 +299,6 @@ class AdvertiserService(BaseService[Advertiser]):
         await self.db.flush()
         await self.db.refresh(advertiser)
 
-        # 失效相关缓存
-        await CacheInvalidator.invalidate_advertiser_cache(advertiser_id)
-
         # 记录审计日志
         await log_user_action(
             db=self.db,
@@ -315,9 +311,6 @@ class AdvertiserService(BaseService[Advertiser]):
             success=True
         )
         await commit_audit_log(self.db)
-
-        # 事务提交后再次失效，清除提交前并发请求可能回填的旧广告主缓存。
-        await CacheInvalidator.invalidate_advertiser_cache(advertiser_id)
 
         logger.info(f"广告主已更新: {advertiser.advertiser_name} (ID: {advertiser.id})")
         return advertiser
@@ -371,8 +364,5 @@ class AdvertiserService(BaseService[Advertiser]):
         await self.db.delete(advertiser)
         await self.db.flush()
         await commit_audit_log(self.db)
-
-        # 删除成功并提交事务后，清除详情及依赖广告主数据的列表缓存。
-        await CacheInvalidator.invalidate_advertiser_cache(advertiser_id)
 
         logger.info(f"广告主已删除: {advertiser.advertiser_name} (ID: {advertiser_id})")
