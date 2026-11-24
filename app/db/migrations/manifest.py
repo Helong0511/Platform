@@ -159,6 +159,12 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     ),
 
     Migration(
+        revision="20261124_click_client_attribution_snapshot",
+        path="sql/migrations/20261124_click_client_attribution_snapshot.sql",
+        sha256="f1f1eee2ee85dfdc3675770fae52e14d37eb4bfc602d8cf68bed2b82e93ec72c",
+    ),
+
+    Migration(
         revision="20261124_cpl_deduction_cache_generation",
         path="sql/migrations/20261124_cpl_deduction_cache_generation.sql",
         sha256="8c078bb17aa43cc79bc7b05c08513b1442a96fcf086d1f7d8bd3ed2fe38da2b7",
@@ -169,12 +175,6 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         revision="20261124_offer_cache_invalidation_outbox",
         path="sql/migrations/20261124_offer_cache_invalidation_outbox.sql",
         sha256="e0f9ad9f0ff253d5d26717c9ca4028677d112f66280f7ecb68e0b9bd15ea95c1",
-    ),
-
-    Migration(
-        revision="20261124_click_client_attribution_snapshot",
-        path="sql/migrations/20261124_click_client_attribution_snapshot.sql",
-        sha256="f1f1eee2ee85dfdc3675770fae52e14d37eb4bfc602d8cf68bed2b82e93ec72c",
     ),
 
     Migration(
