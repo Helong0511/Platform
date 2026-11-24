@@ -1,7 +1,7 @@
 # 缓存使用指南
 
-**版本：** 2.0  
-**更新日期：** 2026-03-14  
+**版本：** 2.1  
+**更新日期：** 2026-11-24  
 **作者：** 钳钳 🦀
 
 ---
@@ -290,24 +290,18 @@ async def periodic_cache_metrics_report():
 
 **场景：** 数据库更新了，缓存还是旧的
 
-**解决方案：**
-1. **主动失效** - 数据更新时删除缓存
-   ```python
-   await cache.delete(f"user:{user_id}")
-   ```
+**解决方案与边界：**
+1. **数据库事务内登记持久化失效事件（强一致性场景优先）**。业务数据变更与 Outbox 事件必须使用同一个数据库事务提交；Worker 使用租约、随机 fencing token 和有限退避重试。不要在业务事务提交后才单独写 Outbox。
+2. **Generation 版本隔离**。广告数据查询缓存与用户统计缓存通过数据库 Generation 生成新键；旧请求即使迟到回填，也不能覆盖新 Generation 的读取结果。
+3. **Offer 热点缓存**。Offer 创建、更新、删除在业务事务内登记 first/second 两阶段事件；提交后 API 尝试立即删除 `offer:cache:{offer_id}`，Outbox 再负责持久化重试和后续复查。
+4. **普通短 TTL 缓存**可接受短暂陈旧时，可使用合理 TTL，但必须明确业务允许的陈旧窗口。
+5. **不要把进程内延迟双删当成可靠保证**。`asyncio.create_task()` 在进程重启、事件循环关闭时会丢失；`asyncio.sleep()` 也不能持久化任务。历史 `CacheInvalidator` 的延迟双删只属于 best-effort 兼容路径，不能代替事务性 Outbox。
 
-2. **短 TTL** - 让缓存自动过期
-   ```python
-   await set_cached(key, data, ttl=300)
-   ```
-
-3. **延迟双删** - 更新 DB 后删缓存，延迟后再删一次
-   ```python
-   await db.update(...)
-   await cache.delete(key)
-   await asyncio.sleep(0.5)
-   await cache.delete(key)
-   ```
+**当前已接入持久化失效的范围（以代码为准）：**
+- `ad_data`：数据库 Generation + Outbox。
+- `user_stats`：数据库 Generation + Outbox。
+- Offer 热点键 `offer:cache:{offer_id}`：专用两阶段 Outbox。
+- 不要据此推断所有 `query_cache:` 缓存、Advertiser 或其他业务域均已获得持久化失效保证。
 
 ### Q4: 如何监控缓存性能？
 
@@ -376,5 +370,5 @@ async def get_hot_user_profile(user_id: int):
 
 ---
 
-_文档版本：2.0_  
-_最后更新：2026-03-14_
+_文档版本：2.1_  
+_最后更新：2026-11-24_
