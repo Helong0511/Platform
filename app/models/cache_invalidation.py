@@ -46,7 +46,7 @@ class CacheInvalidationOutbox(Base):
     max_attempts = Column(Integer, nullable=False, default=12, server_default=text("12"))
     next_retry_time = Column(DateTime, nullable=False, default=get_app_now_naive)
     locked_by = Column(String(128), nullable=True)
-    lease_token = Column(CHAR(32, collation="ascii_bin"), nullable=True)
+    lease_token = Column(CHAR(32), nullable=True)
     lease_until = Column(DateTime, nullable=True)
     last_error_type = Column(String(128), nullable=True, comment="仅记录异常类型，不保存异常原文")
     created_at = Column(DateTime, nullable=False, default=get_app_now_naive, server_default=text("CURRENT_TIMESTAMP"))
@@ -83,7 +83,7 @@ class OfferCacheInvalidationOutbox(Base):
     __tablename__ = "offer_cache_invalidation_outbox"
 
     id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
-    event_key = Column(CHAR(64, collation="ascii_bin"), nullable=False, comment="随机 SHA-256 格式幂等标识")
+    event_key = Column(CHAR(64), nullable=False, comment="随机十六进制幂等标识；生产 SQL 迁移限制为 ASCII")
     offer_id = Column(Integer, nullable=False, comment="Offer 主键快照；不建立外键以允许删除后清理")
     phase = Column(String(8), nullable=False, comment="first 或 second")
     status = Column(String(16), nullable=False, default="pending", server_default=text("'pending'"))
