@@ -290,10 +290,9 @@ class AdTrackingCodec:
             raise ValueError("不得使用内置开发默认密钥")
         if len(normalized) != 64:
             raise ValueError("必须为 64 位十六进制字符（32 字节）")
-        try:
-            return bytes.fromhex(normalized)
-        except ValueError as exc:
-            raise ValueError("必须仅包含十六进制字符") from exc
+        if any(char not in "0123456789abcdefABCDEF" for char in normalized):
+            raise ValueError("必须仅包含十六进制字符")
+        return bytes.fromhex(normalized)
 
     @classmethod
     def _master_key(cls) -> bytes:
