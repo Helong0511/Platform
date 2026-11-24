@@ -61,3 +61,42 @@ async def test_recent_stats_counts_saved_conversions_and_only_unpersisted_volume
     conversion_params = conversion_stmt.compile().params
     assert app_now in conversion_params.values()
     assert datetime(2026, 11, 23, 12, 0, 0) in conversion_params.values()
+
+
+
+@pytest.mark.asyncio
+async def test_strict_recent_stats_bypasses_stale_cache_and_does_not_refresh_it(monkeypatch):
+    stale_cache = AsyncMock(
+        return_value={"total": 999, "deducted": 999, "processed": 999}
+    )
+    cache_write = AsyncMock()
+    monkeypatch.setattr(deduction_manager_module, "get_cached", stale_cache)
+    monkeypatch.setattr(deduction_manager_module, "set_cached", cache_write)
+    monkeypatch.setattr(
+        deduction_manager_module,
+        "get_app_now_naive",
+        lambda: datetime(2026, 11, 24, 12, 0, 0),
+    )
+
+    db = SimpleNamespace(
+        execute=AsyncMock(
+            side_effect=[
+                _ScalarResult(20),
+                _ScalarResult(2),
+                _ScalarResult(1),
+            ]
+        )
+    )
+
+    stats = await DeductionManager(db).get_recent_stats(
+        advertiser_id=12,
+        offer_id=34,
+        publisher_id=56,
+        hours=24,
+        strict=True,
+    )
+
+    assert stats == ConversionStats(total=22, deducted=3, processed=22)
+    stale_cache.assert_not_awaited()
+    cache_write.assert_not_awaited()
+    assert db.execute.await_count == 3
