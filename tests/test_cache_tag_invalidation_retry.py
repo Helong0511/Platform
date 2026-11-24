@@ -1,6 +1,4 @@
 """缓存标签失效的并发轮转、失败重试和崩溃恢复回归测试。"""
-import asyncio
-
 import pytest
 
 from app.core import cache_manager
@@ -63,6 +61,8 @@ class FakeRedis:
     async def delete(self, key):
         if key == self.fail_key and self.fail_key:
             raise RuntimeError("simulated Redis delete failure")
+        if key in self.deleted:
+            return 0
         self.deleted.append(key)
         self.sets.pop(key, None)
         return 1
