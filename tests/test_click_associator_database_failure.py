@@ -106,7 +106,7 @@ def test_matching_token_database_identity_keeps_database_snapshot():
 
 @pytest.mark.parametrize(
     "identity_field",
-    ["click_id", "offer_id", "publisher_id", "advertiser_id", "short_link_id"],
+    ["click_id", "offer_id", "publisher_id", "advertiser_id", "short_link_id", "client_id"],
 )
 def test_each_click_identity_field_mismatch_is_rejected(identity_field):
     db_association = {
@@ -115,12 +115,57 @@ def test_each_click_identity_field_mismatch_is_rejected(identity_field):
         "publisher_id": 20,
         "advertiser_id": 30,
         "short_link_id": 40,
+        "client_id": 50,
         "url_params": {},
     }
     token_association = dict(db_association)
     token_association[identity_field] = (
         "different-click" if identity_field == "click_id" else db_association[identity_field] + 1
     )
+
+    with pytest.raises(ValueError, match="identity conflict"):
+        ClickAssociator._merge_token_and_db_association(
+            db_association, token_association
+        )
+
+def test_missing_database_client_snapshot_uses_signed_token_snapshot():
+    db_association = {
+        "click_id": "click-123",
+        "offer_id": 10,
+        "publisher_id": 20,
+        "advertiser_id": 30,
+        "short_link_id": 40,
+        "client_id": None,
+        "url_params": {},
+    }
+    token_association = {
+        "click_id": "click-123",
+        "offer_id": 10,
+        "publisher_id": 20,
+        "advertiser_id": 30,
+        "short_link_id": 40,
+        "client_id": 55,
+        "url_params": {},
+    }
+
+    merged = ClickAssociator._merge_token_and_db_association(
+        db_association, token_association
+    )
+
+    assert merged["client_id"] == 55
+
+
+def test_click_client_snapshot_conflict_is_rejected():
+    db_association = {
+        "click_id": "click-123",
+        "offer_id": 10,
+        "publisher_id": 20,
+        "advertiser_id": 30,
+        "short_link_id": 40,
+        "client_id": 50,
+        "url_params": {},
+    }
+    token_association = dict(db_association, client_id=51)
 
     with pytest.raises(ValueError, match="identity conflict"):
         ClickAssociator._merge_token_and_db_association(
