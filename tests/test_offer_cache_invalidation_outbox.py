@@ -90,3 +90,11 @@ async def test_offer_invalidation_rejects_invalid_ids(offer_id):
 
     with pytest.raises(ValueError, match="offer_id"):
         await enqueue_offer_cache_invalidation(NoWriteSession(), offer_id)
+
+
+def test_click_batch_processor_keeps_offer_cache_consumer_and_miss_backfill():
+    source = Path("app/scheduler_module/tasks/clicks_batch_processor.py").read_text(
+        encoding="utf-8"
+    )
+    assert "get_offer_advertiser_id" in source
+    assert "set_offer_cache" in source
