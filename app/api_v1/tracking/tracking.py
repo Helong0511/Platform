@@ -211,6 +211,7 @@ async def track_click(
             publisher_id=publisher.id,
             advertiser_id=offer.advertiser_id,
             url_params=url_params_dict,
+            extra={"client_id": publisher.client_id} if publisher.client_id is not None else None,
         )
         
         # 5. 创建点击记录
@@ -218,6 +219,7 @@ async def track_click(
             "click_id": click_id,
             "offer_id": offer.id,
             "publisher_id": publisher.id,
+            "client_id": publisher.client_id,
             "advertiser_id": offer.advertiser_id,
             "click_time": get_app_now_naive(),  # 使用北京时间
             "ip": request_info.get('ip'),
