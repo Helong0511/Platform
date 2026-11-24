@@ -6,6 +6,7 @@ advance_cache_generation()；本模块绝不自行 commit/rollback。
 from __future__ import annotations
 
 import hashlib
+from typing import Iterable
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +36,35 @@ async def get_cache_generation(
             f"cache generation is unavailable for namespace={namespace}"
         )
     return int(generation)
+
+
+async def get_cache_generations(
+    db: AsyncSession,
+    namespaces: Iterable[str],
+) -> dict[str, int]:
+    """在一个数据库查询中读取多个权威缓存版本；缺失时 fail closed。"""
+    normalized = tuple(dict.fromkeys(namespaces))
+    if not normalized:
+        return {}
+
+    result = await db.execute(
+        select(
+            CacheNamespaceGeneration.namespace,
+            CacheNamespaceGeneration.generation,
+        ).where(CacheNamespaceGeneration.namespace.in_(normalized))
+    )
+    generations = {
+        str(namespace): int(generation)
+        for namespace, generation in result.all()
+        if generation is not None and int(generation) > 0
+    }
+    missing = [namespace for namespace in normalized if namespace not in generations]
+    if missing:
+        raise CacheGenerationUnavailable(
+            "cache generation is unavailable for namespaces="
+            + ",".join(missing)
+        )
+    return {namespace: generations[namespace] for namespace in normalized}
 
 
 async def advance_cache_generation(
