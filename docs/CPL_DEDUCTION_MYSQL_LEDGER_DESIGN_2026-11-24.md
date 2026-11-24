@@ -640,3 +640,34 @@ API 路由位于 `app/api_v1/cpl/conversions/deductions.py`。上述六条服务
 
 更安全的默认行为是：存在扣减配置时拒绝父实体删除，要求先显式处理配置；不能让 FK cascade 静默移除财务策略。父实体删除的 2/10/50 并发测试也必须覆盖正在处理的 no_config 事件和配置决策。
 
+## 19. 配置 DB 查询异常可能被吞成“无配置”，绕过 fail-closed（2026-11-24）
+
+本轮继续检查配置缓存读取错误路径，发现一个独立于 Redis 统计的 fail-closed 缺口：
+
+- `app/core/deduction/deduction_cache.py::DeductionConfigCache._load_from_db()` 对数据库查询使用 `try/except Exception`，捕获异常后记录日志并返回 `None`。
+- `DeductionConfigCache.get_config()` 将该返回值直接作为“没有配置”返回给调用方。
+- `DeductionManager.find_config()` 只有在异常真正向外传播时，才会根据 `settings.DEDUCTION_FAIL_OPEN` 决定返回 None 或 raise。
+- 因此 DB 查询异常如果发生在最后一个待查 scope（例如本次只有 publisher_id，或前面 scope 均未命中、publisher 查询失败），异常会在 `_load_from_db` 内被转换成 None；`find_config` 随后正常返回 None。即使 `DEDUCTION_FAIL_OPEN=false`，调用方也可能把“配置查询失败”当成“确实没有扣减配置”，继续正常入库/转发，漏执行已配置的扣量或扣金额策略。
+
+这不是“fail-open 模式允许跳过策略”的问题，而是 fail-closed 模式无法识别数据库故障。尤其当目标 scope 本来存在 active 配置时，DB 查询失败不应等价于配置不存在。
+
+### 19.1 修复要求
+
+1. 对已知 scope 的数据库读取失败必须向上传播明确异常（例如 `DeductionConfigLoadError`），不得返回 None。
+2. 只有 SQL 查询成功且结果为空时，才允许返回 None 表示“确实无配置”。
+3. Redis 缓存读取失败可以按策略回源 MySQL；MySQL 回源失败必须遵守 `DEDUCTION_FAIL_OPEN`：fail-closed 时拒绝继续处理，fail-open 时才可明确记录“配置不可用并跳过扣减”的降级状态。
+4. 未知 level、缓存反序列化失败和 DB 连接/查询失败应区分分类；不能把所有异常折叠成无配置。
+5. 如果 SQLAlchemy Session 已进入 failed transaction，必须由 Postback 外层统一 rollback；不得捕获异常后继续在同一 Session 上执行其它 scope 查询。
+6. 日志不得输出敏感请求字段；记录 scope type/id、异常类型、降级模式和 correlation/event identity 即可。
+
+### 19.2 必测回归
+
+- 仅 publisher_id 存在、配置缓存 miss、MySQL SELECT 抛异常、`DEDUCTION_FAIL_OPEN=false`：必须抛出并回滚，不得返回 no_config。
+- Offer/Advertiser 查询正常但未命中，Publisher 查询失败：必须 fail-closed。
+- DB 查询成功且无配置：正常返回 None 并记录 no_config。
+- `DEDUCTION_FAIL_OPEN=true` 且 DB 查询失败：允许按批准策略跳过扣减，但必须产生可观测降级结果，不能伪装成“没有配置”。
+- Redis 缓存不可用但 MySQL 正常：应按设计回源，不得误判无配置。
+- SQLAlchemy flush/SELECT 失败导致 Session 失效后，不得继续复用该事务处理 Postback。
+
+**当前结论：** 已确认异常吞噬路径存在于代码；尚未修改运行时代码，也未声称该缺陷已修复。该问题必须在 PR #205 的财务事务重构/配置读取重构中一并关闭。
+
