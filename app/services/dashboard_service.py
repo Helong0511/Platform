@@ -201,7 +201,6 @@ class DashboardService:
                 "stats": [],
                 "metrics": {"total_revenue": 0.0, "roi": 0.0}
             }
-            await set_cached(cache_key, response_data, ttl=60, key_prefix="dashboard")
             return response_data
 
         # ====== 上一周期日期范围（用于环比趋势） ======
