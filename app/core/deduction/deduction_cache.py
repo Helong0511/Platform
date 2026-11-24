@@ -87,7 +87,7 @@ class DeductionConfigCache:
         
         if config:
             # 写入缓存
-            await self._save_to_cache(level, target_id, config)
+            await self._save_to_cache(level, target_id, config, generation)
         
         return config
     
@@ -131,9 +131,14 @@ class DeductionConfigCache:
             logger.error(f"从数据库加载配置失败：{e}", exc_info=True)
             return None
     
-    async def _save_to_cache(self, level: str, target_id: int, config: ConversionDeductionConfig):
-        """保存配置到缓存"""
-        generation = await get_cache_generation(self.db, namespace="cpl:deduction_config")
+    async def _save_to_cache(
+        self,
+        level: str,
+        target_id: int,
+        config: ConversionDeductionConfig,
+        generation: int,
+    ):
+        """使用读取配置时的同一 Generation 保存，避免并发更新后的旧值写入新版本键。"""
         cache_key = f"{CONFIG_CACHE_PREFIX}{level}:{target_id}:g{generation}"
         
         # 序列化为字典（避免 SQLAlchemy 对象序列化问题）
