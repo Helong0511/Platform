@@ -73,6 +73,8 @@ async def test_deduction_config_read_write_and_invalidation_share_query_namespac
     expected_key = "query_cache:cpl:deduction_config:offer:7:g17"
     assert cache.get_keys == [expected_key]
     assert cache.set_keys == [expected_key]
+    # 读取与缓存回填必须复用同一数据库 Generation，不能在回填时重新取版本。
+    db.scalar.assert_awaited_once()
 
     # 两条现有失效入口都必须命中与读写相同的 Redis 键空间。
     await service.invalidate("offer", 7)
