@@ -6,6 +6,7 @@
 在系统中的位置：``app.core.cache_manager.CacheManager``，协调 ``offer_cache`` 与 ``short_link_cache``。
 """
 import logging
+import secrets
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,42 @@ logger = logging.getLogger(__name__)
 
 # 标签到键的映射前缀
 TAG_TO_KEYS_PREFIX = "tag_keys:"
+TAG_BATCHES_PREFIX = "tag_batches:"
+TAG_BATCH_PREFIX = "tag_batch:"
+
+# 标签集合轮转、持久化批次登记必须在同一 Lua 原子操作内完成。
+_ROTATE_TAG_BATCH_LUA = """
+local active_key = KEYS[1]
+local pending_key = KEYS[2]
+local batch_key = ARGV[1]
+if redis.call('EXISTS', active_key) == 1 then
+    redis.call('RENAME', active_key, batch_key)
+    redis.call('PERSIST', batch_key)
+    redis.call('SADD', pending_key, batch_key)
+end
+return redis.call('SMEMBERS', pending_key)
+"""
+
+# 仅当批次确实为空时才清理批次及 pending 索引；并发 Worker 可安全重复执行。
+_FINALIZE_TAG_BATCH_LUA = """
+local batch_key = KEYS[1]
+local pending_key = KEYS[2]
+if redis.call('SCARD', batch_key) ~= 0 then
+    return 0
+end
+redis.call('DEL', batch_key)
+redis.call('SREM', pending_key, batch_key)
+if redis.call('SCARD', pending_key) == 0 then
+    redis.call('DEL', pending_key)
+end
+return 1
+"""
+
+_ADD_TAG_MEMBER_LUA = """
+redis.call('SADD', KEYS[1], ARGV[1])
+redis.call('EXPIRE', KEYS[1], ARGV[2])
+return 1
+"""
 
 
 class CacheManager:
@@ -176,92 +213,114 @@ class CacheManager:
     
     @staticmethod
     async def add_cache_tag(cache_key: str, tags: List[str]) -> bool:
-        """
-        为缓存键添加标签
-        
-        标签用于精确失效，可以按标签批量清除相关缓存
-        
-        Args:
-            cache_key: 缓存键
-            tags: 标签列表
-            
-        Returns:
-            是否添加成功
-        """
+        """原子添加标签成员并刷新活动集合 TTL。"""
         redis = await get_redis_client()
         if not redis:
             return False
-        
+
         try:
-            # 为每个标签维护一个键集合
-            for tag in tags:
+            for tag in set(tags):
                 tag_key = f"{TAG_TO_KEYS_PREFIX}{tag}"
-                await redis.sadd(tag_key, cache_key)
-                # 设置标签键的过期时间（7天）
-                await redis.expire(tag_key, 7 * 24 * 3600)
-            
+                await redis.eval(
+                    _ADD_TAG_MEMBER_LUA,
+                    1,
+                    tag_key,
+                    cache_key,
+                    7 * 24 * 3600,
+                )
             return True
         except Exception as e:
-            logger.warning(f"添加缓存标签失败: cache_key={cache_key}, tags={tags}, error={e}")
+            logger.warning(
+                "添加缓存标签失败: cache_key=%s, tags=%s, error=%s",
+                cache_key,
+                tags,
+                e,
+            )
             return False
-    
+
     @staticmethod
     async def invalidate_by_tag(tag: str) -> int:
-        """
-        按标签清除缓存
-        
-        清除所有带有指定标签的缓存键
-        
-        Args:
-            tag: 标签名称
-            
-        Returns:
-            清除的缓存数量
+        """按标签失效缓存；批次轮转和恢复索引具备原子性与崩溃恢复能力。
+
+        活动集合通过 Lua 原子 RENAME 为不可变批次并写入持久 pending 索引。
+        Worker 删除成员成功后才 SREM；若进程在 DEL 后、SREM 前崩溃，重试
+        DEL 不存在的键是幂等操作，随后仍可移除成员。并发 Worker 可重复处理
+        同一批次，不会因一个 Worker 清理索引而丢失另一个 Worker 新增的成员。
         """
         redis = await get_redis_client()
         if not redis:
             return 0
-        
+
+        active_key = f"{TAG_TO_KEYS_PREFIX}{tag}"
+        pending_key = f"{TAG_BATCHES_PREFIX}{tag}"
+        batch_key = f"{TAG_BATCH_PREFIX}{secrets.token_hex(16)}"
+        deleted_count = 0
+
         try:
-            tag_key = f"{TAG_TO_KEYS_PREFIX}{tag}"
-            # 获取所有带此标签的缓存键
-            cache_keys = await redis.smembers(tag_key)
-            
-            if not cache_keys:
-                return 0
-            
-            # 删除所有缓存键；任何一个键删除失败，都必须保留标签集合以便后续重试。
-            deleted_count = 0
-            failed_keys = []
-            for cache_key in cache_keys:
+            batches = await redis.eval(
+                _ROTATE_TAG_BATCH_LUA,
+                2,
+                active_key,
+                pending_key,
+                batch_key,
+            )
+
+            for raw_batch_key in batches or []:
+                current_batch_key = (
+                    raw_batch_key.decode("utf-8")
+                    if isinstance(raw_batch_key, bytes)
+                    else str(raw_batch_key)
+                )
                 try:
-                    if await redis.delete(cache_key):
-                        deleted_count += 1
+                    members = await redis.smembers(current_batch_key)
                 except Exception as e:
-                    failed_keys.append(cache_key)
                     logger.warning(
-                        "删除缓存键失败，保留标签供重试: cache_key=%s, error=%s",
-                        cache_key,
+                        "读取缓存标签批次失败: tag=%s, batch=%s, error=%s",
+                        tag,
+                        current_batch_key,
+                        e,
+                    )
+                    continue
+
+                for cache_key in members:
+                    try:
+                        # DEL 返回 0 表示键已不存在，也属于已完成失效。
+                        deleted_count += int(await redis.delete(cache_key) or 0)
+                        await redis.srem(current_batch_key, cache_key)
+                    except Exception as e:
+                        # 删除或确认成员移除失败时保留该成员，供后续 Worker 重试。
+                        logger.warning(
+                            "删除缓存标签成员失败，保留批次供重试: tag=%s, cache_key=%s, error=%s",
+                            tag,
+                            cache_key,
+                            e,
+                        )
+
+                try:
+                    await redis.eval(
+                        _FINALIZE_TAG_BATCH_LUA,
+                        2,
+                        current_batch_key,
+                        pending_key,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "完成缓存标签批次清理失败: tag=%s, batch=%s, error=%s",
+                        tag,
+                        current_batch_key,
                         e,
                     )
 
-            if failed_keys:
-                logger.error(
-                    "缓存标签失效未完成: tag=%s, failed_count=%s；标签集合保留供重试",
-                    tag,
-                    len(failed_keys),
-                )
-                return deleted_count
-
-            # 只有所有成员键均已确认删除（或本来不存在）后，才移除标签集合。
-            await redis.delete(tag_key)
-
-            logger.info(f"按标签清除缓存: tag={tag}, 清除 {deleted_count} 个缓存键")
+            logger.info(
+                "按标签清除缓存: tag=%s, 清除 %s 个缓存键",
+                tag,
+                deleted_count,
+            )
             return deleted_count
         except Exception as e:
-            logger.warning(f"按标签清除缓存失败: tag={tag}, error={e}")
-            return 0
-    
+            logger.warning("按标签清除缓存失败: tag=%s, error=%s", tag, e)
+            return deleted_count
+
     @staticmethod
     async def invalidate_by_tags(tags: List[str]) -> int:
         """
