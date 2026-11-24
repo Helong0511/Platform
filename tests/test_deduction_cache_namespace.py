@@ -85,7 +85,15 @@ async def test_deduction_config_read_write_and_invalidation_share_query_namespac
 
 
 @pytest.mark.asyncio
-async def test_deduction_cache_reads_generation_once_for_all_priority_levels():
+async def test_deduction_cache_reads_generation_once_for_all_priority_levels(monkeypatch):
+    cache = _Cache()
+
+    async def get_backend():
+        return cache
+
+    monkeypatch.setattr(cache_compat, "get_cache_backend", get_backend)
+    monkeypatch.setattr(cache_compat, "get_metrics_collector", lambda: _Metrics())
+
     db = SimpleNamespace(scalar=AsyncMock(return_value=29))
     service = DeductionConfigCache(db=db)
     service._load_from_db = AsyncMock(return_value=None)
