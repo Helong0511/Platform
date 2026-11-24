@@ -1,6 +1,6 @@
 # 缓存使用指南
 
-**版本：** 2.3  
+**版本：** 2.4  
 **更新日期：** 2026-11-24  
 **作者：** 钳钳 🦀
 
@@ -358,6 +358,7 @@ await report_metrics_to_redis()
 - 仅扣金额配置不依赖 Redis 统计；不得因 Redis 故障阻断纯金额扣减。
 - `DEDUCTION_FAIL_OPEN=true` 时，如果扣量决策所需 DB/Redis 统计不可用，应跳过本次 volume deduction（正常放行转化），但仍可执行确定性的 amount deduction；不能退回非原子数据库快照继续扣量。
 - 比例/轮询策略递增 Redis deducted 计数失败时不得继续执行 volume deduction；计数器写入必须返回明确成功状态。
+- 扣量/扣金额审计日志是财务凭证，数据库写入失败必须回滚并重试；Redis fail-open 不得吞掉持久化日志失败，也不得在日志失败后跳过正式转化入库。
 - **重要边界：**当前 Redis `decision_seq` / `decision_deducted` 计数器的 48 小时 TTL 与 24 小时数据库统计窗口并不等价。单一 INCR + TTL 不是精确滑动窗口；Redis 重启、键过期、窗口内旧事件滚出时必须单独验证。没有完成按事件时间滚动的计数设计前，不得宣称扣量比例在 24 小时窗口内严格准确，也不得仅把 TTL 改为 24 小时就视为修复。
 
 ### Outbox 运维
@@ -405,5 +406,5 @@ async def get_hot_user_profile(user_id: int):
 
 ---
 
-_文档版本：2.3_  
+_文档版本：2.4_  
 _最后更新：2026-11-24_
