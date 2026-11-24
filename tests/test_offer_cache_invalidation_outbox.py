@@ -1,5 +1,6 @@
 """Offer 缓存失效 Outbox 的事务边界测试。"""
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
