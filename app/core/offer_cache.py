@@ -104,12 +104,12 @@ async def set_offer_cache(
     offer_name: Optional[str] = None,
     add_tags: bool = True,
 ) -> bool:
-    """缓存 Offer；advertiser_id 为 None 时写入短 TTL 空值标记。"""
-    redis = await get_redis_client()
-    if not redis:
-        return False
-
+    """缓存 Offer；Redis 故障只影响缓存，不影响数据库权威业务结果。"""
     try:
+        redis = await get_redis_client()
+        if not redis:
+            return False
+
         cache_key = f"{OFFER_CACHE_PREFIX}{offer_id}"
         if advertiser_id is None:
             await redis.setex(cache_key, NONE_TTL, NONE_MARKER)
@@ -139,14 +139,18 @@ async def set_offer_cache(
 
 
 async def invalidate_offer_cache(offer_id: int) -> bool:
-    """清除 Offer 缓存。"""
-    redis = await get_redis_client()
-    if not redis:
-        return False
-
+    """清除 Offer 缓存；Redis 客户端获取或删除失败均返回 False。"""
     try:
+        redis = await get_redis_client()
+        if not redis:
+            return False
+
         await redis.delete(f"{OFFER_CACHE_PREFIX}{offer_id}")
         return True
     except Exception as e:
-        logger.debug(f"清除Offer缓存失败: offer_id={offer_id}, error={e}")
+        logger.warning(
+            "清除 Offer 缓存失败: offer_id=%s error_type=%s",
+            offer_id,
+            type(e).__name__,
+        )
         return False

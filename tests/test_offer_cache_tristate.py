@@ -176,3 +176,57 @@ async def test_offer_warmup_only_writes_on_confirmed_cache_miss(monkeypatch):
 
     assert await cache_manager.CacheManager.warmup_offers(FakeDB()) == 1
     assert len(written) == 1
+
+
+@pytest.mark.asyncio
+async def test_offer_cache_invalidation_handles_redis_client_failure(monkeypatch):
+    async def get_redis():
+        raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(offer_cache, "get_redis_client", get_redis)
+
+    assert await offer_cache.invalidate_offer_cache(17) is False
+
+
+@pytest.mark.asyncio
+async def test_set_offer_cache_returns_false_when_redis_client_acquisition_raises(monkeypatch):
+    async def get_redis():
+        raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(offer_cache, "get_redis_client", get_redis)
+
+    assert await offer_cache.set_offer_cache(17, 29, "offer") is False
+
+
+@pytest.mark.asyncio
+async def test_short_link_offer_resolution_succeeds_when_offer_cache_redis_fails(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.routes.short_link.utils import resolve_offer_id
+
+    async def get_redis():
+        raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(offer_cache, "get_redis_client", get_redis)
+
+    offer = SimpleNamespace(
+        id=17,
+        advertiser_id=29,
+        offer_name="offer",
+        is_active=True,
+        status="Active",
+    )
+
+    class Scalars:
+        def first(self):
+            return offer
+
+    class Result:
+        def scalars(self):
+            return Scalars()
+
+    class FakeDB:
+        async def execute(self, statement):
+            return Result()
+
+    assert await resolve_offer_id(17, FakeDB()) == (17, 29)
