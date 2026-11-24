@@ -758,3 +758,50 @@ GROUP BY publisher_id HAVING COUNT(*) > 1;
 
 **当前结论：** 第 17 节 Scope Mutex 设计还缺少 Generation/read-view 协议，不能直接按“加锁后重新 SELECT”就认定问题解决。该问题必须在运行时代码实现前定稿，并用真实 MySQL 隔离级别测试验证。
 
+
+
+## 21. 扣量配置缓存异常边界不正确：缓存故障与数据库故障混为一类（2026-11-24）
+
+继续沿 PR 分支的真实代码检查 `DeductionConfigCache.get_config()` 与 `DeductionManager.find_config()`，确认配置读取链存在三种不同故障被混淆的问题：
+
+1. `get_config()` 调用 `get_cached()` 时没有隔离 Redis 读取异常。Redis 短暂不可用会直接中断配置读取，没有按“缓存非权威、MySQL 为回源来源”的方式继续查询数据库。
+2. `_load_from_db()` 捕获所有异常并返回 `None`。这会把 MySQL 查询失败伪装成“当前 scope 没有激活配置”，绕过上层 fail-closed 判断。
+3. `_save_to_cache()` 在数据库已成功读取配置后执行；若 Redis 写缓存失败，异常会继续向上传播。缓存写入属于性能优化，不应使一次成功的数据库配置读取失败。
+4. `find_config()` 又对整个配置查找过程捕获异常；在 `DEDUCTION_FAIL_OPEN=true` 时返回 `None`。这可以是明确批准的业务降级，但当前返回值无法区分“数据库确认无配置”和“配置系统不可用后跳过策略”，缺少可审计的降级结果。
+
+### 21.1 必须拆分的故障语义
+
+| 操作 | 故障处理 |
+|---|---|
+| Generation 权威版本 DB 读取失败 | 不能使用任意旧版本；按扣量 fail-open/closed 策略处理并记录降级 |
+| Redis 缓存 GET 失败 | 记录缓存故障，直接回源 MySQL |
+| Redis 缓存值损坏/反序列化失败 | 记录缓存污染，回源 MySQL；不得返回“无配置” |
+| MySQL 配置 SELECT 失败 | 明确抛出配置加载异常；fail-closed 必须中止，fail-open 才允许显式降级 |
+| MySQL SELECT 成功且无记录 | 才能返回 `None` 表示 no_config |
+| Redis 缓存 SET 失败 | 记录告警，不影响已经成功读取的 DB 配置 |
+| 未知 level / 非法 scope | 参数或程序错误，不能当成 no_config |
+
+注意：当前 Generation 来自 MySQL 权威表，因此 Redis 配置缓存故障可以回源，但 Generation DB 读取失败不能简单使用旧缓存键绕过；应由最终事务读取协议决定是否终止或显式降级。
+
+### 21.2 推荐代码边界
+
+- 将 Redis GET、Redis SET、缓存反序列化、MySQL SELECT 分别置于独立错误边界。
+- `_load_from_db()` 不捕获数据库异常并返回 None；SQLAlchemy 异常应携带 scope 信息向上抛出专用异常，外层负责 rollback。
+- 缓存 GET 失败时继续执行 DB SELECT；缓存 SET 失败仅记录告警。
+- `find_config()` 不应以裸 `None` 表示 fail-open 降级。可返回带状态的结果对象（例如 `found` / `not_found` / `unavailable_skipped`），或抛出可识别异常由 Postback 入口明确决定是否跳过扣量；无论采用哪种接口，都必须写入结构化审计/指标。
+- 当 SQLAlchemy Session 已进入 failed transaction，必须立即交由外层 rollback；不得继续查下一个 scope。
+- 缓存反序列化后的 ORM 对象不得被当作锁定读结果。最终决策仍需遵守第 20 节的数据库可见性协议。
+
+### 21.3 必测场景
+
+- Redis GET 抛连接异常、MySQL SELECT 成功且命中配置：必须返回数据库配置。
+- Redis GET 抛异常、MySQL SELECT 成功且无配置：必须返回真实 no_config。
+- Redis GET 返回损坏结构：丢弃缓存并回源 DB。
+- Redis SET 抛异常、MySQL SELECT 命中：必须仍返回 DB 配置。
+- MySQL SELECT 抛异常且 fail-closed：必须中止 Postback 并 rollback。
+- MySQL SELECT 抛异常且 fail-open：允许显式降级，但必须区分 unavailable 与 no_config，并产生可观测记录。
+- Offer/Advertiser 已查询未命中、Publisher DB 查询失败：不得继续把失败当成 no_config。
+- Generation DB 读取失败：不得读取旧 generation 缓存冒充当前配置。
+- Session 因 SQLAlchemy 数据库异常进入 failed state：确认外层 rollback 后才允许重试。
+
+**当前结论：** PR 分支中的缓存 GET、DB SELECT、缓存 SET 三条路径仍未按上述边界隔离；`_load_from_db()` 的异常吞噬仍存在。该项属于运行时代码缺陷，本轮仅补充审计设计，未修改代码，不能标记为已修复。
