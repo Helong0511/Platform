@@ -104,12 +104,12 @@ async def set_offer_cache(
     offer_name: Optional[str] = None,
     add_tags: bool = True,
 ) -> bool:
-    """缓存 Offer；advertiser_id 为 None 时写入短 TTL 空值标记。"""
-    redis = await get_redis_client()
-    if not redis:
-        return False
-
+    """缓存 Offer；Redis 故障只影响缓存，不影响数据库权威业务结果。"""
     try:
+        redis = await get_redis_client()
+        if not redis:
+            return False
+
         cache_key = f"{OFFER_CACHE_PREFIX}{offer_id}"
         if advertiser_id is None:
             await redis.setex(cache_key, NONE_TTL, NONE_MARKER)
