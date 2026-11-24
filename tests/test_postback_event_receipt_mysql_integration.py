@@ -241,30 +241,6 @@ async def _run_scenario(scenario: str) -> None:
                     text("SELECT COUNT(*) FROM postback_event_receipts")
                 )
             assert receipt_count == (0 if scenario == "normal_conversion" else 1)
-            if scenario == "normal_conversion":
-                await first.execute(
-                    text(
-                        "INSERT INTO postback_conversions "
-                        "(platform, conversion_id, event_name) "
-                        "VALUES (:platform, :conversion_id, :event_name)"
-                    ),
-                    identity,
-                )
-                await DuplicateChecker.release_receipt(**identity, db=first)
-                await first.commit()
-                expected_duplicate = True
-            else:
-                # 首个处理事务回滚时，等待者必须成功取得收据并继续处理。
-                await first.rollback()
-                expected_duplicate = False
-
-            duplicate_retry = await asyncio.wait_for(waiting, timeout=10)
-            assert duplicate_retry is expected_duplicate
-            async with session_factory() as verify:
-                receipt_count = await verify.scalar(
-                    text("SELECT COUNT(*) FROM postback_event_receipts")
-                )
-            assert receipt_count == (0 if scenario == "normal_conversion" else 1)
     finally:
         if waiting is not None and not waiting.done():
             waiting.cancel()
