@@ -716,3 +716,45 @@ GROUP BY publisher_id HAVING COUNT(*) > 1;
 
 这些 SQL 只检查当前数据库快照，不会自动修复；生产执行前应确认只读权限、备份查询结果，并由业务方确定保留哪条策略。不能按最高 priority 自动删除其它财务配置。
 
+## 20. REPEATABLE READ 下 Generation 与 Scope Lock 混用会读到不同版本（2026-11-24）
+
+本轮对 `DeductionConfigCache`、`get_cache_generation()` 和 MySQL 隔离级别做了联合核查。
+
+当前实现事实：
+- `DeductionConfigCache._get_generation()` 通过普通 SELECT 读取 `cache_namespace_generations`，并在该 Cache 实例内缓存 generation。
+- `get_config()` 用该 generation 拼 Redis key；缓存 miss 后，`_load_from_db()` 仍用普通 SELECT 读取配置。
+- 当前配置服务在同一业务事务中更新配置并调用 `advance_cache_generation()`；generation UPDATE 与 Outbox 在同一事务内。
+
+如果 Postback 事务使用 MySQL InnoDB 默认 `REPEATABLE READ`，普通 SELECT 使用事务一致性快照。事务第一次普通 SELECT 建立 read view 后，即使后续获得了某个 Scope Mutex 行锁，后续普通 SELECT 仍可能继续读取旧快照；而 `SELECT ... FOR UPDATE` / UPDATE 使用当前锁定读语义。MySQL 官方文档明确说明了普通一致性读与锁定读可能看到不同状态，不建议在同一 REPEATABLE READ 事务中混合后却假设两者是同一个数据库版本。
+
+这意味着第 17 节不能只增加一条 Scope Mutex 锁：
+1. Postback 在加锁前若已读取旧 Generation，可能选中旧 generation cache key；
+2. 加锁后若继续使用普通 SELECT 配置查询，可能仍读到旧 read view；
+3. 如果锁内改用当前读读取配置，却仍使用事务旧快照的 generation，配置与缓存版本又不匹配；
+4. 因此“锁成功”不自动意味着配置和 Generation 读取一致。
+
+### 20.1 必须明确的事务读取协议
+
+建议采用一个清晰、可验证的协议，而不是混合普通 SELECT 与锁定读：
+
+- Postback 对候选 scope 加锁前，不得读取配置 Generation、配置缓存或扣量统计快照。
+- 获取 Scope Mutex 后，以当前读方式读取配置与相关权威版本；必要时对配置行使用 `SELECT ... FOR UPDATE`，并保证所有写路径使用同一锁顺序。
+- 对 generation 也必须定义与 scope lock 一致的读取规则。可选方案包括：将 generation 版本按 scope 拆分并随 scope 锁读取；或采用统一的 DB 事务/隔离级别方案，明确保证读配置、读 generation、写账本使用同一可见版本。
+- 若使用 `READ COMMITTED`，必须明确它对统计查询、重复读取和并发事件的影响，并通过真实 MySQL 测试验证；不能只通过修改连接默认隔离级别解决。
+- 不允许在锁定读拿到新配置后，再从旧 generation 的 Redis key 取出旧配置。
+- 对配置写入，Scope Mutex、配置 DML、generation 更新和 Outbox 必须处于同一事务；提交后才能让后续事务看到新版本。
+- 对 Postback，锁内读取到的配置版本必须写入最终决策账本，便于重放和审计。
+
+### 20.2 必测交错时序
+
+- Postback 先建立 REPEATABLE READ 快照，管理员更新配置并提交，Postback 随后获得 scope lock：必须按定义的线性化顺序读取配置，不能混合旧 generation 和新配置。
+- Postback 先获得 scope lock，管理员更新配置等待：Postback 使用旧配置完成并提交，随后管理员更新；结果必须符合锁顺序。
+- Postback 锁内读配置期间，generation 更新事务并发提交：不得发生配置/Generation 版本错配。
+- Redis 中仍存在旧 generation 缓存时，Postback 必须只读取锁定协议所确定的版本。
+- 多个 Offer/Advertiser/Publisher scope 组合时，锁顺序一致且没有死锁。
+- 在 MySQL REPEATABLE READ 和 READ COMMITTED 两种真实隔离级别分别运行测试，明确最终生产采用的隔离级别与理由。
+
+官方参考：MySQL 8.4 InnoDB Transaction Isolation Levels，说明 REPEATABLE READ 普通一致性读取使用首次读取建立的快照，锁定读使用不同锁语义；官方也明确提醒不要在同一 REPEATABLE READ 事务中混用两种读取而假设状态一致。
+
+**当前结论：** 第 17 节 Scope Mutex 设计还缺少 Generation/read-view 协议，不能直接按“加锁后重新 SELECT”就认定问题解决。该问题必须在运行时代码实现前定稿，并用真实 MySQL 隔离级别测试验证。
+
