@@ -27,7 +27,6 @@ from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.audit_log import log_user_action
-from app.core.infrastructure.cache import CacheInvalidator
 from app.core.config import settings
 from app.services.cpl.offer.helpers import (
     build_tracking_urls,
@@ -38,6 +37,7 @@ from app.services.cpl.offer.helpers import (
 from app.services.cpl.offer.queries.assignments_query import OfferAssignmentsQuery
 from app.services.cpl.offer.queries.detail_query import OfferDetailQuery
 from app.services.cpl.offer.queries.list_query import OfferListQuery
+from app.services.offer_cache_invalidation_outbox import enqueue_offer_cache_invalidation
 import logging
 
 logger = logging.getLogger(__name__)
@@ -235,8 +235,8 @@ class OfferService(BaseService[Offer]):
         elif publisher_ids_for_short_link and not offer.advertiser_tracklink:
             logger.warning(f"Offer {offer.id} 没有配置上游Tracklink，无法创建短链接")
 
-        # 失效相关缓存
-        await CacheInvalidator.invalidate_offer_cache(offer.id)
+        # 在 Offer 业务事务内登记立即清理与延迟复查；事务提交/回滚由调用方负责。
+        await enqueue_offer_cache_invalidation(self.db, offer.id)
 
         # 记录审计日志
         await log_user_action(
@@ -523,8 +523,8 @@ class OfferService(BaseService[Offer]):
                     f"error={error_msg[:200]}"
                 )
 
-        # 失效相关缓存
-        await CacheInvalidator.invalidate_offer_cache(offer.id)
+        # 在 Offer 业务事务内登记立即清理与延迟复查；事务提交/回滚由调用方负责。
+        await enqueue_offer_cache_invalidation(self.db, offer.id)
 
         # 记录审计日志
         await log_user_action(
@@ -589,7 +589,7 @@ class OfferService(BaseService[Offer]):
         await self.db.delete(offer)
         await self.db.flush()
 
-        # 删除后同时清理通用缓存和 offer:cache:{id} 热点缓存
-        await CacheInvalidator.invalidate_offer_cache(offer_id)
+        # 删除后在同一业务事务内登记热点缓存清理；不在提交前直接操作 Redis。
+        await enqueue_offer_cache_invalidation(self.db, offer_id)
 
         logger.info(f"Offer已删除: {offer.offer_name} (ID: {offer_id})")
