@@ -23,16 +23,16 @@ class BftPostbackHandler(PostbackHandler):
         """验证 BFT 回调字段；金额校验与通用入口使用同一 Decimal 规则。"""
         # BFT 字段协议尚未得到官方确认；此处只保证显式 conversion_id 优先，
         # click-like aliases 仅用于兼容校验/归因，不能据此宣称其为事件唯一 ID。
-        clk_id = (
-            DataNormalizer._extract_explicit_conversion_id(data)
-            or DataNormalizer._extract_click_id(data)
-        )
-        if clk_id is None:
-            return False, "clk_id 或 click_id 或 cid 参数不能为空"
+        explicit_conversion_id = DataNormalizer._extract_explicit_conversion_id(data)
+        click_id = DataNormalizer._extract_click_id(data)
+        if not explicit_conversion_id:
+            return False, "缺少稳定转化事件 ID：必须提供 conversion_id 或 conversionId；click_id/clk_id/cid 仅用于归因"
+        if not click_id and not explicit_conversion_id:
+            return False, "缺少 click_id/clk_id/cid 或 conversion_id"
         # 两类 ID 分别检查，不能让较短的显式 conversion_id 掩盖超长 click_id。
         for id_value in (
-            DataNormalizer._extract_explicit_conversion_id(data),
-            DataNormalizer._extract_click_id(data),
+            explicit_conversion_id,
+            click_id,
         ):
             if id_value is not None and len(str(id_value).strip()) > 200:
                 return False, "click_id/conversion_id 过长（最大 200 字符）"
