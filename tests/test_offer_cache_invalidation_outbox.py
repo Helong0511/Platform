@@ -61,6 +61,7 @@ async def test_offer_invalidation_commit_persists_first_and_second_pass():
             )
             assert len(events) == 2
             assert {event.offer_id for event in events} == {42}
+            assert events[0].group_key == events[1].group_key
             assert {event.phase for event in events} == {"first", "second"}
             assert all(event.status == "pending" for event in events)
             assert events[1].run_at - events[0].run_at >= timedelta(seconds=1)
