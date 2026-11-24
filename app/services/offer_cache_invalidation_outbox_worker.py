@@ -73,7 +73,7 @@ async def process_offer_cache_invalidation_outbox(
         first_pass = aliased(OfferCacheInvalidationOutbox)
         first_pass_finished = exists(
             select(1).where(
-                first_pass.offer_id == OfferCacheInvalidationOutbox.offer_id,
+                first_pass.group_key == OfferCacheInvalidationOutbox.group_key,
                 first_pass.phase == "first",
                 first_pass.status.in_(("success", "failed")),
             )
