@@ -163,6 +163,7 @@ async def _wait_for_mysql_lock_wait(thread_id: int) -> None:
 async def _run_scenario(scenario: str) -> None:
     database = _create_database()
     engine = None
+    waiting = None
     try:
         _initialize_schema(database)
         user = quote_plus(MYSQL_USER)
@@ -241,6 +242,12 @@ async def _run_scenario(scenario: str) -> None:
             duplicate_retry = await asyncio.wait_for(waiting, timeout=10)
             assert duplicate_retry is expected_duplicate
     finally:
+        if waiting is not None and not waiting.done():
+            waiting.cancel()
+            try:
+                await waiting
+            except asyncio.CancelledError:
+                pass
         if engine is not None:
             await engine.dispose()
         _drop_database(database)
