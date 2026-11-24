@@ -30,3 +30,12 @@ def test_short_link_api_commits_business_transaction_before_immediate_cache_dele
     delete_commit = delete_section.index("await commit_audit_log(db)")
     delete_cache = delete_section.index("await invalidate_short_link_cache(", delete_commit)
     assert delete_commit < delete_cache
+
+
+def test_scheduled_short_link_reactivation_enqueues_invalidation_in_same_transaction():
+    source = Path("app/scheduler_module/tasks/short_link_tasks.py").read_text(encoding="utf-8")
+    start = source.index("async def open_closed_short_links_task(")
+    section = source[start:]
+    assert "ShortLink.short_code" in section
+    assert "await enqueue_short_link_cache_invalidation(db, short_code)" in section
+    assert section.index("await enqueue_short_link_cache_invalidation(db, short_code)") < section.index("await db.commit()")
