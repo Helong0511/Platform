@@ -52,8 +52,13 @@ def _claimed_event(namespace="ad_data"):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("namespace", "expected_prefix"), [("ad_data", "ad_data:"), ("user_stats", "user_stats:")])
-async def test_outbox_worker_marks_success_only_after_shared_store_confirmation(monkeypatch, namespace, expected_prefix):
+@pytest.mark.parametrize(
+    ("namespace", "expected_prefix"),
+    [("ad_data", "ad_data:"), ("user_stats", "user_stats:")],
+)
+async def test_outbox_worker_marks_success_only_after_shared_store_confirmation(
+    monkeypatch, namespace, expected_prefix
+):
     from app.core.infrastructure import cache_compat
     from app.services import cache_invalidation_outbox_worker as worker
 
@@ -99,7 +104,6 @@ async def test_outbox_worker_marks_success_only_after_shared_store_confirmation(
     }
     claim_db.commit.assert_awaited_once()
     finish_db.commit.assert_awaited_once()
-    from app.core.infrastructure import cache_compat
     cache_compat.invalidate_cache_checked.assert_awaited_once_with(expected_prefix)
 
 
