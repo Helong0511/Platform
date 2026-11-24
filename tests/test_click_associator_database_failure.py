@@ -90,7 +90,7 @@ def test_matching_token_database_identity_keeps_database_snapshot():
         "publisher_id": 20,
         "advertiser_id": 30,
         "short_link_id": 40,
-        "client_id": 123,
+        "client_id": None,
         "url_params": {},
     }
 
