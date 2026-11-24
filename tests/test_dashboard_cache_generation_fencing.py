@@ -8,7 +8,8 @@ from app.services.cache_invalidation_outbox import (
     CacheGenerationUnavailable,
     get_cache_generations,
 )
-from app.services.dashboard_service import _build_dashboard_cache_key
+from app.services.dashboard_service import DashboardService, _build_dashboard_cache_key
+from app.services import dashboard_service as dashboard_service_module
 
 
 @pytest.mark.asyncio
@@ -60,6 +61,9 @@ def test_dashboard_stats_and_trends_both_use_generation_fenced_keys():
         'get_cache_generations(self.db, ("ad_data", "user_stats"))'
     ) == 2
     assert source.count("_build_dashboard_cache_key(") == 3  # helper + stats + trends
+    assert source.count("get_or_set_single_flight(") == 2
+    assert "get_cached(" not in source
+    assert "set_cached(" not in source
 
 
 def test_dashboard_permission_and_data_mutations_advance_fenced_namespaces():
@@ -80,3 +84,54 @@ def test_dashboard_permission_and_data_mutations_advance_fenced_namespaces():
     assert "await advance_cache_generation(self.db)" in product_service
     assert "await advance_cache_generation(self.db)" in ad_data_update
     assert "await advance_cache_generation(self.db)" in ad_data_delete
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("public_method", "private_method", "payload"),
+    [
+        ("get_dashboard_stats", "_get_dashboard_stats_uncached", {"stats": [], "metrics": {}}),
+        ("get_trend_data", "_get_trend_data_uncached", {"dates": [], "series": []}),
+    ],
+)
+async def test_dashboard_cache_methods_use_single_flight(
+    monkeypatch, public_method, private_method, payload
+):
+    from types import SimpleNamespace
+
+    service = DashboardService(object())
+    generations = {"ad_data": 17, "user_stats": 9}
+    monkeypatch.setattr(
+        dashboard_service_module,
+        "get_cache_generations",
+        AsyncMock(return_value=generations),
+    )
+    captured = {}
+
+    async def fake_single_flight(cache_key, factory, **kwargs):
+        captured["cache_key"] = cache_key
+        captured["kwargs"] = kwargs
+        return await factory()
+
+    monkeypatch.setattr(
+        dashboard_service_module,
+        "get_or_set_single_flight",
+        fake_single_flight,
+    )
+    builder = AsyncMock(return_value=payload)
+    setattr(service, private_method, builder)
+    current_user = SimpleNamespace(id=123)
+
+    result = await getattr(service, public_method)("month", current_user)
+
+    assert result == payload
+    assert captured["cache_key"] == _build_dashboard_cache_key(
+        "dashboard_stats" if public_method == "get_dashboard_stats" else "dashboard_trends",
+        "month",
+        123,
+        generations,
+    )
+    assert captured["kwargs"]["ttl"] == 60
+    assert captured["kwargs"]["key_prefix"] == "dashboard"
+    assert captured["kwargs"]["wait_timeout"] == 45
+    builder.assert_awaited_once_with("month", current_user)
