@@ -623,3 +623,20 @@ API 路由位于 `app/api_v1/cpl/conversions/deductions.py`。上述六条服务
 
 **当前结论：** 该风险已由仓库代码与 DDL 静态核查确认；不是已经修复的运行时问题。第 17 节 Scope Mutex 不能标记为完成，直到六条服务写路径、父实体级联删除路径和数据库唯一性防线均已实现并通过真实 MySQL 并发测试。
 
+### 18.5 父实体删除路径复核：Offer / Publisher 删除会触发配置级联删除
+
+继续追查了 main 分支父实体服务的实际删除实现：
+
+- `app/services/cpl/offer_service.py::delete_offer` 只检查关联 Click 数量；若没有点击记录，执行 `db.delete(offer)`。它没有检查或锁定 `ConversionDeductionConfig.offer_id` 对应配置。
+- `app/services/cpl/publisher_service.py::delete_publisher` 只检查 `OfferPublisherAssignment`；若没有分配记录，执行 `db.delete(publisher)`。它没有检查或锁定 `ConversionDeductionConfig.publisher_id` 对应配置。
+- `app/services/cpl/advertiser_service.py::delete_advertiser` 会阻止仍有关联 Offer 的广告主删除，但没有检查广告主级扣减配置；无关联 Offer 但仍有 advertiser 级配置时，仍可能进入父实体删除。
+- `sql/platform.sql` 中三个扣减配置外键均定义为 `ON DELETE CASCADE`。
+
+因此 Offer、Publisher 的父实体删除路径已确认可以在未走 `ConversionDeductionService` 的情况下级联删除扣量配置；Advertiser 删除路径也存在配置未被显式保护的缺口（是否能成功还受其它外键/业务关联约束影响）。这不是理论上的“可能有其他入口”，而是已定位到具体 service 方法。
+
+账本实施前应选择并统一一种策略：
+1. 父实体删除前，收集对应扣减配置 scope 并按固定顺序获取 Scope Mutex；在锁内重新检查并拒绝删除，要求管理员先显式停用/删除扣减配置；或
+2. 在同一事务中安全处理关联配置，但必须确保账本历史快照不受 FK 级联影响，且与 Postback 决策使用同一 scope lock。
+
+更安全的默认行为是：存在扣减配置时拒绝父实体删除，要求先显式处理配置；不能让 FK cascade 静默移除财务策略。父实体删除的 2/10/50 并发测试也必须覆盖正在处理的 no_config 事件和配置决策。
+
