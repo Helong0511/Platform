@@ -15,6 +15,7 @@ from app.core.tracking.click_token import (
         (AdTrackingCodec._DEFAULT_KEY_HEX, "默认密钥"),
         ("abc", "64 位"),
         ("z" * 64, "十六进制"),
+        (("ab" * 30) + (" " * 4), "十六进制"),
     ],
 )
 def test_production_tracking_key_rejects_unsafe_values(key_hex, message):
