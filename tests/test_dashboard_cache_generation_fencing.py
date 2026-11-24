@@ -8,8 +8,8 @@ from app.services.cache_invalidation_outbox import (
     CacheGenerationUnavailable,
     get_cache_generations,
 )
-from app.services.dashboard_service import DashboardService, _build_dashboard_cache_key
 from app.services import dashboard_service as dashboard_service_module
+from app.services.dashboard_service import DashboardService, _build_dashboard_cache_key
 
 
 @pytest.mark.asyncio
@@ -90,8 +90,16 @@ def test_dashboard_permission_and_data_mutations_advance_fenced_namespaces():
 @pytest.mark.parametrize(
     ("public_method", "private_method", "payload"),
     [
-        ("get_dashboard_stats", "_get_dashboard_stats_uncached", {"stats": [], "metrics": {}}),
-        ("get_trend_data", "_get_trend_data_uncached", {"dates": [], "series": []}),
+        (
+            "get_dashboard_stats",
+            "_get_dashboard_stats_uncached",
+            {"stats": [], "metrics": {}},
+        ),
+        (
+            "get_trend_data",
+            "_get_trend_data_uncached",
+            {"dates": [], "series": []},
+        ),
     ],
 )
 async def test_dashboard_cache_methods_use_single_flight(
@@ -125,11 +133,13 @@ async def test_dashboard_cache_methods_use_single_flight(
     result = await getattr(service, public_method)("month", current_user)
 
     assert result == payload
+    cache_name = (
+        "dashboard_stats"
+        if public_method == "get_dashboard_stats"
+        else "dashboard_trends"
+    )
     assert captured["cache_key"] == _build_dashboard_cache_key(
-        "dashboard_stats" if public_method == "get_dashboard_stats" else "dashboard_trends",
-        "month",
-        123,
-        generations,
+        cache_name, "month", 123, generations
     )
     assert captured["kwargs"]["ttl"] == 60
     assert captured["kwargs"]["key_prefix"] == "dashboard"
