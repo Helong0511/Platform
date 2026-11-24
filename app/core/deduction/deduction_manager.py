@@ -340,6 +340,14 @@ class DeductionManager:
     """
 
     # Lua：随机策略预留扣量名额；超比例则回退
+    _INCR_DECISION_DEDUCTED_LUA = """
+    local value = redis.call('INCR', KEYS[1])
+    if value == 1 then
+        redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
+    end
+    return value
+    """
+
     _RESERVE_DEDUCTED_LUA = """
     local deducted_key = KEYS[1]
     local limit = tonumber(ARGV[1])
@@ -374,11 +382,10 @@ class DeductionManager:
             offer_id=offer_id,
             publisher_id=publisher_id,
             hours=hours,
+            strict=True,
         )
         redis = await get_redis_client()
         if not redis:
-            if settings.DEDUCTION_FAIL_OPEN:
-                return base_stats
             raise RuntimeError("扣量决策需要 Redis，当前不可用")
 
         cache_key = self._build_stats_cache_key(
@@ -406,9 +413,7 @@ class DeductionManager:
             )
         except Exception as e:
             logger.warning("扣量决策 Redis 统计失败: %s", e)
-            if settings.DEDUCTION_FAIL_OPEN:
-                return base_stats
-            raise
+            raise RuntimeError(f"扣量决策 Redis 统计失败: {e}") from e
 
     async def _reserve_volume_deduction(
         self,
@@ -453,28 +458,38 @@ class DeductionManager:
         offer_id: Optional[int],
         publisher_id: Optional[int],
         hours: int,
-    ) -> None:
-        """比例/轮询策略命中后同步递增 Redis deducted（无上限校验）。"""
+    ) -> bool:
+        """比例/轮询策略命中后原子递增 Redis deducted；失败时不得继续扣量。"""
         redis = await get_redis_client()
         if not redis:
-            return
+            if settings.DEDUCTION_FAIL_OPEN:
+                return False
+            raise RuntimeError("同步扣量计数需要 Redis，当前不可用")
         cache_key = self._build_stats_cache_key(
             advertiser_id, offer_id, publisher_id, hours
         )
         deducted_key = f"{cache_key}:decision_deducted"
         try:
-            val = await redis.incr(deducted_key)
-            if val == 1:
-                await redis.expire(deducted_key, self.DECISION_SEQ_TTL)
+            value = await redis.eval(
+                self._INCR_DECISION_DEDUCTED_LUA,
+                1,
+                deducted_key,
+                self.DECISION_SEQ_TTL,
+            )
+            return int(value) > 0
         except Exception as e:
-            logger.debug("同步 decision_deducted 失败（可忽略）: %s", e)
+            logger.warning("同步 decision_deducted 失败: %s", e)
+            if settings.DEDUCTION_FAIL_OPEN:
+                return False
+            raise RuntimeError(f"同步扣量计数失败: {e}") from e
 
     async def get_recent_stats(
         self,
         advertiser_id: Optional[int] = None,
         offer_id: Optional[int] = None,
         publisher_id: Optional[int] = None,
-        hours: int = 24
+        hours: int = 24,
+        strict: bool = False,
     ) -> ConversionStats:
         """
         获取最近的转化统计信息（用于判断是否应该扣减）
@@ -569,7 +584,7 @@ class DeductionManager:
             
         except Exception as e:
             logger.error(f"获取转化统计失败: {str(e)}", exc_info=True)
-            if settings.DEDUCTION_FAIL_OPEN:
+            if settings.DEDUCTION_FAIL_OPEN and not strict:
                 return ConversionStats()
             raise
     
@@ -671,16 +686,29 @@ class DeductionManager:
             final_amount=Decimal(str(conversion_data.get('original_payout', 0) or 0)),
         )
         
-        # 获取转化统计（Redis 原子序号 + deducted，避免 60s 缓存竞态）
-        stats = await self._get_stats_for_decision(
-            advertiser_id=advertiser_id,
-            offer_id=offer_id,
-            publisher_id=publisher_id,
-            hours=24
+        # 纯扣金额不依赖 Redis；只有确实需要执行扣量策略时才读取共享统计。
+        volume_decision_available = bool(
+            config.enable_volume_deduction
+            and Decimal(str(config.volume_deduction_ratio or 0)) > 0
         )
-        
+        stats = ConversionStats()
+        if volume_decision_available:
+            try:
+                stats = await self._get_stats_for_decision(
+                    advertiser_id=advertiser_id,
+                    offer_id=offer_id,
+                    publisher_id=publisher_id,
+                    hours=24,
+                )
+            except Exception as exc:
+                if not settings.DEDUCTION_FAIL_OPEN:
+                    raise
+                # Fail-open 的语义是放行转化，不是使用非原子 DB 快照继续扣量。
+                logger.warning("扣量统计不可用，本次跳过扣量但继续计算扣金额: %s", exc)
+                volume_decision_available = False
+
         # 判断是否扣量（确定性哈希 / 间隔策略 + Redis 原子预留防超扣）
-        if config.enable_volume_deduction:
+        if volume_decision_available:
             strategy_name = (config.deduction_strategy or "random").lower()
             decision_key = (click_id or "").strip() or f"offer:{offer_id}:seq:{stats.processed}"
             want_deduct = self.should_deduct_volume(config, stats, decision_key=decision_key)
@@ -691,8 +719,7 @@ class DeductionManager:
                     limit = int(stats.total * ratio) if stats.total > 0 else 10**9
                     if stats.total <= 0:
                         # 无总量窗口时仅按哈希结论 + 递增 deducted
-                        result.should_deduct_volume = True
-                        await self._incr_decision_deducted(
+                        result.should_deduct_volume = await self._incr_decision_deducted(
                             advertiser_id=advertiser_id,
                             offer_id=offer_id,
                             publisher_id=publisher_id,
@@ -708,8 +735,7 @@ class DeductionManager:
                         )
                         result.should_deduct_volume = reserved
                 else:
-                    result.should_deduct_volume = True
-                    await self._incr_decision_deducted(
+                    result.should_deduct_volume = await self._incr_decision_deducted(
                         advertiser_id=advertiser_id,
                         offer_id=offer_id,
                         publisher_id=publisher_id,
