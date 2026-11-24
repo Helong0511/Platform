@@ -22,7 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.infrastructure.cache_compat import (
     generate_cache_key,
-    invalidate_cache,
     legacy_get_cached as get_cached,
     legacy_set_cached as set_cached,
 )
