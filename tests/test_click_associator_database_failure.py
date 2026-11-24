@@ -31,3 +31,21 @@ async def test_click_lookup_database_error_rolls_back_and_propagates(monkeypatch
 
     assert session.execute_calls == 1
     assert session.rollback_calls == 1
+
+@pytest.mark.asyncio
+async def test_token_enrichment_database_error_rolls_back_and_propagates():
+    session = _UnavailableSession()
+    association = {
+        "_from_token": True,
+        "click_id": "click-123",
+        "publisher_id": 7,
+        "offer_id": None,
+        "advertiser_id": None,
+    }
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await ClickAssociator._enrich_association(association, session)
+
+    assert session.execute_calls == 1
+    assert session.rollback_calls == 1
+    assert "publisher" not in association
