@@ -206,6 +206,11 @@ async def _run_scenario(scenario: str) -> None:
                 await first.commit()
                 duplicate_retry = await asyncio.wait_for(waiting, timeout=10)
                 assert duplicate_retry is True
+                async with session_factory() as verify:
+                    receipt_count = await verify.scalar(
+                        text("SELECT COUNT(*) FROM postback_event_receipts")
+                    )
+                assert receipt_count == 1
                 return
 
             # 普通转化：正式记录插入与临时收据删除必须在同一事务提交。
@@ -241,6 +246,11 @@ async def _run_scenario(scenario: str) -> None:
 
             duplicate_retry = await asyncio.wait_for(waiting, timeout=10)
             assert duplicate_retry is expected_duplicate
+            async with session_factory() as verify:
+                receipt_count = await verify.scalar(
+                    text("SELECT COUNT(*) FROM postback_event_receipts")
+                )
+            assert receipt_count == (0 if scenario == "normal_conversion" else 1)
     finally:
         if waiting is not None and not waiting.done():
             waiting.cancel()
