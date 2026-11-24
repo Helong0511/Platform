@@ -434,6 +434,10 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
                 "user_full_name": user.full_name if user else None
             }
 
+            # 在业务事务提交前同步递增查询缓存版本并登记持久化失效事件。
+            from app.services.cache_invalidation_outbox import advance_cache_generation
+            await advance_cache_generation(self.db)
+
             # 提交更改
             await self.db.flush()
 
@@ -572,6 +576,10 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
                     ErrorCode.VALIDATION_ERROR,
                     detail=f"批量更新后验证失败：{error_msg}。请确保日期不重叠且无空窗期。"
                 )
+
+            # 验证通过后，在当前事务内登记缓存版本变更。
+            from app.services.cache_invalidation_outbox import advance_cache_generation
+            await advance_cache_generation(self.db)
 
             # 验证通过，提交所有更改
             await self.db.flush()

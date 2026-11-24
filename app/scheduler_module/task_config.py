@@ -498,5 +498,16 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "description": "每分钟处理到期的渠道/产品 Postback 转发任务与失败重试，确保进程重启后可恢复",
     },
 
+    # ========== 广告数据缓存失效 Outbox ==========
+    "广告数据缓存失效 Outbox": {
+        "task_name": "广告数据缓存失效 Outbox",
+        "task_module": "app.scheduler_module.tasks.cache_invalidation_task",
+        "task_function": "process_ad_data_cache_invalidation_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "*/1 * * * *",
+        "description": "每分钟消费数据库缓存失效 Outbox；仅在共享 Redis 确认成功后完成任务，故障自动退避重试",
+    },
+
 
 }

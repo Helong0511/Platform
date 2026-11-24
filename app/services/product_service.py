@@ -330,6 +330,8 @@ class ProductService(BaseService[Product]):
         )
 
         await self.db.flush()
+        from app.services.cache_invalidation_outbox import advance_cache_generation
+        await advance_cache_generation(self.db)
         await self.db.refresh(saved_product)
 
         logger.info(f"产品已创建: {saved_product.name} (ID: {saved_product.id})")
@@ -392,6 +394,8 @@ class ProductService(BaseService[Product]):
             )
 
         await self.db.flush()
+        from app.services.cache_invalidation_outbox import advance_cache_generation
+        await advance_cache_generation(self.db)
         await self.db.refresh(admin_default_product)
 
         logger.info(
@@ -576,6 +580,8 @@ class ProductService(BaseService[Product]):
                     detail=f"产品名称「{attempted_name}」已存在，不能改成重复名称。",
                 )
             raise
+        from app.services.cache_invalidation_outbox import advance_cache_generation
+        await advance_cache_generation(self.db)
         await self.db.refresh(product)
 
         try:
@@ -673,6 +679,8 @@ class ProductService(BaseService[Product]):
                 )
 
             await self.db.flush()
+            from app.services.cache_invalidation_outbox import advance_cache_generation
+            await advance_cache_generation(self.db)
             await self.db.refresh(product)
 
             try:
@@ -700,6 +708,8 @@ class ProductService(BaseService[Product]):
             # 删除产品
             await self.db.delete(product)
             await self.db.flush()
+            from app.services.cache_invalidation_outbox import advance_cache_generation
+            await advance_cache_generation(self.db)
 
             logger.info(f"产品已删除: {product.name} (ID: {product_id})")
 

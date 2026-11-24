@@ -23,6 +23,7 @@ class _Scalars:
 class _Result:
     def __init__(self, value):
         self.value = value
+        self.rowcount = 1
 
     def scalars(self):
         return _Scalars(self.value)
@@ -35,7 +36,17 @@ class _DB:
 
     async def execute(self, statement):
         self.statements.append(statement)
+        # Generation 递增是 UPDATE，不消耗业务查询的 mock 返回值。
+        if getattr(statement, "is_update", False):
+            return _Result(None)
         return _Result(self.values.pop(0))
+
+    async def scalar(self, statement):
+        self.statements.append(statement)
+        return 2
+
+    def add(self, instance):
+        return None
 
     async def flush(self):
         return None
@@ -81,8 +92,8 @@ async def test_client_can_be_reassigned_to_user_with_existing_client_membership(
 
     assert client.user_id == 2
     assert response.data == {"id": 101, "user_id": 2}
-    # 仅需读取目标 Client、新 User 和更新后的 Client；不再执行一对一冲突查询。
-    assert len(db.statements) == 3
+    # 三次业务读取后，在同一事务内递增缓存 Generation 并读取新版本。
+    assert len(db.statements) == 5
 
 
 

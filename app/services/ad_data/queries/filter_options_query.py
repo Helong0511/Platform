@@ -130,6 +130,7 @@ class FilterOptionsQuery:
             return {"data": clients_list, "count": len(clients_list)}
 
         payload = await ad_data_get_or_set(
+            self.db,
             cache_key,
             _load_payload,
             ttl=ad_data_filter_options_cache_ttl(),
@@ -206,6 +207,7 @@ class FilterOptionsQuery:
             return {"data": countries_list, "count": len(countries_list)}
 
         payload = await ad_data_get_or_set(
+            self.db,
             cache_key,
             _load_payload,
             ttl=ad_data_filter_options_cache_ttl(),
@@ -270,6 +272,7 @@ class FilterOptionsQuery:
             return {"data": ad_units_list, "count": len(ad_units_list)}
 
         payload = await ad_data_get_or_set(
+            self.db,
             cache_key,
             _load_payload,
             ttl=ad_data_filter_options_cache_ttl(),
@@ -349,6 +352,7 @@ class FilterOptionsQuery:
             return {"data": products_list, "count": len(products_list)}
 
         payload = await ad_data_get_or_set(
+            self.db,
             cache_key,
             _load_payload,
             ttl=ad_data_filter_options_cache_ttl(),
@@ -419,6 +423,7 @@ class FilterOptionsQuery:
             return {"min_date": None, "max_date": None}
 
         return await ad_data_get_or_set(
+            self.db,
             cache_key,
             _load_payload,
             ttl=ad_data_filter_options_cache_ttl(),

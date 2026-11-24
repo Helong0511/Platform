@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable, Optional
 
+from app.services.cache_invalidation_outbox import get_cache_generation
+
 from app.core.infrastructure.cache_compat import (
     generate_cache_key,
     get_or_set_single_flight,
@@ -72,6 +74,7 @@ async def invalidate_ad_data_query_caches(*, reason: str = "") -> int:
 
 
 async def ad_data_get_or_set(
+    db,
     cache_key: str,
     factory: Callable[[], Awaitable[Any]],
     *,
@@ -79,9 +82,11 @@ async def ad_data_get_or_set(
     is_valid: Optional[Callable[[Any], bool]] = None,
     wait_timeout: float = 25.0,
 ) -> Any:
-    """广告数据查询缓存：未命中时单飞计算并写回（metric 前缀 ad_data）。"""
+    """广告数据查询缓存：使用同一事务快照的数据库 Generation 隔离旧缓存。"""
+    generation = await get_cache_generation(db)
+    versioned_cache_key = f"{cache_key}:g{generation}"
     return await get_or_set_single_flight(
-        cache_key,
+        versioned_cache_key,
         factory,
         ttl=ttl,
         key_prefix="ad_data",

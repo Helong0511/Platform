@@ -27,6 +27,7 @@ from app.core.security import is_admin
 from app.models.models import AdData, Client, Product, User
 from app.services.ad_data.queries.dimension_filter import kpi_mutual_source_filter
 from app.services.ad_data.queries.join_helpers import join_product_and_client
+from app.services.cache_invalidation_outbox import get_cache_generation
 from app.services.ad_data.query_cache import (
     ad_data_summary_cache_ttl,
     build_ad_data_query_cache_key,
@@ -247,6 +248,9 @@ class AdDataSummaryQuery:
             product_id,
         )
         if not skip_cache:
+            # 使用同一查询事务读取版本，防止缓存版本与 SQL 快照错配。
+            generation = await get_cache_generation(self.db)
+            cache_key = f"{cache_key}:g{generation}"
             cached = await get_cached(cache_key, key_prefix="ad_data")
             if cached:
                 return cached

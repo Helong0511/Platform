@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+
 import hashlib
 import ipaddress
 import os
@@ -2179,3 +2181,245 @@ def test_password_hash_column_migration_widens_existing_users_without_data_loss(
         with root.cursor() as cursor:
             cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
         root.close()
+
+
+
+def test_ad_data_cache_generation_outbox_migration_is_idempotent_and_schema_complete():
+    """真实 MySQL 验证两张表、唯一键、调度索引、检查约束及初始 Generation。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cache_invalidation_outbox")
+            cursor.execute("DROP TABLE IF EXISTS cache_namespace_generations")
+
+            migration = "sql/migrations/20261123_ad_data_cache_generation_outbox.sql"
+            _run_sql_file(cursor, migration)
+            _run_sql_file(cursor, migration)
+
+            cursor.execute(
+                "SELECT TABLE_NAME, ENGINE, TABLE_COLLATION "
+                "FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA = DATABASE() "
+                "AND TABLE_NAME IN ('cache_namespace_generations', 'cache_invalidation_outbox')"
+            )
+            tables = {row[0]: row[1:] for row in cursor.fetchall()}
+            assert tables == {
+                "cache_namespace_generations": ("InnoDB", "utf8mb4_unicode_ci"),
+                "cache_invalidation_outbox": ("InnoDB", "utf8mb4_unicode_ci"),
+            }
+
+            cursor.execute(
+                "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE "
+                "FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() "
+                "AND TABLE_NAME = 'cache_namespace_generations'"
+            )
+            generation_columns = {row[0]: row[1:] for row in cursor.fetchall()}
+            assert generation_columns["namespace"] == ("varchar(64)", "NO")
+            assert generation_columns["generation"] == ("bigint", "NO")
+            assert generation_columns["updated_at"] == ("datetime", "NO")
+
+            cursor.execute(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() "
+                "AND TABLE_NAME = 'cache_invalidation_outbox'"
+            )
+            outbox_columns = {row[0] for row in cursor.fetchall()}
+            assert outbox_columns == {
+                "id", "event_key", "namespace", "generation", "status",
+                "attempt_count", "max_attempts", "next_retry_time", "locked_by",
+                "lease_token", "lease_until", "last_error_type", "created_at", "completed_at",
+            }
+
+            cursor.execute(
+                "SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME "
+                "FROM information_schema.STATISTICS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cache_invalidation_outbox'"
+            )
+            indexes = {}
+            for index_name, non_unique, sequence, column_name in cursor.fetchall():
+                indexes.setdefault(index_name, {"non_unique": non_unique, "columns": []})
+                indexes[index_name]["columns"].append((sequence, column_name))
+            assert [name for _, name in sorted(indexes["uq_cache_invalidation_event_key"]["columns"])] == ["event_key"]
+            assert indexes["uq_cache_invalidation_event_key"]["non_unique"] == 0
+            assert [name for _, name in sorted(indexes["idx_cache_invalidation_due"]["columns"])] == [
+                "status", "next_retry_time", "lease_until", "id"
+            ]
+            assert [name for _, name in sorted(indexes["idx_cache_invalidation_namespace_generation"]["columns"])] == [
+                "namespace", "generation"
+            ]
+
+            cursor.execute(
+                "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS "
+                "WHERE CONSTRAINT_SCHEMA = DATABASE() "
+                "AND TABLE_NAME IN ('cache_namespace_generations', 'cache_invalidation_outbox') "
+                "AND CONSTRAINT_TYPE = 'CHECK'"
+            )
+            checks = {row[0] for row in cursor.fetchall()}
+            assert checks == {
+                "chk_cache_namespace_generation_positive",
+                "chk_cache_invalidation_status",
+                "chk_cache_invalidation_counters",
+            }
+
+            cursor.execute(
+                "SELECT namespace, generation FROM cache_namespace_generations"
+            )
+            assert cursor.fetchall() == (("ad_data", 1),)
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cache_invalidation_outbox")
+            cursor.execute("DROP TABLE IF EXISTS cache_namespace_generations")
+        connection.close()
+
+
+def test_ad_data_cache_generation_migration_rejects_wrong_existing_table_shape():
+    """同名但字段错误的 Generation 表必须阻断迁移，不能静默接受。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cache_invalidation_outbox")
+            cursor.execute("DROP TABLE IF EXISTS cache_namespace_generations")
+            cursor.execute(
+                "CREATE TABLE cache_namespace_generations ("
+                "namespace VARCHAR(32) NOT NULL PRIMARY KEY"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            )
+            with pytest.raises(pymysql.err.OperationalError):
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261123_ad_data_cache_generation_outbox.sql",
+                )
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cache_invalidation_outbox")
+            cursor.execute("DROP TABLE IF EXISTS cache_namespace_generations")
+        connection.close()
+
+
+def test_ad_data_cache_generation_migration_rejects_wrong_existing_outbox_table():
+    """同名但缺少必要字段/索引的 Outbox 表必须 fail closed。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cache_invalidation_outbox")
+            cursor.execute("DROP TABLE IF EXISTS cache_namespace_generations")
+            cursor.execute(
+                "CREATE TABLE cache_namespace_generations ("
+                "namespace VARCHAR(64) NOT NULL PRIMARY KEY, "
+                "generation BIGINT NOT NULL DEFAULT 1, "
+                "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP "
+                "ON UPDATE CURRENT_TIMESTAMP, "
+                "CONSTRAINT chk_cache_namespace_generation_positive CHECK (generation > 0)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            )
+            cursor.execute(
+                "INSERT INTO cache_namespace_generations (namespace, generation) VALUES ('ad_data', 1)"
+            )
+            cursor.execute(
+                "CREATE TABLE cache_invalidation_outbox ("
+                "id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            )
+            with pytest.raises(pymysql.err.ProgrammingError):
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261123_ad_data_cache_generation_outbox.sql",
+                )
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cache_invalidation_outbox")
+            cursor.execute("DROP TABLE IF EXISTS cache_namespace_generations")
+        connection.close()
+
+
+
+@pytest.mark.asyncio
+async def test_mysql_cache_generation_updates_are_serialized_and_outbox_is_transactional():
+    """真实 MySQL 并发递增不得丢版本；回滚必须同时撤销 Generation 与 Outbox。"""
+    from urllib.parse import quote_plus
+
+    from sqlalchemy import func, select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.models.models import CacheInvalidationOutbox, CacheNamespaceGeneration
+    from app.services.cache_invalidation_outbox import advance_cache_generation
+
+    connection = _connect()
+    engine = None
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cache_invalidation_outbox")
+            cursor.execute("DROP TABLE IF EXISTS cache_namespace_generations")
+            _run_sql_file(
+                cursor,
+                "sql/migrations/20261123_ad_data_cache_generation_outbox.sql",
+            )
+
+        password = quote_plus(os.getenv("MYSQL_INTEGRATION_PASSWORD", ""))
+        user = quote_plus(os.getenv("MYSQL_INTEGRATION_USER", "root"))
+        engine = create_async_engine(
+            f"mysql+aiomysql://{user}:{password}@{HOST}:"
+            f"{int(os.getenv('MYSQL_INTEGRATION_PORT', '3306'))}/{DATABASE}?charset=utf8mb4",
+            pool_pre_ping=True,
+            pool_size=10,
+            max_overflow=0,
+        )
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+
+        async def bump_generation():
+            async with session_factory() as session:
+                generation = await advance_cache_generation(session)
+                await session.commit()
+                return generation
+
+        generations = await asyncio.gather(*(bump_generation() for _ in range(8)))
+        assert sorted(generations) == list(range(2, 10))
+
+        async with session_factory() as session:
+            current_generation = await session.scalar(
+                select(CacheNamespaceGeneration.generation).where(
+                    CacheNamespaceGeneration.namespace == "ad_data"
+                )
+            )
+            outbox_count = await session.scalar(
+                select(func.count(CacheInvalidationOutbox.id))
+            )
+            event_generations = (
+                await session.scalars(
+                    select(CacheInvalidationOutbox.generation).order_by(
+                        CacheInvalidationOutbox.generation
+                    )
+                )
+            ).all()
+            assert current_generation == 9
+            assert outbox_count == 8
+            assert event_generations == list(range(2, 10))
+
+        async with session_factory() as session:
+            rolled_back_generation = await advance_cache_generation(session)
+            assert rolled_back_generation == 10
+            await session.rollback()
+
+        async with session_factory() as session:
+            current_generation = await session.scalar(
+                select(CacheNamespaceGeneration.generation).where(
+                    CacheNamespaceGeneration.namespace == "ad_data"
+                )
+            )
+            outbox_count = await session.scalar(
+                select(func.count(CacheInvalidationOutbox.id))
+            )
+            assert current_generation == 9
+            assert outbox_count == 8
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS cache_invalidation_outbox")
+            cursor.execute("DROP TABLE IF EXISTS cache_namespace_generations")
+        connection.close()
