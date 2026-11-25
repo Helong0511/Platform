@@ -32,8 +32,10 @@ from app.models.models import (
     OfferPublisherAssignment,
     Publisher,
     Client,
+    ConversionDeductionConfig,
 )
 from app.services.base_service import BaseService
+from app.services.cpl.deduction.helpers import lock_deduction_scopes
 
 logger = logging.getLogger(__name__)
 
@@ -283,6 +285,19 @@ class AdvertiserService(BaseService[Advertiser]):
 
         # 获取广告主
         advertiser = await self.get_advertiser_by_id(advertiser_id, current_user)
+
+        # 与扣量配置写入口使用同一 scope 锁，避免删除与配置创建并发穿透。
+        await lock_deduction_scopes(self.db, [("advertiser", advertiser_id)])
+        deduction_count = await self.db.execute(
+            select(func.count(ConversionDeductionConfig.id)).where(
+                ConversionDeductionConfig.advertiser_id == advertiser_id
+            )
+        )
+        if deduction_count.scalar() > 0:
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail="广告主仍有关联扣量配置，无法删除",
+            )
 
         # 更新字段
         if 'advertiser_name' in advertiser_data:
