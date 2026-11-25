@@ -3134,3 +3134,49 @@ FOR UPDATE;
 最新 Head 的 Full Audit / Emergency Security 仍须以最新 SHA 的最终结果为准。GitHub Actions 对被后续提交替代的旧 SHA 取消运行，不得视为通过。本轮没有本地执行 pytest、前端构建，也没有真实 MySQL/Redis 测试；不得据此宣称这些测试已通过。
 
 仍未解决的高风险项：所有六个配置写入口与三个父对象删除入口尚未统一取得 scope mutex；Postback 尚未使用同一把锁；没有活动配置唯一性数据库约束；Redis/MySQL 决策非原子与权威事件 ledger 尚未修复。PR #205 继续 Draft，禁止合并。
+
+
+### 62. Scope mutex 第一阶段代码落地与剩余财务阻断
+
+本节记录 2026-11-25 后续提交实际落地的共享 scope 锁，不再沿用第 58–60 节中“尚未新增锁表/服务代码”的历史状态描述。第 58–61 节保留为审计发现与设计依据；本节是当前实现状态。
+
+#### 62.1 已提交实现
+
+1. 新增 `conversion_deduction_scope_locks`：
+   - 主键为 `(scope_type, scope_id)`，scope 类型为 advertiser / offer / publisher。
+   - 锁记录永久保留，不允许 TTL 清理或业务删除。
+   - SQL migration 已登记到 `app/db/migrations/manifest.py`，并加入 `sql/platform.sql` 基线结构。
+2. 新增 `lock_deduction_scopes(db, scopes)`：
+   - 使用调用方传入的同一 AsyncSession。
+   - MySQL 使用 INSERT ... ON DUPLICATE KEY UPDATE 建立/触碰锁行，再 SELECT ... FOR UPDATE。
+   - SQLite 测试路径使用 INSERT OR IGNORE，再普通 SELECT；SQLite 不具备 MySQL InnoDB 行锁语义，不能替代真实 MySQL 并发验收。
+   - 校验 scope 类型、正整数 ID，去重后按 scope_type 字典序及 scope_id 升序加锁。
+   - helper 不执行 commit；锁持有到调用方事务提交或回滚。
+   - 不支持的数据库方言直接失败，不静默绕过锁。
+3. 配置服务的创建、普通更新、单条启停、单条删除、批量启停、批量删除均已接入同一 helper。拿锁后重新读取配置；批量操作先锁定去重后的全部 scope，再 current-read 重新读取配置，并对等待锁期间被并发删除的记录重新校验。
+4. 批量启用拒绝所选集合内重复 scope，并排除本批次记录后检查集合外已有激活配置，避免把本批次自身误判为冲突。
+5. Postback 的 `DeductionManager.find_config()` 在读取任何扣量配置前锁定全部候选 scope。财务决策路径已绕过 Redis 配置缓存与 Generation，直接使用 MySQL 查询，并对命中配置执行 `SELECT ... FOR UPDATE` current-read，避免 REPEATABLE READ 锁前快照或旧 Redis 配置对象作为决策依据。
+6. Advertiser、Offer、Publisher 三个父对象删除服务已获取对应 scope 锁，并显式检查是否仍有关联扣量配置；存在配置时拒绝删除。
+7. 新增外键迁移，将扣量配置指向三个父对象的 CASCADE 删除策略改为 RESTRICT；`sql/platform.sql` 基线也已调整为 RESTRICT。
+8. 新增 `tests/test_deduction_scope_lock.py`，覆盖 scope 去重/排序、helper 不提交事务、不支持方言、非法 ID，以及 Postback 先锁全部候选 scope 再读取配置的调用顺序。
+9. 配置选择查询在 priority 相同情况下增加 `id ASC` 次级排序，降低历史重复配置时的结果不确定性。
+
+#### 62.2 事务与发布边界
+
+- 必须先在正式数据库执行并验收 migration，再发布使用锁表的新代码；不能先部署新 Worker 再补建锁表。
+- 所有 Postback Worker、管理 API Worker 必须在切换期间停止旧版本混跑；旧版本不会自动遵守 scope mutex。
+- 锁表行是永久互斥注册表，不得清理。多 scope 批量请求的锁顺序必须保持一致。
+- Postback scope 锁在配置查询后仍需保持到事件处理事务提交/回滚；不得在中途单独 commit 或释放。
+- 父对象删除服务的应用层保护与 FK RESTRICT 是双层防护；数据库 migration 仍需在正式 MySQL 版本和真实现存约束名称/规则上演练。
+- Postback 目前配置读取不再依赖 Redis 配置缓存，但这不等于 Redis 统计计数已退出财务决策，也不解决 Redis 计数与 MySQL ledger 的提交原子性。
+
+#### 62.3 尚未完成、仍然阻断 PR #205 的事项
+
+1. **活动配置唯一性最终防线尚未建立**：目前通过共享 scope mutex + 锁内冲突查询串行化应用服务写入，但还没有 `conversion_deduction_active_scopes` 唯一注册表或经过历史数据碰撞预检的等价数据库唯一约束。任何绕过这些服务的直接 SQL/旧版本 Worker 都可能破坏唯一性。
+2. **真实 MySQL 并发验收未完成**：当前新增的是单元级顺序/调用边界测试；尚未在两个以上独立 MySQL 连接下验证 no_config 与首次创建竞争、2/10/50 并发启停、反向批量锁、父对象删除竞争、死锁/超时和 commit-unknown。
+3. **Redis 与 MySQL 财务非原子问题仍存在**：Redis decision_seq / deducted 计数可能在 MySQL commit/rollback/commit-unknown 后留下幽灵状态；没有等价于 CapReservationLedger 的 CPL 事件级 reservation/恢复账本。
+4. **24 小时 DB 滑动窗口与 Redis 48 小时计数仍不一致**：旧事件离开 DB 统计窗口后 Redis scope counter 不会同步递减；Redis 重启/过期也可能重置基线。
+5. **事件级权威财务决策 ledger 仍不完整**：仍需为每个已验证事件身份持久化唯一事件键、决策状态、配置快照、扣量结果和恢复状态，并与 Postback receipt/conversion 在同一 MySQL 事务内保持一致。
+6. **迁移需真实 MySQL 演练**：尤其是历史环境 FK 的实际 DELETE_RULE、迁移执行器对 PREPARE/DDL 语句的处理、锁表物理结构与索引，必须用 SHOW CREATE TABLE / information_schema 验收，不能仅凭 CI 推断生产迁移成功。
+
+因此，本轮实现的是“统一 scope 事务互斥的第一阶段”，不是 CPL 财务一致性最终修复。PR #205 继续保持 Draft；在活动唯一性数据库防线、MySQL 并发/故障注入和 Redis/MySQL 事件账本修复全部验收前，禁止合并。
