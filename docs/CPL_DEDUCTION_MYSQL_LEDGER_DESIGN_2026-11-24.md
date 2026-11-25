@@ -2364,3 +2364,72 @@ BFT 服务 `app/services/cpl/postback_bft_service.py` 也调用同一 `PostbackP
 已从最新 Head 源码确认：近期基线修复改善了 MySQL 统计读取与 Redis 冷启动，但 `decision_seq` 仍按每次决策调用递增，Redis 已存在的 scope 扣量计数不会持续按 MySQL 滑动窗口校准，事件级 reservation 幂等及 CPL commit-unknown 恢复仍缺失。
 
 本轮只完成源码与测试核对并更新审计文档；未修改业务逻辑，未执行真实 CPL MySQL + Redis 故障注入。PR #205 必须继续保持 Draft，不得合并。
+
+### 49. 第二十四阶段：Cap Reservation 账本不能直接替代 CPL 扣量账本
+
+本轮对比最新 Head 的 ORM、服务层和 migration manifest，确认仓库已有完整的 Cap Reservation 持久化模型与恢复服务，但尚未看到对应的 CPL 扣量事件决策/预留模型、服务或 SQL migration。两者虽然都涉及 Redis 与 MySQL 的跨存储协调，业务语义并不相同，不能简单复制 Cap 表结构后就认为 CPL 财务问题已解决。
+
+#### 49.1 Cap 已具备的持久化状态机
+
+文件：
+
+- `app/models/cap_reservation.py`
+- `app/services/cap_reservation_ledger.py`
+- `app/services/cap_reservation_recovery.py`
+- `sql/migrations/20261111_cap_reservation_ledger.sql`
+
+Cap Reservation 使用稳定 reservation key，并通过唯一约束保证同一事件、Cap scope、Cap 类型和业务日期只创建一条预留记录。记录保存 Redis counter/token key、Redis 是否已预留、清理状态、状态机、租约 owner、租约到期时间、恢复尝试次数和错误摘要。
+
+其状态至少区分 PREPARED、RESERVED、COMMITTED、ROLLED_BACK、NEEDS_RECONCILIATION。服务使用独立 AsyncSession 提交预留准备记录与租约，Redis token 由事件级 key 标识；Postback 主事务再通过账本状态栅栏协调正式转化提交，恢复 Worker 负责处理过期租约和不确定状态。
+
+这证明项目已经有可参考的跨存储恢复模式，但该账本当前表达的是 Cap 资源预留，不表达 CPL 的扣量决策、扣量比例、财务统计窗口或非扣量终态。
+
+#### 49.2 CPL 当前持久化结构的能力边界
+
+文件：`app/models/deduction.py`
+
+当前只有：
+
+- `ConversionDeductionConfig`：保存配置层级、比例、策略和启用状态。
+- `ConversionDeductionLog`：保存扣减前后数量/金额、配置 ID、比例、策略、原因及可空的内部 conversion_id。
+
+`ConversionDeductionLog` 没有 canonical platform/conversion_id/event_name 组合、事件决策唯一键、reservation token、状态机、租约或恢复字段。扣量事件因不创建正式 `PostbackConversion`，其 log 的 conversion_id 可以为 NULL；click_id 只是归因字段，不能替代事件唯一身份。
+
+当前 migration manifest 包含 Cap Reservation migration、CPL 配置缓存 generation migration 和 Postback event receipt migration，但没有 CPL deduction decision ledger / reservation migration。现有 `postback_event_receipts` 只提供事件接收幂等收据，不记录完整的扣量决策、quota 预留与恢复状态，因此不能把 receipt 当作 CPL 财务账本。
+
+#### 49.3 不能照搬 Cap Reservation 的几个原因
+
+1. **业务维度不同**：Cap reservation 的 scope 是 Offer/Publisher + daily/total + business_date；CPL 扣量还涉及 advertiser/offer/publisher 配置层级、扣量策略、比例、24 小时统计窗口和扣量/不扣量终态。
+2. **统计口径不同**：Cap 是容量上限；CPL 是按窗口内事件数量和扣量比例决定的财务分配。Cap 的 token 成功不等于 CPL 事件已扣量。
+3. **事件终态不同**：CPL 必须为每个已验证事件记录 deducted、not_deducted、skipped_no_config、rejected 或 retryable 等可解释结果，不能只记录“Redis 是否预留”。
+4. **历史数据不同**：现有扣量日志缺少平台事件身份，不能安全地将历史 NULL conversion_id 日志自动映射为新的事件 reservation。
+5. **事务边界不同**：Cap 已有独立准备账本、主业务事务栅栏和恢复 Worker；CPL 当前只在业务 Session flush 扣量日志，随后由 Processor commit，Redis scope 计数没有与之绑定的事件级账本状态。
+
+#### 49.4 建议的 CPL 账本边界
+
+应单独设计 CPL 事件决策账本，而不是修改 Cap 表语义。至少需要以下信息：
+
+- canonical event identity：平台、上游 conversion_id、规范化 event_name，以及版本化哈希键；
+- 决策范围快照：唯一配置 scope、scope ID、配置 ID/版本、比例、策略版本；
+- 窗口快照：窗口类型、开始/结束边界、统计基线或可复算的决策输入；
+- 决策终态：明确区分扣量、不扣量、无配置跳过、验证拒绝、处理中和待对账；
+- 预留信息：事件级 reservation key/token、scope quota 影响量、状态、租约、fencing token；
+- 事务与恢复信息：关联 receipt、扣量日志、最终处理事务标识、commit-unknown 对账状态、恢复尝试及受限错误摘要；
+- 审计时间：统一数据库时间，记录 created/updated/finalized 时间，不以 Redis TTL 作为财务留存期限。
+
+必须先定义“24 小时滑动窗口”的事件时间和统计时间语义，再设计 reservation 的并发限额算法。若窗口内计数和比例扣量无法在 MySQL 事务中安全串行化，应先提出可证明正确的 scope 锁/分桶方案与吞吐上限，再考虑 Redis 加速；不能先写 Redis INCR，再事后补一条日志。
+
+#### 49.5 需要补充的迁移与兼容验收
+
+- 新增独立 CPL ledger migration，并登记 revision、依赖与 SHA-256；部署前检查历史重复身份、NULL event_name、collation 和索引冲突。
+- 不对历史缺失平台事件身份的扣量日志进行猜测性回填；明确旧数据只用于展示统计或进入人工对账的边界。
+- 新账本上线必须处理新旧 worker 混跑：先扩表、兼容读写，再排空旧 Postback worker，最后启用强制账本写入；禁止一部分 worker 仍只写 Redis scope counter。
+- 新账本与 receipt、ConversionDeductionLog 的唯一身份和事务提交关系必须明确；普通转化与 volume-deducted 两种分支均需形成一个且仅一个事件终态。
+- 在真实 MySQL + Redis 集成测试中验证 PREPARED 后崩溃、Redis 成功后崩溃、主事务 rollback、commit ACK 丢失、恢复 Worker 接管、过期 lease fencing、重复请求和并发 quota 竞争。
+- 只有完整状态机、迁移、恢复任务、监控告警、回滚方案和集成测试全部落地，才允许把 CPL Redis 计数从财务决策路径移除或降级为非权威缓存。
+
+#### 49.6 本轮结论与范围声明
+
+已核实 Cap Reservation 有独立模型、唯一键、租约/状态机、恢复服务及 migration；CPL 当前模型仍只有配置和扣减日志，migration manifest 没有 CPL 决策/预留账本 migration，receipt 也不具备财务决策账本职责。
+
+本轮只完成架构对比与审计文档更新，未新增数据库模型、migration 或业务代码，未执行真实 MySQL + Redis 故障注入。PR #205 继续保持 Draft，不得合并。
