@@ -1703,3 +1703,64 @@ await db_session.commit()
 - 对照 `tests/test_cap_reservation_postback_integration.py`：Cap 路径已有 stage-commit、数据库 commit、ledger finalize 顺序和禁止 stale Redis compensation 的专项测试；这类提交栅栏在 CPL volume deduction 路径尚未建立。
 
 因此，现有测试通过不能证明 CPL Redis/DB 双写一致。后续实现必须新增端到端 MySQL + Redis 故障注入测试，不能只增加对内部 helper 的 Mock 单元测试。
+
+### 37. 第十二阶段源码复核：当前顺序策略已 fail-open 跳过，但哈希策略仍存在同事件重复预留
+
+本节用于校准此前对策略执行范围的描述，以当前源码 `86e0e495eef9156cb5cdf69ec7f3efee58cf888c` 为准。
+
+#### 37.1 当前真正执行的 volume 策略范围
+
+`DeductionManager.apply_deduction()` 当前明确执行以下保护：
+- 必须提供经过验证的 `platform + conversion_id + normalized event_name`，否则跳过 volume deduction；
+- `proportional`、`round_robin` 等非 `random/hash/deterministic` 策略被主动跳过，日志说明等待 MySQL 事务账本；
+- 只有 `random`、`hash`、`deterministic` 进入当前 Redis 统计与名额预留路径；
+- `random` 当前由 `RandomDeductionStrategy` 继承确定性 SHA-256 策略，并非真正随机数策略。
+
+因此此前将顺序策略描述为当前仍依赖 Redis processed 序号执行，需要更正：当前调用路径已经将这些策略跳过。相关历史策略代码仍存在，但不能据此认定运行路径会执行。
+
+#### 37.2 事件哈希稳定，不等于 Redis 名额预留幂等
+
+当前事件决策键通过长度前缀编码后 SHA-256：
+`event:v1:SHA256(platform, conversion_id, event_name)`。
+
+它只作为 `should_deduct_volume()` 的确定性哈希输入。后续 Redis 名额预留使用 scope 级 `decision_deducted` key：
+- `_RESERVE_DEDUCTED_LUA` 只检查 scope 当前计数与 limit，然后 INCR；
+- Lua 不接收 event decision key，也没有 per-event reservation token；
+- 同一事件重试会再次执行同一个 scope INCR；
+- `_incr_decision_deducted()` 同样只对 scope key INCR，不记录事件身份。
+
+所以事件身份虽稳定，名额预留却不是事件幂等操作。Postback receipt 可以阻止已成功提交事件的后续重放，但无法撤销第一次 DB rollback 后遗留的 Redis INCR，也无法保证 commit-unknown 的未提交重试复用同一个预留结果。
+
+#### 37.3 同一事件可能出现决策结果漂移
+
+可复现的逻辑序列：
+1. 事件 E 的稳定 hash 命中扣量；
+2. Redis `decision_deducted` 成功 INCR；
+3. MySQL 扣量日志/receipt COMMIT 失败且确认未提交；
+4. E 重试，receipt 因第一次事务回滚而不存在；
+5. E 的 hash 仍命中，但 Redis 名额计数已包含第一次失败尝试；
+6. 如果该计数已达到 limit，第二次 `_RESERVE_DEDUCTED_LUA` 返回 -1，E 本次不再扣量。
+
+即：相同事件身份、相同配置、相同哈希输入，因第一次失败请求污染 Redis scope counter，最终可能得到不同业务结果。
+
+#### 37.4 24 小时 DB 窗口与 48 小时 Redis key 的源码行为
+
+当前 `get_recent_stats(strict=True)` 使用 `[end_time - 24h, end_time)` 直接查询 MySQL；但 `_get_stats_for_decision()` 随后把统计结果与 Redis 状态合并：
+- `decision_seq` 和 `decision_deducted` TTL 均由 `DECISION_SEQ_TTL=48h` 管理；
+- Redis key 存在时，不会用每次新查询到的 DB deducted 基线覆盖 Redis deducted；
+- Redis `decision_deducted` 只在 key 缺失时初始化为 DB 当前 deducted；
+- Redis 名额递增不会按事件离开 24 小时窗口而递减；
+- `total=max(seq, base_stats.total)`，`processed=seq-1`，二者语义不同，不能把 seq 直接当作 24 小时内已处理事件数。
+
+因此，严格 DB 查询本身使用 24 小时半开窗口，并不意味着最终决策统计也严格遵守 24 小时窗口。Redis 48 小时存活期间，已离开 DB 窗口的旧扣量仍可能留在 Redis deducted 中。Redis 重启/key 淘汰后又会重新从当前 DB 窗口基线初始化，决策基线可能跳变。
+
+#### 37.5 当前不应做的局部修补
+
+- 不要只把 Redis TTL 从 48h 改为 24h：TTL 从 key 创建时间计算，不是每个事件的滚动窗口清理；key 过期会整体重建基线。
+- 不要只在 MySQL rollback 后 Redis DECR：无法安全区分该 INCR 是否已被其他并发请求观察、是否被后续名额判断消费。
+- 不要只给 Lua 增加 event key 去重而继续让 Redis 决定财务名额：Redis 去重状态与 MySQL 事件终态仍会在故障/过期时分叉。
+- 不要恢复顺序策略的 Redis seq 执行，除非先建立 MySQL 权威的顺序决策序列及 scope 串行化。
+
+正确方向仍是：同一 MySQL 事务中以事件唯一键争取处理权、锁定 scope、读取一致窗口快照、写入不可变决策结果和扣量日志/receipt；Redis 只做非权威缓存。必须先明确同一 scope 的并发串行化和 MySQL REPEATABLE READ 快照策略，再实现，不可只增加一个 scope lock 就宣称解决。
+
+**本节结论：** 当前代码已跳过顺序策略，但 random/hash 的 scope Redis 计数仍可能被同事件失败重试重复消费；且 48h Redis deducted 与 24h MySQL 统计窗口不一致。财务阻断依旧存在。
