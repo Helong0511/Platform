@@ -484,7 +484,7 @@ async def test_mysql_scope_lock_serializes_authoritative_stats_and_rollback_rele
                 ConversionStats,
                 DeductionManager,
             )
-            from app.core.utils import get_app_now_naive
+            from app.core.utils import get_app_now_naive_floor_second
 
             # 第一次事务写入扣量日志后回滚，统计贡献必须一并消失。
             async with factory() as rolled_back:
@@ -499,7 +499,7 @@ async def test_mysql_scope_lock_serializes_authoritative_stats_and_rollback_rele
                         "(created_at, offer_id, deducted_volume, conversion_id) "
                         "VALUES (:created_at, 606, 1, NULL)"
                     ),
-                    {"created_at": get_app_now_naive()},
+                    {"created_at": get_app_now_naive_floor_second()},
                 )
                 in_transaction = await DeductionManager(
                     rolled_back
@@ -525,7 +525,7 @@ async def test_mysql_scope_lock_serializes_authoritative_stats_and_rollback_rele
                         "(created_at, offer_id, deducted_volume) "
                         "VALUES (:created_at, 606, 0)"
                     ),
-                    {"created_at": get_app_now_naive()},
+                    {"created_at": get_app_now_naive_floor_second()},
                 )
                 started = asyncio.Event()
 
