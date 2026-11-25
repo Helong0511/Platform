@@ -2230,3 +2230,67 @@ BFT 服务 `app/services/cpl/postback_bft_service.py` 也调用同一 `PostbackP
 这不直接证明 ACK 行为一定违反每个平台协议；是否应该 ACK 仍需按各平台官方重试契约确认。但“成功入库”和“永久拒绝”共用 `success=True`，且拒绝请求没有持久化决策留痕，是已确认的可观测性与重放治理缺口。
 
 本轮只完成源码核对和本审计文档更新，未修改业务逻辑，未执行真实 MySQL + Redis 故障注入。PR #205 继续保持 Draft，不得合并。
+
+
+### 47. 第二十二阶段：CPL 扣量测试与 Cap Reservation 跨存储验收覆盖不对称
+
+本轮对最新 Head 的测试目录按文件名筛选了 49 个 Postback、Pending、Deduction、Cap Reservation 相关测试文件，并抽查 CPL 扣量核心测试与 MySQL/Redis 集成测试的实际测试体。目的不是统计 CI 通过数量，而是确认“CPL Redis 预留 + MySQL 财务提交”是否已有与 Cap Reservation 同等级的故障恢复验证。
+
+#### 47.1 Cap Reservation 已有真实跨存储集成测试
+
+文件：`tests/test_cap_reservation_mysql_redis_integration.py`
+
+该文件明确要求 CI 临时 MySQL `platform_ci` 和隔离 Redis DB，并包含 16 个集成测试。已核对的测试覆盖：
+
+- Worker 崩溃后回收孤儿 reservation；
+- MySQL commit ACK 丢失后保留 reservation；
+- 真实 TCP Proxy 丢弃 commit ACK；
+- 同一 reservation 并发 claim 只能有一个 owner；
+- recovery worker 不得重复 rollback；
+- Redis rollback tombstone 保证重试幂等；
+- Postback commit lock 与 recovery claim 的交错；
+- stale recovery worker 的 fencing；
+- Pending 并发容量检查。
+
+此外，`tests/test_cap_reservation_postback_integration.py` 对 Postback 的 Cap ledger 阶段提交、reservation token 和回滚边界另有专门覆盖。由此可见，仓库已经具备实现跨 MySQL/Redis 财务状态恢复测试的技术模式，并非测试环境完全不支持。
+
+#### 47.2 CPL 扣量测试目前主要验证局部逻辑
+
+本轮读取的 CPL 测试：
+
+| 文件 | 已确认覆盖 | 未覆盖的关键边界 |
+|---|---|---|
+| `tests/test_deduction_event_identity.py` | canonical event key、click_id 不作为事件身份、顺序策略暂停 | 真实 Redis 事件级预留与 MySQL 提交联动 |
+| `tests/test_deduction_fail_open_semantics.py` | Redis 缺失/模拟 eval 失败时 fail-open/close | Redis 已成功 INCR 后 MySQL commit 失败 |
+| `tests/test_deduction_stats_accounting.py` | 统计 SQL 口径、半开时间窗口、绕过陈旧缓存 | 真实 MySQL + Redis 窗口漂移、重启、TTL 和并发 |
+| `tests/test_discount_checker_deduction_log_fail_closed.py` | 扣量日志写入失败时 fail-closed | 日志 flush 成功后外层事务 commit/rollback/unknown |
+| `tests/test_postback_event_receipt_mysql_integration.py` | 真实 MySQL receipt 幂等、普通转化竞争、回滚后重试 | 不调用真实 DeductionManager，不验证 Redis 扣量计数补偿 |
+
+上述 CPL 测试使用 mock/AsyncMock 验证 Redis 故障分支或统计 SQL；receipt 集成测试虽连接真实 MySQL，但其测试对象是 DuplicateChecker/receipt，不是 Redis 扣量预留与财务提交协议。
+
+#### 47.3 当前缺少的 CPL 财务故障注入场景
+
+在本轮读取的测试文件中，尚未发现与 Cap Reservation 集成测试等价的 CPL MySQL + Redis 故障注入覆盖。必须补齐：
+
+1. Redis 扣量预留成功，随后 MySQL 事务明确 rollback：同一事件重试必须恢复为同一决策，不得二次消耗 scope quota。
+2. Redis 扣量预留成功，MySQL commit ACK 丢失：重启后根据 MySQL 权威 ledger 判定最终状态，不得重复扣量或撤销已提交决策。
+3. Redis INCR 成功但进程在写入/提交财务日志前崩溃：恢复任务能够识别未完成预留并安全回收。
+4. 同一 canonical event identity 并发到达 2/10/50 次：只允许一份财务终态和一份有效扣量预留。
+5. 两个不同事件并发竞争同一 scope quota：不能超额扣量；其中一个事务回滚后，另一个事件的 reservation 不得被错误补偿。
+6. 24 小时窗口滚动、Redis 48 小时 TTL、Redis 重启/清键、基线重建：结果必须与明确的业务窗口语义一致。
+7. fail-open、fail-closed、配置缓存故障、DB 统计失败与 Redis 连接中断交错时，必须区分“未扣量放行”和“财务状态未知”，禁止把未知状态伪装成成功。
+8. 测试必须使用隔离的真实 MySQL + Redis，并加入 commit ACK 丢失代理或等效故障注入；不能仅通过 mock 抛出异常替代跨存储不确定提交测试。
+
+#### 47.4 修复验收门槛
+
+- 先建立 MySQL 权威事件决策账本与事件级幂等 reservation/recovery 协议；Redis scope 计数不能单独决定财务终态。
+- CPL ledger 必须与事件 receipt、正式转化/扣量日志在同一个 MySQL 事务中形成唯一终态。
+- Redis 预留必须有可恢复的事件级 token/状态，不能只有 scope 级 `decision_deducted` 数值。
+- 参照 Cap Reservation 的安全集成测试隔离策略，新增真实 MySQL + Redis 的 CPL 专项集成测试；测试必须能在 CI 临时服务中执行，不能访问生产数据库或共享 Redis。
+- Full Audit 与 Emergency Security 全绿只能证明对应 CI 工作流通过；不能替代上述财务故障注入和窗口语义验收。
+
+#### 47.5 本轮结论与范围声明
+
+最新 Head 的 Full Audit CI、Emergency Security CI 和 8 个 Check Runs 均已成功；但测试源码核对显示，Cap Reservation 已有真实 MySQL + Redis 的 commit-unknown、恢复、并发和 fencing 测试，CPL 扣量仍缺少同等级的 Redis 预留与 MySQL 财务提交集成验证。
+
+本轮只更新审计文档，没有修改 CPL 业务代码，也没有声称已执行真实 CPL MySQL + Redis 故障注入。PR #205 继续保持 Draft，不得合并。
