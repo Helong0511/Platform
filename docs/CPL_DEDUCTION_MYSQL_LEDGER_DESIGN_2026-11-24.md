@@ -1764,3 +1764,49 @@ await db_session.commit()
 正确方向仍是：同一 MySQL 事务中以事件唯一键争取处理权、锁定 scope、读取一致窗口快照、写入不可变决策结果和扣量日志/receipt；Redis 只做非权威缓存。必须先明确同一 scope 的并发串行化和 MySQL REPEATABLE READ 快照策略，再实现，不可只增加一个 scope lock 就宣称解决。
 
 **本节结论：** 当前代码已跳过顺序策略，但 random/hash 的 scope Redis 计数仍可能被同事件失败重试重复消费；且 48h Redis deducted 与 24h MySQL 统计窗口不一致。财务阻断依旧存在。
+
+### 38. 第十三阶段事务隔离复核：Postback 先建立普通一致性读快照，之后加 scope 锁不能自动刷新统计快照
+
+本轮核对 `app/core/database.py` 与当前 Postback 处理顺序。
+
+#### 38.1 当前连接未显式指定 SQLAlchemy isolation_level
+
+`create_async_engine()` 配置了连接池、`pool_pre_ping`、`pool_recycle` 等参数，但没有传入 `isolation_level`。因此应用没有在引擎层显式固定 MySQL 事务隔离级别，实际值由数据库服务端/会话配置决定。
+
+MySQL 8.4 官方文档说明 InnoDB 默认隔离级别为 REPEATABLE READ；在该级别，普通一致性读使用事务第一次一致性读时建立的 read view，后续普通 SELECT 继续读取该快照。参见：
+- https://dev.mysql.com/doc/refman/8.4/en/innodb-transaction-isolation-levels.html
+- https://dev.mysql.com/doc/refman/8.4/en/glossary.html
+
+生产环境不能仅凭代码假设隔离级别；必须在连接池实际连接上采集 `@@transaction_isolation`、`@@session.transaction_isolation`，并在 CI MySQL 服务中断言。
+
+#### 38.2 Postback 在扣量统计之前已经执行普通 SELECT
+
+当前 `PostbackProcessor.process()` 先执行 Click 关联、Offer 状态检查和重复检测，再进入扣量计算。
+其中 `DuplicateChecker.is_duplicate()` 在插入 receipt 前先执行普通 `SELECT PostbackConversion.id ...`；ClickAssociator、Offer 状态检查等路径也有普通查询。
+
+在 MySQL 默认 REPEATABLE READ 下，这些普通 SELECT 可能已经建立当前事务的一致性读快照。之后即使在扣量计算阶段新增 `SELECT scope_lock ... FOR UPDATE` 并等待另一个请求提交，后续普通 `get_recent_stats()` 聚合查询仍可能读取之前建立的旧快照，而不是 scope 锁释放时的最新已提交统计。
+
+MySQL 官方文档还明确指出，在 REPEATABLE READ 事务中混合 locking read 与 nonlocking consistent read 时，两者可能看到不同数据库状态；locking read 使用较新的状态，普通 SELECT 使用既有 read view。参见：
+- https://dev.mysql.com/doc/refman/8.4/en/innodb-transaction-isolation-levels.html
+
+#### 38.3 为什么单加 scope lock 不足以证明无幻读/无漏计
+
+scope lock 可以串行化遵守同一锁协议的写入者，但不能自动改变当前事务已经建立的一致性读快照。若事务 A 在建立旧快照后等待 scope lock，而事务 B 持锁写入新决策并提交，A 获锁后继续用普通 SELECT 汇总，可能看不到 B 的新记录，仍然基于旧 total/deducted 作决策。
+
+因此，未来实现必须在以下方案中明确选择并进行真实 MySQL 验证：
+- 在 Postback 事务开始之前就为专用处理事务明确设置 READ COMMITTED，并证明设置发生在任何隐式 autobegin/查询之前；不能在事务已经开始后才尝试修改当前事务隔离级别。
+- 使用可证明为 current read 的账本/计数行更新协议，所有事件和配置写入均遵循同一 scope 锁顺序；不能混用旧快照聚合和当前读结果。
+- 采用独立、事务化的 scope 统计/窗口桶表，在 scope 锁内以原子 SQL 更新与过期桶清理，证明窗口边界、重试和崩溃恢复语义。
+
+不能仅因代码出现 `with_for_update()` 就声称解决了 RR 快照、幻读或并发统计。
+
+#### 38.4 必须加入的真实 MySQL 隔离测试
+
+1. 测试启动时记录并断言 `@@session.transaction_isolation`，不允许 CI 环境悄悄使用不同隔离级别。
+2. A 事务先执行普通 SELECT 建立快照；B 获取 scope 锁、写入 ledger 并提交；A 再获取 scope 锁后查询统计，验证所选方案确实看到 B 的提交。
+3. 反向顺序：A 先锁 scope，B 等待；A 提交后 B 必须读取包含 A 的新窗口统计。
+4. 同一 scope 2/10/50 并发，验证无漏计、重复计数和额度超发。
+5. 同时覆盖窗口边界事件滚入/滚出、commit-unknown、死锁 1213、锁等待超时 1205、事务重试。
+6. 配置创建/启用/禁用与 Postback 并发时，验证配置版本和统计窗口快照属于同一决策时点。
+
+**本节结论：** 当前代码未显式固定 MySQL 隔离级别；Postback 在扣量前已执行普通 SELECT。若数据库使用 InnoDB 默认 REPEATABLE READ，未来只增加 scope 锁仍可能基于旧 read view 决策。此项是账本重构的设计约束，必须先解决再编码。
