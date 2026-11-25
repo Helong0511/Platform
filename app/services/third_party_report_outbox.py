@@ -23,6 +23,7 @@ from app.core.third_party_report import (
     update_report_log,
 )
 from app.models.models import ShortLink, ThirdPartyReportLog
+from app.core.third_party_currency import validate_purchase_payload
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,8 @@ async def enqueue_postback_report(
     normalized_platform = (platform or "").strip()
     if not normalized_platform:
         raise ValueError("Postback platform 不能为空")
+    if event == "Purchase":
+        amount, currency = validate_purchase_payload(amount, currency)
 
     # 与直接发送路径使用同一四字段身份锁；锁持有到调用方的转化事务提交/回滚。
     await _lock_report_base_identity(

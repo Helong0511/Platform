@@ -36,6 +36,9 @@ class DataNormalizer:
         # 兼容旧平台的入库/去重字段回退；是否可用于财务扣量身份由显式标记单独决定。
         conversion_id = explicit_conversion_id or click_id_raw
 
+        currency_raw = next((raw_data.get(key) for key in ('currency', 'currency_code', 'currencyCode') if raw_data.get(key) is not None and str(raw_data.get(key)).strip()), None)
+        currency = str(currency_raw).strip().upper() if currency_raw is not None else None
+
         payout_raw = raw_data.get('payout')
         if payout_raw is None or str(payout_raw).strip() == '':
             payout_raw = raw_data.get('amount')
@@ -48,6 +51,7 @@ class DataNormalizer:
             'event_name': event_name,
             'event_value': DataNormalizer._parse_decimal(raw_data.get('event_value')),
             'payout': DataNormalizer._parse_decimal(payout_raw),
+            'currency': currency,
             'devad_id': raw_data.get('devad_id'),
             'os': raw_data.get('os'),
             'carrier': raw_data.get('carrier'),

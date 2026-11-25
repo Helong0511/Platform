@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.telegram.message_sender import send_telegram_message_async as send_telegram_message
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.core.third_party_currency import validate_purchase_payload
 from app.core.utils import APP_TIMEZONE, get_app_now_naive, get_app_now_sql_expression
 from app.models.models import ThirdPartyReportLog, ThirdPartyReportIdentityLock
 from app.core.log_utils import mask_email, mask_hash_prefix, mask_phone
@@ -1704,10 +1705,21 @@ async def update_report_log_params(
                 log_entry.phone = phone
             if ua is not None:
                 log_entry.ua = ua
-            if currency is not None:
-                log_entry.currency = currency
-            if amount is not None:
-                log_entry.amount = amount
+            if log_entry.outbox_enqueued and log_entry.event == "Purchase" and (
+                currency is not None or amount is not None
+            ):
+                candidate_currency = currency if currency is not None else log_entry.currency
+                candidate_amount = amount if amount is not None else log_entry.amount
+                candidate_amount, candidate_currency = validate_purchase_payload(
+                    candidate_amount, candidate_currency
+                )
+                log_entry.currency = candidate_currency
+                log_entry.amount = candidate_amount
+            else:
+                if currency is not None:
+                    log_entry.currency = currency
+                if amount is not None:
+                    log_entry.amount = amount
             if report_params is not None:
                 log_entry.report_params = report_params
             if use_hash is not None:

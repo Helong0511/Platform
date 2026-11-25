@@ -71,6 +71,11 @@ class BftPostbackHandler(PostbackHandler):
             "event_name": event_name,
             "event_value": DataNormalizer._parse_decimal(data.get("event_value")),
             "payout": DataNormalizer._parse_decimal(payout),
+            "currency": (
+                str(next((data.get(key) for key in ("currency", "currency_code", "currencyCode")
+                          if data.get(key) is not None and str(data.get(key)).strip()), "")).strip().upper()
+                or None
+            ),
             "devad_id": self._to_str(data.get("devad_id")),
             "os": self._to_str(data.get("os")),
             "carrier": self._to_str(data.get("carrier")),

@@ -711,25 +711,32 @@ class PostbackProcessor:
         )
         if use_cfg_pb:
             fb_event = (cloak_cfg_pb.postback_report_event or "Purchase").strip() or "Purchase"
-            cur_send = (cloak_cfg_pb.postback_report_currency or "USD").strip().upper() or "USD"
+            configured_currency = (cloak_cfg_pb.postback_report_currency or "").strip()
+            cur_send = configured_currency.upper() if configured_currency else normalized_data.get("currency")
             fixed_val = getattr(cloak_cfg_pb, "postback_report_value", None)
             try:
                 fixed_val = Decimal(str(fixed_val)) if fixed_val is not None else None
             except (TypeError, ValueError, InvalidOperation):
-                fixed_val = None
+                logger.warning("斗篷 Purchase 固定金额配置无效，不创建第三方 Report Outbox")
+                return None
             if fb_event == "Purchase":
-                amt_send = fixed_val if fixed_val is not None and fixed_val > 0 else amount
+                # NULL 表示未配置；0/负数是显式配置错误，不能静默回退上游 payout。
+                amt_send = fixed_val if fixed_val is not None else amount
             else:
                 amt_send = None
                 cur_send = None
         else:
             fb_event = "Purchase"
-            cur_send = "USD"
+            cur_send = normalized_data.get("currency")
             amt_send = amount
 
-        if fb_event == "Purchase" and (amt_send is None or amt_send <= 0):
-            logger.warning("Purchase 金额无效，不创建第三方 Report Outbox")
-            return None
+        if fb_event == "Purchase":
+            try:
+                from app.core.third_party_currency import validate_purchase_payload
+                amt_send, cur_send = validate_purchase_payload(amt_send, cur_send)
+            except ValueError as exc:
+                logger.warning("Purchase 金额/币种校验失败，不创建第三方 Report Outbox：%s", str(exc))
+                return None
 
         report_adsid = fbclid or (
             scalar_query_value(url_params.get("click_id"))
