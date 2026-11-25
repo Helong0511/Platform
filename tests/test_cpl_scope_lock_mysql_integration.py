@@ -379,7 +379,8 @@ async def test_mysql_generated_unique_keys_and_parent_foreign_keys_are_enforced(
                         "INSERT INTO conversion_deduction_configs (offer_id, is_active) "
                         "VALUES (404, 1)"
                     )
-                with pytest.raises(pymysql.err.IntegrityError):
+                # MySQL 8.0 将 CHECK 约束冲突映射为 OperationalError(3819)。
+                with pytest.raises(pymysql.err.OperationalError, match="3819"):
                     cursor.execute(
                         "INSERT INTO conversion_deduction_configs (is_active) VALUES (1)"
                     )
