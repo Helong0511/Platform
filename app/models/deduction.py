@@ -11,6 +11,20 @@ import uuid
 from app.core.utils import get_app_now_naive
 from app.models.base import Base, UserRole
 
+class ConversionDeductionScopeLock(Base):
+    """扣量配置跨 Postback 与管理端写入口共享的 scope 事务锁。"""
+
+    __tablename__ = "conversion_deduction_scope_locks"
+
+    scope_type = Column(String(16), primary_key=True, nullable=False)
+    scope_id = Column(Integer, primary_key=True, nullable=False)
+    created_at = Column(
+        DateTime,
+        default=get_app_now_naive,
+        nullable=False,
+    )
+
+
 class ConversionDeductionConfig(Base):
     """
     转化扣减配置
