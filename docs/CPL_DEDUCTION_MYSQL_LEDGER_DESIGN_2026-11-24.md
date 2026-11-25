@@ -3016,3 +3016,72 @@ FOR UPDATE;
 本轮没有新增表、ORM、迁移或服务代码，也没有运行 MySQL。原因是活动注册表涉及历史配置回填、所有写入口、Postback 决策路径及父表删除路径，单独新增表而不同时改完所有事务入口会制造“部分请求受锁、部分请求绕过锁”的虚假安全感。
 
 下一阶段必须先完整修改上述六个写入口和 Postback 决策读路径，再新增迁移及 MySQL 并发测试；不能先合并一个只创建锁表的空壳迁移。
+
+
+### 60. 父对象删除与 Postback 配置决策路径复核
+
+本节沿 PR 分支源码逐个读取服务实现，确认第 58/59 节锁协议尚有两个必须覆盖的外部入口：父对象删除，以及 Postback 扣量配置读取。以下结论来自当前分支实际代码，不是设计假设。
+
+#### 60.1 父对象删除入口未纳入扣量配置互斥
+
+已检查：
+- `app/services/cpl/advertiser_service.py::delete_advertiser`
+- `app/services/cpl/offer_service.py::delete_offer`
+- `app/services/cpl/publisher_service.py::delete_publisher`
+
+确认结果：
+1. 三个删除服务均执行权限检查、读取父对象、检查各自业务关联，再 `db.delete(...)` + `flush()`；没有获取扣量 scope mutex。
+2. Advertiser 删除只检查是否仍有关联 Offer；Publisher 删除只检查 OfferPublisherAssignment；Offer 删除只检查 Click。它们均没有显式检查 `conversion_deduction_configs`。
+3. `ConversionDeductionConfig` 的 advertiser_id、offer_id、publisher_id 三个外键在 ORM 中均定义 `ondelete="CASCADE"`。因此父对象删除可通过数据库级联删除扣量配置，绕过配置服务的单条/批量删除入口、审计和 Generation 推进。
+4. 删除父对象的关联检查与实际删除之间也没有针对扣量 scope 的互斥，无法阻止并发配置创建或 Postback 决策与父对象删除交错。
+
+修复要求：
+- 三个父对象删除入口必须先获取对应 scope mutex，再在锁内 current-read 检查扣量配置及业务关联。
+- 对仍有关联扣量配置的父对象，首选明确拒绝删除并提示先处理扣量配置；不要依赖 CASCADE 自动清理财务配置。
+- 数据库 FK 策略应调整为 RESTRICT/NO ACTION（具体语法按 MySQL 版本验证），使遗漏业务检查时数据库仍能阻止静默级联。
+- 迁移前检查并清理已存在的孤儿/多层级异常数据；不得自动删除有效财务配置。
+- 删除与 Postback 决策必须共享同一 scope 锁；锁内重新确认父对象存在且未进入删除状态。
+
+#### 60.2 Postback 配置读取路径没有取得数据库 scope mutex
+
+已检查：
+- `app/core/postback/checks/discount_checker.py::calculate`
+- `app/core/deduction/deduction_manager.py::find_config`
+- `app/core/deduction/deduction_cache.py::get_config` / `_load_from_db`
+
+当前路径为：
+1. Postback `DiscountChecker.calculate()` 调用 `find_deduction_config()`。
+2. `DeductionManager.find_config()` 创建 `DeductionConfigCache`，按 Offer → Advertiser → Publisher 顺序查询。
+3. `DeductionConfigCache.get_config()` 先读取数据库 Generation，再读取 Redis 缓存；缓存未命中时执行普通 SQL SELECT。
+4. DB 查询按 `priority DESC LIMIT 1` 返回一条激活配置，没有锁定 scope mutex，也没有 `FOR UPDATE` current-read。
+5. `DeductionManager.find_config()` 捕获配置查找异常后，按 `DEDUCTION_FAIL_OPEN` 返回 None 或重新抛出。
+
+因此，单独给管理后台六个写方法加锁仍不够：Postback 可能在配置切换/删除期间从 Redis 旧缓存或普通 SELECT 得到配置。Generation fencing 能防止部分旧缓存写入新 Generation key，但它本身不是事务互斥锁，不能替代财务决策路径的 scope lock。
+
+修复要求：
+- Postback 在读取任何扣量配置缓存、Generation 或统计基线之前，必须依据归因数据确定候选 scope，并在当前 MySQL 事务中按统一顺序锁定。
+- 获锁后必须用 current-read 读取父对象、激活配置及活动唯一性注册表；配置读取不能继续使用未受锁保护的 Redis 配置对象作为决策依据。
+- 如保留 Redis，只能用于非权威展示/预热；财务决策必须以锁内 MySQL 当前状态为准。不能把“Generation 已变化”误当成“当前事务已拿到新配置”。
+- 配置无记录与数据库/Redis/Generation 故障必须保持不同语义；故障时是否 fail-open 必须按财务策略明确，不得静默当作无配置。
+- 锁的持有范围至少覆盖读取配置、执行扣量决策、写入事件 ledger/扣量凭证并提交；若决定缩短锁范围，必须另有经证明的配置版本快照和一致性协议，不能只做普通缓存读取。
+
+#### 60.3 当前 ORM 与服务入口的附加问题
+
+- `resolve_config_level_target()` 当前按 advertiser → offer → publisher 优先返回第一个非空 ID；如果多列同时非空，会静默选择其中一个。虽然 Postback 的 `DiscountChecker._resolve_config_scope()` 已拒绝零个/多个 scope，但后台更新、启停、删除服务仍调用旧 helper，不能据此认为所有入口都已 fail-closed。
+- `update_deduction_config()` 对 `update_data` 中任何 `hasattr(config, field)` 的字段执行 setattr；这使通用更新接口可能修改 `is_active` 或 scope 字段，绕开专用启停/目标迁移规则。应使用显式允许字段白名单，并禁止通过通用更新修改 scope 和 `is_active`。
+- `batch_update_status()` 先普通 SELECT 配置，再用 bulk UPDATE 批量改状态；没有 scope 去重排序、互斥锁、锁内重读及逐 scope 唯一性验证。
+- `batch_delete()` 同样先普通 SELECT，再 bulk DELETE；没有 scope mutex 或活动注册表同步处理。
+- `DeductionConfigCache` 在单次请求对象中缓存 Generation；这对普通缓存读有性能意义，但在新锁协议中必须避免在拿锁前初始化 Generation，否则可能在事务内沿用旧快照。
+
+#### 60.4 本轮结论与风险
+
+已确认的实施缺口：
+- 父对象删除 3 条路径未加锁，且 FK CASCADE 可绕过配置服务；
+- Postback 财务配置读取通过 Redis/普通 SELECT，未使用 scope mutex；
+- 通用更新可写入激活状态/潜在 scope 字段；
+- 批量启停/删除仍为无锁 bulk SQL；
+- 管理后台层级解析与 Postback 层级校验强度不一致。
+
+因此，锁协议必须形成一个共享的事务级服务，并由 Postback、六个配置写入口和三个父对象删除入口统一调用。只修配置 CRUD 或只增加数据库锁表都不足以消除竞态。
+
+本轮仅补充源码审计记录，没有修改业务代码、数据库结构或生产数据；没有真实 MySQL/Redis 环境，未声称并发测试完成。风险：**高（配置切换与财务决策存在竞态，父对象级联删除可能丢失配置）**。PR #205 必须继续保持 Draft。
