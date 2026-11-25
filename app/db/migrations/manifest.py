@@ -213,7 +213,7 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     Migration(
         revision="20261125_cpl_deduction_scope_unique",
         path="sql/migrations/20261125_cpl_deduction_scope_unique.sql",
-        sha256="8941bc54f0062ec97f3f65463a930337e6fa11dc0f388b99d62a72faac9ab598",
+        sha256="aa31d7a02d092b2f6bdeb6859cf757f2169403c16a087d5e8a07730a1f6b4a84",
         depends_on=(
             "20261125_cpl_deduction_scope_locks",
             "20261125_cpl_deduction_scope_restrict_fks",
