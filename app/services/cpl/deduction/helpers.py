@@ -53,7 +53,7 @@ async def lock_deduction_scopes(
         return
 
     dialect = db.bind.dialect.name if db.bind is not None else ""
-    for level, target_id in normalized
+    for level, target_id in normalized:
         if dialect == "mysql":
             await db.execute(
                 text(
