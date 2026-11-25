@@ -104,6 +104,7 @@ def process_pending_conversion(
         from app.models.models import (
             PendingPostbackConversion,
             PostbackConversion,
+            PostbackEventReceipt,
             Click,
             TelegramPostbackApprovalAudit,
         )
@@ -223,6 +224,60 @@ def process_pending_conversion(
                 # 历史待审批行可能 event_name 为 NULL；统一为 default 后再查重和入库。
                 event_name = normalize_event_name(pending.event_name)
                 pending.event_name = event_name
+                # 收据可能代表已提交的 volume-deducted 事件；没有正式 conversion
+                # 不等于事件未处理，必须先锁定 canonical receipt key 并阻止直接转正。
+                event_receipt_id = db.execute(
+                    sync_select(PostbackEventReceipt.id)
+                    .where(
+                        PostbackEventReceipt.platform == pending.platform,
+                        PostbackEventReceipt.conversion_id == pending.conversion_id,
+                        PostbackEventReceipt.event_name == event_name,
+                    )
+                    .limit(1)
+                    .with_for_update()
+                ).scalar_one_or_none()
+                if event_receipt_id is not None:
+                    previous_status = pending.status
+                    add_postback_approval_audit(
+                        db,
+                        pending_conversion_id=pending.id,
+                        conversion_id=None,
+                        actor_type="telegram",
+                        actor_id=actor_telegram_user_id,
+                        source="telegram",
+                        action="approve",
+                        outcome="event_receipt_exists",
+                        previous_status=previous_status,
+                        new_status=previous_status,
+                        telegram_callback_query_id=callback_query_id,
+                    )
+                    db.commit()
+                    business_committed = True
+                    try:
+                        _api(
+                            chat_id,
+                            bot.edit_message_text(
+                                chat_id=chat_id,
+                                message_id=message_id,
+                                text="⚠️ 该事件已有已提交的 Postback 收据，未创建正式转化；请刷新并核对事件处理结果。",
+                                reply_markup=None,
+                            ),
+                        )
+                        _api(
+                            chat_id,
+                            bot.answer_callback_query(
+                                callback_query_id=callback_query_id,
+                                text="事件已有处理收据，已阻止重复转正",
+                            ),
+                        )
+                    except Exception as e:
+                        logger.warning("更新已有事件收据提示失败：error_type=%s", type(e).__name__)
+                    logger.info(
+                        "Telegram 审批发现已存在 Postback 收据，阻止直接转正：pending_id=%s",
+                        pending_id,
+                    )
+                    return
+
                 # 与 PostbackPendingService 保持一致：批准前检查正式记录，防止 Telegram
                 # 回调路径绕过幂等保护重复创建同一转化。
                 existing_conversion_id = db.execute(
