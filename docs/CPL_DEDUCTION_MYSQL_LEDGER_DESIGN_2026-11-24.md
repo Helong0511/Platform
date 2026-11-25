@@ -3175,10 +3175,23 @@ FOR UPDATE;
 #### 62.3 尚未完成、仍然阻断 PR #205 的事项
 
 1. **活动配置唯一性迁移尚待真实数据库验收**：ORM、`sql/platform.sql` 和新 migration 已加入三个 generated-column UNIQUE KEY 与 exactly-one-scope CHECK；迁移前置检查会拒绝历史异常/重复数据，不会自动清理。尚未在正式结构副本上运行 migration、核对实际 MySQL 版本与生成列/约束行为；迁移未执行前，生产数据库仍没有这层最终防线。
-2. **真实 MySQL 并发验收未完成**：当前新增的是单元级顺序/调用边界测试；尚未在两个以上独立 MySQL 连接下验证 no_config 与首次创建竞争、2/10/50 并发启停、反向批量锁、父对象删除竞争、死锁/超时和 commit-unknown。
+2. **真实 MySQL 并发验收已完成第一批**：GitHub Actions 临时 MySQL 8.0 服务上，新增集成测试已通过 no_config 与首次创建竞争、REPEATABLE READ 旧快照后的 current-read、反向批量 scope 锁、2/10/50 并发首次创建、生成列唯一约束、父对象 FK RESTRICT、历史重复激活配置迁移 fail-closed。尚未覆盖并发启停/批量删除与 Postback 的完整交叉矩阵、父对象删除与创建/Postback 的双向竞争、死锁/锁等待超时恢复和 commit-unknown。
 3. **Redis 与 MySQL 财务非原子问题仍存在**：Redis decision_seq / deducted 计数可能在 MySQL commit/rollback/commit-unknown 后留下幽灵状态；没有等价于 CapReservationLedger 的 CPL 事件级 reservation/恢复账本。
 4. **24 小时 DB 滑动窗口与 Redis 48 小时计数仍不一致**：旧事件离开 DB 统计窗口后 Redis scope counter 不会同步递减；Redis 重启/过期也可能重置基线。
 5. **事件级权威财务决策 ledger 仍不完整**：仍需为每个已验证事件身份持久化唯一事件键、决策状态、配置快照、扣量结果和恢复状态，并与 Postback receipt/conversion 在同一 MySQL 事务内保持一致。
-6. **迁移需真实 MySQL 演练**：尤其是历史环境 FK 的实际 DELETE_RULE、迁移执行器对 PREPARE/DDL 语句的处理、锁表物理结构与索引，必须用 SHOW CREATE TABLE / information_schema 验收，不能仅凭 CI 推断生产迁移成功。
+6. **生产历史库迁移仍需演练**：CI 已在隔离 MySQL 8.0 数据库执行三条 scope migration，验证 PREPARE/DDL、历史重复数据 fail-closed、FK RESTRICT、生成列和唯一索引。正式生产库仍须先执行只读冲突扫描，核对 SHOW CREATE TABLE / information_schema 中的真实 FK、锁表物理结构与索引，再安排受控迁移；CI 隔离库通过不代表生产历史数据一定可直接迁移。
 
 因此，本轮已提交“统一 scope 事务互斥 + 数据库激活唯一性迁移”的代码实现，但尚未完成真实数据库迁移与财务一致性最终修复。PR #205 继续保持 Draft；在 migration 真实验收、MySQL 并发/故障注入和 Redis/MySQL 事件账本修复全部通过前，禁止合并。
+
+
+#### 62.4 本轮 CI 验收记录（2026-11-25）
+
+- PR Head：`466db064223222b06922c6733cd304fcc5075245`
+- Full Audit CI：成功。
+- Emergency Security CI：成功。
+- Backend：`1490 passed, 1 skipped`，耗时约 33.64 秒。
+- Frontend：lint/build 成功。
+- Python 3.10 / 3.11 / 3.13 兼容性与 Python 3.13 password hash 检查全部成功。
+- 新增 8 个真实 MySQL 8.0 scope 集成场景全部通过，包括 2/10/50 并发创建和迁移冲突保护。
+
+该 CI 结果证明上述隔离 MySQL 场景通过，不证明生产库已应用 migration，也不证明 CPL Redis 计数与 MySQL 财务 ledger 已原子化。PR #205 仍保持 Draft。
