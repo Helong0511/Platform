@@ -162,7 +162,8 @@ async def test_unauthorized_telegram_callback_persists_denied_audit(monkeypatch)
 class _FakeTelegramSession:
     def __init__(self, pending, existing_conversion_id=None, fail_commit=False, fail_refresh=False):
         self.pending = pending
-        self.results = [pending, None, existing_conversion_id]
+        # 查询顺序：Pending 行、重复 callback、事件 receipt、正式 conversion。
+        self.results = [pending, None, None, existing_conversion_id]
         self.events = []
         self.fail_commit = fail_commit
         self.fail_refresh = fail_refresh
