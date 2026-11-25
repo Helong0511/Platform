@@ -1898,3 +1898,39 @@ READ COMMITTED 使每条普通一致性读都看到该语句开始前已提交�
 - 对所有批准路径做静态调用图/路由测试，确保未来新增入口不能绕过权威事件服务。
 
 **本节结论：** 当前待审批批准路径只检查正式转化表并直接创建 PostbackConversion，既不检查已有事件 receipt，也不执行 CPL 扣量决策。这是 PR #205 财务账本实现必须覆盖的另一条生产写入路径。当前仅完成源码审计和文档记录，尚未修改业务代码，也未执行上述真实 MySQL 测试；PR #205 继续保持 Draft。
+
+
+### 41. 第十六阶段：Postback READ COMMITTED 会话工厂已落地，但集成验证仍不足
+
+在第 39 节提出隔离边界后，分支已新增实现提交 `251bfa17dd8d5df9466742b4e32fdc8a8dd78b7a`（`fix(postback): isolate callback transactions at read committed`），并新增测试提交 `0ce2ecbd0602da0adb5e36d61c82d9e1e93c60ad`。
+
+#### 41.1 当前实现
+
+- `app/core/database.py` 保留原 `engine` 与 `AsyncSessionLocal`，不改变普通业务会话。
+- MySQL/MariaDB 使用 `engine.execution_options(isolation_level="READ COMMITTED")` 创建 `postback_engine`。
+- SQLite 等其它方言继续复用原 `engine`，不强制设置 MySQL 隔离级别。
+- `PostbackAsyncSessionLocal` 绑定 `postback_engine`。
+- `get_postback_db()` 已改为使用 `PostbackAsyncSessionLocal`。
+- SQLAlchemy execution-options 引擎视图复用原连接池；不会额外创建第二套连接池。
+
+#### 41.2 当前测试的覆盖边界
+
+新增 `tests/test_postback_session_isolation_factory.py` 只有两个工厂级断言：
+1. Postback Engine 与普通 Engine 使用同一连接池，Session factory 分别绑定正确的 Engine。
+2. MySQL/MariaDB 执行选项为 READ COMMITTED，其它方言不被强制修改。
+
+这两个测试没有连接真实 MySQL，也没有证明：
+- checkout 后实际数据库会话的 `@@session.transaction_isolation` 确实为 READ-COMMITTED；
+- 事务开始前设置隔离级别，不会被连接池复用/连接初始化事件覆盖；
+- Session 首次普通 SELECT 建立读视图后，第二个事务提交，再由第一个事务取得锁并执行普通 SELECT，是否能读到新提交数据；
+- 所有后台重放、人工重试、管理端补单等调用 `PostbackProcessor.process()` 的路径都使用 `get_postback_db()`。
+
+#### 41.3 后续必须补齐
+
+- 增加真实 MySQL 8.x 双连接集成测试，显式断言 `SELECT @@session.transaction_isolation`。
+- 做 RR 对照组与 READ COMMITTED 组的快照测试，验证事务 A 先普通读、事务 B 写入提交、事务 A 再读时的差异。
+- 检查所有 `PostbackProcessor.process()` 生产调用点及其 Session 来源；不能只检查两个公开路由。
+- 对不使用 `get_postback_db()` 的内部调用点，要么改为 Postback 专用会话，要么明确禁止进入新的扣量账本处理。
+- 在真实 MySQL 测试中同时覆盖事务回滚、死锁重试、连接池复用及 commit-unknown 场景。
+
+**本节结论：** Postback 专用 READ COMMITTED Engine/Session Factory 已有代码实现并新增了工厂级测试，这是实质性进展；但真实 MySQL 隔离行为和全部调用链覆盖尚未验证。它只是后续 scope 锁与权威事件账本的基础，不代表 CPL 财务一致性阻断项已经解除。
