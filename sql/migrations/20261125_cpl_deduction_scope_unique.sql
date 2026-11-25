@@ -4,7 +4,7 @@
 SET @cpl_invalid_scope_count = (
     SELECT COUNT(*)
     FROM conversion_deduction_configs
-    WHERE
+    WHERE is_active IS NULL OR
         (advertiser_id IS NOT NULL) +
         (offer_id IS NOT NULL) +
         (publisher_id IS NOT NULL) <> 1
@@ -45,6 +45,7 @@ EXECUTE cpl_scope_unique_validation;
 DEALLOCATE PREPARE cpl_scope_unique_validation;
 
 ALTER TABLE conversion_deduction_configs
+    MODIFY COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1,
     ADD COLUMN active_advertiser_id INT
         GENERATED ALWAYS AS (
             CASE WHEN is_active = 1 THEN advertiser_id ELSE NULL END
