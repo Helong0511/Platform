@@ -108,3 +108,28 @@ async def test_postback_locks_all_candidate_scopes_before_current_reads(monkeypa
     assert calls[1] == ("offer", 1)
     manager._find_advertiser_config.assert_not_awaited()
     manager._find_publisher_config.assert_not_awaited()
+
+
+def test_deduction_model_has_database_scope_uniqueness_guards():
+    from app.models.deduction import ConversionDeductionConfig
+
+    table = ConversionDeductionConfig.__table__
+    unique_names = {
+        constraint.name
+        for constraint in table.constraints
+        if constraint.__class__.__name__ == "UniqueConstraint"
+    }
+    assert {
+        "uq_cpl_active_advertiser",
+        "uq_cpl_active_offer",
+        "uq_cpl_active_publisher",
+    }.issubset(unique_names)
+    assert any(
+        constraint.name == "chk_cpl_deduction_exactly_one_scope"
+        for constraint in table.constraints
+    )
+    assert {
+        "active_advertiser_id",
+        "active_offer_id",
+        "active_publisher_id",
+    }.issubset(table.columns.keys())
