@@ -9,11 +9,12 @@ import httpx
 import hashlib
 import json
 import secrets
+from decimal import Decimal
 from contextlib import asynccontextmanager
 from typing import Optional
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, update, or_
+from sqlalchemy import and_, select, update, or_
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1382,6 +1383,18 @@ async def retry_report_log(log_id: int, db=None):
                 ThirdPartyReportLog.platform.is_not(None),
                 ThirdPartyReportLog.platform != "",
                 ThirdPartyReportLog.status == "failed",
+                # Purchase 历史载荷在重新排队前必须仍满足金额/币种约束；
+                # 条件写入与重试状态切换在同一条 UPDATE 中原子判定，避免先读后改竞态。
+                or_(
+                    ThirdPartyReportLog.event != "Purchase",
+                    and_(
+                        ThirdPartyReportLog.amount.is_not(None),
+                        ThirdPartyReportLog.amount > 0,
+                        ThirdPartyReportLog.amount <= Decimal("99999999.9999"),
+                        ThirdPartyReportLog.currency.is_not(None),
+                        ThirdPartyReportLog.currency.op("REGEXP")(r"^[A-Za-z]{3}$"),
+                    ),
+                ),
                 ThirdPartyReportLog.manual_retry_count < MAX_MANUAL_REPORT_RETRIES,
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                 or_(

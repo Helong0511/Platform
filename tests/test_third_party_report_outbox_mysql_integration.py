@@ -7,6 +7,7 @@ import hashlib
 import ipaddress
 import os
 import uuid
+from decimal import Decimal
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import quote_plus
@@ -1537,6 +1538,8 @@ async def test_mysql_manual_retry_is_atomic_against_admin_and_worker_races(monke
                 identity_scope="platform_scoped",
                 platform="meta",
                 destination_pixel_id="pixel-ci-retry",
+                amount=Decimal("21.50"),
+                currency="USD",
                 status="failed",
                 outbox_enqueued=True,
                 attempt_count=1,
