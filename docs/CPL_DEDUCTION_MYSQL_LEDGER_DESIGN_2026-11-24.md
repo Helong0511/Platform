@@ -2522,3 +2522,68 @@ helper 会解析 click attribution、规范化 event_name、构造 `PostbackConv
 已在精确 Head SHA 上确认正常 ConversionSaver 之外，Web/IP Pending helper 和 Telegram callback 各自直接构造正式转化；Web/IP 两个审批入口共用 Pending helper，Telegram 使用独立同步 Session 并自行 commit。上述审批路径没有复用正常 Postback Pipeline 的完整扣量、Cap、receipt 和 Outbox 决策链。
 
 本轮只完成关键入口代码核查并形成可复核的架构证据；没有修改业务代码、没有新增 AST CI 测试、没有运行真实 MySQL/Redis 故障注入。全仓库 455 个 Python 文件尚未完成 AST 全量扫描。PR #205 必须继续保持 Draft，不得合并。
+
+
+### 51. 审批入口细节复核：权限控制存在，但正式事件收据仍未纳入审批判定
+
+#### 51.1 Web 人工审批与 IP 自动审批的事务行为
+
+进一步读取 `postback_pending_service.py` 与 `api_v1/postback/routes/pending.py` 后确认：
+
+- Web 人工批准路由通过 `Depends(require_admin)` 限制管理员，并调用 `pending_handler.approve_pending_conversion()`。
+- Web 服务先通过 `build_pending_for_update_statement(...)` 锁定 Pending 行，检查 Pending 状态，再调用 `_pending_conversion_exists()` 检查正式 `PostbackConversion`。
+- IP 自动批准按 request_ip 查询 pending 行并 `with_for_update()`，逐条使用 `db.begin_nested()` SAVEPOINT；每条记录构造正式转化并写审批审计，SAVEPOINT 成功后才增加批次成功计数。
+- 自动批准方法不自行提交外层事务，最终仍由调用方统一提交；因此“某条记录 SAVEPOINT 成功”不等于“整批已经持久提交”。外层 commit 失败时，批次内所有成功 SAVEPOINT 的改动仍可能整体回滚。
+
+这些锁和 SAVEPOINT 能减少同一 Pending 行的并发处理及单条约束错误污染批次，但不等价于 canonical event receipt 锁，也不提供 CPL quota reservation 或恢复状态。
+
+#### 51.2 关键缺口：审批前只查正式转化，不查 volume-deducted receipt
+
+Web helper 的 `_pending_conversion_exists()` 查询目标是正式 `PostbackConversion`，并按 platform、conversion_id、规范化 event_name 检查。IP 自动批准和 Web 人工批准都依赖该检查。
+
+然而正常 Postback 的 volume-deducted 分支会提交 `postback_event_receipts` 和扣量日志，却不会创建正式 `PostbackConversion`。因此存在如下状态：
+
+- canonical event 已被正常 Postback 接收；
+- receipt 已存在并表示该事件已被处理；
+- CPL 决策为 volume-deducted；
+- 正式 conversion 不存在。
+
+在这个状态下，单纯查询 `PostbackConversion` 会得到“尚无正式转化”。Web/IP Pending 审批随后直接构造正式 conversion，就可能把已经扣量的事件重新变成正式转化，绕过原有扣量终态。Telegram 的“正式转化已存在”检查同样不能识别只有 receipt、没有 conversion 的 volume-deducted 事件。
+
+这是比一般的重复审批更具体的财务一致性问题：正式表唯一键不能代替事件 receipt；Pending 状态锁也不能代替事件级唯一决策锁。
+
+#### 51.3 Telegram 权限与回调幂等边界
+
+本轮也检查了 `handle_postback_approval()`：
+
+- 回调数据先解析 action 和 pending_id；
+- 使用 `_is_authorized_admin(user_id, chat_type)` 校验 Telegram 管理员身份；
+- 未授权操作不改变业务记录，并尝试写入 `outcome="denied"` 的审批审计；
+- 审批任务通过 `submit_approval_task()` 投递，任务队列可返回 duplicate / submitted / busy；
+- 后台同步函数另查 `telegram_callback_query_id`，重复 callback 会写入 `duplicate_callback` 审计并停止再次执行。
+
+因此，本轮没有发现“Telegram callback 完全没有管理员权限校验”的证据，不应把它误报为权限绕过。真正的问题是：授权成功后的业务执行仍直接创建正式 conversion，未查询 CPL event receipt / decision ledger，也没有复用 Cap reservation 和 Outbox 的统一决策链。
+
+`callback_query_id` 只标识 Telegram 的一次按钮回调；同一个 Pending 事件可以因不同回调 ID、Web 请求或 IP 自动批准再次进入业务路径。它不能替代上游 canonical event identity，也不能提供跨入口事件幂等。
+
+#### 51.4 修复验收必须覆盖的状态组合
+
+统一审批命令必须在事件级互斥保护下，至少识别以下情况：
+
+| 事件当前状态 | 审批行为 |
+|---|---|
+| 尚无 receipt / ledger / conversion，且 Pending 可批准 | 按明确批准策略执行一次完整业务决策 |
+| receipt 已存在，终态为 volume-deducted | 不得直接创建 conversion；返回既有扣量终态 |
+| ledger 为处理中或 reservation 未决 | 不得绕过；等待或由恢复流程完成 |
+| ledger 为 not_deducted 且决策已提交 | 依策略返回既有结果，不重新消费 quota |
+| conversion 已存在 | 返回既有正式记录，不重复创建 |
+| receipt 与 conversion / ledger 状态矛盾 | 进入受控对账，不自动猜测并覆盖 |
+| Pending 已被其他入口批准/拒绝 | 返回既有审批终态并记录重复尝试 |
+
+测试需覆盖 Web / IP / Telegram 三入口交错并发，以及 receipt-only、conversion-only、ledger-only 和状态矛盾等数据组合。
+
+#### 51.5 本轮结论与范围声明
+
+已确认 Web 管理员路由有 `require_admin`，Telegram callback 有管理员身份校验、任务去重和 callback ID 审计；这些控制值得保留。但三个入口的事件业务幂等仍未统一：Pending 锁、正式 conversion 查重和 Telegram callback 去重都不能识别“receipt 已提交但正式 conversion 不存在”的 volume-deducted 终态。
+
+本轮仅补充审批入口权限、事务和 receipt-only 状态分析；未修改业务代码、未新增 migration 或测试，也未运行真实 MySQL + Redis 并发故障注入。PR #205 继续保持 Draft，不得合并。
