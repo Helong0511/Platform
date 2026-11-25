@@ -2645,3 +2645,31 @@ Web helper 的 `_pending_conversion_exists()` 查询目标是正式 `PostbackCon
 本轮基于 PR #205 当前 Head 的代码和测试文件，确认 receipt 唯一键及 MySQL 并发测试有实际价值，但它们只覆盖事件接收幂等，不覆盖 Redis CPL reservation 与 MySQL commit 的一致性。Redis 仍按 scope 维护序号和扣量计数，事件哈希未成为事件级 reservation，volume-deducted commit 失败也没有 CPL ledger recovery。
 
 本轮只完成代码路径与测试范围复核并补充审计记录；没有修改业务代码、没有新增 migration、没有运行真实 Redis 故障注入。PR #205 必须继续保持 Draft，不得合并。
+
+
+### 53. Pending Web/IP 审批收据防护：已补充锁定读取，但尚非全入口统一决策
+
+#### 53.1 本轮代码变更
+
+本轮在 app/services/cpl/postback_pending_service.py 增加 _pending_event_receipt_exists()：
+
+- 使用 platform + conversion_id + normalize_event_name(event_name) 查询 PostbackEventReceipt。
+- 查询使用 FOR UPDATE，意图是在 MySQL InnoDB 下以 receipt 的唯一复合索引对已存在行或目标键范围执行锁定读取，减少审批与正常 Postback 收据预留交错时的竞态。
+- Web 人工审批在创建正式 conversion 前先检查 receipt；发现已提交收据时拒绝直接转正，并通过现有独立审批审计记录 event_receipt_exists。
+- IP 白名单批量自动审批在每条 SAVEPOINT 内先检查 receipt；发现收据时不改变 Pending 状态、不创建正式 conversion，计入 skipped_count 并记录 event_receipt_exists。
+- 新增 tests/test_postback_pending_receipt_guard.py，验证 canonical identity 规范化、receipt 存在/不存在分支以及 MySQL 方言 SQL 包含 FOR UPDATE。
+
+#### 53.2 保护边界与重要限制
+
+这项变更是针对已发现 receipt-only 绕过的一道防护，不代表统一业务命令已经完成：
+
+1. 目前只覆盖 Web 和 IP 自动审批共用的 PostbackPendingService；Telegram 同步审批仍是独立实现，尚未复用该 guard。
+2. FOR UPDATE 的锁语义必须在真实 MySQL InnoDB、当前隔离级别、唯一索引和并发事务下验证；SQLite 或 mock 测试不能证明 gap/record lock 行为。
+3. 该查询依赖 PostbackEventReceipt 的唯一索引 (platform, conversion_id, event_name)。生产数据库必须确认迁移已执行且索引真实存在。
+4. 仍需用真实 MySQL 并发测试验证“审批先锁定空 receipt key”与“Postback 先插入 receipt”两种交错顺序，检查是否发生等待、死锁、重试或最终重复 conversion。
+5. 本变更不能解决 Redis CPL quota 与 MySQL commit 的跨系统原子性，也不能替代 MySQL CPL decision ledger、事件级 reservation 和恢复 Worker。
+6. Web/IP 目前在发现 receipt 时采取拒绝/跳过策略，不会擅自把 receipt 推断为某一种最终扣量原因；需要后续统一 ledger 提供可解释的正式事件终态。
+
+#### 53.3 本轮验证状态
+
+代码和测试文件已提交到 PR #205；本轮没有在本地或真实 MySQL 环境执行 pytest，也没有运行 MySQL + Redis 并发故障注入。CI 需要以最新 Head SHA 的实际结果为准。Telegram 路径、统一审批命令、财务 ledger 和跨系统恢复仍是未完成阻断项。PR #205 必须保持 Draft，不得合并。
