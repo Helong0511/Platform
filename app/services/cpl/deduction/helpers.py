@@ -154,6 +154,7 @@ async def check_existing_config(
     level: ConfigLevel,
     target_id: int,
     exclude_config_id: Optional[int] = None,
+    exclude_config_ids: Optional[set[int]] = None,
 ) -> None:
     """同一层级目标不可存在第二条激活配置。"""
     conditions = [ConversionDeductionConfig.is_active == True]
@@ -167,6 +168,8 @@ async def check_existing_config(
 
     if exclude_config_id is not None:
         conditions.append(ConversionDeductionConfig.id != exclude_config_id)
+    if exclude_config_ids:
+        conditions.append(ConversionDeductionConfig.id.notin_(exclude_config_ids))
 
     result = await db.execute(select(ConversionDeductionConfig).where(and_(*conditions)))
     if result.scalars().first():
