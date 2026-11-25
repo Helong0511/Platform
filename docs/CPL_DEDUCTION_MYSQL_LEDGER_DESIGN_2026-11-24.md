@@ -2082,3 +2082,54 @@ READ COMMITTED 使每条普通一致性读都看到该语句开始前已提交�
 当前源码可以确认：Pending 入队阶段明确不占 Cap；正常白名单 Postback 成功路径会执行 Cap reservation、下游转发队列和第三方 Report Outbox；但 Web、IP 自动、Telegram 三类批准路径只直接创建正式转化，没有执行这些正常路径步骤。
 
 这属于正式转化状态与财务/运营副作用不一致的独立风险。当前仅补充源码审计证据和修复验收要求，未修改业务代码，也未执行真实 MySQL + Redis 故障注入测试。PR #205 继续保持 Draft，不得合并。
+
+
+### 45. 第二十阶段：审批入口沿用普通 get_db / 独立同步 Engine，未进入 Postback READ COMMITTED 事务边界
+
+第 39 节已为普通 Postback 回调建立专用 READ COMMITTED Session Factory；第 42、43 节指出 Telegram 使用独立同步 Engine。本轮继续核对 Web 与 IP 白名单路由的 Depends 注入，确认三类审批入口均未使用普通回调的 Postback Session Factory。
+
+#### 45.1 Web 手动批准使用普通 get_db
+
+文件：`app/api_v1/postback/routes/pending.py`
+
+`approve_pending_conversion()` 路由通过 `Depends(get_db)` 获取 AsyncSession，再调用 `pending_handler.approve_pending_conversion(pending_id, db, current_user)`。
+
+`get_db()` 绑定 `AsyncSessionLocal` / 普通 `engine`；MySQL/MariaDB 的 READ COMMITTED execution-options 只绑定在 `PostbackAsyncSessionLocal`。因此 Web 批准不会自动继承第 39 节为 Postback 回调建立的隔离级别。
+
+#### 45.2 IP 白名单自动批准也使用普通 get_db
+
+文件：`app/api_v1/postback/ip_whitelist.py`
+
+创建白名单路由通过 `Depends(get_db)` 获取普通 AsyncSession，再调用 `postback_ip_whitelist_service.create_ip_whitelist()`。加白后自动批准在该业务调用链中复用同一 Session，并调用 `PostbackPendingService.auto_approve_pending_by_ip()`。
+
+因此批量批准的外层事务、SAVEPOINT 和最终提交都发生在普通 Session 上；不能因为它由 Postback IP 白名单服务触发，就认为它使用了 Postback 专用隔离级别。
+
+#### 45.3 当前形成三套隔离边界
+
+| 入口 | Session 工厂 | 当前可确认的隔离配置 |
+|---|---|---|
+| 通用平台回调 | `PostbackAsyncSessionLocal` | MySQL/MariaDB READ COMMITTED execution-options |
+| BFT 回调 | `PostbackAsyncSessionLocal` | MySQL/MariaDB READ COMMITTED execution-options |
+| Web 手动批准 | `AsyncSessionLocal`（`get_db`） | 未在应用工厂显式指定 |
+| IP 加白自动批准 | `AsyncSessionLocal`（`get_db`） | 未在应用工厂显式指定 |
+| Telegram 同步批准 | `get_sync_session_factory()` | 独立 PyMySQL Engine，未显式指定 |
+
+这里的“未显式指定”不等于断言生产连接必然为 REPEATABLE READ；实际值仍须在真实 MySQL Session 上查询 `@@session.transaction_isolation`。但它足以证明应用没有建立统一、可测试的隔离级别约束。
+
+#### 45.4 仅把业务方法改成统一服务仍然不够
+
+如果统一事件处理服务继续接收任意调用方传入的 Session，那么 Web、IP 白名单和 Telegram 仍可能带入不同的 Engine、隔离级别、事务已开始状态和连接生命周期。
+
+特别是批量 IP 自动批准：当前方法使用每条记录 SAVEPOINT、批次外层统一提交。迁移时不能简单地为每条 Pending 记录另开 Session 或单独 commit，否则会破坏批次原有的原子性与失败隔离语义。
+
+#### 45.5 修复要求
+
+1. 统一事件处理服务必须定义唯一、明确的事务边界；所有入口只能提交业务命令和审批上下文，不得传入隔离策略不明的任意 Session 后继续执行财务决策。
+2. Web 手动批准必须在第一条 SQL 前取得 Postback 专用 READ COMMITTED Session，或者由统一服务自行创建并拥有事务。
+3. IP 白名单批量批准必须在同一个 Postback 专用外层事务中处理所有记录；每条 SAVEPOINT 仍只隔离单条失败，不能逐条独立提交。
+4. Telegram 必须移除直接写转化的同步业务实现，改为安全的异步命令桥接或统一服务入口；不得通过同步 Engine 另行实现账本、Cap 或扣量决策。
+5. 所有入口的事务必须共同遵循事件唯一键、scope 锁、配置读取、决策账本、转化/扣量终态、审批审计与 Outbox 的锁顺序和提交协议。
+6. 真实 MySQL 集成测试必须从每一种生产入口的实际依赖工厂创建 Session，并断言 `@@session.transaction_isolation`；同时覆盖连接池复用和事务开始前隔离级别生效。
+7. 测试批量批准中一条记录失败、外层事务回滚、批次提交未知、同一事件由 Web/Telegram/正常回调交错到达等场景。
+
+**本节结论：** 普通 Postback 回调已有 READ COMMITTED Session Factory，但 Web 手动批准和 IP 加白自动批准仍使用普通 `get_db()`，Telegram 则使用独立同步 Engine。三类批准入口尚未纳入统一事务隔离边界。当前只完成源码核查和审计记录，未修改业务代码，也未执行真实 MySQL 隔离集成测试。PR #205 继续保持 Draft，不得合并。
