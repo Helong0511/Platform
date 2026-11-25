@@ -2722,3 +2722,24 @@ Head `229c8708e7697414e2ab696be0c691ca335d37f1` 的 Full Audit backend 为 `7 fa
 #### 55.3 验证边界
 
 本轮代码与迁移已提交，但尚未在本地执行 pytest，也尚未观察到本轮最新 Head 的 CI 结果。迁移需要在部署环境执行后才能让已有数据库接受新枚举；不得只部署应用代码而跳过迁移。仍需真实 MySQL 验证迁移前后 CHECK 行为、事务锁与并发竞争。PR #205 继续 Draft，不能合并。
+
+
+### 56. 最新 Head CI 回归：FakeSession 查询序列与迁移清单计数未同步
+
+#### 56.1 失败证据
+
+PR #205 Head 7ea8cf4b98d4a5578b359c1b6dd9aac74ea8c4ab 的 Full Audit CI run 45536823114 已完成，Backend 单元测试结果为 5 failed, 1452 passed, 1 skipped；Emergency Security CI run 45536823132 成功。
+
+失败项：
+- tests/test_migration_manifest.py::test_manifest_is_explicit_and_contains_no_unreviewed_files：新增 20261125 migration 后，测试仍断言清单数量为 28，实际为 29。
+- tests/test_telegram_postback_approval_audit.py 中 4 个审批用例：FakeSession 仍只为旧查询链提供 3 个结果；实际审批链现在依次查询 Pending 行、重复 callback、PostbackEventReceipt、正式 PostbackConversion，receipt 查询新增后缺少一个空结果，触发 IndexError，导致审批事务回滚。
+
+#### 56.2 修复
+
+- 将迁移清单显式数量断言从 28 更新为 29；仍保留 revision 白名单断言和 manifest 完整性校验，不放宽迁移文件集合检查。
+- 将 Telegram FakeSession 默认结果序列更新为 [pending, None, None, existing_conversion_id]，分别对应 Pending、callback 去重、receipt 查重和正式 conversion 查重。
+- 重复 callback 用例仍显式设置第二个查询结果为非空 ID，继续验证重复回调阻断分支。
+
+#### 56.3 验证边界
+
+以上是根据最新 CI 日志定位的测试夹具/断言问题，不代表财务一致性阻断项已解决。修复提交后必须等待新 Head 的 Full Audit 和 Emergency Security；同时继续保留真实 MySQL + Redis 的 CPL reservation/commit 故障注入、事件级 ledger、24 小时滑动窗口恢复和统一审批入口等阻断项。PR #205 继续 Draft，不得合并。
