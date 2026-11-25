@@ -3221,12 +3221,15 @@ FOR UPDATE;
 - `a54ae228db5227f37d5d08b759ab8c5afb00a02d`：移除 Redis decision sequence / deducted reservation 对扣量决策的影响，改为 MySQL 严格统计。
 - `fabbc6e4dfe11a3de7d747f38475c9c5af2692d2`：重写 fail-open/fail-close 测试，验证财务决策不访问 Redis，并恢复 proportional / round_robin 顺序策略的 MySQL 计数路径。
 - `bada9476ffc024200ccaf4ee1760727e432336c9`：增加真实 MySQL scope 锁与统计事务集成测试。
+- `1ebc0dc17150bdd24c33ef5920e9415309badcb1`：将顺序策略回归测试切换到 MySQL processed 计数语义。
+- `2d6e192c5d7c68bd18452ccdd942c2e2f47eea18`：保留空窗口首次扣量名额，兼容既有冷启动行为。
+- `191cd923197e5da8808ac8756a1245d1e9720042`、`2e178030413641ec6094226cccde13c340b9106c`：更新事件身份/策略测试并清理过期 Redis 策略分支变量。
 
 关键行为：
 1. `_get_stats_for_decision()` 只调用 `get_recent_stats(strict=True)`，不再初始化或递增 Redis key。
 2. 所有策略均使用 MySQL 窗口统计；随机/哈希策略继续使用稳定事件身份，proportional / round_robin 使用锁内 `processed` 计数，不再因 Redis 顺序号缺少事件幂等而被整体跳过。
 3. scope 锁由 `find_config()` 在同一 Session 内提前取得，并持有到 Postback 最终 commit/rollback。同一 scope 的事件决策串行，统计读取不会与另一个同 scope 的事件写入交错。
-4. 统计基线只包含此前已提交事件。当前事件是否扣量按 `floor((stats.total + 1) * ratio)` 计算本次窗口额度，再与此前已扣量数比较；`+1` 是因为当前事件尚未提交、不会出现在本次 SQL count 中。
+4. 统计基线只包含此前已提交事件。当前事件是否扣量按 `max(1, floor((stats.total + 1) * ratio))` 计算本次窗口额度，再与此前已扣量数比较；`+1` 是因为当前事件尚未提交、不会出现在本次 SQL count 中；`max(1, ...)` 保留历史冷启动语义：正比例策略在空窗口首次命中时仍可扣减一条。
 5. MySQL 24 小时半开窗口自动滚动；Redis 重启、TTL 过期或缓存丢失不再改变财务决策。
 6. MySQL 日志/转化/receipt 同事务提交或回滚。提交失败时统计贡献随事务回滚；COMMIT 响应不确定但实际成功时，重试由 receipt 或正式转化唯一键识别，不会再次占用扣量名额。
 7. MySQL 统计失败时遵循既有 `DEDUCTION_FAIL_OPEN`：fail-open 只跳过 volume deduction，可继续 amount deduction；fail-closed 抛出并要求 Postback 重试。scope lock 获取失败始终 fail-closed。
@@ -3249,5 +3252,17 @@ FOR UPDATE;
 - READ COMMITTED 是当前 Postback 专用 Session 的生产隔离级别；MySQL 集成统计测试显式使用 READ COMMITTED。不要将此结论推广到管理端 Session 或其它数据库事务。
 - 该方案不宣称跨库原子事务；它通过将扣量额度、统计基线和扣量凭证收敛到同一 MySQL 事务域，消除原 Redis/MySQL 双写。
 - 生产数据库迁移与历史数据扫描仍按第 62 节执行；当前 CI 不代表正式生产库已应用迁移。
+
+#### 63.5 最新 Head CI 验收记录（2026-11-25）
+
+- PR Head：`2e178030413641ec6094226cccde13c340b9106c`
+- Full Audit CI：成功。
+- Emergency Security CI：成功。
+- Backend：`1491 passed, 1 skipped`，耗时约 38.58 秒。
+- Frontend：成功。
+- Python 3.10 / 3.11 / 3.13 依赖兼容性检查成功；Python 3.13 password hash compatibility 成功。
+- 新增真实 MySQL scope 锁 + 权威统计回滚/并发测试通过；事件身份、顺序策略、无 Redis 决策与冷启动额度回归测试通过。
+
+该结果仅证明 CI 临时 MySQL 8.0 和自动化环境通过，不代表正式生产库已执行 migration 或完成历史数据扫描。
 
 PR #205 继续保持 Draft，直到最新 Head 全部 CI 通过、完整 Postback 成功/失败路径审计完成，并完成生产 migration 预检与部署方案验收。
