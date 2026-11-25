@@ -193,7 +193,14 @@ export function useConversionDeductionForm({ fetchData }) {
           await createDeductionConfig(data);
           ElMessage.success('添加成功');
         } else {
-          await updateDeductionConfig(currentConfig.value.id, data);
+          // 编辑接口只修改业务参数；状态和配置目标分别走专用流程。
+          const {
+            level: _level,
+            target_id: _targetId,
+            is_active: _isActive,
+            ...updateData
+          } = data;
+          await updateDeductionConfig(currentConfig.value.id, updateData);
           ElMessage.success('更新成功');
         }
 
