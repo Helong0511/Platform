@@ -1992,3 +1992,39 @@ READ COMMITTED 使每条普通一致性读都看到该语句开始前已提交�
 - 增加静态架构测试，扫描生产代码中直接创建 `PostbackConversion` 的位置，要求每个写入点要么位于统一事件处理服务内部，要么有明确且经过财务确认的例外策略。
 
 **本节结论：** Telegram 审批是第三条已确认的独立正式转化写入路径。第 40 节的修复范围必须扩展至 Web 手动审批、IP 加白自动审批和 Telegram 同步审批三类入口。当前只完成源码核实与审计记录，尚未修改这三条业务路径，也未完成真实 MySQL + Redis 故障注入验证；PR #205 必须继续保持 Draft。
+
+### 43. 第十八阶段：Telegram 同步数据库引擎形成独立连接池，隔离级别与连接预算尚未纳入统一管理
+
+本轮复核 Telegram 审批 Session 的底层创建方式，确认它不只是绕过 Postback 事件账本，还创建了独立的同步 SQLAlchemy Engine 和连接池。
+
+#### 43.1 源码证据
+
+文件：`app/core/telegram/sync_db.py`
+
+- `get_sync_session_factory()` 使用 `@lru_cache(maxsize=1)` 在进程内缓存同步 Session 工厂。
+- 工厂内部每次进程首次调用时创建独立 `create_engine()`，DSN 将异步 MySQL 驱动转换为 `pymysql`。
+- 连接池参数固定为 `pool_size=5`、`max_overflow=3`，即该 Engine 单进程最多可持有 8 个连接。
+- 该同步 Engine 没有显式配置 `isolation_level`，其会话隔离级别依赖 MySQL 服务端/账号/连接初始化默认值。
+- Telegram 审批回调直接用该 Session 执行 Pending 行锁、正式转化写入、审批审计和 commit。
+- 该连接池独立于 `app/core/database.py` 的异步 Engine。异步 Engine 的 Postback READ COMMITTED execution-options 视图不会自动影响这个同步 Engine。
+
+#### 43.2 资源预算影响
+
+当前异步连接池预算如果只按 `(DB_POOL_SIZE + DB_MAX_OVERFLOW) × worker 数` 计算，会漏掉 Telegram 同步池。
+
+若有 W 个进程都初始化 Telegram 同步 Session 工厂，则同步池理论最大连接数为 `8 × W`。数据库连接总预算至少应计入：
+
+`异步业务池总连接 + Telegram 同步池总连接 + Migration/管理任务连接 + 运维预留连接`
+
+不能因为同步池由 `lru_cache` 缓存，就误认为整个部署只有一份连接池；缓存范围是单个 Python 进程。若 Telegram Bot 被多个 API worker 或多个独立进程初始化，每个进程都可能有自己的同步池。
+
+#### 43.3 修复要求
+
+- 先确认 Telegram Bot 的实际运行拓扑：独立单进程还是嵌入多个 API worker；据此核算连接池最大连接数，禁止无上限地在每个 Web worker 内初始化 Bot polling。
+- 把同步池纳入统一 DB 连接预算配置，不应在代码中固定 5/3 而不计入环境总预算。
+- 为同步 Engine 明确事务隔离级别，并在真实 MySQL 连接上断言；但这只是隔离配置，不代表 Telegram 审批已经接入统一事件账本。
+- 为同步 Engine 增加明确的应用关闭/生命周期 dispose 机制，确保 Bot 停止时释放连接池。
+- 最终应消除 Telegram 审批直接写入 `PostbackConversion` 的独立业务路径，迁移到统一事件处理服务；若暂时保留同步适配层，适配层只能提交业务命令，不得自行实现财务决策和转化写入。
+- 增加多进程连接池预算测试/配置校验，以及同步 Engine 连接隔离、连接回收、关闭释放测试。
+
+**本节结论：** Telegram 审批当前拥有独立的 PyMySQL 同步连接池（单进程最多 8 个连接），其隔离级别未显式固定，也未证明纳入统一连接预算和生命周期管理。该问题会扩大并发写路径的隔离差异，并可能造成生产数据库连接数低估。当前只完成源码审计记录，尚未修复同步池资源管理，也未完成真实 MySQL 验证。
