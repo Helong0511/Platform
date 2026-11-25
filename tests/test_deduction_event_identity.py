@@ -86,10 +86,10 @@ async def test_click_id_alone_never_authorizes_volume_deduction():
 
 
 @pytest.mark.asyncio
-async def test_ordered_strategies_are_paused_until_mysql_ledger_is_authoritative():
+async def test_ordered_strategies_use_mysql_processed_count_under_scope_lock():
     manager = DeductionManager(db=object())
     manager._get_stats_for_decision = AsyncMock(
-        side_effect=AssertionError("ordered strategy must not use Redis sequence")
+        return_value=ConversionStats(total=3, deducted=0, processed=3)
     )
 
     result = await manager.apply_deduction(
@@ -102,9 +102,10 @@ async def test_ordered_strategies_are_paused_until_mysql_ledger_is_authoritative
         },
     )
 
-    assert result.should_deduct_volume is False
-    assert result.final_volume == 1
-    manager._get_stats_for_decision.assert_not_awaited()
+    # 第 4 个事件命中 25% 比例策略，当前事件的额度按 total + 1 计算。
+    assert result.should_deduct_volume is True
+    assert result.final_volume == 0
+    manager._get_stats_for_decision.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -117,7 +118,7 @@ async def test_hash_strategy_uses_event_key_instead_of_click_id():
     }
     captured = {}
     manager._get_stats_for_decision = AsyncMock(
-        return_value=ConversionStats(total=0, deducted=0, processed=0)
+        return_value=ConversionStats(total=3, deducted=0, processed=3)
     )
 
     def capture_decision_key(config, stats, decision_key=""):
@@ -125,7 +126,6 @@ async def test_hash_strategy_uses_event_key_instead_of_click_id():
         return True
 
     manager.should_deduct_volume = capture_decision_key
-    manager._incr_decision_deducted = AsyncMock(return_value=True)
 
     result = await manager.apply_deduction(
         {"original_payout": "10.00"},
@@ -137,4 +137,3 @@ async def test_hash_strategy_uses_event_key_instead_of_click_id():
 
     assert captured["key"] == DeductionManager._build_event_decision_key(identity)
     assert result.should_deduct_volume is True
-    manager._incr_decision_deducted.assert_awaited_once()
