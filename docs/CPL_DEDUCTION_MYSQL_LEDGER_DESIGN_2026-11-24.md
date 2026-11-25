@@ -1947,3 +1947,48 @@ READ COMMITTED 使每条普通一致性读都看到该语句开始前已提交�
 因此，批准路径缺少事件身份并不是因为 Pending 数据天然无法识别事件；入队时已经具备 platform、conversion_id、event_name。修复时应复用同一规范化规则，不应重新引入 click_id 作为 conversion identity 的回退。
 
 另外，IP 白名单创建服务会在同一数据库 Session 中调用批量自动批准；批次的 SAVEPOINT 仅隔离单条处理错误，外层事务仍由路由依赖统一提交/回滚。必须保留这一事务边界，并在批量批准时确保事件 receipt/ledger 与转化创建同事务提交。不能在每条 SAVEPOINT 内单独 commit，也不能把已处理但外层回滚的事件标记成已完成。
+
+### 42. 第十七阶段：Telegram 同步审批是第三条独立的转化写入路径
+
+在第 40 节确认 Web 手动审批和 IP 加白自动审批绕过统一扣量后，本轮继续检查所有管理员审批入口，发现 Telegram 按钮回调使用另一套同步 SQLAlchemy Session，并直接创建正式转化。
+
+#### 42.1 Telegram 入口的源码事实
+
+文件：`app/core/telegram/callback_handlers/postback_approval.py`
+
+- `process_pending_conversion()` 通过 `get_sync_session_factory()` 创建同步 Session；该路径不经过异步 `get_postback_db()`，也没有使用 Postback 专用 READ COMMITTED Session Factory。
+- 审批前通过 `build_pending_for_update_statement()` 锁定 Pending 行，并按 `platform + conversion_id + normalized event_name` 查询 `PostbackConversion`。
+- 若正式转化不存在，代码直接构造 `PostbackConversion`，更新 Pending 状态，写入 Telegram 审批审计，再执行 `db.commit()`。
+- 该方法没有查询或争取 `postback_event_receipts`，没有调用 `PostbackProcessor.process()`、`DeductionManager`、`step_apply_discount()`，也没有写入 CPL volume deduction 决策。
+- Telegram 的 `telegram_callback_query_id` 只用于防止同一个 Telegram 按钮回调重复执行；它不是上游事件身份，不能替代 `platform + conversion_id + normalized event_name`。
+- 现有“正式转化已存在”检查只能保护已入库事件；若同一事件此前已经命中 volume deduction、只留下 receipt 而没有正式转化，Telegram 审批仍可能创建正式转化。
+
+#### 42.2 隔离级别与事务协议也不一致
+
+该入口使用同步 Session 工厂，未证明其连接隔离级别为 READ COMMITTED，也没有证据表明它参与未来 MySQL scope lock 与权威事件账本协议。
+
+不能只在异步 `get_postback_db()` 上设置隔离级别，就声称所有 Postback 写入路径已经使用统一隔离策略。只要 Telegram 审批仍直接写入正式转化，它就可能与正常回调并发修改同一事件和扣量 scope，却不遵守同一锁顺序、账本唯一键和提交协议。
+
+#### 42.3 必须统一的全部入口
+
+统一事件处理服务至少必须覆盖：
+
+1. 通用平台回调：`app/services/cpl/postback_receive_service.py`。
+2. BFT 专用回调：`app/services/cpl/postback_bft_service.py`。
+3. Web 管理端手动批准：`app/api_v1/postback/routes/pending.py` → `PostbackPendingService.approve_pending_conversion()`。
+4. IP 加白单条/批量自动批准：`PostbackIpWhitelistService` → `PostbackPendingService.auto_approve_pending_by_ip()`。
+5. Telegram 同步审批：`app/core/telegram/callback_handlers/postback_approval.py` → `process_pending_conversion()`。
+6. 后续新增的后台重放、人工补单、批处理任务和内部调用入口。
+
+所有入口必须把同一 canonical event identity 交给同一个事务化服务。Telegram callback query ID 作为审批操作审计字段保留，不得作为业务事件幂等键。
+
+#### 42.4 修复和验收要求
+
+- Telegram 审批不得再自行构造并直接提交 `PostbackConversion`；应调用统一事件处理服务，或将同步入口改造成安全的异步桥接，确保复用同一权威事务协议。
+- 不允许通过“先同步写转化、再异步补 receipt/扣量”的方式拼接事务。
+- 统一服务必须在同一 MySQL 事务中处理 canonical receipt/ledger、scope lock、CPL 决策、扣量日志或正式转化、Pending 状态与审批审计。
+- 所有生产写入入口必须在第一条 SQL 前取得正确隔离级别的 Session；如果同步入口无法复用该协议，就必须迁移入口，而不是假设默认隔离级别一致。
+- 新增测试：Telegram 与 Web 对同一 Pending 并发批准；Telegram 审批与正常白名单回调交错；已有 volume receipt 的事件通过 Telegram 批准；Telegram commit rollback/commit-unknown；重复 callback query 与不同 callback query 的同事件重放；Telegram 与批量自动批准的并发锁顺序。
+- 增加静态架构测试，扫描生产代码中直接创建 `PostbackConversion` 的位置，要求每个写入点要么位于统一事件处理服务内部，要么有明确且经过财务确认的例外策略。
+
+**本节结论：** Telegram 审批是第三条已确认的独立正式转化写入路径。第 40 节的修复范围必须扩展至 Web 手动审批、IP 加白自动审批和 Telegram 同步审批三类入口。当前只完成源码核实与审计记录，尚未修改这三条业务路径，也未完成真实 MySQL + Redis 故障注入验证；PR #205 必须继续保持 Draft。
