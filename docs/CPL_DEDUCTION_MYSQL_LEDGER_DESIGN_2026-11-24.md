@@ -2743,3 +2743,81 @@ PR #205 Head 7ea8cf4b98d4a5578b359c1b6dd9aac74ea8c4ab 的 Full Audit CI run 4553
 #### 56.3 验证边界
 
 以上是根据最新 CI 日志定位的测试夹具/断言问题，不代表财务一致性阻断项已解决。修复提交后必须等待新 Head 的 Full Audit 和 Emergency Security；同时继续保留真实 MySQL + Redis 的 CPL reservation/commit 故障注入、事件级 ledger、24 小时滑动窗口恢复和统一审批入口等阻断项。PR #205 继续 Draft，不得合并。
+
+
+### 57. CPL 扣量跨 Redis/MySQL 事务的根因确认与 MySQL 权威账本实施约束
+
+#### 57.1 已核对的真实调用链
+
+当前实现位于 `app/core/deduction/deduction_manager.py`、`app/core/postback/checks/discount_checker.py` 及 Postback 主处理流程：
+
+1. `DeductionManager._get_stats_for_decision()` 先读取 MySQL 24 小时统计，再调用 Redis Lua 推进 `decision_seq`。
+2. 命中扣量后，`_reserve_volume_deduction()` 或 `_incr_decision_deducted()` 在 Redis 中更新 scope 级 `decision_deducted`。
+3. `DiscountChecker.calculate()` 调用 `log_deduction()`；该方法向 SQLAlchemy Session 添加日志并 `flush()`，并不提交事务。
+4. 后续 Postback 处理流程才提交 MySQL 事务。提交失败/回滚/提交结果未知时，当前扣量代码没有与 Redis 预留绑定的事件级恢复凭证。
+
+由此确认：事件决策键稳定不等于扣量名额预留幂等。当前 Redis Lua 只操作 scope 计数，没有按 canonical event identity 保存 reservation 状态；同一事件重试可能再次消耗 scope 计数。MySQL 回滚不会回滚 Redis。
+
+#### 57.2 目标数据模型（需先完成迁移评审，不可直接在生产执行）
+
+新增 MySQL InnoDB 权威事件决策表，建议字段：
+
+- `id BIGINT PRIMARY KEY`
+- `platform VARCHAR(50) NOT NULL`
+- `external_conversion_id VARCHAR(255) NOT NULL`
+- `event_name VARCHAR(100) NOT NULL`（写入前统一规范化，不允许 NULL）
+- `event_key BINARY(32) NOT NULL`（对长度前缀编码后的 canonical identity 做 SHA-256）
+- `scope_type VARCHAR(16) NOT NULL`、`scope_id BIGINT NOT NULL`
+- `config_id BIGINT NULL`、`config_snapshot JSON NOT NULL`
+- `decision_status VARCHAR(24) NOT NULL`（至少区分 accepted、volume_deducted、amount_adjusted、skipped、rejected；最终枚举必须由业务语义评审确定）
+- `original_volume`、`deducted_volume`、`final_volume`、`original_amount`、`deducted_amount`、`final_amount`
+- `decision_reason VARCHAR(100) NULL`、`created_at DATETIME(6) NOT NULL`、`committed_at DATETIME(6) NULL`
+
+唯一约束必须以业务身份为准：`UNIQUE(platform, external_conversion_id, event_name)`；同时为 `(scope_type, scope_id, created_at)` 建立统计索引。event_key 用于稳定检索/审计，不可替代唯一约束本身。上线前必须核查字段长度、字符集/排序规则、大小写敏感性、历史 NULL event_name 和历史重复身份，不能对历史数据盲目回填。
+
+另建 scope 串行化锁表，主键 `(scope_type, scope_id)`。锁记录只用于串行化同一财务范围内的决策，不是事件事实本身。所有扣量配置变更和扣量事件决策必须遵守相同的 scope 锁顺序；多 scope 锁按固定字典序获取，避免反向加锁死锁。
+
+#### 57.3 单一 MySQL 事务的决策协议
+
+目标协议必须由正常 Postback、Web 审批、IP 自动审批、Telegram 审批共同调用，不能各自复制一份实现：
+
+1. 验证并规范化 canonical identity；缺失平台、外部转化 ID 或 event_name 时不得退回 click_id。
+2. 确定配置命中的唯一 scope；按固定顺序获取 scope mutex。
+3. 在同一 MySQL 事务内以唯一键创建/锁定事件决策行；重复事件读取已提交的既有终态并返回，不再次消耗扣量名额。
+4. 在 scope 锁保护下，使用明确的当前读语义读取配置和统计窗口内事件；计算 24 小时窗口的分母、已扣量数量及本次名额。统计窗口统一采用半开区间 `[start, end)`。
+5. 将最终决策、配置快照、金额/数量、原因、receipt 及必要的 conversion/deduction log 写入同一 MySQL 事务。
+6. 仅当事务提交成功后才向调用方确认最终结果。Redis 缓存/计数更新只能在提交后通过可靠 outbox 或可重建任务执行，不得先行影响财务决策。
+7. 若提交结果未知，按 canonical identity 查询账本：已存在终态则返回既有结果；不存在则安全重试；不能用 Redis 计数猜测事务结果。
+
+#### 57.4 24 小时窗口与并发约束
+
+- 不再将 48 小时 TTL 的 Redis 累加计数当作 24 小时滑动窗口统计。
+- 决策统计必须从 MySQL 权威事件账本按 `created_at >= start AND created_at < end` 计算，或使用严格可校验、可回补的 MySQL 时间桶汇总；Redis 丢失、重启、过期不能改变财务结果。
+- scope mutex 必须覆盖“读取窗口统计—计算名额—写入事件终态”的整个事务区间，否则两个并发事务可能基于相同快照同时获得最后一个名额。
+- 必须明确隔离级别和读取语义。不能假设 InnoDB REPEATABLE READ 下普通 SELECT 会看到锁等待后最新提交；需要采用经真实 MySQL 验证的 READ COMMITTED 或 locking/current read 方案。
+- 高频 scope 的锁等待、事务时长、死锁重试、锁超时和连接池耗尽必须有指标及上限；不能无限重试。
+
+#### 57.5 迁移与上线顺序
+
+1. 先做只读预检：生产 SHOW CREATE TABLE、唯一键/排序规则冲突扫描、历史 NULL event_name 扫描、当前配置 scope 异常扫描、数据量和索引空间估算。
+2. 新增 ledger/lock/outbox 表及迁移 manifest；迁移可重复执行且有 checksum，禁止删除或重写历史扣量日志。
+3. 先部署兼容读代码和观测指标，确认所有 Postback worker 版本与入口覆盖情况。
+4. 再切换统一 MySQL 决策事务；在确认没有旧 worker 后，关闭旧 Redis 财务计数写入。
+5. Redis 统计键只作为缓存逐步失效/清理，不把旧值回灌为账本事实。
+6. 完成对账后才允许启用新的扣量策略；出现未知状态时 fail-closed 并进入可恢复队列，不得默默放行或重复扣量。
+
+#### 57.6 必须通过的故障注入矩阵
+
+- 同一事件串行重试、2/10/50 并发重试：唯一决策行一条，扣量名额只消耗一次。
+- Redis 不可用、Redis key 丢失、Redis 重启：财务决策与 MySQL 账本结果一致。
+- MySQL 在写 ledger 前失败、写 ledger 后提交前失败、提交响应丢失：重试可按唯一事件身份确定最终状态。
+- 进程在 MySQL commit 成功后、HTTP ACK 前崩溃：重试返回原终态。
+- 两个不同事件争抢 scope 最后一个扣量名额：最多一个获得名额。
+- 事件进入/离开 24 小时窗口边界：分母与扣量数按半开区间准确变化。
+- 配置启停与事件决策并发、配置删除与事件决策并发：遵循同一 scope 锁协议。
+- READ COMMITTED/REPEATABLE READ、死锁、锁超时、连接断开、主从切换分别验证。
+- 每个测试必须检查账本行、receipt、conversion、deduction log、scope 统计和最终 ACK，不能只断言函数返回值。
+
+#### 57.7 当前状态
+
+本节是根据当前源码确认的根因和实施约束，不是已完成的代码修复。当前仍使用 Redis scope 计数先行、MySQL 后提交的旧路径；尚未新增权威事件账本、统一事务命令或恢复 Worker，也未运行真实 MySQL + Redis 故障注入。不得据此宣称财务一致性已修复。PR #205 保持 Draft，禁止合并。
