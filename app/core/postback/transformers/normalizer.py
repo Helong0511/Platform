@@ -36,7 +36,15 @@ class DataNormalizer:
         # 兼容旧平台的入库/去重字段回退；是否可用于财务扣量身份由显式标记单独决定。
         conversion_id = explicit_conversion_id or click_id_raw
 
-        currency_raw = next((raw_data.get(key) for key in ('currency', 'currency_code', 'currencyCode') if raw_data.get(key) is not None and str(raw_data.get(key)).strip()), None)
+        currency_keys = ("currency", "currency_code", "currencyCode")
+        currency_raw = next(
+            (
+                raw_data.get(key)
+                for key in currency_keys
+                if raw_data.get(key) is not None and str(raw_data.get(key)).strip()
+            ),
+            None,
+        )
         currency = str(currency_raw).strip().upper() if currency_raw is not None else None
 
         payout_raw = raw_data.get('payout')

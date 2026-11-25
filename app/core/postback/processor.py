@@ -712,7 +712,11 @@ class PostbackProcessor:
         if use_cfg_pb:
             fb_event = (cloak_cfg_pb.postback_report_event or "Purchase").strip() or "Purchase"
             configured_currency = (cloak_cfg_pb.postback_report_currency or "").strip()
-            cur_send = configured_currency.upper() if configured_currency else normalized_data.get("currency")
+            cur_send = (
+                configured_currency.upper()
+                if configured_currency
+                else normalized_data.get("currency")
+            )
             fixed_val = getattr(cloak_cfg_pb, "postback_report_value", None)
             try:
                 fixed_val = Decimal(str(fixed_val)) if fixed_val is not None else None
