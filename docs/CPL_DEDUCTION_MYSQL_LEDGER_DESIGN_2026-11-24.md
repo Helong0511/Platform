@@ -2701,3 +2701,24 @@ Web helper 的 `_pending_conversion_exists()` 查询目标是正式 `PostbackCon
 #### 54.3 验证与 CI 状态
 
 本轮提交了 Telegram receipt guard 和源码结构回归测试，但没有在当前环境执行 pytest，也没有连接真实 MySQL/Redis 做并发故障注入。最新已观察到的 Full Audit CI 在前一个 Head `8bf98392a09c9bc91ebdb337ceb003ba715c5124` 的 backend `Run unit tests` 步骤失败；本次提交后的新 Head 必须等待并检查新 CI，不能沿用旧 SHA 的结果。PR #205 继续保持 Draft，不得合并。
+
+
+
+### 55. 审批收据阻断结果枚举与数据库约束同步修复
+
+#### 55.1 CI 根因
+
+Head `229c8708e7697414e2ab696be0c691ca335d37f1` 的 Full Audit backend 为 `7 failed, 1448 passed, 1 skipped`。其中 Telegram 审批用例失败的直接原因不是锁查询本身，而是新分支写入 `outcome="event_receipt_exists"` 时，`add_postback_approval_audit()` 的 `_ALLOWED_OUTCOMES` 白名单及 ORM/MySQL CHECK 约束未同步允许该枚举，分别触发 `ValueError` 或数据库约束拒绝。原有 FakeSession 查询序列也未为新增 receipt SELECT 预留结果，导致归因/审批测试后续查询错位。
+
+#### 55.2 本轮修复
+
+- 将 `event_receipt_exists` 加入 `app/core/postback/approval_audit.py` 的结果白名单。
+- 将同一枚举加入 `TelegramPostbackApprovalAudit` ORM 列注释和 CHECK 约束。
+- 新增迁移 `20261125_postback_approval_receipt_outcome.sql`，对现有表的 `chk_tg_postback_audit_outcome` 执行 DROP CHECK + ADD CONSTRAINT，只扩展允许值，不修改历史数据。
+- 将迁移登记到 `app/db/migrations/manifest.py`，依赖 `20261124_postback_event_deduction_receipts`，并固定 SHA-256。
+- 更新 Telegram 测试 FakeSession 的查询序列，显式为新增 receipt 查询提供空结果。
+- 增加审计枚举允许性测试，以及 Telegram receipt-only 事件不得创建正式 conversion、Pending 保持原状态的回归测试。
+
+#### 55.3 验证边界
+
+本轮代码与迁移已提交，但尚未在本地执行 pytest，也尚未观察到本轮最新 Head 的 CI 结果。迁移需要在部署环境执行后才能让已有数据库接受新枚举；不得只部署应用代码而跳过迁移。仍需真实 MySQL 验证迁移前后 CHECK 行为、事务锁与并发竞争。PR #205 继续 Draft，不能合并。
