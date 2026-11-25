@@ -105,9 +105,10 @@ class PostbackPendingService:
                 PostbackEventReceipt.platform == pending.platform,
                 PostbackEventReceipt.conversion_id == pending.conversion_id,
                 PostbackEventReceipt.event_name == event_name,
-            ).limit(1)
+            ).limit(1).with_for_update()
         )
         return result.scalar_one_or_none() is not None
+
     async def _create_conversion_from_pending(
             self,
             pending: PendingPostbackConversion,
