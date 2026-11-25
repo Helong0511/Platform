@@ -2932,3 +2932,87 @@ ORDER BY id;
 这是基于当前源码与 SQL schema 的已确认缺陷，不是推测。当前没有新增 scope mutex、激活唯一数据库约束或真实 MySQL 并发测试。本轮仅补充审计证据和修复验收标准，没有改动业务数据或启停任何配置。
 
 风险：**高（财务决策配置不确定性）**。在唯一性约束、统一锁协议、历史数据预检和真实 MySQL 并发测试完成前，不得启用多入口并发配置变更，不得将 PR #205 视为可合并。PR #205 继续保持 Draft。
+
+
+
+### 59. 配置服务写入口清单与锁表实施边界（源码复核）
+
+本节基于 `app/services/cpl/conversion_deduction_service.py` 当前完整方法清单复核，补充第 58 节的实施范围。配置服务中实际存在以下写入口：
+
+| 方法 | 写操作 | 必须锁定的对象 |
+|---|---|---|
+| `create_deduction_config` | INSERT 新配置 | 输入目标 scope |
+| `update_deduction_config` | 修改配置字段（当前可触及 is_active） | 原 scope；如允许改目标，还必须同时锁原、新 scope |
+| `update_deduction_config_status` | 单条启停 | 配置所属 scope |
+| `delete_deduction_config` | 单条删除 | 配置所属 scope |
+| `batch_update_status` | 批量启停 | 所有受影响 scope，去重排序后依次锁定 |
+| `batch_delete` | 批量删除 | 所有受影响 scope，去重排序后依次锁定 |
+
+读取方法 `get_deduction_configs`、`get_deduction_config_by_id`、统计和日志查询不是配置写入口；但 Postback 的配置解析属于财务决策读路径，必须在决策事务中与上述写入共用 scope 锁/版本语义，不能读取到正在切换的配置状态。
+
+#### 59.1 建议采用独立 scope lock registry，而不是仅锁配置行
+
+建议表结构（最终 SQL 需经 MySQL 版本验证）：
+
+```sql
+CREATE TABLE conversion_deduction_scope_locks (
+    scope_type VARCHAR(16) NOT NULL,
+    scope_id BIGINT NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (scope_type, scope_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+
+获取锁时在当前事务内执行：
+
+```sql
+INSERT INTO conversion_deduction_scope_locks
+    (scope_type, scope_id)
+VALUES
+    (:scope_type, :scope_id)
+ON DUPLICATE KEY UPDATE scope_id = VALUES(scope_id);
+
+SELECT scope_type, scope_id
+FROM conversion_deduction_scope_locks
+WHERE scope_type = :scope_type AND scope_id = :scope_id
+FOR UPDATE;
+```
+
+说明：
+- 主键包含 scope_type，避免 advertiser=7 与 offer=7 错误互斥或错误冲突。
+- INSERT/SELECT 必须使用同一个 SQLAlchemy Session/事务。
+- 锁记录不能在业务事务结束时删除，否则并发事务可能在删除/重建锁行时出现锁对象生命周期竞态；该表是小型永久互斥注册表，应监控增长并只允许受控清理。
+- 所有写路径必须先解析 scope，再按固定顺序加锁；拿锁后重新读取目标与配置。
+- Postback 决策必须在读取配置、Generation 和统计基线之前取得相同 scope 锁；不能先读缓存再锁，否则可能持有旧配置快照。
+- 对同一事件涉及多个非空 scope 时，按固定顺序锁定全部 scope；任何入口不得采用相反顺序。
+- 仅引入锁表仍不等于数据库唯一约束。应同时实现活动配置唯一性约束/注册表，并保留唯一约束作为最终防线。
+
+#### 59.2 配置目标变更规则
+
+为减少复杂锁和迁移风险，优先禁止通过 `update_deduction_config` 修改 advertiser_id、offer_id、publisher_id。若业务确实需要迁移配置目标，应作为单独的显式操作：
+1. 读取旧目标并计算新目标；
+2. 同时锁旧 scope 与新 scope，统一排序；
+3. 在锁内 current-read 重新确认配置仍属于旧 scope；
+4. 检查新 scope 是否已有激活配置；
+5. 同一事务更新配置并维护活动唯一性注册表；
+6. 提交后再清理缓存；清理失败通过 Generation 版本使旧缓存不可用。
+
+#### 59.3 活动唯一注册表的事务语义
+
+可以采用 `conversion_deduction_active_scopes(scope_type, scope_id, config_id)`，以 `(scope_type, scope_id)` 为主键，并对 `config_id` 建立唯一约束。启用时在持有 scope lock 后 INSERT；停用/删除时在同一事务内按 config_id 删除；配置与注册表必须原子提交。
+
+该方案必须处理：
+- 已有激活配置回填；
+- 同一 config_id 是否可能错误关联多个 scope；
+- 目标变更时旧、新注册表行的原子替换；
+- FK 删除策略，避免级联删除配置后留下孤儿注册表；
+- 事务提交结果未知时重查配置和注册表，不盲目重复 INSERT/DELETE；
+- 数据库唯一冲突映射为明确业务冲突，而非 500 或静默覆盖。
+
+不得在锁表/注册表尚未被所有应用版本共同遵守时先启用约束并部署混合版本；发布顺序应为维护窗口/兼容代码、迁移与预检、所有 Worker 同步升级、最后启用写流量。
+
+#### 59.4 本轮未实施的事项
+
+本轮没有新增表、ORM、迁移或服务代码，也没有运行 MySQL。原因是活动注册表涉及历史配置回填、所有写入口、Postback 决策路径及父表删除路径，单独新增表而不同时改完所有事务入口会制造“部分请求受锁、部分请求绕过锁”的虚假安全感。
+
+下一阶段必须先完整修改上述六个写入口和 Postback 决策读路径，再新增迁移及 MySQL 并发测试；不能先合并一个只创建锁表的空壳迁移。
