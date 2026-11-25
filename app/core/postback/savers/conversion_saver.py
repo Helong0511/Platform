@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.models import PostbackConversion, Click, Product
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive_floor_second
 
 logger = logging.getLogger(__name__)
 
@@ -314,7 +314,7 @@ class ConversionSaver:
             client_id=trusted_client_id,
             conversion_status=conversion_status,
             raw_data=raw_data_json,
-            created_at=get_app_now_naive()
+            created_at=get_app_now_naive_floor_second()
         )
         
         db.add(conversion)
