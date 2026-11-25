@@ -3265,4 +3265,28 @@ FOR UPDATE;
 
 该结果仅证明 CI 临时 MySQL 8.0 和自动化环境通过，不代表正式生产库已执行 migration 或完成历史数据扫描。
 
+
+
+#### 63.6 MySQL DATETIME 秒精度舍入导致的窗口漏计修复
+
+最新 MySQL 重跑暴露一个真实边界问题：Postback 转化和扣量日志的列类型是 MySQL `DATETIME`（默认秒精度），但应用此前传入带微秒的 `get_app_now_naive()`。MySQL 将微秒写入秒精度列时可能向上舍入；若同 scope 的下一次请求在同一秒内执行，统计查询的严格排他上界 `created_at < end_time` 可能暂时看不到刚提交的那条记录。该问题表现为 MySQL 集成测试偶发出现“事务内刚写入的扣量日志统计为 0”，会直接破坏额度计数。
+
+已修复：
+1. 新增 `get_app_now_naive_floor_second()`，按应用时区获取时间并向下截断微秒，绝不把事件时间向未来舍入。
+2. `PostbackConversion.created_at` 与 `ConversionDeductionLog.created_at` 的 ORM 默认值改用该 helper。
+3. `ConversionSaver.save()` 显式写入秒精度时间；`DeductionManager.log_deduction()` 显式写入秒精度时间，确保正常转化与扣量日志两类统计来源一致。
+4. MySQL 集成测试的手工事件时间也使用相同精度，新增单元测试断言两个模型默认值均绑定该 helper。
+5. 无需修改历史表结构或执行新 migration；已有秒精度历史记录不受影响。
+
+本轮修复提交：
+- `127c4276c526af4df70b15d39615145e5f677e35`：新增应用时区秒精度 helper。
+- `68e10efd65708b85a0ec51ba0301b48428366525`：Postback 转化模型默认时间截断。
+- `da8b0e844512741f9552f65692107ea57b04952f`：扣量日志模型默认时间截断。
+- `8687a44c82450a48b49af0458b734f4a0fa76cbc`：转换保存路径显式使用秒精度时间。
+- `a60006f9bbb0cf68fe4c8a94a97371780a16440b`：扣量日志写入显式使用秒精度时间。
+- `ecfe7c202ed89e83adeb577e6175f315bc726a50`：真实 MySQL 集成测试时间精度修正。
+- `53a891620b39c159286f8b34aa55393b0fd0326e`：增加模型默认时间精度回归测试。
+
+该修复后的最新 Head 必须重新跑完整 Full Audit 和 Emergency Security。此前 `2e178030413641ec6094226cccde13c340b9106c` 的 1491 passed / 1 skipped 不覆盖本节新增代码，不能替代最新 Head CI。
+
 PR #205 继续保持 Draft，直到最新 Head 全部 CI 通过、完整 Postback 成功/失败路径审计完成，并完成生产 migration 预检与部署方案验收。
