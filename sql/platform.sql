@@ -235,10 +235,7 @@ CREATE TABLE IF NOT EXISTS `advertisers`  (
   `email` VARCHAR(255) NULL DEFAULT NULL COMMENT '邮箱（可选）',
   `mobile` VARCHAR(20) NULL DEFAULT NULL COMMENT '手机号',
   `advertiser_params` VARCHAR(255) NULL DEFAULT NULL COMMENT '广告主参数',
-  `is_active` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否激活',
-  `active_advertiser_id` INT GENERATED ALWAYS AS (CASE WHEN `is_active` = 1 THEN `advertiser_id` ELSE NULL END) STORED,
-  `active_offer_id` INT GENERATED ALWAYS AS (CASE WHEN `is_active` = 1 THEN `offer_id` ELSE NULL END) STORED,
-  `active_publisher_id` INT GENERATED ALWAYS AS (CASE WHEN `is_active` = 1 THEN `publisher_id` ELSE NULL END) STORED,
+  `is_active` TINYINT(1) NULL DEFAULT 1 COMMENT '是否激活',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
@@ -449,7 +446,10 @@ CREATE TABLE IF NOT EXISTS `conversion_deduction_configs`  (
   `enable_volume_deduction` TINYINT(1) NULL DEFAULT 0 COMMENT '是否启用按比例扣量',
   `enable_amount_deduction` TINYINT(1) NULL DEFAULT 0 COMMENT '是否启用按比例扣金额',
   `priority` INT NULL DEFAULT 0 COMMENT '优先级（数字越大优先级越高）',
-  `is_active` TINYINT(1) NULL DEFAULT 1 COMMENT '是否激活',
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否激活',
+  `active_advertiser_id` INT GENERATED ALWAYS AS (CASE WHEN `is_active` = 1 THEN `advertiser_id` ELSE NULL END) STORED,
+  `active_offer_id` INT GENERATED ALWAYS AS (CASE WHEN `is_active` = 1 THEN `offer_id` ELSE NULL END) STORED,
+  `active_publisher_id` INT GENERATED ALWAYS AS (CASE WHEN `is_active` = 1 THEN `publisher_id` ELSE NULL END) STORED,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
@@ -464,7 +464,7 @@ CREATE TABLE IF NOT EXISTS `conversion_deduction_configs`  (
   CONSTRAINT `chk_cpl_deduction_exactly_one_scope`
     CHECK ((`advertiser_id` IS NOT NULL) + (`offer_id` IS NOT NULL) + (`publisher_id` IS NOT NULL) = 1),
   CONSTRAINT `conversion_deduction_configs_ibfk_1` FOREIGN KEY (`advertiser_id`) REFERENCES `advertisers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `conversion_deduction_configs_ibfk_2` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `conversion_deduction_configs_ibfk_2` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `conversion_deduction_configs_ibfk_3` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '转化扣减配置表' ROW_FORMAT = Dynamic;
 
