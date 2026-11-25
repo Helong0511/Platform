@@ -25,6 +25,10 @@ from app.models.models import (
 
 ConfigLevel = Literal["advertiser", "offer", "publisher"]
 
+class DeductionScopeLockError(RuntimeError):
+    """无法取得财务决策 scope 锁时拒绝继续执行。"""
+
+
 async def lock_deduction_scopes(
     db: AsyncSession,
     scopes: list[Tuple[ConfigLevel, int]],
@@ -54,46 +58,50 @@ async def lock_deduction_scopes(
 
     dialect = db.bind.dialect.name if db.bind is not None else ""
     for level, target_id in normalized:
-        if dialect == "mysql":
-            await db.execute(
+        try:
+            if dialect == "mysql":
+                await db.execute(
+                    text(
+                        "INSERT INTO conversion_deduction_scope_locks "
+                        "(scope_type, scope_id) VALUES (:scope_type, :scope_id) "
+                        "ON DUPLICATE KEY UPDATE scope_id = VALUES(scope_id)"
+                    ),
+                    {"scope_type": level, "scope_id": target_id},
+                )
+            elif dialect == "sqlite":
+                await db.execute(
+                    text(
+                        "INSERT OR IGNORE INTO conversion_deduction_scope_locks "
+                        "(scope_type, scope_id) VALUES (:scope_type, :scope_id)"
+                    ),
+                    {"scope_type": level, "scope_id": target_id},
+                )
+            else:
+                raise DeductionScopeLockError(
+                    f"扣量 scope 锁不支持当前数据库方言: {dialect or 'unknown'}"
+                )
+
+            result = await db.execute(
                 text(
-                    "INSERT INTO conversion_deduction_scope_locks "
-                    "(scope_type, scope_id) VALUES (:scope_type, :scope_id) "
-                    "ON DUPLICATE KEY UPDATE scope_id = VALUES(scope_id)"
+                    "SELECT scope_id FROM conversion_deduction_scope_locks "
+                    "WHERE scope_type = :scope_type AND scope_id = :scope_id "
+                    "FOR UPDATE"
+                ) if dialect == "mysql" else text(
+                    "SELECT scope_id FROM conversion_deduction_scope_locks "
+                    "WHERE scope_type = :scope_type AND scope_id = :scope_id"
                 ),
                 {"scope_type": level, "scope_id": target_id},
             )
-        elif dialect == "sqlite":
-            await db.execute(
-                text(
-                    "INSERT OR IGNORE INTO conversion_deduction_scope_locks "
-                    "(scope_type, scope_id) VALUES (:scope_type, :scope_id)"
-                ),
-                {"scope_type": level, "scope_id": target_id},
-            )
-        else:
-            raise RuntimeError(
-                f"扣量 scope 锁不支持当前数据库方言: {dialect or 'unknown'}"
-            )
-
-        result = await db.execute(
-            text(
-                "SELECT scope_id FROM conversion_deduction_scope_locks "
-                "WHERE scope_type = :scope_type AND scope_id = :scope_id "
-                "FOR UPDATE"
-            ) if dialect == "mysql" else text(
-                "SELECT scope_id FROM conversion_deduction_scope_locks "
-                "WHERE scope_type = :scope_type AND scope_id = :scope_id"
-            ),
-            {"scope_type": level, "scope_id": target_id},
-        )
-        if result.scalar_one_or_none() is None:
-            raise RuntimeError(
-                f"扣量 scope 锁记录缺失: {level}:{target_id}"
-            )
-
-
-_LEVEL_NAMES = {"advertiser": "广告主", "offer": "Offer", "publisher": "渠道"}
+            if result.scalar_one_or_none() is None:
+                raise DeductionScopeLockError(
+                    f"扣量 scope 锁记录缺失: {level}:{target_id}"
+                )
+        except DeductionScopeLockError:
+            raise
+        except Exception as exc:
+            raise DeductionScopeLockError(
+                f"扣量 scope 锁获取失败: {level}:{target_id}"
+            ) from exc
 
 
 def resolve_config_level_target(
