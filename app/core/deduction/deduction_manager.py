@@ -291,7 +291,10 @@ class DeductionManager:
                     ConversionDeductionConfig.offer_id == offer_id,
                     ConversionDeductionConfig.is_active == True
                 )
-            ).order_by(ConversionDeductionConfig.priority.desc())
+            ).order_by(
+                ConversionDeductionConfig.priority.desc(),
+                ConversionDeductionConfig.id.asc(),
+            )
         )
         return result.scalars().first()
     
@@ -303,7 +306,10 @@ class DeductionManager:
                     ConversionDeductionConfig.advertiser_id == advertiser_id,
                     ConversionDeductionConfig.is_active == True
                 )
-            ).order_by(ConversionDeductionConfig.priority.desc())
+            ).order_by(
+                ConversionDeductionConfig.priority.desc(),
+                ConversionDeductionConfig.id.asc(),
+            )
         )
         return result.scalars().first()
     
@@ -315,7 +321,10 @@ class DeductionManager:
                     ConversionDeductionConfig.publisher_id == publisher_id,
                     ConversionDeductionConfig.is_active == True
                 )
-            ).order_by(ConversionDeductionConfig.priority.desc())
+            ).order_by(
+                ConversionDeductionConfig.priority.desc(),
+                ConversionDeductionConfig.id.asc(),
+            )
         )
         return result.scalars().first()
     
