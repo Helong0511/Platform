@@ -152,9 +152,9 @@ class CloakConfigBase(BaseSchema):
         description="postback 为 Purchase 时的固定金额；不填则在处理器中用 postback 的 payout",
     )
     postback_report_currency: Optional[str] = Field(
-        "USD",
+        None,
         max_length=10,
-        description="postback Purchase 货币",
+        description="postback Purchase 货币；留空时必须使用上游明确币种",
     )
 
     is_enabled: bool = Field(True, description="是否启用")
@@ -180,11 +180,15 @@ class CloakConfigBase(BaseSchema):
     @field_validator("report_currency", "load_report_currency", "postback_report_currency")
     @classmethod
     def validate_currencies(cls, value: Optional[str]) -> Optional[str]:
-        """上报货币代码：规范为大写 ISO 4217（如 USD）；空值默认 USD。"""
+        """货币代码规范为三位大写字母；不在缺失时伪造 USD。"""
         if value is None:
-            return "USD"
+            return None
         v = value.strip().upper()
-        return v or "USD"
+        if not v:
+            return None
+        if not re.fullmatch(r"[A-Z]{3}", v):
+            raise ValueError("货币代码必须为三位字母；缺失币种不得默认 USD")
+        return v
 
     @model_validator(mode="after")
     def cloak_report_phase_consistency(self):
@@ -306,11 +310,15 @@ class CloakConfigUpdate(BaseSchema):
     @field_validator("report_currency", "load_report_currency", "postback_report_currency")
     @classmethod
     def validate_currencies_update(cls, value: Optional[str]) -> Optional[str]:
-        """更新时 None 表示不修改；有值则规范化大写（详见字段 Field description）。"""
+        """更新时 None 表示不修改；有值须为三位字母币种代码。"""
         if value is None:
             return None
         v = value.strip().upper()
-        return v or None
+        if not v:
+            return None
+        if not re.fullmatch(r"[A-Z]{3}", v):
+            raise ValueError("货币代码必须为三位字母")
+        return v
 
     @field_validator("cloak_name")
     @classmethod

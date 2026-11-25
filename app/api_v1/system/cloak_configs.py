@@ -433,6 +433,13 @@ async def create_cloak_config(
     if exists_result.scalars().first():
         raise_api_exception(ErrorCode.VALIDATION_ERROR, detail=f"斗篷名称已存在：{data.cloak_name}")
 
+    if data.postback_report_enabled and data.postback_report_event == "Purchase":
+        if data.postback_report_value is not None and data.postback_report_value <= 0:
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="postback Purchase 固定金额须大于 0，或留空以使用上游 payout",
+            )
+
     _ensure_enabled_requires_bridge_html(data.cloak_name, data.is_enabled)
 
     config = CloakConfig(**data.model_dump())
