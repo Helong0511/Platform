@@ -131,6 +131,10 @@ def _create_base_schema(database: str) -> None:
                     "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY"
                     ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
                 )
+            seed_ids = (9, 101, 202, 303, 404, 505)
+            for table in ("advertisers", "offers", "publishers"):
+                values = ", ".join(f"({value})" for value in seed_ids)
+                cursor.execute(f"INSERT INTO `{table}` (id) VALUES {values}")
             cursor.execute(
                 """
                 CREATE TABLE conversion_deduction_configs (
@@ -367,7 +371,6 @@ async def test_mysql_generated_unique_keys_and_parent_foreign_keys_are_enforced(
         )
         try:
             with connection.cursor() as cursor:
-                cursor.execute("INSERT INTO offers (id) VALUES (404)")
                 cursor.execute(
                     "INSERT INTO conversion_deduction_configs (offer_id, is_active) "
                     "VALUES (404, 1)"
@@ -408,7 +411,6 @@ async def test_mysql_unique_migration_refuses_historical_active_scope_collisions
         )
         try:
             with connection.cursor() as cursor:
-                cursor.execute("INSERT INTO offers (id) VALUES (505)")
                 cursor.execute(
                     "INSERT INTO conversion_deduction_configs (offer_id, is_active) "
                     "VALUES (505, 1), (505, 1)"
