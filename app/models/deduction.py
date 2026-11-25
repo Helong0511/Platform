@@ -8,7 +8,7 @@ from datetime import datetime
 import enum
 import uuid
 
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, get_app_now_naive_floor_second
 from app.models.base import Base, UserRole
 
 class ConversionDeductionScopeLock(Base):
@@ -77,7 +77,7 @@ class ConversionDeductionConfig(Base):
     )
     
     # 时间戳
-    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
+    created_at = Column(DateTime, default=get_app_now_naive_floor_second, nullable=False, comment='创建时间')
     updated_at = Column(DateTime, default=get_app_now_naive,
                         onupdate=get_app_now_naive, comment='更新时间')
 
