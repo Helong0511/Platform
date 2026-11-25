@@ -1934,3 +1934,16 @@ READ COMMITTED 使每条普通一致性读都看到该语句开始前已提交�
 - 在真实 MySQL 测试中同时覆盖事务回滚、死锁重试、连接池复用及 commit-unknown 场景。
 
 **本节结论：** Postback 专用 READ COMMITTED Engine/Session Factory 已有代码实现并新增了工厂级测试，这是实质性进展；但真实 MySQL 隔离行为和全部调用链覆盖尚未验证。它只是后续 scope 锁与权威事件账本的基础，不代表 CPL 财务一致性阻断项已经解除。
+
+
+#### 40.4 补充核查：Pending 入队已有可复用的规范身份，但批准仍未消费它
+
+继续读取 `app/services/cpl/postback_pending_ingest_service.py` 后，确认入队阶段已经：
+- 校验 `conversion_id` 非空且长度不超过 200；
+- 通过 `normalize_event_name()` 规范 `event_name`；
+- 使用 `platform.casefold() + conversion_id.casefold() + event_name.casefold()` 生成 SHA-256 `dedupe_key`；
+- 同时按 platform/conversion_id/event_name 检查 pending 重复，并依靠唯一约束作为并发最终栅栏。
+
+因此，批准路径缺少事件身份并不是因为 Pending 数据天然无法识别事件；入队时已经具备 platform、conversion_id、event_name。修复时应复用同一规范化规则，不应重新引入 click_id 作为 conversion identity 的回退。
+
+另外，IP 白名单创建服务会在同一数据库 Session 中调用批量自动批准；批次的 SAVEPOINT 仅隔离单条处理错误，外层事务仍由路由依赖统一提交/回滚。必须保留这一事务边界，并在批量批准时确保事件 receipt/ledger 与转化创建同事务提交。不能在每条 SAVEPOINT 内单独 commit，也不能把已处理但外层回滚的事件标记成已完成。
