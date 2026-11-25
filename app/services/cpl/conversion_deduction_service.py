@@ -323,6 +323,11 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             .with_for_update()
         )
         configs = locked_result.scalars().all()
+        if len(configs) != len(config_ids):
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail="等待扣量 scope 锁期间，部分配置已被并发删除，请刷新后重试",
+            )
         if is_active:
             scope_keys = [scope for scope in scopes]
             if len(scope_keys) != len(set(scope_keys)):
@@ -406,6 +411,11 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             .with_for_update()
         )
         configs = locked_result.scalars().all()
+        if len(configs) != len(config_ids):
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail="等待扣量 scope 锁期间，部分配置已被并发删除，请刷新后重试",
+            )
 
         for config in configs:
             await log_delete(
