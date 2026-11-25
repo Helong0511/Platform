@@ -7,6 +7,9 @@ import pytest
 
 from app.core.deduction import deduction_manager as deduction_manager_module
 from app.core.deduction.deduction_manager import ConversionStats, DeductionManager
+from app.core.utils import get_app_now_naive_floor_second
+from app.models.deduction import ConversionDeductionLog
+from app.models.postback import PostbackConversion
 
 
 class _ScalarResult:
@@ -105,3 +108,12 @@ async def test_strict_recent_stats_bypasses_stale_cache_and_does_not_refresh_it(
     stale_cache.assert_not_awaited()
     cache_write.assert_not_awaited()
     assert db.execute.await_count == 3
+
+
+def test_financial_event_timestamps_are_truncated_to_mysql_datetime_precision():
+    """MySQL DATETIME(0) 会舍入微秒；事件时间必须先向下截断，避免暂时落入未来。"""
+    timestamp = get_app_now_naive_floor_second()
+
+    assert timestamp.microsecond == 0
+    assert PostbackConversion.__table__.c.created_at.default.arg is get_app_now_naive_floor_second
+    assert ConversionDeductionLog.__table__.c.created_at.default.arg is get_app_now_naive_floor_second
