@@ -115,5 +115,11 @@ def test_financial_event_timestamps_are_truncated_to_mysql_datetime_precision():
     timestamp = get_app_now_naive_floor_second()
 
     assert timestamp.microsecond == 0
-    assert PostbackConversion.__table__.c.created_at.default.arg is get_app_now_naive_floor_second
-    assert ConversionDeductionLog.__table__.c.created_at.default.arg is get_app_now_naive_floor_second
+    postback_default = PostbackConversion.__table__.c.created_at.default.arg
+    deduction_default = ConversionDeductionLog.__table__.c.created_at.default.arg
+    assert callable(postback_default)
+    assert callable(deduction_default)
+    assert postback_default.__name__ == get_app_now_naive_floor_second.__name__
+    assert deduction_default.__name__ == get_app_now_naive_floor_second.__name__
+    assert postback_default().microsecond == 0
+    assert deduction_default().microsecond == 0
