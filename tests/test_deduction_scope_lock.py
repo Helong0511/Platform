@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from app.core.deduction.deduction_manager import DeductionManager
+from app.services.cpl.deduction import helpers as deduction_helpers
 from app.services.cpl.deduction.helpers import lock_deduction_scopes
 
 
@@ -58,13 +60,51 @@ async def test_scope_lock_rejects_unsupported_database_dialect():
 
 
 @pytest.mark.asyncio
-async def test_scope_lock_rejects_non_positive_ids():
+async def test_scope_lock_rejects_non_positive_or_boolean_ids():
     db = SimpleNamespace(
         bind=SimpleNamespace(dialect=SimpleNamespace(name="mysql")),
         execute=AsyncMock(),
     )
 
-    with pytest.raises(Exception):
-        await lock_deduction_scopes(db, [("offer", 0)])
+    for invalid_id in (0, -1, True, "1"):
+        with pytest.raises(Exception):
+            await lock_deduction_scopes(db, [("offer", invalid_id)])
 
     db.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_postback_locks_all_candidate_scopes_before_current_reads(monkeypatch):
+    calls = []
+    async def lock_scopes(db, scopes):
+        calls.append(("lock", scopes))
+
+    monkeypatch.setattr(
+        deduction_helpers,
+        "lock_deduction_scopes",
+        lock_scopes,
+    )
+    manager = DeductionManager(db=object())
+
+    async def find_offer(offer_id):
+        calls.append(("offer", offer_id))
+        return "offer-config"
+
+    manager._find_offer_config = find_offer
+    manager._find_advertiser_config = AsyncMock()
+    manager._find_publisher_config = AsyncMock()
+
+    config = await manager.find_config(
+        advertiser_id=2,
+        offer_id=1,
+        publisher_id=3,
+    )
+
+    assert config == "offer-config"
+    assert calls[0] == (
+        "lock",
+        [("advertiser", 2), ("offer", 1), ("publisher", 3)],
+    )
+    assert calls[1] == ("offer", 1)
+    manager._find_advertiser_config.assert_not_awaited()
+    manager._find_publisher_config.assert_not_awaited()
