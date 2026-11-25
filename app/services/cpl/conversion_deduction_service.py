@@ -60,6 +60,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                 detail="配置层级和目标ID不能为空",
             )
 
+        await deduction_helpers.lock_deduction_scopes(self.db, [(level, target_id)])
         await deduction_helpers.validate_target_exists(self.db, level, target_id)
         await deduction_helpers.check_existing_config(self.db, level, target_id)
         fields = deduction_helpers.build_config_fields(level, target_id, config_data)
@@ -141,6 +142,10 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             )
 
         level, target_id = resolve_config_level_target(config)
+        await deduction_helpers.lock_deduction_scopes(self.db, [(level, target_id)])
+        config = await self.get_deduction_config_by_id(config_id)
+        if not config:
+            raise_api_exception(ErrorCode.RESOURCE_NOT_FOUND, detail=f"扣减配置ID {config_id} 不存在")
         # 普通更新仅允许修改业务参数；状态与 scope 必须走独立、受控的事务入口。
         allowed_fields = {
             "enable_volume_deduction",
@@ -199,6 +204,14 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             )
 
         level, target_id = resolve_config_level_target(config)
+        await deduction_helpers.lock_deduction_scopes(self.db, [(level, target_id)])
+        config = await self.get_deduction_config_by_id(config_id)
+        if not config:
+            raise_api_exception(ErrorCode.RESOURCE_NOT_FOUND, detail=f"扣减配置ID {config_id} 不存在")
+        if is_active:
+            await deduction_helpers.check_existing_config(
+                self.db, level, target_id, exclude_config_id=config_id
+            )
         config.is_active = is_active
 
         try:
@@ -241,6 +254,10 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             )
 
         level, target_id = resolve_config_level_target(config)
+        await deduction_helpers.lock_deduction_scopes(self.db, [(level, target_id)])
+        config = await self.get_deduction_config_by_id(config_id)
+        if not config:
+            raise_api_exception(ErrorCode.RESOURCE_NOT_FOUND, detail=f"扣减配置ID {config_id} 不存在")
 
         try:
             await log_delete(
@@ -296,6 +313,27 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                 ErrorCode.RESOURCE_NOT_FOUND,
                 detail=f"以下配置ID不存在: {', '.join(map(str, missing_ids))}",
             )
+
+        scopes = [resolve_config_level_target(config) for config in configs]
+        await deduction_helpers.lock_deduction_scopes(self.db, scopes)
+        # 锁定 scope 后重新读取，避免使用锁前的配置快照执行批量操作。
+        locked_result = await self.db.execute(
+            select(ConversionDeductionConfig)
+            .where(ConversionDeductionConfig.id.in_(config_ids))
+            .with_for_update()
+        )
+        configs = locked_result.scalars().all()
+        if is_active:
+            scope_keys = [scope for scope in scopes]
+            if len(scope_keys) != len(set(scope_keys)):
+                raise_api_exception(
+                    ErrorCode.RESOURCE_ALREADY_EXISTS,
+                    detail="所选配置包含重复 scope，不能批量启用",
+                )
+            for level, target_id in set(scope_keys):
+                await deduction_helpers.check_existing_config(
+                    self.db, level, target_id
+                )
 
         try:
             await self.db.execute(
@@ -356,6 +394,15 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                 ErrorCode.RESOURCE_NOT_FOUND,
                 detail=f"以下配置ID不存在: {', '.join(map(str, missing_ids))}",
             )
+
+        scopes = [resolve_config_level_target(config) for config in configs]
+        await deduction_helpers.lock_deduction_scopes(self.db, scopes)
+        locked_result = await self.db.execute(
+            select(ConversionDeductionConfig)
+            .where(ConversionDeductionConfig.id.in_(config_ids))
+            .with_for_update()
+        )
+        configs = locked_result.scalars().all()
 
         for config in configs:
             await log_delete(
