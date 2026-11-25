@@ -1104,19 +1104,23 @@ async def send_third_party_report(
             }
 
             # 购物事件必须添加 custom_data（Meta 要求 value + currency）
-            if fb_event_name == "Purchase" and amount is not None:
+            if fb_event_name == "Purchase":
+                # 不允许发送阶段再次静默默认 USD；Outbox 已在入队/Worker 两侧校验。
+                purchase_amount, purchase_currency = validate_purchase_payload(amount, currency)
                 event_data["custom_data"] = {
-                    "currency": (currency or "USD"),
-                    "value": float(amount),
+                    "currency": purchase_currency,
+                    # 先用唯一字符串占位，JSON 序列化后替换成未加引号的十进制数字 token，
+                    # 避免 float 转换，也避免把 Meta value 错发成字符串。
+                    "value": "__EXACT_PURCHASE_DECIMAL_VALUE__",
                 }
 
-            # 构建请求数据
-            send_data = {
-                "data": [event_data]
-            }
-
-            # 存储完整上报参数
+            send_data = {"data": [event_data]}
             report_params_json = json.dumps(send_data, ensure_ascii=False)
+            if fb_event_name == "Purchase":
+                report_params_json = report_params_json.replace(
+                    '"__EXACT_PURCHASE_DECIMAL_VALUE__"',
+                    format(purchase_amount, "f"),
+                )
             attempt_persisted = await update_owned_report_log(
                 report_log_id,
                 report_params=report_params_json,
@@ -1159,7 +1163,15 @@ async def send_third_party_report(
                     "report_log_id": report_log_id,
                 }
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await _post_with_total_deadline(client, url, json=send_data, params=params)
+                response = await asyncio.wait_for(
+                    client.post(
+                        url,
+                        content=report_params_json.encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                        params=params,
+                    ),
+                    timeout=_report_http_request_deadline_seconds(),
+                )
                 # 第三方响应可能回显 user_data；日志只记录状态，不记录响应正文。
                 logger.debug("[第三方上报] 响应状态: status=%s", response.status_code)
 

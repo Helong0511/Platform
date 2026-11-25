@@ -350,7 +350,7 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             "source": row.source,
             "use_hash": row.use_hash,
             "currency": row.currency,
-            "amount": float(row.amount) if row.amount is not None else None,
+            "amount": row.amount,
             "click_time": row.click_time,
             "created_at": getattr(row, "created_at", None) or get_app_now_naive(),
             "event_key": row.event_key,
@@ -360,6 +360,28 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             "cloak_name": row.cloak_name,
             "short_code": row.short_code,
         }
+
+    if payload["event"] == "Purchase":
+        try:
+            payload["amount"], payload["currency"] = validate_purchase_payload(
+                payload["amount"], payload["currency"]
+            )
+        except ValueError as exc:
+            updated = await update_report_log(
+                report_log_id,
+                status="failed",
+                error_message="Purchase 金额或币种校验失败，已阻止发送",
+                report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
+                completed_at=get_app_now_naive(),
+                clear_next_retry_time=True,
+                expected_lease_token=lease_token,
+                expected_identity_scope="platform_scoped",
+                expected_platform=payload["platform"],
+            )
+            if not updated:
+                return {"success": False, "retryable": True, "reason": "report_lease_lost"}
+            logger.warning("阻止无效 Purchase Outbox：id=%s error=%s", report_log_id, str(exc))
+            return {"success": False, "retryable": False, "reason": "invalid_purchase_payload"}
 
     if not (payload["short_link_id"] or (payload["cloak_name"] and payload["short_code"])):
         # 历史脏数据/手工写入可能绕过 enqueue 校验；必须认领并收敛为终态，
