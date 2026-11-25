@@ -25,28 +25,35 @@ from app.models.models import (
 
 ConfigLevel = Literal["advertiser", "offer", "publisher"]
 
-_DEDUCTION_SCOPE_LOCK_TABLE = "conversion_deduction_scope_locks"
-
-
 async def lock_deduction_scopes(
     db: AsyncSession,
     scopes: list[Tuple[ConfigLevel, int]],
 ) -> None:
     """在调用方事务中按固定顺序锁定扣量 scope；本函数绝不提交事务。"""
-    normalized = sorted(
-        {(level, int(target_id)) for level, target_id in scopes},
-        key=lambda item: (item[0], item[1]),
-    )
-    if not normalized:
-        return
-
-    dialect = db.bind.dialect.name if db.bind is not None else ""
-    for level, target_id in normalized:
-        if target_id <= 0:
+    normalized_set = set()
+    for level, target_id in scopes:
+        if level not in {"advertiser", "offer", "publisher"}:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail="扣量 scope 类型无效",
+            )
+        if (
+            not isinstance(target_id, int)
+            or isinstance(target_id, bool)
+            or target_id <= 0
+        ):
             raise_api_exception(
                 ErrorCode.INVALID_PARAMETER,
                 detail="扣量 scope ID 必须为正整数",
             )
+        normalized_set.add((level, target_id))
+
+    normalized = sorted(normalized_set, key=lambda item: (item[0], item[1]))
+    if not normalized:
+        return
+
+    dialect = db.bind.dialect.name if db.bind is not None else ""
+    for level, target_id in normalized
         if dialect == "mysql":
             await db.execute(
                 text(
@@ -85,11 +92,6 @@ async def lock_deduction_scopes(
                 f"扣量 scope 锁记录缺失: {level}:{target_id}"
             )
 
-
-def config_scope(config: ConversionDeductionConfig) -> Tuple[ConfigLevel, int]:
-    """从配置实体解析唯一 scope。"""
-    level, target_id = resolve_config_level_target(config)
-    return level, target_id
 
 _LEVEL_NAMES = {"advertiser": "广告主", "offer": "Offer", "publisher": "渠道"}
 
