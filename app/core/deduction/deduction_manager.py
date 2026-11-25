@@ -264,38 +264,28 @@ class DeductionManager:
         await lock_deduction_scopes(self.db, candidate_scopes)
 
         try:
-            from app.core.deduction.deduction_cache import DeductionConfigCache
-
-            cache = DeductionConfigCache(self.db)
-            # 优先级1: Offer级别配置
+            # 财务决策不读取 Redis 配置缓存或 Generation。
+            # scope 锁已在上方获取；以下 SELECT FOR UPDATE 为 MySQL current read，
+            # 避免 REPEATABLE READ 事务复用锁前快照。
             if offer_id:
-                config = await cache.get_config("offer", offer_id)
+                config = await self._find_offer_config(offer_id)
                 if config:
-                    logger.debug(f"找到Offer级别扣减配置: offer_id={offer_id}, config_id={config.id}")
                     return config
-            
-            # 优先级2: 广告主级别配置
             if advertiser_id:
-                config = await cache.get_config("advertiser", advertiser_id)
+                config = await self._find_advertiser_config(advertiser_id)
                 if config:
-                    logger.debug(f"找到广告主级别扣减配置: advertiser_id={advertiser_id}, config_id={config.id}")
                     return config
-            
-            # 优先级3: 渠道级别配置
             if publisher_id:
-                config = await cache.get_config("publisher", publisher_id)
+                config = await self._find_publisher_config(publisher_id)
                 if config:
-                    logger.debug(f"找到渠道级别扣减配置: publisher_id={publisher_id}, config_id={config.id}")
                     return config
-            
             return None
-            
         except Exception as e:
-            logger.error(f"查找扣减配置失败: {str(e)}", exc_info=True)
+            logger.error("查找扣量配置失败: %s", str(e), exc_info=True)
             if settings.DEDUCTION_FAIL_OPEN:
                 return None
             raise
-    
+
     async def _find_offer_config(self, offer_id: int) -> Optional[ConversionDeductionConfig]:
         """查找Offer级别配置"""
         result = await self.db.execute(
@@ -307,7 +297,7 @@ class DeductionManager:
             ).order_by(
                 ConversionDeductionConfig.priority.desc(),
                 ConversionDeductionConfig.id.asc(),
-            )
+            ).with_for_update()
         )
         return result.scalars().first()
     
@@ -322,7 +312,7 @@ class DeductionManager:
             ).order_by(
                 ConversionDeductionConfig.priority.desc(),
                 ConversionDeductionConfig.id.asc(),
-            )
+            ).with_for_update()
         )
         return result.scalars().first()
     
@@ -337,7 +327,7 @@ class DeductionManager:
             ).order_by(
                 ConversionDeductionConfig.priority.desc(),
                 ConversionDeductionConfig.id.asc(),
-            )
+            ).with_for_update()
         )
         return result.scalars().first()
     
