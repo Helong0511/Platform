@@ -133,3 +133,30 @@ def test_deduction_model_has_database_scope_uniqueness_guards():
         "active_offer_id",
         "active_publisher_id",
     }.issubset(table.columns.keys())
+
+
+@pytest.mark.asyncio
+async def test_postback_fails_closed_when_scope_lock_is_unavailable(monkeypatch):
+    from app.core.config import settings
+    from app.core.postback.checks import discount_checker
+    from app.core.postback.errors import DeductionProcessingError
+    from app.services.cpl.deduction.helpers import DeductionScopeLockError
+
+    monkeypatch.setattr(settings, "DEDUCTION_FAIL_OPEN", True)
+    monkeypatch.setattr(
+        discount_checker,
+        "find_deduction_config",
+        AsyncMock(side_effect=DeductionScopeLockError("lock table unavailable")),
+    )
+
+    with pytest.raises(DeductionProcessingError, match="scope 锁获取失败"):
+        await discount_checker.DiscountChecker.calculate(
+            original_payout="10.00",
+            offer_id=None,
+            publisher_id=None,
+            product_id=None,
+            client_id=None,
+            advertiser_id=None,
+            click_id=None,
+            db=object(),
+        )
