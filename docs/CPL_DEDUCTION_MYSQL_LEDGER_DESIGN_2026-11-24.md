@@ -1810,3 +1810,56 @@ scope lock 可以串行化遵守同一锁协议的写入者，但不能自动改
 6. 配置创建/启用/禁用与 Postback 并发时，验证配置版本和统计窗口快照属于同一决策时点。
 
 **本节结论：** 当前代码未显式固定 MySQL 隔离级别；Postback 在扣量前已执行普通 SELECT。若数据库使用 InnoDB 默认 REPEATABLE READ，未来只增加 scope 锁仍可能基于旧 read view 决策。此项是账本重构的设计约束，必须先解决再编码。
+
+
+### 39. 第十四阶段：把事务隔离级别落实到 Postback 会话入口，不能只在扣量服务中临时切换
+
+第 38 节指出，Postback 在扣量之前已经可能建立 REPEATABLE READ 一致性读快照。本节将可执行约束落实到会话生命周期。
+
+#### 39.1 当前会话入口的实际情况
+
+`app/core/database.py` 当前只有一个 `AsyncSessionLocal`，`get_postback_db()` 仍从该工厂创建普通 `AsyncSession`。引擎创建时未显式配置隔离级别。Postback Processor 内部先执行 IP 校验、点击关联、Offer 状态及重复事件查询，然后才执行扣量决策。
+
+因此，不能在 `DeductionManager.apply_deduction()` 或取得 scope lock 之后才执行 `SET TRANSACTION ISOLATION LEVEL READ COMMITTED`：那时事务可能已经开始，且旧 read view 可能已经建立。不能通过 rollback 后继续沿用原业务对象来“刷新快照”，因为 ORM identity map、已 flush 状态和业务锁语义都需要重新建立。
+
+#### 39.2 推荐实施方式：专用 Postback Engine 视图与 Session Factory
+
+在不改变普通管理后台事务隔离语义的前提下，为 MySQL Postback 创建专用 Engine execution-options 视图，复用同一底层连接池，但显式设置 `isolation_level="READ COMMITTED"`，并用它创建 `PostbackAsyncSessionLocal`。Postback 专用依赖 `get_postback_db()` 必须使用该工厂。
+
+约束：
+
+1. 必须在创建 Session/获取连接之前绑定隔离级别；不得在 Processor 已执行 SQL 后再修改。
+2. `get_postback_db()` 的每一个调用入口都必须使用专用工厂，包括平台回调、后台补录/重放、审批后重新处理及内部任务；不得存在绕过该工厂的 Postback 写路径。
+3. SQLite 单元测试继续使用原有测试引擎；不能把 MySQL 专属隔离级别硬编码到 SQLite。
+4. 不得为实现隔离级别而再创建一套独立连接池；execution-options Engine 应复用原 Engine 的连接池，避免连接数预算翻倍。
+5. 启动/健康检查记录实际 `@@session.transaction_isolation`，Postback 写请求在隔离级别不符合预期时拒绝执行扣量决策并告警。
+6. 配置行/稳定 scope lock 仍然必须存在。READ COMMITTED 只解决普通 SELECT 的快照刷新语义，不替代并发互斥和唯一事件身份。
+7. 配置查找、事件账本统计、窗口边界读取必须在获得 scope lock 后执行；锁之前的归因读取只用于确定候选 scope，获得锁后必须重新校验配置状态、scope 和版本。
+
+若某条内部路径无法保证在第一条 SQL 前使用专用 Session Factory，则该路径不能加入新账本决策流程；应改造入口，而不是在事务中途切换隔离级别。
+
+#### 39.3 为什么选择 READ COMMITTED，而不是依赖混合 current read
+
+READ COMMITTED 使每条普通一致性读都看到该语句开始前已提交的数据。配合“同一 scope 的所有决策与配置写入均先获取同一 MySQL scope lock”的协议，等待锁释放后再执行的统计 SELECT 可以看到前一事务提交的账本记录。
+
+这仍要求：
+- 账本统计 SQL 必须在锁获取之后执行；
+- 所有影响该 scope 统计的事件写入必须遵守同一锁协议；
+- scope 创建/配置启用时也必须使用相同的稳定锁行；
+- 统计与本次决策写入必须处于同一个事务；
+- 事务提交失败或结果未知时，按唯一事件身份从新 Session 查询终态。
+
+不要把 READ COMMITTED 描述为“自动解决所有幻读”。它解决的是一致性读快照跨语句更新的问题；同一 scope 的并发决策正确性仍依赖锁协议、唯一约束和真实 MySQL 测试。
+
+#### 39.4 必须新增的会话工厂回归测试
+
+1. 从 `get_postback_db()` 创建 Session，读取 `@@session.transaction_isolation`，必须为 READ-COMMITTED。
+2. 从普通 `get_db()` 创建 Session，确认本次改造没有意外改变管理后台原有隔离级别。
+3. 使用两个真实 MySQL Session：A 先完成一条普通 SELECT；B 写入同 scope 账本并提交；A 等待并取得 scope lock 后再执行统计 SELECT，必须看到 B 的记录。
+4. 反向锁顺序和 2/10/50 并发仍必须通过。
+5. 确认所有 Postback 入口都依赖专用 Session 工厂；通过静态搜索/路由测试阻止绕过。
+6. 确认 execution-options Engine 复用底层连接池，连接池上限不增加。
+7. 测试事务隔离级别设置失败、数据库版本不支持、连接重建/回收后的会话隔离级别仍 fail-closed。
+8. 测试 SQLite 单元测试不因 MySQL 专属隔离配置失败。
+
+**本节结论：** 账本实现的隔离策略应在 Postback Session Factory 层确定，而不是在扣量服务中途补设。READ COMMITTED + 全路径 scope lock + 唯一事件账本，是当前推荐的实现组合；在真实 MySQL 两连接测试通过前仍不得解除 PR #205 的 Draft。
