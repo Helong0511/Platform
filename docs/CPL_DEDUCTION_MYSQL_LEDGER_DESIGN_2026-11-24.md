@@ -3085,3 +3085,52 @@ FOR UPDATE;
 因此，锁协议必须形成一个共享的事务级服务，并由 Postback、六个配置写入口和三个父对象删除入口统一调用。只修配置 CRUD 或只增加数据库锁表都不足以消除竞态。
 
 本轮仅补充源码审计记录，没有修改业务代码、数据库结构或生产数据；没有真实 MySQL/Redis 环境，未声称并发测试完成。风险：**高（配置切换与财务决策存在竞态，父对象级联删除可能丢失配置）**。PR #205 必须继续保持 Draft。
+
+
+### 61. 配置更新入口收紧与事务隔离/提交边界复核
+
+#### 61.1 本轮已实施的代码收紧
+
+本轮对配置层级解析和普通更新入口做了最小范围修复：
+
+1. `resolve_config_level_target()` 不再按 advertiser → offer → publisher 静默优先选择；必须且只能存在一个非空 scope，目标 ID 必须为正整数，否则抛出标准参数错误。
+2. `update_deduction_config()` 仅允许修改扣量/扣金额开关、比例、策略和优先级；拒绝 `is_active`、`level`、`target_id` 及其它系统字段。状态必须走专用状态 API；目标迁移暂不开放。
+3. 管理端编辑表单在编辑模式禁用层级和目标选择，隐藏编辑模式的状态开关；新增模式仍可设置初始状态。编辑请求不再发送 scope 与状态字段。
+4. 新增 `tests/test_deduction_config_scope_validation.py`，覆盖三种合法单 scope、全空、多 scope、零/负数 ID、bool ID，以及通用更新拒绝状态/目标字段。
+
+这些修改只消除错误入口和异常数据被静默解释的问题；没有实现数据库 scope mutex、活动配置唯一约束，也没有解决并发激活竞态。
+
+#### 61.2 事务边界：不能由锁 helper 自行提交
+
+复核当前 `app/core/database.py`、`app/core/audit_log.py` 及三个父对象删除服务：
+
+- 管理端 `get_db()` 在请求成功结束时自动 `commit()`，异常时 rollback 并关闭会话。
+- `commit_audit_log()` 本身会提交整个当前 Session 事务，不只是审计日志；提交失败会尝试 rollback 后重新抛出。
+- Advertiser 删除服务在删除及审计日志 flush 后调用 `commit_audit_log()`，会在服务方法内部提交。
+- Publisher 删除服务同样在服务方法内部提交。
+- Offer 删除服务不在服务方法内部 commit；API 路由在删除服务返回后调用 `commit_audit_log()`，并在提交后清理热点缓存。
+- CPL 扣量配置 CRUD 服务本身通常只 flush 并推进 Generation；最终提交由 API 显式提交或请求级 `get_db()` 完成。
+
+因此，未来 scope mutex 必须由调用方传入的同一个 AsyncSession 获取，不能在锁 helper 中 commit，也不能另开独立 Session。锁必须一直持有到配置/父对象修改、Generation/Outbox 与审计记录一起提交。任何服务内部提交都必须明确纳入该锁持有区间；不得在锁获取后先提交审计日志，再继续执行受保护的业务修改。
+
+#### 61.3 Postback 隔离级别事实校正
+
+本轮读取 `app/core/database.py` 后确认：MySQL/MariaDB 的 `PostbackAsyncSessionLocal` 使用 `engine.execution_options(isolation_level="READ COMMITTED")`，并复用现有连接池；SQLite 测试数据库保持原隔离设置。
+
+因此，不应笼统地将 Postback 当前事务描述为 MySQL REPEATABLE READ。READ COMMITTED 下普通 SELECT 每条语句读取新的已提交快照，但仍不能替代 scope mutex：
+- 必须先取得所有候选 scope 锁，再读取配置；
+- 不得先读 Redis 配置/Generation，再拿锁后继续把锁前缓存结果作为决策依据；
+- 读配置仍应使用明确的 current-read/锁定语义，且与配置写入口共享同一事务锁；
+- 管理端 `AsyncSessionLocal` 没有在该处显式设置 READ COMMITTED，不能将 Postback 专用隔离级别推定为所有 API 请求的隔离级别。
+
+#### 61.4 最新提交与验证边界
+
+本轮代码提交：
+- `710aa488be57d5aeb595b0574355a2e90750b0af`：严格拒绝空/多重/非法 scope。
+- `97ba8c187bec892ad1f282c5cb679ffef2ba64af`：普通更新字段白名单，禁止状态及 scope 修改。
+- `40cb30f37228fdeb502b12520581a124b7c16647`：增加 scope 与更新入口回归测试。
+- `ef931e979fda00739d2408f54a6abf7b09c7a09b`、`776bef0643644b8653b652965faa2006daa3525f`、`7c1b25aa71fdcaf03043ad0703317132526db6f0`：管理端编辑请求剔除 scope/状态字段，并在编辑模式禁用目标变更及状态开关。
+
+最新 Head 的 Full Audit / Emergency Security 仍须以最新 SHA 的最终结果为准。GitHub Actions 对被后续提交替代的旧 SHA 取消运行，不得视为通过。本轮没有本地执行 pytest、前端构建，也没有真实 MySQL/Redis 测试；不得据此宣称这些测试已通过。
+
+仍未解决的高风险项：所有六个配置写入口与三个父对象删除入口尚未统一取得 scope mutex；Postback 尚未使用同一把锁；没有活动配置唯一性数据库约束；Redis/MySQL 决策非原子与权威事件 ledger 尚未修复。PR #205 继续 Draft，禁止合并。
