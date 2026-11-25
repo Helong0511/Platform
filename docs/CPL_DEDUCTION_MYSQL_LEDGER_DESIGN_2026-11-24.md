@@ -1629,3 +1629,65 @@ await db_session.commit()
 - generation 推进与 Postback 读取在 REPEATABLE READ 下不存在旧快照误用。
 
 **本轮结论：** 该风险已由当前源码路径确认，不是推测。重复 active 配置会使 `get_config()` 的优先级选择变得不稳定，并可能让财务扣量规则随查询顺序/缓存状态变化。此项仍是 PR #205 财务阻断项；本轮仅增加审计证据，没有修改业务代码、没有新增 migration，也没有执行真实 MySQL 并发测试。
+
+### 36. 第十一阶段源码复核：Redis 扣量计数在 MySQL 提交失败后无法回滚
+
+本轮沿真实 Postback 调用链复核以下文件：`app/core/deduction/deduction_manager.py`、`app/core/postback/checks/discount_checker.py`、`app/core/postback/pipeline.py`、`app/core/postback/processor.py`。
+
+#### 36.1 决策计数在数据库事务提交前已经写入 Redis
+
+`DeductionManager._get_stats_for_decision()` 调用 `_DECISION_STATS_LUA`：
+- 初始化 `decision_deducted` baseline；
+- 对 `decision_seq` 执行 INCR；
+- 对首次创建的 key 设置 48 小时 TTL；
+- 将 Redis 返回值用于构造本次 `ConversionStats`。
+
+随后随机/哈希策略命中扣量时：
+- 有窗口总量时调用 `_reserve_volume_deduction()`，由 Lua 对 `decision_deducted` 执行 INCR；
+- 无窗口总量时调用 `_incr_decision_deducted()`，同样递增 Redis 计数。
+
+以上 Redis 写入均发生在 Postback MySQL 事务提交之前，且没有与 MySQL 事务共享的持久化 reservation/恢复账本。
+
+#### 36.2 命中扣量分支的实际提交路径没有 Redis 结果协调
+
+真实调用链如下：
+1. `pipeline.step_apply_discount()` 调用 `DiscountChecker.calculate()`；
+2. `DiscountChecker.calculate()` 调用 `apply_deduction()`，先更新 Redis 决策序号/扣量计数；
+3. 命中 volume deduction 后调用 `log_deduction()`，将 `ConversionDeductionLog` 加入当前 SQLAlchemy Session 并 flush；
+4. 返回 `skip_save_and_forward=True`；
+5. `PostbackProcessor.process()` 在该分支直接执行 `await db.commit()`，提交扣量日志和事件收据；
+6. 若该 commit 抛出异常，控制流进入外层异常处理，只尝试 `db.rollback()` 并重新抛出；没有针对上述 Redis decision_seq / decision_deducted 的安全回退或账本恢复。
+
+对照普通转化 Cap reservation：普通转化使用 `_commit_conversion_with_cap_reconciliation()` 和 `CapReservationLedger`，有 MySQL 事务内状态栅栏、commit-unknown 查询及 Redis token finalize/recovery。扣量 Redis 计数目前没有等价机制。不能把 Cap 的恢复能力误认为 CPL 扣量也已具备。
+
+#### 36.3 可复现的错误状态
+
+当 Redis 更新成功、扣量日志 flush 成功，但 MySQL COMMIT 最终回滚或确认未提交时：
+- 数据库没有该事件的扣量日志/持久化扣量事实；
+- Redis 的 decision_seq 仍然前进；
+- 若命中扣量，decision_deducted 仍然增加；
+- 同一事件重试可能读取不同 processed/deducted 基线，产生不同决策；后续不同事件也可能受 ghost counter 影响。
+
+若 COMMIT 响应丢失而数据库实际已提交，当前分支同样没有按事件唯一键核对扣量日志/receipt 终态并返回既有结果的专用恢复逻辑。不能仅凭异常就 DECR，因为并发请求可能已经观察或使用这些计数；无条件补偿可能造成计数虚低和超额扣量。
+
+#### 36.4 修复要求
+
+本问题不能以简单 Redis DECR、延长 TTL、捕获 commit exception 后 best-effort 补偿或给 Redis 操作增加重试来关闭。
+
+必须采用第 3–7 节定义的 MySQL 权威事件决策账本：
+- 在同一 MySQL 事务中以 canonical event identity 争取唯一事件；
+- 锁定唯一 scope，按同一个 decision_now 查询 24 小时滑动窗口；
+- 将本次决策结果、窗口快照、扣量日志/转化事实与事件 receipt 一起提交；
+- commit-unknown 时通过新 Session 按唯一事件身份恢复已提交终态；
+- Redis 仅保留可重建缓存，不再参与扣量决策、序号或名额仲裁。
+
+必须增加真实 MySQL + Redis 集成故障测试：
+1. Redis 决策计数成功后，强制 MySQL commit 失败：账本、receipt、扣量日志均回滚，后续事件决策不受 ghost counter 影响。
+2. Redis 计数成功后，flush 失败：不产生任何已处理事件状态。
+3. COMMIT ACK 丢失但 MySQL 实际提交：重试读取同一事件终态，不重复决策/扣量。
+4. COMMIT 确认未提交：重试可以安全重新决策。
+5. 同 scope 2/10/50 个并发事件与故障注入组合：窗口统计和扣量额度准确。
+6. Redis 停机、重启、清空或 key 过期：已提交财务结果不变化。
+7. 并发请求期间禁止使用无条件 DECR 补偿造成计数回退。
+
+**本轮结论：** 已从源码确认 Redis 扣量计数先于 MySQL commit，且 volume-deduction 分支缺少与 Cap reservation 等价的提交协调机制。该缺陷属于财务正确性阻断项。本轮只补充源码证据与测试要求；没有修改业务代码、没有新增 migration、没有执行真实 MySQL/Redis 故障注入测试。PR #205 继续保持 Draft，不得合并。
