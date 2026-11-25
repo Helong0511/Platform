@@ -44,3 +44,4 @@ async def test_pending_event_receipt_guard_checks_canonical_identity(receipt_id,
     assert "platform" in compiled
     assert "conversion_id" in compiled
     assert "event_name" in compiled
+    assert "FOR UPDATE" in compiled.upper()
