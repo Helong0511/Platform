@@ -155,6 +155,32 @@ def _create_base_schema(database: str) -> None:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
             )
+            # 仅创建统计查询所需列，使用真实 MySQL/InnoDB 验证事务可见性。
+            cursor.execute(
+                """
+                CREATE TABLE postback_conversions (
+                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    created_at DATETIME NOT NULL,
+                    advertiser_id INT NULL,
+                    offer_id INT NULL,
+                    publisher_id INT NULL,
+                    deducted_volume INT NOT NULL DEFAULT 0
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE conversion_deduction_logs (
+                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    conversion_id BIGINT NULL,
+                    created_at DATETIME NOT NULL,
+                    advertiser_id INT NULL,
+                    offer_id INT NULL,
+                    publisher_id INT NULL,
+                    deducted_volume INT NOT NULL DEFAULT 0
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
     finally:
         connection.close()
 
@@ -187,13 +213,13 @@ def _initialize_schema(database: str) -> None:
         _execute_migration(database, migration_path)
 
 
-def _create_engine(database: str):
+def _create_engine(database: str, isolation_level: str = "REPEATABLE READ"):
     user = quote_plus(MYSQL_USER)
     password = quote_plus(MYSQL_PASSWORD)
     return create_async_engine(
         f"mysql+aiomysql://{user}:{password}@{MYSQL_HOST}:{MYSQL_PORT}/{database}"
         "?charset=utf8mb4",
-        isolation_level="REPEATABLE READ",
+        isolation_level=isolation_level,
         pool_pre_ping=True,
         pool_size=55,
         max_overflow=5,
@@ -441,3 +467,86 @@ async def test_mysql_unique_migration_refuses_historical_active_scope_collisions
             verify.close()
     finally:
         _drop_database(database)
+
+
+@pytest.mark.asyncio
+async def test_mysql_scope_lock_serializes_authoritative_stats_and_rollback_releases_quota():
+    """真实 MySQL 验证：锁内 DB 统计串行可见，rollback 不留下 Redis 式幽灵计数。"""
+    async def scenario(database, _factory):
+        engine = _create_engine(database, isolation_level="READ COMMITTED")
+        try:
+            factory = async_sessionmaker(
+                bind=engine,
+                expire_on_commit=False,
+                autoflush=False,
+            )
+            from app.core.deduction.deduction_manager import (
+                ConversionStats,
+                DeductionManager,
+            )
+            from app.core.utils import get_app_now_naive
+
+            # 第一次事务写入扣量日志后回滚，统计贡献必须一并消失。
+            async with factory() as rolled_back:
+                await lock_deduction_scopes(rolled_back, [("offer", 606)])
+                before = await DeductionManager(rolled_back)._get_stats_for_decision(
+                    offer_id=606
+                )
+                assert before == ConversionStats()
+                await rolled_back.execute(
+                    text(
+                        "INSERT INTO conversion_deduction_logs "
+                        "(created_at, offer_id, deducted_volume, conversion_id) "
+                        "VALUES (:created_at, 606, 1, NULL)"
+                    ),
+                    {"created_at": get_app_now_naive()},
+                )
+                in_transaction = await DeductionManager(
+                    rolled_back
+                )._get_stats_for_decision(offer_id=606)
+                assert in_transaction == ConversionStats(
+                    total=1, deducted=1, processed=1
+                )
+                await rolled_back.rollback()
+
+            async with factory() as verify_rollback:
+                await lock_deduction_scopes(verify_rollback, [("offer", 606)])
+                after_rollback = await DeductionManager(
+                    verify_rollback
+                )._get_stats_for_decision(offer_id=606)
+                assert after_rollback == ConversionStats()
+
+            # 第二个事务必须等待第一个 scope 锁；提交后读取到最新 MySQL 统计。
+            async with factory() as first:
+                await lock_deduction_scopes(first, [("offer", 606)])
+                await first.execute(
+                    text(
+                        "INSERT INTO postback_conversions "
+                        "(created_at, offer_id, deducted_volume) "
+                        "VALUES (:created_at, 606, 0)"
+                    ),
+                    {"created_at": get_app_now_naive()},
+                )
+                started = asyncio.Event()
+
+                async def read_after_lock():
+                    async with factory() as second:
+                        started.set()
+                        await lock_deduction_scopes(second, [("offer", 606)])
+                        return await DeductionManager(
+                            second
+                        )._get_stats_for_decision(offer_id=606)
+
+                waiting = asyncio.create_task(read_after_lock())
+                await asyncio.wait_for(started.wait(), timeout=5)
+                await asyncio.sleep(0.2)
+                assert not waiting.done(), "第二个决策未等待第一个事务的 scope 锁"
+                await first.commit()
+                observed = await asyncio.wait_for(waiting, timeout=10)
+                assert observed == ConversionStats(
+                    total=1, deducted=0, processed=1
+                )
+        finally:
+            await engine.dispose()
+
+    await _with_database(scenario)
