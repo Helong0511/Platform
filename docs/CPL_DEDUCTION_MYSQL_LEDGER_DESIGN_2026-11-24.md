@@ -1863,3 +1863,38 @@ READ COMMITTED 使每条普通一致性读都看到该语句开始前已提交�
 8. 测试 SQLite 单元测试不因 MySQL 专属隔离配置失败。
 
 **本节结论：** 账本实现的隔离策略应在 Postback Session Factory 层确定，而不是在扣量服务中途补设。READ COMMITTED + 全路径 scope lock + 唯一事件账本，是当前推荐的实现组合；在真实 MySQL 两连接测试通过前仍不得解除 PR #205 的 Draft。
+
+
+### 40. 第十五阶段：待审批转化批准路径绕过事件收据与 CPL 扣量决策
+
+本轮继续核对非白名单回调和管理员批准链路，发现它们不是普通 PostbackProcessor 入口的简单延伸，而是独立写入正式转化的路径。
+
+#### 40.1 已确认的实际调用链
+
+- `PostbackProcessor.process()` 在第一步执行 IP 校验；IP 不通过时立即调用 `_handle_ip_failure()` 并返回，不会进入后续的 `step_check_duplicate()`、`step_apply_discount()` 和事件收据预留。
+- `_handle_ip_failure()` 调用 `pending_postback_ingest_service.enqueue()`，把非白名单事件保存为 PendingPostbackConversion。
+- 管理员手动批准路由 `app/api_v1/postback/routes/pending.py` 使用普通 `get_db()`，委托 `PostbackPendingService.approve_pending_conversion()`。
+- IP 白名单新增后的批量自动批准由 `PostbackIpWhitelistService.create_ip_whitelist()` 调用 `auto_approve_pending_by_ip()`。
+- 两个批准方法最终调用 `_create_conversion_from_pending()`，直接构造并写入 `PostbackConversion`，不调用 `PostbackProcessor.process()`、`step_check_duplicate()`、`step_apply_discount()` 或 `DeductionManager`。
+- `_pending_conversion_exists()` 只查询 `PostbackConversion`，没有查询 `postback_event_receipts`。
+
+#### 40.2 对事件幂等和财务结果的影响
+
+这会产生至少两类需要修复/明确的风险：
+
+1. **已扣量事件可经待审批路径重新转正。** 假设事件 E 已由白名单入口处理并命中 volume deduction：正式转化不存在，但 `postback_event_receipts` 已保留 E 的唯一事件身份。之后同一 E 又从非白名单来源进入 pending，管理员批准时只查 `postback_conversions`，看不到 receipt，可能直接创建正式转化。这样同一事件先前的 volume-deducted 终态被绕过，变成正式转化。
+2. **批准入库不执行当前 CPL 决策。** Pending 入队阶段没有执行扣量决策；批准时也没有重新进入扣量流程。因此待审批批准的事件可能完全绕过配置、扣量比例、扣量审计日志和新账本终态。其财务含义不能被当成普通 Postback 的等价处理。
+
+正式转化表的唯一键只能阻止已经存在的正式转化重复，不能代表“事件已被扣量收据处理”。因此只检查 PostbackConversion 不足以维护统一事件状态。
+
+#### 40.3 修复要求
+
+- 手动批准和批量自动批准必须共用一个事务化的事件处理服务，不得分别实现事件身份/幂等逻辑。
+- 在批准前按与正常入口完全相同的 canonical identity 查询/争取 `postback_event_receipts`（未来扩展为权威账本后查询账本终态）；若已有终态，批准流程必须按该终态处理，不能创建相反结果。
+- 若业务要求“批准即正式处理”，批准动作必须在同一事务内完成事件收据、scope 锁、CPL 决策、扣量日志/正式转化、审批审计和终态提交；不得先创建转化再异步补扣量。
+- 若产品定义为“管理员批准只解除 IP 隔离、不重新执行扣量”，必须由财务/业务明确批准，并设计与正常入口一致的幂等终态规则；不能默默绕过 receipt。
+- 批量自动批准必须在每条 SAVEPOINT 内执行相同的事件身份与决策协议，并确保批次锁顺序、失败隔离和外层事务回滚语义。
+- 增加真实 MySQL 测试：已有 volume receipt 的同事件 pending 批准、手动/自动批准并发、同事件从白名单和非白名单入口交错到达、批准事务 rollback/commit-unknown、重复审批、不同事件同 scope 并发。
+- 对所有批准路径做静态调用图/路由测试，确保未来新增入口不能绕过权威事件服务。
+
+**本节结论：** 当前待审批批准路径只检查正式转化表并直接创建 PostbackConversion，既不检查已有事件 receipt，也不执行 CPL 扣量决策。这是 PR #205 财务账本实现必须覆盖的另一条生产写入路径。当前仅完成源码审计和文档记录，尚未修改业务代码，也未执行上述真实 MySQL 测试；PR #205 继续保持 Draft。
