@@ -141,11 +141,26 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             )
 
         level, target_id = resolve_config_level_target(config)
+        # 普通更新仅允许修改业务参数；状态与 scope 必须走独立、受控的事务入口。
+        allowed_fields = {
+            "enable_volume_deduction",
+            "volume_deduction_ratio",
+            "deduction_strategy",
+            "enable_amount_deduction",
+            "amount_deduction_ratio",
+            "priority",
+        }
+        forbidden_fields = set(update_data) - allowed_fields
+        if forbidden_fields:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail=(
+                    "普通扣减配置更新不允许修改状态、目标层级或系统字段；"
+                    "请使用专用状态接口，目标迁移需走独立流程"
+                ),
+            )
         for field, value in update_data.items():
-            if field in ("level", "target_id"):
-                continue
-            if hasattr(config, field):
-                setattr(config, field, value)
+            setattr(config, field, value)
 
         try:
             await self.db.flush()
