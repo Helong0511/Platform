@@ -3195,3 +3195,59 @@ FOR UPDATE;
 - 新增 8 个真实 MySQL 8.0 scope 集成场景全部通过，包括 2/10/50 并发创建和迁移冲突保护。
 
 该 CI 结果证明上述隔离 MySQL 场景通过，不证明生产库已应用 migration，也不证明 CPL Redis 计数与 MySQL 财务 ledger 已原子化。PR #205 仍保持 Draft。
+
+
+### 63. Redis 决策计数退出：以 scope 行锁 + MySQL 事务统计作为权威方案
+
+#### 63.1 本轮确认的真实调用链
+
+已重新读取当前分支以下实现：
+- `DeductionManager.find_config()`：在读取扣量配置前，使用 Postback 当前 AsyncSession 锁定所有候选 advertiser / offer / publisher scope。
+- `DiscountChecker.calculate()`：命中配置后，按配置自身唯一 scope 调用 `apply_deduction()`；scope 锁继续由外层 Postback 事务持有。
+- `DeductionManager.apply_deduction()`：此前会先执行 Redis `INCR/EVAL`，再由 `DiscountChecker` 写扣量日志。
+- `PostbackProcessor.process()`：volume-deducted 分支在同一个 MySQL Session 中写日志并直接 commit；正常分支在同一事务写入转化并释放临时 receipt。
+- `DuplicateChecker`：volume-deducted 事件保留唯一 receipt；正常事件在正式转化写入同一事务后删除临时 receipt，正式转化唯一键接管幂等。
+
+由此确认：Redis 计数不是必要的权威状态。当前数据库已经有三种可事务化的事件结果载体：
+1. 正常/无配置/金额扣减/Cap 结果：`postback_conversions` 唯一事件记录；
+2. 未入库的 volume-deducted 事件：`postback_event_receipts` 唯一收据 + 同事务 `conversion_deduction_logs`；
+3. 金额扣减日志不增加 volume 统计，因为其 `deducted_volume=0`，正式转化只计一次。
+
+因此本轮采用“复用现有持久化事实 + MySQL scope 锁”的方案，不再新增第二张重复事件唯一键 ledger 表。若后续审计发现任何成功事件分支没有上述持久化凭证，必须先补齐该分支，不能把它排除在统计之外。
+
+#### 63.2 本轮代码修改
+
+代码提交：
+- `a54ae228db5227f37d5d08b759ab8c5afb00a02d`：移除 Redis decision sequence / deducted reservation 对扣量决策的影响，改为 MySQL 严格统计。
+- `fabbc6e4dfe11a3de7d747f38475c9c5af2692d2`：重写 fail-open/fail-close 测试，验证财务决策不访问 Redis，并恢复 proportional / round_robin 顺序策略的 MySQL 计数路径。
+- `bada9476ffc024200ccaf4ee1760727e432336c9`：增加真实 MySQL scope 锁与统计事务集成测试。
+
+关键行为：
+1. `_get_stats_for_decision()` 只调用 `get_recent_stats(strict=True)`，不再初始化或递增 Redis key。
+2. 所有策略均使用 MySQL 窗口统计；随机/哈希策略继续使用稳定事件身份，proportional / round_robin 使用锁内 `processed` 计数，不再因 Redis 顺序号缺少事件幂等而被整体跳过。
+3. scope 锁由 `find_config()` 在同一 Session 内提前取得，并持有到 Postback 最终 commit/rollback。同一 scope 的事件决策串行，统计读取不会与另一个同 scope 的事件写入交错。
+4. 统计基线只包含此前已提交事件。当前事件是否扣量按 `floor((stats.total + 1) * ratio)` 计算本次窗口额度，再与此前已扣量数比较；`+1` 是因为当前事件尚未提交、不会出现在本次 SQL count 中。
+5. MySQL 24 小时半开窗口自动滚动；Redis 重启、TTL 过期或缓存丢失不再改变财务决策。
+6. MySQL 日志/转化/receipt 同事务提交或回滚。提交失败时统计贡献随事务回滚；COMMIT 响应不确定但实际成功时，重试由 receipt 或正式转化唯一键识别，不会再次占用扣量名额。
+7. MySQL 统计失败时遵循既有 `DEDUCTION_FAIL_OPEN`：fail-open 只跳过 volume deduction，可继续 amount deduction；fail-closed 抛出并要求 Postback 重试。scope lock 获取失败始终 fail-closed。
+
+#### 63.3 真实 MySQL 验收新增场景
+
+新增 `test_mysql_scope_lock_serializes_authoritative_stats_and_rollback_releases_quota`，运行于 GitHub Actions 临时 MySQL 8.0 / InnoDB，并使用与 Postback 生产 Session 一致的 READ COMMITTED 隔离级别：
+- 在真实事务中插入 volume deduction log，事务内统计立即可见；
+- 回滚后重新取得同一 scope 锁，统计恢复为 0，不留下跨事务幽灵计数；
+- 第一个事务持有 scope 锁并写入正式转化时，第二个事务必须等待；
+- 第一个事务提交后，第二个事务取得锁并读取到最新已提交的 MySQL 统计。
+
+该测试与原有 8 个 scope/唯一约束 MySQL 场景一起，验证数据库锁和统计事务边界；CI 最终结果仍必须以最新 Head 对应的 workflow 为准。
+
+#### 63.4 尚需验收与边界
+
+- 必须在最新 Head CI 中确认完整后端测试、前端构建、Emergency Security 和上述 MySQL 集成场景全部通过；不能引用旧 SHA 结果。
+- 必须检查 Postback 生产所有成功分支：普通转化有正式唯一记录；volume deduction 保留 receipt 并写日志；金额扣减写正式转化并仅以正式转化计数。任何旁路入口若绕开该事务协议，必须纳入审计。
+- scope 锁必须覆盖最终写入与 commit。禁止在 `find_config()` 后更换 Session、提前 commit 或把扣量日志改为后台异步写入。
+- READ COMMITTED 是当前 Postback 专用 Session 的生产隔离级别；MySQL 集成统计测试显式使用 READ COMMITTED。不要将此结论推广到管理端 Session 或其它数据库事务。
+- 该方案不宣称跨库原子事务；它通过将扣量额度、统计基线和扣量凭证收敛到同一 MySQL 事务域，消除原 Redis/MySQL 双写。
+- 生产数据库迁移与历史数据扫描仍按第 62 节执行；当前 CI 不代表正式生产库已应用迁移。
+
+PR #205 继续保持 Draft，直到最新 Head 全部 CI 通过、完整 Postback 成功/失败路径审计完成，并完成生产 migration 预检与部署方案验收。
