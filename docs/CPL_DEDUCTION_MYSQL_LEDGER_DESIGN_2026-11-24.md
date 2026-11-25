@@ -2028,3 +2028,57 @@ READ COMMITTED 使每条普通一致性读都看到该语句开始前已提交�
 - 增加多进程连接池预算测试/配置校验，以及同步 Engine 连接隔离、连接回收、关闭释放测试。
 
 **本节结论：** Telegram 审批当前拥有独立的 PyMySQL 同步连接池（单进程最多 8 个连接），其隔离级别未显式固定，也未证明纳入统一连接预算和生命周期管理。该问题会扩大并发写路径的隔离差异，并可能造成生产数据库连接数低估。当前只完成源码审计记录，尚未修复同步池资源管理，也未完成真实 MySQL 验证。
+
+
+### 44. 第十九阶段：Pending 批准不仅绕过 CPL，还绕过 Cap、转发队列与第三方 Report Outbox
+
+本轮进一步对照正常 Postback 主流程与三种 Pending 批准实现，确认此前第 40、42 节所述“直接创建正式转化”会同时绕过正常主流程中的多项事务副作用，不能仅按 CPL 扣量漏算处理。
+
+#### 44.1 非白名单入队阶段的业务边界
+
+文件：`app/core/postback/processor.py`
+
+`_handle_ip_failure()` 的设计明确为：待审批阶段不创建正式转化、不占用 Cap、不触发下游转发。它调用 `pending_postback_ingest_service.enqueue()` 保存 Pending 记录并提交。
+
+这意味着 Pending 记录只是隔离队列中的原始业务命令/待处理事件，不是已经完成财务决策的正式转化。
+
+#### 44.2 正常白名单 Postback 成功路径的实际工作
+
+`PostbackProcessor.process()` 在扣量未命中并继续保存时，除了写入正式 `PostbackConversion`，还会执行：
+
+- `step_check_duplicate()`：正式事件重复检查及事件 receipt 处理；
+- `step_apply_discount()`：CPL volume/amount deduction 决策与日志；
+- `CapChecker.increment_with_reservations()`：Cap 原子预留；
+- `step_save_conversion()`：正式转化保存；
+- `step_release_event_receipt()`：正式转化成功后释放临时事件 receipt；
+- `_enqueue_downstream_forward_tasks()`：与正式转化同事务写入 Publisher/Product 下游转发队列；
+- `_enqueue_third_party_report_if_needed()`：与正式转化同事务写入第三方 Report Outbox；
+- `_commit_conversion_with_cap_reconciliation()`：对 Cap Reservation 进行提交栅栏、commit-unknown 核验和 Redis token 清理/恢复。
+
+#### 44.3 三类 Pending 批准实现的实际行为
+
+- Web 手动批准和 IP 加白自动批准：`PostbackPendingService._create_conversion_from_pending()` 直接构造 `PostbackConversion`，更新 Pending 状态并由外层事务提交。
+- Telegram 批准：`process_pending_conversion()` 使用独立同步 Session，直接构造 `PostbackConversion`，flush 后写审批审计并 commit。
+- 三条批准路径均未重新调用 `PostbackProcessor.process()`，也没有执行上述正常成功路径的 CPL 决策、Cap reservation、下游转发队列和第三方 Report Outbox 创建逻辑。
+
+因此，管理员批准当前不只是“没有执行扣量”；它把一个尚未完成处理的 Pending 事件直接提升为正式转化，却没有完成正常正式转化所依赖的整套业务事务。
+
+#### 44.4 需要业务明确的语义与修复边界
+
+必须先确定 Pending 的业务语义：批准是“解除 IP 隔离并重新执行完整 Postback 处理”，还是“人工豁免某些自动规则、直接确认转化”。两种语义不能由当前直接构造 ORM 对象的实现隐式决定。
+
+无论选择哪一种，都必须满足：
+
+1. Pending 入队不代表扣量、Cap 或转发已经完成；批准服务必须显式执行一套确定、可审计的终态策略。
+2. 若批准等同于正常接收，必须复用统一事件处理服务，在同一 MySQL 事务中完成事件唯一身份、receipt/权威 ledger、scope lock、CPL 决策、Cap Reservation ledger、正式转化、Pending 状态、审批审计及 Outbox/下游队列。
+3. 若业务批准需要豁免 CPL 或 Cap，必须有明确的权限、豁免原因、操作者、审批时间、策略版本和独立不可变审计记录；不得通过跳过整个 PostbackProcessor 顺带丢失其它正常副作用。
+4. 下游转发和第三方上报必须按明确的审批策略入队，且与正式转化终态原子提交；不能因审批路径不同而静默遗漏。
+5. 对已存在 volume-deducted receipt 的事件，任何批准策略都不得把同一 canonical event identity 改写成相反终态。
+6. 手动批准、IP 批量自动批准、Telegram 批准必须调用同一业务命令入口；同步 Telegram 只允许做适配，不得直接写正式转化。
+7. 增加真实 MySQL + Redis 集成测试，覆盖批准/扣量/Cap/Outbox 的成功、回滚、commit-unknown、重试、重复审批、并发交错，以及批量 SAVEPOINT 的外层回滚。
+
+#### 44.5 本轮结论
+
+当前源码可以确认：Pending 入队阶段明确不占 Cap；正常白名单 Postback 成功路径会执行 Cap reservation、下游转发队列和第三方 Report Outbox；但 Web、IP 自动、Telegram 三类批准路径只直接创建正式转化，没有执行这些正常路径步骤。
+
+这属于正式转化状态与财务/运营副作用不一致的独立风险。当前仅补充源码审计证据和修复验收要求，未修改业务代码，也未执行真实 MySQL + Redis 故障注入测试。PR #205 继续保持 Draft，不得合并。
