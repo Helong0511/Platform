@@ -198,6 +198,12 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
 
 
     Migration(
+        revision="20261125_cloak_postback_currency_no_default",
+        path="sql/migrations/20261125_cloak_postback_currency_no_default.sql",
+        sha256="ad3016f3bacf05bcc7ab089eb6759ba50da0d1619ddfb98600a03c36b943016c",
+    ),
+
+    Migration(
         revision="20261125_cpl_deduction_scope_locks",
         path="sql/migrations/20261125_cpl_deduction_scope_locks.sql",
         sha256="3cfa80ab57aadda52ee37224a1a91f51dadfd75af494906b407b0faf6ddb4701",
