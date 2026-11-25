@@ -9,7 +9,7 @@ from datetime import datetime
 import enum
 import uuid
 
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, get_app_now_naive_floor_second
 from app.models.base import Base, UserRole
 
 class PostbackConversion(Base):
@@ -60,7 +60,7 @@ class PostbackConversion(Base):
     deducted_volume = Column(Integer, default=0, comment='扣减的转化数量')
 
     # 元数据
-    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')
+    created_at = Column(DateTime, default=get_app_now_naive_floor_second, nullable=False, index=True, comment='创建时间')
 
     # 关系（用于通过 ORM 访问关联对象，例如：conversion.product.name）
     # 注意：当前查询接口未使用这些关系，但保留以备将来扩展使用（如返回产品名称、客户名称等）
