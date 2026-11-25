@@ -149,7 +149,12 @@ async def validate_target_exists(db: AsyncSession, level: ConfigLevel, target_id
         )
 
 
-async def check_existing_config(db: AsyncSession, level: ConfigLevel, target_id: int) -> None:
+async def check_existing_config(
+    db: AsyncSession,
+    level: ConfigLevel,
+    target_id: int,
+    exclude_config_id: Optional[int] = None,
+) -> None:
     """同一层级目标不可存在第二条激活配置。"""
     conditions = [ConversionDeductionConfig.is_active == True]
 
@@ -159,6 +164,9 @@ async def check_existing_config(db: AsyncSession, level: ConfigLevel, target_id:
         conditions.append(ConversionDeductionConfig.offer_id == target_id)
     elif level == "publisher":
         conditions.append(ConversionDeductionConfig.publisher_id == target_id)
+
+    if exclude_config_id is not None:
+        conditions.append(ConversionDeductionConfig.id != exclude_config_id)
 
     result = await db.execute(select(ConversionDeductionConfig).where(and_(*conditions)))
     if result.scalars().first():
