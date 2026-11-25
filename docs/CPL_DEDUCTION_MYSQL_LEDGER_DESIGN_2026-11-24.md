@@ -2673,3 +2673,31 @@ Web helper 的 `_pending_conversion_exists()` 查询目标是正式 `PostbackCon
 #### 53.3 本轮验证状态
 
 代码和测试文件已提交到 PR #205；本轮没有在本地或真实 MySQL 环境执行 pytest，也没有运行 MySQL + Redis 并发故障注入。CI 需要以最新 Head SHA 的实际结果为准。Telegram 路径、统一审批命令、财务 ledger 和跨系统恢复仍是未完成阻断项。PR #205 必须保持 Draft，不得合并。
+
+
+
+### 54. Telegram Pending 审批收据防护：补齐入口级拦截，统一决策仍未完成
+
+#### 54.1 本轮代码变更
+
+在 `app/core/telegram/callback_handlers/postback_approval.py` 的同步审批事务中补充：
+
+- 查询 `PostbackEventReceipt`，使用 `platform + conversion_id + normalized event_name` 作为 canonical identity。
+- 在锁定 Pending 行后、查询正式 conversion 和构造 `PostbackConversion` 前，执行 `SELECT ... FOR UPDATE`。
+- 如果收据已存在，保持 Pending 原状态，不创建正式 conversion；在当前同步事务中写入 `outcome="event_receipt_exists"` 的审批审计并提交。
+- Telegram 提示明确说明事件已有收据且未创建正式转化，不把 receipt 擅自解释为某个具体扣量原因。
+- 保留现有 Telegram 管理员权限检查、callback ID 去重和审批任务队列行为。
+
+新增架构回归测试 `test_telegram_approval_checks_locked_receipt_before_conversion_creation`，检查 Telegram 审批源码在构造正式 conversion 之前包含 receipt 锁定查询及阻断审计。该测试是源码结构回归，不是数据库行为测试。
+
+#### 54.2 尚存边界
+
+1. Web/IP 与 Telegram 现在都有 receipt-only 的入口级拦截，但仍是两套独立实现，不是统一业务命令；正常 Postback 与审批入口尚未共享同一 CPL decision ledger。
+2. `FOR UPDATE` 对不存在键的范围锁行为取决于 InnoDB 索引、隔离级别和执行计划；本次增加的源码测试不能证明并发正确性。
+3. Telegram 继续使用同步 SQLAlchemy Session；必须在真实 MySQL 环境验证其与异步 Postback/Web/IP 事务并发时的等待、死锁、超时及事务回滚行为。
+4. 若 receipt 存在但其最终决策状态未知，当前处理仍只是安全阻断，不是终态解释或自动恢复。
+5. CPL Redis reservation 与 MySQL commit 不一致、24 小时滑动窗口、事件级 reservation、commit-unknown recovery 和统一审批命令仍是财务阻断项。
+
+#### 54.3 验证与 CI 状态
+
+本轮提交了 Telegram receipt guard 和源码结构回归测试，但没有在当前环境执行 pytest，也没有连接真实 MySQL/Redis 做并发故障注入。最新已观察到的 Full Audit CI 在前一个 Head `8bf98392a09c9bc91ebdb337ceb003ba715c5124` 的 backend `Run unit tests` 步骤失败；本次提交后的新 Head 必须等待并检查新 CI，不能沿用旧 SHA 的结果。PR #205 继续保持 Draft，不得合并。
