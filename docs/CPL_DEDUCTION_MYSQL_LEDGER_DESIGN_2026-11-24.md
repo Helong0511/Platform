@@ -3161,6 +3161,8 @@ FOR UPDATE;
 8. 新增 `tests/test_deduction_scope_lock.py`，覆盖 scope 去重/排序、helper 不提交事务、不支持方言、非法 ID，以及 Postback 先锁全部候选 scope 再读取配置的调用顺序。
 9. 配置选择查询在 priority 相同情况下增加 `id ASC` 次级排序，降低历史重复配置时的结果不确定性。
 
+10. 新增数据库级激活唯一性防线：三个 STORED generated columns 分别在 `is_active=1` 时投影 advertiser_id / offer_id / publisher_id，并分别建立 UNIQUE KEY；增加 exactly-one-scope CHECK，且将 `is_active` 收紧为 NOT NULL。迁移 `20261125_cpl_deduction_scope_unique.sql` 会先检查历史空/多 scope、NULL 状态和同 scope 多条激活配置；发现冲突时故意终止，不自动选择或删除财务配置。
+
 #### 62.2 事务与发布边界
 
 - 必须先在正式数据库执行并验收 migration，再发布使用锁表的新代码；不能先部署新 Worker 再补建锁表。
@@ -3172,11 +3174,11 @@ FOR UPDATE;
 
 #### 62.3 尚未完成、仍然阻断 PR #205 的事项
 
-1. **活动配置唯一性最终防线尚未建立**：目前通过共享 scope mutex + 锁内冲突查询串行化应用服务写入，但还没有 `conversion_deduction_active_scopes` 唯一注册表或经过历史数据碰撞预检的等价数据库唯一约束。任何绕过这些服务的直接 SQL/旧版本 Worker 都可能破坏唯一性。
+1. **活动配置唯一性迁移尚待真实数据库验收**：ORM、`sql/platform.sql` 和新 migration 已加入三个 generated-column UNIQUE KEY 与 exactly-one-scope CHECK；迁移前置检查会拒绝历史异常/重复数据，不会自动清理。尚未在正式结构副本上运行 migration、核对实际 MySQL 版本与生成列/约束行为；迁移未执行前，生产数据库仍没有这层最终防线。
 2. **真实 MySQL 并发验收未完成**：当前新增的是单元级顺序/调用边界测试；尚未在两个以上独立 MySQL 连接下验证 no_config 与首次创建竞争、2/10/50 并发启停、反向批量锁、父对象删除竞争、死锁/超时和 commit-unknown。
 3. **Redis 与 MySQL 财务非原子问题仍存在**：Redis decision_seq / deducted 计数可能在 MySQL commit/rollback/commit-unknown 后留下幽灵状态；没有等价于 CapReservationLedger 的 CPL 事件级 reservation/恢复账本。
 4. **24 小时 DB 滑动窗口与 Redis 48 小时计数仍不一致**：旧事件离开 DB 统计窗口后 Redis scope counter 不会同步递减；Redis 重启/过期也可能重置基线。
 5. **事件级权威财务决策 ledger 仍不完整**：仍需为每个已验证事件身份持久化唯一事件键、决策状态、配置快照、扣量结果和恢复状态，并与 Postback receipt/conversion 在同一 MySQL 事务内保持一致。
 6. **迁移需真实 MySQL 演练**：尤其是历史环境 FK 的实际 DELETE_RULE、迁移执行器对 PREPARE/DDL 语句的处理、锁表物理结构与索引，必须用 SHOW CREATE TABLE / information_schema 验收，不能仅凭 CI 推断生产迁移成功。
 
-因此，本轮实现的是“统一 scope 事务互斥的第一阶段”，不是 CPL 财务一致性最终修复。PR #205 继续保持 Draft；在活动唯一性数据库防线、MySQL 并发/故障注入和 Redis/MySQL 事件账本修复全部验收前，禁止合并。
+因此，本轮已提交“统一 scope 事务互斥 + 数据库激活唯一性迁移”的代码实现，但尚未完成真实数据库迁移与财务一致性最终修复。PR #205 继续保持 Draft；在 migration 真实验收、MySQL 并发/故障注入和 Redis/MySQL 事件账本修复全部通过前，禁止合并。
