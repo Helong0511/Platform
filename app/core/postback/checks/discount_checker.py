@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.core.deduction import apply_deduction, find_deduction_config, log_deduction
 from app.core.discount import calculate_discount
 from app.core.postback.errors import DeductionProcessingError
+from app.services.cpl.deduction.helpers import DeductionScopeLockError
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,11 @@ class DiscountChecker:
                             raise DeductionProcessingError(
                                 f"记录扣金额日志失败: {log_exc}"
                             ) from log_exc
+        except DeductionScopeLockError as exc:
+            # scope 锁不可用时绝不能按 DEDUCTION_FAIL_OPEN 当作“无配置”继续处理。
+            raise DeductionProcessingError(
+                "扣量 scope 锁获取失败，拒绝在无锁状态下执行财务决策"
+            ) from exc
         except DeductionProcessingError:
             raise
         except Exception as exc:
