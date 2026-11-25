@@ -588,7 +588,6 @@ class DeductionManager:
             config.enable_volume_deduction
             and Decimal(str(config.volume_deduction_ratio or 0)) > 0
         )
-        strategy_name = (config.deduction_strategy or "random").lower()
         event_decision_key = self._build_event_decision_key(event_identity)
         if volume_decision_available and not event_decision_key:
             logger.warning(
