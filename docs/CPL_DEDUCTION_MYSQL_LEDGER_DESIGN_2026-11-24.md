@@ -1691,3 +1691,15 @@ await db_session.commit()
 7. 并发请求期间禁止使用无条件 DECR 补偿造成计数回退。
 
 **本轮结论：** 已从源码确认 Redis 扣量计数先于 MySQL commit，且 volume-deduction 分支缺少与 Cap reservation 等价的提交协调机制。该缺陷属于财务正确性阻断项。本轮只补充源码证据与测试要求；没有修改业务代码、没有新增 migration、没有执行真实 MySQL/Redis 故障注入测试。PR #205 继续保持 Draft，不得合并。
+
+#### 36.5 现有测试覆盖边界：Cap 有提交协调测试，CPL 扣量没有对应故障测试
+
+对当前分支以下测试文件进行源码核对：
+
+- `tests/test_deduction_stats_accounting.py`：验证统计 SQL 计数来源、时间半开区间和 strict 模式绕过缓存；没有模拟 Redis 计数成功后 MySQL commit 失败。
+- `tests/test_deduction_fail_open_semantics.py`：验证 Redis 不可用、Redis eval 失败时跳过不安全扣量；主要通过 Mock 替换统计/Redis 方法，没有覆盖 Redis 已成功递增、随后真实 MySQL 事务回滚的状态。
+- `tests/test_discount_checker_deduction_log_fail_closed.py`：验证扣量日志写入失败时 fail-closed；测试的是日志函数抛错，不是日志 flush 成功后 commit 失败。
+- `tests/test_postback_event_receipt_mysql_integration.py`：真实 MySQL REPEATABLE READ 测试覆盖 receipt 并发、正常转化 receipt 释放及 rollback 后重试；没有调用真实 DeductionManager，也没有覆盖 Redis decision counter 与扣量日志提交协调。
+- 对照 `tests/test_cap_reservation_postback_integration.py`：Cap 路径已有 stage-commit、数据库 commit、ledger finalize 顺序和禁止 stale Redis compensation 的专项测试；这类提交栅栏在 CPL volume deduction 路径尚未建立。
+
+因此，现有测试通过不能证明 CPL Redis/DB 双写一致。后续实现必须新增端到端 MySQL + Redis 故障注入测试，不能只增加对内部 helper 的 Mock 单元测试。
