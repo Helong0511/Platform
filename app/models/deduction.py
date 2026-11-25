@@ -60,7 +60,7 @@ class ConversionDeductionConfig(Base):
     priority = Column(Integer, default=0, comment='优先级（数字越大优先级越高）')
     
     # 状态
-    is_active = Column(Boolean, default=True, index=True, comment='是否激活')
+    is_active = Column(Boolean, default=True, nullable=False, index=True, comment='是否激活')
 
     # 仅激活配置生成非 NULL scope key；唯一索引由数据库保证同一 scope 最多一条激活配置。
     active_advertiser_id = Column(
