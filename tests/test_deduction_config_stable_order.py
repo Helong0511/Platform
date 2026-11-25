@@ -1,6 +1,4 @@
 """扣量配置存在历史重复记录时，查询结果必须保持稳定。"""
-from types import SimpleNamespace
-
 import pytest
 
 from app.core.deduction.deduction_cache import DeductionConfigCache
