@@ -21,9 +21,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.models.models import (
     Offer, Advertiser, User,
-    OfferPublisherAssignment, ShortLink, Click
+    OfferPublisherAssignment, ShortLink, Click, ConversionDeductionConfig
 )
 from app.services.base_service import BaseService
+from app.services.cpl.deduction.helpers import lock_deduction_scopes
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.audit_log import log_user_action
@@ -279,6 +280,19 @@ class OfferService(BaseService[Offer]):
 
         # 获取Offer
         offer = await self.get_offer_by_id(offer_id, current_user, include_advertiser=False)
+
+        # 与扣量配置写入口共享 scope 锁，避免级联删除财务配置。
+        await lock_deduction_scopes(self.db, [("offer", offer_id)])
+        deduction_count = await self.db.execute(
+            select(func.count(ConversionDeductionConfig.id)).where(
+                ConversionDeductionConfig.offer_id == offer_id
+            )
+        )
+        if deduction_count.scalar() > 0:
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail="Offer 仍有关联扣量配置，无法删除",
+            )
 
         # 保存旧的tracklink，用于检测变化
         old_downstream_tracklink = offer.downstream_tracklink
