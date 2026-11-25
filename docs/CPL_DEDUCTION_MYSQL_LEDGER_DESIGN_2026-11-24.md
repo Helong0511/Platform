@@ -2821,3 +2821,114 @@ PR #205 Head 7ea8cf4b98d4a5578b359c1b6dd9aac74ea8c4ab 的 Full Audit CI run 4553
 #### 57.7 当前状态
 
 本节是根据当前源码确认的根因和实施约束，不是已完成的代码修复。当前仍使用 Redis scope 计数先行、MySQL 后提交的旧路径；尚未新增权威事件账本、统一事务命令或恢复 Worker，也未运行真实 MySQL + Redis 故障注入。不得据此宣称财务一致性已修复。PR #205 保持 Draft，禁止合并。
+
+
+
+### 58. 扣量配置激活唯一性与并发写入审计
+
+#### 58.1 源码与数据库定义证据
+
+本轮核对 PR #205 当前 Head 的以下文件：
+
+- `app/services/cpl/conversion_deduction_service.py`
+- `app/services/cpl/deduction/helpers.py`
+- `app/models/deduction.py`
+- `sql/platform.sql`
+
+确认当前 `ConversionDeductionConfig` 的 ORM `__table_args__` 只有 advertiser_id、offer_id、publisher_id、is_active、priority 等普通索引，没有 scope 锁表，也没有数据库唯一约束保证同一 scope 只有一条激活配置。
+
+SQL 初始化定义 `conversion_deduction_configs` 同样只有普通索引和三个目标外键；三个目标外键均为 ON DELETE CASCADE。当前 schema 没有 CHECK 约束确保 advertiser_id、offer_id、publisher_id 恰好三选一。
+
+#### 58.2 已确认的并发窗口
+
+1. `create_deduction_config()` 先调用 `validate_target_exists()` 和 `check_existing_config()`，再 INSERT/flush。检查与插入之间没有业务 scope mutex。两个并发事务可以同时检查到“无激活配置”，随后分别插入。
+2. `check_existing_config()` 是普通 SELECT。即使改为对现有配置行执行 FOR UPDATE，也无法在没有稳定父级锁行或 scope lock 行时可靠保护“尚无配置”的情况。
+3. `update_deduction_config()` 遍历允许的 ORM 属性并 setattr；没有排除 is_active，因此通用更新路径可以直接启用配置。
+4. `update_deduction_config_status()` 读取配置后直接修改 is_active，没有先获取 scope mutex，也没有在锁内重新检查同 scope 的其它激活配置。
+5. `batch_update_status()` 先按 ID 查询，随后执行批量 UPDATE；没有对受影响 scope 去重、排序、加锁和重新校验。
+6. 单条和批量删除也没有与事件决策共享的 scope 锁协议。
+7. advertiser、offer、publisher 外键采用 ON DELETE CASCADE。父对象删除可以由数据库级联删除扣量配置；当前不能据此证明它与正在执行的扣量决策拥有统一的互斥顺序。
+8. `resolve_config_level_target()` 按 advertiser、offer、publisher 的顺序返回第一个非空 ID；如果历史脏数据同时设置多个 scope，代码会静默选择其中一个，而不是拒绝非法配置。
+
+#### 58.3 不能直接添加的“简单唯一索引”
+
+MySQL 普通 UNIQUE(scope_id, is_active) 不符合要求：它会同时限制 inactive 历史配置数量，且不同层级的 ID 空间可能相互冲突。MySQL 多列唯一索引对 NULL 的语义也不能直接表达三个不同 scope 的激活唯一性。
+
+实施前应由迁移设计明确一种可验证方案，例如：
+- 三个独立的生成列/活动 scope key，并分别建立唯一索引；生成列只在 is_active=1 且对应 scope 合法时产生非 NULL 唯一键；
+- 或建立独立的 active scope registry 表，以 (scope_type, scope_id) 为主键，在同一事务中由所有配置写入口维护。
+
+无论选哪种方案，必须确保 MySQL 实际版本支持所用生成列/索引语法，并在真实 MySQL 上验证 NULL、inactive、多层级 ID 重叠和并发写入。仅靠 Python 查询检查不构成数据库约束。
+
+#### 58.4 修复前只读数据预检
+
+迁移不得自动删除、覆盖或合并配置。先在生产只读执行并保存结果：
+
+```sql
+-- 检查同一广告主是否存在多条激活配置
+SELECT advertiser_id, COUNT(*) AS active_count,
+       GROUP_CONCAT(id ORDER BY id) AS config_ids
+FROM conversion_deduction_configs
+WHERE is_active = 1 AND advertiser_id IS NOT NULL
+GROUP BY advertiser_id
+HAVING COUNT(*) > 1;
+
+-- 检查同一 Offer 是否存在多条激活配置
+SELECT offer_id, COUNT(*) AS active_count,
+       GROUP_CONCAT(id ORDER BY id) AS config_ids
+FROM conversion_deduction_configs
+WHERE is_active = 1 AND offer_id IS NOT NULL
+GROUP BY offer_id
+HAVING COUNT(*) > 1;
+
+-- 检查同一渠道是否存在多条激活配置
+SELECT publisher_id, COUNT(*) AS active_count,
+       GROUP_CONCAT(id ORDER BY id) AS config_ids
+FROM conversion_deduction_configs
+WHERE is_active = 1 AND publisher_id IS NOT NULL
+GROUP BY publisher_id
+HAVING COUNT(*) > 1;
+
+-- 检查 scope 三选一约束违规（包含全空和多列同时非空）
+SELECT id, advertiser_id, offer_id, publisher_id, is_active
+FROM conversion_deduction_configs
+WHERE
+    (advertiser_id IS NOT NULL) +
+    (offer_id IS NOT NULL) +
+    (publisher_id IS NOT NULL) <> 1
+ORDER BY id;
+```
+
+任何查询返回记录，都必须先由业务负责人确认保留哪条配置、其余配置如何处置；迁移自动终止，不允许按 ID 最大/最小或更新时间自动选胜者。
+
+#### 58.5 统一锁协议要求
+
+- scope key 固定为 `(scope_type, scope_id)`，不同层级不能仅按数值 ID 混锁。
+- 创建、通用更新、启停、单条删除、批量启停、批量删除、父对象删除及 Postback 决策必须使用同一把数据库 scope mutex。
+- 批量请求先去重 scope，再按 `scope_type` 字典序和 `scope_id` 数值升序加锁。
+- 获锁后必须 current-read 重新读取配置，验证三选一、目标存在、激活唯一和当前配置版本。
+- 禁止仅依赖 Redis 锁或进程内 asyncio.Lock；多 Worker/多主机必须由 MySQL 约束。
+- scope lock 与事件 ledger 的锁顺序必须在所有路径一致，并纳入死锁测试。
+- 缓存 Generation 与配置数据在同一数据库事务内推进；Redis cache invalidation 失败不得改变数据库唯一性结果。
+- 父对象删除必须先取得相同 scope mutex，并明确拒绝删除仍有财务配置的父对象，或在同一事务中按锁协议删除；不能让 FK cascade 绕过业务互斥。
+
+#### 58.6 测试矩阵
+
+必须使用真实 MySQL InnoDB、至少两个独立连接，覆盖：
+
+- 同一 scope 并发创建 2/10/50 次：最多一条激活配置，其它请求得到明确冲突。
+- 两条 inactive 配置并发启用：只能一条成功。
+- 通用更新同时启用与专用启用接口并发：结果仍唯一。
+- 批量启用包含重复 ID、多个 scope、乱序 scope：锁顺序稳定且结果唯一。
+- 删除/重建与 Postback 决策并发：无使用已删除/已停用配置的窗口。
+- 父对象删除与配置创建/事件决策并发：不会绕过 scope mutex。
+- 三个 scope 数值 ID 相同：不会发生跨层级误冲突。
+- 全空 scope、多 scope 同时非空：数据库拒绝。
+- 历史重复配置存在时迁移停止，不改动数据。
+- 死锁、lock wait timeout、连接中断及 commit-unknown：重试有界，不能产生重复激活配置。
+
+#### 58.7 当前状态与风险等级
+
+这是基于当前源码与 SQL schema 的已确认缺陷，不是推测。当前没有新增 scope mutex、激活唯一数据库约束或真实 MySQL 并发测试。本轮仅补充审计证据和修复验收标准，没有改动业务数据或启停任何配置。
+
+风险：**高（财务决策配置不确定性）**。在唯一性约束、统一锁协议、历史数据预检和真实 MySQL 并发测试完成前，不得启用多入口并发配置变更，不得将 PR #205 视为可合并。PR #205 继续保持 Draft。
