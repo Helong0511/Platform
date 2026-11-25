@@ -17,6 +17,10 @@ class _ScalarResult:
     def first(self):
         return self.value
 
+    def scalar_one_or_none(self):
+        # 测试中的 Pending 审批默认没有已提交的事件收据。
+        return None
+
     def all(self):
         return self.value
 
@@ -84,7 +88,7 @@ class _FakeAsyncDB:
 @pytest.mark.asyncio
 async def test_ip_whitelist_auto_approval_audits_existing_duplicate(monkeypatch):
     service = PostbackPendingService()
-    pending = SimpleNamespace(id=10, status="pending", approved_at=None)
+    pending = SimpleNamespace(id=10, status="pending", approved_at=None, event_name="install", platform="test", conversion_id="10")
     db = _FakeAsyncDB(_ScalarResult([pending]))
 
     async def exists(_pending, _db):
@@ -113,7 +117,7 @@ async def test_ip_whitelist_auto_approval_audits_existing_duplicate(monkeypatch)
 @pytest.mark.asyncio
 async def test_ip_whitelist_auto_approval_audits_new_conversion(monkeypatch):
     service = PostbackPendingService()
-    pending = SimpleNamespace(id=11, status="pending", approved_at=None)
+    pending = SimpleNamespace(id=11, status="pending", approved_at=None, event_name="install", platform="test", conversion_id="11")
     db = _FakeAsyncDB(_ScalarResult([pending]))
 
     async def exists(_pending, _db):
@@ -145,7 +149,7 @@ async def test_ip_whitelist_auto_approval_audits_new_conversion(monkeypatch):
 @pytest.mark.asyncio
 async def test_web_duplicate_approval_attempt_is_persisted_separately(monkeypatch):
     service = PostbackPendingService()
-    pending = SimpleNamespace(id=12, status="pending")
+    pending = SimpleNamespace(id=12, status="pending", event_name="install", platform="test", conversion_id="12")
     db = _FakeAsyncDB(_ScalarResult(pending))
     captured = {}
 
@@ -213,7 +217,7 @@ async def test_web_successful_approval_audit_is_added_before_request_commit(monk
         "app.services.cpl.postback_pending_service"
     )
     service = service_module.PostbackPendingService()
-    pending = SimpleNamespace(id=14, status="pending", approved_at=None)
+    pending = SimpleNamespace(id=14, status="pending", approved_at=None, event_name="install", platform="test", conversion_id="14")
     db = _FakeAsyncDB(_ScalarResult(pending))
 
     async def exists(_pending, _db):
