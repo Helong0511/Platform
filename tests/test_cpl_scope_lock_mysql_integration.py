@@ -14,7 +14,6 @@ from urllib.parse import quote_plus
 import pymysql
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.migrations.sql_parser import split_mysql_statements
