@@ -631,10 +631,13 @@ class DeductionManager:
                 # stats.total 不含当前未提交事件，因此额度上限按 total + 1 计算。
                 # scope 行锁保证同一配置范围内的决策串行；日志/转化与事件收据
                 # 同事务提交，回滚会自然释放名额，24h 窗口也由 SQL 自动滚动。
-                allowed_deductions = int(
-                    (Decimal(stats.total + 1) * ratio).to_integral_value(
-                        rounding="ROUND_FLOOR"
-                    )
+                allowed_deductions = max(
+                    1,
+                    int(
+                        (Decimal(stats.total + 1) * ratio).to_integral_value(
+                            rounding="ROUND_FLOOR"
+                        )
+                    ),
                 )
                 result.should_deduct_volume = (
                     stats.deducted < allowed_deductions
