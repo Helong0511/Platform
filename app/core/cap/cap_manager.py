@@ -353,10 +353,8 @@ async def increment_cap_count(
         # 最终预留路径必须再次执行零额度拒绝，不能依赖只读预检查。
         for cap in caps:
             if cap.daily_cap == 0:
-                await _refresh_offer_caps(db, caps)
                 return _result(False, "cap_exceeded")
             if cap.total_cap == 0:
-                await _refresh_offer_caps(db, caps)
                 return _result(False, "cap_exceeded")
         
         now = get_app_now_naive()
