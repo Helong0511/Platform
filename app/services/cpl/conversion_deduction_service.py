@@ -332,7 +332,10 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                 )
             for level, target_id in set(scope_keys):
                 await deduction_helpers.check_existing_config(
-                    self.db, level, target_id
+                    self.db,
+                    level,
+                    target_id,
+                    exclude_config_ids=set(config_ids),
                 )
 
         try:
