@@ -331,54 +331,6 @@ class DeductionManager:
         )
         return result.scalars().first()
     
-    DECISION_SEQ_TTL = 86400 * 2  # 决策序号缓存 2 天
-
-    # Lua：初始化 deducted（NX）+ INCR processed 序号，返回 seq 与 deducted
-    _DECISION_STATS_LUA = """
-    local seq_key = KEYS[1]
-    local deducted_key = KEYS[2]
-    local ttl = tonumber(ARGV[1])
-    local init_deducted = tonumber(ARGV[2]) or 0
-    if redis.call('EXISTS', deducted_key) == 0 then
-        redis.call('SET', deducted_key, init_deducted)
-        redis.call('EXPIRE', deducted_key, ttl)
-    end
-    local seq = redis.call('INCR', seq_key)
-    if seq == 1 then
-        redis.call('EXPIRE', seq_key, ttl)
-    end
-    local deducted = tonumber(redis.call('GET', deducted_key) or '0')
-    return {seq, deducted}
-    """
-
-    # Lua：随机策略预留扣量名额；超比例则回退
-    _INCR_DECISION_DEDUCTED_LUA = """
-    local value = redis.call('INCR', KEYS[1])
-    if value == 1 then
-        redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
-    end
-    return value
-    """
-
-    _RESERVE_DEDUCTED_LUA = """
-    local deducted_key = KEYS[1]
-    local limit = tonumber(ARGV[1])
-    local ttl = tonumber(ARGV[2])
-    local current = tonumber(redis.call('GET', deducted_key) or '0')
-    if current >= limit then
-        return -1
-    end
-    local new_val = redis.call('INCR', deducted_key)
-    if new_val == 1 then
-        redis.call('EXPIRE', deducted_key, ttl)
-    end
-    if new_val > limit then
-        redis.call('DECR', deducted_key)
-        return -1
-    end
-    return new_val
-    """
-
     async def _get_stats_for_decision(
         self,
         advertiser_id: Optional[int] = None,
@@ -387,113 +339,21 @@ class DeductionManager:
         hours: int = 24,
     ) -> ConversionStats:
         """
-        获取扣量决策用统计：DB 汇总冷启动 + Redis 原子序号/已扣量，避免并发竞态。
+        从 MySQL 读取扣量决策基线。
+
+        调用前必须由 find_config() 在当前 Session 中取得全部候选 scope 锁；
+        这些锁一直持有到 Postback 外层事务提交/回滚。正常转化由
+        postback_conversions 计数，未入库的扣量事件由同事务提交的
+        conversion_deduction_logs 计数，因此 MySQL 回滚会自动撤销统计贡献。
+        Redis 不再参与财务决策，避免 Redis INCR 与 MySQL COMMIT 跨事务漂移。
         """
-        base_stats = await self.get_recent_stats(
+        return await self.get_recent_stats(
             advertiser_id=advertiser_id,
             offer_id=offer_id,
             publisher_id=publisher_id,
             hours=hours,
             strict=True,
         )
-        redis = await get_redis_client()
-        if not redis:
-            raise RuntimeError("扣量决策需要 Redis，当前不可用")
-
-        cache_key = self._build_stats_cache_key(
-            advertiser_id, offer_id, publisher_id, hours
-        )
-        seq_key = f"{cache_key}:decision_seq"
-        deducted_key = f"{cache_key}:decision_deducted"
-        try:
-            result = await redis.eval(
-                self._DECISION_STATS_LUA,
-                2,
-                seq_key,
-                deducted_key,
-                self.DECISION_SEQ_TTL,
-                int(base_stats.deducted or 0),
-            )
-            seq = int(result[0])
-            deducted = int(result[1])
-            processed = seq - 1
-            total = max(seq, base_stats.total)
-            return ConversionStats(
-                total=total,
-                deducted=deducted,
-                processed=processed,
-            )
-        except Exception as e:
-            logger.warning("扣量决策 Redis 统计失败: %s", e)
-            raise RuntimeError(f"扣量决策 Redis 统计失败: {e}") from e
-
-    async def _reserve_volume_deduction(
-        self,
-        *,
-        advertiser_id: Optional[int],
-        offer_id: Optional[int],
-        publisher_id: Optional[int],
-        hours: int,
-        limit: int,
-    ) -> bool:
-        """原子预留一条扣量名额；超限返回 False。"""
-        if limit <= 0:
-            return False
-        redis = await get_redis_client()
-        if not redis:
-            if settings.DEDUCTION_FAIL_OPEN:
-                return False
-            raise RuntimeError("扣量名额预留需要 Redis，当前不可用")
-        cache_key = self._build_stats_cache_key(
-            advertiser_id, offer_id, publisher_id, hours
-        )
-        deducted_key = f"{cache_key}:decision_deducted"
-        try:
-            new_val = await redis.eval(
-                self._RESERVE_DEDUCTED_LUA,
-                1,
-                deducted_key,
-                int(limit),
-                self.DECISION_SEQ_TTL,
-            )
-            return int(new_val) > 0
-        except Exception as e:
-            logger.warning("扣量名额预留失败: %s", e)
-            if settings.DEDUCTION_FAIL_OPEN:
-                return False
-            raise RuntimeError(f"扣量名额预留失败: {e}") from e
-
-    async def _incr_decision_deducted(
-        self,
-        *,
-        advertiser_id: Optional[int],
-        offer_id: Optional[int],
-        publisher_id: Optional[int],
-        hours: int,
-    ) -> bool:
-        """比例/轮询策略命中后原子递增 Redis deducted；失败时不得继续扣量。"""
-        redis = await get_redis_client()
-        if not redis:
-            if settings.DEDUCTION_FAIL_OPEN:
-                return False
-            raise RuntimeError("同步扣量计数需要 Redis，当前不可用")
-        cache_key = self._build_stats_cache_key(
-            advertiser_id, offer_id, publisher_id, hours
-        )
-        deducted_key = f"{cache_key}:decision_deducted"
-        try:
-            value = await redis.eval(
-                self._INCR_DECISION_DEDUCTED_LUA,
-                1,
-                deducted_key,
-                self.DECISION_SEQ_TTL,
-            )
-            return int(value) > 0
-        except Exception as e:
-            logger.warning("同步 decision_deducted 失败: %s", e)
-            if settings.DEDUCTION_FAIL_OPEN:
-                return False
-            raise RuntimeError(f"同步扣量计数失败: {e}") from e
 
     async def get_recent_stats(
         self,
@@ -723,7 +583,7 @@ class DeductionManager:
             final_amount=Decimal(str(conversion_data.get('original_payout', 0) or 0)),
         )
         
-        # 纯扣金额不依赖 Redis；只有确实需要执行扣量策略时才读取共享统计。
+        # 只有具备稳定事件身份时才允许扣量；click_id 不是转化事件唯一键。
         volume_decision_available = bool(
             config.enable_volume_deduction
             and Decimal(str(config.volume_deduction_ratio or 0)) > 0
@@ -731,16 +591,18 @@ class DeductionManager:
         strategy_name = (config.deduction_strategy or "random").lower()
         event_decision_key = self._build_event_decision_key(event_identity)
         if volume_decision_available and not event_decision_key:
-            # 无法证明事件唯一身份时不得按 click_id/seq 扣量，避免同点击多转化误合并。
-            logger.warning("扣量事件身份未验证，本次跳过扣量：scope_offer_id=%s", offer_id)
+            logger.warning(
+                "扣量事件身份未验证，本次跳过扣量：scope_offer_id=%s",
+                offer_id,
+            )
             volume_decision_available = False
-        if volume_decision_available and strategy_name not in ("random", "hash", "deterministic"):
-            # 顺序策略依赖 Redis 递增序号，尚未迁移到 MySQL 事务账本前不提供重试幂等保证。
-            logger.warning("顺序扣量策略尚未具备事务级事件幂等，本次跳过扣量：strategy=%s", strategy_name)
-            volume_decision_available = False
+
         stats = ConversionStats()
         if volume_decision_available:
             try:
+                # 必须在 find_config() 已锁定全部候选 scope 的同一事务内执行。
+                # DB 统计只包含此前已提交事件；当前事件在本事务结束时写入
+                # postback_conversions 或 volume deduction log。
                 stats = await self._get_stats_for_decision(
                     advertiser_id=advertiser_id,
                     offer_id=offer_id,
@@ -750,43 +612,34 @@ class DeductionManager:
             except Exception as exc:
                 if not settings.DEDUCTION_FAIL_OPEN:
                     raise
-                # Fail-open 的语义是放行转化，不是使用非原子 DB 快照继续扣量。
-                logger.warning("扣量统计不可用，本次跳过扣量但继续计算扣金额: %s", exc)
+                # fail-open 仅放行本次扣量，不得用不完整统计继续执行财务扣量。
+                logger.warning(
+                    "MySQL 扣量统计不可用，本次跳过扣量但继续计算扣金额: %s",
+                    exc,
+                )
                 volume_decision_available = False
 
-        # 仅可信事件身份的随机/哈希策略可进入决策；顺序策略等待 MySQL 账本。
         if volume_decision_available:
             decision_key = event_decision_key or ""
-            want_deduct = self.should_deduct_volume(config, stats, decision_key=decision_key)
+            want_deduct = self.should_deduct_volume(
+                config,
+                stats,
+                decision_key=decision_key,
+            )
             if want_deduct:
-                if strategy_name in ("random", "hash", "deterministic"):
-                    # 哈希命中后仍按目标比例原子预留，避免并发过量扣
-                    ratio = float(config.volume_deduction_ratio or 0)
-                    limit = int(stats.total * ratio) if stats.total > 0 else 10**9
-                    if stats.total <= 0:
-                        # 无总量窗口时仅按哈希结论 + 递增 deducted
-                        result.should_deduct_volume = await self._incr_decision_deducted(
-                            advertiser_id=advertiser_id,
-                            offer_id=offer_id,
-                            publisher_id=publisher_id,
-                            hours=24,
-                        )
-                    else:
-                        reserved = await self._reserve_volume_deduction(
-                            advertiser_id=advertiser_id,
-                            offer_id=offer_id,
-                            publisher_id=publisher_id,
-                            hours=24,
-                            limit=limit,
-                        )
-                        result.should_deduct_volume = reserved
-                else:
-                    result.should_deduct_volume = await self._incr_decision_deducted(
-                        advertiser_id=advertiser_id,
-                        offer_id=offer_id,
-                        publisher_id=publisher_id,
-                        hours=24,
+                ratio = Decimal(str(config.volume_deduction_ratio or 0))
+                # stats.total 不含当前未提交事件，因此额度上限按 total + 1 计算。
+                # scope 行锁保证同一配置范围内的决策串行；日志/转化与事件收据
+                # 同事务提交，回滚会自然释放名额，24h 窗口也由 SQL 自动滚动。
+                allowed_deductions = int(
+                    (Decimal(stats.total + 1) * ratio).to_integral_value(
+                        rounding="ROUND_FLOOR"
                     )
+                )
+                result.should_deduct_volume = (
+                    stats.deducted < allowed_deductions
+                )
+
             if result.should_deduct_volume:
                 result.final_volume = 0
                 result.deducted_volume = 1
