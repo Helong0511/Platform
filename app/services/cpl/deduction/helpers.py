@@ -31,14 +31,26 @@ _LEVEL_NAMES = {"advertiser": "广告主", "offer": "Offer", "publisher": "渠�
 def resolve_config_level_target(
     config: ConversionDeductionConfig,
 ) -> Tuple[Optional[ConfigLevel], Optional[int]]:
-    """从配置 ORM 解析层级与目标 ID。"""
-    if config.advertiser_id:
-        return "advertiser", config.advertiser_id
-    if config.offer_id:
-        return "offer", config.offer_id
-    if config.publisher_id:
-        return "publisher", config.publisher_id
-    return None, None
+    """严格解析配置层级；空目标或多目标均视为数据完整性错误。"""
+    targets = (
+        ("advertiser", config.advertiser_id),
+        ("offer", config.offer_id),
+        ("publisher", config.publisher_id),
+    )
+    selected = [(level, target_id) for level, target_id in targets if target_id is not None]
+    if len(selected) != 1:
+        raise_api_exception(
+            ErrorCode.INVALID_PARAMETER,
+            detail="扣减配置层级数据异常：广告主、Offer、渠道目标必须且只能设置一个",
+        )
+
+    level, target_id = selected[0]
+    if not isinstance(target_id, int) or isinstance(target_id, bool) or target_id <= 0:
+        raise_api_exception(
+            ErrorCode.INVALID_PARAMETER,
+            detail="扣减配置目标 ID 必须为正整数",
+        )
+    return level, target_id
 
 
 async def validate_target_exists(db: AsyncSession, level: ConfigLevel, target_id: int) -> None:
