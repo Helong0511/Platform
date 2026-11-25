@@ -190,19 +190,19 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     ),
 
     Migration(
-        revision="20261125_postback_approval_receipt_outcome",
-        path="sql/migrations/20261125_postback_approval_receipt_outcome.sql",
-        sha256="7280df97b834a95111b671ecb009ec3738a541513fed8b96aa00124c70eaaf76",
-        depends_on=("20261124_postback_event_deduction_receipts",),
-    ),
-
-    Migration(
         revision="20261124_user_stats_cache_generation",
         path="sql/migrations/20261124_user_stats_cache_generation.sql",
         sha256="81110a9f80a191f7463fb723571252cde2c589f22075170d30a87f95a17b3408",
         depends_on=("20261123_ad_data_cache_generation_outbox",),
     ),
 
+
+    Migration(
+        revision="20261125_postback_approval_receipt_outcome",
+        path="sql/migrations/20261125_postback_approval_receipt_outcome.sql",
+        sha256="7280df97b834a95111b671ecb009ec3738a541513fed8b96aa00124c70eaaf76",
+        depends_on=("20261124_postback_event_deduction_receipts",),
+    ),
 )
 
 _REVISION_PATTERN = re.compile(r"^20[0-9]{6}_[a-z0-9_]+$")
