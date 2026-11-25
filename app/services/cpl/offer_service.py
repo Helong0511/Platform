@@ -281,19 +281,6 @@ class OfferService(BaseService[Offer]):
         # 获取Offer
         offer = await self.get_offer_by_id(offer_id, current_user, include_advertiser=False)
 
-        # 与扣量配置写入口共享 scope 锁，避免级联删除财务配置。
-        await lock_deduction_scopes(self.db, [("offer", offer_id)])
-        deduction_count = await self.db.execute(
-            select(func.count(ConversionDeductionConfig.id)).where(
-                ConversionDeductionConfig.offer_id == offer_id
-            )
-        )
-        if deduction_count.scalar() > 0:
-            raise_api_exception(
-                ErrorCode.OPERATION_FAILED,
-                detail="Offer 仍有关联扣量配置，无法删除",
-            )
-
         # 保存旧的tracklink，用于检测变化
         old_downstream_tracklink = offer.downstream_tracklink
         old_advertiser_tracklink = offer.advertiser_tracklink
@@ -576,6 +563,20 @@ class OfferService(BaseService[Offer]):
 
         # 获取Offer
         offer = await self.get_offer_by_id(offer_id, current_user, include_advertiser=False)
+
+        # 删除 Offer 前与扣量配置写入口共享 scope 锁，并拒绝级联删除财务配置。
+        # 该保护只属于删除操作，不能阻断普通 Offer 字段更新。
+        await lock_deduction_scopes(self.db, [("offer", offer_id)])
+        deduction_count = await self.db.execute(
+            select(func.count(ConversionDeductionConfig.id)).where(
+                ConversionDeductionConfig.offer_id == offer_id
+            )
+        )
+        if deduction_count.scalar() > 0:
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail="Offer 仍有关联扣量配置，无法删除",
+            )
 
         # 检查是否有关联的点击记录
         click_count = await self.db.execute(
