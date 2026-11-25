@@ -250,6 +250,19 @@ class DeductionManager:
         Returns:
             找到的扣减配置，如果没找到返回None
         """
+        # 必须在 Generation、Redis 缓存和配置读取之前锁定全部候选 scope。
+        # 所有 scope 按固定字典序获取，避免批量写入口与 Postback 形成反向锁顺序。
+        from app.services.cpl.deduction.helpers import lock_deduction_scopes
+
+        candidate_scopes = []
+        if advertiser_id:
+            candidate_scopes.append(("advertiser", advertiser_id))
+        if offer_id:
+            candidate_scopes.append(("offer", offer_id))
+        if publisher_id:
+            candidate_scopes.append(("publisher", publisher_id))
+        await lock_deduction_scopes(self.db, candidate_scopes)
+
         try:
             from app.core.deduction.deduction_cache import DeductionConfigCache
 
