@@ -2587,3 +2587,61 @@ Web helper 的 `_pending_conversion_exists()` 查询目标是正式 `PostbackCon
 已确认 Web 管理员路由有 `require_admin`，Telegram callback 有管理员身份校验、任务去重和 callback ID 审计；这些控制值得保留。但三个入口的事件业务幂等仍未统一：Pending 锁、正式 conversion 查重和 Telegram callback 去重都不能识别“receipt 已提交但正式 conversion 不存在”的 volume-deducted 终态。
 
 本轮仅补充审批入口权限、事务和 receipt-only 状态分析；未修改业务代码、未新增 migration 或测试，也未运行真实 MySQL + Redis 并发故障注入。PR #205 继续保持 Draft，不得合并。
+
+
+### 52. 最新 Head 事务链复核：事件收据已幂等，但 CPL Redis 名额仍不具备事务恢复
+
+#### 52.1 当前正常 Postback 的执行顺序
+
+按 PR #205 当前 Head 的 app/core/postback/processor.py、pipeline.py、deduction_manager.py 和 discount_checker.py 逐段复核，正常入口顺序为：
+
+1. step_check_duplicate() 调用 DuplicateChecker.is_duplicate()，先查询正式 conversion，再在 SAVEPOINT 中插入具有唯一 canonical identity 的 postback_event_receipts。
+2. 收据插入成功后，流水线进入 step_apply_discount()；只有 event_identity_verified is True 时，才把 platform、显式 conversion_id 和规范化 event_name 传给扣量管理器。
+3. DeductionManager._get_stats_for_decision() 先查询 MySQL strict baseline，再通过 Redis Lua 更新 scope 级 decision_seq 并读取 decision_deducted。
+4. 命中 volume deduction 时，_reserve_volume_deduction() 或 _incr_decision_deducted() 在 Redis 中修改 scope 级 decision_deducted；之后 DiscountChecker.calculate() 写入 ConversionDeductionLog 并 flush。
+5. PostbackProcessor.process() 的 volume-deducted 分支执行 await db.commit()，然后返回，不保存正式 conversion、不进入 Cap Reservation 提交协调器。
+6. 普通转化分支才会继续执行 Cap reservation、保存 conversion、释放临时 receipt、写下游队列/Report Outbox，并进入 _commit_conversion_with_cap_reconciliation()。
+
+因此，新增 receipt 解决的是“同一 canonical event 在 MySQL 中不能被重复接收/并发处理”的一部分问题；它没有把 Redis CPL 计数与 MySQL 事务变成一个可恢复的原子业务决策。
+
+#### 52.2 Redis 计数仍是 scope 级副作用，不是事件级 reservation
+
+当前代码中：
+
+- _build_event_decision_key() 生成稳定事件哈希，并用于 should_deduct_volume() 的确定性判断。
+- _DECISION_STATS_LUA 操作的是 scope 级 decision_seq 和 decision_deducted 两个键。
+- _RESERVE_DEDUCTED_LUA 只读取并递增 decision_deducted；_INCR_DECISION_DEDUCTED_LUA 也只递增同一个 scope 级计数。
+- 上述 Lua 参数没有传入 event key，也没有保存 event_key -> reservation token/state 的映射。
+- 因而稳定事件哈希只保证“同一事件的哈希判定输入稳定”，不保证“同一事件的 Redis 名额预留只消费一次”。
+
+同一事件在数据库事务回滚后重新进入时，receipt 随事务回滚而释放，但 Redis 的 decision_seq / decision_deducted 不会随 MySQL rollback 自动回退。重试可能再次推进序号或再次消费扣量名额；如果第一次预留已把计数推到比例上限，第二次还可能得到不同于首次的扣量结果。
+
+#### 52.3 Volume-deducted 提交失败没有 CPL 对应的补偿/恢复账本
+
+当前 volume-deducted 分支直接 await db.commit()。如果 MySQL commit 明确失败或发生 commit-unknown，外层异常处理会尝试 db.rollback() 并重新抛出，但该路径没有调用 CPL reservation rollback、没有按 event key 查询 MySQL 决策终态，也没有恢复 Worker 可接管的 reservation ledger。
+
+这与普通 conversion 的 Cap 路径不同：Cap 已有 _commit_conversion_with_cap_reconciliation() 和 CapReservationLedger 的 stage/finalize/recovery 机制；CPL volume deduction 没有等价机制。不能把 Cap 的补偿能力推定为 CPL 已具备。
+
+#### 52.4 当前测试证明范围不足以解除阻断
+
+本次检查了 tests/test_postback_event_receipt_mysql_integration.py 与 tests/test_deduction_stats_accounting.py：
+
+- MySQL receipt 集成测试确实使用真实 MySQL、REPEATABLE READ、唯一收据键，覆盖 volume-deducted receipt 提交、普通 conversion + receipt 同事务释放、首事务 rollback 后等待者接管。
+- 但该集成测试直接调用 DuplicateChecker，并用 SQL 手动插入普通 conversion；没有调用真实 PostbackProcessor.process()、DeductionManager.apply_deduction() 或真实 Redis Lua。
+- 统计测试通过 AsyncMock 提供 SQL count 结果，验证统计口径与半开窗口；没有验证 Redis 成功预留后 MySQL commit 失败。
+- 因此，这些测试不能证明 CPL Redis 名额与 MySQL 财务决策一致，也不能覆盖 commit-unknown、Redis 重启、同事件并发重试和窗口滚动。
+
+#### 52.5 必须完成的修复和验收
+
+1. 在 MySQL 中建立 canonical event decision ledger，覆盖 deducted、not_deducted、处理中、失败可重试、commit-unknown 和已恢复等明确状态；同一事件唯一键必须由数据库约束保护。
+2. 将事件级 reservation/token、scope、配置版本、窗口、决策输入快照和最终结果写入同一 MySQL 事务；Redis 只能作为可重建缓存或加速层，不得成为唯一财务名额事实。
+3. 如果仍保留 Redis reservation，必须以 event key 实现幂等 reservation，并有 lease、fencing、提交确认、失败释放和恢复 Worker；不能只靠 scope counter 的 INCR/DECR。
+4. 明确 24 小时滑动窗口的权威计算方式，保证旧事件滚出窗口、Redis key 过期/丢失/重启后都能从 MySQL 重建；不得混用 24 小时 MySQL 窗口和 48 小时 Redis 累计 TTL。
+5. 增加真实 MySQL + Redis 端到端故障注入：Redis 预留成功后 MySQL rollback、commit-unknown、同事件 2/10/50 并发重试、不同事件并发争抢 quota、Redis key 丢失/重建、worker 重启恢复、窗口边界滚动。
+6. 对比正常 Postback、Web Pending、IP 自动审批、Telegram 审批，确保所有入口使用同一事件决策命令，且 receipt-only 的 volume-deducted 事件不能被审批转成正式 conversion。
+
+#### 52.6 本轮结论与范围声明
+
+本轮基于 PR #205 当前 Head 的代码和测试文件，确认 receipt 唯一键及 MySQL 并发测试有实际价值，但它们只覆盖事件接收幂等，不覆盖 Redis CPL reservation 与 MySQL commit 的一致性。Redis 仍按 scope 维护序号和扣量计数，事件哈希未成为事件级 reservation，volume-deducted commit 失败也没有 CPL ledger recovery。
+
+本轮只完成代码路径与测试范围复核并补充审计记录；没有修改业务代码、没有新增 migration、没有运行真实 Redis 故障注入。PR #205 必须继续保持 Draft，不得合并。
