@@ -137,3 +137,57 @@ async def test_hash_strategy_uses_event_key_instead_of_click_id():
 
     assert captured["key"] == DeductionManager._build_event_decision_key(identity)
     assert result.should_deduct_volume is True
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("scope_field", "scope_id", "expected"),
+    [
+        ("offer_id", 22, {"advertiser_id": None, "offer_id": 22, "publisher_id": None}),
+        ("advertiser_id", 11, {"advertiser_id": 11, "offer_id": None, "publisher_id": None}),
+        ("publisher_id", 33, {"advertiser_id": None, "offer_id": None, "publisher_id": 33}),
+    ],
+)
+async def test_decision_stats_follow_resolved_config_scope_not_request_dimensions(
+    scope_field, scope_id, expected
+):
+    manager = DeductionManager(db=object())
+    manager._get_stats_for_decision = AsyncMock(
+        return_value=ConversionStats(total=3, deducted=0, processed=3)
+    )
+    config = _config(strategy="proportional")
+    config.advertiser_id = 11 if scope_field == "advertiser_id" else None
+    config.offer_id = 22 if scope_field == "offer_id" else None
+    config.publisher_id = 33 if scope_field == "publisher_id" else None
+
+    await manager.apply_deduction(
+        {"original_payout": "10.00"},
+        config,
+        advertiser_id=11,
+        offer_id=22,
+        publisher_id=33,
+        event_identity={
+            "platform": "bft",
+            "conversion_id": f"scope-{scope_field}",
+            "event_name": "purchase",
+        },
+    )
+
+    kwargs = manager._get_stats_for_decision.await_args.kwargs
+    assert {key: kwargs[key] for key in expected} == expected
+    assert kwargs["hours"] == 24
+
+
+def test_decision_stats_reject_invalid_multi_scope_config():
+    config = _config()
+    config.advertiser_id = 11
+    config.offer_id = 22
+    config.publisher_id = None
+    with pytest.raises(ValueError, match="只能有一个有效统计 scope"):
+        DeductionManager._stats_scope_for_config(
+            config,
+            advertiser_id=11,
+            offer_id=22,
+            publisher_id=33,
+        )

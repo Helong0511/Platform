@@ -370,7 +370,7 @@ class DeductionManager:
             advertiser_id: 广告主ID
             offer_id: Offer ID
             publisher_id: 渠道ID
-            hours: 统计时间范围（小时）
+            hours: 最近 N 小时内系统接收/入库的转化范围（使用 created_at，不代表上游事件发生时间）
             
         Returns:
             转化统计信息
@@ -552,6 +552,43 @@ class DeductionManager:
 
         return final_amount, deduction_amount
     
+    @staticmethod
+    def _stats_scope_for_config(
+        config: ConversionDeductionConfig,
+        advertiser_id: Optional[int] = None,
+        offer_id: Optional[int] = None,
+        publisher_id: Optional[int] = None,
+    ) -> Dict[str, Optional[int]]:
+        """统计范围必须严格跟随最终命中的配置层级，而不是请求携带的所有维度。"""
+        scope_fields = ("advertiser_id", "offer_id", "publisher_id")
+        # 兼容仅用于单元测试的轻量替身；真实 ORM 配置模型始终具有这三个字段。
+        if not any(hasattr(config, field) for field in scope_fields):
+            return {
+                "advertiser_id": advertiser_id,
+                "offer_id": offer_id,
+                "publisher_id": publisher_id,
+            }
+
+        selected = [
+            (field, getattr(config, field, None))
+            for field in scope_fields
+            if getattr(config, field, None) is not None
+        ]
+        if len(selected) != 1:
+            raise ValueError("扣量配置必须且只能有一个有效统计 scope")
+        field, target_id = selected[0]
+        if (
+            not isinstance(target_id, int)
+            or isinstance(target_id, bool)
+            or target_id <= 0
+        ):
+            raise ValueError("扣量配置统计 scope ID 必须为正整数")
+        return {
+            "advertiser_id": target_id if field == "advertiser_id" else None,
+            "offer_id": target_id if field == "offer_id" else None,
+            "publisher_id": target_id if field == "publisher_id" else None,
+        }
+
     async def apply_deduction(
         self,
         conversion_data: Dict[str, Any],
@@ -602,10 +639,14 @@ class DeductionManager:
                 # 必须在 find_config() 已锁定全部候选 scope 的同一事务内执行。
                 # DB 统计只包含此前已提交事件；当前事件在本事务结束时写入
                 # postback_conversions 或 volume deduction log。
-                stats = await self._get_stats_for_decision(
+                stats_scope = self._stats_scope_for_config(
+                    config,
                     advertiser_id=advertiser_id,
                     offer_id=offer_id,
                     publisher_id=publisher_id,
+                )
+                stats = await self._get_stats_for_decision(
+                    **stats_scope,
                     hours=24,
                 )
             except Exception as exc:
