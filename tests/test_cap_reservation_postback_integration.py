@@ -46,7 +46,7 @@ def _daily_cap():
         offer_id=77,
         publisher_id=12,
         daily_cap=100,
-        total_cap=0,
+        total_cap=None,
         cap_start_date=None,
         current_daily_count=0,
         current_total_count=0,
