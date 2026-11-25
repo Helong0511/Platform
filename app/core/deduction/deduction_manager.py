@@ -33,7 +33,7 @@ from app.core.infrastructure.cache_compat import (
 )
 from app.core.redis_client import get_redis_client
 from app.core.config import settings
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, get_app_now_naive_floor_second
 
 logger = logging.getLogger(__name__)
 
@@ -703,7 +703,8 @@ class DeductionManager:
             volume_deduction_ratio=config.volume_deduction_ratio if config and config.enable_volume_deduction else None,
             amount_deduction_ratio=config.amount_deduction_ratio if config and config.enable_amount_deduction else None,
             deduction_strategy=config.deduction_strategy if config else None,
-            deduction_reason=deduction_reason
+            deduction_reason=deduction_reason,
+            created_at=get_app_now_naive_floor_second(),
         )
         
         self.db.add(log)
