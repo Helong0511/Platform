@@ -2,7 +2,7 @@
 转化扣减配置与日志 ORM 模型。
 """
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
-    UniqueConstraint, Date, Numeric
+    UniqueConstraint, Date, Numeric, Computed, CheckConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -61,6 +61,20 @@ class ConversionDeductionConfig(Base):
     
     # 状态
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
+
+    # 仅激活配置生成非 NULL scope key；唯一索引由数据库保证同一 scope 最多一条激活配置。
+    active_advertiser_id = Column(
+        Integer,
+        Computed("CASE WHEN is_active = 1 THEN advertiser_id ELSE NULL END", persisted=True),
+    )
+    active_offer_id = Column(
+        Integer,
+        Computed("CASE WHEN is_active = 1 THEN offer_id ELSE NULL END", persisted=True),
+    )
+    active_publisher_id = Column(
+        Integer,
+        Computed("CASE WHEN is_active = 1 THEN publisher_id ELSE NULL END", persisted=True),
+    )
     
     # 时间戳
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
@@ -78,6 +92,14 @@ class ConversionDeductionConfig(Base):
         Index("idx_publisher_id", "publisher_id"),
         Index("idx_is_active", "is_active"),
         Index("idx_priority", "priority"),
+        UniqueConstraint("active_advertiser_id", name="uq_cpl_active_advertiser"),
+        UniqueConstraint("active_offer_id", name="uq_cpl_active_offer"),
+        UniqueConstraint("active_publisher_id", name="uq_cpl_active_publisher"),
+        CheckConstraint(
+            "(advertiser_id IS NOT NULL) + (offer_id IS NOT NULL) + "
+            "(publisher_id IS NOT NULL) = 1",
+            name="chk_cpl_deduction_exactly_one_scope",
+        ),
     )
 
 class ConversionDeductionLog(Base):
