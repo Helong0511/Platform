@@ -71,7 +71,6 @@ async def test_recent_stats_counts_saved_conversions_and_only_unpersisted_volume
     assert datetime(2026, 11, 23, 12, 0, 0) in conversion_params.values()
 
 
-
 @pytest.mark.asyncio
 async def test_strict_recent_stats_bypasses_stale_cache_and_does_not_refresh_it(monkeypatch):
     stale_cache = AsyncMock(
@@ -121,5 +120,6 @@ def test_financial_event_timestamps_are_truncated_to_mysql_datetime_precision():
     assert callable(deduction_default)
     assert postback_default.__name__ == get_app_now_naive_floor_second.__name__
     assert deduction_default.__name__ == get_app_now_naive_floor_second.__name__
-    assert postback_default().microsecond == 0
-    assert deduction_default().microsecond == 0
+    # SQLAlchemy ColumnDefault 在执行时传入 ExecutionContext；直接调用时也应模拟该参数。
+    assert postback_default(None).microsecond == 0
+    assert deduction_default(None).microsecond == 0
