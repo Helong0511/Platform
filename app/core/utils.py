@@ -281,6 +281,16 @@ def get_app_now_naive() -> datetime:
     return datetime.now(APP_TIMEZONE).replace(tzinfo=None)
 
 
+def get_app_now_naive_floor_second() -> datetime:
+    """
+    获取应用时区当前时间并向下截断到整秒。
+
+    MySQL DATETIME 默认精度为秒；向上舍入会让刚提交的事件在同一秒内
+    暂时落到统计窗口未来端点之外，导致后续同 scope 决策漏计。
+    """
+    return get_app_now_naive().replace(microsecond=0)
+
+
 def parse_date_to_app_timezone(date_str: str, is_end_date: bool = False) -> datetime:
     """
     将日期字符串解析为应用时区的datetime（naive）
