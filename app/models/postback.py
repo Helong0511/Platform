@@ -364,8 +364,7 @@ class CloakConfig(Base):
     postback_report_currency = Column(
         String(10),
         nullable=True,
-        default='USD',
-        comment='postback Purchase 货币',
+        comment='postback Purchase 货币；NULL 表示未配置，线上必须使用上游明确币种',
     )
     is_enabled = Column(Boolean, default=True, nullable=False, index=True, comment='是否启用')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
