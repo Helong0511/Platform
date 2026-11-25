@@ -185,3 +185,28 @@ def test_telegram_approval_uses_signed_click_token_when_click_row_is_not_yet_ava
     assert conversion.offer_id == 41
     assert conversion.publisher_id == 42
     assert conversion.advertiser_id == 43
+
+
+def test_telegram_receipt_only_event_is_not_promoted_to_conversion(monkeypatch):
+    pending = _pending_record(datetime(2026, 11, 19, 10, 30, 0))
+    fake_db = _install_fake_runtime(monkeypatch, [pending, None, 9876])
+    handler = importlib.import_module(
+        "app.core.telegram.callback_handlers.postback_approval"
+    )
+
+    handler.process_pending_conversion(
+        pending_id=77,
+        action="approve",
+        callback_query_id="callback-receipt-77",
+        chat_id=100,
+        message_id=200,
+        actor_telegram_user_id=555129,
+    )
+
+    assert fake_db.committed is True
+    assert pending.status == "pending"
+    assert not any(isinstance(item, PostbackConversion) for item in fake_db.added)
+    audits = [item for item in fake_db.added if item.__class__.__name__ == "TelegramPostbackApprovalAudit"]
+    assert len(audits) == 1
+    assert audits[0].outcome == "event_receipt_exists"
+    assert audits[0].previous_status == audits[0].new_status == "pending"
