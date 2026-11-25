@@ -1557,9 +1557,34 @@ async def test_mysql_manual_retry_is_atomic_against_admin_and_worker_races(monke
         async with session_factory() as session:
             admin_row = retryable_row(admin_key, "ci-admin-retry-race")
             worker_row = retryable_row(worker_key, "ci-worker-retry-race")
-            session.add_all([admin_row, worker_row])
+            invalid_amount_row = retryable_row(
+                hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest(),
+                "ci-invalid-amount",
+            )
+            invalid_amount_row.amount = Decimal("-1.00")
+            invalid_currency_row = retryable_row(
+                hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest(),
+                "ci-invalid-currency",
+            )
+            invalid_currency_row.currency = "US"
+            session.add_all([
+                admin_row, worker_row, invalid_amount_row, invalid_currency_row
+            ])
             await session.commit()
             admin_id, worker_id = admin_row.id, worker_row.id
+            invalid_amount_id = invalid_amount_row.id
+            invalid_currency_id = invalid_currency_row.id
+
+        # 真实 MySQL 必须在重新排队时拒绝历史无效 Purchase 载荷，且不改状态/重试预算。
+        assert await report_module.retry_report_log(invalid_amount_id) is False
+        assert await report_module.retry_report_log(invalid_currency_id) is False
+        async with session_factory() as session:
+            invalid_amount_after = await session.get(ThirdPartyReportLog, invalid_amount_id)
+            invalid_currency_after = await session.get(ThirdPartyReportLog, invalid_currency_id)
+            assert invalid_amount_after.status == "failed"
+            assert invalid_amount_after.manual_retry_count == 0
+            assert invalid_currency_after.status == "failed"
+            assert invalid_currency_after.manual_retry_count == 0
 
         # 两个管理员同时提交同一失败事件：条件 UPDATE 必须只允许一次预算递增。
         admin_results = await asyncio.gather(
