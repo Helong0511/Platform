@@ -37,9 +37,9 @@ class ConversionDeductionConfig(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='配置ID')
     
     # 配置层级（三选一）
-    advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="CASCADE"), nullable=True, index=True, comment='广告主ID（如果配置在广告主级别）')
-    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=True, index=True, comment='Offer ID（如果配置在Offer级别）')
-    publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="CASCADE"), nullable=True, index=True, comment='渠道ID（如果配置在渠道级别）')
+    advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="RESTRICT"), nullable=True, index=True, comment='广告主ID（如果配置在广告主级别）')
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="RESTRICT"), nullable=True, index=True, comment='Offer ID（如果配置在Offer级别）')
+    publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="RESTRICT"), nullable=True, index=True, comment='渠道ID（如果配置在渠道级别）')
     
     # 扣减类型配置
     volume_deduction_ratio = Column(
