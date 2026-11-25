@@ -106,7 +106,7 @@ async def test_volume_decision_uses_mysql_stats_without_redis(monkeypatch):
 
     result = await manager.apply_deduction(
         {"original_payout": "10.00"},
-        _config(volume=True, ratio="1.0", strategy="hash"),
+        _config(volume=True, ratio="0.25", strategy="hash"),
         event_identity=_EVENT,
     )
 
