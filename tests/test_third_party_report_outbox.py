@@ -496,7 +496,11 @@ async def test_postback_report_outbox_is_enqueued_in_conversion_session(monkeypa
             "user_agent": "ci-agent",
             "click_time": datetime(2026, 11, 11, 10, 0, 0),
         },
-        normalized_data={"conversion_id": "conversion-ci", "payout": "12.50"},
+        normalized_data={
+            "conversion_id": "conversion-ci",
+            "payout": "12.50",
+            "currency": "USD",
+        },
         db=db,
     )
 

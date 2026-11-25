@@ -1711,8 +1711,12 @@ async def update_report_log_params(
                     log_entry.conversion_id,
                 )
             financial_before = {
-                "amount": str(log_entry.amount) if log_entry.amount is not None else None,
-                "currency": log_entry.currency,
+                "amount": (
+                    str(getattr(log_entry, "amount", None))
+                    if getattr(log_entry, "amount", None) is not None
+                    else None
+                ),
+                "currency": getattr(log_entry, "currency", None),
             }
             if email is not None:
                 log_entry.email = email

@@ -973,9 +973,11 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
         async def __aexit__(self, *args):
             return False
 
-        async def post(self, url, *, json, params):
-            state["http_event_ids"].append(json["data"][0]["event_id"])
-            state["http_event_payloads"].append(json["data"][0])
+        async def post(self, url, *, content, headers, params):
+            import json as json_module
+            payload = json_module.loads(content)
+            state["http_event_ids"].append(payload["data"][0]["event_id"])
+            state["http_event_payloads"].append(payload["data"][0])
             return Response()
 
     async def claim(report_log_id, **kwargs):
