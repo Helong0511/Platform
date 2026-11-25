@@ -33,7 +33,7 @@ from app.core.postback.approval_audit import (
     persist_postback_approval_audit_independently,
 )
 from app.models.models import (
-    PendingPostbackConversion, PostbackConversion, Product, Client, User
+    PendingPostbackConversion, PostbackConversion, PostbackEventReceipt, Product, Client, User
 )
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.schemas.postback import PendingPostbackConversionResponse, PostbackConversionResponse
@@ -89,6 +89,25 @@ class PostbackPendingService:
         )
         return existing.scalars().first()
 
+    async def _pending_event_receipt_exists(
+            self, pending: PendingPostbackConversion, db: AsyncSession
+    ) -> bool:
+        """
+        检查 canonical event 是否已有已提交的接收收据。
+
+        volume-deducted 事件可能保留 receipt 而不创建正式 conversion；
+        这种事件不得再由 Pending 审批直接创建正式 conversion。
+        """
+        event_name = normalize_event_name(pending.event_name)
+        pending.event_name = event_name
+        result = await db.execute(
+            select(PostbackEventReceipt.id).where(
+                PostbackEventReceipt.platform == pending.platform,
+                PostbackEventReceipt.conversion_id == pending.conversion_id,
+                PostbackEventReceipt.event_name == event_name,
+            ).limit(1)
+        )
+        return result.scalar_one_or_none() is not None
     async def _create_conversion_from_pending(
             self,
             pending: PendingPostbackConversion,
@@ -188,8 +207,15 @@ class PostbackPendingService:
                 try:
                     # 每条记录单独建立保存点，避免一次 flush 失败使整个批次事务失效。
                     async with db.begin_nested():
-                        existing_conversion_id = await self._pending_conversion_exists(pending, db)
-                        if existing_conversion_id is not None:
+                        receipt_exists = await self._pending_event_receipt_exists(pending, db)
+                        existing_conversion_id = (
+                            None if receipt_exists
+                            else await self._pending_conversion_exists(pending, db)
+                        )
+                        if receipt_exists:
+                            # 已提交收据可能代表 volume-deducted 终态；保留 Pending 状态并阻止转正。
+                            row_outcome = "event_receipt_exists"
+                        elif existing_conversion_id is not None:
                             pending.status = "approved"
                             pending.approved_at = get_app_now_naive()
                             row_outcome = "already_exists"
@@ -217,7 +243,7 @@ class PostbackPendingService:
                         await db.flush()
 
                     # 只有 SAVEPOINT 成功释放后才更新成功计数。
-                    if row_outcome == "already_exists":
+                    if row_outcome in ("already_exists", "event_receipt_exists"):
                         result["skipped_count"] += 1
                     elif row_outcome == "approved":
                         result["approved_count"] += 1
@@ -455,6 +481,23 @@ class PostbackPendingService:
                 raise_api_exception(
                     ErrorCode.OPERATION_FAILED,
                     detail=f"待确认记录已处理，当前状态：{pending.status}",
+                )
+
+            if await self._pending_event_receipt_exists(pending, db):
+                audit_attempt = {
+                    "pending_conversion_id": pending_id,
+                    "conversion_id": None,
+                    "actor_type": "system_user",
+                    "actor_id": current_user.id,
+                    "source": "web",
+                    "action": "approve",
+                    "outcome": "event_receipt_exists",
+                    "previous_status": pending.status,
+                    "new_status": pending.status,
+                }
+                raise_api_exception(
+                    ErrorCode.OPERATION_FAILED,
+                    detail="该事件已有已提交的 Postback 收据，不能通过待确认审批重新创建正式转化",
                 )
 
             existing_conversion_id = await self._pending_conversion_exists(pending, db)
