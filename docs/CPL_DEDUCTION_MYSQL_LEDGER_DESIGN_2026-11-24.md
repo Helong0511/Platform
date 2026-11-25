@@ -2433,3 +2433,92 @@ Cap Reservation 使用稳定 reservation key，并通过唯一约束保证同一
 已核实 Cap Reservation 有独立模型、唯一键、租约/状态机、恢复服务及 migration；CPL 当前模型仍只有配置和扣减日志，migration manifest 没有 CPL 决策/预留账本 migration，receipt 也不具备财务决策账本职责。
 
 本轮只完成架构对比与审计文档更新，未新增数据库模型、migration 或业务代码，未执行真实 MySQL + Redis 故障注入。PR #205 继续保持 Draft，不得合并。
+
+
+### 50. 正式转化写入入口复核：Pending / Telegram 审批仍有两条直接构造路径
+
+#### 50.1 本轮核查范围与证据
+
+本轮从该 PR 的精确 Head SHA `de2fdf2a5c9020a6ba668f5b17c2e5fa7614884e` 读取以下文件，并核对构造点及调用关系：
+
+- `app/services/cpl/postback_pending_service.py`
+- `app/core/telegram/callback_handlers/postback_approval.py`
+- `app/core/postback/savers/conversion_saver.py`
+- `app/services/cpl/postback_receive_service.py`
+- `app/services/cpl/postback_bft_service.py`
+- `app/core/postback/processor.py`
+- `app/core/postback/pipeline.py`
+- `app/core/postback/validators/duplicate_checker.py`
+
+仓库树显示 `app/` 下共有 455 个 Python 文件。本轮只读取上述关键路径，不代表对 455 个文件完成 AST 全量扫描；以下结论限定为已读取文件中的直接证据，不声称全仓库只有这些构造点。
+
+#### 50.2 当前已确认的三个 PostbackConversion 构造点
+
+| 文件 | 构造点 | 入口性质 | 当前事务/处理边界 |
+|---|---:|---|---|
+| `app/core/postback/savers/conversion_saver.py` | 约第 296 行 | 正常 Postback Pipeline 的正式保存器 | 使用当前 AsyncSession，flush 后由 Processor 统一完成事务；前置步骤包含重复收据、扣量和 Cap 检查 |
+| `app/services/cpl/postback_pending_service.py` | 约第 108 行 | Web/IP Pending 审批共用 helper | 调用方传入 AsyncSession；helper 直接 add 转化并把 Pending 标记 approved，不执行正常 Postback Pipeline |
+| `app/core/telegram/callback_handlers/postback_approval.py` | 约第 314 行 | Telegram callback 审批 | 使用独立同步 Session；直接 add、flush、写审批审计并 commit，不调用正常 Processor |
+
+#### 50.3 Web/IP Pending 审批的绕过路径
+
+`PostbackPendingService._create_conversion_from_pending()` 被以下两类业务路径复用：
+
+- `auto_approve_pending_by_ip()`：IP 加白后的批量自动批准，约第 198 行调用 helper；
+- `approve_pending_conversion()`：人工 Web 审批，约第 479 行调用 helper。
+
+helper 会解析 click attribution、规范化 event_name、构造 `PostbackConversion`、`db.add()`，并将 Pending 状态改为 approved。它没有在该调用路径中调用 `PostbackProcessor.process()`，也没有显式复用正常流程的 `DuplicateChecker` receipt 获取、`DiscountChecker` CPL 决策、`CapChecker` reservation、正式保存后 receipt 释放及 downstream/report outbox 编排。
+
+因此，这不是单纯的代码复用差异，而是正式转化可以从 Pending 审批入口绕过正常事件决策链。即使 helper 检查了已存在的正式 conversion，也不能替代 receipt / CPL 决策终态 / Cap reservation 的统一幂等语义。
+
+#### 50.4 Telegram 审批是独立的同步绕过路径
+
+`process_pending_conversion()` 在 Telegram callback 文件内直接构造 `PostbackConversion`，随后：
+
+1. 更新 Pending 状态为 approved；
+2. 写入 Telegram 审批审计；
+3. 执行同步 Session `flush()`；
+4. 执行 `db.commit()` 并标记业务已提交；
+5. 刷新正式转化并编辑 Telegram 消息。
+
+本轮读取的函数体没有调用 `PostbackProcessor.process()`、CPL DeductionManager、Cap Reservation 或 Postback event receipt。Telegram callback query ID 仅用于审批审计，不是上游事件 canonical identity，也不能作为财务幂等键。
+
+这条路径还使用 `get_sync_session_factory()` 创建的同步数据库会话，与 Web/IP AsyncSession 路径不是同一会话工厂。修复时不能简单把 AsyncSession 对象传给同步 callback；必须让两种适配器调用同一个业务命令/应用服务，并明确同步桥接和事务所有权。
+
+#### 50.5 不能采用的局部修补
+
+- 不能只在两个审批 helper 前面增加一次 `PostbackConversion` 查重：它无法处理“已有 receipt、没有正式 conversion”的扣量终态。
+- 不能只在审批时补写 `ConversionDeductionLog`：该日志不是事件决策账本，也不能证明配置版本、窗口输入、未扣量终态或 reservation 是否已消费。
+- 不能把 Telegram callback_query_id、click_id 或 Pending 主键直接当作上游事件身份。
+- 不能把 Pending 审批简单改为“再次调用 Processor”而不定义批准语义、原始 payload、原始平台身份、归因快照和审批时配置变化的处理规则；否则可能重复处理或改变原事件决策。
+- 不能让 Web/IP 使用异步事务、Telegram 使用独立同步事务分别实现一套近似的扣量逻辑；这会继续产生行为漂移。
+
+#### 50.6 统一业务命令的修复边界
+
+建议把“将待确认事件转为正式转化”实现为唯一的应用层业务命令，Web、IP 自动审批、Telegram 和未来重放入口只负责身份认证、权限校验、审批原因及适配，不再直接构造 `PostbackConversion`。
+
+该命令至少应：
+
+1. 使用 canonical identity（platform + conversion_id + normalized event_name）获取事件级互斥/幂等权；
+2. 读取 Pending 原始事件和可信归因快照，校验其仍可批准；
+3. 明确区分“解除隔离后按原始策略完整重处理”与“经授权的人工豁免”；两者不能混成一个 approve 状态；
+4. 在同一业务决策中执行 CPL ledger、Cap reservation、正式 conversion、receipt 和 downstream/report outbox 的一致性协议；
+5. 将 actor_type、actor_id、source、reason、策略版本、原状态、新状态写入不可变审批审计；
+6. 对同步 Telegram 适配器提供明确的同步边界，禁止在已有事务中隐式创建第二个互不协调的业务事务；
+7. 对重复审批返回同一事件的已确定终态，不重复消费 quota、不重复创建正式转化、不重复 enqueue 下游任务。
+
+#### 50.7 应增加的架构回归测试
+
+- 对生产代码执行 AST 扫描，发现 `PostbackConversion(...)` 只能出现在唯一正式保存器/统一业务命令的允许位置；任何新入口必须显式更新 allowlist 和架构说明。
+- 扫描所有 `PostbackProcessor.process()` 调用点，记录入口适配器、Session 类型和异常/ACK 映射；该扫描需覆盖整个 `app/`，并在 CI 中持续执行。
+- Web 人工审批、IP 自动审批、Telegram 审批对同一 canonical identity 并发触发时，只能有一个业务决策终态。
+- 已存在 volume-deducted receipt 但没有正式 conversion 时，任何审批入口不得创建正式 conversion。
+- Pending 事件已经批准后重复点击、Telegram callback 重放、HTTP 重试均不得重复扣量、重复占 Cap 或重复写 Outbox。
+- 人工豁免必须验证权限、原因、操作者、策略版本和不可变审计；普通审批不能隐式获得豁免能力。
+- 主事务 rollback、commit-unknown、同步/异步 worker 并发和恢复 Worker 接管必须使用真实 MySQL 测试验证。
+
+#### 50.8 本轮结论与范围声明
+
+已在精确 Head SHA 上确认正常 ConversionSaver 之外，Web/IP Pending helper 和 Telegram callback 各自直接构造正式转化；Web/IP 两个审批入口共用 Pending helper，Telegram 使用独立同步 Session 并自行 commit。上述审批路径没有复用正常 Postback Pipeline 的完整扣量、Cap、receipt 和 Outbox 决策链。
+
+本轮只完成关键入口代码核查并形成可复核的架构证据；没有修改业务代码、没有新增 AST CI 测试、没有运行真实 MySQL/Redis 故障注入。全仓库 455 个 Python 文件尚未完成 AST 全量扫描。PR #205 必须继续保持 Draft，不得合并。
