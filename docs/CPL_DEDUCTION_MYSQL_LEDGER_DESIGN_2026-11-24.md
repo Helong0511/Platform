@@ -2294,3 +2294,73 @@ BFT 服务 `app/services/cpl/postback_bft_service.py` 也调用同一 `PostbackP
 最新 Head 的 Full Audit CI、Emergency Security CI 和 8 个 Check Runs 均已成功；但测试源码核对显示，Cap Reservation 已有真实 MySQL + Redis 的 commit-unknown、恢复、并发和 fencing 测试，CPL 扣量仍缺少同等级的 Redis 预留与 MySQL 财务提交集成验证。
 
 本轮只更新审计文档，没有修改 CPL 业务代码，也没有声称已执行真实 CPL MySQL + Redis 故障注入。PR #205 继续保持 Draft，不得合并。
+
+### 48. 第二十三阶段：最新扣量基线修复后的 Redis 序号仍非滑动窗口权威值
+
+本轮重新读取最新 Head `9b00e88bf95f1bcb35e183c453879b672d641093` 的扣量管理器、扣量计算器、Postback 提交路径及相关测试。近期提交已调整统计来源、应用时区、数据库基线和 Redis 初始化行为；但最新源码仍保留一个关键问题：Redis 决策序号和 scope 扣量计数不是按事件身份幂等维护，也没有随 MySQL 24 小时滑动窗口持续重建。
+
+#### 48.1 最新源码中的统计读取与 Redis 序号推进
+
+文件：`app/core/deduction/deduction_manager.py`
+
+`_get_stats_for_decision()` 每次先调用 `get_recent_stats(..., strict=True)` 读取 MySQL 统计，再执行 `_DECISION_STATS_LUA`。当前 Lua 的实际行为是：
+
+1. 仅当 `decision_deducted` 键不存在时，才用本次 MySQL `base_stats.deducted` 初始化该键。
+2. 每次调用都对 `decision_seq` 执行 `INCR`，只有 `seq == 1` 时才设置 TTL。
+3. 已存在的 `decision_deducted` 不会与本次 MySQL 基线重新核对。
+4. 调用方将 `processed` 设为 `seq - 1`，将 `total` 设为 `max(seq, base_stats.total)`，而 `deducted` 直接使用 Redis 返回值。
+
+因此，MySQL 当前窗口统计虽然每次重新查询，但并没有成为 Redis 计数器的持续校准依据。旧 Redis 键存在时，MySQL 新基线不会覆盖旧值；旧事件滚出 24 小时窗口时，Redis 的序号和扣量计数也不会随之递减或按当前窗口重建。
+
+#### 48.2 同一事件重试会推进 scope 级计数
+
+同一文件的 `apply_deduction()` 先取得上述统计，再用 canonical event key 进行确定性哈希判断。哈希键稳定只能保证同一事件的哈希命中结果一致，不能使后续 Redis 计数操作幂等。
+
+命中后：
+
+- 有统计总量时，按 `int(stats.total * ratio)` 计算 scope 级限额，再调用 `_reserve_volume_deduction()`。
+- 总量为零时，调用 `_incr_decision_deducted()`。
+- 两条路径都只对 scope 级 `decision_deducted` 做计数，没有传入 canonical event key，也没有事件级 reservation token、唯一键或状态。
+
+`_get_stats_for_decision()` 的 `decision_seq` 在判断是否命中之前已经递增。因此，即使同一事件重试时哈希结论相同，每次重试仍会推进序号；当 MySQL 窗口总量较小时，`max(seq, base_stats.total)` 还可能让重试抬高用于计算限额的 `stats.total`。这不是事件幂等，也不能作为真实窗口总量。
+
+#### 48.3 MySQL 回滚与 Redis 预留仍无共同提交边界
+
+文件：`app/core/postback/checks/discount_checker.py`、`app/core/postback/processor.py`
+
+扣量命中后，`DiscountChecker.calculate()` 写入 `ConversionDeductionLog` 并 flush；随后 Postback Processor 对扣量命中分支执行 `db.commit()`。当前 CPL 路径没有与 Cap Reservation 等价的 MySQL reservation ledger、提交阶段栅栏和 Redis token 恢复协议。
+
+若 Redis 预留成功而 MySQL 事务随后 rollback、commit ACK 丢失或进程崩溃，scope 计数可能与 MySQL 已提交事实分离。由于 reservation 没有事件身份，同一事件重试不能可靠识别并复用原 reservation，也不能安全地区分“应释放的未提交预留”和“已经提交的扣量事实”。
+
+#### 48.4 当前测试不能证明上述跨存储协议安全
+
+最新 Head 的 `tests/test_deduction_stats_accounting.py` 主要验证 SQL 统计口径、半开窗口和 strict 模式绕过缓存；`tests/test_deduction_fail_open_semantics.py` 主要通过 AsyncMock 验证 Redis 不可用/模拟 eval 异常时的 fail-open 与 fail-close。它们没有真实执行以下完整链路：
+
+1. Redis Lua 预留成功；
+2. MySQL 写入扣量财务日志并 flush；
+3. MySQL commit 明确失败、rollback 或 ACK 丢失；
+4. 相同事件重新进入完整 Postback；
+5. 验证 MySQL 最终财务事实与 Redis 预留/窗口统计一致。
+
+因此，当前单元测试通过不能证明 Redis 计数与 MySQL 财务终态一致。
+
+#### 48.5 必须完成的修复
+
+1. 先明确业务语义：最近 24 小时滑动窗口，或固定周期/累计序列；不可将滑动窗口 SQL 与 48 小时 Redis TTL 混用。
+2. 使用 MySQL 事件决策账本作为唯一财务权威，唯一键至少覆盖规范化的 `platform + conversion_id + event_name`；对每个事件保存决策结果、scope、配置版本、统计窗口、策略版本和终态。
+3. 事件级 reservation 必须由 canonical event identity 唯一约束；重复请求读取既有 reservation/决策，不再重复消费 scope quota。
+4. 若 Redis 保留为并发加速层，必须定义 reservation token、状态迁移、fencing、过期回收和 MySQL commit-unknown 恢复；Redis 数字不得独立决定财务终态。
+5. 对滑动窗口，计数必须按事件时间及明确的窗口边界重算/增量维护，并能在 Redis 重启、丢键、TTL 到期后从 MySQL 可重复重建；不得用无界递增序号近似窗口总量。
+6. 增加真实 MySQL + Redis 测试，覆盖同事件 2/10/50 并发、不同事件竞争 quota、MySQL rollback、commit ACK 丢失、Redis 重启/丢键、24 小时边界和 reservation 恢复。
+
+#### 48.6 最新 Head 与 CI 状态修正
+
+本轮核验时 PR #205 的最新 Head 为 `9b00e88bf95f1bcb35e183c453879b672d641093`。该 SHA 的 Check Runs 共 8 项，其中 6 项已成功，`backend` 与 `frontend` 两项仍为 `in_progress`；Emergency Security workflow 已成功，Full Audit workflow 仍在执行。PR 当前仍为 Draft、Open、未合并，GitHub 返回 `mergeable=true`、`mergeable_state=unstable`。
+
+因此，第47.5节中“最新 Head 的 Full Audit CI、Emergency Security CI 和 8 个 Check Runs 均已成功”的状态只适用于当时核验的旧快照，不代表本轮最新 SHA。应以本节记录的 SHA 和逐项 Check Run 状态为准，待全部完成后重新核验。
+
+#### 48.7 本轮结论与范围声明
+
+已从最新 Head 源码确认：近期基线修复改善了 MySQL 统计读取与 Redis 冷启动，但 `decision_seq` 仍按每次决策调用递增，Redis 已存在的 scope 扣量计数不会持续按 MySQL 滑动窗口校准，事件级 reservation 幂等及 CPL commit-unknown 恢复仍缺失。
+
+本轮只完成源码与测试核对并更新审计文档；未修改业务逻辑，未执行真实 CPL MySQL + Redis 故障注入。PR #205 必须继续保持 Draft，不得合并。
