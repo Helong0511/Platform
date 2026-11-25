@@ -2133,3 +2133,49 @@ READ COMMITTED 使每条普通一致性读都看到该语句开始前已提交�
 7. 测试批量批准中一条记录失败、外层事务回滚、批次提交未知、同一事件由 Web/Telegram/正常回调交错到达等场景。
 
 **本节结论：** 普通 Postback 回调已有 READ COMMITTED Session Factory，但 Web 手动批准和 IP 加白自动批准仍使用普通 `get_db()`，Telegram 则使用独立同步 Engine。三类批准入口尚未纳入统一事务隔离边界。当前只完成源码核查和审计记录，未修改业务代码，也未执行真实 MySQL 隔离集成测试。PR #205 继续保持 Draft，不得合并。
+
+
+### 45. 第二十阶段：正式转化构造点与入口 Session 来源交叉核对
+
+本轮按最新分支源码逐段核对正常接收、Pending 批准、Telegram 审批及 BFT 入口，补充直接写入点与 Session 来源的可验证调用链。此处只记录本轮实际读取的生产模块，不把 GitHub 代码搜索无结果误当作全仓库静态扫描完成。
+
+#### 45.1 本轮已读取并确认的正式转化构造位置
+
+1. **正常 Postback 保存器**：`app/core/postback/savers/conversion_saver.py` 的 `ConversionSaver.save()` 构造 `PostbackConversion`，由 `PostbackPipeline.step_save_conversion()` 调用；其上游为 `PostbackProcessor.process()`。该路径在构造之前执行事件重复检查、CPL 扣量和 Cap 预留，之后在同一事务中处理 receipt、下游转发队列和第三方 Report Outbox。
+2. **Web/IP 批准服务**：`app/services/cpl/postback_pending_service.py` 的 `_create_conversion_from_pending()` 直接构造 `PostbackConversion`。Web 手动批准与 IP 加白批量批准均复用该方法，但该方法本身只补归因、创建转化并更新 Pending 状态，不执行正常 Postback 流水线。
+3. **Telegram 审批**：`app/core/telegram/callback_handlers/postback_approval.py` 的 `process_pending_conversion()` 在同步 Session 中直接构造 `PostbackConversion`，然后 flush、写审批审计并 commit；没有调用上述异步保存器或 Postback Processor。
+
+这三处构造点中，后两处是已经确认的正常财务处理链之外的独立正式写入点。后续代码扫描必须把新增的直接构造点纳入架构测试，不能只依赖人工 review。
+
+#### 45.2 正常回调入口的 Session 来源
+
+本轮读取到的两个外部接收路由均显式使用 Postback 专用依赖：
+
+- `app/api_v1/postback/routes/receive.py`：通用 GET/POST `/postback/{platform}` 使用 `Depends(get_postback_db)`，交给 `PostbackReceiveService.receive_postback()`，再调用 `PostbackProcessor.process()`。
+- `app/api_v1/postback/bft.py`：兼容 GET/POST `/bft/postback` 使用 `Depends(get_postback_db)`，交给 `PostbackBftService`，最终调用同一个 `PostbackProcessor.process(platform="bft")`。
+
+因此，在这两个已读取的外部接收入口上，Postback 专用 READ COMMITTED Session Factory 已接入。该结论不自动覆盖管理端 Pending 批准、Telegram 同步 Session、后台脚本或其它内部任务。
+
+#### 45.3 Pending 与 Telegram 入口的隔离边界
+
+- Web Pending 路由 `app/api_v1/postback/routes/pending.py` 使用普通 `get_db()`，不是 `get_postback_db()`。
+- IP 白名单创建服务 `app/services/cpl/postback_ip_whitelist_service.py` 在同一个异步管理 Session 中调用 `auto_approve_pending_by_ip()`；它与 Web 批准共用 Pending 服务，但当前仍是直接转正逻辑。
+- Telegram 回调使用 `get_sync_session_factory()`，即独立 PyMySQL 同步 Engine/连接池；它既不使用 Postback 异步 Session Factory，也不共享其 READ COMMITTED execution-options。
+
+这说明“两个上游 HTTP 接收路由使用 Postback 专用 Session”不能推广成“所有正式转化写入均已使用统一隔离级别”。必须把审批命令也迁移到统一事务服务，并明确同步 Telegram 适配层的边界。
+
+#### 45.4 代码级防回归要求
+
+- 建立 AST/架构测试，扫描生产模块内 `PostbackConversion(...)` 的所有构造表达式；对每个命中点要求登记 owner/service、调用入口、Session Factory、财务终态策略和允许的例外理由。
+- 限制正式转化写入权限：除统一事件处理服务及明确的历史迁移/测试工具外，业务服务不得直接构造并提交正式转化。
+- 对 `PostbackProcessor.process()` 的所有生产调用点建立静态调用图，验证 Session 来自 Postback 专用工厂；不能仅检查两个公开 HTTP 路由。
+- 将 Web 手动批准、IP 自动批准、Telegram 审批改为统一业务命令；Pending 路由只负责鉴权和传递操作者/审批元数据。
+- 对真实 MySQL 测试增加 Session 隔离断言、receipt 冲突、并发批准、回滚和 commit-unknown；Redis 计数与财务决策的恢复测试仍必须同时覆盖。
+
+#### 45.5 本轮结论与范围声明
+
+已确认正常保存器、Pending 服务、Telegram 回调三处直接构造点及通用/BFT 两条外部接收路由的 Session 来源。已读取范围内，Pending 和 Telegram 仍绕开正常 Postback 财务事务；通用/BFT HTTP 接收则使用 Postback 专用 Session。
+
+本轮没有对全部 455 个应用 Python 文件完成 AST 扫描，也没有证明不存在其它内部写入点；GitHub 代码搜索接口本轮没有返回可用匹配结果，不能据此宣称全仓库扫描为零命中。下一步应在仓库 CI 中运行可复现的 AST 扫描并把完整命中清单作为验收产物。
+
+当前仅更新审计文档，未修改业务逻辑，未执行真实 MySQL + Redis 故障注入。PR #205 继续保持 Draft；最新 Head 的 CI 必须全部完成并通过，但 CI 通过仍不是财务一致性验收的替代条件。
