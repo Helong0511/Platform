@@ -2179,3 +2179,54 @@ READ COMMITTED 使每条普通一致性读都看到该语句开始前已提交�
 本轮没有对全部 455 个应用 Python 文件完成 AST 扫描，也没有证明不存在其它内部写入点；GitHub 代码搜索接口本轮没有返回可用匹配结果，不能据此宣称全仓库扫描为零命中。下一步应在仓库 CI 中运行可复现的 AST 扫描并把完整命中清单作为验收产物。
 
 当前仅更新审计文档，未修改业务逻辑，未执行真实 MySQL + Redis 故障注入。PR #205 继续保持 Draft；最新 Head 的 CI 必须全部完成并通过，但 CI 通过仍不是财务一致性验收的替代条件。
+
+
+### 46. 第二十一阶段：验证失败的上游 ACK 语义与事件决策留痕缺口
+
+本轮继续沿通用 Postback 与 BFT 接收调用链，核对验证失败结果如何转换为上游 HTTP 响应。这里需要区分“业务决定拒绝事件”与“系统暂时无法完成处理”：前者可以按协议返回终态 ACK，但必须有可追踪的拒绝原因；后者必须返回可重试失败，不能被成功 ACK 吞掉。
+
+#### 46.1 Processor 对验证失败返回 success=true
+
+文件：`app/core/postback/processor.py`
+
+`PostbackProcessor.process()` 在 IP 校验之后，先调用平台专用 Handler 的 `validate(raw_data)`；若没有专用 Handler，则调用通用 `DataValidator.validate(raw_data, platform)`。
+
+两种验证失败分支目前都返回：
+
+- `success: True`
+- `message: "数据验证失败"`
+- 错误信息放入 `errors`
+
+这意味着验证失败被表示为“成功处理结果”，而不是可重试失败或有明确终态类型的拒绝结果。
+
+#### 46.2 接收服务会把上述结果转换为 HTTP 200 ok
+
+文件：`app/services/cpl/postback_receive_service.py`
+
+`raise_if_postback_retryable()` 仅在 `success is False` 且 `retryable` 为真（默认值为真）时抛出 HTTP 503。对于 Processor 返回的 `success=True`，通用接收服务会继续返回固定文本 `ok`、HTTP 200。
+
+BFT 服务 `app/services/cpl/postback_bft_service.py` 也调用同一 `PostbackProcessor.process()` 和 `raise_if_postback_retryable()`，因此共享该 ACK 语义。
+
+#### 46.3 事件身份验证与财务决策留痕之间存在断点
+
+通用 `DataValidator` 已要求显式稳定 `conversion_id`，不能只依赖 `click_id`；同时检查 payout、event_name 长度等字段。验证失败发生在标准化、事件 receipt 和扣量决策之前。
+
+因此，当前验证拒绝不会形成正式事件 receipt，也不会形成 CPL 决策日志/权威事件账本记录。对于缺少 conversion_id 的请求，系统本身无法使用正常 canonical event identity 去重；但仍应产生受控的 ingress rejection 记录（例如带有请求来源、平台、验证规则代码、时间、受限字段摘要/请求指纹），不能为了留痕把原始 PII 或完整回调密文无限复制到日志。
+
+#### 46.4 必须明确的协议语义
+
+1. 将结果类型从布尔 `success` 扩展为明确终态，例如 `accepted`、`duplicate`、`rejected_permanent`、`retryable_failure`；不要用 `success=True` 同时表达“已成功入库”和“数据验证拒绝”。
+2. 对永久拒绝，是否返回 HTTP 200 ACK 必须按各上游平台重试协议逐一确认；如果 ACK，必须先可靠写入拒绝审计/ingress ledger，再 ACK。
+3. 对 Redis、MySQL、配置、账本或事务状态暂时不可用等基础设施失败，必须返回可重试结果，禁止被验证/业务分支的宽泛成功返回覆盖。
+4. 对无法形成 canonical conversion identity 的请求，使用独立 ingress rejection identity；不得退化为 click_id 作为财务事件身份。
+5. BFT 及所有平台 Handler 的 `validate()` / `normalize()` 异常与失败返回必须纳入同一响应映射表，逐平台确认上游 ACK/重试契约。
+6. 增加路由级测试，分别断言通用平台和 BFT 的验证失败、永久拒绝、DB 失败、Redis 失败、未知提交结果、重复事件的 HTTP 状态与持久化留痕；不能只测试 Processor 返回字典。
+7. 增加测试确保“拒绝事件”不会意外写入正式转化、扣量日志、Cap 或 Outbox；“可重试失败”不会返回 HTTP 200。
+
+#### 46.5 本轮结论与范围声明
+
+已从 Processor、通用接收服务、BFT 接收服务和通用 DataValidator 源码确认：验证失败当前返回 `success=True`；通用/BFT 接收服务据此返回 HTTP 200 `ok`。验证发生在 receipt 与财务决策之前，失败请求没有形成正式事件决策账本记录。
+
+这不直接证明 ACK 行为一定违反每个平台协议；是否应该 ACK 仍需按各平台官方重试契约确认。但“成功入库”和“永久拒绝”共用 `success=True`，且拒绝请求没有持久化决策留痕，是已确认的可观测性与重放治理缺口。
+
+本轮只完成源码核对和本审计文档更新，未修改业务逻辑，未执行真实 MySQL + Redis 故障注入。PR #205 继续保持 Draft，不得合并。
