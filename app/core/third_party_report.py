@@ -1450,6 +1450,7 @@ async def update_report_log_params(
         amount: Optional[float] = None,
         report_params: Optional[str] = None,
         use_hash: Optional[bool] = None,
+        audit_snapshot: Optional[dict] = None,
         db=None,
 ):
     """更新日志参数；身份字段变更必须先取得旧/新基础身份锁并检查冲突。"""
@@ -1709,6 +1710,10 @@ async def update_report_log_params(
                     log_entry.event,
                     log_entry.conversion_id,
                 )
+            financial_before = {
+                "amount": str(log_entry.amount) if log_entry.amount is not None else None,
+                "currency": log_entry.currency,
+            }
             if email is not None:
                 log_entry.email = email
             if ip is not None:
@@ -1736,6 +1741,15 @@ async def update_report_log_params(
                 log_entry.report_params = report_params
             if use_hash is not None:
                 log_entry.use_hash = use_hash
+
+            if audit_snapshot is not None and (amount is not None or currency is not None):
+                audit_snapshot.update({
+                    "before": financial_before,
+                    "after": {
+                        "amount": str(log_entry.amount) if log_entry.amount is not None else None,
+                        "currency": log_entry.currency,
+                    },
+                })
 
             if not caller_managed_session:
                 await db.commit()

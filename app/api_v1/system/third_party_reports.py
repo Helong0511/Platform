@@ -194,6 +194,7 @@ class UpdateReportLogParams(BaseModel):
     conversion_id: Optional[str] = Field(None, max_length=255, description="转化ID")
     currency: Optional[str] = Field(None, max_length=10, description="货币类型")
     amount: Optional[Decimal] = Field(None, description="支付金额")
+    change_reason: Optional[str] = Field(None, max_length=500, description="财务载荷人工修订原因/工单号")
     email: Optional[str] = Field(None, max_length=255, description="邮箱")
     ip: Optional[str] = Field(None, max_length=50, description="IP地址")
     phone: Optional[str] = Field(None, max_length=50, description="手机号")
@@ -543,6 +544,7 @@ async def update_third_party_report(
     # ---------- 入口：参数与依赖准备 ----------
     # ---------- 异常处理 ----------
     try:
+        financial_audit_snapshot = {}
         success = await update_report_log_params(
             log_id=log_id,
             adsid=params.adsid,
@@ -556,6 +558,7 @@ async def update_third_party_report(
             ua=params.ua,
             report_params=params.report_params,
             use_hash=params.use_hash,
+            audit_snapshot=financial_audit_snapshot,
             db=db,
         )
         
@@ -573,7 +576,11 @@ async def update_third_party_report(
             resource_id=log_id,
             resource_name=f"第三方上报日志-{log_id}",
             request=request,
-            details={"updated_fields": list(params.model_dump(exclude_unset=True).keys())},
+            details={
+                "updated_fields": list(params.model_dump(exclude_unset=True).keys()),
+                "financial_payload": financial_audit_snapshot,
+                "change_reason": params.change_reason,
+            },
         )
         await commit_audit_log(db)
 
