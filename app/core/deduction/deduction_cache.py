@@ -111,7 +111,10 @@ class DeductionConfigCache:
                             ConversionDeductionConfig.offer_id == target_id,
                             ConversionDeductionConfig.is_active == True
                         )
-                    ).order_by(ConversionDeductionConfig.priority.desc()).limit(1)
+                    ).order_by(
+                        ConversionDeductionConfig.priority.desc(),
+                        ConversionDeductionConfig.id.asc(),
+                    ).limit(1)
                 )
             elif level == 'publisher':
                 result = await self.db.execute(
@@ -120,7 +123,10 @@ class DeductionConfigCache:
                             ConversionDeductionConfig.publisher_id == target_id,
                             ConversionDeductionConfig.is_active == True
                         )
-                    ).order_by(ConversionDeductionConfig.priority.desc()).limit(1)
+                    ).order_by(
+                        ConversionDeductionConfig.priority.desc(),
+                        ConversionDeductionConfig.id.asc(),
+                    ).limit(1)
                 )
             elif level == 'advertiser':
                 result = await self.db.execute(
@@ -129,7 +135,10 @@ class DeductionConfigCache:
                             ConversionDeductionConfig.advertiser_id == target_id,
                             ConversionDeductionConfig.is_active == True
                         )
-                    ).order_by(ConversionDeductionConfig.priority.desc()).limit(1)
+                    ).order_by(
+                        ConversionDeductionConfig.priority.desc(),
+                        ConversionDeductionConfig.id.asc(),
+                    ).limit(1)
                 )
             else:
                 logger.warning(f"未知配置级别：{level}")
