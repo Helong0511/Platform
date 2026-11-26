@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.api_v1.tb_search_data import _parse_decimal_cell
+from app.api_v1.tb_search_data import _is_blank_excel_cell, _parse_decimal_cell
 
 
 def test_parse_decimal_cell_preserves_decimal_text_precision():
@@ -45,3 +45,22 @@ def test_apply_deduct_ratio_keeps_legacy_two_decimal_default():
 def test_parse_decimal_cell_rejects_non_finite_decimal_instances(value):
     with pytest.raises(ValueError):
         _parse_decimal_cell(value, "REVENUE")
+
+
+
+def test_decimal_nan_is_not_treated_as_an_empty_rpm_cell():
+    assert _is_blank_excel_cell(Decimal("NaN")) is False
+    with pytest.raises(ValueError, match="有限数字"):
+        _parse_decimal_cell(Decimal("NaN"), "RPM")
+
+
+def test_decimal_infinity_is_not_treated_as_an_empty_rpm_cell():
+    assert _is_blank_excel_cell(Decimal("Infinity")) is False
+    with pytest.raises(ValueError, match="有限数字"):
+        _parse_decimal_cell(Decimal("Infinity"), "RPM")
+
+
+def test_pandas_nan_is_treated_as_an_empty_excel_cell():
+    import math
+
+    assert _is_blank_excel_cell(float("nan")) is True
