@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.telegram.message_sender import send_telegram_message_async as send_telegram_message
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.core.third_party_currency import validate_purchase_payload
+from app.core.third_party_currency import resolve_currency, validate_purchase_payload
 from app.core.utils import APP_TIMEZONE, get_app_now_naive, get_app_now_sql_expression
 from app.models.models import ThirdPartyReportLog, ThirdPartyReportIdentityLock
 from app.core.log_utils import mask_email, mask_hash_prefix, mask_phone
@@ -201,6 +201,7 @@ async def create_report_log(
         report_params: Optional[str] = None,
         conversion_id: Optional[str] = None,
         currency: Optional[str] = None,
+        currency_source: Optional[str] = None,
         amount: Optional[float] = None,
         destination_pixel_id: Optional[str] = None,
 ) -> int:
@@ -294,6 +295,7 @@ async def create_report_log(
                 phone=phone,
                 ua=ua,
                 currency=currency,
+                currency_source=currency_source,
                 amount=amount,
                 use_hash=use_hash,
                 report_params=report_params,
@@ -769,6 +771,7 @@ async def send_third_party_report(
         use_hash: bool = True,
         conversion_id: Optional[str] = None,
         currency: Optional[str] = None,
+        currency_source: Optional[str] = None,
         amount: Optional[float] = None,
         click_time: Optional[datetime] = None,
         facebook_api_version: Optional[str] = "v23.0",  # 可选参数，默认与全局 FACEBOOK_API_VERSION 对齐
@@ -803,6 +806,10 @@ async def send_third_party_report(
     base_delay = 1  # 基础延迟时间（秒）
     timeout = 5  # 超时时间（秒）
     failure_reasons = []  # 收集失败原因
+
+    # Purchase 币种在任何日志创建或网络请求前完成 ISO 校验与来源归因。
+    if event == "Purchase":
+        currency, currency_source = resolve_currency(currency, source=currency_source)
 
     # 统一清理字段，避免 None 影响日志入库与参数构造
     email = (email or "").strip()
@@ -901,6 +908,7 @@ async def send_third_party_report(
             conversion_id=conversion_id,
             destination_pixel_id=pixel_id,
             currency=currency,
+            currency_source=currency_source,
             amount=amount,
         )
 
