@@ -49,13 +49,13 @@ def _cloak_phase_report_dict(cloak_config: Optional[CloakConfig]) -> Dict[str, A
         "cloak_load_report_event": (getattr(cloak_config, "load_report_event", None) or "PageView").strip()
         or "PageView",
         "cloak_load_report_value": getattr(cloak_config, "load_report_value", None),
-        "cloak_load_report_currency": (getattr(cloak_config, "load_report_currency", None) or "USD").strip()
+        "cloak_load_report_currency": ((getattr(cloak_config, "load_report_currency", None) or "USD").strip().upper()).strip().upper()
         or "USD",
         "cloak_postback_report_enabled": bool(getattr(cloak_config, "postback_report_enabled", False)),
         "cloak_postback_report_event": (getattr(cloak_config, "postback_report_event", None) or "Purchase").strip()
         or "Purchase",
         "cloak_postback_report_value": getattr(cloak_config, "postback_report_value", None),
-        "cloak_postback_report_currency": (getattr(cloak_config, "postback_report_currency", None) or "USD").strip()
+        "cloak_postback_report_currency": ((getattr(cloak_config, "postback_report_currency", None) or "USD").strip().upper()).strip().upper()
         or "USD",
     }
 
@@ -243,7 +243,7 @@ class CloakPixelMappingService:
             if cloak_config:
                 pixel_config["cloak_report_event"] = getattr(cloak_config, "report_event", None) or "ViewContent"
                 pixel_config["cloak_report_value"] = getattr(cloak_config, "report_value", None)
-                pixel_config["cloak_report_currency"] = getattr(cloak_config, "report_currency", None) or "USD"
+                pixel_config["cloak_report_currency"] = (getattr(cloak_config, "report_currency", None) or "USD").strip().upper()
             pixel_config.update(_cloak_phase_report_dict(cloak_config))
             return pixel_config
 
