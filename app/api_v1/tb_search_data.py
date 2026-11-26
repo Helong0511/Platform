@@ -86,6 +86,17 @@ def _parse_decimal_cell(value, field_name: str, default: Decimal = Decimal("0"))
         raise ValueError(f"{field_name}不是有效数字") from exc
     if not parsed.is_finite():
         raise ValueError(f"{field_name}必须是有限数字")
+
+    # TBSearchData 的收入为 DECIMAL(12,4)，RPM 为 DECIMAL(10,4)。
+    max_abs = (
+        Decimal("99999999.9999")
+        if field_name.upper() in {"REVENUE", "REVENUE_BEFORE_DEDUCT"}
+        else Decimal("999999.9999")
+    )
+    if abs(parsed) > max_abs:
+        raise ValueError(f"{field_name}超出数据库 DECIMAL 存储范围")
+    if parsed.quantize(Decimal("0.0001")) != parsed:
+        raise ValueError(f"{field_name}最多允许 4 位小数")
     return parsed
 
 
@@ -489,8 +500,8 @@ async def import_tb_search_data(
                     rpm_origin = _parse_decimal_cell(rpm_cell, "RPM")
                 
                 # 获取扣减比例
-                revenue_deduct_ratio = product.revenue_deduct_ratio or 0.0
-                ecpm_deduct_ratio = product.ecpm_deduct_ratio or 0.0 # RPM 对应 eCPM 扣减比例
+                revenue_deduct_ratio = product.revenue_deduct_ratio or Decimal("0")
+                ecpm_deduct_ratio = product.ecpm_deduct_ratio or Decimal("0") # RPM 对应 eCPM 扣减比例
                 
                 # 计算扣减后的值：无扣减保留原始精度，有扣减截断两位小数
                 # 币种归因尚未接入 TB Search 时，不得按固定两位小数截断金额或 RPM。
