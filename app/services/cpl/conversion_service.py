@@ -196,6 +196,7 @@ class ConversionService:
                     "total_po": 0.0,
                     "total_po_after_discount": 0.0,
                     "total_profit": 0.0,
+                    "currency_summaries": [],
                     "stats_list": [],
                     "start_date": start_date or (start_datetime.strftime("%Y-%m-%d")),
                     "end_date": end_date or (end_datetime.strftime("%Y-%m-%d"))
@@ -218,6 +219,7 @@ class ConversionService:
                     "total_po": 0.0,
                     "total_po_after_discount": 0.0,
                     "total_profit": 0.0,
+                    "currency_summaries": [],
                     "stats_list": [],
                     "start_date": start_date or (start_datetime.strftime("%Y-%m-%d")),
                     "end_date": end_date or (end_datetime.strftime("%Y-%m-%d"))
