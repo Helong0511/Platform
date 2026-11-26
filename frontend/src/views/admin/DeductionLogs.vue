@@ -199,20 +199,26 @@
           </template>
         </el-table-column>
         
+        <el-table-column v-if="columnVisibility.currency" prop="currency" label="币种" width="85" align="center">
+          <template #default="scope">{{ scope.row.currency || 'USD' }}</template>
+        </el-table-column>
+        <el-table-column v-if="columnVisibility.currency_source" prop="currency_source" label="币种来源" min-width="150" show-overflow-tooltip>
+          <template #default="scope">{{ scope.row.currency_source || 'legacy_unknown' }}</template>
+        </el-table-column>
         <el-table-column label="扣金额信息" align="center" width="220">
           <template #default="scope">
             <div v-if="scope.row.deducted_amount > 0" class="deduction-info amount-deduction">
               <div class="deduction-row">
                 <span class="deduction-label">原始:</span>
-                <span class="deduction-value">{{ formatCurrency(scope.row.original_amount) }}</span>
+                <span class="deduction-value">{{ formatCurrency(scope.row.original_amount, scope.row.currency) }}</span>
               </div>
               <div class="deduction-row">
                 <span class="deduction-label">扣减:</span>
-                <span class="deduction-value deducted">{{ formatCurrency(scope.row.deducted_amount) }}</span>
+                <span class="deduction-value deducted">{{ formatCurrency(scope.row.deducted_amount, scope.row.currency) }}</span>
               </div>
               <div class="deduction-row">
                 <span class="deduction-label">最终:</span>
-                <span class="deduction-value final">{{ formatCurrency(scope.row.final_amount) }}</span>
+                <span class="deduction-value final">{{ formatCurrency(scope.row.final_amount, scope.row.currency) }}</span>
               </div>
               <div v-if="scope.row.amount_deduction_ratio" class="deduction-ratio">
                 比例: {{ (scope.row.amount_deduction_ratio * 100).toFixed(2) }}%
@@ -274,11 +280,13 @@
             </div>
             <span v-else>未扣量</span>
           </el-descriptions-item>
+          <el-descriptions-item label="币种">{{ currentLog.currency || 'USD' }}</el-descriptions-item>
+          <el-descriptions-item label="币种来源">{{ currentLog.currency_source || 'legacy_unknown' }}</el-descriptions-item>
           <el-descriptions-item label="扣金额信息" :span="2">
             <div v-if="currentLog.deducted_amount > 0">
-              <div>原始金额: {{ formatCurrency(currentLog.original_amount) }}</div>
-              <div>扣减金额: <span style="color: #F56C6C;">{{ formatCurrency(currentLog.deducted_amount) }}</span></div>
-              <div>最终金额: <span style="color: #67C23A;">{{ formatCurrency(currentLog.final_amount) }}</span></div>
+              <div>原始金额: {{ formatCurrency(currentLog.original_amount, currentLog.currency) }}</div>
+              <div>扣减金额: <span style="color: #F56C6C;">{{ formatCurrency(currentLog.deducted_amount, currentLog.currency) }}</span></div>
+              <div>最终金额: <span style="color: #67C23A;">{{ formatCurrency(currentLog.final_amount, currentLog.currency) }}</span></div>
               <div>扣金额比例: {{ ((currentLog.amount_deduction_ratio || 0) * 100).toFixed(2) }}%</div>
             </div>
             <span v-else>未扣金额</span>
@@ -320,6 +328,8 @@
         <el-checkbox label="offer_name">Offer</el-checkbox>
         <el-checkbox label="publisher_name">渠道</el-checkbox>
         <el-checkbox label="volume_deduction">扣量信息</el-checkbox>
+        <el-checkbox label="currency">币种</el-checkbox>
+        <el-checkbox label="currency_source">币种来源</el-checkbox>
         <el-checkbox label="amount_deduction">扣金额信息</el-checkbox>
         <el-checkbox label="deduction_strategy">扣减策略</el-checkbox>
         <el-checkbox label="created_at">创建时间</el-checkbox>
