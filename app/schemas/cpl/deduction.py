@@ -174,6 +174,8 @@ class ConversionDeductionLogResponse(BaseSchema):
     deducted_amount: Decimal
     final_volume: int
     final_amount: Decimal
+    currency: str = Field("USD", description="扣减金额对应的 ISO 4217 币种")
+    currency_source: str = Field("system_fallback_usd", description="扣减金额币种来源归因")
     deduction_config_id: Optional[int] = None
     volume_deduction_ratio: Optional[Decimal] = None
     amount_deduction_ratio: Optional[Decimal] = None
