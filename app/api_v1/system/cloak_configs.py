@@ -303,7 +303,8 @@ def _build_facebook_payload(
     # Meta 要求 Purchase 必须带 value + currency
     # ---------- 条件分支 ----------
     if report_event == "Purchase" and report_value is not None:
-        cur = (report_currency or "USD").strip().upper() or "USD"
+        from app.core.third_party_currency import resolve_currency
+        cur, _currency_source = resolve_currency(report_currency, source="cloak_config:test")
         event_obj["custom_data"] = {"currency": cur, "value": float(report_value)}
 
     # ---------- 构建响应 ----------
