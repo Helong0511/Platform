@@ -32,10 +32,22 @@
 
 ## 历史数据处理
 
-迁移只执行以下变更：
+数据库迁移只执行元数据 DDL 和斗篷配置空值兜底，不在迁移中对 Postback 大表执行无界 UPDATE。迁移后必须先运行分批归因脚本：
+
+```bash
+# 默认只读预演，不写入
+MIGRATION_DATABASE_URL='mysql+asyncmy://独立迁移账号:密码@主机:3306/数据库' python -m scripts.backfill_currency_attribution
+
+# 审核 dry-run 输出后，显式启用分批写入
+MIGRATION_DATABASE_URL='mysql+asyncmy://独立迁移账号:密码@主机:3306/数据库' python -m scripts.backfill_currency_attribution --apply --batch-size 500
+```
+
+脚本每批按主键扫描并提交，重跑时跳过已归因来源；输出各表币种/来源分组、ISO 无效数量及最多 200 条样例，不打印 DSN、原始 payload 或 PII。默认 dry-run；只有传入 `--apply` 才会写入。必须使用独立 `MIGRATION_DATABASE_URL`，不会回退到应用 DSN。
+
+脚本处理后：
 
 - 斗篷三阶段配置中 NULL/空白币种设置为 USD，并把数据库默认值设置为 USD。
-- 历史正式/待审批 Postback 转化从原始 JSON 的 `currency` / `currency_code` / `currencyCode`（含 `_payload` 包装）还原币种和字段来源；确实缺失时设置 USD，来源为 `system_fallback_usd`。
+- 历史正式/待审批 Postback 转化从原始 JSON 的 `currency` / `currency_code` / `currencyCode`（含 `_payload` 包装）还原币种和字段来源；确实缺失时设置 USD，来源为 `system_fallback_usd`。非空无效币种保留原值并列入异常清单，不会静默替换。
 - 历史第三方 Purchase 日志中缺失币种的行设置为 USD，来源为 `system_fallback_usd`。
 - 历史 Purchase 日志中已有非空币种的行来源标记为 `legacy_unknown`。迁移不猜测其来源，不修改已有币种和任何金额。
 - 历史非空币种仍须由后续只读审计识别无效/撤销代码，并结合 Postback 原始数据、历史配置快照、报表参数及审计记录还原来源；无证据的行继续保持 `legacy_unknown`，不能伪造来源。
