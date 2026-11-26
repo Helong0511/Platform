@@ -11,6 +11,9 @@ def test_all_cloak_currency_columns_have_usd_orm_and_database_defaults():
         assert column.default.arg == "USD"
         assert str(column.server_default.arg).strip("'") == "USD"
         assert column.nullable is True
+    assert CloakConfig.__table__.c.report_currency_source.default.arg == "system_fallback_usd"
+    assert CloakConfig.__table__.c.load_report_currency_source.default.arg == "system_fallback_usd"
+    assert CloakConfig.__table__.c.postback_report_currency_source.default.arg == "system_fallback_usd"
 
 
 def test_new_cloak_schema_defaults_all_purchase_phases_to_usd():
