@@ -53,7 +53,7 @@
       <el-col :span="6">
         <div class="stat-item">
           <div class="stat-label">总收入</div>
-          <div class="stat-value">${{ (stats.revenue || 0).toFixed(2) }}</div>
+          <div class="stat-value">{{ formatCurrency(stats.revenue) }}</div>
           <div class="stat-trend" :class="trends.revenue >= 0 ? 'up' : 'down'">
             {{ trends.revenue >= 0 ? '↑' : '↓' }} {{ Math.abs(trends.revenue) }}%
           </div>
@@ -73,7 +73,8 @@ import { getOfferStats } from '@/api/offer';
 import { logger } from '@/utils/logger';
 
 const props = defineProps({
-  offerId: { type: Number, required: true }
+  offerId: { type: Number, required: true },
+  currency: { type: String, default: 'USD' }
 });
 
 const loading = ref(false);
@@ -84,6 +85,7 @@ let chartInstance = null;
 const stats = reactive({ clicks: 0, conversions: 0, conversion_rate: 0, revenue: 0 });
 const trends = reactive({ clicks: 0, conversions: 0, conversion_rate: 0, revenue: 0 });
 const chartData = ref([]);
+const formatCurrency = (value) => `${props.currency || 'USD'} ${Number(value || 0).toFixed(2)}`;
 
 const loadStats = async () => {
   if (!props.offerId) return;
@@ -127,7 +129,7 @@ const initChart = () => {
     },
     yAxis: [
       { type: 'value', name: '数量' },
-      { type: 'value', name: '收入', axisLabel: { formatter: '${value}' } }
+      { type: 'value', name: `收入（${props.currency || 'USD'}）`, axisLabel: { formatter: (value) => formatCurrency(value) } }
     ],
     series: [
       { name: '点击', type: 'line', data: chartData.value.map((item) => item.clicks) },
