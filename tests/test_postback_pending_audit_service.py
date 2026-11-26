@@ -309,6 +309,8 @@ async def test_manual_approval_sanitizes_pending_raw_data_before_promotion():
         event_value=None,
         original_payout=10,
         payout=9,
+        currency="USD",
+        currency_source="system_fallback_usd",
         devad_id=None,
         os="Android",
         carrier=None,
