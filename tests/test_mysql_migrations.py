@@ -2442,9 +2442,9 @@ def test_conversion_deduction_log_conversion_fk_migration_is_idempotent_and_pres
                 "CREATE TABLE conversion_deduction_logs ("
                 "id BIGINT NOT NULL AUTO_INCREMENT, "
                 "conversion_id BIGINT NULL, "
-                "original_amount DECIMAL(10,2) NOT NULL, "
-                "deducted_amount DECIMAL(10,2) NULL DEFAULT 0.00, "
-                "final_amount DECIMAL(10,2) NOT NULL, "
+                "original_amount DECIMAL(12,4) NOT NULL, "
+                "deducted_amount DECIMAL(12,4) NULL DEFAULT 0.00, "
+                "final_amount DECIMAL(12,4) NOT NULL, "
                 "PRIMARY KEY (id), KEY idx_conversion_id (conversion_id)"
                 ") ENGINE=InnoDB"
             )
