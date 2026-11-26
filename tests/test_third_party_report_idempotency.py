@@ -1951,3 +1951,17 @@ def test_fbc_uses_click_time_not_conversion_event_time():
     assert third_party_report._build_fbc_value("fbclid-1", click_time) == (
         f"fb.1.{expected_timestamp}.fbclid-1"
     )
+
+
+def test_fbc_is_omitted_when_click_time_is_dst_ambiguous():
+    from zoneinfo import ZoneInfo
+
+    ambiguous_click_time = datetime(2024, 11, 3, 1, 30, 0)
+    original_timezone = third_party_report.APP_TIMEZONE
+    third_party_report.APP_TIMEZONE = ZoneInfo("America/New_York")
+    try:
+        assert third_party_report._build_fbc_value(
+            "fbclid-ambiguous", ambiguous_click_time
+        ) is None
+    finally:
+        third_party_report.APP_TIMEZONE = original_timezone
