@@ -17,7 +17,9 @@ from app.core.third_party_currency import (
     [
         ("0.1", "usd", Decimal("0.1"), "USD"),
         ("0.1234", "CNY", Decimal("0.1234"), "CNY"),
-        ("99999999.9999", "EUR", MAX_PURCHASE_AMOUNT, "EUR"),
+        ("99999999.9999", "EUR", Decimal("99999999.9999"), "EUR"),
+        ("123456789012345678.123456", "KWD", MAX_PURCHASE_AMOUNT, "KWD"),
+        ("0.123456", "BHD", Decimal("0.123456"), "BHD"),
         ("1.00", None, Decimal("1.00"), "USD"),
         ("1.00", "  ", Decimal("1.00"), "USD"),
     ],
@@ -38,8 +40,8 @@ def test_validate_purchase_payload_accepts_iso_currency_and_usd_fallback(
         ("-0.01", "USD"),
         ("NaN", "USD"),
         ("Infinity", "USD"),
-        ("100000000", "USD"),
-        ("1.00001", "USD"),
+        ("1000000000000000000", "USD"),
+        ("1.1234567", "USD"),
     ],
 )
 def test_validate_purchase_payload_rejects_invalid_financial_values(amount, currency):
