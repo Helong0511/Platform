@@ -255,6 +255,7 @@ def _build_facebook_payload(
     report_event: str,
     report_value: Optional[float],
     report_currency: Optional[str],
+    currency_source: Optional[str] = None,
 ) -> dict:
     """
     构造 Meta Conversions API POST /{pixel_id}/events 的请求 JSON 体。
@@ -304,7 +305,7 @@ def _build_facebook_payload(
     # ---------- 条件分支 ----------
     if report_event == "Purchase" and report_value is not None:
         from app.core.third_party_currency import resolve_currency
-        cur, _currency_source = resolve_currency(report_currency, source="cloak_config:test")
+        cur, _currency_source = resolve_currency(report_currency, source=currency_source)
         event_obj["custom_data"] = {"currency": cur, "value": float(report_value)}
 
     # ---------- 构建响应 ----------
@@ -764,6 +765,12 @@ async def test_cloak_report(
     phase = test_data.report_phase
     _validate_test_report_phase(config, phase)
     report_event, report_value, report_currency = _resolve_test_report_params(config, phase)
+    currency_source_field = {
+        "click": "report_currency_source",
+        "load": "load_report_currency_source",
+        "postback": "postback_report_currency_source",
+    }[phase]
+    currency_source = getattr(config, currency_source_field, None) or "legacy_unknown"
 
     client_ip = _resolve_real_client_ip(request)
     client_user_agent = _resolve_real_user_agent(request)
@@ -774,6 +781,7 @@ async def test_cloak_report(
         report_event=report_event,
         report_value=report_value,
         report_currency=report_currency,
+        currency_source=currency_source,
     )
     primary_result = await _send_test_report(config.pixel_id, config.access_token, payload)
 
