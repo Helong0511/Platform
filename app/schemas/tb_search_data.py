@@ -115,6 +115,33 @@ class TBSearchDataUpdate(BaseSchema):
     revenue_before_deduct: Decimal | None = None
     rpm_before_deduct: Decimal | None = None
 
+    @field_validator(
+        "revenue",
+        "rpm",
+        "revenue_before_deduct",
+        "rpm_before_deduct",
+    )
+    @classmethod
+    def validate_finite_amounts(
+        cls, value: Decimal | None, info: ValidationInfo
+    ) -> Decimal | None:
+        """按对应 MySQL DECIMAL 列精度校验，避免数据库静默舍入或溢出。"""
+        if value is None:
+            return value
+        if not value.is_finite():
+            raise ValueError("金额和 RPM 必须是有限数字")
+
+        max_abs = (
+            Decimal("99999999.9999")
+            if info.field_name in {"revenue", "revenue_before_deduct"}
+            else Decimal("999999.9999")
+        )
+        if abs(value) > max_abs:
+            raise ValueError(f"{info.field_name}超出数据库 DECIMAL 存储范围")
+        if value.quantize(Decimal("0.0001")) != value:
+            raise ValueError(f"{info.field_name}最多允许 4 位小数")
+        return value
+
     @model_validator(mode="after")
     def reject_explicit_nulls_for_non_nullable_fields(self):
         """区分字段未提交与显式 null，避免把 NULL 写入数据库 NOT NULL 列。"""
