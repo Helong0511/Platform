@@ -22,6 +22,7 @@
 import logging
 from calendar import monthrange
 from datetime import date
+from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, UploadFile, File
 from sqlalchemy import delete, func, select, and_, or_
@@ -62,6 +63,19 @@ from app.core.country_code import resolve_country_name, find_country_code_by_any
 from app.api_v1.excel.utils import (
     parse_date_value, normalize_date_key, validate_excel_file
 )
+
+def _parse_decimal_cell(value, field_name: str, default: Decimal = Decimal("0")) -> Decimal:
+    """将 Excel 数值解析为有限 Decimal，避免金额/RPM 经二进制 float 运算。"""
+    if value is None or pd.isna(value) or (isinstance(value, str) and not value.strip()):
+        return default
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError(f"{field_name}不是有效数字") from exc
+    if not parsed.is_finite():
+        raise ValueError(f"{field_name}必须是有限数字")
+    return parsed
+
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -429,28 +443,25 @@ async def import_tb_search_data(
             monetized = int(row.get("MONETIZED", 0)) if pd.notna(row.get("MONETIZED")) else 0
             clicks = int(row.get("CLICKS", 0)) if pd.notna(row.get("CLICKS")) else 0
             
-            # 原始收入
-            revenue_origin = float(row.get("REVENUE", 0.0)) if pd.notna(row.get("REVENUE")) else 0.0
+            # 原始收入和 RPM 全程使用 Decimal，避免 float 引入二进制误差。
+            revenue_origin = _parse_decimal_cell(
+                row.get("REVENUE", 0), "REVENUE"
+            )
 
-            # RPM：只有在单元格为空/NaN时才按公式计算；如果有值（包括0），则直接使用
+            # RPM 为空时按公式计算；显式提供但格式错误的值拒绝该行，不静默改算。
             rpm_cell = row.get("RPM", None)
-            rpm_origin: float | None = None
-            # ---------- 条件分支 ----------
-            if rpm_cell is None or (isinstance(rpm_cell, float) and pd.isna(rpm_cell)) or (isinstance(rpm_cell, str) and rpm_cell.strip() == ""):
-                rpm_origin = None
+            rpm_is_blank = (
+                rpm_cell is None
+                or (isinstance(rpm_cell, str) and not rpm_cell.strip())
+                or (not isinstance(rpm_cell, str) and pd.isna(rpm_cell))
+            )
+            if rpm_is_blank:
+                rpm_origin = (
+                    (revenue_origin / Decimal(searches)) * Decimal("1000")
+                    if searches > 0 else Decimal("0")
+                )
             else:
-                # ---------- 异常处理 ----------
-                try:
-                    rpm_origin = float(rpm_cell)
-                except Exception:
-                    rpm_origin = None
-
-            # ---------- 条件分支 ----------
-            if rpm_origin is None and searches > 0:
-                rpm_origin = (revenue_origin / searches) * 1000
-            # ---------- 条件分支 ----------
-            if rpm_origin is None:
-                rpm_origin = 0.0
+                rpm_origin = _parse_decimal_cell(rpm_cell, "RPM")
             
             # 获取扣减比例
             revenue_deduct_ratio = product.revenue_deduct_ratio or 0.0
