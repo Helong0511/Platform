@@ -215,3 +215,30 @@ def test_tb_search_amount_schema_accepts_extra_trailing_zeroes(field_name):
 
     update = TBSearchDataUpdate(**{field_name: "1.23000"})
     assert getattr(update, field_name) == Decimal("1.23000")
+
+
+@pytest.mark.parametrize(
+    "field_name,value",
+    [
+        ("REVENUE", "100000000"),
+        ("RPM", "1000000"),
+        ("REVENUE", "1.23456"),
+        ("RPM", "1.23456"),
+    ],
+)
+def test_excel_decimal_parser_rejects_database_precision_overflow(field_name, value):
+    with pytest.raises(ValueError, match="DECIMAL 存储范围|最多允许 4 位小数"):
+        _parse_decimal_cell(value, field_name)
+
+
+@pytest.mark.parametrize(
+    "field_name,value",
+    [
+        ("REVENUE", "99999999.9999"),
+        ("RPM", "999999.9999"),
+        ("REVENUE", "1.23000"),
+        ("RPM", "1.23000"),
+    ],
+)
+def test_excel_decimal_parser_accepts_database_precision_boundaries(field_name, value):
+    assert _parse_decimal_cell(value, field_name) == Decimal(value)
