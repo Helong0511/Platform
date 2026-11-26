@@ -116,3 +116,17 @@ def test_pending_postback_pii_retention_is_in_baseline_and_manifest():
     assert "pii_scrubbed_at" in Base.metadata.tables[
         "pending_postback_conversions"
     ].columns
+
+
+def test_postback_currency_amount_columns_use_six_decimal_precision():
+    from app.models import Base
+
+    source = (
+        Path(__file__).resolve().parents[1] / "sql" / "platform.sql"
+    ).read_text(encoding="utf-8")
+    for table_name in ("postback_conversions", "pending_postback_conversions"):
+        table = Base.metadata.tables[table_name]
+        for column_name in ("event_value", "original_payout", "payout"):
+            assert table.columns[column_name].type.precision == 24
+            assert table.columns[column_name].type.scale == 6
+            assert f"`{column_name}` DECIMAL(24, 6)" in source
