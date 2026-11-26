@@ -1756,10 +1756,13 @@ async def update_report_log_params(
                     candidate_amount, candidate_currency
                 )
                 log_entry.currency = candidate_currency
+                if currency is not None:
+                    log_entry.currency_source = "manual_override"
                 log_entry.amount = candidate_amount
             else:
                 if currency is not None:
                     log_entry.currency = currency
+                    log_entry.currency_source = "manual_override"
                 if amount is not None:
                     log_entry.amount = amount
             if report_params is not None:
