@@ -1939,3 +1939,15 @@ def test_meta_event_time_uses_actual_event_timestamp_when_provided():
     assert third_party_report._event_time_to_unix_timestamp(event_time) == (
         third_party_report._app_datetime_to_unix_timestamp(event_time)
     )
+
+
+def test_fbc_is_not_fabricated_without_real_click_time():
+    assert third_party_report._build_fbc_value("fbclid-1", None) is None
+
+
+def test_fbc_uses_click_time_not_conversion_event_time():
+    click_time = datetime(2026, 11, 11, 10, 0, 0)
+    expected_timestamp = third_party_report._app_datetime_to_unix_timestamp(click_time)
+    assert third_party_report._build_fbc_value("fbclid-1", click_time) == (
+        f"fb.1.{expected_timestamp}.fbclid-1"
+    )
