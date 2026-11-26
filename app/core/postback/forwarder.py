@@ -228,7 +228,7 @@ class PostbackForwarder:
         # ========== 第 2 步：准备数据 ==========
         # 转发前校验 ISO 4217；缺失时按统一规则 USD 兜底，非法历史值 fail-closed。
         forward_currency, _currency_source = resolve_currency(
-            conversion.currency,
+            getattr(conversion, "currency", None),
             source=getattr(conversion, "currency_source", None),
         )
         # 构建转化数据字典
