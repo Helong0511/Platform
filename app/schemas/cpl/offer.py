@@ -119,6 +119,12 @@ class OfferUpdate(BaseSchema):
     publisher_configs: Optional[List[PublisherConfig]] = Field(None,
                                                                description="渠道配置列表，每个渠道对应一个下游Cap和下游PO")
 
+    @field_validator("payout_currency")
+    @classmethod
+    def validate_optional_payout_currency(cls, value: Optional[str]) -> str:
+        """显式传入空币种时按业务约定兜底 USD；未传字段仍保持原值。"""
+        return validate_iso_currency(value or "USD")
+
     @field_validator('preview_link', 'advertiser_tracklink', 'postback_url')
     @classmethod
     def validate_url(cls, v):
