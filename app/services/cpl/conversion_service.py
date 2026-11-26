@@ -850,7 +850,8 @@ class ConversionService:
                 "click_count": click_count,
                 "conversion_count": conversion_count,
                 "cr": round(cr, 2),
-                "po": po
+                "po": po,
+                "currency": offer.payout_currency or "USD",
             })
 
         # 按点击数量排序
