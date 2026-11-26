@@ -233,6 +233,12 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         depends_on=("20261124_postback_event_deduction_receipts",),
     ),
     Migration(
+        revision="20261126_currency_usd_fallback_attribution",
+        path="sql/migrations/20261126_currency_usd_fallback_attribution.sql",
+        sha256="abe76e21903e51b95401449cd6da3ec3a6dce9110db21053f2107302e95d2602",
+    ),
+
+    Migration(
         revision="20261126_third_party_outbox_api_version_snapshot",
         path="sql/migrations/20261126_third_party_outbox_api_version_snapshot.sql",
         sha256="d9c3cdccd368a163fe89caeddd5097f0e7935755a97987fd84299d169f5a9306",
