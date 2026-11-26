@@ -200,7 +200,7 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     Migration(
         revision="20261125_cloak_postback_currency_no_default",
         path="sql/migrations/20261125_cloak_postback_currency_no_default.sql",
-        sha256="d9cf8dbde3a5f592d02275feb18868a5d912188c12e653434317c503229eea9a",
+        sha256="3ef9b35066173329a00a5a500cfc6dc496460f4131a364f67064ddb5dcea13ed",
     ),
 
     Migration(
@@ -235,7 +235,7 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     Migration(
         revision="20261126_currency_usd_fallback_attribution",
         path="sql/migrations/20261126_currency_usd_fallback_attribution.sql",
-        sha256="808e3b586d575ad3cc4bf64a9be47d31ec51a83f5cf06143fa393ced442b9bad",
+        sha256="9f10b704241c71a0374b1d460dbf09a2680635915af8b4a28a66dc2f5723a90a",
     ),
 
     Migration(
