@@ -60,6 +60,13 @@ ALTER TABLE pending_postback_conversions
         COMMENT '待确认 Postback payout 币种来源',
     ALGORITHM=INSTANT;
 
+ALTER TABLE conversion_deduction_logs
+    ADD COLUMN currency VARCHAR(10) NOT NULL DEFAULT 'USD'
+        COMMENT '扣减金额对应的 ISO 4217 币种',
+    ADD COLUMN currency_source VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd'
+        COMMENT '扣减金额币种来源归因',
+    ALGORITHM=INSTANT;
+
 ALTER TABLE third_party_report_logs
     ADD COLUMN currency_source VARCHAR(100) NULL
         COMMENT '币种来源：upstream_field:* / cloak_config:* / system_fallback_usd / manual_override / legacy_unknown',
@@ -72,6 +79,7 @@ WHERE TABLE_SCHEMA = DATABASE()
   AND (
       (TABLE_NAME = 'cloak_configs' AND COLUMN_NAME IN ('report_currency', 'load_report_currency', 'postback_report_currency'))
       OR (TABLE_NAME IN ('postback_conversions', 'pending_postback_conversions') AND COLUMN_NAME IN ('currency', 'currency_source'))
+      OR (TABLE_NAME = 'conversion_deduction_logs' AND COLUMN_NAME IN ('currency', 'currency_source'))
       OR (TABLE_NAME = 'third_party_report_logs' AND COLUMN_NAME = 'currency_source')
   )
 ORDER BY TABLE_NAME, ORDINAL_POSITION;
