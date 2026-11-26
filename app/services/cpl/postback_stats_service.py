@@ -58,6 +58,7 @@ class PostbackStatsService:
         try:
             query = select(
                 PostbackConversion.platform,
+                PostbackConversion.currency,
                 func.count(PostbackConversion.id).label("total_conversions"),
                 func.sum(PostbackConversion.original_payout).label("total_original_payout"),
                 func.sum(PostbackConversion.payout).label("total_payout"),
@@ -92,8 +93,13 @@ class PostbackStatsService:
             if conditions:
                 query = query.where(and_(*conditions))
 
-            query = query.group_by(PostbackConversion.platform).order_by(
-                PostbackConversion.platform
+            # 不同币种金额绝不能相加；每个平台按 ISO 4217 币种分别统计。
+            query = query.group_by(
+                PostbackConversion.platform,
+                PostbackConversion.currency,
+            ).order_by(
+                PostbackConversion.platform,
+                PostbackConversion.currency,
             )
             result = await db.execute(query)
             stats_rows = result.all()
@@ -103,6 +109,7 @@ class PostbackStatsService:
                 stats_list.append(
                     PostbackStatsResponse(
                         platform=row.platform,
+                        currency=row.currency or "USD",
                         total_conversions=int(row.total_conversions or 0),
                         total_original_payout=float(row.total_original_payout or 0.0)
                         if hasattr(row, "total_original_payout")
@@ -121,11 +128,11 @@ class PostbackStatsService:
 
             logger.info(
                 f"管理员 {current_user.username} 查询 PostBack 统计: "
-                f"platform={platform}, stats_count={len(stats_list)}"
+                f"platform={platform}, currency_groups={len(stats_list)}"
             )
             return ResponseBaseSchema.success(
                 data=stats_list,
-                message=f"成功获取 {len(stats_list)} 个平台的统计信息",
+                message=f"成功获取 {len(stats_list)} 个平台/币种统计分组",
             )
 
         except HTTPException:
