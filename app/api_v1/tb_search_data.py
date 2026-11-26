@@ -514,10 +514,10 @@ async def import_tb_search_data(
                     )
                     db.add(new_data)
 
-            # 在行级保存点内立即 flush，唯一键/字段约束失败只回滚当前行。
-            await db.flush()
-                    
-                success_count += 1
+                # 在行级保存点内立即 flush，唯一键/字段约束失败只回滚当前行。
+                await db.flush()
+
+            success_count += 1
                 
         except Exception as e:
             errors.append(f"行 {index+2}: {str(e)}")
