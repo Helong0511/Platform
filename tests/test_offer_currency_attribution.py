@@ -27,3 +27,18 @@ def test_offer_model_persists_currency_and_source_defaults():
     assert str(Offer.__table__.c.payout_currency.server_default.arg).strip("'") == "USD"
     assert Offer.__table__.c.payout_currency_source.default.arg == "system_fallback_usd"
     assert str(Offer.__table__.c.payout_currency_source.server_default.arg).strip("'") == "system_fallback_usd"
+
+
+def test_offer_po_columns_preserve_high_precision_currency_amounts():
+    assert Offer.__table__.c.payout.type.precision == 24
+    assert Offer.__table__.c.payout.type.scale == 6
+    assert Offer.__table__.c.affiliate_payout.type.precision == 24
+    assert Offer.__table__.c.affiliate_payout.type.scale == 6
+
+
+def test_offer_publisher_assignment_po_column_preserves_high_precision():
+    from app.models.cpl import OfferPublisherAssignment
+
+    column = OfferPublisherAssignment.__table__.c.affiliate_payout
+    assert column.type.precision == 24
+    assert column.type.scale == 6
