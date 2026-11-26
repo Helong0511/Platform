@@ -3,7 +3,7 @@ from decimal import Decimal, InvalidOperation
 
 import pycountry
 
-MAX_PURCHASE_AMOUNT = Decimal("99999999.9999")
+MAX_PURCHASE_AMOUNT = Decimal("999999999999999999.999999")
 DEFAULT_CURRENCY = "USD"
 
 # ISO 4217 特殊用途代码，不代表可用于 Purchase 结算的实际货币。
@@ -59,8 +59,8 @@ def validate_purchase_payload(amount, currency, *, currency_source=None):
     if not value.is_finite() or value <= 0:
         raise ValueError("Purchase 金额必须为有限正数")
     if value > MAX_PURCHASE_AMOUNT:
-        raise ValueError("Purchase 金额超出 Numeric(12,4) 上限")
-    if value.as_tuple().exponent < -4:
-        raise ValueError("Purchase 金额最多允许四位小数")
+        raise ValueError("Purchase 金额超出 Numeric(24,6) 上限")
+    if value.as_tuple().exponent < -6:
+        raise ValueError("Purchase 金额最多允许六位小数")
     code, _source = resolve_currency(currency, source=currency_source)
     return value, code
