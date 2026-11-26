@@ -25,7 +25,7 @@ from app.core.third_party_report import (
     update_report_log,
 )
 from app.models.models import ShortLink, ThirdPartyReportLog
-from app.core.third_party_currency import validate_purchase_payload
+from app.core.third_party_currency import resolve_currency, validate_purchase_payload
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,7 @@ async def enqueue_postback_report(
     if not normalized_platform:
         raise ValueError("Postback platform 不能为空")
     if event == "Purchase":
+        currency, currency_source = resolve_currency(currency, source=currency_source)
         amount, currency = validate_purchase_payload(amount, currency)
 
     # 与直接发送路径使用同一四字段身份锁；锁持有到调用方的转化事务提交/回滚。
@@ -210,7 +211,7 @@ async def enqueue_postback_report(
         phone=phone or "",
         ua=ua or "",
         currency=currency,
-        currency_source=currency_source or "system_fallback_usd",
+        currency_source=currency_source or "caller_supplied",
         amount=amount,
         use_hash=True,
         status="pending" if has_config_reference else "failed",
