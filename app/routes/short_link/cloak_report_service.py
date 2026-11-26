@@ -22,6 +22,7 @@
 import logging
 import re
 import uuid
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
@@ -249,7 +250,7 @@ async def record_cloak_click_count(
 def _log_url_report_mismatch(
         request: Request,
         report_event: str,
-        report_value: Optional[float],
+        report_value: Optional[Decimal],
         report_currency: str,
 ) -> None:
     """若桥页 URL 携带 report_* 查询参数但与服务端配置不一致，仅打警告（以服务端为准）。"""
@@ -264,13 +265,13 @@ def _log_url_report_mismatch(
         )
     if report_event == "Purchase" and report_value is not None and q_val is not None:
         try:
-            if abs(float(q_val) - float(report_value)) > 1e-6:
+            if abs(Decimal(q_val) - report_value) > Decimal('0.000001'):
                 logger.warning(
                     "[斗篷点击] URL 中 report_value=%s 与配置金额 %s 不一致，已以服务端配置为准",
                     q_val,
                     report_value,
                 )
-        except (TypeError, ValueError):
+        except (InvalidOperation, TypeError, ValueError):
             logger.warning("[斗篷点击] URL 中 report_value 无法解析: %s", q_val)
     if (
         q_cur
@@ -316,7 +317,7 @@ def _resolve_fb_report_params(
             rv = pixel_config.get("cloak_load_report_value")
             if rv is not None:
                 try:
-                    report_value = float(rv)
+                    report_value = rv if isinstance(rv, Decimal) else Decimal(str(rv))
                 except (TypeError, ValueError):
                     report_value = None
             report_currency = (
