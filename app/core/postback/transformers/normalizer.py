@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Dict, Any, Optional
 
 from app.core.postback_event_name import normalize_event_name
+from app.core.third_party_currency import resolve_currency
 
 logger = logging.getLogger(__name__)
 
@@ -37,15 +38,18 @@ class DataNormalizer:
         conversion_id = explicit_conversion_id or click_id_raw
 
         currency_keys = ("currency", "currency_code", "currencyCode")
-        currency_raw = next(
+        currency_field = next(
             (
-                raw_data.get(key)
-                for key in currency_keys
+                key for key in currency_keys
                 if raw_data.get(key) is not None and str(raw_data.get(key)).strip()
             ),
             None,
         )
-        currency = str(currency_raw).strip().upper() if currency_raw is not None else None
+        currency_raw = raw_data.get(currency_field) if currency_field else None
+        currency, currency_source = resolve_currency(
+            currency_raw,
+            source=f"upstream_field:{currency_field}" if currency_field else None,
+        )
 
         payout_raw = raw_data.get('payout')
         if payout_raw is None or str(payout_raw).strip() == '':
@@ -60,6 +64,7 @@ class DataNormalizer:
             'event_value': DataNormalizer._parse_decimal(raw_data.get('event_value')),
             'payout': DataNormalizer._parse_decimal(payout_raw),
             'currency': currency,
+            'currency_source': currency_source,
             'devad_id': raw_data.get('devad_id'),
             'os': raw_data.get('os'),
             'carrier': raw_data.get('carrier'),
