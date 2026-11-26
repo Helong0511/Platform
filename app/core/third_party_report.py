@@ -225,7 +225,7 @@ async def create_report_log(
         conversion_id: Optional[str] = None,
         currency: Optional[str] = None,
         currency_source: Optional[str] = None,
-        amount: Optional[float] = None,
+        amount: Optional[Decimal] = None,
         destination_pixel_id: Optional[str] = None,
 ) -> int:
     """创建明确标记为 unscoped 的直接发送日志；历史/平台作用域记录不得被误复用。"""
@@ -795,7 +795,7 @@ async def send_third_party_report(
         conversion_id: Optional[str] = None,
         currency: Optional[str] = None,
         currency_source: Optional[str] = None,
-        amount: Optional[float] = None,
+        amount: Optional[Decimal] = None,
         click_time: Optional[datetime] = None,
         facebook_api_version: Optional[str] = "v23.0",  # 可选参数，默认与全局 FACEBOOK_API_VERSION 对齐
         platform: Optional[str] = None,
@@ -1482,7 +1482,7 @@ async def update_report_log_params(
         phone: Optional[str] = None,
         ua: Optional[str] = None,
         currency: Optional[str] = None,
-        amount: Optional[float] = None,
+        amount: Optional[Decimal] = None,
         report_params: Optional[str] = None,
         use_hash: Optional[bool] = None,
         audit_snapshot: Optional[dict] = None,
