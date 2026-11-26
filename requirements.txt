@@ -41,7 +41,7 @@ tzdata==2026.6
 pycountry==26.2.16
 
 # 配置管理
-pydantic-settings==2.12.0
+pydantic-settings==2.14.2
 email-validator==2.2.0
 
 # Telegram Bot（正式代码：python-telegram-bot；勿再混装 pyTelegramBotAPI）
