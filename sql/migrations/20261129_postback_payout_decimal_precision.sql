@@ -1,6 +1,6 @@
--- 将 Postback 正式转化、待审批与斗篷 Purchase 金额精度统一到 DECIMAL(24,6)。
--- 仅扩大列精度，不改写历史金额、不执行汇率换算。
--- MySQL DDL 隐式提交；执行前应核对实际表结构并在生产结构副本演练。
+-- 统一第三方 Purchase 日志金额精度到 DECIMAL(24,6)。
+-- 同时覆盖 postback、pending postback、cloak 配置及第三方报告日志。
+-- 仅扩大精度，不修改历史金额、不进行币种换算。
 
 ALTER TABLE postback_conversions
     MODIFY COLUMN event_value DECIMAL(24, 6) NULL DEFAULT NULL,
@@ -16,3 +16,6 @@ ALTER TABLE cloak_configs
     MODIFY COLUMN report_value DECIMAL(24, 6) NULL DEFAULT NULL,
     MODIFY COLUMN load_report_value DECIMAL(24, 6) NULL DEFAULT NULL,
     MODIFY COLUMN postback_report_value DECIMAL(24, 6) NULL DEFAULT NULL;
+
+ALTER TABLE third_party_report_logs
+    MODIFY COLUMN amount DECIMAL(24, 6) NULL DEFAULT NULL;
