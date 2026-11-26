@@ -62,15 +62,6 @@ PREPARE cdl_log_id_overflow_check FROM @cdl_log_id_overflow_check_sql;
 EXECUTE cdl_log_id_overflow_check;
 DEALLOCATE PREPARE cdl_log_id_overflow_check;
 
-SET @cdl_log_id_alter_sql = IF(
-    @cdl_log_id_column_type = 'bigint',
-    'ALTER TABLE conversion_deduction_logs MODIFY COLUMN id INT NOT NULL AUTO_INCREMENT COMMENT ''记录ID''',
-    'SELECT 1'
-);
-PREPARE cdl_log_id_alter FROM @cdl_log_id_alter_sql;
-EXECUTE cdl_log_id_alter;
-DEALLOCATE PREPARE cdl_log_id_alter;
-
 SET @cdl_conversion_column_type = (
     SELECT COLUMN_TYPE
     FROM information_schema.COLUMNS
@@ -149,6 +140,15 @@ SET @cdl_orphan_check_sql = IF(
 PREPARE cdl_orphan_check FROM @cdl_orphan_check_sql;
 EXECUTE cdl_orphan_check;
 DEALLOCATE PREPARE cdl_orphan_check;
+
+SET @cdl_log_id_alter_sql = IF(
+    @cdl_log_id_column_type = 'bigint',
+    'ALTER TABLE conversion_deduction_logs MODIFY COLUMN id INT NOT NULL AUTO_INCREMENT COMMENT ''记录ID''',
+    'SELECT 1'
+);
+PREPARE cdl_log_id_alter FROM @cdl_log_id_alter_sql;
+EXECUTE cdl_log_id_alter;
+DEALLOCATE PREPARE cdl_log_id_alter;
 
 SET @cdl_alter_type_sql = IF(
     @cdl_conversion_column_type = 'bigint',
