@@ -64,18 +64,22 @@ from app.api_v1.excel.utils import (
     parse_date_value, normalize_date_key, validate_excel_file
 )
 
+def _is_blank_excel_cell(value) -> bool:
+    """识别 Excel 空值；Decimal NaN/Infinity 属于非法数值，不得当作空值。"""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return True
+    if isinstance(value, Decimal):
+        return False
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
 def _parse_decimal_cell(value, field_name: str, default: Decimal = Decimal("0")) -> Decimal:
     """将 Excel 数值解析为有限 Decimal，避免金额/RPM 经二进制 float 运算。"""
-    if value is None or (isinstance(value, str) and not value.strip()):
+    if _is_blank_excel_cell(value):
         return default
-    # Decimal('NaN') / Decimal('Infinity') 不是空单元格，必须进入有限性校验并拒绝。
-    if not isinstance(value, Decimal):
-        try:
-            is_missing = pd.isna(value)
-        except (TypeError, ValueError):
-            is_missing = False
-        if bool(is_missing):
-            return default
     try:
         parsed = Decimal(str(value).strip())
     except (InvalidOperation, ValueError, TypeError) as exc:
@@ -458,11 +462,7 @@ async def import_tb_search_data(
 
             # RPM 为空时按公式计算；显式提供但格式错误的值拒绝该行，不静默改算。
             rpm_cell = row.get("RPM", None)
-            rpm_is_blank = (
-                rpm_cell is None
-                or (isinstance(rpm_cell, str) and not rpm_cell.strip())
-                or (not isinstance(rpm_cell, str) and pd.isna(rpm_cell))
-            )
+            rpm_is_blank = _is_blank_excel_cell(rpm_cell)
             if rpm_is_blank:
                 rpm_origin = (
                     (revenue_origin / Decimal(searches)) * Decimal("1000")
