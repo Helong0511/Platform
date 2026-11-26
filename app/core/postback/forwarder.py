@@ -29,6 +29,7 @@ from app.core.postback.forwarding.placeholder_resolver import PlaceholderResolve
 from app.core.postback.forwarding.http_client import HttpClient
 from app.core.postback.forwarding.success_checker import SuccessChecker
 from app.core.utils import get_app_now_naive
+from app.core.third_party_currency import resolve_currency
 from app.services.telegram_notification_service import TelegramNotificationService
 from app.core.url.url_params_util import (
     build_click_association_payload,
@@ -225,11 +226,16 @@ class PostbackForwarder:
         logger.info(f"postback_success_check: {publisher.postback_success_check}")
         
         # ========== 第 2 步：准备数据 ==========
+        # 转发前校验 ISO 4217；缺失时按统一规则 USD 兜底，非法历史值 fail-closed。
+        forward_currency, _currency_source = resolve_currency(
+            conversion.currency,
+            source=getattr(conversion, "currency_source", None),
+        )
         # 构建转化数据字典
         conversion_data = {
             'conversion_id': conversion.conversion_id,  # 转化 ID
             'payout': conversion.payout,  # 支付金额
-            'currency': conversion.currency or 'USD',  # 金额币种
+            'currency': forward_currency,  # 金额币种
             'event_name': conversion.event_name,  # 事件名称
             'event_value': conversion.event_value,  # 事件值
             'ip': conversion.ip,  # IP 地址
