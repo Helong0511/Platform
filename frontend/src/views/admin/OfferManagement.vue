@@ -60,7 +60,7 @@
         <el-table-column v-if="isAdmin && columnVisibility.advertiser_offer_id" prop="advertiser_offer_id" label="上游Offer ID" width="150" show-overflow-tooltip />
         <el-table-column v-if="isAdmin && columnVisibility.payout" prop="payout" label="上游PO" width="100" align="right">
           <template #default="scope">
-            <span v-if="scope.row.payout">{{ scope.row.payout.toFixed(2) }} {{ scope.row.payout_currency || 'USD' }}</span>
+            <span v-if="scope.row.payout">{{ formatPayoutCurrency(scope.row.payout, scope.row.payout_currency) }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
@@ -69,13 +69,13 @@
             <template v-if="!isAdmin && currentClientId && scope.row.assigned_publishers">
               <!-- 客户登录：显示分配给该客户渠道的PO -->
               <span v-if="getRowClientPublisherPO(scope.row)">
-                {{ getRowClientPublisherPO(scope.row).toFixed(2) }} {{ scope.row.payout_currency || 'USD' }}
+                {{ formatPayoutCurrency(getRowClientPublisherPO(scope.row), scope.row.payout_currency) }}
               </span>
               <span v-else>-</span>
             </template>
             <template v-else>
               <!-- 管理员：显示Offer级别的PO -->
-              <span v-if="scope.row.affiliate_payout">{{ scope.row.affiliate_payout.toFixed(2) }} {{ scope.row.payout_currency || 'USD' }}</span>
+              <span v-if="scope.row.affiliate_payout">{{ formatPayoutCurrency(scope.row.affiliate_payout, scope.row.payout_currency) }}</span>
               <span v-else>-</span>
             </template>
           </template>
@@ -606,18 +606,18 @@
               <el-descriptions-item v-if="isAdmin" label="广告主">{{ currentOffer?.advertiser_name }}</el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="上游Offer ID">{{ currentOffer?.advertiser_offer_id || '-' }}</el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="上游PO">
-                <span v-if="currentOffer?.payout">{{ currentOffer.payout.toFixed(2) }} {{ currentOffer?.payout_currency || 'USD' }}</span>
+                <span v-if="currentOffer?.payout">{{ formatPayoutCurrency(currentOffer.payout, currentOffer?.payout_currency) }}</span>
                 <span v-else>-</span>
               </el-descriptions-item>
               <el-descriptions-item :label="isAdmin ? '下游PO' : 'PO'">
                 <template v-if="!isAdmin && currentClientId && currentOffer?.assigned_publishers">
                   <!-- 客户登录：显示分配给该客户渠道的PO -->
-                  <span v-if="getClientPublisherPO()">{{ getClientPublisherPO().toFixed(2) }} {{ currentOffer?.payout_currency || 'USD' }}</span>
+                  <span v-if="getClientPublisherPO()">{{ formatPayoutCurrency(getClientPublisherPO(), currentOffer?.payout_currency) }}</span>
                   <span v-else>-</span>
                 </template>
                 <template v-else>
                   <!-- 管理员：显示Offer级别的PO -->
-                  <span v-if="currentOffer?.affiliate_payout">{{ currentOffer.affiliate_payout.toFixed(2) }} {{ currentOffer?.payout_currency || 'USD' }}</span>
+                  <span v-if="currentOffer?.affiliate_payout">{{ formatPayoutCurrency(currentOffer.affiliate_payout, currentOffer?.payout_currency) }}</span>
                   <span v-else>-</span>
                 </template>
               </el-descriptions-item>
@@ -898,6 +898,22 @@ import OfferSearchBar from '@/components/admin/OfferSearchBar.vue'
 const authStore = useAuthStore()
 const route = useRoute()
 const isAdmin = computed(() => authStore.isAdmin)
+
+// 按 ISO 4217 币种小数位格式化，避免把 KWD/BHD 等三位小数金额显示成两位。
+const formatPayoutCurrency = (value, currency = 'USD') => {
+  const amount = Number(value)
+  const code = String(currency || 'USD').trim().toUpperCase()
+  if (!Number.isFinite(amount)) return '—'
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: code,
+      currencyDisplay: 'code',
+    }).format(amount)
+  } catch {
+    return `${code} ${amount}`
+  }
+}
 // 获取客户ID，支持多种方式
 const currentClientId = computed(() => {
   // 方式1: 从 userInfo.client.id 获取
