@@ -27,9 +27,9 @@ class PostbackConversion(Base):
     transaction_id = Column(String(255), nullable=True, unique=True, comment='上游事务ID（幂等）')
     request_id = Column(String(128), nullable=True, unique=True, comment='请求防重放ID')
     event_name = Column(String(100), nullable=True, index=True, comment='事件名称')
-    event_value = Column(Numeric(12, 4), nullable=True, comment='事件价值（购买价格等）')
-    original_payout = Column(Numeric(12, 4), nullable=True, comment='原始支付金额（PO）')
-    payout = Column(Numeric(12, 4), nullable=True, comment='扣后支付金额（PO(扣)）')
+    event_value = Column(Numeric(24, 6), nullable=True, comment='事件价值（购买价格等）')
+    original_payout = Column(Numeric(24, 6), nullable=True, comment='原始支付金额（PO）')
+    payout = Column(Numeric(24, 6), nullable=True, comment='扣后支付金额（PO(扣)）')
     currency = Column(
         String(10),
         nullable=False,
@@ -596,8 +596,8 @@ class PendingPostbackConversion(Base):
     conversion_id = Column(String(255), nullable=False, comment='转化ID')
     event_name = Column(String(100), nullable=True, comment='事件名称')
     event_value = Column(Numeric(12, 4), nullable=True, comment='事件价值')
-    original_payout = Column(Numeric(12, 4), nullable=True, comment='原始支付金额（PO）')
-    payout = Column(Numeric(12, 4), nullable=True, comment='扣后支付金额（PO(扣)）')
+    original_payout = Column(Numeric(24, 6), nullable=True, comment='原始支付金额（PO）')
+    payout = Column(Numeric(24, 6), nullable=True, comment='扣后支付金额（PO(扣)）')
     currency = Column(
         String(10), nullable=False, default='USD', server_default=text("'USD'"),
         comment='待确认 Postback payout 的 ISO 4217 币种',
