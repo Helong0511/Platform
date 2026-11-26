@@ -181,6 +181,8 @@ async def enqueue_postback_report(
         # 仅允许从未尝试发送、且没有活动租约的旧日志升级为 Outbox；
         # 此时补充非敏感配置引用，不改变事件身份及 PII/金额等业务载荷。
         existing.outbox_enqueued = True
+        if event == "Purchase" and not getattr(existing, "currency_source", None):
+            existing.currency_source = currency_source or "caller_supplied"
         existing.destination_api_version_pending = True
         existing.short_link_id = short_link_id
         existing.cloak_name = cloak_name
@@ -211,7 +213,7 @@ async def enqueue_postback_report(
         phone=phone or "",
         ua=ua or "",
         currency=currency,
-        currency_source=currency_source or "caller_supplied",
+        currency_source=(currency_source or "caller_supplied") if event == "Purchase" else None,
         amount=amount,
         use_hash=True,
         status="pending" if has_config_reference else "failed",
