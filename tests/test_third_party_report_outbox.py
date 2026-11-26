@@ -1376,6 +1376,8 @@ async def test_enqueue_existing_lease_uses_database_clock_not_worker_clock(monke
             "destination_pixel_id": None,
             "max_attempts": 3,
             "attempt_count": 0,
+            "amount": 1.0,
+            "currency": "USD",
             # 本机时钟被故意设置为远未来；此时间戳仍由 DB 查询决定是否有效。
             "report_start_time": datetime(2030, 1, 1, 0, 0, 0),
         },
