@@ -38,6 +38,7 @@ SET @cdl_any_fk_count = (
 -- 使用 COLUMN_TYPE 检查 signed/unsigned；父列必须是 ORM 对应的有符号 INT。
 SET @cdl_type_check_sql = IF(
     @cdl_conversion_column_type IS NULL
+    OR @cdl_postback_column_type IS NULL
     OR @cdl_postback_column_type <> 'int'
     OR @cdl_conversion_column_type NOT IN ('int', 'bigint')
     OR @cdl_conversion_nullable <> 'YES'
