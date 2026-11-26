@@ -10,6 +10,23 @@ from app.core.postback.checks.discount_checker import DiscountChecker
 from app.core.postback.errors import DeductionProcessingError
 
 
+class _OfferCurrencyResult:
+    def __init__(self, currency="USD", source="system_fallback_usd"):
+        self.row = (currency, source)
+
+    def one_or_none(self):
+        return self.row
+
+
+class _OfferCurrencyDB:
+    def __init__(self, currency="USD", source="system_fallback_usd"):
+        self.currency = currency
+        self.source = source
+
+    async def execute(self, statement):
+        return _OfferCurrencyResult(self.currency, self.source)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("config_scope", "expected_scope"),
@@ -43,7 +60,7 @@ async def test_apply_deduction_receives_only_final_config_scope(
         client_id=None,
         advertiser_id=11,
         click_id="stable-click",
-        db=object(),
+        db=_OfferCurrencyDB(),
         event_identity={"platform": "bft", "conversion_id": "event-1", "event_name": "purchase"},
     )
 
@@ -68,6 +85,7 @@ async def test_invalid_multi_or_missing_config_scope_fails_closed(monkeypatch, c
     monkeypatch.setattr(module.settings, "DEDUCTION_FAIL_OPEN", True)
     config = SimpleNamespace(id=7, **config_scope)
     apply_mock = AsyncMock()
+    monkeypatch.setattr(module, "calculate_discount", AsyncMock(return_value=(Decimal("10.00"), Decimal("0"), None)))
     monkeypatch.setattr(module, "find_deduction_config", AsyncMock(return_value=config))
     monkeypatch.setattr(module, "apply_deduction", apply_mock)
 
@@ -80,6 +98,43 @@ async def test_invalid_multi_or_missing_config_scope_fails_closed(monkeypatch, c
             client_id=None,
             advertiser_id=11,
             click_id="stable-click",
-            db=object(),
+            db=_OfferCurrencyDB(),
         )
     apply_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_missing_postback_currency_uses_offer_currency_and_records_source(monkeypatch):
+    monkeypatch.setattr(module, "calculate_discount", AsyncMock(return_value=(Decimal("10.00"), Decimal("0"), None)))
+    monkeypatch.setattr(module, "find_deduction_config", AsyncMock(return_value=None))
+
+    _, info, _ = await DiscountChecker.calculate(
+        original_payout=Decimal("10.00"),
+        offer_id=22,
+        publisher_id=None,
+        product_id=None,
+        client_id=None,
+        advertiser_id=None,
+        click_id="click-1",
+        db=_OfferCurrencyDB("EUR", "manual_config"),
+    )
+
+    assert info["currency"] == "EUR"
+    assert info["currency_source"] == "offer_config"
+
+
+@pytest.mark.asyncio
+async def test_explicit_postback_currency_must_match_offer_currency(monkeypatch):
+    with pytest.raises(DeductionProcessingError, match="币种.*不一致"):
+        await DiscountChecker.calculate(
+            original_payout=Decimal("10.00"),
+            offer_id=22,
+            publisher_id=None,
+            product_id=None,
+            client_id=None,
+            advertiser_id=None,
+            click_id="click-1",
+            db=_OfferCurrencyDB("EUR", "manual_config"),
+            currency="USD",
+            currency_source="upstream_field:currency",
+        )
