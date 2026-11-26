@@ -32,6 +32,34 @@
 - 三阶段斗篷配置分别持久化币种来源，click/load 的直接发送和 Postback Outbox 不再根据“有无配置行”猜测来源。
 - `third_party_report_logs.currency_source` 持久化第三方上报币种来源，API 和管理端详情/列表可查看。
 
+## ISO 4217 权威数据来源与结算代码范围
+
+- ISO 4217 的官方维护机构为 SIX Financial Information。上线前应对照 SIX 的 Current Currency & Funds（List One）、Current Funds（List Two）和 Historical（List Three），不能仅用三位大写字母正则判断代码有效。
+- 官方资料入口：https://www.six-group.com/en/products-services/financial-information/market-reference-data/data-standards.html
+- 本项目锁定 pycountry 数据集作为运行时校验来源，并以 SIX 当前清单核验新增/撤销代码；基金单位、贵金属、测试代码、无货币代码不作为 Purchase/PO 结算货币。当前测试覆盖 XCG 当前代码及 BGN、ANG 等历史代码。
+- ISO minor unit 与数据库精度是两个不同问题：币种代码有效，不代表当前金额列精度足以表达该币种。
+
+## Offer PO 币种
+
+- `offers.payout_currency` 和 `payout_currency_source` 已加入 ORM、Schema、建库基线及迁移 `20261127_offer_payout_currency`；未配置时 USD，来源 `system_fallback_usd`，显式配置来源 `manual_config`。
+- 当前业务模型约定 Offer 上游 PO 与其默认/渠道下游 PO 使用同一币种。Postback 显式币种必须与 Offer 币种一致；回调未带币种时继承 Offer 币种。若业务允许同一 Offer 的上游与各渠道使用不同币种，必须进一步拆分为 Offer 上游币种、Offer 默认下游币种和每个 PublisherAssignment 独立币种，不能沿用当前单币种模型。
+- Offer 已有正式转化或扣量财务凭证后禁止直接变更币种；新转化入账、待审批转正式入账与 Offer 币种修改共用 Offer 行锁，防止并发竞态。
+- 斗篷 Postback Purchase 若使用动态上游 payout，继承上游币种；只有固定金额才使用斗篷配置币种，未配置时 USD 兜底。管理员显式配置币种与动态 payout 不一致时 fail-closed，不做无汇率换算。
+- 下游 GET/POST 转发在发送前再次校验 ISO 4217，非法历史币种不会发往渠道。
+- 转化总览按币种生成 `currency_summaries`；多币种结果的全局金额字段返回 NULL，不再跨币种 SUM。管理端明细、按币种汇总和 CSV 导出均保留币种。
+
+## 其他收入数据的币种缺口（尚未修复，发布阻断）
+
+- `ad_data` / `ad_data_archive` 的收入、eCPM、CPC 字段没有 currency/source；导入分组键与统计汇总也不区分币种。
+- Google Ad Manager API 的 reportCurrency 未显式设置时默认使用 Network currency；项目当前只把 Network currency 打印到日志，没有把它持久化到 AdData。多 GAM Network 可能因此混币种汇总。
+- `tb_search_data` 的 revenue/RPM 同样没有币种字段。
+- 修复必须贯穿上游 API/Excel 导入、分组键、唯一键、主表/归档表、统计、导出和前端展示；缺失币种才按 USD 兜底并记录来源。不能只给历史金额加 USD 标签。
+
+## 金额精度缺口（尚未修复，发布阻断）
+
+当前 Offer PO 和扣量日志仍有 DECIMAL(...,2) 字段，而部分 Postback 金额已使用 DECIMAL(...,4)。KWD/BHD/JOD 等三位小数币种会在两位小数字段中丢失精度。MySQL 8.0 改变列数据类型需要评估 COPY 型 DDL 或采用影子列扩展/收缩迁移；未完成前不能宣称所有 ISO 4217 币种金额均可准确结算。
+官方 DDL 参考：https://dev.mysql.com/doc/refman/8.0/en/innodb-online-ddl-operations.html
+
 ## 历史数据处理
 
 数据库迁移只执行元数据 DDL 和斗篷配置空值兜底，不在迁移中对 Postback 大表执行无界 UPDATE。迁移后必须先运行分批归因脚本：
