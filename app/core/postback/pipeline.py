@@ -226,6 +226,8 @@ async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[Decimal, An
         click_id=ctx.normalized_data.get("click_id"),
         db=ctx.db,
         # 财务决策身份必须来自显式 conversion_id；click_id 只用于归因。
+        currency=ctx.normalized_data.get("currency") or "USD",
+        currency_source=ctx.normalized_data.get("currency_source") or "system_fallback_usd",
         event_identity=(
             {
                 "platform": ctx.platform,
