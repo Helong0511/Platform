@@ -3,6 +3,8 @@ import pytest
 from app.core.postback.transformers.normalizer import DataNormalizer
 from app.core.postback.bft_handler import BftPostbackHandler
 from app.models.postback import PostbackConversion, PendingPostbackConversion
+from app.models.deduction import ConversionDeductionLog
+from app.core.deduction.deduction_manager import DeductionResult
 from scripts.backfill_currency_attribution import extract_currency
 
 
@@ -78,3 +80,19 @@ def test_historical_currency_backfill_extracts_source_without_guessing(
     raw_data, expected_currency, expected_source
 ):
     assert extract_currency(raw_data) == (expected_currency, expected_source)
+
+
+def test_conversion_deduction_log_persists_currency_defaults():
+    currency = ConversionDeductionLog.__table__.c.currency
+    source = ConversionDeductionLog.__table__.c.currency_source
+    assert currency.default.arg == "USD"
+    assert str(currency.server_default.arg).strip("'") == "USD"
+    assert source.default.arg == "system_fallback_usd"
+    assert str(source.server_default.arg).strip("'") == "system_fallback_usd"
+
+
+def test_deduction_result_serializes_currency_attribution():
+    result = DeductionResult(currency="CNY", currency_source="upstream_field:currency_code")
+    data = result.to_dict()
+    assert data["currency"] == "CNY"
+    assert data["currency_source"] == "upstream_field:currency_code"
