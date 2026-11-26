@@ -769,6 +769,12 @@ CREATE TABLE IF NOT EXISTS `postback_conversions`  (
   CONSTRAINT `postback_conversions_ibfk_publisher` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = 'Postback转化事件表，统一存储所有平台的postback回调数据' ROW_FORMAT = DYNAMIC;
 
+-- 扣减日志可能先于正式转化表创建，因此在两张表均存在后补齐 ORM 声明的关联约束。
+ALTER TABLE `conversion_deduction_logs`
+  MODIFY COLUMN `conversion_id` INT NULL DEFAULT NULL COMMENT '转化记录ID（关联postback_conversions.id，可为NULL因为扣量的转化可能不保存）',
+  ADD CONSTRAINT `fk_cdl_postback_conversion` FOREIGN KEY (`conversion_id`)
+    REFERENCES `postback_conversions` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT;
+
 -- ----------------------------
 -- Table structure for postback_forward_logs
 -- ----------------------------
