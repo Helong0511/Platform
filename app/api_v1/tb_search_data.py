@@ -468,8 +468,13 @@ async def import_tb_search_data(
             ecpm_deduct_ratio = product.ecpm_deduct_ratio or 0.0 # RPM 对应 eCPM 扣减比例
             
             # 计算扣减后的值：无扣减保留原始精度，有扣减截断两位小数
-            revenue = apply_deduct_ratio(revenue_origin, revenue_deduct_ratio)
-            rpm = apply_deduct_ratio(rpm_origin, ecpm_deduct_ratio)
+            # 币种归因尚未接入 TB Search 时，不得按固定两位小数截断金额或 RPM。
+            revenue = apply_deduct_ratio(
+                revenue_origin, revenue_deduct_ratio, truncate_places=None
+            )
+            rpm = apply_deduct_ratio(
+                rpm_origin, ecpm_deduct_ratio, truncate_places=None
+            )
             
             # ---------- 条件分支 ----------
             if existing:
