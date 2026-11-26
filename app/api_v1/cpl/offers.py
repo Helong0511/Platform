@@ -567,6 +567,11 @@ async def create_offer(
 
     # 准备Offer数据（包含渠道配置）
     offer_data = offer_in.model_dump()
+    offer_data["_payout_currency_source"] = (
+        "manual_config"
+        if "payout_currency" in offer_in.model_fields_set
+        else "system_fallback_usd"
+    )
     # ---------- 条件分支 ----------
     if offer_in.publisher_configs is not None:
         # 将Pydantic对象转换为字典
@@ -969,6 +974,8 @@ async def update_offer(
 
     # 准备更新数据（包含渠道配置）
     update_data = offer_in.model_dump(exclude_unset=True, exclude={'publisher_configs'})
+    if "payout_currency" in offer_in.model_fields_set:
+        update_data["_payout_currency_source"] = "manual_config"
     # ---------- 条件分支 ----------
     if offer_in.publisher_configs is not None:
         # 将Pydantic对象转换为字典
