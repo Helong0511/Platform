@@ -11,6 +11,15 @@ from app.core.deduction.deduction_manager import ConversionStats, DeductionManag
 from app.core.utils import get_app_now_naive_floor_second
 from app.models.deduction import ConversionDeductionLog
 from app.models.postback import PostbackConversion
+from app.services.cpl.deduction.queries.stats_query import DeductionStatsQuery
+
+
+class _AllResult:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def all(self):
+        return self.rows
 
 
 class _ScalarResult:
@@ -160,3 +169,32 @@ def test_deduction_export_formatter_keeps_three_and_six_decimal_values():
     assert _format_amount(Decimal("12.345")) == "12.345"
     assert _format_amount(Decimal("12.345678")) == "12.345678"
     assert _format_amount(Decimal("12.000000")) == "12.000000"
+
+
+
+@pytest.mark.asyncio
+async def test_deduction_stats_query_preserves_decimal_currency_totals():
+    row = SimpleNamespace(
+        currency="KWD",
+        original_volume=10,
+        deducted_volume=2,
+        final_volume=8,
+        original_amount=Decimal("123.456789"),
+        deducted_amount=Decimal("12.345678"),
+        final_amount=Decimal("111.111111"),
+    )
+    db = SimpleNamespace(execute=AsyncMock(return_value=_AllResult([row])))
+
+    result = await DeductionStatsQuery(db).fetch(
+        start_date="2026-11-01",
+        end_date="2026-11-26",
+    )
+
+    assert result["original_amount"] == Decimal("123.456789")
+    assert result["deducted_amount"] == Decimal("12.345678")
+    assert result["final_amount"] == Decimal("111.111111")
+    assert result["amount_deduction_ratio"] == (
+        Decimal("12.345678") / Decimal("123.456789")
+    )
+    assert result["currency_summaries"][0]["currency"] == "KWD"
+    assert isinstance(result["currency_summaries"][0]["original_amount"], Decimal)
