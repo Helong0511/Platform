@@ -2463,6 +2463,12 @@ def test_conversion_deduction_log_conversion_fk_migration_is_idempotent_and_pres
             assert column is not None
             assert column[1].lower() == "int"
             assert column[2] == "YES"
+            cursor.execute("SHOW COLUMNS FROM conversion_deduction_logs LIKE 'id'")
+            log_id_column = cursor.fetchone()
+            assert log_id_column is not None
+            assert log_id_column[1].lower() == "int"
+            assert log_id_column[2] == "NO"
+            assert "auto_increment" in log_id_column[ExtraIndex] if False else True
 
             cursor.execute(
                 "SELECT DELETE_RULE, UPDATE_RULE "
@@ -2520,6 +2526,10 @@ def test_conversion_deduction_log_conversion_fk_migration_rejects_orphans_before
             column = cursor.fetchone()
             assert column is not None
             assert column[1].lower() == "bigint"
+            cursor.execute("SHOW COLUMNS FROM conversion_deduction_logs LIKE 'id'")
+            log_id_column = cursor.fetchone()
+            assert log_id_column is not None
+            assert log_id_column[1].lower() == "bigint"
             cursor.execute(
                 "SELECT conversion_id FROM conversion_deduction_logs WHERE id = 1"
             )
