@@ -23,15 +23,9 @@ SET
     END;
 
 ALTER TABLE cloak_configs
-    MODIFY COLUMN report_currency VARCHAR(10) NULL DEFAULT 'USD'
-        COMMENT '点击 Purchase 货币；未设置时 USD 兜底',
-    MODIFY COLUMN load_report_currency VARCHAR(10) NULL DEFAULT 'USD'
-        COMMENT '加载 Purchase 货币；未设置时 USD 兜底',
-    MODIFY COLUMN postback_report_currency VARCHAR(10) NULL DEFAULT 'USD'
-        COMMENT 'postback Purchase 货币；未设置时 USD 兜底',
-    MODIFY COLUMN report_currency_source VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd',
-    MODIFY COLUMN load_report_currency_source VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd',
-    MODIFY COLUMN postback_report_currency_source VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd',
+    ALTER COLUMN report_currency SET DEFAULT 'USD',
+    ALTER COLUMN load_report_currency SET DEFAULT 'USD',
+    ALTER COLUMN postback_report_currency SET DEFAULT 'USD',
     ALGORITHM=INSTANT;
 
 UPDATE cloak_configs
