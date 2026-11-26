@@ -229,6 +229,7 @@ class PostbackForwarder:
         conversion_data = {
             'conversion_id': conversion.conversion_id,  # 转化 ID
             'payout': conversion.payout,  # 支付金额
+            'currency': conversion.currency or 'USD',  # 金额币种
             'event_name': conversion.event_name,  # 事件名称
             'event_value': conversion.event_value,  # 事件值
             'ip': conversion.ip,  # IP 地址
@@ -281,6 +282,7 @@ class PostbackForwarder:
             # 从 conversion_data 中提取数据
             if conversion_data.get('payout'):
                 json_data['payout'] = conversion_data['payout']
+            json_data['currency'] = conversion_data['currency']
             if conversion_data.get('conversion_id'):
                 json_data['conversion_id'] = conversion_data['conversion_id']
             if conversion_data.get('event_name'):
