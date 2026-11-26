@@ -40,3 +40,8 @@ def test_cloak_create_rejects_non_iso_currency(field):
             access_token="test-token",
             **{field: "ZZZ"},
         )
+
+@pytest.mark.parametrize("field", ["report_currency", "load_report_currency", "postback_report_currency"])
+def test_cloak_update_rejects_non_iso_currency(field):
+    with pytest.raises(ValidationError):
+        CloakConfigUpdate(**{field: "ZZZ"})
