@@ -591,6 +591,8 @@ class ConversionService:
         # 多币种必须分别汇总；禁止将 USD/EUR/KWD 等金额直接相加。
         currency_summary_map: Dict[str, Dict[str, Any]] = {}
         for item in stats_list:
+            if int(item["conversion_count"] or 0) <= 0:
+                continue
             currency_code = item["currency"]
             currency_summary = currency_summary_map.setdefault(
                 currency_code,
