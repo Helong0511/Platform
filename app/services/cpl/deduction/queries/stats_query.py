@@ -31,28 +31,59 @@ class DeductionStatsQuery:
             start_dt, end_dt, advertiser_id, offer_id, publisher_id
         )
 
-        stats_row = (
+        currency_rows = (
             await self.db.execute(
                 select(
+                    ConversionDeductionLog.currency,
                     func.sum(ConversionDeductionLog.original_volume).label("original_volume"),
                     func.sum(ConversionDeductionLog.deducted_volume).label("deducted_volume"),
                     func.sum(ConversionDeductionLog.final_volume).label("final_volume"),
                     func.sum(ConversionDeductionLog.original_amount).label("original_amount"),
                     func.sum(ConversionDeductionLog.deducted_amount).label("deducted_amount"),
                     func.sum(ConversionDeductionLog.final_amount).label("final_amount"),
-                ).where(and_(*conditions))
+                )
+                .where(and_(*conditions))
+                .group_by(ConversionDeductionLog.currency)
+                .order_by(ConversionDeductionLog.currency)
             )
-        ).first()
+        ).all()
 
-        original_volume = stats_row.original_volume or 0
-        deducted_volume = stats_row.deducted_volume or 0
-        final_volume = stats_row.final_volume or 0
-        original_amount = float(stats_row.original_amount or 0)
-        deducted_amount = float(stats_row.deducted_amount or 0)
-        final_amount = float(stats_row.final_amount or 0)
+        currency_summaries = []
+        original_volume = deducted_volume = final_volume = 0
+        for row in currency_rows:
+            row_original_volume = int(row.original_volume or 0)
+            row_deducted_volume = int(row.deducted_volume or 0)
+            row_final_volume = int(row.final_volume or 0)
+            row_original_amount = float(row.original_amount or 0)
+            row_deducted_amount = float(row.deducted_amount or 0)
+            row_final_amount = float(row.final_amount or 0)
+            original_volume += row_original_volume
+            deducted_volume += row_deducted_volume
+            final_volume += row_final_volume
+            currency_summaries.append({
+                "currency": row.currency or "USD",
+                "original_amount": row_original_amount,
+                "deducted_amount": row_deducted_amount,
+                "final_amount": row_final_amount,
+                "amount_deduction_ratio": (
+                    row_deducted_amount / row_original_amount if row_original_amount > 0 else 0.0
+                ),
+                "original_volume": row_original_volume,
+                "deducted_volume": row_deducted_volume,
+                "final_volume": row_final_volume,
+            })
 
         volume_deduction_ratio = deducted_volume / original_volume if original_volume > 0 else 0.0
-        amount_deduction_ratio = deducted_amount / original_amount if original_amount > 0 else 0.0
+        # 仅当查询结果只有一种币种时保留兼容性金额总计；多币种时禁止跨币种相加。
+        if len(currency_summaries) == 1:
+            only_currency = currency_summaries[0]
+            original_amount = only_currency["original_amount"]
+            deducted_amount = only_currency["deducted_amount"]
+            final_amount = only_currency["final_amount"]
+            amount_deduction_ratio = only_currency["amount_deduction_ratio"]
+        else:
+            original_amount = deducted_amount = final_amount = None
+            amount_deduction_ratio = None
 
         items = []
         if group_by and group_by != "time":
@@ -67,6 +98,7 @@ class DeductionStatsQuery:
             "deducted_amount": deducted_amount,
             "final_amount": final_amount,
             "amount_deduction_ratio": amount_deduction_ratio,
+            "currency_summaries": currency_summaries,
             "items": items,
         }
 
@@ -114,6 +146,7 @@ class DeductionStatsQuery:
             group_fields = [ConversionDeductionLog.offer_id]
         elif group_by == "publisher":
             group_fields = [ConversionDeductionLog.publisher_id]
+        group_fields.append(ConversionDeductionLog.currency)
 
         if not group_fields:
             return []
@@ -135,6 +168,7 @@ class DeductionStatsQuery:
         items = []
         for row in group_result:
             item_data = {
+                "currency": row.currency or "USD",
                 "original_volume": int(row.original_volume or 0),
                 "deducted_volume": int(row.deducted_volume or 0),
                 "final_volume": int(row.final_volume or 0),
