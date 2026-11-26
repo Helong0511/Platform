@@ -186,6 +186,8 @@ async def test_pending_approval_normalizes_legacy_null_before_lookup_and_insert(
         event_value=None,
         original_payout=None,
         payout=None,
+        currency="USD",
+        currency_source="system_fallback_usd",
         devad_id=None,
         os=None,
         carrier=None,
