@@ -219,6 +219,8 @@ async def test_enqueue_does_not_reopen_or_mutate_attempted_outbox_payload(monkey
         "short_code": "original-code",
         "click_time": datetime(2026, 11, 11, 10, 0, 0),
         "error_message": "original failure",
+        "amount": 3.0,
+        "currency": "USD",
     }
     existing = type("Existing", (), original.copy())()
 
@@ -240,7 +242,7 @@ async def test_enqueue_does_not_reopen_or_mutate_attempted_outbox_payload(monkey
         phone="",
         ua="new-agent",
         currency="USD",
-        amount=99.0,
+        amount=3.0,
         short_link_id=99,
         cloak_name="new-cloak",
         short_code="new-code",
