@@ -2,12 +2,36 @@
 -- Postback / pending / report log 的历史数据回填由 scripts/backfill_currency_attribution.py 分批执行。
 -- 所有金额字段保持原值；无币种时 USD 兜底；非空无效币种不得自动替换为 USD。
 ALTER TABLE cloak_configs
+    ADD COLUMN report_currency_source VARCHAR(100) NULL COMMENT '点击阶段币种来源归因',
+    ADD COLUMN load_report_currency_source VARCHAR(100) NULL COMMENT '加载阶段币种来源归因',
+    ADD COLUMN postback_report_currency_source VARCHAR(100) NULL COMMENT 'postback 阶段币种来源归因',
+    ALGORITHM=INSTANT;
+
+UPDATE cloak_configs
+SET
+    report_currency_source = CASE
+        WHEN report_currency IS NULL OR TRIM(report_currency) = '' THEN 'system_fallback_usd'
+        ELSE 'legacy_unknown'
+    END,
+    load_report_currency_source = CASE
+        WHEN load_report_currency IS NULL OR TRIM(load_report_currency) = '' THEN 'system_fallback_usd'
+        ELSE 'legacy_unknown'
+    END,
+    postback_report_currency_source = CASE
+        WHEN postback_report_currency IS NULL OR TRIM(postback_report_currency) = '' THEN 'system_fallback_usd'
+        ELSE 'legacy_unknown'
+    END;
+
+ALTER TABLE cloak_configs
     MODIFY COLUMN report_currency VARCHAR(10) NULL DEFAULT 'USD'
         COMMENT '点击 Purchase 货币；未设置时 USD 兜底',
     MODIFY COLUMN load_report_currency VARCHAR(10) NULL DEFAULT 'USD'
         COMMENT '加载 Purchase 货币；未设置时 USD 兜底',
     MODIFY COLUMN postback_report_currency VARCHAR(10) NULL DEFAULT 'USD'
         COMMENT 'postback Purchase 货币；未设置时 USD 兜底',
+    MODIFY COLUMN report_currency_source VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd',
+    MODIFY COLUMN load_report_currency_source VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd',
+    MODIFY COLUMN postback_report_currency_source VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd',
     ALGORITHM=INSTANT;
 
 UPDATE cloak_configs
