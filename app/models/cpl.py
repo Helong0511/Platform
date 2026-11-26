@@ -91,6 +91,14 @@ class Offer(Base):
     preview_link = Column(Text, nullable=True, comment='预览链接')
     payout = Column(Numeric(10, 2), nullable=True, comment='上游支付金额（PO）')
     affiliate_payout = Column(Numeric(10, 2), nullable=True, comment='扣价后给渠道的金额（PO扣价后）')
+    payout_currency = Column(
+        String(3), nullable=False, default='USD', server_default=text("'USD'"),
+        comment='Offer 上游 PO 与全部渠道下游 PO 共用的 ISO 4217 币种',
+    )
+    payout_currency_source = Column(
+        String(100), nullable=False, default='system_fallback_usd',
+        server_default=text("'system_fallback_usd'"), comment='Offer PO 币种来源归因',
+    )
     country = Column(String(50), nullable=True, index=True, comment='国家')
     category = Column(String(50), nullable=True, comment='分类')
     type = Column(String(50), nullable=True, comment='类型')
