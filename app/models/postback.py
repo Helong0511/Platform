@@ -334,6 +334,13 @@ class CloakConfig(Base):
         server_default=text("'USD'"),
         comment='购物类事件货币代码；缺失时默认 USD',
     )
+    report_currency_source = Column(
+        String(100),
+        nullable=False,
+        default='system_fallback_usd',
+        server_default=text("'system_fallback_usd'"),
+        comment='点击阶段币种来源归因',
+    )
     click_report_enabled = Column(
         Boolean,
         default=True,
@@ -359,6 +366,13 @@ class CloakConfig(Base):
         default='USD',
         server_default=text("'USD'"),
         comment='加载上报为 Purchase 时的货币；缺失时默认 USD',
+    )
+    load_report_currency_source = Column(
+        String(100),
+        nullable=False,
+        default='system_fallback_usd',
+        server_default=text("'system_fallback_usd'"),
+        comment='加载阶段币种来源归因',
     )
     postback_report_enabled = Column(
         Boolean,
