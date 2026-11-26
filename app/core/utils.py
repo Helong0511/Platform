@@ -21,8 +21,8 @@ import ipaddress
 import math
 from decimal import Decimal, ROUND_DOWN
 import uuid
-import pytz
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from typing import Any, Optional
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +32,7 @@ from app.core.constants import PERCENTAGE_MULTIPLIER
 
 # 应用时区配置（从统一配置读取）
 
-APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
+APP_TIMEZONE = ZoneInfo(settings.TIMEZONE)
 
 
 def get_app_now_sql_expression(offset_seconds: int = 0):
@@ -420,7 +420,6 @@ async def get_user_name_by_id(
     if not user_id:
         return f"{default_prefix}_None"
     
-    from sqlalchemy.future import select
     from app.models.models import User
     
     try:
