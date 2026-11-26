@@ -135,6 +135,8 @@ class PostbackPendingService:
             event_value=pending.event_value,
             original_payout=pending.original_payout,
             payout=pending.payout,
+            currency=pending.currency or "USD",
+            currency_source=pending.currency_source or "system_fallback_usd",
             devad_id=pending.devad_id,
             os=pending.os,
             carrier=pending.carrier,
