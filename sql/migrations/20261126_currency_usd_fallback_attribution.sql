@@ -37,6 +37,9 @@ SET
             NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currency'))), ''),
             NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currency_code'))), ''),
             NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currencyCode'))), ''),
+            NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$._payload.currency'))), ''),
+            NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$._payload.currency_code'))), ''),
+            NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$._payload.currencyCode'))), ''),
             'USD'
         ))
         ELSE 'USD'
@@ -50,6 +53,15 @@ SET
             THEN 'upstream_field:currency_code'
         WHEN JSON_VALID(raw_data)
              AND NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currencyCode'))), '') IS NOT NULL
+            THEN 'upstream_field:currencyCode'
+        WHEN JSON_VALID(raw_data)
+             AND NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$._payload.currency'))), '') IS NOT NULL
+            THEN 'upstream_field:currency'
+        WHEN JSON_VALID(raw_data)
+             AND NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$._payload.currency_code'))), '') IS NOT NULL
+            THEN 'upstream_field:currency_code'
+        WHEN JSON_VALID(raw_data)
+             AND NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$._payload.currencyCode'))), '') IS NOT NULL
             THEN 'upstream_field:currencyCode'
         ELSE 'system_fallback_usd'
     END;
