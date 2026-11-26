@@ -7,12 +7,15 @@ import logging
 from decimal import Decimal
 from typing import Any, Dict, Optional, Tuple
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.deduction import apply_deduction, find_deduction_config, log_deduction
 from app.core.discount import calculate_discount
 from app.core.postback.errors import DeductionProcessingError
+from app.core.third_party_currency import resolve_currency, validate_iso_currency
+from app.models.models import Offer
 from app.services.cpl.deduction.helpers import DeductionScopeLockError
 
 logger = logging.getLogger(__name__)
@@ -64,11 +67,42 @@ class DiscountChecker:
         Returns:
             (最终金额, 扣量详情, 是否跳过入库与下游转发)
         """
+        currency, currency_source = resolve_currency(
+            currency,
+            source=currency_source,
+        )
+        if offer_id:
+            offer_result = await db.execute(
+                select(Offer.payout_currency, Offer.payout_currency_source)
+                .where(Offer.id == offer_id)
+                .limit(1)
+            )
+            offer_currency_row = offer_result.one_or_none()
+            if offer_currency_row is None:
+                raise DeductionProcessingError(
+                    "Postback 关联的 Offer 不存在，无法确认 payout 币种"
+                )
+            offer_currency = validate_iso_currency(offer_currency_row[0] or "USD")
+            offer_currency_source = offer_currency_row[1] or "system_fallback_usd"
+            if currency_source.startswith("system_fallback"):
+                currency = offer_currency
+                currency_source = (
+                    "offer_config"
+                    if offer_currency_source != "system_fallback_usd"
+                    else "system_fallback_usd"
+                )
+            elif currency != offer_currency:
+                raise DeductionProcessingError(
+                    f"Postback 币种 {currency} 与 Offer 配置币种 {offer_currency} 不一致"
+                )
+
         deduction_info: Dict[str, Any] = {
             "original_payout": original_payout,
             "offer_discount": None,
             "deduction_config": None,
             "final_payout": original_payout,
+            "currency": currency,
+            "currency_source": currency_source,
         }
         final_payout = Decimal(str(original_payout or 0))
         skip_save_and_forward = False
