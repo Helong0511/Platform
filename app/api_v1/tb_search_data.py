@@ -66,8 +66,16 @@ from app.api_v1.excel.utils import (
 
 def _parse_decimal_cell(value, field_name: str, default: Decimal = Decimal("0")) -> Decimal:
     """将 Excel 数值解析为有限 Decimal，避免金额/RPM 经二进制 float 运算。"""
-    if value is None or pd.isna(value) or (isinstance(value, str) and not value.strip()):
+    if value is None or (isinstance(value, str) and not value.strip()):
         return default
+    # Decimal('NaN') / Decimal('Infinity') 不是空单元格，必须进入有限性校验并拒绝。
+    if not isinstance(value, Decimal):
+        try:
+            is_missing = pd.isna(value)
+        except (TypeError, ValueError):
+            is_missing = False
+        if isinstance(is_missing, bool) and is_missing:
+            return default
     try:
         parsed = Decimal(str(value).strip())
     except (InvalidOperation, ValueError, TypeError) as exc:
