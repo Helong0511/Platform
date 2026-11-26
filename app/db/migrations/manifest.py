@@ -268,7 +268,7 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     Migration(
         revision="20261129_postback_payout_decimal_precision",
         path="sql/migrations/20261129_postback_payout_decimal_precision.sql",
-        sha256="bdc77951657f5f0fe6610a84f66ec4d156035119bc88ff15e9ea8a34bdd17d7d",
+        sha256="d2e8bedc68b1d6d19abf8529323a09c3d0bbb89559e275cee13444a525d75a42",
         depends_on=("20261128_offer_payout_decimal_precision",),
     ),
 )
