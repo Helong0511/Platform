@@ -636,6 +636,8 @@ CREATE TABLE IF NOT EXISTS `offers`  (
   `preview_link` TEXT NULL COMMENT '预览链接',
   `payout` DECIMAL(10, 2) NULL DEFAULT NULL COMMENT '上游支付金额（PO）',
   `affiliate_payout` DECIMAL(10, 2) NULL DEFAULT NULL COMMENT '扣价后给渠道的金额（PO扣价后）',
+  `payout_currency` VARCHAR(3) NOT NULL DEFAULT 'USD' COMMENT 'Offer 上游 PO 与全部渠道下游 PO 共用的 ISO 4217 币种',
+  `payout_currency_source` VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd' COMMENT 'Offer PO 币种来源归因',
   `country` VARCHAR(50) NULL DEFAULT NULL COMMENT '国家',
   `category` VARCHAR(50) NULL DEFAULT NULL COMMENT '分类',
   `type` VARCHAR(50) NULL DEFAULT NULL COMMENT '类型',
