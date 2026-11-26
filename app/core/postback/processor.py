@@ -717,6 +717,11 @@ class PostbackProcessor:
                 if configured_currency
                 else normalized_data.get("currency")
             )
+            currency_source = (
+                f"cloak_config:postback:{cloak_cfg_pb.id}"
+                if configured_currency
+                else normalized_data.get("currency_source") or "system_fallback_usd"
+            )
             fixed_val = getattr(cloak_cfg_pb, "postback_report_value", None)
             try:
                 fixed_val = Decimal(str(fixed_val)) if fixed_val is not None else None
@@ -729,9 +734,11 @@ class PostbackProcessor:
             else:
                 amt_send = None
                 cur_send = None
+                currency_source = None
         else:
             fb_event = "Purchase"
-            cur_send = normalized_data.get("currency")
+            cur_send = normalized_data.get("currency") or "USD"
+            currency_source = normalized_data.get("currency_source") or "system_fallback_usd"
             amt_send = amount
 
         if fb_event == "Purchase":
@@ -772,6 +779,7 @@ class PostbackProcessor:
             phone=phone,
             ua=ua,
             currency=cur_send,
+            currency_source=currency_source,
             amount=amt_send,
             short_link_id=int(short_link_id) if short_link_id else None,
             cloak_name=str(dp).strip() if dp else None,
