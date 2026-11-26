@@ -64,6 +64,7 @@ async def _scan_postback_table(connection, table: str, *, batch_size: int, apply
     scanned = 0
     updated = 0
     invalid: list[dict[str, Any]] = []
+    invalid_count = 0
     sources: Counter[str] = Counter()
     currencies: Counter[str] = Counter()
     while True:
@@ -94,6 +95,7 @@ async def _scan_postback_table(connection, table: str, *, batch_size: int, apply
             currencies[current_currency] += 1
             sources[current_source] += 1
             if status != "valid":
+                invalid_count += 1
                 if len(invalid) < 200:
                     invalid.append({"id": int(row["id"]), "currency": current_currency, "source": current_source})
             if (
@@ -120,6 +122,7 @@ async def _scan_postback_table(connection, table: str, *, batch_size: int, apply
         "updated": updated,
         "currencies": dict(sorted(currencies.items())),
         "sources": dict(sorted(sources.items())),
+        "invalid_count": invalid_count,
         "invalid_sample": invalid,
     }
 
@@ -129,13 +132,14 @@ async def _scan_report_logs(connection, *, batch_size: int, apply: bool) -> dict
     scanned = 0
     updated = 0
     invalid: list[dict[str, Any]] = []
+    invalid_count = 0
     sources: Counter[str] = Counter()
     currencies: Counter[str] = Counter()
     while True:
         result = await connection.execute(
             text(
                 "SELECT id, currency, currency_source FROM third_party_report_logs "
-                "WHERE event = 'Purchase' AND id > :last_id ORDER BY id LIMIT :batch_size"
+                "WHERE id > :last_id ORDER BY id LIMIT :batch_size"
             ),
             {"last_id": last_id, "batch_size": batch_size},
         )
@@ -156,8 +160,10 @@ async def _scan_report_logs(connection, *, batch_size: int, apply: bool) -> dict
             status = _iso_status(currency)
             currencies[currency] += 1
             sources[source] += 1
-            if status != "valid" and len(invalid) < 200:
-                invalid.append({"id": int(row["id"]), "currency": currency, "source": source})
+            if status != "valid":
+                invalid_count += 1
+                if len(invalid) < 200:
+                    invalid.append({"id": int(row["id"]), "currency": currency, "source": source})
             if apply and (row["currency"] != currency or row["currency_source"] != source):
                 updates.append({"id": int(row["id"]), "currency": currency, "currency_source": source})
         if updates:
@@ -176,6 +182,7 @@ async def _scan_report_logs(connection, *, batch_size: int, apply: bool) -> dict
         "updated": updated,
         "currencies": dict(sorted(currencies.items())),
         "sources": dict(sorted(sources.items())),
+        "invalid_count": invalid_count,
         "invalid_sample": invalid,
     }
 
@@ -203,12 +210,15 @@ async def run_backfill(*, apply: bool, batch_size: int) -> list[dict[str, Any]]:
             rows = result.mappings().all()
             result.close()
             invalid_configs = []
+            invalid_config_count = 0
             for row in rows:
                 for field in ("report_currency", "load_report_currency", "postback_report_currency"):
                     value = str(row[field] or "USD").strip().upper() or "USD"
                     if _iso_status(value) != "valid":
-                        invalid_configs.append({"id": int(row["id"]), "field": field, "currency": value})
-            results.append({"table": "cloak_configs", "scanned": len(rows), "invalid_sample": invalid_configs[:200]})
+                        invalid_config_count += 1
+                        if len(invalid_configs) < 200:
+                            invalid_configs.append({"id": int(row["id"]), "field": field, "currency": value})
+            results.append({"table": "cloak_configs", "scanned": len(rows), "invalid_count": invalid_config_count, "invalid_sample": invalid_configs})
             return results
     finally:
         await engine.dispose()
