@@ -256,7 +256,7 @@
               <div ref="volumeRatioChartRef" style="width: 100%; height: 300px;"></div>
             </el-card>
           </el-col>
-          <el-col v-if="stats.currency_summaries?.length <= 1" :span="12">
+          <el-col v-show="stats.currency_summaries?.length <= 1" :span="12">
             <el-card>
               <template #header>
                 <div class="chart-header">扣金额比例分布（单一币种）</div>
