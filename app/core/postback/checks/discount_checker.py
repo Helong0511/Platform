@@ -72,18 +72,19 @@ class DiscountChecker:
             source=currency_source,
         )
         if offer_id:
+            # 与 Offer 币种修改共用行锁，避免 Postback 正在入账时币种被并发切换。
             offer_result = await db.execute(
-                select(Offer.payout_currency, Offer.payout_currency_source)
+                select(Offer)
                 .where(Offer.id == offer_id)
-                .limit(1)
+                .with_for_update()
             )
-            offer_currency_row = offer_result.one_or_none()
-            if offer_currency_row is None:
+            offer_row = offer_result.scalar_one_or_none()
+            if offer_row is None:
                 raise DeductionProcessingError(
                     "Postback 关联的 Offer 不存在，无法确认 payout 币种"
                 )
-            offer_currency = validate_iso_currency(offer_currency_row[0] or "USD")
-            offer_currency_source = offer_currency_row[1] or "system_fallback_usd"
+            offer_currency = validate_iso_currency(offer_row.payout_currency or "USD")
+            offer_currency_source = offer_row.payout_currency_source or "system_fallback_usd"
             if currency_source.startswith("system_fallback"):
                 currency = offer_currency
                 currency_source = (
