@@ -129,6 +129,14 @@ class ConversionDeductionLog(Base):
     deducted_amount = Column(Numeric(10, 2), nullable=True, default=0, server_default='0.00', comment='扣减的转化金额')
     final_volume = Column(Integer, default=1, comment='最终转化数量（扣减后）')
     final_amount = Column(Numeric(10, 2), nullable=False, comment='最终转化金额（扣减后）')
+    currency = Column(
+        String(10), nullable=False, default='USD', server_default=text("'USD'"),
+        comment='扣减金额对应的 ISO 4217 币种',
+    )
+    currency_source = Column(
+        String(100), nullable=False, default='system_fallback_usd',
+        server_default=text("'system_fallback_usd'"), comment='扣减金额币种来源归因',
+    )
     
     # 扣减配置信息
     deduction_config_id = Column(Integer, ForeignKey("conversion_deduction_configs.id", ondelete="SET NULL"), nullable=True, index=True, comment='使用的扣减配置ID')
