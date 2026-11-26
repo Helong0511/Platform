@@ -443,7 +443,17 @@ async def create_cloak_config(
 
     _ensure_enabled_requires_bridge_html(data.cloak_name, data.is_enabled)
 
-    config = CloakConfig(**data.model_dump())
+    config_data = data.model_dump()
+    for currency_field in ("report_currency", "load_report_currency", "postback_report_currency"):
+        configured_value = config_data.get(currency_field)
+        if configured_value is None or not str(configured_value).strip():
+            config_data[currency_field] = "USD"
+            config_data[f"{currency_field}_source"] = "system_fallback_usd"
+        else:
+            config_data[f"{currency_field}_source"] = (
+                "manual_override" if currency_field in data.model_fields_set else "system_fallback_usd"
+            )
+    config = CloakConfig(**config_data)
     db.add(config)
     await db.commit()
     await db.refresh(config)
@@ -513,6 +523,14 @@ async def update_cloak_config(
 
     old_cloak_name = config.cloak_name
     update_data = data.model_dump(exclude_unset=True)
+    for currency_field in ("report_currency", "load_report_currency", "postback_report_currency"):
+        if currency_field in update_data:
+            configured_value = update_data[currency_field]
+            if configured_value is None or not str(configured_value).strip():
+                update_data[currency_field] = "USD"
+                update_data[f"{currency_field}_source"] = "system_fallback_usd"
+            else:
+                update_data[f"{currency_field}_source"] = "manual_override"
     # ---------- 条件分支 ----------
     if "cloak_name" in update_data and update_data["cloak_name"] != config.cloak_name:
         duplicate_result = await db.execute(
