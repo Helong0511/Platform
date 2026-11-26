@@ -24,10 +24,11 @@
 
 - ISO 4217 校验集中在 `app/core/third_party_currency.py`，币种数据由锁定版本的 pycountry 提供。
 - 通用 Postback normalizer 和 BFT handler 识别 `currency`、`currency_code`、`currencyCode`，并记录实际命中的字段名。
-- 斗篷 click/load/postback 三阶段配置默认 USD；ORM、Schema、运行时映射和测试上报统一处理。
+- 斗篷 click/load/postback 三阶段配置默认 USD，并分别持久化 `*_currency_source`；新建时未显式配置标记 `system_fallback_usd`，管理员显式设置标记 `manual_override`，历史已有值暂标记 `legacy_unknown`。ORM、Schema、运行时映射和测试上报统一处理。
 - Outbox 在入队时冻结币种及来源；Worker 重试沿用已持久化的币种和来源，不因配置变更重新推断。
 - 直接发送、管理员编辑和测试发送均走同一 ISO 校验逻辑。
 - `postback_conversions` 与 `pending_postback_conversions` 都持久化 payout 的 `currency` 和 `currency_source`；待审批通过时原样复制来源，通用适配器/BFT 的字段归因不会丢失。
+- 三阶段斗篷配置分别持久化币种来源，click/load 的直接发送和 Postback Outbox 不再根据“有无配置行”猜测来源。
 - `third_party_report_logs.currency_source` 持久化第三方上报币种来源，API 和管理端详情/列表可查看。
 
 ## 历史数据处理
