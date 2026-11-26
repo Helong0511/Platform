@@ -74,7 +74,7 @@ def _parse_decimal_cell(value, field_name: str, default: Decimal = Decimal("0"))
             is_missing = pd.isna(value)
         except (TypeError, ValueError):
             is_missing = False
-        if isinstance(is_missing, bool) and is_missing:
+        if bool(is_missing):
             return default
     try:
         parsed = Decimal(str(value).strip())
