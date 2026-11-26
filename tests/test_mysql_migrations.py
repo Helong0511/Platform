@@ -2441,12 +2441,17 @@ def test_conversion_deduction_log_conversion_fk_migration_is_idempotent_and_pres
                 "CREATE TABLE conversion_deduction_logs ("
                 "id BIGINT NOT NULL AUTO_INCREMENT, "
                 "conversion_id BIGINT NULL, "
+                "original_amount DECIMAL(10,2) NOT NULL, "
+                "deducted_amount DECIMAL(10,2) NULL DEFAULT 0.00, "
+                "final_amount DECIMAL(10,2) NOT NULL, "
                 "PRIMARY KEY (id), KEY idx_conversion_id (conversion_id)"
                 ") ENGINE=InnoDB"
             )
             cursor.execute("INSERT INTO postback_conversions VALUES ()")
             cursor.execute(
-                "INSERT INTO conversion_deduction_logs (conversion_id) VALUES (1)"
+                "INSERT INTO conversion_deduction_logs "
+                "(conversion_id, original_amount, deducted_amount, final_amount) "
+                "VALUES (1, 1.2345, 0.1234, 1.1111)"
             )
 
             migration = (
@@ -2469,6 +2474,25 @@ def test_conversion_deduction_log_conversion_fk_migration_is_idempotent_and_pres
             assert log_id_column[1].lower() == "int"
             assert log_id_column[2] == "NO"
             assert "auto_increment" in log_id_column[5].lower()
+            for amount_column in ("original_amount", "deducted_amount", "final_amount"):
+                cursor.execute(
+                    f"SELECT DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE "
+                    f"FROM information_schema.COLUMNS "
+                    f"WHERE TABLE_SCHEMA = DATABASE() "
+                    f"AND TABLE_NAME = 'conversion_deduction_logs' "
+                    f"AND COLUMN_NAME = %s",
+                    (amount_column,),
+                )
+                assert cursor.fetchone() == ("decimal", 20, 6)
+            cursor.execute(
+                "SELECT original_amount, deducted_amount, final_amount "
+                "FROM conversion_deduction_logs WHERE id = 1"
+            )
+            assert cursor.fetchone() == (
+                decimal.Decimal("1.234500"),
+                decimal.Decimal("0.123400"),
+                decimal.Decimal("1.111100"),
+            )
 
             cursor.execute(
                 "SELECT DELETE_RULE, UPDATE_RULE "
