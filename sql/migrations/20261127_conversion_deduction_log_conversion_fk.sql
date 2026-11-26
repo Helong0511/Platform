@@ -152,6 +152,7 @@ SET @cdl_amount_columns_ok = (
       AND DATA_TYPE = 'decimal'
       AND NUMERIC_PRECISION <= 24
       AND NUMERIC_SCALE <= 6
+      AND (NUMERIC_PRECISION - NUMERIC_SCALE) <= 18
 );
 SET @cdl_amount_columns_present = (
     SELECT COUNT(*)
@@ -172,7 +173,7 @@ DEALLOCATE PREPARE cdl_amount_definition_check;
 SET @cdl_original_amount_alter_sql = IF(
     (SELECT NUMERIC_PRECISION FROM information_schema.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversion_deduction_logs'
-       AND COLUMN_NAME = 'original_amount') < 20
+       AND COLUMN_NAME = 'original_amount') < 24
     OR
     (SELECT NUMERIC_SCALE FROM information_schema.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversion_deduction_logs'
@@ -187,7 +188,7 @@ DEALLOCATE PREPARE cdl_original_amount_alter;
 SET @cdl_deducted_amount_alter_sql = IF(
     (SELECT NUMERIC_PRECISION FROM information_schema.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversion_deduction_logs'
-       AND COLUMN_NAME = 'deducted_amount') < 20
+       AND COLUMN_NAME = 'deducted_amount') < 24
     OR
     (SELECT NUMERIC_SCALE FROM information_schema.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversion_deduction_logs'
@@ -202,7 +203,7 @@ DEALLOCATE PREPARE cdl_deducted_amount_alter;
 SET @cdl_final_amount_alter_sql = IF(
     (SELECT NUMERIC_PRECISION FROM information_schema.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversion_deduction_logs'
-       AND COLUMN_NAME = 'final_amount') < 20
+       AND COLUMN_NAME = 'final_amount') < 24
     OR
     (SELECT NUMERIC_SCALE FROM information_schema.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversion_deduction_logs'
