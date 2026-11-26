@@ -6,7 +6,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import ConfigDict, field_validator
+from pydantic import ConfigDict, Field, field_validator
 
 from app.schemas.base import BaseSchema
 
@@ -22,10 +22,10 @@ class TBSearchDataBase(BaseSchema):
     product_name: str | None = None
     country_code: str | None = None
     country_name_zh: str | None = None
-    redirects: int | None = 0
-    searches: int | None = 0
-    monetized: int | None = 0
-    clicks: int | None = 0
+    redirects: int | None = Field(default=0, ge=0, le=2147483647)
+    searches: int | None = Field(default=0, ge=0, le=2147483647)
+    monetized: int | None = Field(default=0, ge=0, le=2147483647)
+    clicks: int | None = Field(default=0, ge=0, le=2147483647)
     revenue: Decimal | None = Decimal('0')
     rpm: Decimal | None = Decimal('0')
     # 减扣前字段仅管理员填充；客户响应保持 None，避免对照出扣减
@@ -90,10 +90,10 @@ class TBSearchDataUpdate(BaseSchema):
     """
     product_id: int | None = None
     country_code: str | None = None
-    redirects: int | None = None
-    searches: int | None = None
-    monetized: int | None = None
-    clicks: int | None = None
+    redirects: int | None = Field(default=None, ge=0, le=2147483647)
+    searches: int | None = Field(default=None, ge=0, le=2147483647)
+    monetized: int | None = Field(default=None, ge=0, le=2147483647)
+    clicks: int | None = Field(default=None, ge=0, le=2147483647)
     revenue: Decimal | None = None
     rpm: Decimal | None = None
     revenue_before_deduct: Decimal | None = None
