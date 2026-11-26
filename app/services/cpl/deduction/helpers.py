@@ -8,9 +8,8 @@
 """
 from typing import Any, Dict, Literal, Optional, Tuple
 
-from sqlalchemy import and_, text
+from sqlalchemy import and_, text, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 
 from app.core.errors import ErrorCode
