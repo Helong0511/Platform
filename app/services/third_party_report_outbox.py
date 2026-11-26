@@ -6,6 +6,7 @@ Outbox 记录与 PostbackConversion 在同一 AsyncSession/事务中提交；
 Facebook access token 永远不写入此表。
 """
 import logging
+from decimal import Decimal, InvalidOperation
 from datetime import timedelta
 from typing import Optional
 
@@ -89,6 +90,27 @@ async def enqueue_postback_report(
         .where(ThirdPartyReportLog.event_key == event_key)
         .with_for_update()
     )
+    if existing is not None and event == "Purchase":
+        # event_key 只代表事件身份，不代表财务载荷相同；同一身份再次带来不同金额/币种必须拒绝，
+        # 不能静默复用旧 Outbox 并把新 Postback 伪装成已处理。
+        try:
+            existing_amount = Decimal(str(getattr(existing, "amount", None)))
+            incoming_amount = Decimal(str(amount))
+        except (InvalidOperation, TypeError, ValueError):
+            raise LegacyEventIdentityConflict(
+                "同一 Purchase 事件的历史金额无法可靠核对，需人工核实"
+            )
+        existing_currency = (getattr(existing, "currency", None) or "").strip().upper()
+        incoming_currency = (currency or "").strip().upper()
+        if (
+            not existing_amount.is_finite()
+            or existing_amount != incoming_amount
+            or existing_currency != incoming_currency
+        ):
+            raise LegacyEventIdentityConflict(
+                "同一 Purchase 事件身份对应的金额或币种不一致，拒绝静默复用旧上报记录"
+            )
+
     if existing is not None and (
         getattr(existing, "identity_scope", None) != "platform_scoped"
         or getattr(existing, "platform", None) != normalized_platform
