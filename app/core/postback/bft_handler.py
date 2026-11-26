@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 from app.core.postback.handlers import PostbackHandler
 from app.core.postback.transformers.normalizer import DataNormalizer
 from app.core.postback.validators.data_validator import validate_payout_value
+from app.core.third_party_currency import resolve_currency
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,15 @@ class BftPostbackHandler(PostbackHandler):
             "payout", "PayOut", "pay_out", "pay-out", "Pay_Out", "Payout", "PAYOUT",
         )
 
+        currency_field = next(
+            (key for key in ("currency", "currency_code", "currencyCode")
+             if data.get(key) is not None and str(data.get(key)).strip()),
+            None,
+        )
+        currency, currency_source = resolve_currency(
+            data.get(currency_field) if currency_field else None,
+            source=f"upstream_field:{currency_field}" if currency_field else None,
+        )
         return {
             "platform": self.platform_name,
             "conversion_id": str(conversion_id).strip() if conversion_id is not None else None,
@@ -71,11 +81,8 @@ class BftPostbackHandler(PostbackHandler):
             "event_name": event_name,
             "event_value": DataNormalizer._parse_decimal(data.get("event_value")),
             "payout": DataNormalizer._parse_decimal(payout),
-            "currency": (
-                str(next((data.get(key) for key in ("currency", "currency_code", "currencyCode")
-                          if data.get(key) is not None and str(data.get(key)).strip()), "")).strip().upper()
-                or None
-            ),
+            "currency": currency,
+            "currency_source": currency_source,
             "devad_id": self._to_str(data.get("devad_id")),
             "os": self._to_str(data.get("os")),
             "carrier": self._to_str(data.get("carrier")),
