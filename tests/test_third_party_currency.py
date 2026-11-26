@@ -18,7 +18,7 @@ from app.core.third_party_currency import (
         ("0.1", "usd", Decimal("0.1"), "USD"),
         ("0.1234", "CNY", Decimal("0.1234"), "CNY"),
         ("99999999.9999", "EUR", Decimal("99999999.9999"), "EUR"),
-        ("123456789012345678.123456", "KWD", MAX_PURCHASE_AMOUNT, "KWD"),
+        ("999999999999999999.999999", "KWD", MAX_PURCHASE_AMOUNT, "KWD"),
         ("0.123456", "BHD", Decimal("0.123456"), "BHD"),
         ("1.00", None, Decimal("1.00"), "USD"),
         ("1.00", "  ", Decimal("1.00"), "USD"),
