@@ -51,6 +51,18 @@ def extract_currency(raw_data: Any) -> tuple[str, str]:
     return "USD", "legacy_unknown"
 
 
+def resolve_historical_postback_currency(current_currency: Any, current_source: Any, raw_data: Any) -> tuple[str, str]:
+    """历史币种归因：只用 payload 中的明确字段覆盖；无证据时保留原代码并标未知。"""
+    currency = str(current_currency or "USD").strip().upper() or "USD"
+    source = str(current_source or "system_fallback_usd").strip()
+    if source == "system_fallback_usd":
+        recovered_currency, recovered_source = extract_currency(raw_data)
+        if recovered_source.startswith("upstream_field:"):
+            return recovered_currency, recovered_source
+        return currency, "legacy_unknown"
+    return currency, source
+
+
 def _iso_status(currency: Any) -> str:
     try:
         validate_iso_currency(currency)
@@ -85,15 +97,9 @@ async def _scan_postback_table(connection, table: str, *, batch_size: int, apply
         scanned += len(rows)
         updates = []
         for row in rows:
-            current_source = row["currency_source"] or "system_fallback_usd"
-            current_currency = str(row["currency"] or "USD").strip().upper() or "USD"
-            if current_source == "system_fallback_usd":
-                recovered_currency, recovered_source = extract_currency(row["raw_data"])
-                if recovered_source.startswith("upstream_field:"):
-                    current_currency, current_source = recovered_currency, recovered_source
-                else:
-                    # 保留现存代码作为未证实的历史值；仅修正来源，不能将其认证为 USD。
-                    current_source = "legacy_unknown"
+            current_currency, current_source = resolve_historical_postback_currency(
+                row["currency"], row["currency_source"], row["raw_data"]
+            )
             status = _iso_status(current_currency)
             currencies[current_currency] += 1
             sources[current_source] += 1
