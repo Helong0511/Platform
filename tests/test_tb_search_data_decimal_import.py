@@ -161,3 +161,57 @@ def test_tb_search_manual_update_allows_null_country_code():
     update = TBSearchDataUpdate(country_code=None)
     assert update.country_code is None
     assert "country_code" in update.model_fields_set
+
+
+@pytest.mark.parametrize(
+    "field_name,maximum",
+    [
+        ("revenue", "99999999.9999"),
+        ("revenue_before_deduct", "99999999.9999"),
+        ("rpm", "999999.9999"),
+        ("rpm_before_deduct", "999999.9999"),
+    ],
+)
+def test_tb_search_amount_schema_accepts_database_decimal_boundary(field_name, maximum):
+    from app.schemas.tb_search_data import TBSearchDataUpdate
+
+    update = TBSearchDataUpdate(**{field_name: maximum})
+    assert getattr(update, field_name) == Decimal(maximum)
+
+
+@pytest.mark.parametrize(
+    "field_name,too_large",
+    [
+        ("revenue", "100000000"),
+        ("revenue_before_deduct", "100000000"),
+        ("rpm", "1000000"),
+        ("rpm_before_deduct", "1000000"),
+    ],
+)
+def test_tb_search_amount_schema_rejects_database_decimal_overflow(field_name, too_large):
+    from app.schemas.tb_search_data import TBSearchDataUpdate
+
+    with pytest.raises(ValueError, match="DECIMAL 存储范围"):
+        TBSearchDataUpdate(**{field_name: too_large})
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["revenue", "rpm", "revenue_before_deduct", "rpm_before_deduct"],
+)
+def test_tb_search_amount_schema_rejects_more_than_four_effective_decimals(field_name):
+    from app.schemas.tb_search_data import TBSearchDataUpdate
+
+    with pytest.raises(ValueError, match="最多允许 4 位小数"):
+        TBSearchDataUpdate(**{field_name: "1.23456"})
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["revenue", "rpm", "revenue_before_deduct", "rpm_before_deduct"],
+)
+def test_tb_search_amount_schema_accepts_extra_trailing_zeroes(field_name):
+    from app.schemas.tb_search_data import TBSearchDataUpdate
+
+    update = TBSearchDataUpdate(**{field_name: "1.23000"})
+    assert getattr(update, field_name) == Decimal("1.23000")
