@@ -118,9 +118,11 @@ def log_to_export_row(log: ConversionDeductionLog) -> Dict[str, Any]:
         "扣减数量": log_response.deducted_volume or 0,
         "最终数量": log_response.final_volume or 0,
         "扣量比例": f"{(log_response.volume_deduction_ratio or 0) * 100:.2f}%",
-        "原始金额": f"${log_response.original_amount or 0:.2f}",
-        "扣减金额": f"${log_response.deducted_amount or 0:.2f}",
-        "最终金额": f"${log_response.final_amount or 0:.2f}",
+        "币种": log_response.currency or "USD",
+        "币种来源": log_response.currency_source or "legacy_unknown",
+        "原始金额": f"{log_response.original_amount or 0:.2f} {log_response.currency or 'USD'}",
+        "扣减金额": f"{log_response.deducted_amount or 0:.2f} {log_response.currency or 'USD'}",
+        "最终金额": f"{log_response.final_amount or 0:.2f} {log_response.currency or 'USD'}",
         "扣金额比例": f"{(log_response.amount_deduction_ratio or 0) * 100:.2f}%",
         "扣减原因": log_response.deduction_reason or "",
         "创建时间": str(log_response.created_at) if log_response.created_at else "",
@@ -128,31 +130,58 @@ def log_to_export_row(log: ConversionDeductionLog) -> Dict[str, Any]:
 
 
 def stats_to_export_rows(stats: DeductionStatsResponse) -> List[Dict[str, Any]]:
-    """将统计数据转为 Excel 导出行列表（首行为汇总，其余为分组项）。"""
+    """导出扣减统计；多币种金额必须按币种分别列示，禁止生成混币总额。"""
+    if stats.original_amount is None:
+        original_total = deducted_total = final_total = "多币种，见分币种明细"
+        ratio_total = "多币种，见分币种明细"
+    else:
+        original_total = f"{stats.original_amount:.2f}"
+        deducted_total = f"{stats.deducted_amount or 0:.2f}"
+        final_total = f"{stats.final_amount or 0:.2f}"
+        ratio_total = f"{(stats.amount_deduction_ratio or 0) * 100:.2f}%"
+
     data = [
         {
             "类型": "汇总",
+            "币种": "多币种" if stats.original_amount is None else (
+                stats.currency_summaries[0].get("currency", "USD") if stats.currency_summaries else "USD"
+            ),
             "原始转化数量": stats.original_volume,
             "扣减转化数量": stats.deducted_volume,
             "最终转化数量": stats.final_volume,
             "扣量比例": f"{(stats.volume_deduction_ratio * 100):.2f}%",
-            "原始转化金额": f"${stats.original_amount:.2f}",
-            "扣减转化金额": f"${stats.deducted_amount:.2f}",
-            "最终转化金额": f"${stats.final_amount:.2f}",
-            "扣金额比例": f"{(stats.amount_deduction_ratio * 100):.2f}%",
+            "原始转化金额": original_total,
+            "扣减转化金额": deducted_total,
+            "最终转化金额": final_total,
+            "扣金额比例": ratio_total,
         }
     ]
-    if stats.items:
-        for item in stats.items:
-            data.append({
-                "类型": item.get("name", "未知"),
-                "原始转化数量": item.get("original_volume", 0),
-                "扣减转化数量": item.get("deducted_volume", 0),
-                "最终转化数量": item.get("final_volume", 0),
-                "扣量比例": f"{(item.get('volume_deduction_ratio', 0) * 100):.2f}%",
-                "原始转化金额": f"${item.get('original_amount', 0):.2f}",
-                "扣减转化金额": f"${item.get('deducted_amount', 0):.2f}",
-                "最终转化金额": f"${item.get('final_amount', 0):.2f}",
-                "扣金额比例": f"{(item.get('amount_deduction_ratio', 0) * 100):.2f}%",
-            })
+    for summary in stats.currency_summaries:
+        currency = summary.get("currency", "USD")
+        data.append({
+            "类型": "币种汇总",
+            "币种": currency,
+            "原始转化数量": summary.get("original_volume", 0),
+            "扣减转化数量": summary.get("deducted_volume", 0),
+            "最终转化数量": summary.get("final_volume", 0),
+            "扣量比例": "",
+            "原始转化金额": f"{summary.get('original_amount', 0):.2f} {currency}",
+            "扣减转化金额": f"{summary.get('deducted_amount', 0):.2f} {currency}",
+            "最终转化金额": f"{summary.get('final_amount', 0):.2f} {currency}",
+            "扣金额比例": f"{summary.get('amount_deduction_ratio', 0) * 100:.2f}%",
+        })
+    for item in stats.items:
+        currency = item.get("currency", "USD")
+        data.append({
+            "类型": item.get("name", "分组明细"),
+            "币种": currency,
+            "原始转化数量": item.get("original_volume", 0),
+            "扣减转化数量": item.get("deducted_volume", 0),
+            "最终转化数量": item.get("final_volume", 0),
+            "扣量比例": f"{(item.get('volume_deduction_ratio', 0) * 100):.2f}%",
+            "原始转化金额": f"{item.get('original_amount', 0):.2f} {currency}",
+            "扣减转化金额": f"{item.get('deducted_amount', 0):.2f} {currency}",
+            "最终转化金额": f"{item.get('final_amount', 0):.2f} {currency}",
+            "扣金额比例": f"{(item.get('amount_deduction_ratio', 0) * 100):.2f}%",
+        })
     return data
