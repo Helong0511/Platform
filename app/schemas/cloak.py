@@ -306,15 +306,10 @@ class CloakConfigUpdate(BaseSchema):
     @field_validator("report_currency", "load_report_currency", "postback_report_currency")
     @classmethod
     def validate_currencies_update(cls, value: Optional[str]) -> Optional[str]:
-        """更新时 None 表示不修改；有值须为三位字母币种代码。"""
-        if value is None:
+        """更新时 None 表示不修改；有值须为当前有效 ISO 4217 结算币种。"""
+        if value is None or not value.strip():
             return None
-        v = value.strip().upper()
-        if not v:
-            return None
-        if not re.fullmatch(r"[A-Z]{3}", v):
-            raise ValueError("货币代码必须为三位字母")
-        return v
+        return validate_iso_currency(value)
 
     @field_validator("cloak_name")
     @classmethod
