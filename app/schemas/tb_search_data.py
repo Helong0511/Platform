@@ -102,7 +102,18 @@ class TBSearchDataUpdate(BaseSchema):
     @model_validator(mode="after")
     def reject_explicit_nulls_for_non_nullable_fields(self):
         """区分字段未提交与显式 null，避免把 NULL 写入数据库 NOT NULL 列。"""
-        for field_name in self.model_fields_set:
+        non_nullable_fields = {
+            "product_id",
+            "redirects",
+            "searches",
+            "monetized",
+            "clicks",
+            "revenue",
+            "rpm",
+            "revenue_before_deduct",
+            "rpm_before_deduct",
+        }
+        for field_name in self.model_fields_set & non_nullable_fields:
             if getattr(self, field_name) is None:
                 raise ValueError(f"{field_name}不能显式设置为 null")
         return self
