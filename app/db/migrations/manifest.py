@@ -235,7 +235,7 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     Migration(
         revision="20261126_currency_usd_fallback_attribution",
         path="sql/migrations/20261126_currency_usd_fallback_attribution.sql",
-        sha256="fa35c85dc778c516c7ebab4708faefc7ad210c7d09a00931eb29faa82f220f52",
+        sha256="808e3b586d575ad3cc4bf64a9be47d31ec51a83f5cf06143fa393ced442b9bad",
     ),
 
     Migration(
