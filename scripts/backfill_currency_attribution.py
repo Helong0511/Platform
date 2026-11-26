@@ -127,6 +127,68 @@ async def _scan_postback_table(connection, table: str, *, batch_size: int, apply
     }
 
 
+async def _scan_deduction_logs(connection, *, batch_size: int, apply: bool) -> dict[str, Any]:
+    last_id = 0
+    scanned = 0
+    updated = 0
+    invalid: list[dict[str, Any]] = []
+    invalid_count = 0
+    sources: Counter[str] = Counter()
+    currencies: Counter[str] = Counter()
+    while True:
+        result = await connection.execute(
+            text(
+                "SELECT d.id, d.currency, d.currency_source, p.currency AS conversion_currency, "
+                "p.currency_source AS conversion_currency_source "
+                "FROM conversion_deduction_logs d "
+                "LEFT JOIN postback_conversions p ON p.id = d.conversion_id "
+                "WHERE d.id > :last_id ORDER BY d.id LIMIT :batch_size"
+            ),
+            {"last_id": last_id, "batch_size": batch_size},
+        )
+        rows = result.mappings().all()
+        result.close()
+        if not rows:
+            break
+        last_id = int(rows[-1]["id"])
+        scanned += len(rows)
+        updates = []
+        for row in rows:
+            currency = str(row["currency"] or "USD").strip().upper() or "USD"
+            source = row["currency_source"] or "system_fallback_usd"
+            if source == "system_fallback_usd" and row["conversion_currency"]:
+                currency = str(row["conversion_currency"]).strip().upper()
+                source = row["conversion_currency_source"] or "legacy_unknown"
+            status = _iso_status(currency)
+            currencies[currency] += 1
+            sources[source] += 1
+            if status != "valid":
+                invalid_count += 1
+                if len(invalid) < 200:
+                    invalid.append({"id": int(row["id"]), "currency": currency, "source": source})
+            if apply and (row["currency"] != currency or row["currency_source"] != source):
+                updates.append({"id": int(row["id"]), "currency": currency, "currency_source": source})
+        if updates:
+            await connection.execute(
+                text(
+                    "UPDATE conversion_deduction_logs SET currency = :currency, "
+                    "currency_source = :currency_source WHERE id = :id"
+                ),
+                updates,
+            )
+            await connection.commit()
+            updated += len(updates)
+    return {
+        "table": "conversion_deduction_logs",
+        "scanned": scanned,
+        "updated": updated,
+        "currencies": dict(sorted(currencies.items())),
+        "sources": dict(sorted(sources.items())),
+        "invalid_count": invalid_count,
+        "invalid_sample": invalid,
+    }
+
+
 async def _scan_report_logs(connection, *, batch_size: int, apply: bool) -> dict[str, Any]:
     last_id = 0
     scanned = 0
@@ -202,6 +264,7 @@ async def run_backfill(*, apply: bool, batch_size: int) -> list[dict[str, Any]]:
             results = []
             for table in TABLES:
                 results.append(await _scan_postback_table(connection, table, batch_size=batch_size, apply=apply))
+            results.append(await _scan_deduction_logs(connection, batch_size=batch_size, apply=apply))
             results.append(await _scan_report_logs(connection, batch_size=batch_size, apply=apply))
             # 斗篷配置量小，统一扫描并验证；空值在 schema migration 中已兜底 USD。
             result = await connection.execute(
