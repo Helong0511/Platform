@@ -715,6 +715,8 @@ CREATE TABLE IF NOT EXISTS `postback_conversions`  (
   `event_value` DECIMAL(12, 4) NULL DEFAULT NULL COMMENT '事件价值（购买价格等）',
   `original_payout` DECIMAL(12, 4) NULL DEFAULT NULL COMMENT '原始支付金额（PO）',
   `payout` DECIMAL(12, 4) NULL DEFAULT NULL COMMENT '支付金额（确认的广告单元价格）',
+  `currency` VARCHAR(10) NOT NULL DEFAULT 'USD' COMMENT 'Postback payout 的 ISO 4217 币种；缺失时 USD 兜底',
+  `currency_source` VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd' COMMENT 'Postback payout 币种来源归因',
   `devad_id` VARCHAR(255) NULL DEFAULT NULL COMMENT '设备广告ID（IDFA或GAID）',
   `os` VARCHAR(20) NULL DEFAULT NULL COMMENT '操作系统（IOS或Android）',
   `carrier` VARCHAR(50) NULL DEFAULT NULL COMMENT '用户运营商',
