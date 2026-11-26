@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import decimal
 
 import hashlib
 import ipaddress
@@ -2483,7 +2484,7 @@ def test_conversion_deduction_log_conversion_fk_migration_is_idempotent_and_pres
                     f"AND COLUMN_NAME = %s",
                     (amount_column,),
                 )
-                assert cursor.fetchone() == ("decimal", 20, 6)
+                assert cursor.fetchone() == ("decimal", 24, 6)
             cursor.execute(
                 "SELECT original_amount, deducted_amount, final_amount "
                 "FROM conversion_deduction_logs WHERE id = 1"
