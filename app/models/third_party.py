@@ -68,7 +68,12 @@ class ThirdPartyReportLog(Base):
     ip = Column(String(50), nullable=True, comment='IP地址（原始值）')
     phone = Column(String(50), nullable=True, comment='手机号（原始值）')
     ua = Column(Text, nullable=True, comment='用户代理')
-    currency = Column(String(10), nullable=True, comment='货币类型')
+    currency = Column(String(10), nullable=True, comment='ISO 4217 货币类型')
+    currency_source = Column(
+        String(100),
+        nullable=True,
+        comment="币种来源归因：upstream_field:* / cloak_config:* / system_fallback_usd / manual_override / legacy_unknown",
+    )
     amount = Column(Numeric(12, 4), nullable=True, comment='支付金额')
 
     # Postback 事务性 Outbox 元数据；只保存配置引用，不保存 Facebook access token。
