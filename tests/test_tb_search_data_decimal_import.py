@@ -242,3 +242,25 @@ def test_excel_decimal_parser_rejects_database_precision_overflow(field_name, va
 )
 def test_excel_decimal_parser_accepts_database_precision_boundaries(field_name, value):
     assert _parse_decimal_cell(value, field_name) == Decimal(value)
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [(None, Decimal("0")), ("0", Decimal("0")), ("1", Decimal("1")),
+     ("0.1250", Decimal("0.1250")), (Decimal("0.5000"), Decimal("0.5000"))],
+)
+def test_tb_search_deduct_ratio_accepts_valid_values(value, expected):
+    from app.api_v1.tb_search_data import _parse_deduct_ratio
+
+    assert _parse_deduct_ratio(value, "ratio") == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["-0.0001", "1.0001", "NaN", "Infinity", "-Infinity", "0.12345", "invalid"],
+)
+def test_tb_search_deduct_ratio_rejects_invalid_values(value):
+    from app.api_v1.tb_search_data import _parse_deduct_ratio
+
+    with pytest.raises(ValueError):
+        _parse_deduct_ratio(value, "ratio")
+
