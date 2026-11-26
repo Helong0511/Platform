@@ -1,5 +1,6 @@
 """CPL 扣量统计口径与应用时区回归测试。"""
 from datetime import datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -123,3 +124,39 @@ def test_financial_event_timestamps_are_truncated_to_mysql_datetime_precision():
     # SQLAlchemy ColumnDefault 在执行时传入 ExecutionContext；直接调用时也应模拟该参数。
     assert postback_default(None).microsecond == 0
     assert deduction_default(None).microsecond == 0
+
+
+
+def test_deduction_amount_calculation_preserves_fractional_currency_precision():
+    config = SimpleNamespace(
+        enable_amount_deduction=True,
+        amount_deduction_ratio=Decimal("0.125"),
+    )
+    final_amount, deducted_amount = DeductionManager(None).calculate_amount_deduction(
+        Decimal("10.1234"),
+        config,
+    )
+    assert final_amount == Decimal("8.8580")
+    assert deducted_amount == Decimal("1.2654")
+
+
+def test_deduction_amount_calculation_does_not_convert_through_float():
+    config = SimpleNamespace(
+        enable_amount_deduction=True,
+        amount_deduction_ratio=Decimal("0.333333"),
+    )
+    final_amount, deducted_amount = DeductionManager(None).calculate_amount_deduction(
+        Decimal("123456789.123456"),
+        config,
+    )
+    assert final_amount + deducted_amount == Decimal("123456789.123456")
+    assert isinstance(final_amount, Decimal)
+    assert isinstance(deducted_amount, Decimal)
+
+
+def test_deduction_export_formatter_keeps_three_and_six_decimal_values():
+    from app.services.cpl.deduction.mappers import _format_amount
+
+    assert _format_amount(Decimal("12.345")) == "12.345"
+    assert _format_amount(Decimal("12.345678")) == "12.345678"
+    assert _format_amount(Decimal("12.000000")) == "12.000000"
