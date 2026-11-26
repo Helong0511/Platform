@@ -81,7 +81,11 @@ def _build_fbc_value(fbclid: Optional[str], click_time: Optional[datetime]) -> O
     normalized_fbclid = str(fbclid or "").strip()
     if not normalized_fbclid or click_time is None:
         return None
-    click_timestamp = _app_datetime_to_unix_timestamp(click_time)
+    try:
+        click_timestamp = _app_datetime_to_unix_timestamp(click_time)
+    except ValueError:
+        # 点击时间处于 DST 歧义/不存在区间时，不伪造 fbc；不影响有效 event_time 上报。
+        return None
     return f"fb.1.{click_timestamp}.{normalized_fbclid}"
 
 
