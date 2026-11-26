@@ -849,6 +849,7 @@ async def test_mysql_outbox_pixel_destination_is_bound_once_and_cannot_silently_
                 platform="meta",
                 identity_scope="platform_scoped",
                 destination_pixel_id=None,
+                destination_api_version_pending=True,
                 conversion_id=f"conversion-{identity}",
                 status="pending",
                 outbox_enqueued=True,
@@ -867,27 +868,32 @@ async def test_mysql_outbox_pixel_destination_is_bound_once_and_cannot_silently_
             lease_token=lease_token,
             platform="meta",
             pixel_id="pixel-A",
+            api_version="v23.0",
         )
         same_pixel_retry = await outbox_module._bind_outbox_destination(
             report_id,
             lease_token=lease_token,
             platform="meta",
             pixel_id="pixel-A",
+            api_version="v24.0",
         )
         changed_pixel = await outbox_module._bind_outbox_destination(
             report_id,
             lease_token=lease_token,
             platform="meta",
             pixel_id="pixel-B",
+            api_version="v24.0",
         )
 
-        assert first_bind is True
-        assert same_pixel_retry is True
-        assert changed_pixel is False
+        assert first_bind == "v23.0"
+        assert same_pixel_retry == "v23.0"
+        assert changed_pixel is None
 
         async with session_factory() as session:
             persisted = await session.get(ThirdPartyReportLog, report_id)
             assert persisted.destination_pixel_id == "pixel-A"
+            assert persisted.destination_api_version == "v23.0"
+            assert persisted.destination_api_version_pending is False
     finally:
         if engine is not None:
             await engine.dispose()
