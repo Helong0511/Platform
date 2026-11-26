@@ -89,6 +89,21 @@ def _parse_decimal_cell(value, field_name: str, default: Decimal = Decimal("0"))
     return parsed
 
 
+def _parse_nonnegative_integer_cell(value, field_name: str) -> int:
+    """严格解析非负计数列，拒绝小数、负数和非有限值。"""
+    if _is_blank_excel_cell(value):
+        return 0
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError(f"{field_name}必须是非负整数") from exc
+    if not parsed.is_finite() or parsed < 0 or parsed != parsed.to_integral_value():
+        raise ValueError(f"{field_name}必须是非负整数")
+    if parsed > Decimal("2147483647"):
+        raise ValueError(f"{field_name}超出数据库整数范围")
+    return int(parsed)
+
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -452,10 +467,10 @@ async def import_tb_search_data(
                 
 
                 # 解析数值
-                redirects = int(row.get("REDIRECTS", 0)) if pd.notna(row.get("REDIRECTS")) else 0
-                searches = int(row.get("SEARCHES", 0)) if pd.notna(row.get("SEARCHES")) else 0
-                monetized = int(row.get("MONETIZED", 0)) if pd.notna(row.get("MONETIZED")) else 0
-                clicks = int(row.get("CLICKS", 0)) if pd.notna(row.get("CLICKS")) else 0
+                redirects = _parse_nonnegative_integer_cell(row.get("REDIRECTS"), "REDIRECTS")
+                searches = _parse_nonnegative_integer_cell(row.get("SEARCHES"), "SEARCHES")
+                monetized = _parse_nonnegative_integer_cell(row.get("MONETIZED"), "MONETIZED")
+                clicks = _parse_nonnegative_integer_cell(row.get("CLICKS"), "CLICKS")
                 
                 # 原始收入和 RPM 全程使用 Decimal，避免 float 引入二进制误差。
                 revenue_origin = _parse_decimal_cell(
