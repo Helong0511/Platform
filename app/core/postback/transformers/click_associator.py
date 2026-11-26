@@ -7,7 +7,7 @@ import asyncio
 import logging
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from app.core.tracking.click_token import resolve_click_from_token
