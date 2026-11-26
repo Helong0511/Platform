@@ -61,6 +61,4 @@ def test_decimal_infinity_is_not_treated_as_an_empty_rpm_cell():
 
 
 def test_pandas_nan_is_treated_as_an_empty_excel_cell():
-    import math
-
     assert _is_blank_excel_cell(float("nan")) is True
