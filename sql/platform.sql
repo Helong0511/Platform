@@ -485,6 +485,8 @@ CREATE TABLE IF NOT EXISTS `conversion_deduction_logs`  (
   `deducted_amount` DECIMAL(10, 2) NULL DEFAULT 0.00 COMMENT '扣减的转化金额',
   `final_volume` INT NULL DEFAULT 1 COMMENT '最终转化数量（扣减后）',
   `final_amount` DECIMAL(10, 2) NOT NULL COMMENT '最终转化金额（扣减后）',
+  `currency` VARCHAR(10) NOT NULL DEFAULT 'USD' COMMENT '扣减金额对应的 ISO 4217 币种',
+  `currency_source` VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd' COMMENT '扣减金额币种来源归因',
   `deduction_config_id` INT NULL DEFAULT NULL COMMENT '使用的扣减配置ID',
   `volume_deduction_ratio` DECIMAL(5, 4) NULL DEFAULT NULL COMMENT '使用的扣量比例',
   `amount_deduction_ratio` DECIMAL(5, 4) NULL DEFAULT NULL COMMENT '使用的扣金额比例',
