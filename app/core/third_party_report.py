@@ -23,7 +23,7 @@ from app.core.telegram.message_sender import send_telegram_message_async as send
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.third_party_currency import resolve_currency, validate_purchase_payload
-from app.core.utils import APP_TIMEZONE, get_app_now_naive, get_app_now_sql_expression
+from app.core.utils import APP_TIMEZONE, get_app_now_naive, get_app_now_sql_expression, localize_app_datetime
 from app.models.models import ThirdPartyReportLog, ThirdPartyReportIdentityLock
 from app.core.log_utils import mask_email, mask_hash_prefix, mask_phone
 
@@ -70,7 +70,7 @@ def _app_datetime_to_unix_timestamp(value: datetime) -> int:
     """将应用时区 naive DATETIME 或 aware datetime 转为 Unix 秒时间戳。"""
     if value.tzinfo is None:
         # 数据库 DATETIME 按应用时区存储；不能依赖运行主机的 TZ 环境变量。
-        localized = APP_TIMEZONE.localize(value, is_dst=None)
+        localized = localize_app_datetime(value)
     else:
         localized = value.astimezone(APP_TIMEZONE)
     return int(localized.timestamp())
