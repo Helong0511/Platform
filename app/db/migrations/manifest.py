@@ -227,6 +227,12 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     ),
 
     Migration(
+        revision="20261126_third_party_outbox_api_version_snapshot",
+        path="sql/migrations/20261126_third_party_outbox_api_version_snapshot.sql",
+        sha256="68e1ab515bdb84ef3fc26e7d898edd46140f5e4b8de4622c116b7b77e46ed439",
+        depends_on=("20261111_third_party_report_outbox",),
+    ),
+    Migration(
         revision="20261125_postback_approval_receipt_outcome",
         path="sql/migrations/20261125_postback_approval_receipt_outcome.sql",
         sha256="7280df97b834a95111b671ecb009ec3738a541513fed8b96aa00124c70eaaf76",

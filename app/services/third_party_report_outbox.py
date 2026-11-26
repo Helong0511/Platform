@@ -12,6 +12,7 @@ from typing import Optional
 from sqlalchemy import func, or_, select, update
 
 from app.core.database import AsyncSessionLocal
+from app.core.config import settings
 from app.core.utils import get_app_now_naive, get_app_now_sql_expression
 from app.core.third_party_report import (
     REPORT_LOG_LEASE_SECONDS,
@@ -245,10 +246,14 @@ async def _bind_outbox_destination(
     lease_token,
     platform: str,
     pixel_id: str,
-) -> bool:
-    """在当前有效租约内绑定首次解析的 Pixel；后续配置变更不得改投目的地。"""
+    api_version: Optional[str],
+) -> Optional[str]:
+    """在当前有效租约内冻结首次解析的 Pixel 与 API 版本；只返回持久化版本。"""
     if not platform or not pixel_id or not isinstance(lease_token, str) or len(lease_token) != 32:
-        return False
+        return None
+    normalized_api_version = (api_version or settings.FACEBOOK_API_VERSION or "v23.0").strip()
+    if not normalized_api_version or len(normalized_api_version) > 20:
+        return None
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             update(ThirdPartyReportLog)
@@ -266,14 +271,18 @@ async def _bind_outbox_destination(
                     ThirdPartyReportLog.destination_pixel_id == pixel_id,
                 ),
             )
-            .values(destination_pixel_id=pixel_id)
+            .values(
+                destination_pixel_id=pixel_id,
+                destination_api_version=func.coalesce(
+                    ThirdPartyReportLog.destination_api_version,
+                    normalized_api_version,
+                ),
+            )
         )
         await db.commit()
-        if (result.rowcount or 0) == 1:
-            return True
-        # MySQL changed-rows 模式下相同 Pixel 更新可能返回 0；回读确认当前租约与目的地。
+        # 必须回读数据库中首次冻结的版本；后续配置变化不得覆盖它。
         current = await db.scalar(
-            select(ThirdPartyReportLog.id).where(
+            select(ThirdPartyReportLog.destination_api_version).where(
                 ThirdPartyReportLog.id == report_log_id,
                 ThirdPartyReportLog.outbox_enqueued.is_(True),
                 ThirdPartyReportLog.identity_scope == "platform_scoped",
@@ -285,7 +294,7 @@ async def _bind_outbox_destination(
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
             )
         )
-        return current is not None
+        return str(current) if current else None
 
 
 async def process_postback_report_outbox_item(report_log_id: int) -> dict:
@@ -460,12 +469,15 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
         return {"success": False, "retryable": True, "reason": "missing_pixel_credentials"}
 
     # Pixel ID 是非敏感目的地标识；首次解析后固定绑定，后续配置变更不得悄悄改投其它 Pixel。
-    if not await _bind_outbox_destination(
+    frozen_api_version = await _bind_outbox_destination(
         report_log_id,
         lease_token=lease_token,
         platform=payload["platform"],
         pixel_id=pixel_id,
-    ):
+        api_version=api_version,
+    )
+    # 兼容旧测试替身返回 bool；真实实现始终返回数据库中已冻结的版本字符串。
+    if not frozen_api_version:
         now = get_app_now_naive()
         await update_report_log(
             report_log_id,
@@ -490,7 +502,9 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
         ua=payload["ua"],
         facebook_pixel_id=pixel_id,
         facebook_access_token=access_token,
-        facebook_api_version=api_version,
+        facebook_api_version=(
+            frozen_api_version if isinstance(frozen_api_version, str) else api_version
+        ),
         source=payload["source"],
         use_hash=payload["use_hash"],
         conversion_id=payload["conversion_id"],

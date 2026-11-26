@@ -51,6 +51,11 @@ class ThirdPartyReportLog(Base):
         nullable=True,
         comment="Meta Pixel 目的地 ID，用于同目的地事件关联与配置变更核验",
     )
+    destination_api_version = Column(
+        String(20),
+        nullable=True,
+        comment="首次发送时冻结的 Meta Graph API 版本；不保存凭据",
+    )
     use_hash = Column(Boolean, default=True, nullable=False, comment='是否对email、ip、phone进行哈希处理：True=哈希，False=不哈希')
     email = Column(String(255), nullable=True, comment='邮箱（原始值）')
     ip = Column(String(50), nullable=True, comment='IP地址（原始值）')
