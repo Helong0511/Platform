@@ -3,6 +3,7 @@ import pytest
 from app.core.postback.transformers.normalizer import DataNormalizer
 from app.core.postback.bft_handler import BftPostbackHandler
 from app.models.postback import PostbackConversion, PendingPostbackConversion
+from scripts.backfill_currency_attribution import extract_currency
 
 
 @pytest.mark.parametrize(
@@ -60,3 +61,20 @@ def test_pending_postback_conversion_persists_currency_and_source_defaults():
     assert str(currency.server_default.arg).strip("'") == "USD"
     assert source.default.arg == "system_fallback_usd"
     assert str(source.server_default.arg).strip("'") == "system_fallback_usd"
+
+
+@pytest.mark.parametrize(
+    ("raw_data", "expected_currency", "expected_source"),
+    [
+        ('{"currency":"cny"}', "CNY", "upstream_field:currency"),
+        ('{"currency_code":" eur "}', "EUR", "upstream_field:currency_code"),
+        ('{"currencyCode":"JPY"}', "JPY", "upstream_field:currencyCode"),
+        ('{"_payload":{"currency":"gbp"}}', "GBP", "upstream_field:currency"),
+        ('{"payout":"10"}', "USD", "system_fallback_usd"),
+        ("not-json", "USD", "system_fallback_usd"),
+    ],
+)
+def test_historical_currency_backfill_extracts_source_without_guessing(
+    raw_data, expected_currency, expected_source
+):
+    assert extract_currency(raw_data) == (expected_currency, expected_source)
