@@ -1372,3 +1372,45 @@ async def test_enqueue_existing_lease_uses_database_clock_not_worker_clock(monke
     assert "report_start_time <= timestampadd" in captured["lease_sql"]
     assert "utc_timestamp()" in captured["lease_sql"]
     assert captured["flushed"] is True
+
+async def test_outbox_destination_freezes_first_api_version(monkeypatch):
+    from sqlalchemy.dialects import mysql
+
+    captured = {}
+
+    class FakeDB:
+        async def execute(self, statement):
+            captured["update_sql"] = str(statement.compile(dialect=mysql.dialect())).lower()
+            return type("Result", (), {"rowcount": 1})()
+
+        async def scalar(self, statement):
+            captured["read_sql"] = str(statement.compile(dialect=mysql.dialect())).lower()
+            # 模拟数据库中已冻结的旧版本；当前配置已升级，不能覆盖它。
+            return "v22.0"
+
+        async def commit(self):
+            captured["committed"] = True
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+
+    frozen = await outbox._bind_outbox_destination(
+        501,
+        lease_token="a" * 32,
+        platform="bft",
+        pixel_id="pixel-501",
+        api_version="v23.0",
+    )
+
+    assert frozen == "v22.0"
+    assert captured["committed"] is True
+    assert "coalesce(third_party_report_logs.destination_api_version" in captured["update_sql"]
+    assert "third_party_report_logs.lease_token =" in captured["update_sql"]
+    assert "third_party_report_logs.destination_api_version" in captured["read_sql"]
+    assert "third_party_report_logs.lease_token =" in captured["read_sql"]
