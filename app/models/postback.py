@@ -317,7 +317,8 @@ class CloakConfig(Base):
         String(10),
         nullable=True,
         default='USD',
-        comment='购物类事件货币代码（如 USD）',
+        server_default=text("'USD'"),
+        comment='购物类事件货币代码；缺失时默认 USD',
     )
     click_report_enabled = Column(
         Boolean,
@@ -342,7 +343,8 @@ class CloakConfig(Base):
         String(10),
         nullable=True,
         default='USD',
-        comment='加载上报为 Purchase 时的货币',
+        server_default=text("'USD'"),
+        comment='加载上报为 Purchase 时的货币；缺失时默认 USD',
     )
     postback_report_enabled = Column(
         Boolean,
@@ -364,7 +366,9 @@ class CloakConfig(Base):
     postback_report_currency = Column(
         String(10),
         nullable=True,
-        comment='postback Purchase 货币；NULL 表示未配置，线上必须使用上游明确币种',
+        default='USD',
+        server_default=text("'USD'"),
+        comment='postback Purchase 货币；缺失时使用 USD 兜底',
     )
     is_enabled = Column(Boolean, default=True, nullable=False, index=True, comment='是否启用')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
