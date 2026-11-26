@@ -125,3 +125,32 @@ def test_tb_search_manual_update_accepts_zero_and_maximum_counter():
     update = TBSearchDataUpdate(redirects=0, clicks=2147483647)
     assert update.redirects == 0
     assert update.clicks == 2147483647
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "product_id",
+        "country_code",
+        "redirects",
+        "searches",
+        "monetized",
+        "clicks",
+        "revenue",
+        "rpm",
+        "revenue_before_deduct",
+        "rpm_before_deduct",
+    ],
+)
+def test_tb_search_manual_update_rejects_explicit_null_for_non_nullable_fields(field_name):
+    from app.schemas.tb_search_data import TBSearchDataUpdate
+
+    with pytest.raises(ValueError, match="不能显式设置为 null"):
+        TBSearchDataUpdate(**{field_name: None})
+
+
+def test_tb_search_manual_update_allows_omitted_fields():
+    from app.schemas.tb_search_data import TBSearchDataUpdate
+
+    update = TBSearchDataUpdate()
+    assert update.model_fields_set == set()
