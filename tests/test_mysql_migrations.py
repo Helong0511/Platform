@@ -2423,3 +2423,109 @@ async def test_mysql_cache_generation_updates_are_serialized_and_outbox_is_trans
             cursor.execute("DROP TABLE IF EXISTS cache_invalidation_outbox")
             cursor.execute("DROP TABLE IF EXISTS cache_namespace_generations")
         connection.close()
+
+
+def test_conversion_deduction_log_conversion_fk_migration_is_idempotent_and_preserves_log():
+    """升级 BIGINT 子字段后建立 FK；重复执行安全，删除转化只清空关联 ID。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS conversion_deduction_logs")
+            cursor.execute("DROP TABLE IF EXISTS postback_conversions")
+            cursor.execute(
+                "CREATE TABLE postback_conversions ("
+                "id INT NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)"
+                ") ENGINE=InnoDB"
+            )
+            cursor.execute(
+                "CREATE TABLE conversion_deduction_logs ("
+                "id BIGINT NOT NULL AUTO_INCREMENT, "
+                "conversion_id BIGINT NULL, "
+                "PRIMARY KEY (id), KEY idx_conversion_id (conversion_id)"
+                ") ENGINE=InnoDB"
+            )
+            cursor.execute("INSERT INTO postback_conversions VALUES ()")
+            cursor.execute(
+                "INSERT INTO conversion_deduction_logs (conversion_id) VALUES (1)"
+            )
+
+            migration = (
+                "sql/migrations/"
+                "20261127_conversion_deduction_log_conversion_fk.sql"
+            )
+            _run_sql_file(cursor, migration)
+            _run_sql_file(cursor, migration)
+
+            cursor.execute(
+                "SHOW COLUMNS FROM conversion_deduction_logs LIKE 'conversion_id'"
+            )
+            column = cursor.fetchone()
+            assert column is not None
+            assert column[1].lower() == "int"
+            assert column[2] == "YES"
+
+            cursor.execute(
+                "SELECT DELETE_RULE, UPDATE_RULE "
+                "FROM information_schema.REFERENTIAL_CONSTRAINTS "
+                "WHERE CONSTRAINT_SCHEMA = DATABASE() "
+                "AND TABLE_NAME = 'conversion_deduction_logs' "
+                "AND CONSTRAINT_NAME = 'fk_cdl_postback_conversion'"
+            )
+            assert cursor.fetchone() == ("SET NULL", "RESTRICT")
+
+            cursor.execute("DELETE FROM postback_conversions WHERE id = 1")
+            cursor.execute(
+                "SELECT conversion_id FROM conversion_deduction_logs WHERE id = 1"
+            )
+            assert cursor.fetchone() == (None,)
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS conversion_deduction_logs")
+            cursor.execute("DROP TABLE IF EXISTS postback_conversions")
+        connection.close()
+
+
+def test_conversion_deduction_log_conversion_fk_migration_rejects_orphans_before_alter():
+    """孤儿引用存在时拒绝迁移，不能先收窄字段或丢弃扣减日志。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS conversion_deduction_logs")
+            cursor.execute("DROP TABLE IF EXISTS postback_conversions")
+            cursor.execute(
+                "CREATE TABLE postback_conversions ("
+                "id INT NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)"
+                ") ENGINE=InnoDB"
+            )
+            cursor.execute(
+                "CREATE TABLE conversion_deduction_logs ("
+                "id BIGINT NOT NULL AUTO_INCREMENT, "
+                "conversion_id BIGINT NULL, PRIMARY KEY (id)"
+                ") ENGINE=InnoDB"
+            )
+            cursor.execute(
+                "INSERT INTO conversion_deduction_logs (conversion_id) VALUES (987654)"
+            )
+
+            with pytest.raises(pymysql.err.OperationalError):
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/"
+                    "20261127_conversion_deduction_log_conversion_fk.sql",
+                )
+
+            cursor.execute(
+                "SHOW COLUMNS FROM conversion_deduction_logs LIKE 'conversion_id'"
+            )
+            column = cursor.fetchone()
+            assert column is not None
+            assert column[1].lower() == "bigint"
+            cursor.execute(
+                "SELECT conversion_id FROM conversion_deduction_logs WHERE id = 1"
+            )
+            assert cursor.fetchone() == (987654,)
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS conversion_deduction_logs")
+            cursor.execute("DROP TABLE IF EXISTS postback_conversions")
+        connection.close()
