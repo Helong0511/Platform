@@ -1,5 +1,5 @@
 -- 统一斗篷三阶段币种默认值，并为 Postback/第三方 Purchase 持久化币种来源归因。
--- 只对缺失币种的 Purchase 记录补 USD；不改写已有非空币种和金额。
+-- 缺失币种统一补 USD；还原可证明的上游字段来源；不改写任何金额。
 -- 既有非空币种的历史来源无法从该表单独证明，标记 legacy_unknown，后续需结合原始回调/配置快照审计。
 ALTER TABLE cloak_configs
     MODIFY COLUMN report_currency VARCHAR(10) NULL DEFAULT 'USD'
@@ -80,6 +80,9 @@ SET
             NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currency'))), ''),
             NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currency_code'))), ''),
             NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currencyCode'))), ''),
+            NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$._payload.currency'))), ''),
+            NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$._payload.currency_code'))), ''),
+            NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$._payload.currencyCode'))), ''),
             'USD'
         ))
         ELSE 'USD'
@@ -93,6 +96,15 @@ SET
             THEN 'upstream_field:currency_code'
         WHEN JSON_VALID(raw_data)
              AND NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currencyCode'))), '') IS NOT NULL
+            THEN 'upstream_field:currencyCode'
+        WHEN JSON_VALID(raw_data)
+             AND NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$._payload.currency'))), '') IS NOT NULL
+            THEN 'upstream_field:currency'
+        WHEN JSON_VALID(raw_data)
+             AND NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$._payload.currency_code'))), '') IS NOT NULL
+            THEN 'upstream_field:currency_code'
+        WHEN JSON_VALID(raw_data)
+             AND NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$._payload.currencyCode'))), '') IS NOT NULL
             THEN 'upstream_field:currencyCode'
         ELSE 'system_fallback_usd'
     END;
