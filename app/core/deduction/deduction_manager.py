@@ -16,8 +16,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import and_, func
+from sqlalchemy import select, and_, func
 from datetime import timedelta
 
 from app.models.models import (
