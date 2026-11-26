@@ -140,6 +140,7 @@ async def enqueue_postback_report(
         # 仅允许从未尝试发送、且没有活动租约的旧日志升级为 Outbox；
         # 此时补充非敏感配置引用，不改变事件身份及 PII/金额等业务载荷。
         existing.outbox_enqueued = True
+        existing.destination_api_version_pending = True
         existing.short_link_id = short_link_id
         existing.cloak_name = cloak_name
         existing.short_code = short_code
@@ -179,6 +180,7 @@ async def enqueue_postback_report(
             else "缺少短链接/斗篷配置引用，无法自动解析像素凭据"
         ),
         outbox_enqueued=True,
+        destination_api_version_pending=True,
         short_link_id=short_link_id,
         cloak_name=cloak_name,
         short_code=short_code,
@@ -270,6 +272,10 @@ async def _bind_outbox_destination(
                     ThirdPartyReportLog.destination_pixel_id.is_(None),
                     ThirdPartyReportLog.destination_pixel_id == pixel_id,
                 ),
+                or_(
+                    ThirdPartyReportLog.destination_api_version.is_not(None),
+                    ThirdPartyReportLog.destination_api_version_pending.is_(True),
+                ),
             )
             .values(
                 destination_pixel_id=pixel_id,
@@ -277,6 +283,7 @@ async def _bind_outbox_destination(
                     ThirdPartyReportLog.destination_api_version,
                     normalized_api_version,
                 ),
+                destination_api_version_pending=False,
             )
         )
         await db.commit()
@@ -482,7 +489,7 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
         await update_report_log(
             report_log_id,
             status="failed",
-            error_message="像素目的地与事件首次绑定的 Pixel 不一致，需要人工核对",
+            error_message="事件缺少可验证的 Pixel/API 版本快照，或与已绑定目的地不一致，需要人工核对",
             report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
             completed_at=now,
             clear_next_retry_time=True,

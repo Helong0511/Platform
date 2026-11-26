@@ -1412,5 +1412,44 @@ async def test_outbox_destination_freezes_first_api_version(monkeypatch):
     assert captured["committed"] is True
     assert "coalesce(third_party_report_logs.destination_api_version" in captured["update_sql"]
     assert "third_party_report_logs.lease_token =" in captured["update_sql"]
+    assert "third_party_report_logs.destination_api_version_pending is true" in captured["update_sql"]
     assert "third_party_report_logs.destination_api_version" in captured["read_sql"]
     assert "third_party_report_logs.lease_token =" in captured["read_sql"]
+
+async def test_outbox_legacy_event_without_api_snapshot_is_not_assigned_current_version(monkeypatch):
+    from sqlalchemy.dialects import mysql
+
+    captured = {}
+
+    class FakeDB:
+        async def execute(self, statement):
+            captured["update_sql"] = str(statement.compile(dialect=mysql.dialect())).lower()
+            return type("Result", (), {"rowcount": 0})()
+
+        async def scalar(self, statement):
+            captured["read_sql"] = str(statement.compile(dialect=mysql.dialect())).lower()
+            return None
+
+        async def commit(self):
+            captured["committed"] = True
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+
+    frozen = await outbox._bind_outbox_destination(
+        502,
+        lease_token="b" * 32,
+        platform="bft",
+        pixel_id="pixel-502",
+        api_version="v23.0",
+    )
+
+    assert frozen is None
+    assert captured["committed"] is True
+    assert "third_party_report_logs.destination_api_version_pending is true" in captured["update_sql"]

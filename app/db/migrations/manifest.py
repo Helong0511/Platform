@@ -235,7 +235,7 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     Migration(
         revision="20261126_third_party_outbox_api_version_snapshot",
         path="sql/migrations/20261126_third_party_outbox_api_version_snapshot.sql",
-        sha256="68e1ab515bdb84ef3fc26e7d898edd46140f5e4b8de4622c116b7b77e46ed439",
+        sha256="d9c3cdccd368a163fe89caeddd5097f0e7935755a97987fd84299d169f5a9306",
         depends_on=("20261111_third_party_report_outbox",),
     ),
 )
