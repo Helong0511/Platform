@@ -8,11 +8,11 @@ DEFAULT_CURRENCY = "USD"
 
 # ISO 4217 特殊用途代码，不代表可用于 Purchase 结算的实际货币。
 _NON_SETTLEMENT_CODES = {
-    "XTS",  # 测试代码
-    "XXX",  # 无货币
+    "XTS", "XXX",                 # 测试代码、无货币
     "XAU", "XAG", "XPD", "XPT",  # 贵金属
     "XBA", "XBB", "XBC", "XBD",  # 债券市场单位
-    "XDR", "XSU", "XUA",          # 特殊记账单位
+    "XAD", "XDR", "XSU", "XUA",  # 特殊记账/基金单位
+    "BOV", "CHE", "CHW", "CLF", "COU", "MXV", "USN",  # ISO 基金代码，非日常结算货币
 }
 
 
