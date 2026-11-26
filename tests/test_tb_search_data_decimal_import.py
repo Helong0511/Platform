@@ -131,7 +131,6 @@ def test_tb_search_manual_update_accepts_zero_and_maximum_counter():
     "field_name",
     [
         "product_id",
-        "country_code",
         "redirects",
         "searches",
         "monetized",
@@ -154,3 +153,11 @@ def test_tb_search_manual_update_allows_omitted_fields():
 
     update = TBSearchDataUpdate()
     assert update.model_fields_set == set()
+
+
+def test_tb_search_manual_update_allows_null_country_code():
+    from app.schemas.tb_search_data import TBSearchDataUpdate
+
+    update = TBSearchDataUpdate(country_code=None)
+    assert update.country_code is None
+    assert "country_code" in update.model_fields_set
