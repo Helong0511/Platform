@@ -2,7 +2,7 @@
 转化扣减配置与日志 ORM 模型。
 """
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
-    UniqueConstraint, Date, Numeric, Computed, CheckConstraint
+    UniqueConstraint, Date, Numeric, Computed, CheckConstraint, text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
