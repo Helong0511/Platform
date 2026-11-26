@@ -1,5 +1,8 @@
+import pytest
+from pydantic import ValidationError
+
 from app.models.postback import CloakConfig
-import pytest\nfrom pydantic import ValidationError\n\nfrom app.schemas.cloak import CloakConfigCreate, CloakConfigUpdate
+from app.schemas.cloak import CloakConfigCreate, CloakConfigUpdate
 
 
 def test_all_cloak_currency_columns_have_usd_orm_and_database_defaults():
@@ -26,6 +29,7 @@ def test_cloak_update_keeps_omitted_currency_as_no_change():
     assert update.report_currency is None
     assert update.load_report_currency is None
     assert update.postback_report_currency is None
+
 
 @pytest.mark.parametrize("field", ["report_currency", "load_report_currency", "postback_report_currency"])
 def test_cloak_create_rejects_non_iso_currency(field):
