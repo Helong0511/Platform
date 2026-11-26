@@ -14,9 +14,8 @@ import logging
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.errors import ErrorCode
@@ -24,6 +23,7 @@ from app.core.exceptions import raise_api_exception
 from app.core.pagination import calculate_pagination_offset
 from app.core.postback.transformers.click_associator import ClickAssociator
 from app.core.postback_event_name import normalize_event_name
+from app.core.third_party_currency import resolve_currency, validate_iso_currency
 from app.core.tracking.click_token import resolve_click_from_token
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from app.core.postback.pending_lock import build_pending_for_update_statement
@@ -33,7 +33,7 @@ from app.core.postback.approval_audit import (
     persist_postback_approval_audit_independently,
 )
 from app.models.models import (
-    PendingPostbackConversion, PostbackConversion, PostbackEventReceipt, Product, Client, User
+    PendingPostbackConversion, PostbackConversion, PostbackEventReceipt, Product, Client, User, Offer
 )
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.schemas.postback import PendingPostbackConversionResponse, PostbackConversionResponse
@@ -123,6 +123,33 @@ class PostbackPendingService:
             已 add 至 session 的 PostbackConversion（status=Pending）
         """
         click_assoc = await self._resolve_click_assoc(pending, db)
+        currency, currency_source = resolve_currency(
+            pending.currency,
+            source=pending.currency_source,
+        )
+        offer_id = click_assoc.get("offer_id") if click_assoc else None
+        if offer_id:
+            offer_result = await db.execute(
+                select(Offer.payout_currency, Offer.payout_currency_source)
+                .where(Offer.id == offer_id)
+                .limit(1)
+            )
+            offer_currency_row = offer_result.one_or_none()
+            if offer_currency_row is None:
+                raise ValueError("待审批 Postback 关联的 Offer 不存在，无法确认 payout 币种")
+            offer_currency = validate_iso_currency(offer_currency_row[0] or "USD")
+            offer_currency_source = offer_currency_row[1] or "system_fallback_usd"
+            if currency_source.startswith("system_fallback"):
+                currency = offer_currency
+                currency_source = (
+                    "offer_config"
+                    if offer_currency_source != "system_fallback_usd"
+                    else "system_fallback_usd"
+                )
+            elif currency != offer_currency:
+                raise ValueError(
+                    f"待审批 Postback 币种 {currency} 与 Offer 配置币种 {offer_currency} 不一致"
+                )
         event_name = normalize_event_name(pending.event_name)
         pending.event_name = event_name
         conversion = PostbackConversion(
@@ -135,8 +162,8 @@ class PostbackPendingService:
             event_value=pending.event_value,
             original_payout=pending.original_payout,
             payout=pending.payout,
-            currency=pending.currency or "USD",
-            currency_source=pending.currency_source or "system_fallback_usd",
+            currency=currency,
+            currency_source=currency_source,
             devad_id=pending.devad_id,
             os=pending.os,
             carrier=pending.carrier,
