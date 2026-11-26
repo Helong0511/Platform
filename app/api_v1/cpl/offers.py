@@ -569,7 +569,7 @@ async def create_offer(
     offer_data = offer_in.model_dump()
     offer_data["_payout_currency_source"] = (
         "manual_config"
-        if "payout_currency" in offer_in.model_fields_set
+        if "payout_currency" in offer_in.model_fields_set and offer_in.payout_currency
         else "system_fallback_usd"
     )
     # ---------- 条件分支 ----------
