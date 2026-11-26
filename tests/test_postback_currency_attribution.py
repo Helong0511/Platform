@@ -5,7 +5,7 @@ from app.core.postback.bft_handler import BftPostbackHandler
 from app.models.postback import PostbackConversion, PendingPostbackConversion
 from app.models.deduction import ConversionDeductionLog
 from app.core.deduction.deduction_manager import DeductionResult
-from scripts.backfill_currency_attribution import extract_currency
+from scripts.backfill_currency_attribution import extract_currency, resolve_historical_postback_currency
 from app.core.postback.forwarding.url_builder import UrlBuilder
 
 
@@ -112,3 +112,20 @@ def test_downstream_get_postback_preserves_payout_currency():
 
     assert params["currency"] == "EUR"
     assert "currency=EUR" in url
+
+
+@pytest.mark.parametrize(
+    ("current_currency", "raw_data", "expected"),
+    [
+        ("USD", {"payout": "1.00"}, ("USD", "legacy_unknown")),
+        ("CNY", {"payout": "1.00"}, ("CNY", "legacy_unknown")),
+        ("USD", {"currency_code": "EUR"}, ("EUR", "upstream_field:currency_code")),
+        ("CNY", {"currency": "JPY"}, ("JPY", "upstream_field:currency")),
+    ],
+)
+def test_historical_postback_backfill_only_overwrites_currency_with_payload_evidence(
+    current_currency, raw_data, expected
+):
+    assert resolve_historical_postback_currency(
+        current_currency, "system_fallback_usd", raw_data
+    ) == expected
