@@ -290,7 +290,7 @@ def _resolve_fb_report_params(
         pixel_config: Optional[Dict[str, Any]],
         resolved_dp: Optional[str],
         dp_param: str,
-) -> tuple[bool, str, Optional[float], str, str, str]:
+) -> tuple[bool, str, Optional[Decimal], str, str, str]:
     """
     根据阶段与像素配置决定是否发送 CAPI，并解析事件名、金额、货币、source 标识。
 
@@ -299,7 +299,7 @@ def _resolve_fb_report_params(
     """
     send_fb = False
     report_event = "ViewContent"
-    report_value: Optional[float] = None
+    report_value: Optional[Decimal] = None
     report_currency = "USD"
     source = "short_link"
     conv_seg = "click"
@@ -318,7 +318,7 @@ def _resolve_fb_report_params(
             if rv is not None:
                 try:
                     report_value = rv if isinstance(rv, Decimal) else Decimal(str(rv))
-                except (TypeError, ValueError):
+                except (InvalidOperation, TypeError, ValueError):
                     report_value = None
             report_currency = (
                 (pixel_config.get("cloak_load_report_currency") or "USD").strip().upper()
@@ -342,7 +342,7 @@ def _resolve_fb_report_params(
             rv = pixel_config.get("cloak_report_value")
             if rv is not None:
                 try:
-                    report_value = float(rv)
+                    report_value = rv if isinstance(rv, Decimal) else Decimal(str(rv))
                 except (TypeError, ValueError):
                     report_value = None
             report_currency = (
