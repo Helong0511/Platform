@@ -23,7 +23,6 @@ def resolve_currency(value, *, source=None, default=DEFAULT_CURRENCY):
     cloak_config:postback 或 manual_override。调用方未提供来源时，
     非空值标记为 caller_supplied；缺失值标记为 system_fallback_usd。
     """
-    raw = value
     normalized = str(value).strip().upper() if value is not None else ""
     if not normalized:
         fallback = str(default or DEFAULT_CURRENCY).strip().upper()
