@@ -238,6 +238,13 @@ async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[Decimal, An
             else None
         ),
     )
+    ctx.normalized_data["currency"] = info.get(
+        "currency", ctx.normalized_data.get("currency") or "USD"
+    )
+    ctx.normalized_data["currency_source"] = info.get(
+        "currency_source",
+        ctx.normalized_data.get("currency_source") or "system_fallback_usd",
+    )
     ctx.final_payout = final_payout
     ctx.skip_save_and_forward = skip_save
     return final_payout, info, skip_save
