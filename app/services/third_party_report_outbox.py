@@ -50,12 +50,12 @@ async def enqueue_postback_report(
     phone: Optional[str],
     ua: Optional[str],
     currency: Optional[str],
-    currency_source: Optional[str] = None,
     amount: Optional[float],
     short_link_id: Optional[int],
     cloak_name: Optional[str],
     short_code: Optional[str],
     click_time,
+    currency_source: Optional[str] = None,
 ) -> int:
     """只写入当前转化事务，不 commit；返回可恢复的持久化 Outbox 行 ID。"""
     normalized_platform = (platform or "").strip()
