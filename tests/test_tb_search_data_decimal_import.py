@@ -62,3 +62,24 @@ def test_decimal_infinity_is_not_treated_as_an_empty_rpm_cell():
 
 def test_pandas_nan_is_treated_as_an_empty_excel_cell():
     assert _is_blank_excel_cell(float("nan")) is True
+
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["revenue", "rpm", "revenue_before_deduct", "rpm_before_deduct"],
+)
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity"])
+def test_tb_search_schema_rejects_non_finite_manual_amounts(field_name, value):
+    from app.schemas.tb_search_data import TBSearchDataUpdate
+
+    with pytest.raises(ValueError, match="有限数字"):
+        TBSearchDataUpdate(**{field_name: value})
+
+
+def test_tb_search_schema_accepts_finite_decimal_manual_amounts():
+    from app.schemas.tb_search_data import TBSearchDataUpdate
+
+    update = TBSearchDataUpdate(revenue="123.456789", rpm="0.123456")
+    assert update.revenue == Decimal("123.456789")
+    assert update.rpm == Decimal("0.123456")
