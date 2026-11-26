@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.redis_client import get_redis_client
 from app.core.utils import get_app_now_naive
-from app.models.models import PendingPostbackConversion, PendingPostbackQueueGuard
+from app.models.models import PendingPostbackConversion
+from app.core.third_party_currency import resolve_currency, PendingPostbackQueueGuard
 from app.core.postback_event_name import normalize_event_name
 
 logger = logging.getLogger(__name__)
@@ -259,6 +260,10 @@ class PendingPostbackIngestService:
         if len(raw_json.encode("utf-8")) > _PENDING_RAW_DATA_MAX_BYTES:
             return {"queued": False, "reason": "payload_too_large"}
 
+        currency, currency_source = resolve_currency(
+            normalized.get("currency"),
+            source=normalized.get("currency_source"),
+        )
         pending = PendingPostbackConversion(
             platform=platform,
             conversion_id=conversion_id,
@@ -266,6 +271,8 @@ class PendingPostbackIngestService:
             event_value=event_value,
             original_payout=payout,
             payout=payout,
+            currency=currency,
+            currency_source=currency_source,
             devad_id=normalized.get("devad_id"),
             os=normalized.get("os"),
             carrier=normalized.get("carrier"),
