@@ -141,6 +141,79 @@ PREPARE cdl_orphan_check FROM @cdl_orphan_check_sql;
 EXECUTE cdl_orphan_check;
 DEALLOCATE PREPARE cdl_orphan_check;
 
+-- 扣减账本必须容纳 ISO 4217 的三位小数币种（如 KWD/BHD/JOD）。
+-- 统一扩展到 DECIMAL(20,6)，只扩大精度/小数位，不做货币换算或历史金额重算。
+SET @cdl_amount_columns_ok = (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'conversion_deduction_logs'
+      AND COLUMN_NAME IN ('original_amount', 'deducted_amount', 'final_amount')
+      AND DATA_TYPE = 'decimal'
+      AND NUMERIC_PRECISION <= 20
+      AND NUMERIC_SCALE <= 6
+);
+SET @cdl_amount_columns_present = (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'conversion_deduction_logs'
+      AND COLUMN_NAME IN ('original_amount', 'deducted_amount', 'final_amount')
+);
+SET @cdl_amount_definition_check_sql = IF(
+    @cdl_amount_columns_present = 3 AND @cdl_amount_columns_ok = 3,
+    'SELECT 1',
+    'SELECT * FROM __cdl_deduction_amount_column_definition_mismatch__'
+);
+PREPARE cdl_amount_definition_check FROM @cdl_amount_definition_check_sql;
+EXECUTE cdl_amount_definition_check;
+DEALLOCATE PREPARE cdl_amount_definition_check;
+
+SET @cdl_original_amount_alter_sql = IF(
+    (SELECT NUMERIC_PRECISION FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversion_deduction_logs'
+       AND COLUMN_NAME = 'original_amount') < 20
+    OR
+    (SELECT NUMERIC_SCALE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversion_deduction_logs'
+       AND COLUMN_NAME = 'original_amount') < 6,
+    'ALTER TABLE conversion_deduction_logs MODIFY COLUMN original_amount DECIMAL(20,6) NOT NULL COMMENT ''原始转化金额''',
+    'SELECT 1'
+);
+PREPARE cdl_original_amount_alter FROM @cdl_original_amount_alter_sql;
+EXECUTE cdl_original_amount_alter;
+DEALLOCATE PREPARE cdl_original_amount_alter;
+
+SET @cdl_deducted_amount_alter_sql = IF(
+    (SELECT NUMERIC_PRECISION FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversion_deduction_logs'
+       AND COLUMN_NAME = 'deducted_amount') < 20
+    OR
+    (SELECT NUMERIC_SCALE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversion_deduction_logs'
+       AND COLUMN_NAME = 'deducted_amount') < 6,
+    'ALTER TABLE conversion_deduction_logs MODIFY COLUMN deducted_amount DECIMAL(20,6) NULL DEFAULT 0.000000 COMMENT ''扣减的转化金额''',
+    'SELECT 1'
+);
+PREPARE cdl_deducted_amount_alter FROM @cdl_deducted_amount_alter_sql;
+EXECUTE cdl_deducted_amount_alter;
+DEALLOCATE PREPARE cdl_deducted_amount_alter;
+
+SET @cdl_final_amount_alter_sql = IF(
+    (SELECT NUMERIC_PRECISION FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversion_deduction_logs'
+       AND COLUMN_NAME = 'final_amount') < 20
+    OR
+    (SELECT NUMERIC_SCALE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversion_deduction_logs'
+       AND COLUMN_NAME = 'final_amount') < 6,
+    'ALTER TABLE conversion_deduction_logs MODIFY COLUMN final_amount DECIMAL(20,6) NOT NULL COMMENT ''最终转化金额（扣减后）''',
+    'SELECT 1'
+);
+PREPARE cdl_final_amount_alter FROM @cdl_final_amount_alter_sql;
+EXECUTE cdl_final_amount_alter;
+DEALLOCATE PREPARE cdl_final_amount_alter;
+
 SET @cdl_log_id_alter_sql = IF(
     @cdl_log_id_column_type = 'bigint',
     'ALTER TABLE conversion_deduction_logs MODIFY COLUMN id INT NOT NULL AUTO_INCREMENT COMMENT ''记录ID''',
