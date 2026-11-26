@@ -76,6 +76,15 @@ def _app_datetime_to_unix_timestamp(value: datetime) -> int:
     return int(localized.timestamp())
 
 
+def _build_fbc_value(fbclid: Optional[str], click_time: Optional[datetime]) -> Optional[str]:
+    """只有同时具备原始 fbclid 与真实点击时间时才构造 fbc。"""
+    normalized_fbclid = str(fbclid or "").strip()
+    if not normalized_fbclid or click_time is None:
+        return None
+    click_timestamp = _app_datetime_to_unix_timestamp(click_time)
+    return f"fb.1.{click_timestamp}.{normalized_fbclid}"
+
+
 def _event_time_to_unix_timestamp(event_time: Optional[datetime]) -> int:
     """将事件发生时间转换为 Meta event_time；缺失时使用当前接收/发送时间。
 
@@ -1083,12 +1092,8 @@ async def send_third_party_report(
             # event_time 表示转化实际发生时间；click_time 仅用于 fbc 的点击时间戳。
             event_timestamp = _event_time_to_unix_timestamp(event_time)
 
-            # fbc 中段时间必须与 fbclid 产生时的点击时间一致，不能改用转化接收时间。
-            fbc_ts = (
-                _app_datetime_to_unix_timestamp(click_time)
-                if click_time is not None
-                else event_timestamp
-            )
+            # fbc 中段时间必须与 fbclid 产生时的点击时间一致；缺失点击时间时不伪造 fbc。
+            fbc_value = _build_fbc_value(adsid, click_time)
 
             # 构建用户数据
             user_data = {}
@@ -1107,8 +1112,8 @@ async def send_third_party_report(
             if ua:
                 user_data["client_user_agent"] = ua
 
-            if adsid:
-                user_data["fbc"] = f"fb.1.{fbc_ts}.{adsid}"
+            if fbc_value:
+                user_data["fbc"] = fbc_value
             event_data = {
                 "event_name": fb_event_name,
                 "event_time": event_timestamp,
