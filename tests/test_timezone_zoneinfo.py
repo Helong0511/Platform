@@ -2,7 +2,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from app.core.utils import APP_TIMEZONE, get_app_now, get_app_now_naive
+from app.core.utils import APP_TIMEZONE, get_app_now, get_app_now_naive, localize_app_datetime
 from app.schemas.base import datetime_encoder
 
 
@@ -26,3 +26,27 @@ def test_datetime_encoder_attaches_configured_timezone_to_naive_value():
 
     assert encoded == expected
     assert encoded.endswith(expected[-6:])
+
+
+def test_localize_app_datetime_rejects_nonexistent_dst_time():
+    import pytest
+
+    new_york = ZoneInfo("America/New_York")
+    with pytest.raises(ValueError, match="不存在"):
+        localize_app_datetime(datetime(2024, 3, 10, 2, 30), new_york)
+
+
+def test_localize_app_datetime_rejects_ambiguous_dst_time():
+    import pytest
+
+    new_york = ZoneInfo("America/New_York")
+    with pytest.raises(ValueError, match="无法唯一确定"):
+        localize_app_datetime(datetime(2024, 11, 3, 1, 30), new_york)
+
+
+def test_localize_app_datetime_accepts_unambiguous_local_time():
+    new_york = ZoneInfo("America/New_York")
+    value = datetime(2024, 11, 3, 3, 30)
+    localized = localize_app_datetime(value, new_york)
+    assert localized.tzinfo is new_york
+    assert localized.replace(tzinfo=None) == value
