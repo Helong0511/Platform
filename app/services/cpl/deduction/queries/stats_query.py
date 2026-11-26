@@ -2,6 +2,7 @@
 扣减日志聚合统计查询。
 """
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any, Dict, Optional
 
 from sqlalchemy import and_, func
@@ -54,9 +55,9 @@ class DeductionStatsQuery:
             row_original_volume = int(row.original_volume or 0)
             row_deducted_volume = int(row.deducted_volume or 0)
             row_final_volume = int(row.final_volume or 0)
-            row_original_amount = float(row.original_amount or 0)
-            row_deducted_amount = float(row.deducted_amount or 0)
-            row_final_amount = float(row.final_amount or 0)
+            row_original_amount = Decimal(row.original_amount or 0)
+            row_deducted_amount = Decimal(row.deducted_amount or 0)
+            row_final_amount = Decimal(row.final_amount or 0)
             original_volume += row_original_volume
             deducted_volume += row_deducted_volume
             final_volume += row_final_volume
@@ -66,7 +67,7 @@ class DeductionStatsQuery:
                 "deducted_amount": row_deducted_amount,
                 "final_amount": row_final_amount,
                 "amount_deduction_ratio": (
-                    row_deducted_amount / row_original_amount if row_original_amount > 0 else 0.0
+                    row_deducted_amount / row_original_amount if row_original_amount > 0 else Decimal('0')
                 ),
                 "original_volume": row_original_volume,
                 "deducted_volume": row_deducted_volume,
@@ -83,7 +84,7 @@ class DeductionStatsQuery:
             amount_deduction_ratio = only_currency["amount_deduction_ratio"]
         elif not currency_summaries:
             original_amount = deducted_amount = final_amount = 0.0
-            amount_deduction_ratio = 0.0
+            amount_deduction_ratio = Decimal('0')
         else:
             original_amount = deducted_amount = final_amount = None
             amount_deduction_ratio = None
@@ -180,7 +181,7 @@ class DeductionStatsQuery:
                 "volume_deduction_ratio": (row.deducted_volume or 0) / (row.original_volume or 1)
                 if row.original_volume
                 else 0.0,
-                "amount_deduction_ratio": (row.deducted_amount or 0) / (row.original_amount or 1)
+                "amount_deduction_ratio": Decimal(row.deducted_amount or 0) / Decimal(row.original_amount or 1)
                 if row.original_amount
                 else 0.0,
             }
