@@ -577,8 +577,9 @@ class ConversionService:
                 "conversion_count": stat["conversion_count"],
                 "cr": round(cr_val, 2),
                 "po": stat["po"],
-                "po_after_discount": round(po_after_discount, 2),
-                "revenue": revenue,
+                "po_after_discount": round(po_after_discount, 4),
+                "revenue": round(revenue, 4),
+                "currency": (offer.payout_currency if offer and offer.payout_currency else "USD"),
                 "adv_po": adv_po,
                 "pub_po": pub_po,
                 "geo": geo
@@ -587,14 +588,51 @@ class ConversionService:
         # 按点击数量排序
         stats_list.sort(key=lambda x: x['click_count'], reverse=True)
 
+        # 多币种必须分别汇总；禁止将 USD/EUR/KWD 等金额直接相加。
+        currency_summary_map: Dict[str, Dict[str, Any]] = {}
+        for item in stats_list:
+            currency_code = item["currency"]
+            currency_summary = currency_summary_map.setdefault(
+                currency_code,
+                {
+                    "currency": currency_code,
+                    "conversion_count": 0,
+                    "total_po": 0.0,
+                    "total_po_after_discount": 0.0,
+                    "total_profit": 0.0,
+                },
+            )
+            currency_summary["conversion_count"] += int(item["conversion_count"] or 0)
+            currency_summary["total_po"] += float(item["po"] or 0)
+            currency_summary["total_po_after_discount"] += float(item["po_after_discount"] or 0)
+            currency_summary["total_profit"] += (
+                float(item["po"] or 0) - float(item["po_after_discount"] or 0)
+            )
+        currency_summaries = [
+            {
+                **item,
+                "total_po": round(item["total_po"], 4),
+                "total_po_after_discount": round(item["total_po_after_discount"], 4),
+                "total_profit": round(item["total_profit"], 4),
+            }
+            for _, item in sorted(currency_summary_map.items())
+        ]
+        has_multiple_currencies = len(currency_summaries) > 1
+        summary_total_po = None if has_multiple_currencies else round(total_po, 4)
+        summary_total_po_after_discount = (
+            None if has_multiple_currencies else round(total_po_after_discount, 4)
+        )
+        summary_total_profit = None if has_multiple_currencies else round(total_profit, 4)
+
         # 返回最终的统计结果
         summary = {
             "total_clicks": total_clicks,
             "total_conversions": total_conversions,
             "cr": round(cr, 2),
-            "total_po": round(total_po, 2),
-            "total_po_after_discount": round(total_po_after_discount, 2),
-            "total_profit": round(total_profit, 2),
+            "total_po": summary_total_po,
+            "total_po_after_discount": summary_total_po_after_discount,
+            "total_profit": summary_total_profit,
+            "currency_summaries": currency_summaries,
             "conversion_cap": conversion_cap,
             "stats_list": stats_list,
             "start_date": start_date or (start_datetime.strftime("%Y-%m-%d")),
