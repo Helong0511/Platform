@@ -27,7 +27,7 @@
 - 斗篷 click/load/postback 三阶段配置默认 USD；ORM、Schema、运行时映射和测试上报统一处理。
 - Outbox 在入队时冻结币种及来源；Worker 重试沿用已持久化的币种和来源，不因配置变更重新推断。
 - 直接发送、管理员编辑和测试发送均走同一 ISO 校验逻辑。
-- `postback_conversions.currency` 与 `currency_source` 持久化 Postback payout 币种及来源，通用适配器/BFT 的字段归因会随转化记录保存。
+- `postback_conversions` 与 `pending_postback_conversions` 都持久化 payout 的 `currency` 和 `currency_source`；待审批通过时原样复制来源，通用适配器/BFT 的字段归因不会丢失。
 - `third_party_report_logs.currency_source` 持久化第三方上报币种来源，API 和管理端详情/列表可查看。
 
 ## 历史数据处理
@@ -35,7 +35,7 @@
 迁移只执行以下变更：
 
 - 斗篷三阶段配置中 NULL/空白币种设置为 USD，并把数据库默认值设置为 USD。
-- 历史 Postback 转化从原始 JSON 的 `currency` / `currency_code` / `currencyCode`（含 `_payload` 包装）还原币种和字段来源；确实缺失时设置 USD，来源为 `system_fallback_usd`。
+- 历史正式/待审批 Postback 转化从原始 JSON 的 `currency` / `currency_code` / `currencyCode`（含 `_payload` 包装）还原币种和字段来源；确实缺失时设置 USD，来源为 `system_fallback_usd`。
 - 历史第三方 Purchase 日志中缺失币种的行设置为 USD，来源为 `system_fallback_usd`。
 - 历史 Purchase 日志中已有非空币种的行来源标记为 `legacy_unknown`。迁移不猜测其来源，不修改已有币种和任何金额。
 - 历史非空币种仍须由后续只读审计识别无效/撤销代码，并结合 Postback 原始数据、历史配置快照、报表参数及审计记录还原来源；无证据的行继续保持 `legacy_unknown`，不能伪造来源。
@@ -43,11 +43,12 @@
 ## 上线前必须执行的只读核验
 
 1. 备份数据库并在生产结构副本执行迁移演练。
-2. 对 Postback 转化和第三方 Purchase 日志分别按 `currency, currency_source` 分组计数，核对 USD 回填数量与历史未知来源数量。
-3. 从 Postback 原始 JSON 和斗篷配置快照核对每条 `legacy_unknown` 的真实来源；输出可追踪的明细，不修改金额。
-4. 使用应用层 ISO 校验器对历史所有非空币种执行扫描，分别列出有效、撤销、无效和特殊用途代码。
-5. 检查新建、编辑、直接发送、Outbox Worker、人工重试和管理端测试发送都保存正确的来源。
-6. 仅在审计结果、迁移副本、MySQL 集成测试和当前 PR Head CI 全部通过后，才允许讨论发布。
+2. 对正式 Postback、待审批 Postback 和第三方 Purchase 日志分别按 `currency, currency_source` 分组计数，核对 USD 回填数量与历史未知来源数量。
+3. Postback 金额统计必须按 `platform + currency` 分组，禁止把不同币种的 payout 直接相加；管理端显示每条记录和统计分组的实际币种。
+4. 从 Postback 原始 JSON 和斗篷配置快照核对每条 `legacy_unknown` 的真实来源；输出可追踪的明细，不修改金额。
+5. 使用应用层 ISO 校验器对历史所有非空币种执行扫描，分别列出有效、撤销、无效和特殊用途代码。
+6. 检查新建、编辑、直接发送、Outbox Worker、人工重试和管理端测试发送都保存正确的来源。
+7. 仅在审计结果、迁移副本、MySQL 集成测试和当前 PR Head CI 全部通过后，才允许讨论发布。
 
 ## 关键限制
 
