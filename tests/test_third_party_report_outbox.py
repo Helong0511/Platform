@@ -101,6 +101,8 @@ async def test_enqueue_postback_report_reuses_existing_event(monkeypatch):
             "platform": "bft",
             "destination_pixel_id": None,
             "max_attempts": 3,
+            "amount": 3.0,
+            "currency": "USD",
         },
     )()
 
@@ -149,6 +151,52 @@ async def test_enqueue_postback_report_reuses_existing_event(monkeypatch):
     assert existing.short_link_id == 2
     assert existing.next_retry_time == datetime(2026, 11, 11, 12, 0, 0)
     assert db.flushed is True
+
+
+async def test_enqueue_rejects_duplicate_purchase_with_different_amount_or_currency(monkeypatch):
+    import pytest
+    from app.services.third_party_report_outbox import LegacyEventIdentityConflict
+
+    existing = type(
+        "Existing",
+        (),
+        {
+            "id": 810,
+            "status": "failed",
+            "next_retry_time": None,
+            "outbox_enqueued": True,
+            "identity_scope": "platform_scoped",
+            "platform": "bft",
+            "amount": 3.0,
+            "currency": "USD",
+        },
+    )()
+
+    class FakeDB:
+        async def scalar(self, statement):
+            return existing
+
+        async def flush(self):
+            raise AssertionError("冲突事件不得写入或修改 Outbox")
+
+    with pytest.raises(LegacyEventIdentityConflict, match="金额或币种不一致"):
+        await outbox.enqueue_postback_report(
+            FakeDB(),
+            platform="bft",
+            adsid="fbclid-existing-conflict",
+            event="Purchase",
+            conversion_id="conversion-existing-conflict",
+            email=None,
+            ip=None,
+            phone=None,
+            ua=None,
+            currency="EUR",
+            amount=9.0,
+            short_link_id=9,
+            cloak_name=None,
+            short_code=None,
+            click_time=None,
+        )
 
 
 async def test_enqueue_does_not_reopen_or_mutate_attempted_outbox_payload(monkeypatch):
