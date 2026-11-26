@@ -429,6 +429,10 @@ async def schedule_cloak_facebook_report(
     }
     if report_event == "Purchase":
         report_kwargs["currency"] = report_currency
+        report_kwargs["currency_source"] = (
+            f"cloak_config:{report_phase}:{resolved_dp}"
+            if resolved_dp else "system_fallback_usd"
+        )
         report_kwargs["amount"] = report_value
         report_kwargs["conversion_id"] = f"cloak_{conv_seg}_{short_code}_{fbclid}"[:200]
 
