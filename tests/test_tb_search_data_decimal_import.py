@@ -39,3 +39,9 @@ def test_apply_deduct_ratio_keeps_legacy_two_decimal_default():
     assert apply_deduct_ratio(
         Decimal("1.239"), Decimal("0.1")
     ) == Decimal("1.11")
+
+
+@pytest.mark.parametrize("value", [Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity")])
+def test_parse_decimal_cell_rejects_non_finite_decimal_instances(value):
+    with pytest.raises(ValueError):
+        _parse_decimal_cell(value, "REVENUE")
