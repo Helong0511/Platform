@@ -391,13 +391,6 @@ import { formatCurrency } from '@/utils/currencyFormat'
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.isAdmin)
 
-const hasMultipleCurrencies = computed(() => (summaryData.currency_summaries || []).length > 1)
-const formatSummaryValue = (value) => {
-  if (hasMultipleCurrencies.value) return '多币种分开统计'
-  const currency = summaryData.currency_summaries?.[0]?.currency || 'USD'
-  return formatCurrency(value, currency)
-}
-
 const {
   loading,
   dateRange,
@@ -421,6 +414,13 @@ const {
   displayConversion,
   initPage,
 } = useConversionSummary(isAdmin)
+
+const hasMultipleCurrencies = computed(() => (summaryData.currency_summaries || []).length > 1)
+const formatSummaryValue = (value) => {
+  if (hasMultipleCurrencies.value) return '多币种分开统计'
+  const currency = summaryData.currency_summaries?.[0]?.currency || 'USD'
+  return formatCurrency(value, currency)
+}
 
 const {
   columnSettingVisible,
