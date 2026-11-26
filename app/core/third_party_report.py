@@ -1747,7 +1747,7 @@ async def update_report_log_params(
                 log_entry.phone = phone
             if ua is not None:
                 log_entry.ua = ua
-            if log_entry.outbox_enqueued and log_entry.event == "Purchase" and (
+            if log_entry.event == "Purchase" and (
                 currency is not None or amount is not None
             ):
                 candidate_currency = currency if currency is not None else log_entry.currency
