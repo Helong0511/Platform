@@ -264,6 +264,13 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         sha256="f500206745f92ed0d2fcba74771bfb8076f81cf072257bb7ed86328b426b35ff",
         depends_on=("20261127_offer_payout_currency",),
     ),
+
+    Migration(
+        revision="20261129_postback_payout_decimal_precision",
+        path="sql/migrations/20261129_postback_payout_decimal_precision.sql",
+        sha256="4453dcff4a92899c3d9dd214aaf19a559107caeaf9d05e67957d937d6fa9bc3a",
+        depends_on=("20261128_offer_payout_decimal_precision",),
+    ),
 )
 
 _REVISION_PATTERN = re.compile(r"^20[0-9]{6}_[a-z0-9_]+$")
