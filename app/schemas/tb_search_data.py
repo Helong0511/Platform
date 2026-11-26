@@ -6,7 +6,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 
 from app.schemas.base import BaseSchema
 
@@ -31,6 +31,19 @@ class TBSearchDataBase(BaseSchema):
     # 减扣前字段仅管理员填充；客户响应保持 None，避免对照出扣减
     revenue_before_deduct: Decimal | None = None
     rpm_before_deduct: Decimal | None = None
+
+    @field_validator(
+        "revenue",
+        "rpm",
+        "revenue_before_deduct",
+        "rpm_before_deduct",
+    )
+    @classmethod
+    def validate_finite_amounts(cls, value: Decimal | None) -> Decimal | None:
+        """拒绝非有限财务数值，避免 NaN/Infinity 进入持久化和后续统计。"""
+        if value is not None and not value.is_finite():
+            raise ValueError("金额和 RPM 必须是有限数字")
+        return value
 
 
 class TBSearchDataInDBBase(TBSearchDataBase):
