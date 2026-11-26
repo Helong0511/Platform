@@ -97,6 +97,9 @@ class UrlBuilder:
         if conversion_data.get('payout'):
             params['payout'] = str(conversion_data['payout'])
         
+        if conversion_data.get('currency'):
+            params['currency'] = str(conversion_data['currency'])
+        
         if conversion_data.get('event_name'):
             params['event_name'] = str(conversion_data['event_name'])
         
