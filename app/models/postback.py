@@ -326,7 +326,7 @@ class CloakConfig(Base):
             '含义与可选值见 app/schemas/cloak.py 中 FACEBOOK_STANDARD_EVENT_NAMES / 自定义命名规则'
         ),
     )
-    report_value = Column(Numeric(12, 4), nullable=True, comment='购物类事件金额（Purchase 等需配合 report_currency）')
+    report_value = Column(Numeric(24, 6), nullable=True, comment='购物类事件金额（Purchase 等需配合 report_currency）')
     report_currency = Column(
         String(10),
         nullable=True,
@@ -359,7 +359,7 @@ class CloakConfig(Base):
         default='PageView',
         comment='加载完成时 CAPI event_name',
     )
-    load_report_value = Column(Numeric(12, 4), nullable=True, comment='加载上报为 Purchase 时的金额')
+    load_report_value = Column(Numeric(24, 6), nullable=True, comment='加载上报为 Purchase 时的金额')
     load_report_currency = Column(
         String(10),
         nullable=True,
@@ -387,7 +387,7 @@ class CloakConfig(Base):
         comment='postback 转化时 CAPI event_name（需点击记录 url_params 含 dp=斗篷名）',
     )
     postback_report_value = Column(
-        Numeric(12, 4),
+        Numeric(24, 6),
         nullable=True,
         comment='postback 为 Purchase 时固定金额；NULL 则用 postback 的 payout',
     )
