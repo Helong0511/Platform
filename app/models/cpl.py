@@ -2,7 +2,7 @@
 CPL 广告主、渠道、Offer、Cap、扣量 ORM 模型。
 """
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
-    UniqueConstraint, Date, Numeric
+    UniqueConstraint, Date, Numeric, text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
