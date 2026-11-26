@@ -17,13 +17,13 @@ Postback 转化管理页面
       <div class="header-left">
         <h1>Postback 转化管理</h1>
         <div class="stats-info" v-if="stats && stats.length > 0">
-          <span class="stat-item" v-for="stat in stats" :key="stat.platform">
-            <span class="stat-label">{{ stat.platform }}：</span>
+          <span class="stat-item" v-for="stat in stats" :key="`${stat.platform}:${stat.currency || 'USD'}`>
+            <span class="stat-label">{{ stat.platform }} / {{ stat.currency || 'USD' }}：</span>
             <span class="stat-value">{{ stat.total_conversions || 0 }}</span>
             <span class="stat-unit">条转化</span>
             <span class="stat-separator">|</span>
             <span class="stat-label">{{ isAdmin ? '总金额 (PayOut(扣))' : '总金额 (PayOut)' }}：</span>
-            <span class="stat-value">{{ formatCurrency(stat.total_payout || 0) }}</span>
+            <span class="stat-value">{{ formatCurrency(stat.total_payout || 0, stat.currency) }}</span>
           </span>
         </div>
       </div>
@@ -58,7 +58,7 @@ Postback 转化管理页面
         <el-col :xs="24" :sm="12" :md="8" :lg="6" :xl="4" v-for="stat in stats" :key="stat.platform">
           <div class="stat-card">
             <div class="stat-card-header">
-              <span class="platform-name">{{ stat.platform }}</span>
+              <span class="platform-name">{{ stat.platform }} / {{ stat.currency || 'USD' }}</span>
             </div>
             <div class="stat-card-body">
               <div class="stat-row">
@@ -67,7 +67,7 @@ Postback 转化管理页面
               </div>
               <div class="stat-row" v-if="isAdmin && stat.total_original_payout">
                 <span class="stat-label">PayOut：</span>
-                <span class="stat-value">{{ formatCurrency(stat.total_original_payout || 0) }}</span>
+                <span class="stat-value">{{ formatCurrency(stat.total_original_payout || 0, stat.currency) }}</span>
               </div>
               <div class="stat-row">
                 <span class="stat-label">{{ isAdmin ? 'PayOut(扣)' : 'PayOut' }}：</span>
@@ -75,7 +75,7 @@ Postback 转化管理页面
               </div>
               <div class="stat-row">
                 <span class="stat-label">总事件价值：</span>
-                <span class="stat-value">{{ formatCurrency(stat.total_event_value || 0) }}</span>
+                <span class="stat-value">{{ formatCurrency(stat.total_event_value || 0, stat.currency) }}</span>
               </div>
               <div class="stat-row">
                 <span class="stat-label">唯一事件数：</span>
@@ -205,15 +205,21 @@ Postback 转化管理页面
             <span v-else>-</span>
           </template>
         </el-table-column>
+        <el-table-column v-if="columnVisibility.currency" prop="currency" label="币种" width="90" align="center">
+          <template #default="scope">{{ scope.row.currency || 'USD' }}</template>
+        </el-table-column>
+        <el-table-column v-if="columnVisibility.currency_source" prop="currency_source" label="币种来源" min-width="170" show-overflow-tooltip>
+          <template #default="scope">{{ scope.row.currency_source || 'legacy_unknown' }}</template>
+        </el-table-column>
         <el-table-column v-if="columnVisibility.event_value" prop="event_value" label="事件价值" width="120" align="right">
           <template #default="scope">
-            {{ scope.row.event_value ? formatCurrency(scope.row.event_value) : '-' }}
+            {{ scope.row.event_value ? formatCurrency(scope.row.event_value, scope.row.currency) : '-' }}
           </template>
         </el-table-column>
         <el-table-column v-if="isAdmin && columnVisibility.original_payout" prop="original_payout" label="PayOut" width="150" align="right">
           <template #default="scope">
             <span v-if="scope.row.original_payout">
-              {{ formatCurrency(scope.row.original_payout) }}
+              {{ formatCurrency(scope.row.original_payout, scope.row.currency) }}
             </span>
             <span v-else>-</span>
           </template>
@@ -221,7 +227,7 @@ Postback 转化管理页面
         <el-table-column v-if="columnVisibility.payout" prop="payout" :label="isAdmin ? 'PayOut(扣)' : 'PayOut'" width="150" align="right">
           <template #default="scope">
             <span class="highlight" v-if="scope.row.payout">
-              {{ formatCurrency(scope.row.payout) }}
+              {{ formatCurrency(scope.row.payout, scope.row.currency) }}
             </span>
             <span v-else>-</span>
           </template>
@@ -379,6 +385,8 @@ Postback 转化管理页面
             <el-tag type="primary">{{ currentConversion.platform }}</el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="转化ID">{{ currentConversion.conversion_id }}</el-descriptions-item>
+          <el-descriptions-item label="币种">{{ currentConversion.currency || 'USD' }}</el-descriptions-item>
+          <el-descriptions-item label="币种来源">{{ currentConversion.currency_source || 'legacy_unknown' }}</el-descriptions-item>
           <el-descriptions-item label="事件名称">
             <el-tag v-if="currentConversion.event_name" type="success">
               {{ currentConversion.event_name }}
@@ -386,17 +394,17 @@ Postback 转化管理页面
             <span v-else>-</span>
           </el-descriptions-item>
           <el-descriptions-item label="事件价值">
-            {{ currentConversion.event_value ? formatCurrency(currentConversion.event_value) : '-' }}
+            {{ currentConversion.event_value ? formatCurrency(currentConversion.event_value, currentConversion.currency) : '-' }}
           </el-descriptions-item>
           <el-descriptions-item v-if="isAdmin" label="PayOut">
             <span v-if="currentConversion.original_payout">
-              {{ formatCurrency(currentConversion.original_payout) }}
+              {{ formatCurrency(currentConversion.original_payout, currentConversion.currency) }}
             </span>
             <span v-else>-</span>
           </el-descriptions-item>
           <el-descriptions-item :label="isAdmin ? 'PayOut(扣)' : 'PayOut'">
             <span class="highlight" v-if="currentConversion.payout">
-              {{ formatCurrency(currentConversion.payout) }}
+              {{ formatCurrency(currentConversion.payout, currentConversion.currency) }}
             </span>
             <span v-else>-</span>
           </el-descriptions-item>
@@ -509,6 +517,8 @@ Postback 转化管理页面
         <el-checkbox label="click_time">点击时间</el-checkbox>
         <el-checkbox label="conversion_status">转化状态</el-checkbox>
         <el-checkbox label="event_name">事件名称</el-checkbox>
+        <el-checkbox label="currency">币种</el-checkbox>
+        <el-checkbox label="currency_source">币种来源</el-checkbox>
         <el-checkbox label="event_value">事件价值</el-checkbox>
         <el-checkbox v-if="isAdmin" label="original_payout">PayOut</el-checkbox>
         <el-checkbox label="payout">{{ isAdmin ? 'PayOut(扣)' : 'PayOut' }}</el-checkbox>
