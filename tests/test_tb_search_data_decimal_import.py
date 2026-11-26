@@ -9,8 +9,8 @@ from app.api_v1.tb_search_data import (
 )
 
 
-def test_parse_decimal_cell_preserves_decimal_text_precision():
-    assert _parse_decimal_cell("123456789.123456", "REVENUE") == Decimal("123456789.123456")
+def test_parse_decimal_cell_preserves_supported_decimal_text_precision():
+    assert _parse_decimal_cell("12345678.1234", "REVENUE") == Decimal("12345678.1234")
 
 
 def test_parse_decimal_cell_converts_float_via_shortest_decimal_text():
@@ -84,9 +84,19 @@ def test_tb_search_schema_rejects_non_finite_manual_amounts(field_name, value):
 def test_tb_search_schema_accepts_finite_decimal_manual_amounts():
     from app.schemas.tb_search_data import TBSearchDataUpdate
 
-    update = TBSearchDataUpdate(revenue="123.456789", rpm="0.123456")
-    assert update.revenue == Decimal("123.456789")
-    assert update.rpm == Decimal("0.123456")
+    update = TBSearchDataUpdate(revenue="123.4567", rpm="0.1234")
+    assert update.revenue == Decimal("123.4567")
+    assert update.rpm == Decimal("0.1234")
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["revenue", "rpm", "revenue_before_deduct", "rpm_before_deduct"],
+)
+def test_tb_search_schema_rejects_manual_amounts_with_excess_precision(field_name):
+    from app.schemas.tb_search_data import TBSearchDataUpdate
+
+    with pytest.raises(ValueError, match="最多允许 4 位小数"):
+        TBSearchDataUpdate(**{field_name: "1.23456"})
 
 
 
