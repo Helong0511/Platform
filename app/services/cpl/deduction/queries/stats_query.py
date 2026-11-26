@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy import and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from sqlalchemy import select
 
 from app.models.models import ConversionDeductionLog
 
