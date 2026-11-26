@@ -14,14 +14,13 @@ Offer 投放业务服务层。
 """
 from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import and_, func, delete
+from sqlalchemy import select, and_, func, delete
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import IntegrityError
 
 from app.models.models import (
     Offer, Advertiser, User,
-    OfferPublisherAssignment, ShortLink, Click, ConversionDeductionConfig
+    OfferPublisherAssignment, ShortLink, Click, ConversionDeductionConfig, PostbackConversion
 )
 from app.services.base_service import BaseService
 from app.services.cpl.deduction.helpers import lock_deduction_scopes
@@ -29,6 +28,7 @@ from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.audit_log import log_user_action
 from app.core.config import settings
+from app.core.third_party_currency import validate_iso_currency
 from app.services.cpl.offer.helpers import (
     build_tracking_urls,
     extract_short_code_from_url,
@@ -160,6 +160,8 @@ class OfferService(BaseService[Offer]):
             preview_link=offer_data.get('preview_link'),
             payout=offer_data.get('payout'),
             affiliate_payout=offer_data.get('affiliate_payout'),
+            payout_currency=validate_iso_currency(offer_data.get('payout_currency') or "USD"),
+            payout_currency_source=offer_data.get("_payout_currency_source") or "system_fallback_usd",
             country=offer_data.get('country'),
             category=offer_data.get('category'),
             type=offer_data.get('type'),
@@ -280,6 +282,40 @@ class OfferService(BaseService[Offer]):
 
         # 获取Offer
         offer = await self.get_offer_by_id(offer_id, current_user, include_advertiser=False)
+
+        # 币种是 Offer 上游 PO 与所有渠道下游 PO 的共同计价单位。
+        # 已产生转化后禁止变更，避免同一 Offer 历史收入跨币种混算。
+        if "payout_currency" in offer_data:
+            new_currency = validate_iso_currency(offer_data.get("payout_currency") or "USD")
+            if new_currency != (offer.payout_currency or "USD"):
+                conversion_result = await self.db.execute(
+                    select(PostbackConversion.id)
+                    .where(PostbackConversion.offer_id == offer.id)
+                    .limit(1)
+                )
+                if conversion_result.scalar_one_or_none() is not None:
+                    raise_api_exception(
+                        ErrorCode.CONFLICT,
+                        detail="Offer 已有历史转化，不能直接变更 PO 币种；请新建 Offer 并按新币种配置。"
+                    )
+                if "publisher_configs" not in offer_data:
+                    assignment_result = await self.db.execute(
+                        select(OfferPublisherAssignment.id)
+                        .where(
+                            OfferPublisherAssignment.offer_id == offer.id,
+                            OfferPublisherAssignment.affiliate_payout.is_not(None),
+                        )
+                        .limit(1)
+                    )
+                    if assignment_result.scalar_one_or_none() is not None:
+                        raise_api_exception(
+                            ErrorCode.CONFLICT,
+                            detail="已有渠道下游 PO 配置，变更币种前必须在同一请求中重新提交全部渠道配置。"
+                        )
+            offer.payout_currency = new_currency
+            offer.payout_currency_source = (
+                offer_data.get("_payout_currency_source") or "manual_config"
+            )
 
         # 保存旧的tracklink，用于检测变化
         old_downstream_tracklink = offer.downstream_tracklink
