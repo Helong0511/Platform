@@ -37,7 +37,10 @@ python-dotenv==1.2.2
 apscheduler==3.11.3
 pytz==2024.2
 
-# ISO 4217 当前币种数据（含有效性/撤销状态）\npycountry==24.6.1\n\n# 配置管理
+# ISO 4217 当前币种数据（含有效性/撤销状态）
+pycountry==24.6.1
+
+# 配置管理
 pydantic-settings==2.7.1
 email-validator==2.2.0
 
