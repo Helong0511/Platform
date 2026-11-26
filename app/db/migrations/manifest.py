@@ -249,7 +249,7 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     Migration(
         revision="20261127_conversion_deduction_log_conversion_fk",
         path="sql/migrations/20261127_conversion_deduction_log_conversion_fk.sql",
-        sha256="eac04ffa1e796c367c3156a398ecd797b7beb9e30891ce30774c517b3b70564f",
+        sha256="9c3034db880839bcd27be5ed2dad64a1c56a18feb8c7fdc3b36a83821be75e59",
         depends_on=("20261126_currency_usd_fallback_attribution",),
     ),
     Migration(
