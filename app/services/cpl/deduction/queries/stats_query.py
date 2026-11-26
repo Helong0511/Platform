@@ -146,10 +146,9 @@ class DeductionStatsQuery:
             group_fields = [ConversionDeductionLog.offer_id]
         elif group_by == "publisher":
             group_fields = [ConversionDeductionLog.publisher_id]
-        group_fields.append(ConversionDeductionLog.currency)
-
         if not group_fields:
             return []
+        group_fields.append(ConversionDeductionLog.currency)
 
         group_result = await self.db.execute(
             select(
