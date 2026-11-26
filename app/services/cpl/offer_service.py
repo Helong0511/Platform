@@ -282,6 +282,11 @@ class OfferService(BaseService[Offer]):
 
         # 获取Offer
         offer = await self.get_offer_by_id(offer_id, current_user, include_advertiser=False)
+        # 与 Postback 入账路径共用 Offer 行锁，串行化币种变更与新转化写入。
+        locked_offer_result = await self.db.execute(
+            select(Offer).where(Offer.id == offer_id).with_for_update()
+        )
+        offer = locked_offer_result.scalar_one()
 
         # 币种是 Offer 上游 PO 与所有渠道下游 PO 的共同计价单位。
         # 已产生转化后禁止变更，避免同一 Offer 历史收入跨币种混算。
