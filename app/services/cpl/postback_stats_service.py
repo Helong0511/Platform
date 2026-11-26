@@ -18,7 +18,7 @@ from typing import List, Optional
 from fastapi import HTTPException
 from sqlalchemy import func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from sqlalchemy import select
 
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
