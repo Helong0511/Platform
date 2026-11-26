@@ -1,4 +1,4 @@
--- 统一斗篷三阶段币种默认值，并为第三方 Purchase 日志增加币种来源归因。
+-- 统一斗篷三阶段币种默认值，并为 Postback/第三方 Purchase 持久化币种来源归因。
 -- 只对缺失币种的 Purchase 记录补 USD；不改写已有非空币种和金额。
 -- 既有非空币种的历史来源无法从该表单独证明，标记 legacy_unknown，后续需结合原始回调/配置快照审计。
 ALTER TABLE cloak_configs
@@ -21,6 +21,39 @@ UPDATE cloak_configs
 SET postback_report_currency = 'USD'
 WHERE postback_report_currency IS NULL OR TRIM(postback_report_currency) = '';
 
+-- Postback payout 本身也必须携带币种与来源，不能只在 Meta Outbox 中记录。
+ALTER TABLE postback_conversions
+    ADD COLUMN currency VARCHAR(10) NOT NULL DEFAULT 'USD'
+        COMMENT 'Postback payout 的 ISO 4217 币种；缺失时 USD 兜底' AFTER payout,
+    ADD COLUMN currency_source VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd'
+        COMMENT 'Postback payout 币种来源归因' AFTER currency;
+
+-- 从历史原始回调 JSON 还原实际币种字段；非空无效值仍原样保留，交由 ISO 审计识别，绝不静默替换。
+-- 只有没有任何上游币种字段时才使用 USD fallback。金额字段不参与修改。
+UPDATE postback_conversions
+SET
+    currency = CASE
+        WHEN JSON_VALID(raw_data) THEN UPPER(COALESCE(
+            NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currency'))), ''),
+            NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currency_code'))), ''),
+            NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currencyCode'))), ''),
+            'USD'
+        ))
+        ELSE 'USD'
+    END,
+    currency_source = CASE
+        WHEN JSON_VALID(raw_data)
+             AND NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currency'))), '') IS NOT NULL
+            THEN 'upstream_field:currency'
+        WHEN JSON_VALID(raw_data)
+             AND NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currency_code'))), '') IS NOT NULL
+            THEN 'upstream_field:currency_code'
+        WHEN JSON_VALID(raw_data)
+             AND NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currencyCode'))), '') IS NOT NULL
+            THEN 'upstream_field:currencyCode'
+        ELSE 'system_fallback_usd'
+    END;
+
 ALTER TABLE third_party_report_logs
     ADD COLUMN currency_source VARCHAR(100) NULL
         COMMENT '币种来源：upstream_field:* / cloak_config:* / system_fallback_usd / manual_override / legacy_unknown'
@@ -39,7 +72,13 @@ WHERE event = 'Purchase'
   AND TRIM(currency) <> ''
   AND currency_source IS NULL;
 
--- 迁移后核验：三阶段默认值及历史 Purchase 归因均应可见。
+-- 迁移后核验：Postback 与第三方 Purchase 的币种/来源归因均应可见。
+SELECT currency, currency_source, COUNT(*) AS row_count
+FROM postback_conversions
+GROUP BY currency, currency_source
+ORDER BY currency, currency_source;
+
+
 SELECT COLUMN_NAME, COLUMN_DEFAULT, IS_NULLABLE
 FROM information_schema.COLUMNS
 WHERE TABLE_SCHEMA = DATABASE()
