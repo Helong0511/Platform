@@ -577,6 +577,14 @@ class PendingPostbackConversion(Base):
     event_value = Column(Numeric(12, 4), nullable=True, comment='事件价值')
     original_payout = Column(Numeric(12, 4), nullable=True, comment='原始支付金额（PO）')
     payout = Column(Numeric(12, 4), nullable=True, comment='扣后支付金额（PO(扣)）')
+    currency = Column(
+        String(10), nullable=False, default='USD', server_default=text("'USD'"),
+        comment='待确认 Postback payout 的 ISO 4217 币种',
+    )
+    currency_source = Column(
+        String(100), nullable=False, default='system_fallback_usd',
+        server_default=text("'system_fallback_usd'"), comment='待确认 Postback payout 币种来源',
+    )
     
     # 设备信息
     devad_id = Column(String(255), nullable=True, comment='设备广告ID')
