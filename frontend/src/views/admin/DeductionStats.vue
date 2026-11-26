@@ -192,7 +192,7 @@
           <div class="stat-content">
             <div class="stat-label">扣金额比例</div>
             <div class="stat-value danger">
-              {{ ((stats.amount_deduction_ratio || 0) * 100).toFixed(2) }}%
+              {{ stats.amount_deduction_ratio == null ? '多币种分开统计' : ((stats.amount_deduction_ratio || 0) * 100).toFixed(2) + '%' }}
             </div>
           </div>
         </el-card>
@@ -237,7 +237,7 @@
               <div ref="volumeChartRef" style="width: 100%; height: 300px;"></div>
             </el-card>
           </el-col>
-          <el-col v-if="stats.currency_summaries?.length <= 1" :span="12">
+          <el-col v-show="stats.currency_summaries?.length <= 1" :span="12">
             <el-card>
               <template #header>
                 <div class="chart-header">扣金额趋势（单一币种）</div>
