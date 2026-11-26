@@ -107,3 +107,21 @@ def test_counter_parser_accepts_integral_nonnegative_values(value, expected):
 def test_counter_parser_rejects_invalid_values(value):
     with pytest.raises(ValueError, match="非负整数|数据库整数范围"):
         _parse_nonnegative_integer_cell(value, "CLICKS")
+
+
+
+@pytest.mark.parametrize("field_name", ["redirects", "searches", "monetized", "clicks"])
+@pytest.mark.parametrize("value", [-1, 2147483648])
+def test_tb_search_manual_update_rejects_out_of_range_counters(field_name, value):
+    from app.schemas.tb_search_data import TBSearchDataUpdate
+
+    with pytest.raises(ValueError):
+        TBSearchDataUpdate(**{field_name: value})
+
+
+def test_tb_search_manual_update_accepts_zero_and_maximum_counter():
+    from app.schemas.tb_search_data import TBSearchDataUpdate
+
+    update = TBSearchDataUpdate(redirects=0, clicks=2147483647)
+    assert update.redirects == 0
+    assert update.clicks == 2147483647
