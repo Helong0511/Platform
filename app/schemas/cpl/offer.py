@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from pydantic import ConfigDict, Field, field_validator
 
 from app.schemas.base import BaseSchema
+from app.core.third_party_currency import validate_iso_currency
 
 from app.core.url.placeholder_validation import (
     format_placeholder_validation_error,
@@ -33,6 +34,7 @@ class OfferBase(BaseSchema):
     preview_link: Optional[str] = Field(None, description="预览链接")
     payout: Optional[Decimal] = Field(None, ge=0, description="上游支付金额（PO）")
     affiliate_payout: Optional[Decimal] = Field(None, ge=0, description="扣价后给渠道的金额")
+    payout_currency: str = Field("USD", min_length=3, max_length=3, description="Offer 上游 PO 与所有渠道下游 PO 共用币种，ISO 4217；未配置时 USD 兜底")
     country: Optional[str] = Field(None, max_length=50, description="国家")
     category: Optional[str] = Field(None, max_length=50, description="分类")
     type: Optional[str] = Field(None, max_length=50, description="类型")
@@ -44,6 +46,12 @@ class OfferBase(BaseSchema):
     postback_method: str = Field("GET", description="Postback请求方式：GET/POST")
     click_validity_hours: Optional[int] = Field(720, ge=1, le=8760, description="点击有效期（小时），默认720小时（30天）")
     is_active: bool = Field(True, description="是否激活")
+
+    @field_validator("payout_currency")
+    @classmethod
+    def validate_payout_currency(cls, value: str) -> str:
+        """Offer PO 必须使用当前有效 ISO 4217 结算币种。"""
+        return validate_iso_currency(value or "USD")
 
     @field_validator('preview_link', 'advertiser_tracklink', 'postback_url')
     @classmethod
@@ -96,6 +104,7 @@ class OfferUpdate(BaseSchema):
     preview_link: Optional[str] = Field(None, description="预览链接")
     payout: Optional[Decimal] = Field(None, ge=0, description="上游支付金额")
     affiliate_payout: Optional[Decimal] = Field(None, ge=0, description="扣价后金额")
+    payout_currency: Optional[str] = Field(None, min_length=3, max_length=3, description="变更 Offer 及全部渠道 PO 共用币种；未传则保持原设置")
     country: Optional[str] = Field(None, max_length=50, description="国家")
     category: Optional[str] = Field(None, max_length=50, description="分类")
     type: Optional[str] = Field(None, max_length=50, description="类型")
@@ -109,6 +118,12 @@ class OfferUpdate(BaseSchema):
     is_active: Optional[bool] = Field(None, description="是否激活")
     publisher_configs: Optional[List[PublisherConfig]] = Field(None,
                                                                description="渠道配置列表，每个渠道对应一个下游Cap和下游PO")
+
+    @field_validator("payout_currency")
+    @classmethod
+    def validate_optional_payout_currency(cls, value: Optional[str]) -> Optional[str]:
+        """更新未传币种时保持原值；显式空值由服务层按 USD 兜底。"""
+        return validate_iso_currency(value) if value else None
 
     @field_validator('preview_link', 'advertiser_tracklink', 'postback_url')
     @classmethod
@@ -144,6 +159,7 @@ class OfferResponse(OfferBase):
     click_validity_hours: Optional[int] = None
     created_at: datetime
     updated_at: datetime
+    payout_currency_source: str = Field("system_fallback_usd", description="Offer PO 币种来源归因")
     # 关联信息
     advertiser_name: Optional[str] = None
     assigned_publishers: Optional[list[dict]] = None
