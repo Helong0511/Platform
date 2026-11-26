@@ -47,7 +47,7 @@ def test_validate_purchase_payload_rejects_invalid_financial_values(amount, curr
         validate_purchase_payload(amount, currency)
 
 
-@pytest.mark.parametrize("currency", ["ZZZ", "US", "USDD", "XXX", "XTS", "XAU", ""])
+@pytest.mark.parametrize("currency", ["ZZZ", "US", "USDD", "XXX", "XTS", "XAU", "BOV", "CLF", "HRK", "VEF", ""])
 def test_validate_iso_currency_rejects_non_settlement_or_invalid_codes(currency):
     with pytest.raises(ValueError):
         validate_iso_currency(currency)
