@@ -175,9 +175,9 @@ class DeductionStatsQuery:
                 "original_volume": int(row.original_volume or 0),
                 "deducted_volume": int(row.deducted_volume or 0),
                 "final_volume": int(row.final_volume or 0),
-                "original_amount": float(row.original_amount or 0),
-                "deducted_amount": float(row.deducted_amount or 0),
-                "final_amount": float(row.final_amount or 0),
+                "original_amount": Decimal(row.original_amount or 0),
+                "deducted_amount": Decimal(row.deducted_amount or 0),
+                "final_amount": Decimal(row.final_amount or 0),
                 "volume_deduction_ratio": (row.deducted_volume or 0) / (row.original_volume or 1)
                 if row.original_volume
                 else 0.0,
