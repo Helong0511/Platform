@@ -76,6 +76,16 @@ def _app_datetime_to_unix_timestamp(value: datetime) -> int:
     return int(localized.timestamp())
 
 
+def _event_time_to_unix_timestamp(event_time: Optional[datetime]) -> int:
+    """将事件发生时间转换为 Meta event_time；缺失时使用当前接收/发送时间。
+
+    点击时间 click_time 只用于 fbc，不是转化发生时间，绝不能回退为 event_time。
+    """
+    if event_time is None:
+        return int(time.time())
+    return _app_datetime_to_unix_timestamp(event_time)
+
+
 def sha256_hash(value: Optional[str]) -> str:
     """
     对字符串进行 SHA256 哈希处理
@@ -796,7 +806,7 @@ async def send_third_party_report(
     
     可选参数：
     - click_time: 点击时间（datetime 对象），用于构造 fbc 中的点击时间戳
-    - event_time: 事件实际发生时间；未提供时兼容回退到 click_time 或当前时间
+    - event_time: 事件实际发生时间；未提供时使用当前接收/发送时间（click_time 只用于 fbc）
     - conversion_id: 转化 ID（Purchase 事件必需）
     - currency: 货币类型（默认为 USD）
     - amount: 金额（Purchase 事件必需）
@@ -1071,12 +1081,7 @@ async def send_third_party_report(
             fb_event_name = event
 
             # event_time 表示转化实际发生时间；click_time 仅用于 fbc 的点击时间戳。
-            occurred_at = event_time or click_time
-            event_timestamp = (
-                _app_datetime_to_unix_timestamp(occurred_at)
-                if occurred_at is not None
-                else int(time.time())
-            )
+            event_timestamp = _event_time_to_unix_timestamp(event_time)
 
             # fbc 中段时间必须与 fbclid 产生时的点击时间一致，不能改用转化接收时间。
             fbc_ts = (
