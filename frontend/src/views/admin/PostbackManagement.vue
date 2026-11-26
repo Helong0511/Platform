@@ -17,7 +17,7 @@ Postback 转化管理页面
       <div class="header-left">
         <h1>Postback 转化管理</h1>
         <div class="stats-info" v-if="stats && stats.length > 0">
-          <span class="stat-item" v-for="stat in stats" :key="`${stat.platform}:${stat.currency || 'USD'}`>
+          <span class="stat-item" v-for="stat in stats" :key="`${stat.platform}:${stat.currency || 'USD'}`">
             <span class="stat-label">{{ stat.platform }} / {{ stat.currency || 'USD' }}：</span>
             <span class="stat-value">{{ stat.total_conversions || 0 }}</span>
             <span class="stat-unit">条转化</span>
@@ -55,7 +55,7 @@ Postback 转化管理页面
         </div>
       </template>
       <el-row :gutter="16">
-        <el-col :xs="24" :sm="12" :md="8" :lg="6" :xl="4" v-for="stat in stats" :key="stat.platform">
+        <el-col :xs="24" :sm="12" :md="8" :lg="6" :xl="4" v-for="stat in stats" :key="`${stat.platform}:${stat.currency || 'USD'}`">
           <div class="stat-card">
             <div class="stat-card-header">
               <span class="platform-name">{{ stat.platform }} / {{ stat.currency || 'USD' }}</span>
@@ -71,7 +71,7 @@ Postback 转化管理页面
               </div>
               <div class="stat-row">
                 <span class="stat-label">{{ isAdmin ? 'PayOut(扣)' : 'PayOut' }}：</span>
-                <span class="stat-value highlight">{{ formatCurrency(stat.total_payout || 0) }}</span>
+                <span class="stat-value highlight">{{ formatCurrency(stat.total_payout || 0, stat.currency) }}</span>
               </div>
               <div class="stat-row">
                 <span class="stat-label">总事件价值：</span>
