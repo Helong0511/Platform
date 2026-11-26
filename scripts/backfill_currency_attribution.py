@@ -35,7 +35,7 @@ def _payload_object(raw_data: Any) -> dict[str, Any]:
 
 
 def extract_currency(raw_data: Any) -> tuple[str, str]:
-    """从已脱敏原始 payload 中恢复币种和精确字段来源；缺失时 USD 兜底。"""
+    """从历史 payload 恢复币种；没有可验证字段时保留 legacy_unknown。"""
     payload = _payload_object(raw_data)
     nested = payload.get("_payload")
     candidates = [payload]
@@ -46,7 +46,9 @@ def extract_currency(raw_data: Any) -> tuple[str, str]:
             value = item.get(field)
             if value is not None and str(value).strip():
                 return str(value).strip().upper(), f"upstream_field:{field}"
-    return "USD", "system_fallback_usd"
+    # 历史 payload 缺少币种，不代表当时业务明确采用 USD。
+    # NOT NULL 列暂存结构默认值时，来源必须标记未知，财务汇总不得计入 USD。
+    return "USD", "legacy_unknown"
 
 
 def _iso_status(currency: Any) -> str:
@@ -156,9 +158,12 @@ async def _scan_deduction_logs(connection, *, batch_size: int, apply: bool) -> d
         for row in rows:
             currency = str(row["currency"] or "USD").strip().upper() or "USD"
             source = row["currency_source"] or "system_fallback_usd"
-            if source == "system_fallback_usd" and row["conversion_currency"]:
-                currency = str(row["conversion_currency"]).strip().upper()
-                source = row["conversion_currency_source"] or "legacy_unknown"
+            if source == "system_fallback_usd":
+                if row["conversion_currency"] and row["conversion_currency_source"] not in (None, "system_fallback_usd", "legacy_unknown"):
+                    currency = str(row["conversion_currency"]).strip().upper()
+                    source = row["conversion_currency_source"]
+                else:
+                    source = "legacy_unknown"
             status = _iso_status(currency)
             currencies[currency] += 1
             sources[source] += 1
@@ -216,13 +221,14 @@ async def _scan_report_logs(connection, *, batch_size: int, apply: bool) -> dict
             currency = str(row["currency"] or "").strip().upper()
             source = row["currency_source"]
             if not currency:
-                currency, source = "USD", "system_fallback_usd"
+                # report_logs.currency 可空：保留 NULL，禁止伪标为 USD。
+                currency, source = None, "legacy_unknown"
             elif not source:
                 source = "legacy_unknown"
-            status = _iso_status(currency)
-            currencies[currency] += 1
+            status = _iso_status(currency) if currency else "unknown"
+            currencies[currency or "legacy_unknown"] += 1
             sources[source] += 1
-            if status != "valid":
+            if status == "invalid":
                 invalid_count += 1
                 if len(invalid) < 200:
                     invalid.append({"id": int(row["id"]), "currency": currency, "source": source})
