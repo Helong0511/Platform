@@ -3,7 +3,7 @@
 -- 可重复执行：字段已为 INT 且正确外键已存在时不做破坏性变更。
 
 SET @cdl_conversion_column_type = (
-    SELECT DATA_TYPE
+    SELECT COLUMN_TYPE
     FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = 'conversion_deduction_logs'
@@ -11,20 +11,37 @@ SET @cdl_conversion_column_type = (
     LIMIT 1
 );
 SET @cdl_postback_column_type = (
-    SELECT DATA_TYPE
+    SELECT COLUMN_TYPE
     FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = 'postback_conversions'
       AND COLUMN_NAME = 'id'
     LIMIT 1
 );
+SET @cdl_conversion_nullable = (
+    SELECT IS_NULLABLE
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'conversion_deduction_logs'
+      AND COLUMN_NAME = 'conversion_id'
+    LIMIT 1
+);
+SET @cdl_any_fk_count = (
+    SELECT COUNT(*)
+    FROM information_schema.KEY_COLUMN_USAGE
+    WHERE CONSTRAINT_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'conversion_deduction_logs'
+      AND COLUMN_NAME = 'conversion_id'
+      AND REFERENCED_TABLE_NAME IS NOT NULL
+);
 
--- 父子字段必须为同一有符号 INT 类型；当前 ORM 两端均为 Integer。
+-- 使用 COLUMN_TYPE 检查 signed/unsigned；父列必须是 ORM 对应的有符号 INT。
 SET @cdl_type_check_sql = IF(
     @cdl_conversion_column_type IS NULL
-    OR @cdl_postback_column_type IS NULL
     OR @cdl_postback_column_type <> 'int'
-    OR @cdl_conversion_column_type NOT IN ('int', 'bigint'),
+    OR @cdl_conversion_column_type NOT IN ('int', 'bigint')
+    OR @cdl_conversion_nullable <> 'YES'
+    OR (@cdl_conversion_column_type = 'bigint' AND @cdl_any_fk_count > 0),
     'SELECT * FROM __cdl_conversion_fk_column_type_mismatch__',
     'SELECT 1'
 );
@@ -86,14 +103,6 @@ SET @cdl_fk_count = (
       AND k.REFERENCED_COLUMN_NAME = 'id'
       AND r.DELETE_RULE = 'SET NULL'
       AND r.UPDATE_RULE = 'RESTRICT'
-);
-SET @cdl_any_fk_count = (
-    SELECT COUNT(*)
-    FROM information_schema.KEY_COLUMN_USAGE
-    WHERE CONSTRAINT_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'conversion_deduction_logs'
-      AND COLUMN_NAME = 'conversion_id'
-      AND REFERENCED_TABLE_NAME IS NOT NULL
 );
 SET @cdl_fk_sql = IF(
     @cdl_fk_count = 1,
