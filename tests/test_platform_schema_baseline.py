@@ -128,6 +128,7 @@ def test_postback_currency_amount_columns_use_six_decimal_precision():
         "postback_conversions": ("event_value", "original_payout", "payout"),
         "pending_postback_conversions": ("event_value", "original_payout", "payout"),
         "cloak_configs": ("report_value", "load_report_value", "postback_report_value"),
+        "third_party_report_logs": ("amount",),
     }
     for table_name, column_names in expected_columns.items():
         table = Base.metadata.tables[table_name]
