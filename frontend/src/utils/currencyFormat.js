@@ -17,10 +17,11 @@ export function formatCurrency(value, currency = 'USD') {
   try {
     return new Intl.NumberFormat('zh-CN', {
       style: 'currency',
-      currency: code
+      currency: code,
+      currencyDisplay: 'code'
     }).format(value);
   } catch {
-    return `${Number(value).toFixed(2)} ${code}`;
+    return `${Number(value).toLocaleString('en-US')} ${code}`;
   }
 }
 
