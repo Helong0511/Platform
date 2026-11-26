@@ -27,7 +27,7 @@
 """
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.dialects.mysql import aiomysql as sqlalchemy_aiomysql
-from sqlalchemy.future import select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from app.core.config import settings
 from collections.abc import AsyncGenerator  # Python 3.10+ 推荐使用 collections.abc
