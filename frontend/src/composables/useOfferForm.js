@@ -25,6 +25,7 @@ export function createEmptyOfferForm() {
     preview_link: '',
     payout: null,
     affiliate_payout: null,
+    payout_currency: 'USD',
     country: '',
     category: '',
     type: '',
@@ -62,6 +63,7 @@ function mapOfferToForm(offerData) {
     preview_link: offerData.preview_link || '',
     payout: offerData.payout,
     affiliate_payout: offerData.affiliate_payout,
+    payout_currency: offerData.payout_currency || 'USD',
     country: offerData.country || '',
     category: offerData.category || '',
     type: offerData.type || '',
@@ -102,6 +104,7 @@ export function useOfferForm({ isAdmin, loadData, publisherList }) {
   const formRules = {
     offer_name: [{ required: true, message: '请输入Offer名称', trigger: 'blur' }],
     advertiser_id: [{ required: true, message: '请选择广告主', trigger: 'change' }],
+    payout_currency: [{ required: true, message: '请输入有效的 ISO 4217 币种代码', trigger: 'blur' }],
     ...createOfferTracklinkRules(() => formData),
     'publisher_configs.*.downstream_cap': [
       { type: 'number', min: 0, message: '下游Cap不能为负数', trigger: 'blur' },
