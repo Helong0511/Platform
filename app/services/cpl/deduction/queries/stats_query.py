@@ -84,9 +84,6 @@ class DeductionStatsQuery:
         elif not currency_summaries:
             original_amount = deducted_amount = final_amount = 0.0
             amount_deduction_ratio = 0.0
-        elif not currency_summaries:
-            original_amount = deducted_amount = final_amount = 0.0
-            amount_deduction_ratio = 0.0
         else:
             original_amount = deducted_amount = final_amount = None
             amount_deduction_ratio = None
