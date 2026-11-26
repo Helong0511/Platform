@@ -17,6 +17,7 @@ from typing import Literal, Optional
 from pydantic import Field, field_validator, model_validator, ConfigDict
 
 from app.schemas.base import BaseSchema
+from app.core.third_party_currency import validate_iso_currency
 
     # ---------------------------------------------------------------------------
 # Meta Pixel / Conversions API 官方「标准事件」event_name（与 Meta 文档 Standard Events 一致）。
@@ -152,9 +153,9 @@ class CloakConfigBase(BaseSchema):
         description="postback 为 Purchase 时的固定金额；不填则在处理器中用 postback 的 payout",
     )
     postback_report_currency: Optional[str] = Field(
-        None,
+        "USD",
         max_length=10,
-        description="postback Purchase 货币；留空时必须使用上游明确币种",
+        description="postback Purchase 货币；未设置时使用系统 USD 兜底",
     )
 
     is_enabled: bool = Field(True, description="是否启用")
@@ -180,15 +181,10 @@ class CloakConfigBase(BaseSchema):
     @field_validator("report_currency", "load_report_currency", "postback_report_currency")
     @classmethod
     def validate_currencies(cls, value: Optional[str]) -> Optional[str]:
-        """货币代码规范为三位大写字母；不在缺失时伪造 USD。"""
-        if value is None:
+        """验证当前有效 ISO 4217 结算币种；空值保留给阶段默认值解析。"""
+        if value is None or not value.strip():
             return None
-        v = value.strip().upper()
-        if not v:
-            return None
-        if not re.fullmatch(r"[A-Z]{3}", v):
-            raise ValueError("货币代码必须为三位字母；缺失币种不得默认 USD")
-        return v
+        return validate_iso_currency(value)
 
     @model_validator(mode="after")
     def cloak_report_phase_consistency(self):
