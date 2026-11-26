@@ -34,6 +34,7 @@ from app.core.infrastructure.cache_compat import (
 from app.core.redis_client import get_redis_client
 from app.core.config import settings
 from app.core.utils import get_app_now_naive, get_app_now_naive_floor_second
+from app.core.third_party_currency import resolve_currency
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,8 @@ class DeductionResult:
     deducted_volume: int = 0
     deducted_amount: Decimal = Decimal("0")
     deduction_type: Optional[str] = None
+    currency: str = "USD"
+    currency_source: str = "system_fallback_usd"
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -84,7 +87,9 @@ class DeductionResult:
             'final_amount': self.final_amount,
             'deducted_volume': self.deducted_volume,
             'deducted_amount': self.deducted_amount,
-            'deduction_type': self.deduction_type
+            'deduction_type': self.deduction_type,
+            'currency': self.currency,
+            'currency_source': self.currency_source,
         }
 
 
@@ -613,11 +618,17 @@ class DeductionManager:
         Returns:
             扣减结果
         """
+        currency, currency_source = resolve_currency(
+            conversion_data.get("currency"),
+            source=conversion_data.get("currency_source"),
+        )
         result = DeductionResult(
             original_volume=1,
             original_amount=Decimal(str(conversion_data.get('original_payout', 0) or 0)),
             final_volume=1,
             final_amount=Decimal(str(conversion_data.get('original_payout', 0) or 0)),
+            currency=currency,
+            currency_source=currency_source,
         )
         
         # 只有具备稳定事件身份时才允许扣量；click_id 不是转化事件唯一键。
@@ -740,6 +751,8 @@ class DeductionManager:
             deducted_amount=deduction_result.deducted_amount,
             final_volume=deduction_result.final_volume,
             final_amount=deduction_result.final_amount,
+            currency=deduction_result.currency,
+            currency_source=deduction_result.currency_source,
             deduction_config_id=config.id if config else None,
             volume_deduction_ratio=config.volume_deduction_ratio if config and config.enable_volume_deduction else None,
             amount_deduction_ratio=config.amount_deduction_ratio if config and config.enable_amount_deduction else None,
