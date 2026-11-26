@@ -85,7 +85,19 @@ let chartInstance = null;
 const stats = reactive({ clicks: 0, conversions: 0, conversion_rate: 0, revenue: 0 });
 const trends = reactive({ clicks: 0, conversions: 0, conversion_rate: 0, revenue: 0 });
 const chartData = ref([]);
-const formatCurrency = (value) => `${props.currency || 'USD'} ${Number(value || 0).toFixed(2)}`;
+const formatCurrency = (value) => {
+  const currency = String(props.currency || 'USD').trim().toUpperCase()
+  const amount = Number(value || 0)
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency,
+      currencyDisplay: 'code',
+    }).format(amount)
+  } catch {
+    return `${currency} ${amount}`
+  }
+};
 
 const loadStats = async () => {
   if (!props.offerId) return;
