@@ -81,6 +81,9 @@ class DeductionStatsQuery:
             deducted_amount = only_currency["deducted_amount"]
             final_amount = only_currency["final_amount"]
             amount_deduction_ratio = only_currency["amount_deduction_ratio"]
+        elif not currency_summaries:
+            original_amount = deducted_amount = final_amount = 0.0
+            amount_deduction_ratio = 0.0
         else:
             original_amount = deducted_amount = final_amount = None
             amount_deduction_ratio = None
