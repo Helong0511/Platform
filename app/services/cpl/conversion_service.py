@@ -14,8 +14,7 @@
 """
 from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func, and_, or_, case, cast, Integer
+from sqlalchemy import select, func, and_, or_, case, cast, Integer
 from sqlalchemy.orm import aliased
 
 from app.models.models import (
@@ -45,6 +44,40 @@ _CLIENT_HIDDEN_STATS_KEYS = frozenset({
 })
 
 
+def _build_currency_summaries(stats_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """按 ISO 币种分别汇总转化金额；点击但无转化的行不制造空币种总计。"""
+    totals: Dict[str, Dict[str, Any]] = {}
+    for item in stats_list:
+        if int(item.get("conversion_count") or 0) <= 0:
+            continue
+        currency = str(item.get("currency") or "USD").strip().upper() or "USD"
+        summary = totals.setdefault(
+            currency,
+            {
+                "currency": currency,
+                "conversion_count": 0,
+                "total_po": 0.0,
+                "total_po_after_discount": 0.0,
+                "total_profit": 0.0,
+            },
+        )
+        original = float(item.get("po") or 0)
+        downstream = float(item.get("po_after_discount") or 0)
+        summary["conversion_count"] += int(item.get("conversion_count") or 0)
+        summary["total_po"] += original
+        summary["total_po_after_discount"] += downstream
+        summary["total_profit"] += original - downstream
+    return [
+        {
+            **summary,
+            "total_po": round(summary["total_po"], 4),
+            "total_po_after_discount": round(summary["total_po_after_discount"], 4),
+            "total_profit": round(summary["total_profit"], 4),
+        }
+        for _, summary in sorted(totals.items())
+    ]
+
+
 def _sanitize_conversion_summary_for_client(summary: Dict[str, Any]) -> Dict[str, Any]:
     """剥离转化总览中客户不应看到的上游 PO / 利润 / 广告主信息。"""
     sanitized = {
@@ -61,6 +94,15 @@ def _sanitize_conversion_summary_for_client(summary: Dict[str, Any]) -> Dict[str
         }
         for item in stats_list
     ]
+    if "currency_summaries" in sanitized:
+        sanitized["currency_summaries"] = [
+            {
+                key: value
+                for key, value in item.items()
+                if key not in {"total_po", "total_profit"}
+            }
+            for item in sanitized["currency_summaries"]
+        ]
     return sanitized
 
 
@@ -589,36 +631,7 @@ class ConversionService:
         stats_list.sort(key=lambda x: x['click_count'], reverse=True)
 
         # 多币种必须分别汇总；禁止将 USD/EUR/KWD 等金额直接相加。
-        currency_summary_map: Dict[str, Dict[str, Any]] = {}
-        for item in stats_list:
-            if int(item["conversion_count"] or 0) <= 0:
-                continue
-            currency_code = item["currency"]
-            currency_summary = currency_summary_map.setdefault(
-                currency_code,
-                {
-                    "currency": currency_code,
-                    "conversion_count": 0,
-                    "total_po": 0.0,
-                    "total_po_after_discount": 0.0,
-                    "total_profit": 0.0,
-                },
-            )
-            currency_summary["conversion_count"] += int(item["conversion_count"] or 0)
-            currency_summary["total_po"] += float(item["po"] or 0)
-            currency_summary["total_po_after_discount"] += float(item["po_after_discount"] or 0)
-            currency_summary["total_profit"] += (
-                float(item["po"] or 0) - float(item["po_after_discount"] or 0)
-            )
-        currency_summaries = [
-            {
-                **item,
-                "total_po": round(item["total_po"], 4),
-                "total_po_after_discount": round(item["total_po_after_discount"], 4),
-                "total_profit": round(item["total_profit"], 4),
-            }
-            for _, item in sorted(currency_summary_map.items())
-        ]
+        currency_summaries = _build_currency_summaries(stats_list)
         has_multiple_currencies = len(currency_summaries) > 1
         summary_total_po = None if has_multiple_currencies else round(total_po, 4)
         summary_total_po_after_discount = (
