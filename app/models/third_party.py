@@ -74,7 +74,7 @@ class ThirdPartyReportLog(Base):
         nullable=True,
         comment="币种来源归因：upstream_field:* / cloak_config:* / system_fallback_usd / manual_override / legacy_unknown",
     )
-    amount = Column(Numeric(12, 4), nullable=True, comment='支付金额')
+    amount = Column(Numeric(24, 6), nullable=True, comment='支付金额')
 
     # Postback 事务性 Outbox 元数据；只保存配置引用，不保存 Facebook access token。
     outbox_enqueued = Column(
