@@ -1927,3 +1927,15 @@ async def test_direct_event_rejects_platform_scope_when_empty_conversion_is_norm
     assert result == 0
     assert "conversion_id is null" in captured["scope_sql"]
     assert "conversion_id = ''" in captured["scope_sql"]
+
+
+def test_meta_event_time_never_falls_back_to_click_time(monkeypatch):
+    monkeypatch.setattr(third_party_report.time, "time", lambda: 1_800_000_000)
+    assert third_party_report._event_time_to_unix_timestamp(None) == 1_800_000_000
+
+
+def test_meta_event_time_uses_actual_event_timestamp_when_provided():
+    event_time = datetime(2026, 11, 11, 10, 5, 0)
+    assert third_party_report._event_time_to_unix_timestamp(event_time) == (
+        third_party_report._app_datetime_to_unix_timestamp(event_time)
+    )
