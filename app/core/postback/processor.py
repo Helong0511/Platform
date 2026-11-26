@@ -718,9 +718,10 @@ class PostbackProcessor:
                 else normalized_data.get("currency")
             )
             currency_source = (
-                f"cloak_config:postback:{cloak_cfg_pb.id}"
-                if configured_currency
-                else normalized_data.get("currency_source") or "system_fallback_usd"
+                getattr(cloak_cfg_pb, "postback_report_currency_source", None)
+                or (f"cloak_config:postback:{cloak_cfg_pb.id}" if configured_currency else None)
+                or normalized_data.get("currency_source")
+                or "system_fallback_usd"
             )
             fixed_val = getattr(cloak_cfg_pb, "postback_report_value", None)
             try:
