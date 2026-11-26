@@ -259,6 +259,18 @@ async def _resolve_pixel_credentials(
     return pixel_id, access_token, api_version
 
 
+def _normalize_outbox_api_version(api_version: Optional[str]) -> Optional[str]:
+    """按发送配置的优先级规范化版本；空白配置必须继续回退系统默认值。"""
+    configured = (api_version or "").strip()
+    if not configured:
+        configured = (settings.FACEBOOK_API_VERSION or "").strip()
+    if not configured:
+        configured = "v23.0"
+    if len(configured) > 20:
+        return None
+    return configured
+
+
 async def _bind_outbox_destination(
     report_log_id: int,
     *,
@@ -270,8 +282,8 @@ async def _bind_outbox_destination(
     """在当前有效租约内冻结首次解析的 Pixel 与 API 版本；只返回持久化版本。"""
     if not platform or not pixel_id or not isinstance(lease_token, str) or len(lease_token) != 32:
         return None
-    normalized_api_version = (api_version or settings.FACEBOOK_API_VERSION or "v23.0").strip()
-    if not normalized_api_version or len(normalized_api_version) > 20:
+    normalized_api_version = _normalize_outbox_api_version(api_version)
+    if normalized_api_version is None:
         return None
     async with AsyncSessionLocal() as db:
         result = await db.execute(
