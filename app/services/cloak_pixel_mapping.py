@@ -49,13 +49,13 @@ def _cloak_phase_report_dict(cloak_config: Optional[CloakConfig]) -> Dict[str, A
         "cloak_load_report_event": (getattr(cloak_config, "load_report_event", None) or "PageView").strip()
         or "PageView",
         "cloak_load_report_value": getattr(cloak_config, "load_report_value", None),
-        "cloak_load_report_currency": ((getattr(cloak_config, "load_report_currency", None) or "USD").strip().upper()).strip().upper()
+        "cloak_load_report_currency": (getattr(cloak_config, "load_report_currency", None) or "USD").strip().upper() or "USD"
         or "USD",
         "cloak_postback_report_enabled": bool(getattr(cloak_config, "postback_report_enabled", False)),
         "cloak_postback_report_event": (getattr(cloak_config, "postback_report_event", None) or "Purchase").strip()
         or "Purchase",
         "cloak_postback_report_value": getattr(cloak_config, "postback_report_value", None),
-        "cloak_postback_report_currency": ((getattr(cloak_config, "postback_report_currency", None) or "USD").strip().upper()).strip().upper()
+        "cloak_postback_report_currency": (getattr(cloak_config, "postback_report_currency", None) or "USD").strip().upper() or "USD"
         or "USD",
     }
 
@@ -258,7 +258,7 @@ class CloakPixelMappingService:
                 "backup_facebook_access_token": cloak_config.backup_access_token,
                 "cloak_report_event": getattr(cloak_config, "report_event", None) or "ViewContent",
                 "cloak_report_value": getattr(cloak_config, "report_value", None),
-                "cloak_report_currency": getattr(cloak_config, "report_currency", None) or "USD",
+                "cloak_report_currency": (getattr(cloak_config, "report_currency", None) or "USD").strip().upper() or "USD",
                 "dp_name": dp,
                 "short_code": short_link.short_code,
                 "original_url": short_link.original_url,
