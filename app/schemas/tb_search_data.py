@@ -6,7 +6,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from app.schemas.base import BaseSchema
 
@@ -39,10 +39,26 @@ class TBSearchDataBase(BaseSchema):
         "rpm_before_deduct",
     )
     @classmethod
-    def validate_finite_amounts(cls, value: Decimal | None) -> Decimal | None:
-        """拒绝非有限财务数值，避免 NaN/Infinity 进入持久化和后续统计。"""
-        if value is not None and not value.is_finite():
+    def validate_finite_amounts(
+        cls, value: Decimal | None, info: ValidationInfo
+    ) -> Decimal | None:
+        """按对应 MySQL DECIMAL 列精度校验，避免数据库静默舍入或溢出。"""
+        if value is None:
+            return value
+        if not value.is_finite():
             raise ValueError("金额和 RPM 必须是有限数字")
+
+        # ORM: revenue/revenue_before_deduct DECIMAL(12,4);
+        # rpm/rpm_before_deduct DECIMAL(10,4)。
+        max_abs = (
+            Decimal("99999999.9999")
+            if info.field_name in {"revenue", "revenue_before_deduct"}
+            else Decimal("999999.9999")
+        )
+        if abs(value) > max_abs:
+            raise ValueError(f"{info.field_name}超出数据库 DECIMAL 存储范围")
+        if value.quantize(Decimal("0.0001")) != value:
+            raise ValueError(f"{info.field_name}最多允许 4 位小数")
         return value
 
 
