@@ -17,9 +17,7 @@ export function formatCurrency(value, currency = 'USD') {
   try {
     return new Intl.NumberFormat('zh-CN', {
       style: 'currency',
-      currency: code,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
+      currency: code
     }).format(value);
   } catch {
     return `${Number(value).toFixed(2)} ${code}`;
