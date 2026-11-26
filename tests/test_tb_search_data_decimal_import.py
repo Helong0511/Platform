@@ -23,3 +23,19 @@ def test_parse_decimal_cell_uses_default_for_blank_values():
 def test_parse_decimal_cell_rejects_invalid_or_non_finite_values(value):
     with pytest.raises(ValueError):
         _parse_decimal_cell(value, "REVENUE")
+
+
+def test_apply_deduct_ratio_can_preserve_fractional_precision():
+    from app.core.utils import apply_deduct_ratio
+
+    assert apply_deduct_ratio(
+        Decimal("1.239"), Decimal("0.1"), truncate_places=None
+    ) == Decimal("1.1151")
+
+
+def test_apply_deduct_ratio_keeps_legacy_two_decimal_default():
+    from app.core.utils import apply_deduct_ratio
+
+    assert apply_deduct_ratio(
+        Decimal("1.239"), Decimal("0.1")
+    ) == Decimal("1.11")
