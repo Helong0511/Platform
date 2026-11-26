@@ -205,20 +205,23 @@ async def run_backfill(*, apply: bool, batch_size: int) -> list[dict[str, Any]]:
             results.append(await _scan_report_logs(connection, batch_size=batch_size, apply=apply))
             # 斗篷配置量小，统一扫描并验证；空值在 schema migration 中已兜底 USD。
             result = await connection.execute(
-                text("SELECT id, report_currency, load_report_currency, postback_report_currency FROM cloak_configs ORDER BY id")
+                text("SELECT id, report_currency, report_currency_source, load_report_currency, load_report_currency_source, postback_report_currency, postback_report_currency_source FROM cloak_configs ORDER BY id")
             )
             rows = result.mappings().all()
             result.close()
             invalid_configs = []
             invalid_config_count = 0
+            config_sources: Counter[str] = Counter()
             for row in rows:
                 for field in ("report_currency", "load_report_currency", "postback_report_currency"):
                     value = str(row[field] or "USD").strip().upper() or "USD"
+                    source = row[f"{field}_source"] or "legacy_unknown"
+                    config_sources[source] += 1
                     if _iso_status(value) != "valid":
                         invalid_config_count += 1
                         if len(invalid_configs) < 200:
-                            invalid_configs.append({"id": int(row["id"]), "field": field, "currency": value})
-            results.append({"table": "cloak_configs", "scanned": len(rows), "invalid_count": invalid_config_count, "invalid_sample": invalid_configs})
+                            invalid_configs.append({"id": int(row["id"]), "field": field, "currency": value, "source": source})
+            results.append({"table": "cloak_configs", "scanned": len(rows), "sources": dict(sorted(config_sources.items())), "invalid_count": invalid_config_count, "invalid_sample": invalid_configs})
             return results
     finally:
         await engine.dispose()
