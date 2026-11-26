@@ -240,6 +240,13 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
 
 
     Migration(
+        revision="20261126_third_party_outbox_api_version_snapshot",
+        path="sql/migrations/20261126_third_party_outbox_api_version_snapshot.sql",
+        sha256="d9c3cdccd368a163fe89caeddd5097f0e7935755a97987fd84299d169f5a9306",
+        depends_on=("20261111_third_party_report_outbox",),
+    ),
+
+    Migration(
         revision="20261127_conversion_deduction_log_conversion_fk",
         path="sql/migrations/20261127_conversion_deduction_log_conversion_fk.sql",
         sha256="eac04ffa1e796c367c3156a398ecd797b7beb9e30891ce30774c517b3b70564f",
@@ -250,12 +257,6 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         path="sql/migrations/20261127_offer_payout_currency.sql",
         sha256="659acb3df252da2f8b54fcf3d2b90d18bd0be356ae7e6c23ef9de7efe6e70f77",
         depends_on=("20261126_currency_usd_fallback_attribution",),
-    ),
-    Migration(
-        revision="20261126_third_party_outbox_api_version_snapshot",
-        path="sql/migrations/20261126_third_party_outbox_api_version_snapshot.sql",
-        sha256="d9c3cdccd368a163fe89caeddd5097f0e7935755a97987fd84299d169f5a9306",
-        depends_on=("20261111_third_party_report_outbox",),
     ),
 )
 
