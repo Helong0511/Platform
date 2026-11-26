@@ -19,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.postback.errors import DeductionProcessingError
+from app.core.third_party_currency import resolve_currency, validate_iso_currency
 from app.core.postback.pipeline import attribution_ids_from_association
 from app.core.postback.validators.ip_validator import IpValidator
 from app.core.postback.validators.data_validator import DataValidator
@@ -64,6 +65,44 @@ from app.core.url.url_params_util import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_cloak_postback_purchase_currency(
+    *,
+    upstream_currency: Optional[str],
+    upstream_currency_source: Optional[str],
+    configured_currency: Optional[str],
+    configured_currency_source: Optional[str],
+    fixed_amount: Optional[Decimal],
+) -> tuple[str, str]:
+    """动态上游 payout 继承上游币种；固定金额使用斗篷币种（缺省 USD）。
+
+    斗篷字段的 system_fallback_usd/legacy_unknown 不应覆盖上游实际币种。
+    若管理员明确配置了不同币种却仍使用动态 payout，则拒绝发送，避免无汇率换算却改写币种。
+    """
+    upstream_code, upstream_source = resolve_currency(
+        upstream_currency,
+        source=upstream_currency_source,
+    )
+    configured_code = str(configured_currency or "").strip()
+    source = configured_currency_source or ""
+
+    if fixed_amount is None:
+        if configured_code and source == "manual_override":
+            explicit_code = validate_iso_currency(configured_code)
+            if explicit_code != upstream_code:
+                raise ValueError(
+                    "斗篷显式配置的 Purchase 币种与动态上游 payout 币种不一致；"
+                    "请改用上游币种或配置固定金额，禁止无汇率换算"
+                )
+        return upstream_code, upstream_source
+
+    if configured_code:
+        return resolve_currency(
+            configured_code,
+            source=source or "legacy_unknown",
+        )
+    return resolve_currency(None)
 
 
 class PostbackProcessor:
@@ -712,16 +751,8 @@ class PostbackProcessor:
         if use_cfg_pb:
             fb_event = (cloak_cfg_pb.postback_report_event or "Purchase").strip() or "Purchase"
             configured_currency = (cloak_cfg_pb.postback_report_currency or "").strip()
-            cur_send = (
-                configured_currency.upper()
-                if configured_currency
-                else normalized_data.get("currency")
-            )
-            currency_source = (
-                getattr(cloak_cfg_pb, "postback_report_currency_source", None)
-                or (f"cloak_config:postback:{cloak_cfg_pb.id}" if configured_currency else None)
-                or normalized_data.get("currency_source")
-                or "system_fallback_usd"
+            configured_currency_source = getattr(
+                cloak_cfg_pb, "postback_report_currency_source", None
             )
             fixed_val = getattr(cloak_cfg_pb, "postback_report_value", None)
             try:
@@ -730,8 +761,19 @@ class PostbackProcessor:
                 logger.warning("斗篷 Purchase 固定金额配置无效，不创建第三方 Report Outbox")
                 return None
             if fb_event == "Purchase":
-                # NULL 表示未配置；0/负数是显式配置错误，不能静默回退上游 payout。
+                # NULL 固定金额表示使用上游 payout，币种必须随上游金额继承。
                 amt_send = fixed_val if fixed_val is not None else amount
+                try:
+                    cur_send, currency_source = _resolve_cloak_postback_purchase_currency(
+                        upstream_currency=normalized_data.get("currency"),
+                        upstream_currency_source=normalized_data.get("currency_source"),
+                        configured_currency=configured_currency,
+                        configured_currency_source=configured_currency_source,
+                        fixed_amount=fixed_val,
+                    )
+                except ValueError as exc:
+                    logger.warning("斗篷 Postback Purchase 币种来源冲突，不创建第三方 Report Outbox：%s", str(exc))
+                    return None
             else:
                 amt_send = None
                 cur_send = None
