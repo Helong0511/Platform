@@ -1,10 +1,11 @@
+from decimal import Decimal
+
 import pytest
 from pydantic import ValidationError
 
+from app.core.postback.processor import _resolve_cloak_postback_purchase_currency
 from app.models.postback import CloakConfig
 from app.schemas.cloak import CloakConfigCreate, CloakConfigUpdate
-from app.core.postback.processor import _resolve_cloak_postback_purchase_currency
-from decimal import Decimal
 
 
 def test_all_cloak_currency_columns_have_usd_orm_and_database_defaults():
