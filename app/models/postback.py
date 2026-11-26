@@ -384,6 +384,13 @@ class CloakConfig(Base):
         server_default=text("'USD'"),
         comment='postback Purchase 货币；缺失时使用 USD 兜底',
     )
+    postback_report_currency_source = Column(
+        String(100),
+        nullable=False,
+        default='system_fallback_usd',
+        server_default=text("'system_fallback_usd'"),
+        comment='postback 阶段币种来源归因',
+    )
     is_enabled = Column(Boolean, default=True, nullable=False, index=True, comment='是否启用')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
     updated_at = Column(DateTime, default=get_app_now_naive,
