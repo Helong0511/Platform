@@ -87,6 +87,9 @@
           <template #default="{ row }">
             <span v-if="row.report_event === 'Purchase'">
               {{ row.report_value != null ? row.report_value : '-' }} {{ row.report_currency || 'USD' }}
+              <el-tooltip :content="currencySourceLabel(row.report_currency_source)">
+                <el-tag size="small" :type="currencySourceTag(row.report_currency_source)">{{ currencySourceShort(row.report_currency_source) }}</el-tag>
+              </el-tooltip>
             </span>
             <span v-else>-</span>
           </template>
@@ -189,6 +192,7 @@
         </el-form-item>
         <el-form-item v-if="formData.load_report_event === 'Purchase'" label="加载货币" prop="load_report_currency">
           <el-input v-model="formData.load_report_currency" maxlength="10" placeholder="如 USD" />
+          <div class="switch-hint">来源：{{ currencySourceLabel(formData.load_report_currency_source) }}</div>
         </el-form-item>
 
         <el-divider content-position="left">2. 点击跳转上报</el-divider>
@@ -228,6 +232,7 @@
         </el-form-item>
         <el-form-item v-if="formData.report_event === 'Purchase'" label="点击货币" prop="report_currency">
           <el-input v-model="formData.report_currency" maxlength="10" placeholder="如 USD" />
+          <div class="switch-hint">来源：{{ currencySourceLabel(formData.report_currency_source) }}</div>
         </el-form-item>
 
         <el-divider content-position="left">3. Postback 转化上报</el-divider>
@@ -265,6 +270,7 @@
         </el-form-item>
         <el-form-item v-if="formData.postback_report_event === 'Purchase'" label="转化货币" prop="postback_report_currency">
           <el-input v-model="formData.postback_report_currency" maxlength="10" placeholder="如 USD" />
+          <div class="switch-hint">来源：{{ currencySourceLabel(formData.postback_report_currency_source) }}</div>
         </el-form-item>
 
         <el-divider content-position="left">其它</el-divider>
@@ -449,6 +455,24 @@ const {
   handleTestReport,
   submitTestReport,
 } = useCloakConfigs();
+
+const currencySourceLabel = (source) => {
+  if (source === 'system_fallback_usd') return '系统 USD 兜底';
+  if (source === 'manual_override') return '管理员显式配置';
+  if (source === 'legacy_unknown') return '历史来源未核实';
+  return source || '未记录';
+};
+const currencySourceShort = (source) => {
+  if (source === 'system_fallback_usd') return 'USD兜底';
+  if (source === 'manual_override') return '人工配置';
+  if (source === 'legacy_unknown' || !source) return '待核实';
+  return '已归因';
+};
+const currencySourceTag = (source) => {
+  if (source === 'legacy_unknown' || !source) return 'danger';
+  if (source === 'system_fallback_usd') return 'warning';
+  return 'success';
+};
 </script>
 
 <style scoped>
