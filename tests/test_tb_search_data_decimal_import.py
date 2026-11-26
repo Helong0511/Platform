@@ -2,7 +2,11 @@ from decimal import Decimal
 
 import pytest
 
-from app.api_v1.tb_search_data import _is_blank_excel_cell, _parse_decimal_cell
+from app.api_v1.tb_search_data import (
+    _is_blank_excel_cell,
+    _parse_decimal_cell,
+    _parse_nonnegative_integer_cell,
+)
 
 
 def test_parse_decimal_cell_preserves_decimal_text_precision():
@@ -83,3 +87,23 @@ def test_tb_search_schema_accepts_finite_decimal_manual_amounts():
     update = TBSearchDataUpdate(revenue="123.456789", rpm="0.123456")
     assert update.revenue == Decimal("123.456789")
     assert update.rpm == Decimal("0.123456")
+
+
+
+@pytest.mark.parametrize("value", [None, "", float("nan"), ""])
+def test_counter_parser_defaults_blank_cells_to_zero(value):
+    assert _parse_nonnegative_integer_cell(value, "CLICKS") == 0
+
+
+@pytest.mark.parametrize("value, expected", [(0, 0), (12, 12), (12.0, 12), ("0012", 12), ("12.000", 12)])
+def test_counter_parser_accepts_integral_nonnegative_values(value, expected):
+    assert _parse_nonnegative_integer_cell(value, "CLICKS") == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["1.5", -1, "-0.1", "NaN", "Infinity", "-Infinity", "not-a-number", "2147483648"],
+)
+def test_counter_parser_rejects_invalid_values(value):
+    with pytest.raises(ValueError, match="非负整数|数据库整数范围"):
+        _parse_nonnegative_integer_cell(value, "CLICKS")
