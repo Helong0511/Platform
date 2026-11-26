@@ -4,6 +4,7 @@
  */
 import { ElMessage } from 'element-plus';
 import { getDefaultMonthDateRange } from './dateRangeFormat';
+import { formatCurrency } from './currencyFormat';
 
 export { getDefaultMonthDateRange };
 
@@ -25,6 +26,8 @@ export function buildConversionTableSummaries(param, summaryData, isAdmin) {
   const totalPo = summaryData.total_po || 0;
   const totalPoAfterDiscount = summaryData.total_po_after_discount || 0;
   const totalProfit = summaryData.total_profit || 0;
+  const hasMultipleCurrencies = (summaryData.currency_summaries || []).length > 1;
+  const summaryCurrency = summaryData.currency_summaries?.[0]?.currency || 'USD';
 
   columns.forEach((column, index) => {
     const prop = column.property;
@@ -35,9 +38,9 @@ export function buildConversionTableSummaries(param, summaryData, isAdmin) {
     if (prop === 'click_count') sums[index] = totalClicks;
     else if (prop === 'conversion_count') sums[index] = totalConversions;
     else if (prop === 'cr') sums[index] = `${totalCr}%`;
-    else if (prop === 'po' && isAdmin) sums[index] = totalPo.toFixed(2);
-    else if (prop === 'po_after_discount') sums[index] = totalPoAfterDiscount.toFixed(2);
-    else if (prop === 'profit' && isAdmin) sums[index] = totalProfit.toFixed(2);
+    else if (prop === 'po' && isAdmin) sums[index] = hasMultipleCurrencies ? '多币种分开统计' : formatCurrency(totalPo, summaryCurrency);
+    else if (prop === 'po_after_discount') sums[index] = hasMultipleCurrencies ? '多币种分开统计' : formatCurrency(totalPoAfterDiscount, summaryCurrency);
+    else if (prop === 'profit' && isAdmin) sums[index] = hasMultipleCurrencies ? '多币种分开统计' : formatCurrency(totalProfit, summaryCurrency);
     else sums[index] = '';
   });
   return sums;
@@ -52,6 +55,7 @@ export function exportConversionStatsCsv(statsList, isAdmin) {
   const headers = [
     'Offer ID',
     'Offer Name',
+    'Currency',
     'Advertiser',
     'Publisher',
     'Click',
@@ -70,16 +74,17 @@ export function exportConversionStatsCsv(statsList, isAdmin) {
       [
         row.offer_id || '',
         `"${row.offer_name || ''}"`,
+        row.currency || 'USD',
         `"${row.advertiser_name || ''}"`,
         `"${row.publisher_name || ''}"`,
         row.click_count || 0,
         row.conversion_count || 0,
         `${row.cr || 0}%`,
-        isAdmin ? (row.po || 0).toFixed(2) : '',
-        (row.po_after_discount || 0).toFixed(2),
-        isAdmin ? (row.po ? (row.po - (row.po_after_discount || 0)).toFixed(2) : '0.00') : '',
-        isAdmin ? (row.adv_po || 0).toFixed(2) : '',
-        (row.pub_po || 0).toFixed(2),
+        isAdmin ? String(Number(row.po || 0)) : '',
+        String(Number(row.po_after_discount || 0)),
+        isAdmin ? String(Number(row.po || 0) - Number(row.po_after_discount || 0)) : '',
+        isAdmin ? String(Number(row.adv_po || 0)) : '',
+        String(Number(row.pub_po || 0)),
         row.geo || '',
       ].join(','),
     );
