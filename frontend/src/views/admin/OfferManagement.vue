@@ -601,21 +601,23 @@
             <el-descriptions :column="2" border>
               <el-descriptions-item label="Offer ID">{{ currentOffer?.id }}</el-descriptions-item>
               <el-descriptions-item label="Offer名称">{{ currentOffer?.offer_name }}</el-descriptions-item>
+              <el-descriptions-item label="PO币种">{{ currentOffer?.payout_currency || 'USD' }}</el-descriptions-item>
+              <el-descriptions-item v-if="isAdmin" label="币种来源">{{ currentOffer?.payout_currency_source || 'legacy_unknown' }}</el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="广告主">{{ currentOffer?.advertiser_name }}</el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="上游Offer ID">{{ currentOffer?.advertiser_offer_id || '-' }}</el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="上游PO">
-                <span v-if="currentOffer?.payout">{{ currentOffer.payout.toFixed(2) }}</span>
+                <span v-if="currentOffer?.payout">{{ currentOffer.payout.toFixed(2) }} {{ currentOffer?.payout_currency || 'USD' }}</span>
                 <span v-else>-</span>
               </el-descriptions-item>
               <el-descriptions-item :label="isAdmin ? '下游PO' : 'PO'">
                 <template v-if="!isAdmin && currentClientId && currentOffer?.assigned_publishers">
                   <!-- 客户登录：显示分配给该客户渠道的PO -->
-                  <span v-if="getClientPublisherPO()">{{ getClientPublisherPO().toFixed(2) }}</span>
+                  <span v-if="getClientPublisherPO()">{{ getClientPublisherPO().toFixed(2) }} {{ currentOffer?.payout_currency || 'USD' }}</span>
                   <span v-else>-</span>
                 </template>
                 <template v-else>
                   <!-- 管理员：显示Offer级别的PO -->
-                  <span v-if="currentOffer?.affiliate_payout">{{ currentOffer.affiliate_payout.toFixed(2) }}</span>
+                  <span v-if="currentOffer?.affiliate_payout">{{ currentOffer.affiliate_payout.toFixed(2) }} {{ currentOffer?.payout_currency || 'USD' }}</span>
                   <span v-else>-</span>
                 </template>
               </el-descriptions-item>
@@ -700,6 +702,7 @@
             <OfferStatsPanel
               v-if="currentOffer?.id"
               :offer-id="currentOffer.id"
+              :currency="currentOffer.payout_currency || 'USD'"
             />
           </el-tab-pane>
 
