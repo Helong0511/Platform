@@ -49,8 +49,8 @@ class OfferBase(BaseSchema):
 
     @field_validator("payout_currency")
     @classmethod
-    def validate_payout_currency(cls, value: str) -> str:
-        """Offer PO 必须使用当前有效 ISO 4217 结算币种。"""
+    def validate_payout_currency(cls, value: Optional[str]) -> str:
+        """Offer PO 必须使用当前有效 ISO 4217 结算币种；空值回退 USD。"""
         return validate_iso_currency(value or "USD")
 
     @field_validator('preview_link', 'advertiser_tracklink', 'postback_url')
@@ -118,12 +118,6 @@ class OfferUpdate(BaseSchema):
     is_active: Optional[bool] = Field(None, description="是否激活")
     publisher_configs: Optional[List[PublisherConfig]] = Field(None,
                                                                description="渠道配置列表，每个渠道对应一个下游Cap和下游PO")
-
-    @field_validator("payout_currency")
-    @classmethod
-    def validate_optional_payout_currency(cls, value: Optional[str]) -> Optional[str]:
-        """更新未传币种时保持原值；显式空值由服务层按 USD 兜底。"""
-        return validate_iso_currency(value) if value else None
 
     @field_validator('preview_link', 'advertiser_tracklink', 'postback_url')
     @classmethod
