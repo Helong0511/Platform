@@ -28,6 +28,7 @@
 - Outbox 在入队时冻结币种及来源；Worker 重试沿用已持久化的币种和来源，不因配置变更重新推断。
 - 直接发送、管理员编辑和测试发送均走同一 ISO 校验逻辑。
 - `postback_conversions` 与 `pending_postback_conversions` 都持久化 payout 的 `currency` 和 `currency_source`；待审批通过时原样复制来源，通用适配器/BFT 的字段归因不会丢失。
+- `conversion_deduction_logs` 保存扣量前/扣量后金额对应的币种和来源；历史日志存在 `conversion_id` 时可从正式转化记录恢复币种，否则保留 USD fallback。
 - 三阶段斗篷配置分别持久化币种来源，click/load 的直接发送和 Postback Outbox 不再根据“有无配置行”猜测来源。
 - `third_party_report_logs.currency_source` 持久化第三方上报币种来源，API 和管理端详情/列表可查看。
 
@@ -56,7 +57,7 @@ MIGRATION_DATABASE_URL='mysql+asyncmy://独立迁移账号:密码@主机:3306/�
 ## 上线前必须执行的只读核验
 
 1. 备份数据库并在生产结构副本执行迁移演练。
-2. 对正式 Postback、待审批 Postback 和第三方 Purchase 日志分别按 `currency, currency_source` 分组计数，核对 USD 回填数量与历史未知来源数量。
+2. 对正式 Postback、待审批 Postback、扣量日志和第三方 Purchase 日志分别按 `currency, currency_source` 分组计数，核对 USD 回填数量与历史未知来源数量。
 3. Postback 金额统计必须按 `platform + currency` 分组，禁止把不同币种的 payout 直接相加；管理端显示每条记录和统计分组的实际币种。
 4. 从 Postback 原始 JSON 和斗篷配置快照核对每条 `legacy_unknown` 的真实来源；输出可追踪的明细，不修改金额。
 5. 使用应用层 ISO 校验器对历史所有非空币种执行扫描，分别列出有效、撤销、无效和特殊用途代码。
