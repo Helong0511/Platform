@@ -366,6 +366,9 @@ class CloakConfigResponse(CloakConfigBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    report_currency_source: str = Field("system_fallback_usd", description="点击阶段币种来源")
+    load_report_currency_source: str = Field("system_fallback_usd", description="加载阶段币种来源")
+    postback_report_currency_source: str = Field("system_fallback_usd", description="postback 阶段币种来源")
     bridge_html_present: bool = Field(
         False,
         description="是否已在磁盘部署桥页 HTML（任一路径存在 {cloak_name}.html）",
