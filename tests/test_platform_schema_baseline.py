@@ -124,9 +124,14 @@ def test_postback_currency_amount_columns_use_six_decimal_precision():
     source = (
         Path(__file__).resolve().parents[1] / "sql" / "platform.sql"
     ).read_text(encoding="utf-8")
-    for table_name in ("postback_conversions", "pending_postback_conversions"):
+    expected_columns = {
+        "postback_conversions": ("event_value", "original_payout", "payout"),
+        "pending_postback_conversions": ("event_value", "original_payout", "payout"),
+        "cloak_configs": ("report_value", "load_report_value", "postback_report_value"),
+    }
+    for table_name, column_names in expected_columns.items():
         table = Base.metadata.tables[table_name]
-        for column_name in ("event_value", "original_payout", "payout"):
+        for column_name in column_names:
             assert table.columns[column_name].type.precision == 24
             assert table.columns[column_name].type.scale == 6
             assert f"`{column_name}` DECIMAL(24, 6)" in source
