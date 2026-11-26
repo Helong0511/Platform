@@ -200,11 +200,12 @@ class DeductionStatsResponse(BaseSchema):
     deducted_volume: int = 0
     final_volume: int = 0
     volume_deduction_ratio: Decimal = Decimal('0')
-    original_amount: Decimal = Decimal('0')
-    deducted_amount: Decimal = Decimal('0')
-    final_amount: Decimal = Decimal('0')
-    amount_deduction_ratio: Decimal = Decimal('0')
-    items: list = []
+    original_amount: Optional[Decimal] = None
+    deducted_amount: Optional[Decimal] = None
+    final_amount: Optional[Decimal] = None
+    amount_deduction_ratio: Optional[Decimal] = None
+    currency_summaries: list[dict] = Field(default_factory=list)
+    items: list = Field(default_factory=list)
 
 
 class BatchUpdateStatusRequest(BaseSchema):
