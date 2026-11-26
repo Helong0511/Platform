@@ -55,6 +55,8 @@ class DiscountChecker:
         click_id: Optional[str],
         db: AsyncSession,
         event_identity: Optional[Dict[str, str]] = None,
+        currency: str = "USD",
+        currency_source: str = "system_fallback_usd",
     ) -> Tuple[Decimal, Dict[str, Any], bool]:
         """
         计算扣量后的金额。
@@ -113,7 +115,11 @@ class DiscountChecker:
                 scope_advertiser_id, scope_offer_id, scope_publisher_id = (
                     DiscountChecker._resolve_config_scope(config)
                 )
-                conversion_data = {"original_payout": final_payout}
+                conversion_data = {
+                    "original_payout": final_payout,
+                    "currency": currency,
+                    "currency_source": currency_source,
+                }
                 result = await apply_deduction(
                     db=db,
                     conversion_data=conversion_data,
