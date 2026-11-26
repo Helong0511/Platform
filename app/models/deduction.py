@@ -122,13 +122,13 @@ class ConversionDeductionLog(Base):
     
     # 扣减前数据
     original_volume = Column(Integer, default=1, comment='原始转化数量（通常为1）')
-    original_amount = Column(Numeric(10, 2), nullable=False, comment='原始转化金额')
+    original_amount = Column(Numeric(20, 6), nullable=False, comment='原始转化金额')
     
     # 扣减后数据
     deducted_volume = Column(Integer, default=0, comment='扣减的转化数量')
-    deducted_amount = Column(Numeric(10, 2), nullable=True, default=0, server_default='0.00', comment='扣减的转化金额')
+    deducted_amount = Column(Numeric(20, 6), nullable=True, default=0, server_default='0.00', comment='扣减的转化金额')
     final_volume = Column(Integer, default=1, comment='最终转化数量（扣减后）')
-    final_amount = Column(Numeric(10, 2), nullable=False, comment='最终转化金额（扣减后）')
+    final_amount = Column(Numeric(20, 6), nullable=False, comment='最终转化金额（扣减后）')
     currency = Column(
         String(10), nullable=False, default='USD', server_default=text("'USD'"),
         comment='扣减金额对应的 ISO 4217 币种',
