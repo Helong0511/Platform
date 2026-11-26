@@ -20,7 +20,8 @@ from sqlalchemy.exc import IntegrityError
 
 from app.models.models import (
     Offer, Advertiser, User,
-    OfferPublisherAssignment, ShortLink, Click, ConversionDeductionConfig, PostbackConversion
+    OfferPublisherAssignment, ShortLink, Click, ConversionDeductionConfig, PostbackConversion,
+    ConversionDeductionLog,
 )
 from app.services.base_service import BaseService
 from app.services.cpl.deduction.helpers import lock_deduction_scopes
@@ -302,6 +303,16 @@ class OfferService(BaseService[Offer]):
                     raise_api_exception(
                         ErrorCode.CONFLICT,
                         detail="Offer 已有历史转化，不能直接变更 PO 币种；请新建 Offer 并按新币种配置。"
+                    )
+                deduction_history_result = await self.db.execute(
+                    select(ConversionDeductionLog.id)
+                    .where(ConversionDeductionLog.offer_id == offer.id)
+                    .limit(1)
+                )
+                if deduction_history_result.scalar_one_or_none() is not None:
+                    raise_api_exception(
+                        ErrorCode.CONFLICT,
+                        detail="Offer 已有扣减财务凭证，不能直接变更 PO 币种；请新建 Offer 并按新币种配置。"
                     )
                 if "publisher_configs" not in offer_data:
                     assignment_result = await self.db.execute(
