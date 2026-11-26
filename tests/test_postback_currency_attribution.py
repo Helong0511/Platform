@@ -2,7 +2,7 @@ import pytest
 
 from app.core.postback.transformers.normalizer import DataNormalizer
 from app.core.postback.bft_handler import BftPostbackHandler
-from app.models.postback import PostbackConversion
+from app.models.postback import PostbackConversion, PendingPostbackConversion
 
 
 @pytest.mark.parametrize(
@@ -51,3 +51,12 @@ def test_postback_conversion_persists_currency_and_source_defaults():
 async def test_bft_postback_rejects_invalid_iso_currency_instead_of_fallback():
     with pytest.raises(ValueError):
         await BftPostbackHandler().normalize({"payout": "12.34", "currency": "ZZZ"})
+
+
+def test_pending_postback_conversion_persists_currency_and_source_defaults():
+    currency = PendingPostbackConversion.__table__.c.currency
+    source = PendingPostbackConversion.__table__.c.currency_source
+    assert currency.default.arg == "USD"
+    assert str(currency.server_default.arg).strip("'") == "USD"
+    assert source.default.arg == "system_fallback_usd"
+    assert str(source.server_default.arg).strip("'") == "system_fallback_usd"
