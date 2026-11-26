@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.telegram.message_sender import send_telegram_message_async as send_telegram_message
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.core.third_party_currency import resolve_currency, validate_purchase_payload
+from app.core.third_party_currency import MAX_PURCHASE_AMOUNT, resolve_currency, validate_purchase_payload
 from app.core.utils import APP_TIMEZONE, get_app_now_naive, get_app_now_sql_expression, localize_app_datetime
 from app.models.models import ThirdPartyReportLog, ThirdPartyReportIdentityLock
 from app.core.log_utils import mask_email, mask_hash_prefix, mask_phone
@@ -1412,7 +1412,7 @@ async def retry_report_log(log_id: int, db=None):
                     and_(
                         ThirdPartyReportLog.amount.is_not(None),
                         ThirdPartyReportLog.amount > 0,
-                        ThirdPartyReportLog.amount <= Decimal("99999999.9999"),
+                        ThirdPartyReportLog.amount <= MAX_PURCHASE_AMOUNT,
                         ThirdPartyReportLog.currency.is_not(None),
                         ThirdPartyReportLog.currency.op("REGEXP")(r"^[A-Za-z]{3}$"),
                     ),
