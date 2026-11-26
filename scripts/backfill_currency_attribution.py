@@ -92,7 +92,8 @@ async def _scan_postback_table(connection, table: str, *, batch_size: int, apply
                 if recovered_source != "system_fallback_usd":
                     current_currency, current_source = recovered_currency, recovered_source
                 else:
-                    current_currency, current_source = "USD", "system_fallback_usd"
+                    # 保留现存代码作为未证实的历史值；仅修正来源，不能将其认证为 USD。 
+                    current_source = "legacy_unknown"
             status = _iso_status(current_currency)
             currencies[current_currency] += 1
             sources[current_source] += 1
