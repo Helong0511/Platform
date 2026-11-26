@@ -473,7 +473,7 @@ CREATE TABLE IF NOT EXISTS `conversion_deduction_configs`  (
 -- ----------------------------
 DROP TABLE IF EXISTS `conversion_deduction_logs`;
 CREATE TABLE IF NOT EXISTS `conversion_deduction_logs`  (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '记录ID',
+  `id` INT NOT NULL AUTO_INCREMENT COMMENT '记录ID',
   `conversion_id` BIGINT NULL DEFAULT NULL COMMENT '转化记录ID（关联postback_conversions.id，可为NULL因为扣量的转化可能不保存）',
   `click_id` VARCHAR(255) NULL DEFAULT NULL COMMENT '点击ID',
   `advertiser_id` INT NULL DEFAULT NULL COMMENT '广告主ID',
