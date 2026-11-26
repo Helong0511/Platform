@@ -2,6 +2,75 @@
 -- 安全策略：先检查字段范围、孤儿引用和现有外键；发现不一致即失败，不自动丢弃或改写业务数据。
 -- 可重复执行：字段已为 INT 且正确外键已存在时不做破坏性变更。
 
+-- ORM 的 ConversionDeductionLog.id 为有符号 Integer；基线旧 DDL 曾使用 BIGINT。
+-- 收窄主键前必须确认范围、AUTO_INCREMENT/NOT NULL 属性和不存在外部引用。
+SET @cdl_log_id_column_type = (
+    SELECT COLUMN_TYPE
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'conversion_deduction_logs'
+      AND COLUMN_NAME = 'id'
+    LIMIT 1
+);
+SET @cdl_log_id_nullable = (
+    SELECT IS_NULLABLE
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'conversion_deduction_logs'
+      AND COLUMN_NAME = 'id'
+    LIMIT 1
+);
+SET @cdl_log_id_extra = (
+    SELECT EXTRA
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'conversion_deduction_logs'
+      AND COLUMN_NAME = 'id'
+    LIMIT 1
+);
+SET @cdl_log_id_external_fk_count = (
+    SELECT COUNT(*)
+    FROM information_schema.KEY_COLUMN_USAGE
+    WHERE CONSTRAINT_SCHEMA = DATABASE()
+      AND REFERENCED_TABLE_NAME = 'conversion_deduction_logs'
+      AND REFERENCED_COLUMN_NAME = 'id'
+);
+SET @cdl_log_id_type_check_sql = IF(
+    @cdl_log_id_column_type IS NULL
+    OR @cdl_log_id_column_type NOT IN ('int', 'bigint')
+    OR @cdl_log_id_nullable <> 'NO'
+    OR @cdl_log_id_extra NOT LIKE '%auto_increment%'
+    OR (@cdl_log_id_column_type = 'bigint' AND @cdl_log_id_external_fk_count > 0),
+    'SELECT * FROM __cdl_log_primary_key_definition_mismatch__',
+    'SELECT 1'
+);
+PREPARE cdl_log_id_type_check FROM @cdl_log_id_type_check_sql;
+EXECUTE cdl_log_id_type_check;
+DEALLOCATE PREPARE cdl_log_id_type_check;
+
+SET @cdl_log_id_overflow_count = (
+    SELECT COUNT(*)
+    FROM conversion_deduction_logs
+    WHERE id > 2147483647 OR id < -2147483648
+);
+SET @cdl_log_id_overflow_check_sql = IF(
+    @cdl_log_id_overflow_count = 0,
+    'SELECT 1',
+    'SELECT * FROM __cdl_log_primary_key_out_of_int_range__'
+);
+PREPARE cdl_log_id_overflow_check FROM @cdl_log_id_overflow_check_sql;
+EXECUTE cdl_log_id_overflow_check;
+DEALLOCATE PREPARE cdl_log_id_overflow_check;
+
+SET @cdl_log_id_alter_sql = IF(
+    @cdl_log_id_column_type = 'bigint',
+    'ALTER TABLE conversion_deduction_logs MODIFY COLUMN id INT NOT NULL AUTO_INCREMENT COMMENT ''记录ID''',
+    'SELECT 1'
+);
+PREPARE cdl_log_id_alter FROM @cdl_log_id_alter_sql;
+EXECUTE cdl_log_id_alter;
+DEALLOCATE PREPARE cdl_log_id_alter;
+
 SET @cdl_conversion_column_type = (
     SELECT COLUMN_TYPE
     FROM information_schema.COLUMNS
