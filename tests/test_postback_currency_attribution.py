@@ -6,6 +6,7 @@ from app.models.postback import PostbackConversion, PendingPostbackConversion
 from app.models.deduction import ConversionDeductionLog
 from app.core.deduction.deduction_manager import DeductionResult
 from scripts.backfill_currency_attribution import extract_currency
+from app.core.postback.forwarding.url_builder import UrlBuilder
 
 
 @pytest.mark.parametrize(
@@ -96,3 +97,18 @@ def test_deduction_result_serializes_currency_attribution():
     data = result.to_dict()
     assert data["currency"] == "CNY"
     assert data["currency_source"] == "upstream_field:currency_code"
+
+
+def test_downstream_get_postback_preserves_payout_currency():
+    url, params = UrlBuilder.build_postback_url(
+        "https://publisher.example/postback",
+        {
+            "conversion_id": "conversion-1",
+            "payout": "12.34",
+            "currency": "EUR",
+            "event_name": "Purchase",
+        },
+    )
+
+    assert params["currency"] == "EUR"
+    assert "currency=EUR" in url
