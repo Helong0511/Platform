@@ -13,8 +13,8 @@ from app.core.postback.forwarding.url_builder import UrlBuilder
     ("raw_data", "expected_currency", "expected_source"),
     [
         ({"payout": "12.34", "currency_code": "cny"}, "CNY", "upstream_field:currency_code"),
-        ({"payout": "12.34"}, "USD", "system_fallback_usd"),
-        ({"payout": "12.34", "currency": "   "}, "USD", "system_fallback_usd"),
+        ({"payout": "12.34"}, "USD", "legacy_unknown"),
+        ({"payout": "12.34", "currency": "   "}, "USD", "legacy_unknown"),
     ],
 )
 def test_generic_postback_currency_source_attribution(raw_data, expected_currency, expected_source):
@@ -73,8 +73,8 @@ def test_pending_postback_conversion_persists_currency_and_source_defaults():
         ('{"currency_code":" eur "}', "EUR", "upstream_field:currency_code"),
         ('{"currencyCode":"JPY"}', "JPY", "upstream_field:currencyCode"),
         ('{"_payload":{"currency":"gbp"}}', "GBP", "upstream_field:currency"),
-        ('{"payout":"10"}', "USD", "system_fallback_usd"),
-        ("not-json", "USD", "system_fallback_usd"),
+        ('{"payout":"10"}', "USD", "legacy_unknown"),
+        ("not-json", "USD", "legacy_unknown"),
     ],
 )
 def test_historical_currency_backfill_extracts_source_without_guessing(
