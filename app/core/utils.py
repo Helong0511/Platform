@@ -220,18 +220,29 @@ def truncate_to_2_decimal(value: float | int | str | Decimal | None) -> Decimal:
 def apply_deduct_ratio(
     amount: float | int | str | Decimal | None,
     deduct_ratio: float | int | str | Decimal | None,
+    *,
+    truncate_places: int | None = 2,
 ) -> Decimal:
     """
-    按产品扣减比例计算扣后金额。
+    按产品扣减比例计算扣后值。
 
-    扣减比例为 0 时保留原始金额的全部小数位；有扣减时截断到两位小数（不四舍五入）。
-    使用 Decimal 运算避免 float 精度误差。
+    默认兼容既有业务：发生扣减时向下截断到两位小数。
+    对币种尚未完成归因的导入链路，可传 None 保留完整 Decimal 精度，
+    避免在未知币种小数位规则下擅自截断；最终精度由字段/迁移约束决定。
     """
     value = Decimal(str(amount or 0))
     ratio = Decimal(str(deduct_ratio or 0))
+    if not value.is_finite() or not ratio.is_finite():
+        raise ValueError("金额和扣减比例必须是有限 Decimal")
     if ratio <= 0:
         return value
-    return truncate_to_2_decimal(value * (1 - ratio))
+    result = value * (1 - ratio)
+    if truncate_places is None:
+        return result
+    if truncate_places < 0:
+        raise ValueError("truncate_places 不能小于 0")
+    quantum = Decimal(1).scaleb(-truncate_places)
+    return result.quantize(quantum, rounding=ROUND_DOWN)
 
 
 def get_date_range(date_obj: datetime | Any) -> tuple[datetime, datetime]:
