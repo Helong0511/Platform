@@ -21,7 +21,7 @@ import ipaddress
 import math
 from decimal import Decimal, ROUND_DOWN
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 from typing import Any, Optional
 from fastapi import Request
@@ -33,6 +33,26 @@ from app.core.constants import PERCENTAGE_MULTIPLIER
 # 应用时区配置（从统一配置读取）
 
 APP_TIMEZONE = ZoneInfo(settings.TIMEZONE)
+
+
+def localize_app_datetime(value: datetime, tz: ZoneInfo = APP_TIMEZONE) -> datetime:
+    """将 naive DATETIME 严格解释为指定 IANA 时区；拒绝 DST 不存在/歧义时间。"""
+    if value.tzinfo is not None:
+        return value.astimezone(tz)
+
+    first = value.replace(tzinfo=tz, fold=0)
+    second = value.replace(tzinfo=tz, fold=1)
+    first_roundtrip = (
+        first.astimezone(timezone.utc).astimezone(tz).replace(tzinfo=None)
+    )
+    second_roundtrip = (
+        second.astimezone(timezone.utc).astimezone(tz).replace(tzinfo=None)
+    )
+    if first_roundtrip != value or second_roundtrip != value:
+        raise ValueError("naive DATETIME 落在时区夏令时跳跃区间内，不存在对应本地时间")
+    if first.utcoffset() != second.utcoffset():
+        raise ValueError("naive DATETIME 落在时区夏令时回拨区间内，无法唯一确定时间")
+    return first
 
 
 def get_app_now_sql_expression(offset_seconds: int = 0):
