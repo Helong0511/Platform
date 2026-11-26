@@ -66,6 +66,37 @@ SET
         ELSE 'system_fallback_usd'
     END;
 
+-- 待审批队列也保存币种与来源，审批通过时原样传递到正式转化记录。
+ALTER TABLE pending_postback_conversions
+    ADD COLUMN currency VARCHAR(10) NOT NULL DEFAULT 'USD'
+        COMMENT '待确认 Postback payout 的 ISO 4217 币种' AFTER payout,
+    ADD COLUMN currency_source VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd'
+        COMMENT '待确认 Postback payout 币种来源' AFTER currency;
+
+UPDATE pending_postback_conversions
+SET
+    currency = CASE
+        WHEN JSON_VALID(raw_data) THEN UPPER(COALESCE(
+            NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currency'))), ''),
+            NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currency_code'))), ''),
+            NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currencyCode'))), ''),
+            'USD'
+        ))
+        ELSE 'USD'
+    END,
+    currency_source = CASE
+        WHEN JSON_VALID(raw_data)
+             AND NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currency'))), '') IS NOT NULL
+            THEN 'upstream_field:currency'
+        WHEN JSON_VALID(raw_data)
+             AND NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currency_code'))), '') IS NOT NULL
+            THEN 'upstream_field:currency_code'
+        WHEN JSON_VALID(raw_data)
+             AND NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.currencyCode'))), '') IS NOT NULL
+            THEN 'upstream_field:currencyCode'
+        ELSE 'system_fallback_usd'
+    END;
+
 ALTER TABLE third_party_report_logs
     ADD COLUMN currency_source VARCHAR(100) NULL
         COMMENT '币种来源：upstream_field:* / cloak_config:* / system_fallback_usd / manual_override / legacy_unknown'
@@ -84,12 +115,16 @@ WHERE event = 'Purchase'
   AND TRIM(currency) <> ''
   AND currency_source IS NULL;
 
--- 迁移后核验：Postback 与第三方 Purchase 的币种/来源归因均应可见。
+-- 迁移后核验：正式/待审批 Postback 与第三方 Purchase 的币种/来源归因均应可见。
 SELECT currency, currency_source, COUNT(*) AS row_count
 FROM postback_conversions
 GROUP BY currency, currency_source
 ORDER BY currency, currency_source;
 
+SELECT currency, currency_source, COUNT(*) AS row_count
+FROM pending_postback_conversions
+GROUP BY currency, currency_source
+ORDER BY currency, currency_source;
 
 SELECT COLUMN_NAME, COLUMN_DEFAULT, IS_NULLABLE
 FROM information_schema.COLUMNS
