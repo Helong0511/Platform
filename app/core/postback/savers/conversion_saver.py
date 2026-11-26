@@ -15,6 +15,7 @@ from sqlalchemy import select
 
 from app.models.models import PostbackConversion, Click, Product
 from app.core.utils import get_app_now_naive_floor_second
+from app.core.third_party_currency import resolve_currency
 
 logger = logging.getLogger(__name__)
 
@@ -293,6 +294,10 @@ class ConversionSaver:
         else:
             raw_data_json = None
 
+        currency, currency_source = resolve_currency(
+            normalized_data.get("currency"),
+            source=normalized_data.get("currency_source"),
+        )
         conversion = PostbackConversion(
             platform=normalized_data['platform'],
             conversion_id=normalized_data['conversion_id'],
@@ -305,6 +310,8 @@ class ConversionSaver:
             event_value=normalized_data['event_value'],
             original_payout=normalized_data['payout'],
             payout=final_payout,
+            currency=currency,
+            currency_source=currency_source,
             devad_id=normalized_data['devad_id'],
             os=normalized_data['os'],
             carrier=normalized_data['carrier'],
