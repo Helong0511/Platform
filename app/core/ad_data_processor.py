@@ -12,7 +12,7 @@ import asyncio
 from collections import defaultdict
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Set
-import pytz
+from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 
@@ -196,7 +196,7 @@ async def _find_existing_ad_data_for_import(
     return result.scalars().first()
 
 # 应用时区配置（从统一配置读取）
-APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
+APP_TIMEZONE = ZoneInfo(settings.TIMEZONE)
 
 
 METRIC_DECREASE_CATEGORIES: tuple[tuple[str, str, str], ...] = (
