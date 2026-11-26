@@ -60,7 +60,7 @@
         <el-table-column v-if="isAdmin && columnVisibility.advertiser_offer_id" prop="advertiser_offer_id" label="上游Offer ID" width="150" show-overflow-tooltip />
         <el-table-column v-if="isAdmin && columnVisibility.payout" prop="payout" label="上游PO" width="100" align="right">
           <template #default="scope">
-            <span v-if="scope.row.payout">{{ scope.row.payout.toFixed(2) }}</span>
+            <span v-if="scope.row.payout">{{ scope.row.payout.toFixed(2) }} {{ scope.row.payout_currency || 'USD' }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
@@ -69,13 +69,13 @@
             <template v-if="!isAdmin && currentClientId && scope.row.assigned_publishers">
               <!-- 客户登录：显示分配给该客户渠道的PO -->
               <span v-if="getRowClientPublisherPO(scope.row)">
-                {{ getRowClientPublisherPO(scope.row).toFixed(2) }}
+                {{ getRowClientPublisherPO(scope.row).toFixed(2) }} {{ scope.row.payout_currency || 'USD' }}
               </span>
               <span v-else>-</span>
             </template>
             <template v-else>
               <!-- 管理员：显示Offer级别的PO -->
-              <span v-if="scope.row.affiliate_payout">{{ scope.row.affiliate_payout.toFixed(2) }}</span>
+              <span v-if="scope.row.affiliate_payout">{{ scope.row.affiliate_payout.toFixed(2) }} {{ scope.row.payout_currency || 'USD' }}</span>
               <span v-else>-</span>
             </template>
           </template>
@@ -298,6 +298,17 @@
         </el-row>
 
         <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item label="PO币种（ISO 4217）" prop="payout_currency">
+              <el-input
+                v-model.trim="formData.payout_currency"
+                maxlength="3"
+                placeholder="USD"
+                style="width: 100%; text-transform: uppercase;"
+              />
+              <div class="field-hint">上游 PO 与全部渠道下游 PO 共用该币种；不设置时系统兜底 USD。</div>
+            </el-form-item>
+          </el-col>
           <el-col :span="12">
             <el-form-item label="上游PO" prop="payout">
               <el-input-number
