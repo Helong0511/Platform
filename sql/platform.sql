@@ -1111,7 +1111,7 @@ CREATE TABLE IF NOT EXISTS `third_party_report_logs`  (
   `conversion_id` VARCHAR(255) NULL DEFAULT NULL COMMENT '转化ID',
   `currency` VARCHAR(10) NULL DEFAULT NULL COMMENT 'ISO 4217 货币类型',
   `currency_source` VARCHAR(100) NULL DEFAULT NULL COMMENT '币种来源归因',
-  `amount` DECIMAL(12, 4) NULL DEFAULT NULL COMMENT '支付金额',
+  `amount` DECIMAL(24, 6) NULL DEFAULT NULL COMMENT '支付金额',
   `outbox_enqueued` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否由转化事务创建的持久化 Outbox 事件',
   `short_link_id` INT NULL DEFAULT NULL COMMENT '用于恢复像素配置的短链接 ID（非外键，保留删除后的证据）',
   `cloak_name` VARCHAR(100) NULL DEFAULT NULL COMMENT '斗篷配置名称（仅配置引用）',
