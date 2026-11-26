@@ -100,6 +100,22 @@ def _parse_decimal_cell(value, field_name: str, default: Decimal = Decimal("0"))
     return parsed
 
 
+
+def _parse_deduct_ratio(value, field_name: str) -> Decimal:
+    """校验产品扣减比例，防止历史脏数据导致负数扣后金额或超额扣减。"""
+    if value is None:
+        return Decimal("0")
+    try:
+        ratio = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError(f"{field_name}不是有效扣减比例") from exc
+    if not ratio.is_finite() or ratio < 0 or ratio > 1:
+        raise ValueError(f"{field_name}必须是 0 到 1 之间的有限比例")
+    if ratio.quantize(Decimal("0.0001")) != ratio:
+        raise ValueError(f"{field_name}最多允许 4 位小数")
+    return ratio
+
+
 def _parse_nonnegative_integer_cell(value, field_name: str) -> int:
     """严格解析非负计数列，拒绝小数、负数和非有限值。"""
     if _is_blank_excel_cell(value):
@@ -500,8 +516,12 @@ async def import_tb_search_data(
                     rpm_origin = _parse_decimal_cell(rpm_cell, "RPM")
                 
                 # 获取扣减比例
-                revenue_deduct_ratio = product.revenue_deduct_ratio or Decimal("0")
-                ecpm_deduct_ratio = product.ecpm_deduct_ratio or Decimal("0") # RPM 对应 eCPM 扣减比例
+                revenue_deduct_ratio = _parse_deduct_ratio(
+                    product.revenue_deduct_ratio, "收益扣减比例"
+                )
+                ecpm_deduct_ratio = _parse_deduct_ratio(
+                    product.ecpm_deduct_ratio, "eCPM扣减比例"
+                )  # RPM 对应 eCPM 扣减比例
                 
                 # 计算扣减后的值：无扣减保留原始精度，有扣减截断两位小数
                 # 币种归因尚未接入 TB Search 时，不得按固定两位小数截断金额或 RPM。
