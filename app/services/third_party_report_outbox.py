@@ -121,6 +121,17 @@ async def enqueue_postback_report(
             return int(existing.id)
 
         attempts = int(getattr(existing, "attempt_count", 0) or 0)
+        manual_retries = int(getattr(existing, "manual_retry_count", 0) or 0)
+        has_previous_response = any(
+            getattr(existing, field, None) not in (None, "")
+            for field in (
+                "response_status",
+                "response_body",
+                "log_id",
+                "report_success_time",
+                "completed_at",
+            )
+        )
         # 活动租约必须由数据库时钟判断；未来时间戳也不应被误判为有效租约。
         active_lease_id = None
         if getattr(existing, "report_start_time", None) is not None:
@@ -134,7 +145,13 @@ async def enqueue_postback_report(
                 )
                 .limit(1)
             )
-        if existing.status == "success" or attempts > 0 or active_lease_id is not None:
+        if (
+            existing.status == "success"
+            or attempts > 0
+            or manual_retries > 0
+            or has_previous_response
+            or active_lease_id is not None
+        ):
             return int(existing.id)
 
         # 仅允许从未尝试发送、且没有活动租约的旧日志升级为 Outbox；
