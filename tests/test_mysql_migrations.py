@@ -2468,7 +2468,7 @@ def test_conversion_deduction_log_conversion_fk_migration_is_idempotent_and_pres
             assert log_id_column is not None
             assert log_id_column[1].lower() == "int"
             assert log_id_column[2] == "NO"
-            assert "auto_increment" in log_id_column[ExtraIndex] if False else True
+            assert "auto_increment" in log_id_column[5].lower()
 
             cursor.execute(
                 "SELECT DELETE_RULE, UPDATE_RULE "
