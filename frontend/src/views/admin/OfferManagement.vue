@@ -314,7 +314,7 @@
               <el-input-number
                 v-model="formData.payout"
                 :min="0"
-                :precision="2"
+                :precision="getPayoutPrecision(formData.payout_currency)"
                 placeholder="上游支付金额"
                 style="width: 100%;"
               />
@@ -502,7 +502,7 @@
                       <el-input-number
                         v-model="config.affiliate_payout"
                         :min="0"
-                        :precision="2"
+                        :precision="getPayoutPrecision(formData.payout_currency)"
                         placeholder="渠道的转化金额"
                         style="width: 100%;"
                       />
@@ -886,6 +886,7 @@ import { useRoute } from 'vue-router'
 import { getOffers, getOffer } from '@/api/offer'
 import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
+import { formatCurrency, getCurrencyFractionDigits } from '@/utils/currencyFormat'
 import { copyToClipboard } from '@/utils/clipboard'
 import { useAuthStore } from '@/store'
 import { useOfferColumnVisibility } from '@/composables/useOfferColumnVisibility'
@@ -899,21 +900,9 @@ const authStore = useAuthStore()
 const route = useRoute()
 const isAdmin = computed(() => authStore.isAdmin)
 
-// 按 ISO 4217 币种小数位格式化，避免把 KWD/BHD 等三位小数金额显示成两位。
-const formatPayoutCurrency = (value, currency = 'USD') => {
-  const amount = Number(value)
-  const code = String(currency || 'USD').trim().toUpperCase()
-  if (!Number.isFinite(amount)) return '—'
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency: code,
-      currencyDisplay: 'code',
-    }).format(amount)
-  } catch {
-    return `${code} ${amount}`
-  }
-}
+// 直接按 Decimal 字符串格式化，避免 Number 转换造成财务金额精度损失。
+const formatPayoutCurrency = (value, currency = 'USD') => formatCurrency(value, currency)
+const getPayoutPrecision = (currency = 'USD') => getCurrencyFractionDigits(currency)
 // 获取客户ID，支持多种方式
 const currentClientId = computed(() => {
   // 方式1: 从 userInfo.client.id 获取
