@@ -42,6 +42,23 @@ export function formatCurrency(value, currency = 'USD') {
   }
 }
 
+
+/**
+ * 获取 ISO 4217 币种的标准小数位数，用于金额输入控件。
+ * 不手写 KWD/BHD/JOD 等例外列表，跟随运行时 Intl 货币元数据。
+ */
+export function getCurrencyFractionDigits(currency = 'USD') {
+  const code = String(currency || 'USD').trim().toUpperCase() || 'USD';
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: code
+    }).resolvedOptions().maximumFractionDigits;
+  } catch {
+    return 2;
+  }
+}
+
 /** Element Plus 表格列 formatter：USD 固定两位小数 */
 export function formatAdTableCurrency(_row, _column, value) {
   return formatAdTableCurrencyAmount(value);
