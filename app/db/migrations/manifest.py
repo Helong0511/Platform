@@ -258,6 +258,13 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         sha256="659acb3df252da2f8b54fcf3d2b90d18bd0be356ae7e6c23ef9de7efe6e70f77",
         depends_on=("20261126_currency_usd_fallback_attribution",),
     ),
+
+    Migration(
+        revision="20261127_offer_payout_currency_legacy_unknown",
+        path="sql/migrations/20261127_offer_payout_currency_legacy_unknown.sql",
+        sha256="cfb889c04c013dc265156b38bdae7a20f5fc6a554a98e2e571c7ea2d52d33b87",
+        depends_on=("20261127_offer_payout_currency",),
+    ),
     Migration(
         revision="20261128_offer_payout_decimal_precision",
         path="sql/migrations/20261128_offer_payout_decimal_precision.sql",
