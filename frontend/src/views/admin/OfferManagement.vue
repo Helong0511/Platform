@@ -60,7 +60,7 @@
         <el-table-column v-if="isAdmin && columnVisibility.advertiser_offer_id" prop="advertiser_offer_id" label="上游Offer ID" width="150" show-overflow-tooltip />
         <el-table-column v-if="isAdmin && columnVisibility.payout" prop="payout" label="上游PO" width="100" align="right">
           <template #default="scope">
-            <span v-if="scope.row.payout">{{ formatPayoutCurrency(scope.row.payout, scope.row.payout_currency) }}</span>
+            <span v-if="scope.row.payout">{{ formatOfferPayout(scope.row.payout, scope.row) }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
@@ -69,13 +69,13 @@
             <template v-if="!isAdmin && currentClientId && scope.row.assigned_publishers">
               <!-- 客户登录：显示分配给该客户渠道的PO -->
               <span v-if="getRowClientPublisherPO(scope.row)">
-                {{ formatPayoutCurrency(getRowClientPublisherPO(scope.row), scope.row.payout_currency) }}
+                {{ formatOfferPayout(getRowClientPublisherPO(scope.row), scope.row) }}
               </span>
               <span v-else>-</span>
             </template>
             <template v-else>
               <!-- 管理员：显示Offer级别的PO -->
-              <span v-if="scope.row.affiliate_payout">{{ formatPayoutCurrency(scope.row.affiliate_payout, scope.row.payout_currency) }}</span>
+              <span v-if="scope.row.affiliate_payout">{{ formatOfferPayout(scope.row.affiliate_payout, scope.row) }}</span>
               <span v-else>-</span>
             </template>
           </template>
@@ -611,23 +611,23 @@
             <el-descriptions :column="2" border>
               <el-descriptions-item label="Offer ID">{{ currentOffer?.id }}</el-descriptions-item>
               <el-descriptions-item label="Offer名称">{{ currentOffer?.offer_name }}</el-descriptions-item>
-              <el-descriptions-item label="PO币种">{{ currentOffer?.payout_currency || 'USD' }}</el-descriptions-item>
+              <el-descriptions-item label="PO币种">{{ currentOffer?.payout_currency_source === 'legacy_unknown' ? '未知（USD 仅占位）' : (currentOffer?.payout_currency || 'USD') }}</el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="币种来源">{{ currentOffer?.payout_currency_source || 'legacy_unknown' }}</el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="广告主">{{ currentOffer?.advertiser_name }}</el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="上游Offer ID">{{ currentOffer?.advertiser_offer_id || '-' }}</el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="上游PO">
-                <span v-if="currentOffer?.payout">{{ formatPayoutCurrency(currentOffer.payout, currentOffer?.payout_currency) }}</span>
+                <span v-if="currentOffer?.payout">{{ formatOfferPayout(currentOffer.payout, currentOffer) }}</span>
                 <span v-else>-</span>
               </el-descriptions-item>
               <el-descriptions-item :label="isAdmin ? '下游PO' : 'PO'">
                 <template v-if="!isAdmin && currentClientId && currentOffer?.assigned_publishers">
                   <!-- 客户登录：显示分配给该客户渠道的PO -->
-                  <span v-if="getClientPublisherPO()">{{ formatPayoutCurrency(getClientPublisherPO(), currentOffer?.payout_currency) }}</span>
+                  <span v-if="getClientPublisherPO()">{{ formatOfferPayout(getClientPublisherPO(), currentOffer) }}</span>
                   <span v-else>-</span>
                 </template>
                 <template v-else>
                   <!-- 管理员：显示Offer级别的PO -->
-                  <span v-if="currentOffer?.affiliate_payout">{{ formatPayoutCurrency(currentOffer.affiliate_payout, currentOffer?.payout_currency) }}</span>
+                  <span v-if="currentOffer?.affiliate_payout">{{ formatOfferPayout(currentOffer.affiliate_payout, currentOffer) }}</span>
                   <span v-else>-</span>
                 </template>
               </el-descriptions-item>
@@ -912,6 +912,13 @@ const isAdmin = computed(() => authStore.isAdmin)
 
 // 直接按 Decimal 字符串格式化，避免 Number 转换造成财务金额精度损失。
 const formatPayoutCurrency = (value, currency = 'USD') => formatCurrency(value, currency)
+const formatOfferPayout = (value, offer) => {
+  if (value === null || value === undefined || value === '') return '—'
+  if (offer?.payout_currency_source === 'legacy_unknown') {
+    return `${String(value)}（币种未知）`
+  }
+  return formatPayoutCurrency(value, offer?.payout_currency)
+}
 const getPayoutPrecision = (currency = 'USD') => getCurrencyFractionDigits(currency)
 const getPayoutStep = (currency = 'USD') => 1 / (10 ** getPayoutPrecision(currency))
 // 获取客户ID，支持多种方式
