@@ -46,38 +46,52 @@ _CLIENT_HIDDEN_STATS_KEYS = frozenset({
 
 
 def _build_currency_summaries(stats_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """按 ISO 币种分别汇总转化金额；点击但无转化的行不制造空币种总计。"""
-    totals: Dict[str, Dict[str, Any]] = {}
+    """按币种和币种来源分别汇总；金额全程使用 Decimal 字符串。"""
+    totals: Dict[Tuple[str, str], Dict[str, Any]] = {}
     for item in stats_list:
-        if int(item.get("conversion_count") or 0) <= 0:
+        count = int(item.get("conversion_count") or 0)
+        if count <= 0:
             continue
-        currency = str(item.get("currency") or "USD").strip().upper() or "USD"
+
+        raw_currency = item.get("currency")
+        raw_source = item.get("currency_source")
+        currency = str(raw_currency or "legacy_unknown").strip().upper() or "legacy_unknown"
+        source = str(raw_source or "legacy_unknown").strip() or "legacy_unknown"
+        key = (currency, source)
+
+        original_value = item.get("po")
+        downstream_value = item.get("po_after_discount")
+        if original_value is None or downstream_value is None:
+            # 不完整或未知金额不进入可加总的币种财务汇总。
+            continue
+        original = original_value if isinstance(original_value, Decimal) else Decimal(str(original_value))
+        downstream = downstream_value if isinstance(downstream_value, Decimal) else Decimal(str(downstream_value))
+
         summary = totals.setdefault(
-            currency,
+            key,
             {
                 "currency": currency,
+                "currency_source": source,
                 "conversion_count": 0,
-                "total_po": 0.0,
-                "total_po_after_discount": 0.0,
-                "total_profit": 0.0,
+                "total_po": Decimal("0"),
+                "total_po_after_discount": Decimal("0"),
+                "total_profit": Decimal("0"),
             },
         )
-        original = float(item.get("po") or 0)
-        downstream = float(item.get("po_after_discount") or 0)
-        summary["conversion_count"] += int(item.get("conversion_count") or 0)
+        summary["conversion_count"] += count
         summary["total_po"] += original
         summary["total_po_after_discount"] += downstream
         summary["total_profit"] += original - downstream
+
     return [
         {
             **summary,
-            "total_po": round(summary["total_po"], 4),
-            "total_po_after_discount": round(summary["total_po_after_discount"], 4),
-            "total_profit": round(summary["total_profit"], 4),
+            "total_po": format(summary["total_po"], "f"),
+            "total_po_after_discount": format(summary["total_po_after_discount"], "f"),
+            "total_profit": format(summary["total_profit"], "f"),
         }
         for _, summary in sorted(totals.items())
     ]
-
 
 def _build_offer_currency_breakdown(rows: List[Tuple[Any, Any, Any, Any]]) -> Dict[str, Any]:
     """按转化事实币种/来源聚合 Offer 金额，不回退当前 Offer 配置币种。"""
