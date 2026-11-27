@@ -2564,3 +2564,81 @@ def test_conversion_deduction_log_conversion_fk_migration_rejects_orphans_before
             cursor.execute("DROP TABLE IF EXISTS conversion_deduction_logs")
             cursor.execute("DROP TABLE IF EXISTS postback_conversions")
         connection.close()
+
+def test_postback_payout_decimal_precision_migration_is_idempotent_and_preserves_values():
+    """Postback 金额精度迁移覆盖四张表，重复执行不改写既有金额。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "CREATE TEMPORARY TABLE postback_conversions ("
+                "event_value DECIMAL(12,4) NULL, "
+                "original_payout DECIMAL(12,4) NULL, "
+                "payout DECIMAL(12,4) NULL) ENGINE=InnoDB"
+            )
+            cursor.execute(
+                "CREATE TEMPORARY TABLE pending_postback_conversions ("
+                "event_value DECIMAL(12,4) NULL, "
+                "original_payout DECIMAL(12,4) NULL, "
+                "payout DECIMAL(12,4) NULL) ENGINE=InnoDB"
+            )
+            cursor.execute(
+                "CREATE TEMPORARY TABLE cloak_configs ("
+                "report_value DECIMAL(12,4) NULL, "
+                "load_report_value DECIMAL(12,4) NULL, "
+                "postback_report_value DECIMAL(12,4) NULL) ENGINE=InnoDB"
+            )
+            cursor.execute(
+                "CREATE TEMPORARY TABLE third_party_report_logs ("
+                "amount DECIMAL(12,4) NULL) ENGINE=InnoDB"
+            )
+            cursor.execute(
+                "INSERT INTO postback_conversions VALUES (1.2345, 2.3456, 3.4567)"
+            )
+            cursor.execute(
+                "INSERT INTO pending_postback_conversions VALUES (4.5678, 5.6789, 6.7891)"
+            )
+            cursor.execute(
+                "INSERT INTO cloak_configs VALUES (7.8912, 8.9123, 9.1234)"
+            )
+            cursor.execute("INSERT INTO third_party_report_logs VALUES (1.9876)")
+
+            migration = "sql/migrations/20261129_postback_payout_decimal_precision.sql"
+            _run_sql_file(cursor, migration)
+            _run_sql_file(cursor, migration)
+
+            expected = {
+                "postback_conversions": ("event_value", "original_payout", "payout"),
+                "pending_postback_conversions": ("event_value", "original_payout", "payout"),
+                "cloak_configs": ("report_value", "load_report_value", "postback_report_value"),
+                "third_party_report_logs": ("amount",),
+            }
+            for table_name, column_names in expected.items():
+                for column_name in column_names:
+                    cursor.execute(f"SHOW COLUMNS FROM \u0060{table_name}\u0060 LIKE %s", (column_name,))
+                    row = cursor.fetchone()
+                    assert row is not None
+                    assert row[1].lower() == "decimal(24,6)"
+
+            cursor.execute(
+                "SELECT event_value, original_payout, payout FROM postback_conversions"
+            )
+            assert tuple(str(value) for value in cursor.fetchone()) == (
+                "1.2345", "2.3456", "3.4567"
+            )
+            cursor.execute(
+                "SELECT event_value, original_payout, payout FROM pending_postback_conversions"
+            )
+            assert tuple(str(value) for value in cursor.fetchone()) == (
+                "4.5678", "5.6789", "6.7891"
+            )
+            cursor.execute(
+                "SELECT report_value, load_report_value, postback_report_value FROM cloak_configs"
+            )
+            assert tuple(str(value) for value in cursor.fetchone()) == (
+                "7.8912", "8.9123", "9.1234"
+            )
+            cursor.execute("SELECT amount FROM third_party_report_logs")
+            assert str(cursor.fetchone()[0]) == "1.9876"
+    finally:
+        connection.close()
