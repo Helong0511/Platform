@@ -18,7 +18,10 @@ class _OfferCurrencyResult:
         return self.row
 
     def scalar_one_or_none(self):
-        return 1
+        return SimpleNamespace(
+            payout_currency=self.row[0],
+            payout_currency_source=self.row[1],
+        )
 
 
 class _OfferCurrencyDB:
@@ -125,6 +128,29 @@ async def test_missing_postback_currency_uses_offer_currency_and_records_source(
 
     assert info["currency"] == "EUR"
     assert info["currency_source"] == "offer_config"
+
+
+@pytest.mark.asyncio
+async def test_legacy_unknown_offer_currency_fails_closed_before_discount(monkeypatch):
+    calculate_discount = AsyncMock(
+        return_value=(Decimal("10.00"), Decimal("0"), None)
+    )
+    monkeypatch.setattr(module, "calculate_discount", calculate_discount)
+    monkeypatch.setattr(module, "find_deduction_config", AsyncMock(return_value=None))
+
+    with pytest.raises(DeductionProcessingError, match="历史 PO 币种未知"):
+        await DiscountChecker.calculate(
+            original_payout=Decimal("10.00"),
+            offer_id=22,
+            publisher_id=None,
+            product_id=None,
+            client_id=None,
+            advertiser_id=None,
+            click_id="click-legacy-unknown",
+            db=_OfferCurrencyDB("USD", "legacy_unknown"),
+        )
+
+    calculate_discount.assert_not_awaited()
 
 
 @pytest.mark.asyncio
