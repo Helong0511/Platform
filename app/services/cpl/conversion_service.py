@@ -79,6 +79,39 @@ def _build_currency_summaries(stats_list: List[Dict[str, Any]]) -> List[Dict[str
     ]
 
 
+def _build_offer_currency_breakdown(rows: List[Tuple[Any, Any, Any, Any]]) -> Dict[str, Any]:
+    """按转化事实币种/来源聚合 Offer 金额，不回退当前 Offer 配置币种。"""
+    groups = []
+    total_count = 0
+    for currency_value, source_value, count_value, amount_value in rows:
+        currency = str(currency_value or "legacy_unknown").strip().upper() or "legacy_unknown"
+        source = str(source_value or "legacy_unknown").strip() or "legacy_unknown"
+        amount = amount_value if isinstance(amount_value, Decimal) else Decimal(str(amount_value or 0))
+        count = int(count_value or 0)
+        total_count += count
+        groups.append({
+            "currency": currency,
+            "currency_source": source,
+            "amount": format(amount, "f"),
+            "conversion_count": count,
+        })
+    groups.sort(key=lambda item: (item["currency"], item["currency_source"]))
+    # 旧版单金额字段只在唯一且可信的币种/来源组时保留；其余场景显式返回 null。
+    if len(groups) == 1 and groups[0]["currency"] != "LEGACY_UNKNOWN":
+        return {
+            "count": total_count,
+            "po": groups[0]["amount"],
+            "currency": groups[0]["currency"],
+            "currency_groups": groups,
+        }
+    return {
+        "count": total_count,
+        "po": None,
+        "currency": None,
+        "currency_groups": groups,
+    }
+
+
 def _sanitize_conversion_summary_for_client(summary: Dict[str, Any]) -> Dict[str, Any]:
     """剥离转化总览中客户不应看到的上游 PO / 利润 / 广告主信息。"""
     sanitized = {
@@ -830,38 +863,18 @@ class ConversionService:
             PostbackConversion.currency_source,
         )
         conversion_result = await self.db.execute(conversion_query)
-        conversion_map = {}
+        grouped_rows = {}
         for row in conversion_result.all():
-            item = conversion_map.setdefault(
-                row.offer_id,
-                {"count": 0, "currency_groups": []},
-            )
-            item["count"] += int(row.conversion_count or 0)
-            amount = row.total_po if isinstance(row.total_po, Decimal) else Decimal(str(row.total_po or 0))
-            item["currency_groups"].append({
-                "currency": str(row.currency or "legacy_unknown").strip().upper() or "legacy_unknown",
-                "currency_source": str(row.currency_source or "legacy_unknown").strip() or "legacy_unknown",
-                "amount": format(amount, "f"),
-                "conversion_count": int(row.conversion_count or 0),
-            })
-        for item in conversion_map.values():
-            item["currency_groups"].sort(
-                key=lambda group: (group["currency"], group["currency_source"])
-            )
-            trusted_groups = [
-                group for group in item["currency_groups"]
-                if group["currency"] != "LEGACY_UNKNOWN"
-            ]
-            item["po"] = (
-                trusted_groups[0]["amount"]
-                if len(item["currency_groups"]) == 1 and len(trusted_groups) == 1
-                else None
-            )
-            item["currency"] = (
-                trusted_groups[0]["currency"]
-                if len(item["currency_groups"]) == 1 and len(trusted_groups) == 1
-                else None
-            )
+            grouped_rows.setdefault(row.offer_id, []).append((
+                row.currency,
+                row.currency_source,
+                row.conversion_count,
+                row.total_po,
+            ))
+        conversion_map = {
+            offer_id_value: _build_offer_currency_breakdown(rows)
+            for offer_id_value, rows in grouped_rows.items()
+        }
 
         # 构建响应数据
         stats_list = []
@@ -871,7 +884,7 @@ class ConversionService:
             # 获取转化数据
             conversion_data = conversion_map.get(
                 offer.id,
-                {"count": 0, "po": "0", "currency": offer.payout_currency, "currency_groups": []},
+                {"count": 0, "po": None, "currency": None, "currency_groups": []},
             )
             conversion_count = conversion_data["count"]
             po = conversion_data["po"]
