@@ -26,6 +26,7 @@ export function createEmptyOfferForm() {
     payout: null,
     affiliate_payout: null,
     payout_currency: 'USD',
+    payout_currency_source: 'system_fallback_usd',
     country: '',
     category: '',
     type: '',
@@ -64,6 +65,7 @@ function mapOfferToForm(offerData) {
     payout: offerData.payout,
     affiliate_payout: offerData.affiliate_payout,
     payout_currency: offerData.payout_currency || 'USD',
+    payout_currency_source: offerData.payout_currency_source || 'legacy_unknown',
     country: offerData.country || '',
     category: offerData.category || '',
     type: offerData.type || '',
@@ -288,6 +290,7 @@ export function useOfferForm({ isAdmin, loadData, publisherList }) {
           return;
         }
         const submitData = { ...formData };
+        delete submitData.payout_currency_source;
         submitData.publisher_configs = validConfigs;
         delete submitData.postback_url;
         delete submitData.postback_method;
