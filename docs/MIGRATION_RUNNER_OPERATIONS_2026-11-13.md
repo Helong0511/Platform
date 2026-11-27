@@ -50,7 +50,7 @@ python -m app.db.migrations apply
 `sql/platform.sql` 是完整 schema 快照，含 `DROP TABLE IF EXISTS` 和客户端 DELIMITER / routine 定义；当前快照不包含 `CREATE DATABASE` 或 `USE`，由 provisioning 预先创建目标库，并通过 MySQL 客户端 `--database=<目标库>` 显式选择。它不是增量 migration，也不是 Runner 的输入。
 
 - 只允许在全新或可丢弃数据库上使用经过审核的初始化流程。
-- 截至 2026-11-27，本分支 manifest 登记 40 条 revision；执行前必须以目标提交中的 `manifest.py` 和 SQL 文件集合为准，先运行 `validate`，再核对 `status` 与目标环境基线版本。该数量会随新增迁移变化，不应作为永久常量。
+- 截至 2026-11-27，本分支 manifest 登记 39 条 revision；执行前必须以目标提交中的 `manifest.py` 和 SQL 文件集合为准，先运行 `validate`，再核对 `status` 与目标环境基线版本。该数量会随新增迁移变化，不应作为永久常量。
 - 绝不能把它用于已有数据库升级。
 - 不要把“ORM 表名覆盖测试通过”误认为所有列、索引、外键、CHECK 和字符集都已完成物理结构核验。
 
@@ -811,10 +811,10 @@ CI 负责验证 unit 文件契约、CLI credential 读取与文档一致性；�
 
 ## 2026-11-27：Offer 历史 PO 币种未知归因
 
-新增 revision：`20261127_offer_payout_currency_legacy_unknown`，依赖 `20261127_offer_payout_currency`。
+该行为已合并到 revision：`20261127_offer_payout_currency`，确保存量标记与币种列创建在同一迁移中完成。
 
-- 新增 PO 币种列时，历史 Offer 行最初会得到 USD 默认值；该默认值只满足新数据兜底，不能证明历史 PO 金额原本就是 USD。
-- 后续迁移仅把仍处于 `system_fallback_usd` 来源的存量 Offer 标记为 `legacy_unknown`，不修改 `payout`、`affiliate_payout` 或币种占位值，也不覆盖已有 `manual_config`。
+- 新增 PO 币种列时，历史 Offer 行先得到 USD 占位值；同一迁移紧接着将当时所有存量行标记为 `legacy_unknown`。该默认值只满足新数据兜底，不能证明历史 PO 金额原本就是 USD。
+- 该 UPDATE 不修改 `payout` 或 `affiliate_payout` 金额。迁移必须在 Backend/Scheduler 停止期间执行；业务服务恢复后新建 Offer 才会使用 `USD / system_fallback_usd` 默认来源。
 - `payout_currency='USD'` 且 `payout_currency_source='legacy_unknown'` 时，USD 只是占位值，不得用于历史金额归因、扣减或下游 PO 比较。实时 Postback 对此类 Offer fail-closed，管理员需依据合同、上游结算单等可信凭证确认币种后配置。
 - 新建 Offer 未配置币种时仍按 `USD / system_fallback_usd` 兜底；管理员明确配置时记录 `manual_config`。修改其他 Offer 字段不得顺带清除 `legacy_unknown`。
 - 管理员可先用以下只读查询盘点待确认 Offer：
@@ -828,4 +828,4 @@ ORDER BY id;
 ```
 
 - 对历史转化记录的币种归因必须独立处理；确认 Offer 当前配置币种，不代表可以回写或重算历史 Postback、扣减日志和转发记录。
-- 隔离 MySQL 集成测试验证迁移重复执行、原 PO 金额保持不变、人工配置来源不被覆盖；扣减单元测试验证 `legacy_unknown` Offer 在金额决策前拒绝处理。CI 未通过前不得将这些测试描述为已验证。
+- 隔离 MySQL 集成测试验证同一迁移把存量 Offer 标为 `legacy_unknown`、原 PO 金额保持不变，并验证迁移后新建 Offer 仍为 `USD / system_fallback_usd`；扣减单元测试验证 `legacy_unknown` Offer 在金额决策前拒绝处理。CI 未通过前不得将这些测试描述为已验证。
