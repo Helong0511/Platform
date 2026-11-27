@@ -105,8 +105,12 @@ class DiscountChecker:
                 raise DeductionProcessingError(
                     "Postback 关联的 Offer 不存在，无法确认 payout 币种"
                 )
-            offer_currency = validate_iso_currency(offer_row.payout_currency or "USD")
             offer_currency_source = offer_row.payout_currency_source or "system_fallback_usd"
+            if str(offer_currency_source).strip().casefold() == "legacy_unknown":
+                raise DeductionProcessingError(
+                    "Offer 历史 PO 币种未知，请管理员先明确配置币种后再接收 Postback"
+                )
+            offer_currency = validate_iso_currency(offer_row.payout_currency or "USD")
             if currency_source.startswith("system_fallback"):
                 currency = offer_currency
                 currency_source = (
