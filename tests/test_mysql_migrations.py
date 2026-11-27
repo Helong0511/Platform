@@ -2647,8 +2647,8 @@ def test_postback_payout_decimal_precision_migration_is_idempotent_and_preserves
     finally:
         connection.close()
 
-def test_legacy_offer_currency_migration_marks_only_unverified_fallback_rows():
-    """历史 Offer 币种无来源证据时标为 legacy_unknown，不改动金额或人工配置。"""
+def test_offer_currency_migration_marks_existing_rows_unknown_and_new_rows_usd_fallback():
+    """同一迁移先标记存量未知；迁移后的新 Offer 继续使用 USD 兜底。"""
     connection = _connect()
     try:
         with connection.cursor() as cursor:
@@ -2656,34 +2656,38 @@ def test_legacy_offer_currency_migration_marks_only_unverified_fallback_rows():
                 "CREATE TEMPORARY TABLE offers ("
                 "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
                 "payout DECIMAL(24,6) NULL, "
-                "payout_currency VARCHAR(3) NOT NULL DEFAULT 'USD', "
-                "payout_currency_source VARCHAR(100) NOT NULL "
-                "DEFAULT 'system_fallback_usd') ENGINE=InnoDB"
+                "affiliate_payout DECIMAL(24,6) NULL) ENGINE=InnoDB"
             )
-            cursor.execute("INSERT INTO offers (payout) VALUES (12.345678)")
             cursor.execute(
-                "INSERT INTO offers "
-                "(payout, payout_currency, payout_currency_source) "
-                "VALUES (98.765432, 'EUR', 'manual_config')"
+                "INSERT INTO offers (payout, affiliate_payout) "
+                "VALUES (12.345678, 9.876543)"
+            )
+            cursor.execute(
+                "INSERT INTO offers (payout, affiliate_payout) "
+                "VALUES (98.765432, 87.654321)"
             )
 
-            migration = (
-                "sql/migrations/"
-                "20261127_offer_payout_currency_legacy_unknown.sql"
-            )
-            _run_sql_file(cursor, migration)
-            _run_sql_file(cursor, migration)
+            _run_sql_file(cursor, "sql/migrations/20261127_offer_payout_currency.sql")
 
             cursor.execute(
-                "SELECT payout, payout_currency, payout_currency_source "
+                "SELECT payout, affiliate_payout, payout_currency, payout_currency_source "
                 "FROM offers ORDER BY id"
             )
             rows = cursor.fetchall()
             assert tuple(str(value) for value in rows[0]) == (
-                "12.345678", "USD", "legacy_unknown"
+                "12.345678", "9.876543", "USD", "legacy_unknown"
             )
             assert tuple(str(value) for value in rows[1]) == (
-                "98.765432", "EUR", "manual_config"
+                "98.765432", "87.654321", "USD", "legacy_unknown"
             )
+
+            cursor.execute(
+                "INSERT INTO offers (payout, affiliate_payout) VALUES (1.234567, 0.987654)"
+            )
+            cursor.execute(
+                "SELECT payout_currency, payout_currency_source "
+                "FROM offers WHERE id = LAST_INSERT_ID()"
+            )
+            assert cursor.fetchone() == ("USD", "system_fallback_usd")
     finally:
         connection.close()
