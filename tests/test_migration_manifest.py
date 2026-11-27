@@ -83,7 +83,7 @@ def test_manifest_rejects_unknown_or_forward_dependency(tmp_path: Path):
 
 
 def test_manifest_is_explicit_and_contains_no_unreviewed_files():
-    assert len(MIGRATION_MANIFEST) == 38
+    assert len(MIGRATION_MANIFEST) == 39
     assert any(
         item.revision == "20261125_cloak_postback_currency_no_default"
         for item in MIGRATION_MANIFEST
