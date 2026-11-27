@@ -8,6 +8,6 @@ ALTER TABLE offers
     ALGORITHM=INSTANT;
 
 -- 同一迁移内标记所有存量 Offer：USD 是新数据兜底，不是历史 PO 币种证据。
--- systemd 发布链路在迁移期间停止业务 Worker，避免新建 Offer 与历史标记交错。
+-- 发布操作必须先停止 Backend/Scheduler 及其他 Offer 写入方；migration unit ordering 不会自动停止已运行服务。
 UPDATE offers
 SET payout_currency_source = 'legacy_unknown';
