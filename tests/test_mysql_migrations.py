@@ -2615,7 +2615,7 @@ def test_postback_payout_decimal_precision_migration_is_idempotent_and_preserves
             }
             for table_name, column_names in expected.items():
                 for column_name in column_names:
-                    cursor.execute(f"SHOW COLUMNS FROM \u0060{table_name}\u0060 LIKE %s", (column_name,))
+                    cursor.execute(\n                        "SHOW COLUMNS FROM `" + table_name + "` LIKE %s",\n                        (column_name,),\n                    )
                     row = cursor.fetchone()
                     assert row is not None
                     assert row[1].lower() == "decimal(24,6)"
@@ -2633,7 +2633,8 @@ def test_postback_payout_decimal_precision_migration_is_idempotent_and_preserves
                 "4.5678", "5.6789", "6.7891"
             )
             cursor.execute(
-                "SELECT report_value, load_report_value, postback_report_value FROM cloak_configs"
+                "SELECT report_value, load_report_value, postback_report_value "
+                "FROM cloak_configs"
             )
             assert tuple(str(value) for value in cursor.fetchone()) == (
                 "7.8912", "8.9123", "9.1234"
