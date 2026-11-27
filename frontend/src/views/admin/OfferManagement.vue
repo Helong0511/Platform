@@ -306,7 +306,15 @@
                 placeholder="USD"
                 style="width: 100%; text-transform: uppercase;"
               />
-              <div class="field-hint">上游 PO 与全部渠道下游 PO 共用该币种；不设置时系统兜底 USD。</div>
+              <el-alert
+                v-if="isEdit && formData.payout_currency_source === 'legacy_unknown'"
+                title="该 Offer 的历史 PO 币种未知；当前 USD 仅为占位值。请依据原始合同或上游结算凭证确认币种后保存，确认前关联 Postback 会被拒绝。"
+                type="warning"
+                :closable="false"
+                show-icon
+                class="field-hint"
+              />
+              <div v-else class="field-hint">上游 PO 与全部渠道下游 PO 共用该币种；新建 Offer 未配置时系统兜底 USD。</div>
             </el-form-item>
           </el-col>
           <el-col :span="12">
