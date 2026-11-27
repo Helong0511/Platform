@@ -62,7 +62,7 @@ def serialize_currency_revenue_groups(rows):
             "currency_source": source,
             "amount": format(amount, "f"),
         })
-    return groups
+    return sorted(groups, key=lambda item: (item["currency"], item["currency_source"]))
 
 
 def single_trusted_revenue_amount(groups):
