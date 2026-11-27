@@ -71,8 +71,16 @@
         <template #default="{ row }">{{ formatCurrency(row.amount, row.currency) }}</template>
       </el-table-column>
     </el-table>
+    <el-table v-if="dailyRevenueRows.length" :data="dailyRevenueRows" size="small" class="currency-revenue-table">
+      <el-table-column prop="date" label="日期" width="130" />
+      <el-table-column prop="currency" label="币种" width="110" />
+      <el-table-column prop="currency_source" label="币种来源" min-width="180" />
+      <el-table-column label="当日收入" min-width="160">
+        <template #default="{ row }">{{ formatCurrency(row.amount, row.currency) }}</template>
+      </el-table-column>
+    </el-table>
     <div ref="chartContainer" class="chart-container" v-if="chartData.length > 0"></div>
-    <el-empty v-else description="暂无统计数据" />
+    <el-empty v-if="chartData.length === 0" description="暂无统计数据" />
   </div>
 </template>
 
@@ -96,6 +104,7 @@ const stats = reactive({ clicks: 0, conversions: 0, conversion_rate: 0, revenue:
 const trends = reactive({ clicks: 0, conversions: 0, conversion_rate: 0, revenue: null });
 const chartData = ref([]);
 const revenueByCurrency = ref([]);
+const dailyRevenueRows = ref([]);
 // 金额按后端 Decimal 字符串展示，不在 UI 层转成 Number，避免精度及币种小数位丢失。
 const formatCurrency = (value, currency) => {
   const code = String(currency || 'LEGACY_UNKNOWN').trim().toUpperCase();
@@ -115,6 +124,9 @@ const loadStats = async () => {
       revenue_currency: data.revenue_currency || null
     });
     revenueByCurrency.value = data.revenue_by_currency || [];
+    dailyRevenueRows.value = (data.chart_data || []).flatMap((day) =>
+      (day.revenue_by_currency || []).map((item) => ({ date: day.date, ...item }))
+    );
     Object.assign(trends, {
       clicks: data.trends?.clicks || 0,
       conversions: data.trends?.conversions || 0,
@@ -135,21 +147,22 @@ const initChart = () => {
   if (!chartContainer.value || chartData.value.length === 0) return;
   if (chartInstance) chartInstance.dispose();
   chartInstance = echarts.init(chartContainer.value);
-  const revenueKeys = revenueByCurrency.value.map((item) => ({
-    currency: item.currency,
-    currency_source: item.currency_source
-  }));
-  const revenueSeries = revenueKeys.map((group) => ({
-    name: `${group.currency} · ${group.currency_source}`,
+  // 只有唯一且可信的币种来源才绘制收入曲线，禁止跨币种共用数值轴。
+  const revenueGroup = revenueByCurrency.value.length === 1 &&
+    revenueByCurrency.value[0].currency !== 'LEGACY_UNKNOWN'
+    ? revenueByCurrency.value[0]
+    : null;
+  const revenueSeries = revenueGroup ? [{
+    name: `${revenueGroup.currency} · ${revenueGroup.currency_source}`,
     type: 'line',
     yAxisIndex: 1,
     data: chartData.value.map((day) => {
       const match = (day.revenue_by_currency || []).find((item) =>
-        item.currency === group.currency && item.currency_source === group.currency_source
+        item.currency === revenueGroup.currency && item.currency_source === revenueGroup.currency_source
       );
       return match ? Number(match.amount) : null;
     })
-  }));
+  }] : [];
   chartInstance.setOption({
     tooltip: { trigger: 'axis' },
     legend: { data: ['点击', '转化', ...revenueSeries.map((item) => item.name)] },
@@ -161,7 +174,7 @@ const initChart = () => {
     },
     yAxis: [
       { type: 'value', name: '数量' },
-      { type: 'value', name: '分币种收入（图表近似值）' }
+      { type: 'value', name: revenueGroup ? `收入（${revenueGroup.currency}）` : '收入（多币种明细见表格）' }
     ],
     series: [
       { name: '点击', type: 'line', data: chartData.value.map((item) => item.clicks) },
