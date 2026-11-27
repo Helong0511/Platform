@@ -867,7 +867,7 @@ async def get_offer_stats(
         """仅在唯一且币种可信时提供旧版单金额字段，混币种/未知币种返回 null。"""
         if len(groups) != 1 or groups[0]["currency"] == "LEGACY_UNKNOWN":
             return None
-        return float(Decimal(groups[0]["amount"]))
+        return groups[0]["amount"]
 
     clicks = await _count_clicks(start)
     conversions = await _count_conversions(start)
@@ -891,7 +891,7 @@ async def get_offer_stats(
     revenue_trend = None
     if current_group_key and current_group_key in previous_by_key:
         revenue_trend = pct_trend(
-            revenue,
+            float(Decimal(revenue)),
             float(Decimal(previous_by_key[current_group_key]["amount"])),
         )
 
