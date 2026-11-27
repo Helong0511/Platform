@@ -2646,3 +2646,43 @@ def test_postback_payout_decimal_precision_migration_is_idempotent_and_preserves
             assert str(cursor.fetchone()[0]) == "1.9876"
     finally:
         connection.close()
+
+def test_legacy_offer_currency_migration_marks_only_unverified_fallback_rows():
+    """历史 Offer 币种无来源证据时标为 legacy_unknown，不改动金额或人工配置。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "CREATE TEMPORARY TABLE offers ("
+                "payout DECIMAL(24,6) NULL, "
+                "payout_currency VARCHAR(3) NOT NULL DEFAULT 'USD', "
+                "payout_currency_source VARCHAR(100) NOT NULL "
+                "DEFAULT 'system_fallback_usd') ENGINE=InnoDB"
+            )
+            cursor.execute("INSERT INTO offers (payout) VALUES (12.345678)")
+            cursor.execute(
+                "INSERT INTO offers "
+                "(payout, payout_currency, payout_currency_source) "
+                "VALUES (98.765432, 'EUR', 'manual_config')"
+            )
+
+            migration = (
+                "sql/migrations/"
+                "20261127_offer_payout_currency_legacy_unknown.sql"
+            )
+            _run_sql_file(cursor, migration)
+            _run_sql_file(cursor, migration)
+
+            cursor.execute(
+                "SELECT payout, payout_currency, payout_currency_source "
+                "FROM offers ORDER BY id"
+            )
+            rows = cursor.fetchall()
+            assert tuple(str(value) for value in rows[0]) == (
+                "12.345678", "USD", "legacy_unknown"
+            )
+            assert tuple(str(value) for value in rows[1]) == (
+                "98.765432", "EUR", "manual_config"
+            )
+    finally:
+        connection.close()
