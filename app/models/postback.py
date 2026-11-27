@@ -595,7 +595,7 @@ class PendingPostbackConversion(Base):
     platform = Column(String(50), nullable=False, index=True, comment='平台名称')
     conversion_id = Column(String(255), nullable=False, comment='转化ID')
     event_name = Column(String(100), nullable=True, comment='事件名称')
-    event_value = Column(Numeric(12, 4), nullable=True, comment='事件价值')
+    event_value = Column(Numeric(24, 6), nullable=True, comment='事件价值（保留 ISO 4217 三位小数及额外计算精度）')
     original_payout = Column(Numeric(24, 6), nullable=True, comment='原始支付金额（PO）')
     payout = Column(Numeric(24, 6), nullable=True, comment='扣后支付金额（PO(扣)）')
     currency = Column(
