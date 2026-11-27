@@ -138,3 +138,76 @@ async def test_explicit_postback_currency_must_match_offer_currency(monkeypatch)
             currency="USD",
             currency_source="upstream_field:currency",
         )
+
+
+@pytest.mark.asyncio
+async def test_postback_acquires_scope_mutex_before_offer_row_lock(monkeypatch):
+    calls = []
+
+    async def lock_scopes(db, scopes):
+        calls.append(("scope_lock", scopes))
+
+    class OrderedDB(_OfferCurrencyDB):
+        async def execute(self, statement):
+            calls.append(("offer_row_lock", None))
+            return await super().execute(statement)
+
+    async def calculate_discount(**kwargs):
+        calls.append(("offer_discount", None))
+        return Decimal("10.00"), Decimal("0"), None
+
+    async def find_config(**kwargs):
+        calls.append(("find_config", None))
+        return None
+
+    monkeypatch.setattr(module, "lock_deduction_scopes", lock_scopes)
+    monkeypatch.setattr(module, "calculate_discount", calculate_discount)
+    monkeypatch.setattr(module, "find_deduction_config", find_config)
+
+    await DiscountChecker.calculate(
+        original_payout=Decimal("10.00"),
+        offer_id=22,
+        publisher_id=33,
+        product_id=None,
+        client_id=None,
+        advertiser_id=11,
+        click_id="click-1",
+        db=OrderedDB(),
+    )
+
+    assert calls == [
+        ("scope_lock", [
+            ("advertiser", 11),
+            ("offer", 22),
+            ("publisher", 33),
+        ]),
+        ("offer_row_lock", None),
+        ("offer_discount", None),
+        ("find_config", None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_scope_lock_failure_prevents_offer_row_lock(monkeypatch):
+    from app.services.cpl.deduction.helpers import DeductionScopeLockError
+
+    db = _OfferCurrencyDB()
+    lock_mock = AsyncMock(side_effect=DeductionScopeLockError("lock unavailable"))
+    execute_mock = AsyncMock(wraps=db.execute)
+    db.execute = execute_mock
+
+    monkeypatch.setattr(module, "lock_deduction_scopes", lock_mock)
+
+    with pytest.raises(DeductionProcessingError, match="scope 锁获取失败"):
+        await DiscountChecker.calculate(
+            original_payout=Decimal("10.00"),
+            offer_id=22,
+            publisher_id=None,
+            product_id=None,
+            client_id=None,
+            advertiser_id=None,
+            click_id="click-1",
+            db=db,
+        )
+
+    execute_mock.assert_not_awaited()
