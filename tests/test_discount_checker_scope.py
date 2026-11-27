@@ -17,13 +17,17 @@ class _OfferCurrencyResult:
     def one_or_none(self):
         return self.row
 
+    def scalar_one_or_none(self):
+        return 1
+
 
 class _OfferCurrencyDB:
     def __init__(self, currency="USD", source="system_fallback_usd"):
         self.currency = currency
         self.source = source
+        self.bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
 
-    async def execute(self, statement):
+    async def execute(self, statement, params=None):
         return _OfferCurrencyResult(self.currency, self.source)
 
 
