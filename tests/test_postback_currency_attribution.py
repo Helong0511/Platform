@@ -13,8 +13,8 @@ from app.core.postback.forwarding.url_builder import UrlBuilder
     ("raw_data", "expected_currency", "expected_source"),
     [
         ({"payout": "12.34", "currency_code": "cny"}, "CNY", "upstream_field:currency_code"),
-        ({"payout": "12.34"}, "USD", "legacy_unknown"),
-        ({"payout": "12.34", "currency": "   "}, "USD", "legacy_unknown"),
+        ({"payout": "12.34"}, "USD", "system_fallback_usd"),
+        ({"payout": "12.34", "currency": "   "}, "USD", "system_fallback_usd"),
     ],
 )
 def test_generic_postback_currency_source_attribution(raw_data, expected_currency, expected_source):
