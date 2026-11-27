@@ -106,9 +106,11 @@ def process_pending_conversion(
             PostbackConversion,
             PostbackEventReceipt,
             Click,
+            Offer,
             TelegramPostbackApprovalAudit,
         )
         from app.core.tracking.click_token import resolve_click_from_token
+        from app.core.third_party_currency import resolve_currency, validate_iso_currency
 
         token = getattr(settings, "TELEGRAM_TOKEN", None)
         if not token:
@@ -366,6 +368,41 @@ def process_pending_conversion(
                     or (click.click_time if click else None)
                 )
 
+                # Telegram 与 Web/白名单自动审批保持相同币种归因规则。
+                # 审批时锁定 Offer 行，避免币种配置并发变更造成入账快照不一致。
+                currency, currency_source = resolve_currency(
+                    getattr(pending, "currency", None),
+                    source=getattr(pending, "currency_source", None),
+                )
+                if offer_id:
+                    offer_row = db.execute(
+                        sync_select(Offer)
+                        .where(Offer.id == offer_id)
+                        .with_for_update()
+                    ).scalar_one_or_none()
+                    if offer_row is None:
+                        raise ValueError(
+                            "待审批 Postback 关联的 Offer 不存在，无法确认 payout 币种"
+                        )
+                    offer_currency = validate_iso_currency(
+                        offer_row.payout_currency or "USD"
+                    )
+                    offer_currency_source = (
+                        offer_row.payout_currency_source or "system_fallback_usd"
+                    )
+                    if currency_source.startswith("system_fallback"):
+                        currency = offer_currency
+                        currency_source = (
+                            "offer_config"
+                            if offer_currency_source != "system_fallback_usd"
+                            else "system_fallback_usd"
+                        )
+                    elif currency != offer_currency:
+                        raise ValueError(
+                            f"待审批 Postback 币种 {currency} 与 "
+                            f"Offer 配置币种 {offer_currency} 不一致"
+                        )
+
                 conversion = PostbackConversion(
                     platform=pending.platform,
                     conversion_id=pending.conversion_id,
@@ -373,6 +410,8 @@ def process_pending_conversion(
                     event_value=pending.event_value,
                     original_payout=pending.original_payout,
                     payout=pending.payout,
+                    currency=currency,
+                    currency_source=currency_source,
                     devad_id=pending.devad_id,
                     os=pending.os,
                     carrier=pending.carrier,
