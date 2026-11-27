@@ -50,7 +50,7 @@ python -m app.db.migrations apply
 `sql/platform.sql` 是完整 schema 快照，含 `DROP TABLE IF EXISTS` 和客户端 DELIMITER / routine 定义；当前快照不包含 `CREATE DATABASE` 或 `USE`，由 provisioning 预先创建目标库，并通过 MySQL 客户端 `--database=<目标库>` 显式选择。它不是增量 migration，也不是 Runner 的输入。
 
 - 只允许在全新或可丢弃数据库上使用经过审核的初始化流程。
-- 当前 manifest 共 18 条 revision；执行前必须先运行 `validate`，并核对 `status` 与目标环境基线版本。
+- 截至 2026-11-27，本分支 manifest 登记 39 条 revision；执行前必须以目标提交中的 `manifest.py` 和 SQL 文件集合为准，先运行 `validate`，再核对 `status` 与目标环境基线版本。该数量会随新增迁移变化，不应作为永久常量。
 - 绝不能把它用于已有数据库升级。
 - 不要把“ORM 表名覆盖测试通过”误认为所有列、索引、外键、CHECK 和字符集都已完成物理结构核验。
 
@@ -708,7 +708,7 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
 
 ### 35.1 当前 manifest 与执行器状态
 
-- 当前 `app/db/migrations/manifest.py` 明确登记 **18 条**增量 revision，最后三条为：
+- **历史快照（2026-11-21，main SHA `4f0d14f761af7fe4eb097d5c72404aaa469918e6`）**：当时 `app/db/migrations/manifest.py` 登记 **18 条**增量 revision，最后三条为：
   - `20261120_telegram_postback_approval_audit`
   - `20261121_postback_pending_dedupe`
   - `20261121_postback_pending_queue_guard`
@@ -740,7 +740,7 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
 - `main` 的提交 SHA：`4f0d14f761af7fe4eb097d5c72404aaa469918e6`。
 - Full Audit CI：[Run 44887408836](https://github.com/Helong0511/Platform/actions/runs/44887408836)，结论 success。
 - Emergency Security CI：[Run 44887408854](https://github.com/Helong0511/Platform/actions/runs/44887408854)，结论 success。
-- CI 成功只证明该 SHA 在隔离测试环境中的自动检查结果；不代表已对生产数据库执行 18 条迁移，也不代表生产数据备份恢复、目标版本 DDL 算法、真实大表锁等待或故障恢复已演练。
+- CI 成功只证明该 SHA 在隔离测试环境中的自动检查结果；不代表已对生产数据库执行该历史快照中的迁移，也不代表生产数据备份恢复、目标版本 DDL 算法、真实大表锁等待或故障恢复已演练。
 
 ### 35.5 仍然有效的上线阻断项
 
