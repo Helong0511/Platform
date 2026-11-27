@@ -2615,7 +2615,10 @@ def test_postback_payout_decimal_precision_migration_is_idempotent_and_preserves
             }
             for table_name, column_names in expected.items():
                 for column_name in column_names:
-                    cursor.execute(\n                        "SHOW COLUMNS FROM `" + table_name + "` LIKE %s",\n                        (column_name,),\n                    )
+                    cursor.execute(
+                        "SHOW COLUMNS FROM `" + table_name + "` LIKE %s",
+                        (column_name,),
+                    )
                     row = cursor.fetchone()
                     assert row is not None
                     assert row[1].lower() == "decimal(24,6)"
