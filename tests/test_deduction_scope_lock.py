@@ -160,3 +160,11 @@ async def test_postback_fails_closed_when_scope_lock_is_unavailable(monkeypatch)
             click_id=None,
             db=object(),
         )
+
+
+@pytest.mark.asyncio
+async def test_scope_lock_rejects_unbound_session_as_domain_lock_error():
+    from app.services.cpl.deduction.helpers import DeductionScopeLockError
+
+    with pytest.raises(DeductionScopeLockError, match="不支持当前数据库方言"):
+        await lock_deduction_scopes(object(), [("offer", 1)])
