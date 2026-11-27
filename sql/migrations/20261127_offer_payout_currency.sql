@@ -6,3 +6,8 @@ ALTER TABLE offers
     ADD COLUMN payout_currency_source VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd'
         COMMENT 'Offer PO 币种来源归因',
     ALGORITHM=INSTANT;
+
+-- 同一迁移内标记所有存量 Offer：USD 是新数据兜底，不是历史 PO 币种证据。
+-- systemd 发布链路在迁移期间停止业务 Worker，避免新建 Offer 与历史标记交错。
+UPDATE offers
+SET payout_currency_source = 'legacy_unknown';
