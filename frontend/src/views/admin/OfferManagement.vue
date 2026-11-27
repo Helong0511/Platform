@@ -319,10 +319,11 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="上游PO" prop="payout">
-              <el-input-number
+              <el-input
                 v-model="formData.payout"
-                :min="0"
-                :precision="getPayoutPrecision(formData.payout_currency)"
+                type="number"
+                min="0"
+                :step="getPayoutStep(formData.payout_currency)"
                 placeholder="上游支付金额"
                 style="width: 100%;"
               />
@@ -507,10 +508,11 @@
                       label="下游PO" 
                       :prop="`publisher_configs.${index}.affiliate_payout`"
                     >
-                      <el-input-number
+                      <el-input
                         v-model="config.affiliate_payout"
-                        :min="0"
-                        :precision="getPayoutPrecision(formData.payout_currency)"
+                        type="number"
+                        min="0"
+                        :step="getPayoutStep(formData.payout_currency)"
                         placeholder="渠道的转化金额"
                         style="width: 100%;"
                       />
@@ -911,6 +913,7 @@ const isAdmin = computed(() => authStore.isAdmin)
 // 直接按 Decimal 字符串格式化，避免 Number 转换造成财务金额精度损失。
 const formatPayoutCurrency = (value, currency = 'USD') => formatCurrency(value, currency)
 const getPayoutPrecision = (currency = 'USD') => getCurrencyFractionDigits(currency)
+const getPayoutStep = (currency = 'USD') => 1 / (10 ** getPayoutPrecision(currency))
 // 获取客户ID，支持多种方式
 const currentClientId = computed(() => {
   // 方式1: 从 userInfo.client.id 获取
