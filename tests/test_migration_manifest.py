@@ -83,7 +83,7 @@ def test_manifest_rejects_unknown_or_forward_dependency(tmp_path: Path):
 
 
 def test_manifest_is_explicit_and_contains_no_unreviewed_files():
-    assert len(MIGRATION_MANIFEST) == 39
+    assert len(MIGRATION_MANIFEST) == 40
     assert any(
         item.revision == "20261125_cloak_postback_currency_no_default"
         for item in MIGRATION_MANIFEST
@@ -103,6 +103,7 @@ def test_manifest_is_explicit_and_contains_no_unreviewed_files():
     assert any(item.revision == "20261124_short_link_cache_invalidation_outbox" for item in MIGRATION_MANIFEST)
     assert any(item.revision == "20261124_user_stats_cache_generation" for item in MIGRATION_MANIFEST)
     assert any(item.revision == "20261127_offer_payout_currency" for item in MIGRATION_MANIFEST)
+    assert any(item.revision == "20261127_offer_payout_currency_legacy_unknown" for item in MIGRATION_MANIFEST)
     assert any(item.revision == "20261127_conversion_deduction_log_conversion_fk" for item in MIGRATION_MANIFEST)
     assert any(item.revision == "20261129_postback_payout_decimal_precision" for item in MIGRATION_MANIFEST)
     assert any(item.revision == "20261126_third_party_outbox_api_version_snapshot" for item in MIGRATION_MANIFEST)
