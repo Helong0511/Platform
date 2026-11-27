@@ -290,8 +290,16 @@ export function useOfferForm({ isAdmin, loadData, publisherList }) {
           return;
         }
         const submitData = { ...formData };
+        const normalizeOptionalDecimal = (value) => (
+          value === '' || value === undefined ? null : String(value)
+        );
+        submitData.payout = normalizeOptionalDecimal(submitData.payout);
+        submitData.affiliate_payout = normalizeOptionalDecimal(submitData.affiliate_payout);
         delete submitData.payout_currency_source;
-        submitData.publisher_configs = validConfigs;
+        submitData.publisher_configs = validConfigs.map((config) => ({
+          ...config,
+          affiliate_payout: normalizeOptionalDecimal(config.affiliate_payout),
+        }));
         delete submitData.postback_url;
         delete submitData.postback_method;
         let offerData;
