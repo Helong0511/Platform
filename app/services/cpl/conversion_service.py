@@ -13,6 +13,7 @@
 对应路由：app/api_v1/cpl/conversions
 """
 from typing import Optional, List, Dict, Any, Tuple
+from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, case, cast, Integer
 from sqlalchemy.orm import aliased
@@ -787,6 +788,8 @@ class ConversionService:
         conversion_query = (
             select(
                 Click.offer_id,
+                PostbackConversion.currency,
+                PostbackConversion.currency_source,
                 func.count(PostbackConversion.id).label('conversion_count'),
                 func.sum(PostbackConversion.payout).label('total_po')
             )
@@ -820,17 +823,45 @@ class ConversionService:
                 Click.publisher_id.in_(client_publisher_ids)
             )
 
-        # 按offer_id分组
-        conversion_query = conversion_query.group_by(Click.offer_id)
+        # 金额按转化记录自身币种和来源分组；conversion_count 后续按 Offer 汇总，避免拆分金额重复点击数。
+        conversion_query = conversion_query.group_by(
+            Click.offer_id,
+            PostbackConversion.currency,
+            PostbackConversion.currency_source,
+        )
         conversion_result = await self.db.execute(conversion_query)
-        # 构建转化统计映射
-        conversion_map = {
-            row.offer_id: {
-                'count': row.conversion_count or 0,
-                'po': float(row.total_po) if row.total_po else 0.0
-            }
-            for row in conversion_result.all()
-        }
+        conversion_map = {}
+        for row in conversion_result.all():
+            item = conversion_map.setdefault(
+                row.offer_id,
+                {"count": 0, "currency_groups": []},
+            )
+            item["count"] += int(row.conversion_count or 0)
+            amount = row.total_po if isinstance(row.total_po, Decimal) else Decimal(str(row.total_po or 0))
+            item["currency_groups"].append({
+                "currency": str(row.currency or "legacy_unknown").strip().upper() or "legacy_unknown",
+                "currency_source": str(row.currency_source or "legacy_unknown").strip() or "legacy_unknown",
+                "amount": format(amount, "f"),
+                "conversion_count": int(row.conversion_count or 0),
+            })
+        for item in conversion_map.values():
+            item["currency_groups"].sort(
+                key=lambda group: (group["currency"], group["currency_source"])
+            )
+            trusted_groups = [
+                group for group in item["currency_groups"]
+                if group["currency"] != "LEGACY_UNKNOWN"
+            ]
+            item["po"] = (
+                trusted_groups[0]["amount"]
+                if len(item["currency_groups"]) == 1 and len(trusted_groups) == 1
+                else None
+            )
+            item["currency"] = (
+                trusted_groups[0]["currency"]
+                if len(item["currency_groups"]) == 1 and len(trusted_groups) == 1
+                else None
+            )
 
         # 构建响应数据
         stats_list = []
@@ -838,9 +869,12 @@ class ConversionService:
             # 获取点击数量
             click_count = click_map.get(offer.id, 0)
             # 获取转化数据
-            conversion_data = conversion_map.get(offer.id, {'count': 0, 'po': 0.0})
-            conversion_count = conversion_data['count']
-            po = conversion_data['po']
+            conversion_data = conversion_map.get(
+                offer.id,
+                {"count": 0, "po": "0", "currency": offer.payout_currency, "currency_groups": []},
+            )
+            conversion_count = conversion_data["count"]
+            po = conversion_data["po"]
 
             # 计算转化率
             cr = (conversion_count / click_count * 100) if click_count > 0 else 0.0
@@ -853,7 +887,8 @@ class ConversionService:
                 "conversion_count": conversion_count,
                 "cr": round(cr, 2),
                 "po": po,
-                "currency": offer.payout_currency or "USD",
+                "currency": conversion_data["currency"],
+                "currency_breakdown": conversion_data["currency_groups"],
             })
 
         # 按点击数量排序
