@@ -2650,10 +2650,16 @@ def test_postback_payout_decimal_precision_migration_is_idempotent_and_preserves
 def test_offer_currency_migration_marks_existing_rows_unknown_and_new_rows_usd_fallback():
     """同一迁移先标记存量未知；迁移后的新 Offer 继续使用 USD 兜底。"""
     connection = _connect()
+    schema_name = f"platform_ci_offer_currency_{secrets.token_hex(6)}"
     try:
         with connection.cursor() as cursor:
             cursor.execute(
-                "CREATE TEMPORARY TABLE offers ("
+                f"CREATE DATABASE `{schema_name}` "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
+            )
+            cursor.execute(f"USE `{schema_name}`")
+            cursor.execute(
+                "CREATE TABLE offers ("
                 "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
                 "payout DECIMAL(24,6) NULL, "
                 "affiliate_payout DECIMAL(24,6) NULL) ENGINE=InnoDB"
@@ -2690,4 +2696,8 @@ def test_offer_currency_migration_marks_existing_rows_unknown_and_new_rows_usd_f
             )
             assert cursor.fetchone() == ("USD", "system_fallback_usd")
     finally:
-        connection.close()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(f"DROP DATABASE IF EXISTS `{schema_name}`")
+        finally:
+            connection.close()
