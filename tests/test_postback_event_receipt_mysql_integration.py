@@ -190,8 +190,22 @@ async def _run_scenario(scenario: str) -> None:
         }
 
         async with session_factory() as first:
-            duplicate = await DuplicateChecker.is_duplicate(**identity, db=first)
-            assert duplicate is False
+            if scenario == "approval_gap_lock":
+                # 模拟 Web/Telegram 审批：先锁定不存在的 canonical receipt 唯一键范围，
+                # 再创建正式转化。REPEATABLE READ 下精确唯一索引的锁定读应阻止并发收据插入。
+                locked_receipt_id = await first.scalar(
+                    text(
+                        "SELECT id FROM postback_event_receipts "
+                        "WHERE platform = :platform "
+                        "AND conversion_id = :conversion_id "
+                        "AND event_name = :event_name FOR UPDATE"
+                    ),
+                    identity,
+                )
+                assert locked_receipt_id is None
+            else:
+                duplicate = await DuplicateChecker.is_duplicate(**identity, db=first)
+                assert duplicate is False
 
             flush_started = asyncio.Event()
             flush_finished = asyncio.Event()
@@ -212,7 +226,20 @@ async def _run_scenario(scenario: str) -> None:
             else:
                 raise AssertionError("第二个事务未阻塞在唯一收据键上")
 
-            if scenario == "volume_deducted":
+            if scenario == "approval_gap_lock":
+                # 审批在持有 receipt gap lock 时提交正式 conversion；并发实时请求随后
+                # 插入临时 receipt，并通过 DuplicateChecker 的二次锁定读发现正式记录。
+                await first.execute(
+                    text(
+                        "INSERT INTO postback_conversions "
+                        "(platform, conversion_id, event_name) "
+                        "VALUES (:platform, :conversion_id, :event_name)"
+                    ),
+                    identity,
+                )
+                await first.commit()
+                expected_duplicate = True
+            elif scenario == "volume_deducted":
                 # 命中扣量：不插入正式转化，只提交持久收据。
                 await first.commit()
                 expected_duplicate = True
@@ -240,7 +267,9 @@ async def _run_scenario(scenario: str) -> None:
                 receipt_count = await verify.scalar(
                     text("SELECT COUNT(*) FROM postback_event_receipts")
                 )
-            assert receipt_count == (0 if scenario == "normal_conversion" else 1)
+            assert receipt_count == (
+                0 if scenario in ("normal_conversion", "approval_gap_lock") else 1
+            )
     finally:
         if waiting is not None and not waiting.done():
             waiting.cancel()
@@ -274,6 +303,11 @@ async def test_mysql_receipt_prevents_replay_of_volume_deducted_event():
 @pytest.mark.asyncio
 async def test_mysql_repeatable_read_closes_normal_conversion_receipt_release_race():
     await _run_scenario("normal_conversion")
+
+
+@pytest.mark.asyncio
+async def test_mysql_approval_gap_lock_prevents_realtime_receipt_race():
+    await _run_scenario("approval_gap_lock")
 
 
 @pytest.mark.asyncio
