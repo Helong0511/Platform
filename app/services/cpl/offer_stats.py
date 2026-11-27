@@ -12,6 +12,7 @@ Offer 统计辅助模块。
 2. 结果可做短 TTL 缓存，减轻高频列表刷新压力
 """
 from datetime import timedelta
+from decimal import Decimal
 
 from app.core.utils import get_app_now_naive
 
@@ -47,3 +48,43 @@ def pct_trend(current: float, previous: float) -> float:
     if previous <= 0:
         return 100.0 if current > 0 else 0.0
     return round((current - previous) / previous * 100, 2)
+
+
+def serialize_currency_revenue_groups(rows):
+    """将数据库币种收入分组转成精确十进制字符串，不合并不同来源。"""
+    groups = []
+    for currency_value, source_value, amount_value in rows:
+        currency = str(currency_value or "legacy_unknown").strip().upper() or "legacy_unknown"
+        source = str(source_value or "legacy_unknown").strip() or "legacy_unknown"
+        amount = amount_value if isinstance(amount_value, Decimal) else Decimal(str(amount_value or 0))
+        groups.append({
+            "currency": currency,
+            "currency_source": source,
+            "amount": format(amount, "f"),
+        })
+    return groups
+
+
+def single_trusted_revenue_amount(groups):
+    """仅唯一且币种可信时返回兼容金额字符串；混合或未知币种禁止合计。"""
+    if len(groups) != 1 or groups[0]["currency"] == "LEGACY_UNKNOWN":
+        return None
+    return groups[0]["amount"]
+
+
+def single_group_revenue_trend(current_groups, previous_groups):
+    """仅同一币种和来源在本期、上期均存在时计算环比。"""
+    current_amount = single_trusted_revenue_amount(current_groups)
+    if current_amount is None:
+        return None
+    key = (current_groups[0]["currency"], current_groups[0]["currency_source"])
+    previous = {
+        (item["currency"], item["currency_source"]): item
+        for item in previous_groups
+    }.get(key)
+    if previous is None:
+        return None
+    return pct_trend(
+        float(Decimal(current_amount)),
+        float(Decimal(previous["amount"])),
+    )
