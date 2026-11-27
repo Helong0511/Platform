@@ -16,7 +16,10 @@ from app.core.discount import calculate_discount
 from app.core.postback.errors import DeductionProcessingError
 from app.core.third_party_currency import resolve_currency, validate_iso_currency
 from app.models.models import Offer
-from app.services.cpl.deduction.helpers import DeductionScopeLockError
+from app.services.cpl.deduction.helpers import (
+    DeductionScopeLockError,
+    lock_deduction_scopes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +74,27 @@ class DiscountChecker:
             currency,
             source=currency_source,
         )
+
+        # 全局加锁顺序必须是 scope 锁 -> Offer 行锁。
+        # Offer 删除先锁 offer scope，再执行父行 DELETE；如果 Postback 先锁 Offer
+        # 再等待 scope，会与删除事务形成 Offer <-> scope 的锁环并触发死锁。
+        # 与 find_deduction_config 使用同一候选范围和排序，后续重复获取为事务内重入。
+        candidate_scopes = []
+        if advertiser_id:
+            candidate_scopes.append(("advertiser", advertiser_id))
         if offer_id:
-            # 与 Offer 币种修改共用行锁，避免 Postback 正在入账时币种被并发切换。
+            candidate_scopes.append(("offer", offer_id))
+        if publisher_id:
+            candidate_scopes.append(("publisher", publisher_id))
+        try:
+            await lock_deduction_scopes(db, candidate_scopes)
+        except DeductionScopeLockError as exc:
+            raise DeductionProcessingError(
+                "扣量 scope 锁获取失败，拒绝在无锁状态下执行财务决策"
+            ) from exc
+
+        if offer_id:
+            # 在 scope 锁之后取得 Offer 行锁，防止币种变更与入账并发。
             offer_result = await db.execute(
                 select(Offer)
                 .where(Offer.id == offer_id)
