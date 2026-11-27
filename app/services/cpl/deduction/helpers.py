@@ -55,7 +55,8 @@ async def lock_deduction_scopes(
     if not normalized:
         return
 
-    dialect = db.bind.dialect.name if db.bind is not None else ""
+    bind = getattr(db, "bind", None)
+    dialect = getattr(getattr(bind, "dialect", None), "name", "")
     for level, target_id in normalized:
         try:
             if dialect == "mysql":
