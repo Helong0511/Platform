@@ -35,6 +35,9 @@ from app.services.cpl.offer_stats import (
     offer_stats_period_start,
     offer_stats_previous_range,
     pct_trend,
+    serialize_currency_revenue_groups,
+    single_trusted_revenue_amount,
+    single_group_revenue_trend,
 )
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.schemas.cpl.offer import OfferCreate, OfferUpdate, OfferResponse
@@ -850,29 +853,13 @@ async def get_offer_stats(
             PostbackConversion.currency_source,
         )
         rows = (await db.execute(q)).all()
-        groups = []
-        for currency_value, source_value, amount_value in rows:
-            currency_code = str(currency_value or "legacy_unknown").strip().upper()
-            source_code = str(source_value or "legacy_unknown").strip()
-            amount = amount_value if isinstance(amount_value, Decimal) else Decimal(str(amount_value or 0))
-            groups.append({
-                "currency": currency_code or "legacy_unknown",
-                "currency_source": source_code or "legacy_unknown",
-                # Decimal 字符串避免 API JSON 序列化及前端二进制浮点提前损失精度。
-                "amount": format(amount, "f"),
-            })
-        return groups
-
-    def _single_group_amount(groups):
-        """仅在唯一且币种可信时提供旧版单金额字段，混币种/未知币种返回 null。"""
-        if len(groups) != 1 or groups[0]["currency"] == "LEGACY_UNKNOWN":
-            return None
-        return groups[0]["amount"]
+        # Decimal 字符串避免 JSON 序列化及前端二进制浮点提前损失精度。
+        return serialize_currency_revenue_groups(rows)
 
     clicks = await _count_clicks(start)
     conversions = await _count_conversions(start)
     revenue_groups = await _revenue_groups(start)
-    revenue = _single_group_amount(revenue_groups)
+    revenue = single_trusted_revenue_amount(revenue_groups)
     revenue_currency = revenue_groups[0]["currency"] if revenue is not None else None
     revenue_currency_source = revenue_groups[0]["currency_source"] if revenue is not None else None
     conversion_rate = (conversions / clicks) if clicks else 0.0
@@ -881,19 +868,7 @@ async def get_offer_stats(
     prev_conversions = await _count_conversions(prev_start, prev_end)
     prev_groups = await _revenue_groups(prev_start, prev_end)
     prev_rate = (prev_conversions / prev_clicks) if prev_clicks else 0.0
-    current_group_key = (
-        (revenue_groups[0]["currency"], revenue_groups[0]["currency_source"])
-        if len(revenue_groups) == 1 and revenue is not None else None
-    )
-    previous_by_key = {
-        (item["currency"], item["currency_source"]): item for item in prev_groups
-    }
-    revenue_trend = None
-    if current_group_key and current_group_key in previous_by_key:
-        revenue_trend = pct_trend(
-            float(Decimal(revenue)),
-            float(Decimal(previous_by_key[current_group_key]["amount"])),
-        )
+    revenue_trend = single_group_revenue_trend(revenue_groups, prev_groups)
 
     click_day = func.date(Click.click_time).label("d")
     conv_day = func.date(PostbackConversion.created_at).label("d")
