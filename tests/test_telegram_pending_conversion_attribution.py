@@ -17,6 +17,8 @@ def _pending_record(click_time):
         event_value=None,
         original_payout=10,
         payout=9,
+        currency="USD",
+        currency_source="system_fallback_usd",
         devad_id=None,
         os="Android",
         carrier=None,
@@ -100,7 +102,11 @@ def test_approved_pending_postback_preserves_click_attribution(monkeypatch):
         publisher_id=22,
         advertiser_id=33,
     )
-    fake_db = _install_fake_runtime(monkeypatch, [pending, None, None, None, click])
+    offer = SimpleNamespace(
+        payout_currency="EUR",
+        payout_currency_source="manual_config",
+    )
+    fake_db = _install_fake_runtime(monkeypatch, [pending, None, None, None, click, offer])
 
     handler = importlib.import_module(
         "app.core.telegram.callback_handlers.postback_approval"
@@ -125,6 +131,8 @@ def test_approved_pending_postback_preserves_click_attribution(monkeypatch):
     assert conversion.offer_id == 11
     assert conversion.publisher_id == 22
     assert conversion.advertiser_id == 33
+    assert conversion.currency == "EUR"
+    assert conversion.currency_source == "offer_config"
     assert "private@example.com" not in conversion.raw_data
     assert "trusted-click-77" in conversion.raw_data
 
@@ -166,7 +174,11 @@ def test_telegram_approval_uses_signed_click_token_when_click_row_is_not_yet_ava
             "click_time": click_time,
         },
     )
-    fake_db = _install_fake_runtime(monkeypatch, [pending, None, None, None, None])
+    offer = SimpleNamespace(
+        payout_currency="EUR",
+        payout_currency_source="manual_config",
+    )
+    fake_db = _install_fake_runtime(monkeypatch, [pending, None, None, None, None, offer])
 
     handler = importlib.import_module(
         "app.core.telegram.callback_handlers.postback_approval"
