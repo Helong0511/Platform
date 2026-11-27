@@ -808,3 +808,24 @@ CI 负责验证 unit 文件契约、CLI credential 读取与文档一致性；�
 - 任一变量设置/核验失败时 fail-closed，不继续执行 DDL；该设置仅作用于迁移连接，不污染应用连接池。
 - 30 秒限制的是等待锁的时间，不是 DDL 执行时长。已获得锁后的大表扫描、索引创建、数据回填、磁盘峰值和复制延迟仍需在目标 MySQL 版本及生产等价数据量副本演练。
 - 若特定迁移确需更长锁等待，必须在代码、测试、变更审批和本手册中同步明确预算；不得依赖 MySQL 默认超长 metadata lock 等待时间。
+
+## 2026-11-27：Offer 历史 PO 币种未知归因
+
+新增 revision：`20261127_offer_payout_currency_legacy_unknown`，依赖 `20261127_offer_payout_currency`。
+
+- 新增 PO 币种列时，历史 Offer 行最初会得到 USD 默认值；该默认值只满足新数据兜底，不能证明历史 PO 金额原本就是 USD。
+- 后续迁移仅把仍处于 `system_fallback_usd` 来源的存量 Offer 标记为 `legacy_unknown`，不修改 `payout`、`affiliate_payout` 或币种占位值，也不覆盖已有 `manual_config`。
+- `payout_currency='USD'` 且 `payout_currency_source='legacy_unknown'` 时，USD 只是占位值，不得用于历史金额归因、扣减或下游 PO 比较。实时 Postback 对此类 Offer fail-closed，管理员需依据合同、上游结算单等可信凭证确认币种后配置。
+- 新建 Offer 未配置币种时仍按 `USD / system_fallback_usd` 兜底；管理员明确配置时记录 `manual_config`。修改其他 Offer 字段不得顺带清除 `legacy_unknown`。
+- 管理员可先用以下只读查询盘点待确认 Offer：
+
+```sql
+SELECT id, offer_name, payout, affiliate_payout,
+       payout_currency, payout_currency_source
+FROM offers
+WHERE payout_currency_source = 'legacy_unknown'
+ORDER BY id;
+```
+
+- 对历史转化记录的币种归因必须独立处理；确认 Offer 当前配置币种，不代表可以回写或重算历史 Postback、扣减日志和转发记录。
+- 隔离 MySQL 集成测试验证迁移重复执行、原 PO 金额保持不变、人工配置来源不被覆盖；扣减单元测试验证 `legacy_unknown` Offer 在金额决策前拒绝处理。CI 未通过前不得将这些测试描述为已验证。
