@@ -2654,6 +2654,7 @@ def test_legacy_offer_currency_migration_marks_only_unverified_fallback_rows():
         with connection.cursor() as cursor:
             cursor.execute(
                 "CREATE TEMPORARY TABLE offers ("
+                "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
                 "payout DECIMAL(24,6) NULL, "
                 "payout_currency VARCHAR(3) NOT NULL DEFAULT 'USD', "
                 "payout_currency_source VARCHAR(100) NOT NULL "
