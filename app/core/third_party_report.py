@@ -9,12 +9,11 @@ import httpx
 import hashlib
 import json
 import secrets
-from decimal import Decimal
 from contextlib import asynccontextmanager
 from typing import Optional
 from datetime import datetime, timedelta
 
-from sqlalchemy import and_, select, update, or_
+from sqlalchemy import select, update, or_
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,8 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.telegram.message_sender import send_telegram_message_async as send_telegram_message
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.core.third_party_currency import MAX_PURCHASE_AMOUNT, resolve_currency, validate_purchase_payload
-from app.core.utils import APP_TIMEZONE, get_app_now_naive, get_app_now_sql_expression, localize_app_datetime
+from app.core.utils import APP_TIMEZONE, get_app_now_naive, get_app_now_sql_expression
 from app.models.models import ThirdPartyReportLog, ThirdPartyReportIdentityLock
 from app.core.log_utils import mask_email, mask_hash_prefix, mask_phone
 
@@ -70,33 +68,10 @@ def _app_datetime_to_unix_timestamp(value: datetime) -> int:
     """将应用时区 naive DATETIME 或 aware datetime 转为 Unix 秒时间戳。"""
     if value.tzinfo is None:
         # 数据库 DATETIME 按应用时区存储；不能依赖运行主机的 TZ 环境变量。
-        localized = localize_app_datetime(value)
+        localized = value.replace(tzinfo=APP_TIMEZONE)
     else:
         localized = value.astimezone(APP_TIMEZONE)
     return int(localized.timestamp())
-
-
-def _build_fbc_value(fbclid: Optional[str], click_time: Optional[datetime]) -> Optional[str]:
-    """只有同时具备原始 fbclid 与真实点击时间时才构造 fbc。"""
-    normalized_fbclid = str(fbclid or "").strip()
-    if not normalized_fbclid or click_time is None:
-        return None
-    try:
-        click_timestamp = _app_datetime_to_unix_timestamp(click_time)
-    except ValueError:
-        # 点击时间处于 DST 歧义/不存在区间时，不伪造 fbc；不影响有效 event_time 上报。
-        return None
-    return f"fb.1.{click_timestamp}.{normalized_fbclid}"
-
-
-def _event_time_to_unix_timestamp(event_time: Optional[datetime]) -> int:
-    """将事件发生时间转换为 Meta event_time；缺失时使用当前接收/发送时间。
-
-    点击时间 click_time 只用于 fbc，不是转化发生时间，绝不能回退为 event_time。
-    """
-    if event_time is None:
-        return int(time.time())
-    return _app_datetime_to_unix_timestamp(event_time)
 
 
 def sha256_hash(value: Optional[str]) -> str:
@@ -224,8 +199,7 @@ async def create_report_log(
         report_params: Optional[str] = None,
         conversion_id: Optional[str] = None,
         currency: Optional[str] = None,
-        currency_source: Optional[str] = None,
-        amount: Optional[Decimal] = None,
+        amount: Optional[float] = None,
         destination_pixel_id: Optional[str] = None,
 ) -> int:
     """创建明确标记为 unscoped 的直接发送日志；历史/平台作用域记录不得被误复用。"""
@@ -318,7 +292,6 @@ async def create_report_log(
                 phone=phone,
                 ua=ua,
                 currency=currency,
-                currency_source=currency_source,
                 amount=amount,
                 use_hash=use_hash,
                 report_params=report_params,
@@ -794,8 +767,7 @@ async def send_third_party_report(
         use_hash: bool = True,
         conversion_id: Optional[str] = None,
         currency: Optional[str] = None,
-        currency_source: Optional[str] = None,
-        amount: Optional[Decimal] = None,
+        amount: Optional[float] = None,
         click_time: Optional[datetime] = None,
         facebook_api_version: Optional[str] = "v23.0",  # 可选参数，默认与全局 FACEBOOK_API_VERSION 对齐
         platform: Optional[str] = None,
@@ -819,7 +791,7 @@ async def send_third_party_report(
     
     可选参数：
     - click_time: 点击时间（datetime 对象），用于构造 fbc 中的点击时间戳
-    - event_time: 事件实际发生时间；未提供时使用当前接收/发送时间（click_time 只用于 fbc）
+    - event_time: 事件实际发生时间；未提供时兼容回退到 click_time 或当前时间
     - conversion_id: 转化 ID（Purchase 事件必需）
     - currency: 货币类型（默认为 USD）
     - amount: 金额（Purchase 事件必需）
@@ -829,10 +801,6 @@ async def send_third_party_report(
     base_delay = 1  # 基础延迟时间（秒）
     timeout = 5  # 超时时间（秒）
     failure_reasons = []  # 收集失败原因
-
-    # Purchase 币种在任何日志创建或网络请求前完成 ISO 校验与来源归因。
-    if event == "Purchase":
-        currency, currency_source = resolve_currency(currency, source=currency_source)
 
     # 统一清理字段，避免 None 影响日志入库与参数构造
     email = (email or "").strip()
@@ -931,7 +899,6 @@ async def send_third_party_report(
             conversion_id=conversion_id,
             destination_pixel_id=pixel_id,
             currency=currency,
-            currency_source=currency_source,
             amount=amount,
         )
 
@@ -1094,10 +1061,19 @@ async def send_third_party_report(
             fb_event_name = event
 
             # event_time 表示转化实际发生时间；click_time 仅用于 fbc 的点击时间戳。
-            event_timestamp = _event_time_to_unix_timestamp(event_time)
+            occurred_at = event_time or click_time
+            event_timestamp = (
+                _app_datetime_to_unix_timestamp(occurred_at)
+                if occurred_at is not None
+                else int(time.time())
+            )
 
-            # fbc 中段时间必须与 fbclid 产生时的点击时间一致；缺失点击时间时不伪造 fbc。
-            fbc_value = _build_fbc_value(adsid, click_time)
+            # fbc 中段时间必须与 fbclid 产生时的点击时间一致，不能改用转化接收时间。
+            fbc_ts = (
+                _app_datetime_to_unix_timestamp(click_time)
+                if click_time is not None
+                else event_timestamp
+            )
 
             # 构建用户数据
             user_data = {}
@@ -1116,8 +1092,8 @@ async def send_third_party_report(
             if ua:
                 user_data["client_user_agent"] = ua
 
-            if fbc_value:
-                user_data["fbc"] = fbc_value
+            if adsid:
+                user_data["fbc"] = f"fb.1.{fbc_ts}.{adsid}"
             event_data = {
                 "event_name": fb_event_name,
                 "event_time": event_timestamp,
@@ -1127,23 +1103,19 @@ async def send_third_party_report(
             }
 
             # 购物事件必须添加 custom_data（Meta 要求 value + currency）
-            if fb_event_name == "Purchase":
-                # 不允许发送阶段再次静默默认 USD；Outbox 已在入队/Worker 两侧校验。
-                purchase_amount, purchase_currency = validate_purchase_payload(amount, currency)
+            if fb_event_name == "Purchase" and amount is not None:
                 event_data["custom_data"] = {
-                    "currency": purchase_currency,
-                    # 先用唯一字符串占位，JSON 序列化后替换成未加引号的十进制数字 token，
-                    # 避免 float 转换，也避免把 Meta value 错发成字符串。
-                    "value": "__EXACT_PURCHASE_DECIMAL_VALUE__",
+                    "currency": (currency or "USD"),
+                    "value": float(amount),
                 }
 
-            send_data = {"data": [event_data]}
+            # 构建请求数据
+            send_data = {
+                "data": [event_data]
+            }
+
+            # 存储完整上报参数
             report_params_json = json.dumps(send_data, ensure_ascii=False)
-            if fb_event_name == "Purchase":
-                report_params_json = report_params_json.replace(
-                    '"__EXACT_PURCHASE_DECIMAL_VALUE__"',
-                    format(purchase_amount, "f"),
-                )
             attempt_persisted = await update_owned_report_log(
                 report_log_id,
                 report_params=report_params_json,
@@ -1186,15 +1158,7 @@ async def send_third_party_report(
                     "report_log_id": report_log_id,
                 }
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await asyncio.wait_for(
-                    client.post(
-                        url,
-                        content=report_params_json.encode("utf-8"),
-                        headers={"Content-Type": "application/json"},
-                        params=params,
-                    ),
-                    timeout=_report_http_request_deadline_seconds(),
-                )
+                response = await _post_with_total_deadline(client, url, json=send_data, params=params)
                 # 第三方响应可能回显 user_data；日志只记录状态，不记录响应正文。
                 logger.debug("[第三方上报] 响应状态: status=%s", response.status_code)
 
@@ -1405,18 +1369,6 @@ async def retry_report_log(log_id: int, db=None):
                 ThirdPartyReportLog.platform.is_not(None),
                 ThirdPartyReportLog.platform != "",
                 ThirdPartyReportLog.status == "failed",
-                # Purchase 历史载荷在重新排队前必须仍满足金额/币种约束；
-                # 条件写入与重试状态切换在同一条 UPDATE 中原子判定，避免先读后改竞态。
-                or_(
-                    ThirdPartyReportLog.event != "Purchase",
-                    and_(
-                        ThirdPartyReportLog.amount.is_not(None),
-                        ThirdPartyReportLog.amount > 0,
-                        ThirdPartyReportLog.amount <= MAX_PURCHASE_AMOUNT,
-                        ThirdPartyReportLog.currency.is_not(None),
-                        ThirdPartyReportLog.currency.op("REGEXP")(r"^[A-Za-z]{3}$"),
-                    ),
-                ),
                 ThirdPartyReportLog.manual_retry_count < MAX_MANUAL_REPORT_RETRIES,
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                 or_(
@@ -1482,10 +1434,9 @@ async def update_report_log_params(
         phone: Optional[str] = None,
         ua: Optional[str] = None,
         currency: Optional[str] = None,
-        amount: Optional[Decimal] = None,
+        amount: Optional[float] = None,
         report_params: Optional[str] = None,
         use_hash: Optional[bool] = None,
-        audit_snapshot: Optional[dict] = None,
         db=None,
 ):
     """更新日志参数；身份字段变更必须先取得旧/新基础身份锁并检查冲突。"""
@@ -1745,14 +1696,6 @@ async def update_report_log_params(
                     log_entry.event,
                     log_entry.conversion_id,
                 )
-            financial_before = {
-                "amount": (
-                    str(getattr(log_entry, "amount", None))
-                    if getattr(log_entry, "amount", None) is not None
-                    else None
-                ),
-                "currency": getattr(log_entry, "currency", None),
-            }
             if email is not None:
                 log_entry.email = email
             if ip is not None:
@@ -1761,37 +1704,14 @@ async def update_report_log_params(
                 log_entry.phone = phone
             if ua is not None:
                 log_entry.ua = ua
-            if log_entry.event == "Purchase" and (
-                currency is not None or amount is not None
-            ):
-                candidate_currency = currency if currency is not None else log_entry.currency
-                candidate_amount = amount if amount is not None else log_entry.amount
-                candidate_amount, candidate_currency = validate_purchase_payload(
-                    candidate_amount, candidate_currency
-                )
-                log_entry.currency = candidate_currency
-                if currency is not None:
-                    log_entry.currency_source = "manual_override"
-                log_entry.amount = candidate_amount
-            else:
-                if currency is not None:
-                    log_entry.currency = currency
-                    log_entry.currency_source = "manual_override"
-                if amount is not None:
-                    log_entry.amount = amount
+            if currency is not None:
+                log_entry.currency = currency
+            if amount is not None:
+                log_entry.amount = amount
             if report_params is not None:
                 log_entry.report_params = report_params
             if use_hash is not None:
                 log_entry.use_hash = use_hash
-
-            if audit_snapshot is not None and (amount is not None or currency is not None):
-                audit_snapshot.update({
-                    "before": financial_before,
-                    "after": {
-                        "amount": str(log_entry.amount) if log_entry.amount is not None else None,
-                        "currency": log_entry.currency,
-                    },
-                })
 
             if not caller_managed_session:
                 await db.commit()
