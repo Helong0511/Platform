@@ -12,6 +12,7 @@ import secrets
 from contextlib import asynccontextmanager
 from typing import Optional
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy import and_, select, update, or_
 from sqlalchemy.dialects.mysql import insert as mysql_insert
