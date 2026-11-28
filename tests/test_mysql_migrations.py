@@ -2626,24 +2626,24 @@ def test_postback_payout_decimal_precision_migration_is_idempotent_and_preserves
             cursor.execute(
                 "SELECT event_value, original_payout, payout FROM postback_conversions"
             )
-            assert tuple(Decimal(str(value)) for value in cursor.fetchone()) == (
-                Decimal("1.2345"), Decimal("2.3456"), Decimal("3.4567")
+            assert tuple(decimal.Decimal(str(value)) for value in cursor.fetchone()) == (
+                decimal.Decimal("1.2345"), decimal.Decimal("2.3456"), decimal.Decimal("3.4567")
             )
             cursor.execute(
                 "SELECT event_value, original_payout, payout FROM pending_postback_conversions"
             )
-            assert tuple(Decimal(str(value)) for value in cursor.fetchone()) == (
-                Decimal("4.5678"), Decimal("5.6789"), Decimal("6.7891")
+            assert tuple(decimal.Decimal(str(value)) for value in cursor.fetchone()) == (
+                decimal.Decimal("4.5678"), decimal.Decimal("5.6789"), decimal.Decimal("6.7891")
             )
             cursor.execute(
                 "SELECT report_value, load_report_value, postback_report_value "
                 "FROM cloak_configs"
             )
-            assert tuple(Decimal(str(value)) for value in cursor.fetchone()) == (
-                Decimal("7.8912"), Decimal("8.9123"), Decimal("9.1234")
+            assert tuple(decimal.Decimal(str(value)) for value in cursor.fetchone()) == (
+                decimal.Decimal("7.8912"), decimal.Decimal("8.9123"), decimal.Decimal("9.1234")
             )
             cursor.execute("SELECT amount FROM third_party_report_logs")
-            assert Decimal(str(cursor.fetchone()[0])) == Decimal("1.9876")
+            assert Decimal(str(cursor.fetchone()[0])) == decimal.Decimal("1.9876")
     finally:
         connection.close()
 
