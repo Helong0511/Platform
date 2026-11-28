@@ -2,6 +2,31 @@
 -- 已有 RESTRICT 约束保持不动；仅将仍为 CASCADE 的外键改为 RESTRICT。
 -- 该迁移不删除、不迁移任何业务配置数据。
 
+-- 在修改约束前，拒绝同一目标表上列映射错误的外键；不能误删其它业务约束。
+SET @cpl_fk_mapping_mismatch_count = (
+    SELECT COUNT(DISTINCT CONCAT(k.TABLE_NAME, ':', k.CONSTRAINT_NAME))
+    FROM information_schema.KEY_COLUMN_USAGE k
+    WHERE k.CONSTRAINT_SCHEMA = DATABASE()
+      AND k.TABLE_NAME = 'conversion_deduction_configs'
+      AND k.REFERENCED_TABLE_NAME IN ('advertisers', 'offers', 'publishers')
+      AND (
+          k.COLUMN_NAME <> CASE k.REFERENCED_TABLE_NAME
+              WHEN 'advertisers' THEN 'advertiser_id'
+              WHEN 'offers' THEN 'offer_id'
+              WHEN 'publishers' THEN 'publisher_id'
+          END
+          OR k.REFERENCED_COLUMN_NAME <> 'id'
+      )
+);
+SET @cpl_fk_mapping_validation_sql = IF(
+    @cpl_fk_mapping_mismatch_count = 0,
+    'SELECT 1',
+    'SELECT * FROM __cpl_deduction_scope_fk_column_mapping_mismatch__'
+);
+PREPARE cpl_fk_mapping_validation FROM @cpl_fk_mapping_validation_sql;
+EXECUTE cpl_fk_mapping_validation;
+DEALLOCATE PREPARE cpl_fk_mapping_validation;
+
 SET @cpl_adv_fk = (
     SELECT CONSTRAINT_NAME
     FROM information_schema.REFERENTIAL_CONSTRAINTS
@@ -118,12 +143,21 @@ DEALLOCATE PREPARE cpl_pub_add_fk;
 
 -- 验收：三条 scope 外键必须全部为 RESTRICT。
 SET @cpl_restrict_count = (
-    SELECT COUNT(*)
-    FROM information_schema.REFERENTIAL_CONSTRAINTS
-    WHERE CONSTRAINT_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'conversion_deduction_configs'
-      AND REFERENCED_TABLE_NAME IN ('advertisers', 'offers', 'publishers')
-      AND DELETE_RULE = 'RESTRICT'
+    SELECT COUNT(DISTINCT k.REFERENCED_TABLE_NAME)
+    FROM information_schema.KEY_COLUMN_USAGE k
+    JOIN information_schema.REFERENTIAL_CONSTRAINTS r
+      ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA
+     AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME
+     AND r.TABLE_NAME = k.TABLE_NAME
+    WHERE k.CONSTRAINT_SCHEMA = DATABASE()
+      AND k.TABLE_NAME = 'conversion_deduction_configs'
+      AND (
+          (k.COLUMN_NAME = 'advertiser_id' AND k.REFERENCED_TABLE_NAME = 'advertisers' AND k.REFERENCED_COLUMN_NAME = 'id')
+          OR (k.COLUMN_NAME = 'offer_id' AND k.REFERENCED_TABLE_NAME = 'offers' AND k.REFERENCED_COLUMN_NAME = 'id')
+          OR (k.COLUMN_NAME = 'publisher_id' AND k.REFERENCED_TABLE_NAME = 'publishers' AND k.REFERENCED_COLUMN_NAME = 'id')
+      )
+      AND r.DELETE_RULE = 'RESTRICT'
+      AND r.UPDATE_RULE = 'RESTRICT'
 );
 SET @cpl_restrict_validation_sql = IF(
     @cpl_restrict_count = 3,
