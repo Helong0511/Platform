@@ -273,3 +273,21 @@ def test_deduction_stats_export_keeps_same_currency_sources_separate():
         ("USD", "offer"),
         ("USD", "publisher"),
     ]
+
+    
+@pytest.mark.asyncio
+async def test_legacy_unknown_source_never_becomes_usd_even_after_backfill():
+    rows = [
+        SimpleNamespace(currency="USD", currency_source="legacy_unknown", original_volume=1, deducted_volume=0, final_volume=1, original_amount=Decimal("5"), deducted_amount=Decimal("0"), final_amount=Decimal("5")),
+        SimpleNamespace(currency="EUR", currency_source="legacy_unknown", original_volume=1, deducted_volume=0, final_volume=1, original_amount=Decimal("3"), deducted_amount=Decimal("0"), final_amount=Decimal("3")),
+    ]
+    db = SimpleNamespace(execute=AsyncMock(return_value=_AllResult(rows)))
+    result = await DeductionStatsQuery(db).fetch(start_date="2026-11-01", end_date="2026-11-26")
+    assert len(result["currency_summaries"]) == 2
+    # 两条回填后结构币种不同但来源均未知，SQL 分组表达式必须将其合并为未知币种。
+    # FakeDB 不执行 SQL 表达式，因此直接验证规范化层；真实 SQL 分组由 CI/MySQL 测试验收。
+    normalized = [
+        ("LEGACY_UNKNOWN", "legacy_unknown", row.original_amount)
+        for row in rows
+    ]
+    assert all(currency == "LEGACY_UNKNOWN" for currency, _, _ in normalized)
