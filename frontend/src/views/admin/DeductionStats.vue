@@ -203,12 +203,12 @@
         type="warning"
         :closable="false"
         show-icon
-        title="检测到多种币种：金额不会跨币种相加，请按下方币种分组核对。"
+        title="检测到多币种或同币种多来源：金额不会跨币种/来源合并，请按下方明细核对。"
         style="margin-bottom: 16px;"
       />
 
       <div v-if="stats.currency_summaries?.length" class="table-section">
-        <h3>分币种金额统计</h3>
+        <h3>分币种及来源金额统计</h3>
         <el-table :data="stats.currency_summaries" stripe>
           <el-table-column prop="currency" label="币种" width="110" />
           <el-table-column prop="currency_source" label="币种来源" min-width="160" />
