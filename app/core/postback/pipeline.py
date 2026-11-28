@@ -238,6 +238,7 @@ async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[Decimal, An
             else None
         ),
     )
+    info = info or {}
     ctx.normalized_data["currency"] = info.get(
         "currency", ctx.normalized_data.get("currency") or "USD"
     )
