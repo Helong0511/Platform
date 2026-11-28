@@ -27,7 +27,7 @@ def datetime_encoder(v: datetime) -> str:
     - 如果没有时区信息，假设是应用时区（用于时间戳字段）
     """
     if v.tzinfo is None:
-        # zoneinfo 遵循标准库 tzinfo 协议，naive 数据按应用配置时区解释。
+        # 标准库 ZoneInfo 可直接附加应用时区，避免 pytz 的历史 LMT 偏移问题。
         v = v.replace(tzinfo=APP_TIMEZONE)
     return v.isoformat()
 
