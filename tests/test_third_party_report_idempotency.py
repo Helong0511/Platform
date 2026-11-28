@@ -1034,7 +1034,7 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
     first = await third_party_report.send_third_party_report(**common)
     assert first["success"] is False
     assert first["retryable"] is True
-    assert first["reason"] == "report_lease_lost_after_send"
+    assert first["reason"] == "remote_accepted_local_ack_unknown"
     assert state["status"] == "pending"
 
     # 模拟租约到期后 worker 恢复；数据库仍未确认第一次发送成功。
@@ -1922,3 +1922,72 @@ async def test_direct_event_rejects_platform_scope_when_empty_conversion_is_norm
     assert result == 0
     assert "conversion_id is null" in captured["scope_sql"]
     assert "conversion_id = ''" in captured["scope_sql"]
+
+
+async def test_remote_acceptance_with_local_success_ack_exception_never_reposts_same_round(monkeypatch):
+    """远端已确认接收后，本地 success ACK 异常必须终止本轮，HTTP POST 只能一次。"""
+    state = {"http_calls": 0, "updates": []}
+
+    class Response:
+        status_code = 200
+        text = '{"events_received":1,"fbtrace_id":"trace-ack-unknown"}'
+
+        @staticmethod
+        def json():
+            return {"events_received": 1, "fbtrace_id": "trace-ack-unknown"}
+
+    class FakeHTTPClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            state["http_calls"] += 1
+            return Response()
+
+    async def existing_log(**kwargs):
+        return 941
+
+    async def claimed(report_log_id, **kwargs):
+        return "lease-941"
+
+    async def renew_claimed_lease(report_log_id, lease_token, **kwargs):
+        return lease_token
+
+    async def fail_local_ack(report_log_id, **kwargs):
+        state["updates"].append(kwargs.get("status"))
+        if kwargs.get("status") == "success":
+            raise RuntimeError("simulated database ACK failure")
+        return True
+
+    monkeypatch.setattr(third_party_report, "create_report_log", existing_log)
+    monkeypatch.setattr(third_party_report, "_claim_report_log", claimed)
+    monkeypatch.setattr(third_party_report, "_renew_report_log_lease", renew_claimed_lease)
+    monkeypatch.setattr(third_party_report, "update_report_log", fail_local_ack)
+    monkeypatch.setattr(third_party_report.httpx, "AsyncClient", FakeHTTPClient)
+
+    result = await third_party_report.send_third_party_report(
+        adsid="ack-unknown-click",
+        event="Lead",
+        email=None,
+        ip=None,
+        phone=None,
+        ua=None,
+        facebook_pixel_id="pixel-ack-unknown",
+        facebook_access_token="token-ack-unknown",
+        source="short_link",
+    )
+
+    assert result == {
+        "success": False,
+        "retryable": True,
+        "reason": "remote_accepted_local_ack_unknown",
+        "report_log_id": 941,
+    }
+    assert state["http_calls"] == 1
+    assert state["updates"] == [None, "success"]
