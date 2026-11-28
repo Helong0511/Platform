@@ -176,6 +176,7 @@ def test_deduction_export_formatter_keeps_three_and_six_decimal_values():
 async def test_deduction_stats_query_preserves_decimal_currency_totals():
     row = SimpleNamespace(
         currency="KWD",
+        currency_source="offer",
         original_volume=10,
         deducted_volume=2,
         final_volume=8,
@@ -197,4 +198,31 @@ async def test_deduction_stats_query_preserves_decimal_currency_totals():
         Decimal("12.345678") / Decimal("123.456789")
     )
     assert result["currency_summaries"][0]["currency"] == "KWD"
+    assert result["currency_summaries"][0]["currency_source"] == "offer"
     assert isinstance(result["currency_summaries"][0]["original_amount"], Decimal)
+
+    
+@pytest.mark.asyncio
+async def test_deduction_stats_separates_same_currency_by_source_and_keeps_unknown_explicit():
+    rows = [
+        SimpleNamespace(currency="USD", currency_source="offer", original_volume=2, deducted_volume=0, final_volume=2, original_amount=Decimal("10"), deducted_amount=Decimal("0"), final_amount=Decimal("10")),
+        SimpleNamespace(currency="USD", currency_source="publisher", original_volume=3, deducted_volume=1, final_volume=2, original_amount=Decimal("20"), deducted_amount=Decimal("2"), final_amount=Decimal("18")),
+        SimpleNamespace(currency=None, currency_source=None, original_volume=1, deducted_volume=0, final_volume=1, original_amount=Decimal("5"), deducted_amount=Decimal("0"), final_amount=Decimal("5")),
+    ]
+    db = SimpleNamespace(execute=AsyncMock(return_value=_AllResult(rows)))
+    result = await DeductionStatsQuery(db).fetch(start_date="2026-11-01", end_date="2026-11-26")
+    assert len(result["currency_summaries"]) == 3
+    assert {(x["currency"], x["currency_source"]) for x in result["currency_summaries"]} == {
+        ("USD", "offer"), ("USD", "publisher"), ("LEGACY_UNKNOWN", "legacy_unknown")
+    }
+    assert result["original_amount"] is None
+    assert result["deducted_amount"] is None
+    assert result["amount_deduction_ratio"] is None
+
+
+def test_deduction_stats_response_rejects_missing_currency_source():
+    from pydantic import ValidationError
+    from app.schemas.cpl.deduction import DeductionStatsResponse
+
+    with pytest.raises(ValidationError):
+        DeductionStatsResponse(currency_summaries=[{"currency": "USD", "original_amount": Decimal("1")}])
