@@ -2643,7 +2643,7 @@ def test_postback_payout_decimal_precision_migration_is_idempotent_and_preserves
                 decimal.Decimal("7.8912"), decimal.Decimal("8.9123"), decimal.Decimal("9.1234")
             )
             cursor.execute("SELECT amount FROM third_party_report_logs")
-            assert Decimal(str(cursor.fetchone()[0])) == decimal.Decimal("1.9876")
+            assert decimal.Decimal(str(cursor.fetchone()[0])) == decimal.Decimal("1.9876")
     finally:
         connection.close()
 
