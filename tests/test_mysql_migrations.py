@@ -116,6 +116,55 @@ def _index_columns(cursor, table_name: str, index_name: str) -> list[str]:
     ]
 
 
+
+def test_cpl_scope_restrict_migration_rejects_wrong_local_fk_column():
+    """同一父表的错误列外键不能被当作 scope 外键，更不能被静默替换。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS conversion_deduction_configs")
+            cursor.execute("DROP TABLE IF EXISTS advertisers")
+            cursor.execute("DROP TABLE IF EXISTS offers")
+            cursor.execute("DROP TABLE IF EXISTS publishers")
+            for table in ("advertisers", "offers", "publishers"):
+                cursor.execute(
+                    f"CREATE TABLE `{table}` (id INT NOT NULL PRIMARY KEY) "
+                    "ENGINE=InnoDB"
+                )
+            cursor.execute(
+                "CREATE TABLE conversion_deduction_configs ("
+                "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "advertiser_id INT NULL, offer_id INT NULL, publisher_id INT NULL, "
+                "unrelated_advertiser_id INT NULL, "
+                "KEY idx_cpl_offer (offer_id), KEY idx_cpl_publisher (publisher_id), "
+                "KEY idx_unrelated_advertiser (unrelated_advertiser_id), "
+                "CONSTRAINT fk_unrelated_advertiser FOREIGN KEY (unrelated_advertiser_id) "
+                "REFERENCES advertisers(id) ON DELETE RESTRICT ON UPDATE RESTRICT"
+                ") ENGINE=InnoDB"
+            )
+
+            with pytest.raises(pymysql.err.OperationalError) as migration_error:
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261125_cpl_deduction_scope_restrict_fks.sql",
+                )
+            assert migration_error.value.args[0] == 1146
+
+            cursor.execute(
+                "SELECT COLUMN_NAME, REFERENCED_TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversion_deduction_configs' "
+                "AND CONSTRAINT_NAME = 'fk_unrelated_advertiser'"
+            )
+            assert cursor.fetchall() == (("unrelated_advertiser_id", "advertisers"),)
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS conversion_deduction_configs")
+            cursor.execute("DROP TABLE IF EXISTS advertisers")
+            cursor.execute("DROP TABLE IF EXISTS offers")
+            cursor.execute("DROP TABLE IF EXISTS publishers")
+        connection.close()
+
+
 def _column_metadata(cursor, table_name: str, column_name: str):
     """读取字段类型、NULL 和默认值，核对迁移结果而不只核对字段名。"""
     allowed_tables = {"third_party_report_logs", "postback_forward_logs", "pending_postback_conversions", "clicks_archive"}
