@@ -226,3 +226,50 @@ def test_deduction_stats_response_rejects_missing_currency_source():
 
     with pytest.raises(ValidationError):
         DeductionStatsResponse(currency_summaries=[{"currency": "USD", "original_amount": Decimal("1")}])
+
+    
+
+def test_deduction_stats_export_keeps_same_currency_sources_separate():
+    from app.schemas.cpl.deduction import DeductionStatsResponse
+    from app.services.cpl.deduction.mappers import stats_to_export_rows
+
+    stats = DeductionStatsResponse(
+        original_volume=5,
+        deducted_volume=1,
+        final_volume=4,
+        original_amount=None,
+        deducted_amount=None,
+        final_amount=None,
+        amount_deduction_ratio=None,
+        currency_summaries=[
+            {
+                "currency": "USD",
+                "currency_source": "offer",
+                "original_volume": 2,
+                "deducted_volume": 0,
+                "final_volume": 2,
+                "original_amount": Decimal("10"),
+                "deducted_amount": Decimal("0"),
+                "final_amount": Decimal("10"),
+                "amount_deduction_ratio": Decimal("0"),
+            },
+            {
+                "currency": "USD",
+                "currency_source": "publisher",
+                "original_volume": 3,
+                "deducted_volume": 1,
+                "final_volume": 2,
+                "original_amount": Decimal("20"),
+                "deducted_amount": Decimal("2"),
+                "final_amount": Decimal("18"),
+                "amount_deduction_ratio": Decimal("0.1"),
+            },
+        ],
+    )
+
+    rows = stats_to_export_rows(stats)
+    assert rows[0]["原始转化金额"] == "多币种，见分币种明细"
+    assert [(row["币种"], row["币种来源"]) for row in rows[1:]] == [
+        ("USD", "offer"),
+        ("USD", "publisher"),
+    ]
