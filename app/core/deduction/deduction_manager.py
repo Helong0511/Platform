@@ -14,7 +14,7 @@ import hashlib
 from typing import Optional, Tuple, Dict, Any
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
 from datetime import timedelta
@@ -551,7 +551,11 @@ class DeductionManager:
 
         orig = Decimal(str(original_amount or 0))
         ratio = Decimal(str(config.amount_deduction_ratio))
-        deduction_amount = orig * ratio
+        # 保持输入金额的小数位数；按十进制四舍五入，不经过 float。
+        amount_quantum = Decimal(1).scaleb(orig.as_tuple().exponent)
+        deduction_amount = (orig * ratio).quantize(
+            amount_quantum, rounding=ROUND_HALF_UP
+        )
         final_amount = orig - deduction_amount
 
         return final_amount, deduction_amount
