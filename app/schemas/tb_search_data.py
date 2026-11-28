@@ -142,6 +142,24 @@ class TBSearchDataListResponse(BaseSchema):
 
 
 class TBSearchDataUpdate(BaseSchema):
+    @model_validator(mode="before")
+    @classmethod
+    def reject_non_finite_amount_payload(cls, data):
+        """在字段 Decimal 核心解析前拦截非有限金额，返回稳定中文错误。"""
+        if not isinstance(data, dict):
+            return data
+        for field_name in ("revenue", "rpm", "revenue_before_deduct", "rpm_before_deduct"):
+            value = data.get(field_name)
+            if value is None:
+                continue
+            try:
+                parsed = Decimal(str(value))
+            except Exception:
+                continue
+            if not parsed.is_finite():
+                raise ValueError("金额和 RPM 必须是有限数字")
+        return data
+
     """
     单条更新请求，所有字段可选（仅提交需修改项）
     
