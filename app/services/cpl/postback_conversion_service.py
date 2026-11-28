@@ -19,9 +19,8 @@ from time import perf_counter
 from typing import Optional, Dict, Any
 
 from fastapi import Request, HTTPException
-from sqlalchemy import func, and_, or_
+from sqlalchemy import func, and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.errors import ErrorCode

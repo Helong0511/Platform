@@ -18,6 +18,7 @@ BASELINE_MYSQL_TABLE_OPTIONS: dict[str, dict[str, str]] = {
     "client_notification_configs": {"charset": "utf8mb4", "collation": "utf8mb4_0900_ai_ci"},
     "clients": {"charset": "utf8mb4", "collation": "utf8mb4_0900_ai_ci"},
     "conversion_deduction_configs": {"charset": "utf8mb4", "collation": "utf8mb4_0900_ai_ci"},
+    "conversion_deduction_scope_locks": {"charset": "utf8mb4", "collation": "utf8mb4_0900_ai_ci"},
     "conversion_deduction_logs": {"charset": "utf8mb4", "collation": "utf8mb4_0900_ai_ci"},
     "countries": {"charset": "utf8mb4", "collation": "utf8mb4_unicode_ci"},
     "country_aliases": {"charset": "utf8mb4", "collation": "utf8mb4_unicode_ci"},

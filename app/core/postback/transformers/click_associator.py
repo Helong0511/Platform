@@ -7,7 +7,7 @@ import asyncio
 import logging
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from app.core.tracking.click_token import resolve_click_from_token
@@ -43,11 +43,40 @@ class ClickAssociator:
         token_assoc: Dict[str, Any],
     ) -> Dict[str, Any]:
         """合并数据库点击行与令牌解析结果，url_params 做键级合并。"""
+        # 数据库点击快照与签名 Token 的身份字段必须一致；Token 不得静默覆盖 DB。
+        identity_fields = (
+            "click_id",
+            "offer_id",
+            "publisher_id",
+            "advertiser_id",
+            "short_link_id",
+            "client_id",
+        )
+        conflicts = [
+            key
+            for key in identity_fields
+            if db_assoc.get(key) is not None
+            and token_assoc.get(key) is not None
+            and str(db_assoc.get(key)) != str(token_assoc.get(key))
+        ]
+        if conflicts:
+            logger.error(
+                "Click Token 与数据库身份快照冲突，拒绝归因：fields=%s",
+                ",".join(conflicts),
+            )
+            raise ValueError("Click attribution identity conflict")
+
         merged = dict(db_assoc)
         for key, value in token_assoc.items():
-            if value is None or key == "url_params":
+            if value is None or key == "url_params" or key in identity_fields:
                 continue
             merged[key] = value
+        # 数据库有点击时快照优先；旧行缺少快照时仅接受签名 Token 的非空客户 ID。
+        merged["client_id"] = (
+            db_assoc.get("client_id")
+            if db_assoc.get("client_id") is not None
+            else token_assoc.get("client_id")
+        )
         merged["url_params"] = merge_association_url_params(
             db_assoc.get("url_params"),
             token_assoc.get("url_params"),
@@ -105,8 +134,7 @@ class ClickAssociator:
                     select(Publisher).where(Publisher.id == publisher_id).limit(1)
                 )
                 association["publisher"] = r.scalars().first()
-                if association["publisher"] is not None:
-                    association["client_id"] = association["publisher"].client_id
+                # 禁止用 Publisher 当前 client_id 回填历史点击归属；历史 Token/Click 缺快照时保持 None。
             if offer_id and association.get("offer") is None:
                 r = await db.execute(
                     select(Offer).where(Offer.id == offer_id).limit(1)
@@ -118,10 +146,20 @@ class ClickAssociator:
                 )
                 association["advertiser"] = r.scalars().first()
         except Exception as e:
-            logger.warning(
-                "令牌关联 ORM enrichment 失败（不影响 ID 归因）：%s",
+            # Enrichment 查询失败属于数据库故障，不等于关联对象不存在。
+            # 不得返回半截 Token 身份继续进入 Cap/扣量/转发流程。
+            logger.error(
+                "令牌关联 ORM enrichment 数据库查询失败，终止归因：error_type=%s",
                 type(e).__name__,
             )
+            try:
+                await db.rollback()
+            except Exception as rollback_error:
+                logger.critical(
+                    "令牌关联 ORM enrichment 失败后的事务回滚也失败：error_type=%s",
+                    type(rollback_error).__name__,
+                )
+            raise
 
         return association
 
@@ -131,7 +169,7 @@ class ClickAssociator:
         db: AsyncSession,
     ) -> Optional[Dict[str, Any]]:
         """
-        通过 clicks 表关联（兼容旧版随机 click_id 及异步落库延迟）。
+        通过 clicks 表关联（兼容旧版随机 click_id 及异步落库延迟）。仅对明确的未命中重试；数据库异常回滚后向上传播，避免伪装成 not-found。
         """
         if not click_id:
             logger.debug("Click ID 为空，无法关联")
@@ -171,12 +209,20 @@ class ClickAssociator:
                         logger.debug(f"等待 {delay:.2f} 秒后重试...")
                         await asyncio.sleep(delay)
             except Exception as e:
-                logger.error("第 %s 次尝试查询 Click 记录失败：%s", attempt + 1, type(e).__name__)
-                if attempt < max_attempts - 1:
-                    # 指数退避：delay = base_delay * (2 ** attempt)
-                    delay = base_delay * (2 ** attempt)
-                    logger.debug(f"等待 {delay:.2f} 秒后重试...")
-                    await asyncio.sleep(delay)
+                # 查询异常不等于 Click 不存在。SQLAlchemy 事务失败后 Session 可能进入
+                # failed state，不能在同一 Session 上继续重试，更不能把 DB 故障降级成 None。
+                logger.error(
+                    "查询 Click 记录失败，终止归因并交由接收层返回可重试错误：error_type=%s",
+                    type(e).__name__,
+                )
+                try:
+                    await db.rollback()
+                except Exception as rollback_error:
+                    logger.critical(
+                        "Click 查询失败后的事务回滚也失败：error_type=%s",
+                        type(rollback_error).__name__,
+                    )
+                raise
         
         if not click:
             logger.error("多次尝试后仍未找到 Click 记录")
@@ -204,7 +250,7 @@ class ClickAssociator:
             'offer': click.offer,
             'publisher': click.publisher,
             # 客户归属以点击时的渠道配置为准，不能信任回调请求体中的 client_id。
-            'client_id': click.publisher.client_id if click.publisher else None,
+            'client_id': click.client_id,
             'advertiser': click.advertiser,
             'url_params': url_params,
         }

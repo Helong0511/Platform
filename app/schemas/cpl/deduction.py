@@ -174,6 +174,8 @@ class ConversionDeductionLogResponse(BaseSchema):
     deducted_amount: Decimal
     final_volume: int
     final_amount: Decimal
+    currency: Optional[str] = Field(None, description="扣减金额对应的 ISO 4217 币种；历史缺失值保持为空")
+    currency_source: Optional[str] = Field(None, description="扣减金额币种来源归因；历史缺失值保持为空")
     deduction_config_id: Optional[int] = None
     volume_deduction_ratio: Optional[Decimal] = None
     amount_deduction_ratio: Optional[Decimal] = None
@@ -188,21 +190,43 @@ class ConversionDeductionLogResponse(BaseSchema):
     model_config = ConfigDict(from_attributes=True)
 
 
+class DeductionCurrencySummary(BaseSchema):
+    """按币种和币种来源隔离的金额汇总。"""
+    currency: str = Field(..., min_length=1)
+    currency_source: str = Field(..., min_length=1)
+    original_amount: Decimal = Decimal('0')
+    deducted_amount: Decimal = Decimal('0')
+    final_amount: Decimal = Decimal('0')
+    amount_deduction_ratio: Decimal = Decimal('0')
+    original_volume: int = 0
+    deducted_volume: int = 0
+    final_volume: int = 0
+
+
+class DeductionStatsItem(DeductionCurrencySummary):
+    """按业务维度、币种和来源拆分的统计明细。"""
+    volume_deduction_ratio: Decimal = Decimal('0')
+    advertiser_id: Optional[int] = None
+    offer_id: Optional[int] = None
+    publisher_id: Optional[int] = None
+
+
 class DeductionStatsResponse(BaseSchema):
     """
     扣减汇总统计响应。
 
-    聚合原始/扣减/最终 volume 与 amount，及按维度拆分的 items 明细列表。
+    金额必须按币种和币种来源隔离；只有唯一分组时才提供兼容总金额字段。
     """
     original_volume: int = 0
     deducted_volume: int = 0
     final_volume: int = 0
     volume_deduction_ratio: Decimal = Decimal('0')
-    original_amount: Decimal = Decimal('0')
-    deducted_amount: Decimal = Decimal('0')
-    final_amount: Decimal = Decimal('0')
-    amount_deduction_ratio: Decimal = Decimal('0')
-    items: list = []
+    original_amount: Optional[Decimal] = None
+    deducted_amount: Optional[Decimal] = None
+    final_amount: Optional[Decimal] = None
+    amount_deduction_ratio: Optional[Decimal] = None
+    currency_summaries: list[DeductionCurrencySummary] = Field(default_factory=list)
+    items: list[DeductionStatsItem] = Field(default_factory=list)
 
 
 class BatchUpdateStatusRequest(BaseSchema):

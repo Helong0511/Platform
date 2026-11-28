@@ -435,6 +435,8 @@ async def _batch_insert_clicks(
                 "click_id": click.get("click_id"),
                 "offer_id": click.get("offer_id"),
                 "publisher_id": click.get("publisher_id"),
+                # 使用入队时保存的客户归属快照，不能在批量落库时读取 Publisher 当前归属。
+                "client_id": click.get("client_id"),
                 "advertiser_id": click.get("advertiser_id"),
                 "short_link_id": click.get("short_link_id"),
                 "click_time": click_time,

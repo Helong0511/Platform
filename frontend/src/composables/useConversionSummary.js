@@ -59,6 +59,7 @@ export function useConversionSummary(isAdmin) {
     total_po: 0,
     total_po_after_discount: 0,
     total_profit: 0,
+    currency_summaries: [],
     conversion_cap: 0,
     stats_list: [],
   });

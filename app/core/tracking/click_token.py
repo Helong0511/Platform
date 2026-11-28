@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 _BEIJING = timezone(timedelta(hours=8))
 
 # userinfo 内业务字段（紧凑 JSON 键名尽量短）
+_KEY_CLIENT_ID = "client_id"
 _KEY_OFFER = "oid"
 _KEY_PUBLISHER = "pub"
 _KEY_ADVERTISER = "aid"
@@ -418,6 +419,8 @@ def _build_generation_attempts(
         advertiser_id=advertiser_id,
         short_link_id=short_link_id,
     )
+    # 必须把签名的点击时客户归属放进最先尝试的紧凑载荷；否则紧凑载荷会静默丢失 extra。
+    id_list_with_extra = {**id_list_base, **(extra or {})}
 
     up_ladder = _url_params_slim_ladder(url_params)
     has_up = url_params and isinstance(url_params, dict) and bool(url_params)
@@ -427,7 +430,9 @@ def _build_generation_attempts(
             if not up:
                 continue
             # 紧凑 ID + up（体积最小，尽量塞下更多 query）
-            if id_list_base:
+            if id_list_with_extra:
+                _add(_attach_url_params(id_list_with_extra, up))
+            elif id_list_base:
                 _add(_attach_url_params(id_list_base, up))
             # 标准对象 + up（兼容旧解析键名）
             _add(
@@ -443,6 +448,8 @@ def _build_generation_attempts(
             )
 
     # 最后手段：去掉 up（仅在上面的带 up 尝试全部失败后才会走到这里）
+    if id_list_with_extra:
+        _add(id_list_with_extra)
     if id_list_base:
         _add(id_list_base)
     _add(
@@ -693,6 +700,7 @@ def association_from_parsed(parsed: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     click_time = _ms_to_naive_beijing(int(ts_ms)) if ts_ms is not None else None
 
     offer_id, publisher_id, advertiser_id, short_link_id = _ids_from_userinfo(ui)
+    client_id = _pick_int(ui, _KEY_CLIENT_ID)
 
     url_params = ui.get(_KEY_URL_PARAMS) or ui.get("url_params")
     if url_params is not None and not isinstance(url_params, dict):
@@ -708,6 +716,7 @@ def association_from_parsed(parsed: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "publisher_id": publisher_id,
         "advertiser_id": advertiser_id,
         "short_link_id": short_link_id,
+        "client_id": client_id,
         "click_time": click_time,
         "ip": ui.get("ip"),
         "user_agent": ui.get("user_agent") or ui.get("ua"),
@@ -797,5 +806,6 @@ def regenerate_click_id_from_click_data(click_data: Dict[str, Any]) -> str:
         advertiser_id=click_data.get("advertiser_id"),
         short_link_id=click_data.get("short_link_id"),
         url_params=url_params,
+        extra={"client_id": click_data.get("client_id")} if click_data.get("client_id") is not None else None,
     )
 

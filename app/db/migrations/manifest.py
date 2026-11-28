@@ -159,6 +159,12 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
     ),
 
     Migration(
+        revision="20261124_click_client_attribution_snapshot",
+        path="sql/migrations/20261124_click_client_attribution_snapshot.sql",
+        sha256="f1f1eee2ee85dfdc3675770fae52e14d37eb4bfc602d8cf68bed2b82e93ec72c",
+    ),
+
+    Migration(
         revision="20261124_cpl_deduction_cache_generation",
         path="sql/migrations/20261124_cpl_deduction_cache_generation.sql",
         sha256="8c078bb17aa43cc79bc7b05c08513b1442a96fcf086d1f7d8bd3ed2fe38da2b7",
@@ -190,6 +196,81 @@ MIGRATION_MANIFEST: tuple[Migration, ...] = (
         depends_on=("20261123_ad_data_cache_generation_outbox",),
     ),
 
+
+    Migration(
+        revision="20261125_cloak_postback_currency_no_default",
+        path="sql/migrations/20261125_cloak_postback_currency_no_default.sql",
+        sha256="3ef9b35066173329a00a5a500cfc6dc496460f4131a364f67064ddb5dcea13ed",
+    ),
+
+    Migration(
+        revision="20261125_cpl_deduction_scope_locks",
+        path="sql/migrations/20261125_cpl_deduction_scope_locks.sql",
+        sha256="3cfa80ab57aadda52ee37224a1a91f51dadfd75af494906b407b0faf6ddb4701",
+    ),
+
+    Migration(
+        revision="20261125_cpl_deduction_scope_restrict_fks",
+        path="sql/migrations/20261125_cpl_deduction_scope_restrict_fks.sql",
+        sha256="4d964092779db0bc0920461471abf140bb26e8f69fcfe7aa6f838a18a81be30f",
+        depends_on=("20261125_cpl_deduction_scope_locks",),
+    ),
+
+    Migration(
+        revision="20261125_cpl_deduction_scope_unique",
+        path="sql/migrations/20261125_cpl_deduction_scope_unique.sql",
+        sha256="aa31d7a02d092b2f6bdeb6859cf757f2169403c16a087d5e8a07730a1f6b4a84",
+        depends_on=(
+            "20261125_cpl_deduction_scope_locks",
+            "20261125_cpl_deduction_scope_restrict_fks",
+        ),
+    ),
+
+    Migration(
+        revision="20261125_postback_approval_receipt_outcome",
+        path="sql/migrations/20261125_postback_approval_receipt_outcome.sql",
+        sha256="7280df97b834a95111b671ecb009ec3738a541513fed8b96aa00124c70eaaf76",
+        depends_on=("20261124_postback_event_deduction_receipts",),
+    ),
+    Migration(
+        revision="20261126_currency_usd_fallback_attribution",
+        path="sql/migrations/20261126_currency_usd_fallback_attribution.sql",
+        sha256="9f10b704241c71a0374b1d460dbf09a2680635915af8b4a28a66dc2f5723a90a",
+    ),
+
+
+    Migration(
+        revision="20261126_third_party_outbox_api_version_snapshot",
+        path="sql/migrations/20261126_third_party_outbox_api_version_snapshot.sql",
+        sha256="d9c3cdccd368a163fe89caeddd5097f0e7935755a97987fd84299d169f5a9306",
+        depends_on=("20261111_third_party_report_outbox",),
+    ),
+
+    Migration(
+        revision="20261127_conversion_deduction_log_conversion_fk",
+        path="sql/migrations/20261127_conversion_deduction_log_conversion_fk.sql",
+        sha256="c9e973859bbb568d3653efb86829c707a58ec2765e6cf651ab9ffef0644759aa",
+        depends_on=("20261126_currency_usd_fallback_attribution",),
+    ),
+    Migration(
+        revision="20261127_offer_payout_currency",
+        path="sql/migrations/20261127_offer_payout_currency.sql",
+        sha256="9dff8302720fb29b48723dd0b6995f52be6baea5bd15e37cb87c2ca43dbe9697",
+        depends_on=("20261126_currency_usd_fallback_attribution",),
+    ),
+    Migration(
+        revision="20261128_offer_payout_decimal_precision",
+        path="sql/migrations/20261128_offer_payout_decimal_precision.sql",
+        sha256="f500206745f92ed0d2fcba74771bfb8076f81cf072257bb7ed86328b426b35ff",
+        depends_on=("20261127_offer_payout_currency",),
+    ),
+
+    Migration(
+        revision="20261129_postback_payout_decimal_precision",
+        path="sql/migrations/20261129_postback_payout_decimal_precision.sql",
+        sha256="d2e8bedc68b1d6d19abf8529323a09c3d0bbb89559e275cee13444a525d75a42",
+        depends_on=("20261128_offer_payout_decimal_precision",),
+    ),
 )
 
 _REVISION_PATTERN = re.compile(r"^20[0-9]{6}_[a-z0-9_]+$")

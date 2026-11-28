@@ -279,6 +279,7 @@ CREATE TABLE IF NOT EXISTS `clicks`  (
   `click_id` VARCHAR(255) NOT NULL COMMENT '点击ID（系统生成，唯一标识）',
   `offer_id` INT NULL DEFAULT NULL COMMENT '关联的Offer ID',
   `publisher_id` INT NULL DEFAULT NULL COMMENT '关联的渠道ID',
+  `client_id` INT NULL DEFAULT NULL COMMENT '点击时客户ID快照（不设外键，保留历史归属）',
   `advertiser_id` INT NULL DEFAULT NULL COMMENT '关联的广告主ID',
   `short_link_id` INT NULL DEFAULT NULL COMMENT '关联的短链接ID',
   `click_time` DATETIME NOT NULL COMMENT '点击时间',
@@ -422,6 +423,15 @@ CREATE TABLE IF NOT EXISTS `clients`  (
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '客户表（下游商户）' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
+-- CPL 扣量 scope 事务锁（锁行永久保留，不允许按 TTL 清理）
+DROP TABLE IF EXISTS `conversion_deduction_scope_locks`;
+CREATE TABLE `conversion_deduction_scope_locks` (
+  `scope_type` varchar(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT 'advertiser/offer/publisher',
+  `scope_id` bigint unsigned NOT NULL COMMENT '对应业务对象主键',
+  `created_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`scope_type`, `scope_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='CPL 扣量配置跨入口事务互斥锁';
+
 -- Table structure for conversion_deduction_configs
 -- ----------------------------
 DROP TABLE IF EXISTS `conversion_deduction_configs`;
@@ -436,7 +446,10 @@ CREATE TABLE IF NOT EXISTS `conversion_deduction_configs`  (
   `enable_volume_deduction` TINYINT(1) NULL DEFAULT 0 COMMENT '是否启用按比例扣量',
   `enable_amount_deduction` TINYINT(1) NULL DEFAULT 0 COMMENT '是否启用按比例扣金额',
   `priority` INT NULL DEFAULT 0 COMMENT '优先级（数字越大优先级越高）',
-  `is_active` TINYINT(1) NULL DEFAULT 1 COMMENT '是否激活',
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否激活',
+  `active_advertiser_id` INT GENERATED ALWAYS AS (CASE WHEN `is_active` = 1 THEN `advertiser_id` ELSE NULL END) STORED,
+  `active_offer_id` INT GENERATED ALWAYS AS (CASE WHEN `is_active` = 1 THEN `offer_id` ELSE NULL END) STORED,
+  `active_publisher_id` INT GENERATED ALWAYS AS (CASE WHEN `is_active` = 1 THEN `publisher_id` ELSE NULL END) STORED,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
@@ -445,9 +458,14 @@ CREATE TABLE IF NOT EXISTS `conversion_deduction_configs`  (
   INDEX `idx_publisher_id`(`publisher_id` ASC) USING BTREE,
   INDEX `idx_is_active`(`is_active` ASC) USING BTREE,
   INDEX `idx_priority`(`priority` ASC) USING BTREE,
-  CONSTRAINT `conversion_deduction_configs_ibfk_1` FOREIGN KEY (`advertiser_id`) REFERENCES `advertisers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
-  CONSTRAINT `conversion_deduction_configs_ibfk_2` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
-  CONSTRAINT `conversion_deduction_configs_ibfk_3` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
+  UNIQUE KEY `uq_cpl_active_advertiser` (`active_advertiser_id`),
+  UNIQUE KEY `uq_cpl_active_offer` (`active_offer_id`),
+  UNIQUE KEY `uq_cpl_active_publisher` (`active_publisher_id`),
+  CONSTRAINT `chk_cpl_deduction_exactly_one_scope`
+    CHECK ((`advertiser_id` IS NOT NULL) + (`offer_id` IS NOT NULL) + (`publisher_id` IS NOT NULL) = 1),
+  CONSTRAINT `conversion_deduction_configs_ibfk_1` FOREIGN KEY (`advertiser_id`) REFERENCES `advertisers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `conversion_deduction_configs_ibfk_2` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `conversion_deduction_configs_ibfk_3` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '转化扣减配置表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
@@ -455,18 +473,20 @@ CREATE TABLE IF NOT EXISTS `conversion_deduction_configs`  (
 -- ----------------------------
 DROP TABLE IF EXISTS `conversion_deduction_logs`;
 CREATE TABLE IF NOT EXISTS `conversion_deduction_logs`  (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '记录ID',
+  `id` INT NOT NULL AUTO_INCREMENT COMMENT '记录ID',
   `conversion_id` BIGINT NULL DEFAULT NULL COMMENT '转化记录ID（关联postback_conversions.id，可为NULL因为扣量的转化可能不保存）',
   `click_id` VARCHAR(255) NULL DEFAULT NULL COMMENT '点击ID',
   `advertiser_id` INT NULL DEFAULT NULL COMMENT '广告主ID',
   `offer_id` INT NULL DEFAULT NULL COMMENT 'Offer ID',
   `publisher_id` INT NULL DEFAULT NULL COMMENT '渠道ID',
   `original_volume` INT NULL DEFAULT 1 COMMENT '原始转化数量（通常为1）',
-  `original_amount` DECIMAL(10, 2) NOT NULL COMMENT '原始转化金额',
+  `original_amount` DECIMAL(24, 6) NOT NULL COMMENT '原始转化金额',
   `deducted_volume` INT NULL DEFAULT 0 COMMENT '扣减的转化数量',
-  `deducted_amount` DECIMAL(10, 2) NULL DEFAULT 0.00 COMMENT '扣减的转化金额',
+  `deducted_amount` DECIMAL(24, 6) NULL DEFAULT 0.000000 COMMENT '扣减的转化金额',
   `final_volume` INT NULL DEFAULT 1 COMMENT '最终转化数量（扣减后）',
-  `final_amount` DECIMAL(10, 2) NOT NULL COMMENT '最终转化金额（扣减后）',
+  `final_amount` DECIMAL(24, 6) NOT NULL COMMENT '最终转化金额（扣减后）',
+  `currency` VARCHAR(10) NOT NULL DEFAULT 'USD' COMMENT '扣减金额对应的 ISO 4217 币种',
+  `currency_source` VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd' COMMENT '扣减金额币种来源归因',
   `deduction_config_id` INT NULL DEFAULT NULL COMMENT '使用的扣减配置ID',
   `volume_deduction_ratio` DECIMAL(5, 4) NULL DEFAULT NULL COMMENT '使用的扣量比例',
   `amount_deduction_ratio` DECIMAL(5, 4) NULL DEFAULT NULL COMMENT '使用的扣金额比例',
@@ -591,7 +611,7 @@ CREATE TABLE IF NOT EXISTS `offer_publisher_assignments`  (
   `offer_id` INT NOT NULL COMMENT 'Offer ID',
   `publisher_id` INT NOT NULL COMMENT '渠道ID',
   `downstream_cap` INT NULL DEFAULT NULL COMMENT '该渠道的下游转化上限',
-  `affiliate_payout` DECIMAL(10, 2) NULL DEFAULT NULL COMMENT '该渠道的扣价后给渠道的金额（PO扣价后）',
+  `affiliate_payout` DECIMAL(24, 6) NULL DEFAULT NULL COMMENT '该渠道的扣价后给渠道的金额（PO扣价后）',
   `is_active` TINYINT(1) NULL DEFAULT 1 COMMENT '是否激活',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -614,8 +634,10 @@ CREATE TABLE IF NOT EXISTS `offers`  (
   `advertiser_offer_id` VARCHAR(100) NULL DEFAULT NULL COMMENT '上游系统中的Offer ID（ADV Offer ID）',
   `advertiser_id` INT NOT NULL COMMENT '关联的广告主ID',
   `preview_link` TEXT NULL COMMENT '预览链接',
-  `payout` DECIMAL(10, 2) NULL DEFAULT NULL COMMENT '上游支付金额（PO）',
-  `affiliate_payout` DECIMAL(10, 2) NULL DEFAULT NULL COMMENT '扣价后给渠道的金额（PO扣价后）',
+  `payout` DECIMAL(24, 6) NULL DEFAULT NULL COMMENT '上游支付金额（PO）',
+  `affiliate_payout` DECIMAL(24, 6) NULL DEFAULT NULL COMMENT '扣价后给渠道的金额（PO扣价后）',
+  `payout_currency` VARCHAR(3) NOT NULL DEFAULT 'USD' COMMENT 'Offer 上游 PO 与全部渠道下游 PO 共用的 ISO 4217 币种',
+  `payout_currency_source` VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd' COMMENT 'Offer PO 币种来源归因',
   `country` VARCHAR(50) NULL DEFAULT NULL COMMENT '国家',
   `category` VARCHAR(50) NULL DEFAULT NULL COMMENT '分类',
   `type` VARCHAR(50) NULL DEFAULT NULL COMMENT '类型',
@@ -648,9 +670,11 @@ CREATE TABLE IF NOT EXISTS `pending_postback_conversions`  (
   `platform` VARCHAR(50) NOT NULL COMMENT '平台名称',
   `conversion_id` VARCHAR(255) NOT NULL COMMENT '转化ID',
   `event_name` VARCHAR(100) NULL DEFAULT NULL COMMENT '事件名称',
-  `event_value` DECIMAL(12, 4) NULL DEFAULT NULL COMMENT '事件价值',
-  `original_payout` DECIMAL(12, 4) NULL DEFAULT NULL COMMENT '原始支付金额（PO）',
-  `payout` DECIMAL(12, 4) NULL DEFAULT NULL COMMENT '扣后支付金额（PO(扣)）',
+  `event_value` DECIMAL(24, 6) NULL DEFAULT NULL COMMENT '事件价值',
+  `original_payout` DECIMAL(24, 6) NULL DEFAULT NULL COMMENT '原始支付金额（PO）',
+  `payout` DECIMAL(24, 6) NULL DEFAULT NULL COMMENT '扣后支付金额（PO(扣)）',
+  `currency` VARCHAR(10) NOT NULL DEFAULT 'USD' COMMENT '待确认 Postback payout 的 ISO 4217 币种',
+  `currency_source` VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd' COMMENT '待确认 Postback payout 币种来源',
   `devad_id` VARCHAR(255) NULL DEFAULT NULL COMMENT '设备广告ID',
   `os` VARCHAR(20) NULL DEFAULT NULL COMMENT '操作系统',
   `carrier` VARCHAR(50) NULL DEFAULT NULL COMMENT '用户运营商',
@@ -694,9 +718,11 @@ CREATE TABLE IF NOT EXISTS `postback_conversions`  (
   `transaction_id` VARCHAR(255) NULL DEFAULT NULL COMMENT '上游事务ID（幂等）',
   `request_id` VARCHAR(128) NULL DEFAULT NULL COMMENT '请求防重放ID',
   `event_name` VARCHAR(100) NULL DEFAULT NULL COMMENT '事件名称（如purchase, install等）',
-  `event_value` DECIMAL(12, 4) NULL DEFAULT NULL COMMENT '事件价值（购买价格等）',
-  `original_payout` DECIMAL(12, 4) NULL DEFAULT NULL COMMENT '原始支付金额（PO）',
-  `payout` DECIMAL(12, 4) NULL DEFAULT NULL COMMENT '支付金额（确认的广告单元价格）',
+  `event_value` DECIMAL(24, 6) NULL DEFAULT NULL COMMENT '事件价值（购买价格等）',
+  `original_payout` DECIMAL(24, 6) NULL DEFAULT NULL COMMENT '原始支付金额（PO）',
+  `payout` DECIMAL(24, 6) NULL DEFAULT NULL COMMENT '支付金额（确认的广告单元价格）',
+  `currency` VARCHAR(10) NOT NULL DEFAULT 'USD' COMMENT 'Postback payout 的 ISO 4217 币种；缺失时 USD 兜底',
+  `currency_source` VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd' COMMENT 'Postback payout 币种来源归因',
   `devad_id` VARCHAR(255) NULL DEFAULT NULL COMMENT '设备广告ID（IDFA或GAID）',
   `os` VARCHAR(20) NULL DEFAULT NULL COMMENT '操作系统（IOS或Android）',
   `carrier` VARCHAR(50) NULL DEFAULT NULL COMMENT '用户运营商',
@@ -742,6 +768,12 @@ CREATE TABLE IF NOT EXISTS `postback_conversions`  (
   CONSTRAINT `postback_conversions_ibfk_offer` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `postback_conversions_ibfk_publisher` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = 'Postback转化事件表，统一存储所有平台的postback回调数据' ROW_FORMAT = DYNAMIC;
+
+-- 扣减日志可能先于正式转化表创建，因此在两张表均存在后补齐 ORM 声明的关联约束。
+ALTER TABLE `conversion_deduction_logs`
+  MODIFY COLUMN `conversion_id` INT NULL DEFAULT NULL COMMENT '转化记录ID（关联postback_conversions.id，可为NULL因为扣量的转化可能不保存）',
+  ADD CONSTRAINT `fk_cdl_postback_conversion` FOREIGN KEY (`conversion_id`)
+    REFERENCES `postback_conversions` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT;
 
 -- ----------------------------
 -- Table structure for postback_forward_logs
@@ -1077,8 +1109,9 @@ CREATE TABLE IF NOT EXISTS `third_party_report_logs`  (
   `completed_at` DATETIME NULL DEFAULT NULL COMMENT '完成时间',
   `pii_scrubbed_at` DATETIME NULL DEFAULT NULL COMMENT 'PII 按保留策略清理时间；保留事件幂等键',
   `conversion_id` VARCHAR(255) NULL DEFAULT NULL COMMENT '转化ID',
-  `currency` VARCHAR(10) NULL DEFAULT NULL COMMENT '货币类型',
-  `amount` DECIMAL(12, 4) NULL DEFAULT NULL COMMENT '支付金额',
+  `currency` VARCHAR(10) NULL DEFAULT NULL COMMENT 'ISO 4217 货币类型',
+  `currency_source` VARCHAR(100) NULL DEFAULT NULL COMMENT '币种来源归因',
+  `amount` DECIMAL(24, 6) NULL DEFAULT NULL COMMENT '支付金额',
   `outbox_enqueued` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否由转化事务创建的持久化 Outbox 事件',
   `short_link_id` INT NULL DEFAULT NULL COMMENT '用于恢复像素配置的短链接 ID（非外键，保留删除后的证据）',
   `cloak_name` VARCHAR(100) NULL DEFAULT NULL COMMENT '斗篷配置名称（仅配置引用）',
@@ -1127,17 +1160,20 @@ CREATE TABLE IF NOT EXISTS `cloak_configs`  (
   `backup_pixel_id` VARCHAR(50) NULL DEFAULT NULL COMMENT '备份像素ID',
   `backup_access_token` VARCHAR(500) NULL DEFAULT NULL COMMENT '备份像素Token',
   `report_event` VARCHAR(64) NOT NULL DEFAULT 'ViewContent' COMMENT '斗篷点击与测上报的CAPI event_name',
-  `report_value` DECIMAL(12,4) NULL DEFAULT NULL COMMENT '购物类事件金额',
+  `report_value` DECIMAL(24, 6) NULL DEFAULT NULL COMMENT '购物类事件金额',
   `report_currency` VARCHAR(10) NULL DEFAULT 'USD' COMMENT '购物类事件货币',
+  `report_currency_source` VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd' COMMENT '点击阶段币种来源归因',
   `click_report_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '桥页按钮跳转是否做 Facebook 上报',
   `load_report_enabled` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '桥页加载完成是否做 Facebook 上报',
   `load_report_event` VARCHAR(64) NOT NULL DEFAULT 'PageView' COMMENT '加载完成 CAPI event_name',
-  `load_report_value` DECIMAL(12,4) NULL DEFAULT NULL COMMENT '加载上报为 Purchase 时的金额',
+  `load_report_value` DECIMAL(24, 6) NULL DEFAULT NULL COMMENT '加载上报为 Purchase 时的金额',
   `load_report_currency` VARCHAR(10) NULL DEFAULT 'USD' COMMENT '加载上报为 Purchase 时的货币',
+  `load_report_currency_source` VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd' COMMENT '加载阶段币种来源归因',
   `postback_report_enabled` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'postback 转化是否按斗篷配置做 Facebook 上报（0=保持原逻辑按 payout 发 Purchase）',
   `postback_report_event` VARCHAR(64) NOT NULL DEFAULT 'Purchase' COMMENT 'postback 转化 CAPI event_name',
-  `postback_report_value` DECIMAL(12,4) NULL DEFAULT NULL COMMENT 'postback 为 Purchase 时固定金额；NULL 则用 postback 的 payout',
+  `postback_report_value` DECIMAL(24, 6) NULL DEFAULT NULL COMMENT 'postback 为 Purchase 时固定金额；NULL 则用 postback 的 payout',
   `postback_report_currency` VARCHAR(10) NULL DEFAULT 'USD' COMMENT 'postback Purchase 货币',
+  `postback_report_currency_source` VARCHAR(100) NOT NULL DEFAULT 'system_fallback_usd' COMMENT 'postback 阶段币种来源归因',
   `is_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
   `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '创建时间',
   `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',

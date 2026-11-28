@@ -7,6 +7,7 @@ import hashlib
 import ipaddress
 import os
 import uuid
+from decimal import Decimal
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import quote_plus
@@ -848,6 +849,7 @@ async def test_mysql_outbox_pixel_destination_is_bound_once_and_cannot_silently_
                 platform="meta",
                 identity_scope="platform_scoped",
                 destination_pixel_id=None,
+                destination_api_version_pending=True,
                 conversion_id=f"conversion-{identity}",
                 status="pending",
                 outbox_enqueued=True,
@@ -866,27 +868,32 @@ async def test_mysql_outbox_pixel_destination_is_bound_once_and_cannot_silently_
             lease_token=lease_token,
             platform="meta",
             pixel_id="pixel-A",
+            api_version="v23.0",
         )
         same_pixel_retry = await outbox_module._bind_outbox_destination(
             report_id,
             lease_token=lease_token,
             platform="meta",
             pixel_id="pixel-A",
+            api_version="v24.0",
         )
         changed_pixel = await outbox_module._bind_outbox_destination(
             report_id,
             lease_token=lease_token,
             platform="meta",
             pixel_id="pixel-B",
+            api_version="v24.0",
         )
 
-        assert first_bind is True
-        assert same_pixel_retry is True
-        assert changed_pixel is False
+        assert first_bind == "v23.0"
+        assert same_pixel_retry == "v23.0"
+        assert changed_pixel is None
 
         async with session_factory() as session:
             persisted = await session.get(ThirdPartyReportLog, report_id)
             assert persisted.destination_pixel_id == "pixel-A"
+            assert persisted.destination_api_version == "v23.0"
+            assert persisted.destination_api_version_pending is False
     finally:
         if engine is not None:
             await engine.dispose()
@@ -1537,6 +1544,8 @@ async def test_mysql_manual_retry_is_atomic_against_admin_and_worker_races(monke
                 identity_scope="platform_scoped",
                 platform="meta",
                 destination_pixel_id="pixel-ci-retry",
+                amount=Decimal("21.50"),
+                currency="USD",
                 status="failed",
                 outbox_enqueued=True,
                 attempt_count=1,
@@ -1554,9 +1563,34 @@ async def test_mysql_manual_retry_is_atomic_against_admin_and_worker_races(monke
         async with session_factory() as session:
             admin_row = retryable_row(admin_key, "ci-admin-retry-race")
             worker_row = retryable_row(worker_key, "ci-worker-retry-race")
-            session.add_all([admin_row, worker_row])
+            invalid_amount_row = retryable_row(
+                hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest(),
+                "ci-invalid-amount",
+            )
+            invalid_amount_row.amount = Decimal("-1.00")
+            invalid_currency_row = retryable_row(
+                hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest(),
+                "ci-invalid-currency",
+            )
+            invalid_currency_row.currency = "US"
+            session.add_all([
+                admin_row, worker_row, invalid_amount_row, invalid_currency_row
+            ])
             await session.commit()
             admin_id, worker_id = admin_row.id, worker_row.id
+            invalid_amount_id = invalid_amount_row.id
+            invalid_currency_id = invalid_currency_row.id
+
+        # 真实 MySQL 必须在重新排队时拒绝历史无效 Purchase 载荷，且不改状态/重试预算。
+        assert await report_module.retry_report_log(invalid_amount_id) is False
+        assert await report_module.retry_report_log(invalid_currency_id) is False
+        async with session_factory() as session:
+            invalid_amount_after = await session.get(ThirdPartyReportLog, invalid_amount_id)
+            invalid_currency_after = await session.get(ThirdPartyReportLog, invalid_currency_id)
+            assert invalid_amount_after.status == "failed"
+            assert invalid_amount_after.manual_retry_count == 0
+            assert invalid_currency_after.status == "failed"
+            assert invalid_currency_after.manual_retry_count == 0
 
         # 两个管理员同时提交同一失败事件：条件 UPDATE 必须只允许一次预算递增。
         admin_results = await asyncio.gather(

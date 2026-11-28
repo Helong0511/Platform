@@ -308,7 +308,7 @@
       >
         <!-- 配置层级 -->
         <el-form-item label="配置层级" prop="level">
-          <el-radio-group v-model="form.level" @change="handleLevelChange">
+          <el-radio-group v-model="form.level" @change="handleLevelChange" :disabled="dialogMode === 'edit'">
             <el-radio label="advertiser">广告主</el-radio>
             <el-radio label="offer">Offer</el-radio>
             <el-radio label="publisher">渠道</el-radio>
@@ -323,6 +323,7 @@
             filterable
             style="width: 100%;"
             :loading="targetLoading"
+            :disabled="dialogMode === 'edit'"
           >
             <el-option
               v-for="item in targetOptions"
@@ -525,7 +526,7 @@
         </el-form-item>
         
         <!-- 状态 -->
-        <el-form-item label="状态">
+        <el-form-item v-if="dialogMode === 'add'" label="状态">
           <el-switch v-model="form.is_active" />
         </el-form-item>
       </el-form>

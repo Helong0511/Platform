@@ -38,10 +38,13 @@ def _cloak_phase_report_dict(cloak_config: Optional[CloakConfig]) -> Dict[str, A
             "cloak_load_report_event": "PageView",
             "cloak_load_report_value": None,
             "cloak_load_report_currency": "USD",
+            "cloak_load_report_currency_source": "system_fallback_usd",
+            "cloak_report_currency_source": "system_fallback_usd",
             "cloak_postback_report_enabled": False,
             "cloak_postback_report_event": "Purchase",
             "cloak_postback_report_value": None,
             "cloak_postback_report_currency": "USD",
+            "cloak_postback_report_currency_source": "system_fallback_usd",
         }
     return {
         "cloak_click_report_enabled": bool(getattr(cloak_config, "click_report_enabled", True)),
@@ -49,14 +52,15 @@ def _cloak_phase_report_dict(cloak_config: Optional[CloakConfig]) -> Dict[str, A
         "cloak_load_report_event": (getattr(cloak_config, "load_report_event", None) or "PageView").strip()
         or "PageView",
         "cloak_load_report_value": getattr(cloak_config, "load_report_value", None),
-        "cloak_load_report_currency": (getattr(cloak_config, "load_report_currency", None) or "USD").strip()
-        or "USD",
+        "cloak_load_report_currency": (getattr(cloak_config, "load_report_currency", None) or "USD").strip().upper() or "USD",
+        "cloak_load_report_currency_source": getattr(cloak_config, "load_report_currency_source", None) or "legacy_unknown",
+        "cloak_report_currency_source": getattr(cloak_config, "report_currency_source", None) or "legacy_unknown",
         "cloak_postback_report_enabled": bool(getattr(cloak_config, "postback_report_enabled", False)),
         "cloak_postback_report_event": (getattr(cloak_config, "postback_report_event", None) or "Purchase").strip()
         or "Purchase",
         "cloak_postback_report_value": getattr(cloak_config, "postback_report_value", None),
-        "cloak_postback_report_currency": (getattr(cloak_config, "postback_report_currency", None) or "USD").strip()
-        or "USD",
+        "cloak_postback_report_currency": (getattr(cloak_config, "postback_report_currency", None) or "USD").strip().upper() or "USD",
+        "cloak_postback_report_currency_source": getattr(cloak_config, "postback_report_currency_source", None) or "legacy_unknown",
     }
 
 
@@ -243,7 +247,7 @@ class CloakPixelMappingService:
             if cloak_config:
                 pixel_config["cloak_report_event"] = getattr(cloak_config, "report_event", None) or "ViewContent"
                 pixel_config["cloak_report_value"] = getattr(cloak_config, "report_value", None)
-                pixel_config["cloak_report_currency"] = getattr(cloak_config, "report_currency", None) or "USD"
+                pixel_config["cloak_report_currency"] = (getattr(cloak_config, "report_currency", None) or "USD").strip().upper() or "USD"
             pixel_config.update(_cloak_phase_report_dict(cloak_config))
             return pixel_config
 
@@ -258,7 +262,7 @@ class CloakPixelMappingService:
                 "backup_facebook_access_token": cloak_config.backup_access_token,
                 "cloak_report_event": getattr(cloak_config, "report_event", None) or "ViewContent",
                 "cloak_report_value": getattr(cloak_config, "report_value", None),
-                "cloak_report_currency": getattr(cloak_config, "report_currency", None) or "USD",
+                "cloak_report_currency": (getattr(cloak_config, "report_currency", None) or "USD").strip().upper() or "USD",
                 "dp_name": dp,
                 "short_code": short_link.short_code,
                 "original_url": short_link.original_url,

@@ -170,21 +170,21 @@
         <el-card class="stat-card">
           <div class="stat-content">
             <div class="stat-label">原始转化金额</div>
-            <div class="stat-value">{{ formatCurrency(stats.original_amount || 0) }}</div>
+            <div class="stat-value">{{ stats.original_amount == null ? '多币种分开统计' : formatCurrency(stats.original_amount, stats.currency_summaries?.[0]?.currency || 'USD') }}</div>
           </div>
         </el-card>
         
         <el-card class="stat-card">
           <div class="stat-content">
             <div class="stat-label">扣减转化金额</div>
-            <div class="stat-value danger">{{ formatCurrency(stats.deducted_amount || 0) }}</div>
+            <div class="stat-value danger">{{ stats.deducted_amount == null ? '多币种分开统计' : formatCurrency(stats.deducted_amount, stats.currency_summaries?.[0]?.currency || 'USD') }}</div>
           </div>
         </el-card>
         
         <el-card class="stat-card">
           <div class="stat-content">
             <div class="stat-label">最终转化金额</div>
-            <div class="stat-value success">{{ formatCurrency(stats.final_amount || 0) }}</div>
+            <div class="stat-value success">{{ stats.final_amount == null ? '多币种分开统计' : formatCurrency(stats.final_amount, stats.currency_summaries?.[0]?.currency || 'USD') }}</div>
           </div>
         </el-card>
         
@@ -192,14 +192,43 @@
           <div class="stat-content">
             <div class="stat-label">扣金额比例</div>
             <div class="stat-value danger">
-              {{ ((stats.amount_deduction_ratio || 0) * 100).toFixed(2) }}%
+              {{ stats.amount_deduction_ratio == null ? '多币种分开统计' : ((stats.amount_deduction_ratio || 0) * 100).toFixed(2) + '%' }}
             </div>
           </div>
         </el-card>
       </div>
 
+      <el-alert
+        v-if="stats.currency_summaries?.length > 1"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="检测到多币种或同币种多来源：金额不会跨币种/来源合并，请按下方明细核对。"
+        style="margin-bottom: 16px;"
+      />
+
+      <div v-if="stats.currency_summaries?.length" class="table-section">
+        <h3>分币种及来源金额统计</h3>
+        <el-table :data="stats.currency_summaries" stripe>
+          <el-table-column prop="currency" label="币种" width="110" />
+          <el-table-column prop="currency_source" label="币种来源" min-width="160" />
+          <el-table-column label="原始金额" align="right">
+            <template #default="scope">{{ formatCurrency(scope.row.original_amount, scope.row.currency) }}</template>
+          </el-table-column>
+          <el-table-column label="扣减金额" align="right">
+            <template #default="scope">{{ formatCurrency(scope.row.deducted_amount, scope.row.currency) }}</template>
+          </el-table-column>
+          <el-table-column label="最终金额" align="right">
+            <template #default="scope">{{ formatCurrency(scope.row.final_amount, scope.row.currency) }}</template>
+          </el-table-column>
+          <el-table-column label="扣金额比例" align="right">
+            <template #default="scope">{{ ((scope.row.amount_deduction_ratio || 0) * 100).toFixed(2) }}%</template>
+          </el-table-column>
+        </el-table>
+      </div>
+
       <!-- 图表展示 -->
-      <div class="charts-section" v-if="!loading && (stats.original_volume > 0 || stats.original_amount > 0)">
+      <div class="charts-section" v-if="!loading && (stats.original_volume > 0 || stats.currency_summaries?.length === 1)">
         <el-row :gutter="20">
           <el-col :span="12">
             <el-card>
@@ -209,10 +238,10 @@
               <div ref="volumeChartRef" style="width: 100%; height: 300px;"></div>
             </el-card>
           </el-col>
-          <el-col :span="12">
+          <el-col v-show="stats.currency_summaries?.length <= 1" :span="12">
             <el-card>
               <template #header>
-                <div class="chart-header">扣金额趋势</div>
+                <div class="chart-header">扣金额趋势（单一币种）</div>
               </template>
               <div ref="amountChartRef" style="width: 100%; height: 300px;"></div>
             </el-card>
@@ -228,10 +257,10 @@
               <div ref="volumeRatioChartRef" style="width: 100%; height: 300px;"></div>
             </el-card>
           </el-col>
-          <el-col :span="12">
+          <el-col v-show="stats.currency_summaries?.length <= 1" :span="12">
             <el-card>
               <template #header>
-                <div class="chart-header">扣金额比例分布</div>
+                <div class="chart-header">扣金额比例分布（单一币种）</div>
               </template>
               <div ref="amountRatioChartRef" style="width: 100%; height: 300px;"></div>
             </el-card>
@@ -251,6 +280,8 @@
           <el-table-column prop="advertiser_name" label="广告主" min-width="150" show-overflow-tooltip />
           <el-table-column prop="offer_name" label="Offer" min-width="150" show-overflow-tooltip />
           <el-table-column prop="publisher_name" label="渠道" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="currency" label="币种" width="100" align="center" />
+          <el-table-column prop="currency_source" label="币种来源" min-width="150" align="center" />
           <el-table-column label="扣量统计" align="center">
             <el-table-column prop="original_volume" label="原始数量" width="100" align="right">
               <template #default="scope">
@@ -278,17 +309,17 @@
           <el-table-column label="扣金额统计" align="center">
             <el-table-column prop="original_amount" label="原始金额" width="120" align="right">
               <template #default="scope">
-                {{ formatCurrency(scope.row.original_amount || 0) }}
+                {{ formatCurrency(scope.row.original_amount || 0, scope.row.currency) }}
               </template>
             </el-table-column>
             <el-table-column prop="deducted_amount" label="扣减金额" width="120" align="right">
               <template #default="scope">
-                <span class="text-danger">{{ formatCurrency(scope.row.deducted_amount || 0) }}</span>
+                <span class="text-danger">{{ formatCurrency(scope.row.deducted_amount || 0, scope.row.currency) }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="final_amount" label="最终金额" width="120" align="right">
               <template #default="scope">
-                <span class="text-success">{{ formatCurrency(scope.row.final_amount || 0) }}</span>
+                <span class="text-success">{{ formatCurrency(scope.row.final_amount || 0, scope.row.currency) }}</span>
               </template>
             </el-table-column>
             <el-table-column label="扣金额比例" width="100" align="right">
@@ -382,10 +413,11 @@ const fetchStats = async () => {
         deducted_volume: data.deducted_volume || 0,
         final_volume: data.final_volume || 0,
         volume_deduction_ratio: data.volume_deduction_ratio || 0,
-        original_amount: data.original_amount || 0,
-        deducted_amount: data.deducted_amount || 0,
-        final_amount: data.final_amount || 0,
-        amount_deduction_ratio: data.amount_deduction_ratio || 0
+        original_amount: data.original_amount ?? null,
+        deducted_amount: data.deducted_amount ?? null,
+        final_amount: data.final_amount ?? null,
+        amount_deduction_ratio: data.amount_deduction_ratio ?? null,
+        currency_summaries: data.currency_summaries || []
       }
       // items 是分组统计的详细数据
       detailStats.value = data.items || []
@@ -788,7 +820,8 @@ const updateCharts = () => {
         formatter: (params) => {
           let result = params[0].name + '<br/>'
           params.forEach(param => {
-            result += `${param.seriesName}: $${param.value.toFixed(2)}<br/>`
+            const code = stats.value.currency_summaries?.[0]?.currency || 'USD'
+          result += `${param.seriesName}: ${formatCurrency(param.value, code)}<br/>`
           })
           return result
         }
@@ -804,7 +837,7 @@ const updateCharts = () => {
       yAxis: {
         type: 'value',
         axisLabel: {
-          formatter: '${value}'
+          formatter: (value) => formatCurrency(value, stats.value.currency_summaries?.[0]?.currency || 'USD')
         }
       },
       series: [

@@ -76,6 +76,13 @@ async def check_cap(
         
         result = await db.execute(query)
         caps = result.scalars().all()
+
+        # 零额度表示禁止新增转化；不能使用 truthy 判断把 0 当成未配置。
+        for cap in caps:
+            if cap.daily_cap == 0:
+                return False, "已达到每日Cap限制: 0 (当前: 0)"
+            if cap.total_cap == 0:
+                return False, "已达到总Cap限制: 0 (当前: 0)"
         
         if not caps:
             # 没有 Cap 配置，允许通过
@@ -87,7 +94,7 @@ async def check_cap(
         
         for cap in caps:
             # 检查每日 Cap
-            if cap.daily_cap:
+            if cap.daily_cap is not None:
                 # ====== 优化：使用 Redis 获取当前计数 ======
                 redis = await get_redis_client()
                 actual_count = 0
@@ -125,7 +132,7 @@ async def check_cap(
                     return False, f"已达到每日Cap限制: {cap.daily_cap} (当前: {actual_count})"
             
             # 检查总 Cap（与 increment 一致：优先读 Redis total key）
-            if cap.total_cap:
+            if cap.total_cap is not None:
                 actual_total_count = cap.current_total_count
                 redis = await get_redis_client()
                 if redis:
@@ -342,6 +349,13 @@ async def increment_cap_count(
         
         result = await db.execute(query)
         caps = list(result.scalars().all())
+
+        # 最终预留路径必须再次执行零额度拒绝，不能依赖只读预检查。
+        for cap in caps:
+            if cap.daily_cap == 0:
+                return _result(False, "cap_exceeded")
+            if cap.total_cap == 0:
+                return _result(False, "cap_exceeded")
         
         now = get_app_now_naive()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -352,9 +366,9 @@ async def increment_cap_count(
         total_groups: dict[tuple[int, Optional[int]], list] = {}
         for cap in caps:
             group_key = (cap.offer_id, cap.publisher_id)
-            if cap.daily_cap:
+            if cap.daily_cap is not None:
                 daily_groups.setdefault(group_key, []).append(cap)
-            if cap.total_cap:
+            if cap.total_cap is not None:
                 total_groups.setdefault(group_key, []).append(cap)
 
         # 2. 每个 Daily Redis key 只原子预留一次；多个约束取最严格上限。

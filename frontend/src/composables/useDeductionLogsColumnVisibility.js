@@ -21,6 +21,8 @@ export function useDeductionLogsColumnVisibility() {
       publisher_name: true,
       volume_deduction: true,
       amount_deduction: true,
+      currency: true,
+      currency_source: true,
       deduction_strategy: true,
       created_at: true
     }),
@@ -31,6 +33,8 @@ export function useDeductionLogsColumnVisibility() {
       publisher_name: v.publisher_name,
       volume_deduction: v.volume_deduction,
       amount_deduction: v.amount_deduction,
+      currency: v.currency,
+      currency_source: v.currency_source,
       deduction_strategy: v.deduction_strategy,
       created_at: v.created_at
     }),

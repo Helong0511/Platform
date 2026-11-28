@@ -8,6 +8,7 @@
 
 说明：CPL 子系统接口，涵盖广告主（上游）、渠道（下游）、Offer、Cap、扣量与转化。"""
 import logging
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, Path
@@ -34,6 +35,9 @@ from app.services.cpl.offer_stats import (
     offer_stats_period_start,
     offer_stats_previous_range,
     pct_trend,
+    serialize_currency_revenue_groups,
+    single_trusted_revenue_amount,
+    single_group_revenue_trend,
 )
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.schemas.cpl.offer import OfferCreate, OfferUpdate, OfferResponse
@@ -567,6 +571,11 @@ async def create_offer(
 
     # 准备Offer数据（包含渠道配置）
     offer_data = offer_in.model_dump()
+    offer_data["_payout_currency_source"] = (
+        "manual_config"
+        if "payout_currency" in offer_in.model_fields_set and offer_in.payout_currency
+        else "system_fallback_usd"
+    )
     # ---------- 条件分支 ----------
     if offer_in.publisher_configs is not None:
         # 将Pydantic对象转换为字典
@@ -820,30 +829,46 @@ async def get_offer_stats(
             q = q.where(PostbackConversion.created_at < e)
         return int((await db.execute(q)).scalar() or 0)
 
-    async def _sum_revenue(s, e=None):
-        """汇总时间区间内 Offer 转化 payout 收入。（详见字段 Field description）。"""
-        q = select(func.coalesce(func.sum(PostbackConversion.payout), 0)).where(
+    async def _revenue_groups(s, e=None):
+        """按转化记录自身的币种及来源分组，禁止跨币种或跨归因来源混加。"""
+        q = select(
+            PostbackConversion.currency,
+            PostbackConversion.currency_source,
+            func.coalesce(func.sum(PostbackConversion.payout), 0),
+        ).where(
             PostbackConversion.offer_id == offer_id,
             PostbackConversion.created_at >= s,
         )
         if publisher_ids is not None:
             if not publisher_ids:
-                return 0.0
+                return []
             q = q.where(PostbackConversion.publisher_id.in_(publisher_ids))
-        # ---------- 条件分支 ----------
         if e is not None:
             q = q.where(PostbackConversion.created_at < e)
-        return float((await db.execute(q)).scalar() or 0)
+        q = q.group_by(
+            PostbackConversion.currency,
+            PostbackConversion.currency_source,
+        ).order_by(
+            PostbackConversion.currency,
+            PostbackConversion.currency_source,
+        )
+        rows = (await db.execute(q)).all()
+        # Decimal 字符串避免 JSON 序列化及前端二进制浮点提前损失精度。
+        return serialize_currency_revenue_groups(rows)
 
     clicks = await _count_clicks(start)
     conversions = await _count_conversions(start)
-    revenue = await _sum_revenue(start)
+    revenue_groups = await _revenue_groups(start)
+    revenue = single_trusted_revenue_amount(revenue_groups)
+    revenue_currency = revenue_groups[0]["currency"] if revenue is not None else None
+    revenue_currency_source = revenue_groups[0]["currency_source"] if revenue is not None else None
     conversion_rate = (conversions / clicks) if clicks else 0.0
 
     prev_clicks = await _count_clicks(prev_start, prev_end)
     prev_conversions = await _count_conversions(prev_start, prev_end)
-    prev_revenue = await _sum_revenue(prev_start, prev_end)
+    prev_groups = await _revenue_groups(prev_start, prev_end)
     prev_rate = (prev_conversions / prev_clicks) if prev_clicks else 0.0
+    revenue_trend = single_group_revenue_trend(revenue_groups, prev_groups)
 
     click_day = func.date(Click.click_time).label("d")
     conv_day = func.date(PostbackConversion.created_at).label("d")
@@ -865,7 +890,6 @@ async def get_offer_stats(
         select(
             conv_day,
             func.count(PostbackConversion.id),
-            func.coalesce(func.sum(PostbackConversion.payout), 0),
         )
         .where(PostbackConversion.offer_id == offer_id, PostbackConversion.created_at >= start)
     )
@@ -878,33 +902,72 @@ async def get_offer_stats(
         await db.execute(conv_q.group_by(conv_day).order_by(conv_day))
     ).all()
 
+    daily_revenue_q = select(
+        conv_day,
+        PostbackConversion.currency,
+        PostbackConversion.currency_source,
+        func.coalesce(func.sum(PostbackConversion.payout), 0),
+    ).where(
+        PostbackConversion.offer_id == offer_id,
+        PostbackConversion.created_at >= start,
+    )
+    if publisher_ids is not None:
+        if publisher_ids:
+            daily_revenue_q = daily_revenue_q.where(
+                PostbackConversion.publisher_id.in_(publisher_ids)
+            )
+        else:
+            daily_revenue_q = daily_revenue_q.where(PostbackConversion.id == -1)
+    daily_revenue_rows = (
+        await db.execute(
+            daily_revenue_q.group_by(
+                conv_day,
+                PostbackConversion.currency,
+                PostbackConversion.currency_source,
+            ).order_by(
+                conv_day,
+                PostbackConversion.currency,
+                PostbackConversion.currency_source,
+            )
+        )
+    ).all()
+
     by_date: dict[str, dict] = {}
-    # ---------- 循环处理 ----------
     for d, cnt in click_rows:
         key = d.isoformat() if hasattr(d, "isoformat") else str(d)
-        by_date.setdefault(key, {"date": key, "clicks": 0, "conversions": 0, "revenue": 0.0})
+        by_date.setdefault(key, {"date": key, "clicks": 0, "conversions": 0, "revenue_by_currency": []})
         by_date[key]["clicks"] = int(cnt or 0)
-    # ---------- 循环处理 ----------
-    for d, cnt, rev in conv_rows:
+    for d, cnt in conv_rows:
         key = d.isoformat() if hasattr(d, "isoformat") else str(d)
-        by_date.setdefault(key, {"date": key, "clicks": 0, "conversions": 0, "revenue": 0.0})
+        by_date.setdefault(key, {"date": key, "clicks": 0, "conversions": 0, "revenue_by_currency": []})
         by_date[key]["conversions"] = int(cnt or 0)
-        by_date[key]["revenue"] = float(rev or 0)
+    for d, currency_value, source_value, amount_value in daily_revenue_rows:
+        key = d.isoformat() if hasattr(d, "isoformat") else str(d)
+        by_date.setdefault(key, {"date": key, "clicks": 0, "conversions": 0, "revenue_by_currency": []})
+        amount = amount_value if isinstance(amount_value, Decimal) else Decimal(str(amount_value or 0))
+        by_date[key]["revenue_by_currency"].append({
+            "currency": str(currency_value or "legacy_unknown").strip().upper() or "legacy_unknown",
+            "currency_source": str(source_value or "legacy_unknown").strip() or "legacy_unknown",
+            "amount": format(amount, "f"),
+        })
 
     chart_data = [by_date[k] for k in sorted(by_date.keys())]
 
-    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(
         data={
             "clicks": clicks,
             "conversions": conversions,
             "conversion_rate": round(conversion_rate, 6),
-            "revenue": round(revenue, 4),
+            "revenue": revenue,
+            "revenue_currency": revenue_currency,
+            "revenue_currency_source": revenue_currency_source,
+            "revenue_by_currency": revenue_groups,
+            "previous_revenue_by_currency": prev_groups,
             "trends": {
                 "clicks": pct_trend(clicks, prev_clicks),
                 "conversions": pct_trend(conversions, prev_conversions),
                 "conversion_rate": pct_trend(conversion_rate, prev_rate),
-                "revenue": pct_trend(revenue, prev_revenue),
+                "revenue": revenue_trend,
             },
             "chart_data": chart_data,
         }
@@ -969,6 +1032,12 @@ async def update_offer(
 
     # 准备更新数据（包含渠道配置）
     update_data = offer_in.model_dump(exclude_unset=True, exclude={'publisher_configs'})
+    if "payout_currency" in offer_in.model_fields_set:
+        update_data["_payout_currency_source"] = (
+            "manual_config"
+            if offer_in.payout_currency
+            else "system_fallback_usd"
+        )
     # ---------- 条件分支 ----------
     if offer_in.publisher_configs is not None:
         # 将Pydantic对象转换为字典

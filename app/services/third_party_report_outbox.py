@@ -6,12 +6,14 @@ Outbox 记录与 PostbackConversion 在同一 AsyncSession/事务中提交；
 Facebook access token 永远不写入此表。
 """
 import logging
+from decimal import Decimal, InvalidOperation
 from datetime import timedelta
 from typing import Optional
 
 from sqlalchemy import func, or_, select, update
 
 from app.core.database import AsyncSessionLocal
+from app.core.config import settings
 from app.core.utils import get_app_now_naive, get_app_now_sql_expression
 from app.core.third_party_report import (
     REPORT_LOG_LEASE_SECONDS,
@@ -23,6 +25,7 @@ from app.core.third_party_report import (
     update_report_log,
 )
 from app.models.models import ShortLink, ThirdPartyReportLog
+from app.core.third_party_currency import resolve_currency, validate_purchase_payload
 
 logger = logging.getLogger(__name__)
 
@@ -52,11 +55,15 @@ async def enqueue_postback_report(
     cloak_name: Optional[str],
     short_code: Optional[str],
     click_time,
+    currency_source: Optional[str] = None,
 ) -> int:
     """只写入当前转化事务，不 commit；返回可恢复的持久化 Outbox 行 ID。"""
     normalized_platform = (platform or "").strip()
     if not normalized_platform:
         raise ValueError("Postback platform 不能为空")
+    if event == "Purchase":
+        currency, currency_source = resolve_currency(currency, source=currency_source)
+        amount, currency = validate_purchase_payload(amount, currency)
 
     # 与直接发送路径使用同一四字段身份锁；锁持有到调用方的转化事务提交/回滚。
     await _lock_report_base_identity(
@@ -85,6 +92,27 @@ async def enqueue_postback_report(
         .where(ThirdPartyReportLog.event_key == event_key)
         .with_for_update()
     )
+    if existing is not None and event == "Purchase":
+        # event_key 只代表事件身份，不代表财务载荷相同；同一身份再次带来不同金额/币种必须拒绝，
+        # 不能静默复用旧 Outbox 并把新 Postback 伪装成已处理。
+        try:
+            existing_amount = Decimal(str(getattr(existing, "amount", None)))
+            incoming_amount = Decimal(str(amount))
+        except (InvalidOperation, TypeError, ValueError):
+            raise LegacyEventIdentityConflict(
+                "同一 Purchase 事件的历史金额无法可靠核对，需人工核实"
+            )
+        existing_currency = (getattr(existing, "currency", None) or "").strip().upper()
+        incoming_currency = (currency or "").strip().upper()
+        if (
+            not existing_amount.is_finite()
+            or existing_amount != incoming_amount
+            or existing_currency != incoming_currency
+        ):
+            raise LegacyEventIdentityConflict(
+                "同一 Purchase 事件身份对应的金额或币种不一致，拒绝静默复用旧上报记录"
+            )
+
     if existing is not None and (
         getattr(existing, "identity_scope", None) != "platform_scoped"
         or getattr(existing, "platform", None) != normalized_platform
@@ -117,6 +145,17 @@ async def enqueue_postback_report(
             return int(existing.id)
 
         attempts = int(getattr(existing, "attempt_count", 0) or 0)
+        manual_retries = int(getattr(existing, "manual_retry_count", 0) or 0)
+        has_previous_response = any(
+            getattr(existing, field, None) not in (None, "")
+            for field in (
+                "response_status",
+                "response_body",
+                "log_id",
+                "report_success_time",
+                "completed_at",
+            )
+        )
         # 活动租约必须由数据库时钟判断；未来时间戳也不应被误判为有效租约。
         active_lease_id = None
         if getattr(existing, "report_start_time", None) is not None:
@@ -130,12 +169,21 @@ async def enqueue_postback_report(
                 )
                 .limit(1)
             )
-        if existing.status == "success" or attempts > 0 or active_lease_id is not None:
+        if (
+            existing.status == "success"
+            or attempts > 0
+            or manual_retries > 0
+            or has_previous_response
+            or active_lease_id is not None
+        ):
             return int(existing.id)
 
         # 仅允许从未尝试发送、且没有活动租约的旧日志升级为 Outbox；
         # 此时补充非敏感配置引用，不改变事件身份及 PII/金额等业务载荷。
         existing.outbox_enqueued = True
+        if event == "Purchase" and not getattr(existing, "currency_source", None):
+            existing.currency_source = currency_source or "caller_supplied"
+        existing.destination_api_version_pending = True
         existing.short_link_id = short_link_id
         existing.cloak_name = cloak_name
         existing.short_code = short_code
@@ -165,6 +213,7 @@ async def enqueue_postback_report(
         phone=phone or "",
         ua=ua or "",
         currency=currency,
+        currency_source=(currency_source or "caller_supplied") if event == "Purchase" else None,
         amount=amount,
         use_hash=True,
         status="pending" if has_config_reference else "failed",
@@ -175,6 +224,7 @@ async def enqueue_postback_report(
             else "缺少短链接/斗篷配置引用，无法自动解析像素凭据"
         ),
         outbox_enqueued=True,
+        destination_api_version_pending=True,
         short_link_id=short_link_id,
         cloak_name=cloak_name,
         short_code=short_code,
@@ -236,16 +286,32 @@ async def _resolve_pixel_credentials(
     return pixel_id, access_token, api_version
 
 
+def _normalize_outbox_api_version(api_version: Optional[str]) -> Optional[str]:
+    """按发送配置的优先级规范化版本；空白配置必须继续回退系统默认值。"""
+    configured = (api_version or "").strip()
+    if not configured:
+        configured = (settings.FACEBOOK_API_VERSION or "").strip()
+    if not configured:
+        configured = "v23.0"
+    if len(configured) > 20:
+        return None
+    return configured
+
+
 async def _bind_outbox_destination(
     report_log_id: int,
     *,
     lease_token,
     platform: str,
     pixel_id: str,
-) -> bool:
-    """在当前有效租约内绑定首次解析的 Pixel；后续配置变更不得改投目的地。"""
+    api_version: Optional[str],
+) -> Optional[str]:
+    """在当前有效租约内冻结首次解析的 Pixel 与 API 版本；只返回持久化版本。"""
     if not platform or not pixel_id or not isinstance(lease_token, str) or len(lease_token) != 32:
-        return False
+        return None
+    normalized_api_version = _normalize_outbox_api_version(api_version)
+    if normalized_api_version is None:
+        return None
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             update(ThirdPartyReportLog)
@@ -262,15 +328,24 @@ async def _bind_outbox_destination(
                     ThirdPartyReportLog.destination_pixel_id.is_(None),
                     ThirdPartyReportLog.destination_pixel_id == pixel_id,
                 ),
+                or_(
+                    ThirdPartyReportLog.destination_api_version.is_not(None),
+                    ThirdPartyReportLog.destination_api_version_pending.is_(True),
+                ),
             )
-            .values(destination_pixel_id=pixel_id)
+            .values(
+                destination_pixel_id=pixel_id,
+                destination_api_version=func.coalesce(
+                    ThirdPartyReportLog.destination_api_version,
+                    normalized_api_version,
+                ),
+                destination_api_version_pending=False,
+            )
         )
         await db.commit()
-        if (result.rowcount or 0) == 1:
-            return True
-        # MySQL changed-rows 模式下相同 Pixel 更新可能返回 0；回读确认当前租约与目的地。
+        # 必须回读数据库中首次冻结的版本；后续配置变化不得覆盖它。
         current = await db.scalar(
-            select(ThirdPartyReportLog.id).where(
+            select(ThirdPartyReportLog.destination_api_version).where(
                 ThirdPartyReportLog.id == report_log_id,
                 ThirdPartyReportLog.outbox_enqueued.is_(True),
                 ThirdPartyReportLog.identity_scope == "platform_scoped",
@@ -282,7 +357,7 @@ async def _bind_outbox_destination(
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
             )
         )
-        return current is not None
+        return str(current) if current else None
 
 
 async def process_postback_report_outbox_item(report_log_id: int) -> dict:
@@ -347,7 +422,8 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             "source": row.source,
             "use_hash": row.use_hash,
             "currency": row.currency,
-            "amount": float(row.amount) if row.amount is not None else None,
+            "currency_source": getattr(row, "currency_source", None) or "legacy_unknown",
+            "amount": row.amount,
             "click_time": row.click_time,
             "created_at": getattr(row, "created_at", None) or get_app_now_naive(),
             "event_key": row.event_key,
@@ -357,6 +433,28 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             "cloak_name": row.cloak_name,
             "short_code": row.short_code,
         }
+
+    if payload["event"] == "Purchase":
+        try:
+            payload["amount"], payload["currency"] = validate_purchase_payload(
+                payload["amount"], payload["currency"]
+            )
+        except ValueError as exc:
+            updated = await update_report_log(
+                report_log_id,
+                status="failed",
+                error_message="Purchase 金额或币种校验失败，已阻止发送",
+                report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
+                completed_at=get_app_now_naive(),
+                clear_next_retry_time=True,
+                expected_lease_token=lease_token,
+                expected_identity_scope="platform_scoped",
+                expected_platform=payload["platform"],
+            )
+            if not updated:
+                return {"success": False, "retryable": True, "reason": "report_lease_lost"}
+            logger.warning("阻止无效 Purchase Outbox：id=%s error=%s", report_log_id, str(exc))
+            return {"success": False, "retryable": False, "reason": "invalid_purchase_payload"}
 
     if not (payload["short_link_id"] or (payload["cloak_name"] and payload["short_code"])):
         # 历史脏数据/手工写入可能绕过 enqueue 校验；必须认领并收敛为终态，
@@ -435,17 +533,20 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
         return {"success": False, "retryable": True, "reason": "missing_pixel_credentials"}
 
     # Pixel ID 是非敏感目的地标识；首次解析后固定绑定，后续配置变更不得悄悄改投其它 Pixel。
-    if not await _bind_outbox_destination(
+    frozen_api_version = await _bind_outbox_destination(
         report_log_id,
         lease_token=lease_token,
         platform=payload["platform"],
         pixel_id=pixel_id,
-    ):
+        api_version=api_version,
+    )
+    # 兼容旧测试替身返回 bool；真实实现始终返回数据库中已冻结的版本字符串。
+    if not frozen_api_version:
         now = get_app_now_naive()
         await update_report_log(
             report_log_id,
             status="failed",
-            error_message="像素目的地与事件首次绑定的 Pixel 不一致，需要人工核对",
+            error_message="事件缺少可验证的 Pixel/API 版本快照，或与已绑定目的地不一致，需要人工核对",
             report_start_time=get_app_now_sql_expression(-(REPORT_LOG_LEASE_SECONDS + 1)),
             completed_at=now,
             clear_next_retry_time=True,
@@ -465,11 +566,14 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
         ua=payload["ua"],
         facebook_pixel_id=pixel_id,
         facebook_access_token=access_token,
-        facebook_api_version=api_version,
+        facebook_api_version=(
+            frozen_api_version if isinstance(frozen_api_version, str) else api_version
+        ),
         source=payload["source"],
         use_hash=payload["use_hash"],
         conversion_id=payload["conversion_id"],
         currency=payload["currency"],
+        currency_source=payload.get("currency_source"),
         amount=payload["amount"],
         click_time=payload["click_time"],
         event_time=payload["created_at"],

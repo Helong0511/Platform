@@ -17,6 +17,7 @@ from typing import Literal, Optional
 from pydantic import Field, field_validator, model_validator, ConfigDict
 
 from app.schemas.base import BaseSchema
+from app.core.third_party_currency import validate_iso_currency
 
     # ---------------------------------------------------------------------------
 # Meta Pixel / Conversions API 官方「标准事件」event_name（与 Meta 文档 Standard Events 一致）。
@@ -154,7 +155,7 @@ class CloakConfigBase(BaseSchema):
     postback_report_currency: Optional[str] = Field(
         "USD",
         max_length=10,
-        description="postback Purchase 货币",
+        description="postback Purchase 货币；未设置时使用系统 USD 兜底",
     )
 
     is_enabled: bool = Field(True, description="是否启用")
@@ -180,11 +181,10 @@ class CloakConfigBase(BaseSchema):
     @field_validator("report_currency", "load_report_currency", "postback_report_currency")
     @classmethod
     def validate_currencies(cls, value: Optional[str]) -> Optional[str]:
-        """上报货币代码：规范为大写 ISO 4217（如 USD）；空值默认 USD。"""
-        if value is None:
-            return "USD"
-        v = value.strip().upper()
-        return v or "USD"
+        """验证当前有效 ISO 4217 结算币种；空值保留给阶段默认值解析。"""
+        if value is None or not value.strip():
+            return None
+        return validate_iso_currency(value)
 
     @model_validator(mode="after")
     def cloak_report_phase_consistency(self):
@@ -306,11 +306,10 @@ class CloakConfigUpdate(BaseSchema):
     @field_validator("report_currency", "load_report_currency", "postback_report_currency")
     @classmethod
     def validate_currencies_update(cls, value: Optional[str]) -> Optional[str]:
-        """更新时 None 表示不修改；有值则规范化大写（详见字段 Field description）。"""
-        if value is None:
+        """更新时 None 表示不修改；有值须为当前有效 ISO 4217 结算币种。"""
+        if value is None or not value.strip():
             return None
-        v = value.strip().upper()
-        return v or None
+        return validate_iso_currency(value)
 
     @field_validator("cloak_name")
     @classmethod
@@ -367,6 +366,9 @@ class CloakConfigResponse(CloakConfigBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    report_currency_source: str = Field("system_fallback_usd", description="点击阶段币种来源")
+    load_report_currency_source: str = Field("system_fallback_usd", description="加载阶段币种来源")
+    postback_report_currency_source: str = Field("system_fallback_usd", description="postback 阶段币种来源")
     bridge_html_present: bool = Field(
         False,
         description="是否已在磁盘部署桥页 HTML（任一路径存在 {cloak_name}.html）",

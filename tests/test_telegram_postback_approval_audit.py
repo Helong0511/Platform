@@ -162,7 +162,8 @@ async def test_unauthorized_telegram_callback_persists_denied_audit(monkeypatch)
 class _FakeTelegramSession:
     def __init__(self, pending, existing_conversion_id=None, fail_commit=False, fail_refresh=False):
         self.pending = pending
-        self.results = [pending, None, existing_conversion_id]
+        # 查询顺序：Pending 行、重复 callback、事件 receipt、正式 conversion。
+        self.results = [pending, None, None, existing_conversion_id]
         self.events = []
         self.fail_commit = fail_commit
         self.fail_refresh = fail_refresh
@@ -478,3 +479,20 @@ def test_telegram_approval_normalizes_legacy_null_event_name(monkeypatch):
     assert pending.event_name == "default"
     assert len(conversions) == 1
     assert conversions[0].event_name == "default"
+
+
+def test_receipt_exists_outcome_is_allowed_for_all_approval_adapters():
+    event = add_postback_approval_audit(
+        SimpleNamespace(add=lambda value: value),
+        pending_conversion_id=77,
+        conversion_id=None,
+        actor_type="telegram",
+        actor_id=555129,
+        source="telegram",
+        action="approve",
+        outcome="event_receipt_exists",
+        previous_status="pending",
+        new_status="pending",
+    )
+    assert event.outcome == "event_receipt_exists"
+    assert event.previous_status == event.new_status == "pending"

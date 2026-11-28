@@ -2,14 +2,28 @@
 转化扣减配置与日志 ORM 模型。
 """
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
-    UniqueConstraint, Date, Numeric
+    UniqueConstraint, Date, Numeric, Computed, CheckConstraint, text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
 import uuid
 
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, get_app_now_naive_floor_second
 from app.models.base import Base, UserRole
+
+class ConversionDeductionScopeLock(Base):
+    """扣量配置跨 Postback 与管理端写入口共享的 scope 事务锁。"""
+
+    __tablename__ = "conversion_deduction_scope_locks"
+
+    scope_type = Column(String(16), primary_key=True, nullable=False)
+    scope_id = Column(Integer, primary_key=True, nullable=False)
+    created_at = Column(
+        DateTime,
+        default=get_app_now_naive,
+        nullable=False,
+    )
+
 
 class ConversionDeductionConfig(Base):
     """
@@ -23,9 +37,9 @@ class ConversionDeductionConfig(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='配置ID')
     
     # 配置层级（三选一）
-    advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="CASCADE"), nullable=True, index=True, comment='广告主ID（如果配置在广告主级别）')
-    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=True, index=True, comment='Offer ID（如果配置在Offer级别）')
-    publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="CASCADE"), nullable=True, index=True, comment='渠道ID（如果配置在渠道级别）')
+    advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="RESTRICT"), nullable=True, index=True, comment='广告主ID（如果配置在广告主级别）')
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="RESTRICT"), nullable=True, index=True, comment='Offer ID（如果配置在Offer级别）')
+    publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="RESTRICT"), nullable=True, index=True, comment='渠道ID（如果配置在渠道级别）')
     
     # 扣减类型配置
     volume_deduction_ratio = Column(
@@ -46,7 +60,21 @@ class ConversionDeductionConfig(Base):
     priority = Column(Integer, default=0, comment='优先级（数字越大优先级越高）')
     
     # 状态
-    is_active = Column(Boolean, default=True, index=True, comment='是否激活')
+    is_active = Column(Boolean, default=True, nullable=False, index=True, comment='是否激活')
+
+    # 仅激活配置生成非 NULL scope key；唯一索引由数据库保证同一 scope 最多一条激活配置。
+    active_advertiser_id = Column(
+        Integer,
+        Computed("CASE WHEN is_active = 1 THEN advertiser_id ELSE NULL END", persisted=True),
+    )
+    active_offer_id = Column(
+        Integer,
+        Computed("CASE WHEN is_active = 1 THEN offer_id ELSE NULL END", persisted=True),
+    )
+    active_publisher_id = Column(
+        Integer,
+        Computed("CASE WHEN is_active = 1 THEN publisher_id ELSE NULL END", persisted=True),
+    )
     
     # 时间戳
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
@@ -64,6 +92,14 @@ class ConversionDeductionConfig(Base):
         Index("idx_publisher_id", "publisher_id"),
         Index("idx_is_active", "is_active"),
         Index("idx_priority", "priority"),
+        UniqueConstraint("active_advertiser_id", name="uq_cpl_active_advertiser"),
+        UniqueConstraint("active_offer_id", name="uq_cpl_active_offer"),
+        UniqueConstraint("active_publisher_id", name="uq_cpl_active_publisher"),
+        CheckConstraint(
+            "(advertiser_id IS NOT NULL) + (offer_id IS NOT NULL) + "
+            "(publisher_id IS NOT NULL) = 1",
+            name="chk_cpl_deduction_exactly_one_scope",
+        ),
     )
 
 class ConversionDeductionLog(Base):
@@ -86,13 +122,21 @@ class ConversionDeductionLog(Base):
     
     # 扣减前数据
     original_volume = Column(Integer, default=1, comment='原始转化数量（通常为1）')
-    original_amount = Column(Numeric(10, 2), nullable=False, comment='原始转化金额')
+    original_amount = Column(Numeric(24, 6), nullable=False, comment='原始转化金额')
     
     # 扣减后数据
     deducted_volume = Column(Integer, default=0, comment='扣减的转化数量')
-    deducted_amount = Column(Numeric(10, 2), nullable=True, default=0, server_default='0.00', comment='扣减的转化金额')
+    deducted_amount = Column(Numeric(24, 6), nullable=True, default=0, server_default='0.00', comment='扣减的转化金额')
     final_volume = Column(Integer, default=1, comment='最终转化数量（扣减后）')
-    final_amount = Column(Numeric(10, 2), nullable=False, comment='最终转化金额（扣减后）')
+    final_amount = Column(Numeric(24, 6), nullable=False, comment='最终转化金额（扣减后）')
+    currency = Column(
+        String(10), nullable=False, default='USD', server_default=text("'USD'"),
+        comment='扣减金额对应的 ISO 4217 币种',
+    )
+    currency_source = Column(
+        String(100), nullable=False, default='system_fallback_usd',
+        server_default=text("'system_fallback_usd'"), comment='扣减金额币种来源归因',
+    )
     
     # 扣减配置信息
     deduction_config_id = Column(Integer, ForeignKey("conversion_deduction_configs.id", ondelete="SET NULL"), nullable=True, index=True, comment='使用的扣减配置ID')
@@ -104,7 +148,7 @@ class ConversionDeductionLog(Base):
     deduction_reason = Column(Text, nullable=True, comment='扣减原因说明')
     
     # 时间戳
-    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
+    created_at = Column(DateTime, default=get_app_now_naive_floor_second, nullable=False, comment='创建时间')
 
     # 关系
     conversion = relationship("PostbackConversion", foreign_keys=[conversion_id])

@@ -9,7 +9,7 @@ from datetime import datetime
 import enum
 import uuid
 
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, get_app_now_naive_floor_second
 from app.models.base import Base, UserRole
 
 class PostbackConversion(Base):
@@ -27,9 +27,23 @@ class PostbackConversion(Base):
     transaction_id = Column(String(255), nullable=True, unique=True, comment='上游事务ID（幂等）')
     request_id = Column(String(128), nullable=True, unique=True, comment='请求防重放ID')
     event_name = Column(String(100), nullable=True, index=True, comment='事件名称')
-    event_value = Column(Numeric(12, 4), nullable=True, comment='事件价值（购买价格等）')
-    original_payout = Column(Numeric(12, 4), nullable=True, comment='原始支付金额（PO）')
-    payout = Column(Numeric(12, 4), nullable=True, comment='扣后支付金额（PO(扣)）')
+    event_value = Column(Numeric(24, 6), nullable=True, comment='事件价值（购买价格等）')
+    original_payout = Column(Numeric(24, 6), nullable=True, comment='原始支付金额（PO）')
+    payout = Column(Numeric(24, 6), nullable=True, comment='扣后支付金额（PO(扣)）')
+    currency = Column(
+        String(10),
+        nullable=False,
+        default='USD',
+        server_default=text("'USD'"),
+        comment='Postback payout 的 ISO 4217 币种；缺失时 USD 兜底',
+    )
+    currency_source = Column(
+        String(100),
+        nullable=False,
+        default='system_fallback_usd',
+        server_default=text("'system_fallback_usd'"),
+        comment='Postback payout 币种来源归因',
+    )
 
     # 设备信息
     devad_id = Column(String(255), nullable=True, comment='设备广告ID（IDFA或GAID）')
@@ -60,7 +74,7 @@ class PostbackConversion(Base):
     deducted_volume = Column(Integer, default=0, comment='扣减的转化数量')
 
     # 元数据
-    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')
+    created_at = Column(DateTime, default=get_app_now_naive_floor_second, nullable=False, index=True, comment='创建时间')
 
     # 关系（用于通过 ORM 访问关联对象，例如：conversion.product.name）
     # 注意：当前查询接口未使用这些关系，但保留以备将来扩展使用（如返回产品名称、客户名称等）
@@ -312,12 +326,20 @@ class CloakConfig(Base):
             '含义与可选值见 app/schemas/cloak.py 中 FACEBOOK_STANDARD_EVENT_NAMES / 自定义命名规则'
         ),
     )
-    report_value = Column(Numeric(12, 4), nullable=True, comment='购物类事件金额（Purchase 等需配合 report_currency）')
+    report_value = Column(Numeric(24, 6), nullable=True, comment='购物类事件金额（Purchase 等需配合 report_currency）')
     report_currency = Column(
         String(10),
         nullable=True,
         default='USD',
-        comment='购物类事件货币代码（如 USD）',
+        server_default=text("'USD'"),
+        comment='购物类事件货币代码；缺失时默认 USD',
+    )
+    report_currency_source = Column(
+        String(100),
+        nullable=False,
+        default='system_fallback_usd',
+        server_default=text("'system_fallback_usd'"),
+        comment='点击阶段币种来源归因',
     )
     click_report_enabled = Column(
         Boolean,
@@ -337,12 +359,20 @@ class CloakConfig(Base):
         default='PageView',
         comment='加载完成时 CAPI event_name',
     )
-    load_report_value = Column(Numeric(12, 4), nullable=True, comment='加载上报为 Purchase 时的金额')
+    load_report_value = Column(Numeric(24, 6), nullable=True, comment='加载上报为 Purchase 时的金额')
     load_report_currency = Column(
         String(10),
         nullable=True,
         default='USD',
-        comment='加载上报为 Purchase 时的货币',
+        server_default=text("'USD'"),
+        comment='加载上报为 Purchase 时的货币；缺失时默认 USD',
+    )
+    load_report_currency_source = Column(
+        String(100),
+        nullable=False,
+        default='system_fallback_usd',
+        server_default=text("'system_fallback_usd'"),
+        comment='加载阶段币种来源归因',
     )
     postback_report_enabled = Column(
         Boolean,
@@ -357,7 +387,7 @@ class CloakConfig(Base):
         comment='postback 转化时 CAPI event_name（需点击记录 url_params 含 dp=斗篷名）',
     )
     postback_report_value = Column(
-        Numeric(12, 4),
+        Numeric(24, 6),
         nullable=True,
         comment='postback 为 Purchase 时固定金额；NULL 则用 postback 的 payout',
     )
@@ -365,7 +395,15 @@ class CloakConfig(Base):
         String(10),
         nullable=True,
         default='USD',
-        comment='postback Purchase 货币',
+        server_default=text("'USD'"),
+        comment='postback Purchase 货币；缺失时使用 USD 兜底',
+    )
+    postback_report_currency_source = Column(
+        String(100),
+        nullable=False,
+        default='system_fallback_usd',
+        server_default=text("'system_fallback_usd'"),
+        comment='postback 阶段币种来源归因',
     )
     is_enabled = Column(Boolean, default=True, nullable=False, index=True, comment='是否启用')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
@@ -557,9 +595,17 @@ class PendingPostbackConversion(Base):
     platform = Column(String(50), nullable=False, index=True, comment='平台名称')
     conversion_id = Column(String(255), nullable=False, comment='转化ID')
     event_name = Column(String(100), nullable=True, comment='事件名称')
-    event_value = Column(Numeric(12, 4), nullable=True, comment='事件价值')
-    original_payout = Column(Numeric(12, 4), nullable=True, comment='原始支付金额（PO）')
-    payout = Column(Numeric(12, 4), nullable=True, comment='扣后支付金额（PO(扣)）')
+    event_value = Column(Numeric(24, 6), nullable=True, comment='事件价值（保留 ISO 4217 三位小数及额外计算精度）')
+    original_payout = Column(Numeric(24, 6), nullable=True, comment='原始支付金额（PO）')
+    payout = Column(Numeric(24, 6), nullable=True, comment='扣后支付金额（PO(扣)）')
+    currency = Column(
+        String(10), nullable=False, default='USD', server_default=text("'USD'"),
+        comment='待确认 Postback payout 的 ISO 4217 币种',
+    )
+    currency_source = Column(
+        String(100), nullable=False, default='system_fallback_usd',
+        server_default=text("'system_fallback_usd'"), comment='待确认 Postback payout 币种来源',
+    )
     
     # 设备信息
     devad_id = Column(String(255), nullable=True, comment='设备广告ID')
@@ -646,7 +692,7 @@ class TelegramPostbackApprovalAudit(Base):
     actor_id = Column(String(64), nullable=True, comment="操作者 ID；Telegram User ID 以字符串独立存储")
     source = Column(String(24), nullable=False, comment="操作来源：telegram/web/ip_whitelist")
     action = Column(String(24), nullable=False, comment="动作：approve/reject/auto_approve")
-    outcome = Column(String(24), nullable=False, comment="结果：approved/rejected/already_exists/denied/not_found/already_processed/duplicate_callback")
+    outcome = Column(String(24), nullable=False, comment="结果：approved/rejected/already_exists/denied/not_found/already_processed/duplicate_callback/event_receipt_exists")
     previous_status = Column(String(20), nullable=True, comment="操作前待确认记录状态")
     new_status = Column(String(20), nullable=True, comment="操作后待确认记录状态")
     telegram_callback_query_id = Column(String(128), nullable=True, comment="Telegram 回调唯一 ID，用于防止回调重放产生重复审计")
@@ -676,7 +722,7 @@ class TelegramPostbackApprovalAudit(Base):
             name="chk_tg_postback_audit_action",
         ),
         CheckConstraint(
-            "outcome IN ('approved', 'rejected', 'already_exists', 'denied', 'not_found', 'already_processed', 'duplicate_callback')",
+            "outcome IN ('approved', 'rejected', 'already_exists', 'denied', 'not_found', 'already_processed', 'duplicate_callback', 'event_receipt_exists')",
             name="chk_tg_postback_audit_outcome",
         ),
         Index(

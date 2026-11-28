@@ -18,6 +18,7 @@ _ALLOWED_OUTCOMES = frozenset({
     "not_found",
     "already_processed",
     "duplicate_callback",
+    "event_receipt_exists",
 })
 
 

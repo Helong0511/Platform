@@ -111,27 +111,45 @@
           </el-statistic>
         </el-card>
         <el-card v-if="isAdmin" class="stat-card">
-          <el-statistic title="Revenue" :value="summaryData.total_po || 0" :precision="2">
+          <el-statistic title="Revenue" :value="summaryData.total_po ?? 0" :formatter="formatSummaryValue">
             <template #prefix>
               <el-icon :size="20"><Money /></el-icon>
             </template>
           </el-statistic>
         </el-card>
         <el-card class="stat-card">
-          <el-statistic title="Pub Revenue" :value="summaryData.total_po_after_discount || 0" :precision="2">
+          <el-statistic title="Pub Revenue" :value="summaryData.total_po_after_discount ?? 0" :formatter="formatSummaryValue">
             <template #prefix>
               <el-icon :size="20"><Money /></el-icon>
             </template>
           </el-statistic>
         </el-card>
         <el-card v-if="isAdmin" class="stat-card">
-          <el-statistic title="Profit" :value="summaryData.total_profit || 0" :precision="2">
+          <el-statistic title="Profit" :value="summaryData.total_profit ?? 0" :formatter="formatSummaryValue">
             <template #prefix>
               <el-icon :size="20"><Money /></el-icon>
             </template>
           </el-statistic>
         </el-card>
       </div>
+
+      <!-- 多币种汇总分开显示，禁止跨币种合计 -->
+      <el-card v-if="hasMultipleCurrencies" class="table-card currency-summary-card" style="margin-top: 20px;">
+        <template #header>按币种汇总</template>
+        <el-table :data="summaryData.currency_summaries" size="small" stripe>
+          <el-table-column prop="currency" label="币种" width="100" />
+          <el-table-column prop="conversion_count" label="转化数" width="100" align="right" />
+          <el-table-column v-if="isAdmin" label="Revenue" align="right">
+            <template #default="scope">{{ formatCurrency(scope.row.total_po, scope.row.currency) }}</template>
+          </el-table-column>
+          <el-table-column label="Pub Revenue" align="right">
+            <template #default="scope">{{ formatCurrency(scope.row.total_po_after_discount, scope.row.currency) }}</template>
+          </el-table-column>
+          <el-table-column v-if="isAdmin" label="Profit" align="right">
+            <template #default="scope">{{ formatCurrency(scope.row.total_profit, scope.row.currency) }}</template>
+          </el-table-column>
+        </el-table>
+      </el-card>
 
       <!-- Offer统计表格 -->
       <el-card class="table-card" style="margin-top: 20px;">
@@ -206,6 +224,7 @@
                 <span v-else>-</span>
               </template>
             </el-table-column>
+            <el-table-column prop="currency" label="币种" width="90" align="center" />
             <el-table-column 
               v-if="isAdmin && columnVisibility.advertiser_name"
               prop="advertiser_name" 
@@ -257,7 +276,7 @@
               align="right"
             >
               <template #default="scope">
-                <span v-if="scope.row.po !== undefined && scope.row.po !== null">{{ scope.row.po.toFixed(2) }}</span>
+                <span v-if="scope.row.po !== undefined && scope.row.po !== null">{{ formatCurrency(scope.row.po, scope.row.currency) }}</span>
                 <span v-else>0.00</span>
               </template>
             </el-table-column>
@@ -270,7 +289,7 @@
             >
               <template #default="scope">
                 <span v-if="scope.row.po_after_discount !== undefined && scope.row.po_after_discount !== null">
-                  {{ scope.row.po_after_discount.toFixed(2) }}
+                  {{ formatCurrency(scope.row.po_after_discount, scope.row.currency) }}
                 </span>
                 <span v-else>0.00</span>
               </template>
@@ -284,7 +303,7 @@
             >
               <template #default="scope">
                 <span v-if="scope.row.po !== undefined && scope.row.po !== null && scope.row.po_after_discount !== undefined && scope.row.po_after_discount !== null">
-                  {{ (scope.row.po - scope.row.po_after_discount).toFixed(2) }}
+                  {{ formatCurrency(scope.row.po - scope.row.po_after_discount, scope.row.currency) }}
                 </span>
                 <span v-else>0.00</span>
               </template>
@@ -297,7 +316,7 @@
               align="right"
             >
               <template #default="scope">
-                <span v-if="scope.row.adv_po !== undefined && scope.row.adv_po !== null">{{ scope.row.adv_po.toFixed(2) }}</span>
+                <span v-if="scope.row.adv_po !== undefined && scope.row.adv_po !== null">{{ formatCurrency(scope.row.adv_po, scope.row.currency) }}</span>
                 <span v-else>-</span>
               </template>
             </el-table-column>
@@ -309,7 +328,7 @@
               align="right"
             >
               <template #default="scope">
-                <span v-if="scope.row.pub_po !== undefined && scope.row.pub_po !== null">{{ scope.row.pub_po.toFixed(2) }}</span>
+                <span v-if="scope.row.pub_po !== undefined && scope.row.pub_po !== null">{{ formatCurrency(scope.row.pub_po, scope.row.currency) }}</span>
                 <span v-else>-</span>
               </template>
             </el-table-column>
@@ -367,6 +386,7 @@ import { Search, Refresh, DataAnalysis, Mouse, Check, TrendCharts, Money, Settin
 import { useAuthStore } from '@/store'
 import { useConversionSummary } from '@/composables/useConversionSummary'
 import { useConversionSummaryColumnVisibility } from '@/composables/useConversionSummaryColumnVisibility'
+import { formatCurrency } from '@/utils/currencyFormat'
 
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.isAdmin)
@@ -394,6 +414,13 @@ const {
   displayConversion,
   initPage,
 } = useConversionSummary(isAdmin)
+
+const hasMultipleCurrencies = computed(() => (summaryData.currency_summaries || []).length > 1)
+const formatSummaryValue = (value) => {
+  if (hasMultipleCurrencies.value) return '多币种分开统计'
+  const currency = summaryData.currency_summaries?.[0]?.currency || 'USD'
+  return formatCurrency(value, currency)
+}
 
 const {
   columnSettingVisible,

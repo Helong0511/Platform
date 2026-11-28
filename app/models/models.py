@@ -11,7 +11,7 @@ from app.models.system import ScheduledTask, UserAuditLog, CountryInfo, CountryA
 from app.models.postback import PostbackConversion, PostbackEventReceipt, PostbackForwardLog, PostbackForwardQueue, ClientNotificationConfig, ProductNotificationConfig, AdminNotificationConfig, CloakConfig, PostbackNotification, ShortLink, ShortLinkClickSyncBatch, ShortLinkClickSyncLedgerMaintenanceState, PendingPostbackConversion, PendingPostbackQueueGuard, TelegramPostbackApprovalAudit
 from app.models.cpl import Advertiser, Publisher, Offer, OfferPublisherAssignment, Click, OfferCap, OfferDiscount, AdvertiserTest, AffiliateTest
 from app.models.cap_reservation import CapReservation
-from app.models.deduction import ConversionDeductionConfig, ConversionDeductionLog
+from app.models.deduction import ConversionDeductionConfig, ConversionDeductionLog, ConversionDeductionScopeLock
 from app.models.security import SensitivePathProbeLog, SensitiveBlockedIP, PostbackIpWhitelist
 from app.models.third_party import ThirdPartyReportLog, ThirdPartyReportIdentityLock
 from app.models.cache_invalidation import CacheNamespaceGeneration, CacheInvalidationOutbox, OfferCacheInvalidationOutbox, ShortLinkCacheInvalidationOutbox
@@ -55,6 +55,7 @@ __all__ = [
     "CapReservation",
     "ConversionDeductionConfig",
     "ConversionDeductionLog",
+    "ConversionDeductionScopeLock",
     "SensitivePathProbeLog",
     "SensitiveBlockedIP",
     "PostbackIpWhitelist",

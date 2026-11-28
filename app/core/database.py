@@ -27,7 +27,7 @@
 """
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.dialects.mysql import aiomysql as sqlalchemy_aiomysql
-from sqlalchemy.future import select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from app.core.config import settings
 from collections.abc import AsyncGenerator  # Python 3.10+ 推荐使用 collections.abc
@@ -127,6 +127,23 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False,
 )
 
+# Postback 事务在读取点击、转化和扣量统计前就必须确定隔离级别。
+# MySQL/MariaDB 使用 READ COMMITTED，避免默认 REPEATABLE READ 的一致性快照
+# 在后续取得 scope 行锁后仍读取旧快照。execution_options 复用原引擎连接池，
+# 不会额外创建一套连接池；SQLite 等测试数据库保持原有隔离行为。
+if engine.dialect.name in {"mysql", "mariadb"}:
+    postback_engine = engine.execution_options(isolation_level="READ COMMITTED")
+else:
+    postback_engine = engine
+
+PostbackAsyncSessionLocal = async_sessionmaker(
+    bind=postback_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
+)
+
 
 # ====== 数据库依赖项 ======
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -174,7 +191,7 @@ async def get_postback_db() -> AsyncGenerator[AsyncSession, None]:
 
     事务由 PostbackProcessor 显式 commit/rollback，避免与 get_db 二次提交冲突。
   """
-    async with AsyncSessionLocal() as session:
+    async with PostbackAsyncSessionLocal() as session:
         try:
             yield session
         except HTTPException:

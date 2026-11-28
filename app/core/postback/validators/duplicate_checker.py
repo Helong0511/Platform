@@ -7,10 +7,9 @@
 import logging
 from typing import Optional
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from app.models.models import PostbackConversion, PostbackEventReceipt
 from app.core.postback_event_name import normalize_event_name

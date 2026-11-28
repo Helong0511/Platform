@@ -101,6 +101,8 @@ async def test_enqueue_postback_report_reuses_existing_event(monkeypatch):
             "platform": "bft",
             "destination_pixel_id": None,
             "max_attempts": 3,
+            "amount": 3.0,
+            "currency": "USD",
         },
     )()
 
@@ -151,6 +153,52 @@ async def test_enqueue_postback_report_reuses_existing_event(monkeypatch):
     assert db.flushed is True
 
 
+async def test_enqueue_rejects_duplicate_purchase_with_different_amount_or_currency(monkeypatch):
+    import pytest
+    from app.services.third_party_report_outbox import LegacyEventIdentityConflict
+
+    existing = type(
+        "Existing",
+        (),
+        {
+            "id": 810,
+            "status": "failed",
+            "next_retry_time": None,
+            "outbox_enqueued": True,
+            "identity_scope": "platform_scoped",
+            "platform": "bft",
+            "amount": 3.0,
+            "currency": "USD",
+        },
+    )()
+
+    class FakeDB:
+        async def scalar(self, statement):
+            return existing
+
+        async def flush(self):
+            raise AssertionError("冲突事件不得写入或修改 Outbox")
+
+    with pytest.raises(LegacyEventIdentityConflict, match="金额或币种不一致"):
+        await outbox.enqueue_postback_report(
+            FakeDB(),
+            platform="bft",
+            adsid="fbclid-existing-conflict",
+            event="Purchase",
+            conversion_id="conversion-existing-conflict",
+            email=None,
+            ip=None,
+            phone=None,
+            ua=None,
+            currency="EUR",
+            amount=9.0,
+            short_link_id=9,
+            cloak_name=None,
+            short_code=None,
+            click_time=None,
+        )
+
+
 async def test_enqueue_does_not_reopen_or_mutate_attempted_outbox_payload(monkeypatch):
     original = {
         "id": 82,
@@ -171,6 +219,8 @@ async def test_enqueue_does_not_reopen_or_mutate_attempted_outbox_payload(monkey
         "short_code": "original-code",
         "click_time": datetime(2026, 11, 11, 10, 0, 0),
         "error_message": "original failure",
+        "amount": 3.0,
+        "currency": "USD",
     }
     existing = type("Existing", (), original.copy())()
 
@@ -192,7 +242,7 @@ async def test_enqueue_does_not_reopen_or_mutate_attempted_outbox_payload(monkey
         phone="",
         ua="new-agent",
         currency="USD",
-        amount=99.0,
+        amount=3.0,
         short_link_id=99,
         cloak_name="new-cloak",
         short_code="new-code",
@@ -496,7 +546,11 @@ async def test_postback_report_outbox_is_enqueued_in_conversion_session(monkeypa
             "user_agent": "ci-agent",
             "click_time": datetime(2026, 11, 11, 10, 0, 0),
         },
-        normalized_data={"conversion_id": "conversion-ci", "payout": "12.50"},
+        normalized_data={
+            "conversion_id": "conversion-ci",
+            "payout": "12.50",
+            "currency": "USD",
+        },
         db=db,
     )
 
@@ -1322,6 +1376,8 @@ async def test_enqueue_existing_lease_uses_database_clock_not_worker_clock(monke
             "destination_pixel_id": None,
             "max_attempts": 3,
             "attempt_count": 0,
+            "amount": 1.0,
+            "currency": "USD",
             # 本机时钟被故意设置为远未来；此时间戳仍由 DB 查询决定是否有效。
             "report_start_time": datetime(2030, 1, 1, 0, 0, 0),
         },
@@ -1368,3 +1424,84 @@ async def test_enqueue_existing_lease_uses_database_clock_not_worker_clock(monke
     assert "report_start_time <= timestampadd" in captured["lease_sql"]
     assert "utc_timestamp()" in captured["lease_sql"]
     assert captured["flushed"] is True
+
+async def test_outbox_destination_freezes_first_api_version(monkeypatch):
+    from sqlalchemy.dialects import mysql
+
+    captured = {}
+
+    class FakeDB:
+        async def execute(self, statement):
+            captured["update_sql"] = str(statement.compile(dialect=mysql.dialect())).lower()
+            return type("Result", (), {"rowcount": 1})()
+
+        async def scalar(self, statement):
+            captured["read_sql"] = str(statement.compile(dialect=mysql.dialect())).lower()
+            # 模拟数据库中已冻结的旧版本；当前配置已升级，不能覆盖它。
+            return "v22.0"
+
+        async def commit(self):
+            captured["committed"] = True
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+
+    frozen = await outbox._bind_outbox_destination(
+        501,
+        lease_token="a" * 32,
+        platform="bft",
+        pixel_id="pixel-501",
+        api_version="v23.0",
+    )
+
+    assert frozen == "v22.0"
+    assert captured["committed"] is True
+    assert "coalesce(third_party_report_logs.destination_api_version" in captured["update_sql"]
+    assert "third_party_report_logs.lease_token =" in captured["update_sql"]
+    assert "third_party_report_logs.destination_api_version_pending is true" in captured["update_sql"]
+    assert "third_party_report_logs.destination_api_version" in captured["read_sql"]
+    assert "third_party_report_logs.lease_token =" in captured["read_sql"]
+
+async def test_outbox_legacy_event_without_api_snapshot_is_not_assigned_current_version(monkeypatch):
+    from sqlalchemy.dialects import mysql
+
+    captured = {}
+
+    class FakeDB:
+        async def execute(self, statement):
+            captured["update_sql"] = str(statement.compile(dialect=mysql.dialect())).lower()
+            return type("Result", (), {"rowcount": 0})()
+
+        async def scalar(self, statement):
+            captured["read_sql"] = str(statement.compile(dialect=mysql.dialect())).lower()
+            return None
+
+        async def commit(self):
+            captured["committed"] = True
+
+    class SessionContext:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(outbox, "AsyncSessionLocal", lambda: SessionContext())
+
+    frozen = await outbox._bind_outbox_destination(
+        502,
+        lease_token="b" * 32,
+        platform="bft",
+        pixel_id="pixel-502",
+        api_version="v23.0",
+    )
+
+    assert frozen is None
+    assert captured["committed"] is True
+    assert "third_party_report_logs.destination_api_version_pending is true" in captured["update_sql"]

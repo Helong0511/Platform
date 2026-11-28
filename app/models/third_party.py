@@ -51,13 +51,30 @@ class ThirdPartyReportLog(Base):
         nullable=True,
         comment="Meta Pixel 目的地 ID，用于同目的地事件关联与配置变更核验",
     )
+    destination_api_version = Column(
+        String(20),
+        nullable=True,
+        comment="首次发送时冻结的 Meta Graph API 版本；不保存凭据",
+    )
+    destination_api_version_pending = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("0"),
+        comment="仅新建或确认从未发送的 Outbox 允许首次冻结 API 版本；历史未知事件禁止猜测",
+    )
     use_hash = Column(Boolean, default=True, nullable=False, comment='是否对email、ip、phone进行哈希处理：True=哈希，False=不哈希')
     email = Column(String(255), nullable=True, comment='邮箱（原始值）')
     ip = Column(String(50), nullable=True, comment='IP地址（原始值）')
     phone = Column(String(50), nullable=True, comment='手机号（原始值）')
     ua = Column(Text, nullable=True, comment='用户代理')
-    currency = Column(String(10), nullable=True, comment='货币类型')
-    amount = Column(Numeric(12, 4), nullable=True, comment='支付金额')
+    currency = Column(String(10), nullable=True, comment='ISO 4217 货币类型')
+    currency_source = Column(
+        String(100),
+        nullable=True,
+        comment="币种来源归因：upstream_field:* / cloak_config:* / system_fallback_usd / manual_override / legacy_unknown",
+    )
+    amount = Column(Numeric(24, 6), nullable=True, comment='支付金额')
 
     # Postback 事务性 Outbox 元数据；只保存配置引用，不保存 Facebook access token。
     outbox_enqueued = Column(

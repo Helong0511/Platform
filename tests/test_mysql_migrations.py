@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import decimal
 
 import hashlib
 import ipaddress
@@ -113,6 +114,114 @@ def _index_columns(cursor, table_name: str, index_name: str) -> list[str]:
         row[4]
         for row in sorted(rows, key=lambda item: item[3])
     ]
+
+
+
+
+def test_cpl_scope_restrict_migration_converts_exact_scope_fks_and_is_repeatable():
+    """只将三条准确的 scope 外键改为 RESTRICT，重复执行保持相同结构。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS conversion_deduction_configs")
+            cursor.execute("DROP TABLE IF EXISTS advertisers")
+            cursor.execute("DROP TABLE IF EXISTS offers")
+            cursor.execute("DROP TABLE IF EXISTS publishers")
+            for table in ("advertisers", "offers", "publishers"):
+                cursor.execute(
+                    f"CREATE TABLE `{table}` (id INT NOT NULL PRIMARY KEY) "
+                    "ENGINE=InnoDB"
+                )
+            cursor.execute(
+                "CREATE TABLE conversion_deduction_configs ("
+                "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "advertiser_id INT NULL, offer_id INT NULL, publisher_id INT NULL, "
+                "KEY idx_cpl_advertiser (advertiser_id), "
+                "KEY idx_cpl_offer (offer_id), KEY idx_cpl_publisher (publisher_id), "
+                "CONSTRAINT fk_test_cpl_advertiser FOREIGN KEY (advertiser_id) "
+                "REFERENCES advertisers(id) ON DELETE CASCADE ON UPDATE RESTRICT, "
+                "CONSTRAINT fk_test_cpl_offer FOREIGN KEY (offer_id) "
+                "REFERENCES offers(id) ON DELETE CASCADE ON UPDATE RESTRICT, "
+                "CONSTRAINT fk_test_cpl_publisher FOREIGN KEY (publisher_id) "
+                "REFERENCES publishers(id) ON DELETE CASCADE ON UPDATE RESTRICT"
+                ") ENGINE=InnoDB"
+            )
+
+            migration = "sql/migrations/20261125_cpl_deduction_scope_restrict_fks.sql"
+            _run_sql_file(cursor, migration)
+            _run_sql_file(cursor, migration)
+
+            cursor.execute(
+                "SELECT k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, r.DELETE_RULE, r.UPDATE_RULE "
+                "FROM information_schema.KEY_COLUMN_USAGE k "
+                "JOIN information_schema.REFERENTIAL_CONSTRAINTS r "
+                "ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA "
+                "AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME AND r.TABLE_NAME = k.TABLE_NAME "
+                "WHERE k.CONSTRAINT_SCHEMA = DATABASE() "
+                "AND k.TABLE_NAME = 'conversion_deduction_configs' "
+                "AND k.REFERENCED_TABLE_NAME IS NOT NULL "
+                "ORDER BY k.COLUMN_NAME"
+            )
+            assert cursor.fetchall() == (
+                ("advertiser_id", "advertisers", "RESTRICT", "RESTRICT"),
+                ("offer_id", "offers", "RESTRICT", "RESTRICT"),
+                ("publisher_id", "publishers", "RESTRICT", "RESTRICT"),
+            )
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS conversion_deduction_configs")
+            cursor.execute("DROP TABLE IF EXISTS advertisers")
+            cursor.execute("DROP TABLE IF EXISTS offers")
+            cursor.execute("DROP TABLE IF EXISTS publishers")
+        connection.close()
+
+
+def test_cpl_scope_restrict_migration_rejects_wrong_local_fk_column():
+    """同一父表的错误列外键不能被当作 scope 外键，更不能被静默替换。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS conversion_deduction_configs")
+            cursor.execute("DROP TABLE IF EXISTS advertisers")
+            cursor.execute("DROP TABLE IF EXISTS offers")
+            cursor.execute("DROP TABLE IF EXISTS publishers")
+            for table in ("advertisers", "offers", "publishers"):
+                cursor.execute(
+                    f"CREATE TABLE `{table}` (id INT NOT NULL PRIMARY KEY) "
+                    "ENGINE=InnoDB"
+                )
+            cursor.execute(
+                "CREATE TABLE conversion_deduction_configs ("
+                "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "advertiser_id INT NULL, offer_id INT NULL, publisher_id INT NULL, "
+                "unrelated_advertiser_id INT NULL, "
+                "KEY idx_cpl_offer (offer_id), KEY idx_cpl_publisher (publisher_id), "
+                "KEY idx_unrelated_advertiser (unrelated_advertiser_id), "
+                "CONSTRAINT fk_unrelated_advertiser FOREIGN KEY (unrelated_advertiser_id) "
+                "REFERENCES advertisers(id) ON DELETE RESTRICT ON UPDATE RESTRICT"
+                ") ENGINE=InnoDB"
+            )
+
+            with pytest.raises(pymysql.err.ProgrammingError) as migration_error:
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/20261125_cpl_deduction_scope_restrict_fks.sql",
+                )
+            assert migration_error.value.args[0] == 1146
+
+            cursor.execute(
+                "SELECT COLUMN_NAME, REFERENCED_TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversion_deduction_configs' "
+                "AND CONSTRAINT_NAME = 'fk_unrelated_advertiser'"
+            )
+            assert cursor.fetchall() == (("unrelated_advertiser_id", "advertisers"),)
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS conversion_deduction_configs")
+            cursor.execute("DROP TABLE IF EXISTS advertisers")
+            cursor.execute("DROP TABLE IF EXISTS offers")
+            cursor.execute("DROP TABLE IF EXISTS publishers")
+        connection.close()
 
 
 def _column_metadata(cursor, table_name: str, column_name: str):
@@ -2423,3 +2532,280 @@ async def test_mysql_cache_generation_updates_are_serialized_and_outbox_is_trans
             cursor.execute("DROP TABLE IF EXISTS cache_invalidation_outbox")
             cursor.execute("DROP TABLE IF EXISTS cache_namespace_generations")
         connection.close()
+
+
+def test_conversion_deduction_log_conversion_fk_migration_is_idempotent_and_preserves_log():
+    """升级 BIGINT 子字段后建立 FK；重复执行安全，删除转化只清空关联 ID。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS conversion_deduction_logs")
+            cursor.execute("DROP TABLE IF EXISTS postback_conversions")
+            cursor.execute(
+                "CREATE TABLE postback_conversions ("
+                "id INT NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)"
+                ") ENGINE=InnoDB"
+            )
+            cursor.execute(
+                "CREATE TABLE conversion_deduction_logs ("
+                "id BIGINT NOT NULL AUTO_INCREMENT, "
+                "conversion_id BIGINT NULL, "
+                "original_amount DECIMAL(12,4) NOT NULL, "
+                "deducted_amount DECIMAL(12,4) NULL DEFAULT 0.00, "
+                "final_amount DECIMAL(12,4) NOT NULL, "
+                "PRIMARY KEY (id), KEY idx_conversion_id (conversion_id)"
+                ") ENGINE=InnoDB"
+            )
+            cursor.execute("INSERT INTO postback_conversions VALUES ()")
+            cursor.execute(
+                "INSERT INTO conversion_deduction_logs "
+                "(conversion_id, original_amount, deducted_amount, final_amount) "
+                "VALUES (1, 1.2345, 0.1234, 1.1111)"
+            )
+
+            migration = (
+                "sql/migrations/"
+                "20261127_conversion_deduction_log_conversion_fk.sql"
+            )
+            _run_sql_file(cursor, migration)
+            _run_sql_file(cursor, migration)
+
+            cursor.execute(
+                "SHOW COLUMNS FROM conversion_deduction_logs LIKE 'conversion_id'"
+            )
+            column = cursor.fetchone()
+            assert column is not None
+            assert column[1].lower() == "int"
+            assert column[2] == "YES"
+            cursor.execute("SHOW COLUMNS FROM conversion_deduction_logs LIKE 'id'")
+            log_id_column = cursor.fetchone()
+            assert log_id_column is not None
+            assert log_id_column[1].lower() == "int"
+            assert log_id_column[2] == "NO"
+            assert "auto_increment" in log_id_column[5].lower()
+            for amount_column in ("original_amount", "deducted_amount", "final_amount"):
+                cursor.execute(
+                    f"SELECT DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE "
+                    f"FROM information_schema.COLUMNS "
+                    f"WHERE TABLE_SCHEMA = DATABASE() "
+                    f"AND TABLE_NAME = 'conversion_deduction_logs' "
+                    f"AND COLUMN_NAME = %s",
+                    (amount_column,),
+                )
+                assert cursor.fetchone() == ("decimal", 24, 6)
+            cursor.execute(
+                "SELECT original_amount, deducted_amount, final_amount "
+                "FROM conversion_deduction_logs WHERE id = 1"
+            )
+            assert cursor.fetchone() == (
+                decimal.Decimal("1.234500"),
+                decimal.Decimal("0.123400"),
+                decimal.Decimal("1.111100"),
+            )
+
+            cursor.execute(
+                "SELECT DELETE_RULE, UPDATE_RULE "
+                "FROM information_schema.REFERENTIAL_CONSTRAINTS "
+                "WHERE CONSTRAINT_SCHEMA = DATABASE() "
+                "AND TABLE_NAME = 'conversion_deduction_logs' "
+                "AND CONSTRAINT_NAME = 'fk_cdl_postback_conversion'"
+            )
+            assert cursor.fetchone() == ("SET NULL", "RESTRICT")
+
+            cursor.execute("DELETE FROM postback_conversions WHERE id = 1")
+            cursor.execute(
+                "SELECT conversion_id FROM conversion_deduction_logs WHERE id = 1"
+            )
+            assert cursor.fetchone() == (None,)
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS conversion_deduction_logs")
+            cursor.execute("DROP TABLE IF EXISTS postback_conversions")
+        connection.close()
+
+
+def test_conversion_deduction_log_conversion_fk_migration_rejects_orphans_before_alter():
+    """孤儿引用存在时拒绝迁移，不能先收窄字段或丢弃扣减日志。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS conversion_deduction_logs")
+            cursor.execute("DROP TABLE IF EXISTS postback_conversions")
+            cursor.execute(
+                "CREATE TABLE postback_conversions ("
+                "id INT NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)"
+                ") ENGINE=InnoDB"
+            )
+            cursor.execute(
+                "CREATE TABLE conversion_deduction_logs ("
+                "id BIGINT NOT NULL AUTO_INCREMENT, "
+                "conversion_id BIGINT NULL, PRIMARY KEY (id)"
+                ") ENGINE=InnoDB"
+            )
+            cursor.execute(
+                "INSERT INTO conversion_deduction_logs (conversion_id) VALUES (987654)"
+            )
+
+            with pytest.raises(pymysql.MySQLError):
+                _run_sql_file(
+                    cursor,
+                    "sql/migrations/"
+                    "20261127_conversion_deduction_log_conversion_fk.sql",
+                )
+
+            cursor.execute(
+                "SHOW COLUMNS FROM conversion_deduction_logs LIKE 'conversion_id'"
+            )
+            column = cursor.fetchone()
+            assert column is not None
+            assert column[1].lower() == "bigint"
+            cursor.execute("SHOW COLUMNS FROM conversion_deduction_logs LIKE 'id'")
+            log_id_column = cursor.fetchone()
+            assert log_id_column is not None
+            assert log_id_column[1].lower() == "bigint"
+            cursor.execute(
+                "SELECT conversion_id FROM conversion_deduction_logs WHERE id = 1"
+            )
+            assert cursor.fetchone() == (987654,)
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS conversion_deduction_logs")
+            cursor.execute("DROP TABLE IF EXISTS postback_conversions")
+        connection.close()
+
+def test_postback_payout_decimal_precision_migration_is_idempotent_and_preserves_values():
+    """Postback 金额精度迁移覆盖四张表，重复执行不改写既有金额。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "CREATE TEMPORARY TABLE postback_conversions ("
+                "event_value DECIMAL(12,4) NULL, "
+                "original_payout DECIMAL(12,4) NULL, "
+                "payout DECIMAL(12,4) NULL) ENGINE=InnoDB"
+            )
+            cursor.execute(
+                "CREATE TEMPORARY TABLE pending_postback_conversions ("
+                "event_value DECIMAL(12,4) NULL, "
+                "original_payout DECIMAL(12,4) NULL, "
+                "payout DECIMAL(12,4) NULL) ENGINE=InnoDB"
+            )
+            cursor.execute(
+                "CREATE TEMPORARY TABLE cloak_configs ("
+                "report_value DECIMAL(12,4) NULL, "
+                "load_report_value DECIMAL(12,4) NULL, "
+                "postback_report_value DECIMAL(12,4) NULL) ENGINE=InnoDB"
+            )
+            cursor.execute(
+                "CREATE TEMPORARY TABLE third_party_report_logs ("
+                "amount DECIMAL(12,4) NULL) ENGINE=InnoDB"
+            )
+            cursor.execute(
+                "INSERT INTO postback_conversions VALUES (1.2345, 2.3456, 3.4567)"
+            )
+            cursor.execute(
+                "INSERT INTO pending_postback_conversions VALUES (4.5678, 5.6789, 6.7891)"
+            )
+            cursor.execute(
+                "INSERT INTO cloak_configs VALUES (7.8912, 8.9123, 9.1234)"
+            )
+            cursor.execute("INSERT INTO third_party_report_logs VALUES (1.9876)")
+
+            migration = "sql/migrations/20261129_postback_payout_decimal_precision.sql"
+            _run_sql_file(cursor, migration)
+            _run_sql_file(cursor, migration)
+
+            expected = {
+                "postback_conversions": ("event_value", "original_payout", "payout"),
+                "pending_postback_conversions": ("event_value", "original_payout", "payout"),
+                "cloak_configs": ("report_value", "load_report_value", "postback_report_value"),
+                "third_party_report_logs": ("amount",),
+            }
+            for table_name, column_names in expected.items():
+                for column_name in column_names:
+                    cursor.execute(
+                        "SHOW COLUMNS FROM `" + table_name + "` LIKE %s",
+                        (column_name,),
+                    )
+                    row = cursor.fetchone()
+                    assert row is not None
+                    assert row[1].lower() == "decimal(24,6)"
+
+            cursor.execute(
+                "SELECT event_value, original_payout, payout FROM postback_conversions"
+            )
+            assert tuple(decimal.Decimal(str(value)) for value in cursor.fetchone()) == (
+                decimal.Decimal("1.2345"), decimal.Decimal("2.3456"), decimal.Decimal("3.4567")
+            )
+            cursor.execute(
+                "SELECT event_value, original_payout, payout FROM pending_postback_conversions"
+            )
+            assert tuple(decimal.Decimal(str(value)) for value in cursor.fetchone()) == (
+                decimal.Decimal("4.5678"), decimal.Decimal("5.6789"), decimal.Decimal("6.7891")
+            )
+            cursor.execute(
+                "SELECT report_value, load_report_value, postback_report_value "
+                "FROM cloak_configs"
+            )
+            assert tuple(decimal.Decimal(str(value)) for value in cursor.fetchone()) == (
+                decimal.Decimal("7.8912"), decimal.Decimal("8.9123"), decimal.Decimal("9.1234")
+            )
+            cursor.execute("SELECT amount FROM third_party_report_logs")
+            assert decimal.Decimal(str(cursor.fetchone()[0])) == decimal.Decimal("1.9876")
+    finally:
+        connection.close()
+
+def test_offer_currency_migration_marks_existing_rows_unknown_and_new_rows_usd_fallback():
+    """同一迁移先标记存量未知；迁移后的新 Offer 继续使用 USD 兜底。"""
+    connection = _connect()
+    schema_name = f"platform_ci_offer_currency_{secrets.token_hex(6)}"
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"CREATE DATABASE `{schema_name}` "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
+            )
+            cursor.execute(f"USE `{schema_name}`")
+            cursor.execute(
+                "CREATE TABLE offers ("
+                "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "payout DECIMAL(24,6) NULL, "
+                "affiliate_payout DECIMAL(24,6) NULL) ENGINE=InnoDB"
+            )
+            cursor.execute(
+                "INSERT INTO offers (payout, affiliate_payout) "
+                "VALUES (12.345678, 9.876543)"
+            )
+            cursor.execute(
+                "INSERT INTO offers (payout, affiliate_payout) "
+                "VALUES (98.765432, 87.654321)"
+            )
+
+            _run_sql_file(cursor, "sql/migrations/20261127_offer_payout_currency.sql")
+
+            cursor.execute(
+                "SELECT payout, affiliate_payout, payout_currency, payout_currency_source "
+                "FROM offers ORDER BY id"
+            )
+            rows = cursor.fetchall()
+            assert tuple(str(value) for value in rows[0]) == (
+                "12.345678", "9.876543", "USD", "legacy_unknown"
+            )
+            assert tuple(str(value) for value in rows[1]) == (
+                "98.765432", "87.654321", "USD", "legacy_unknown"
+            )
+
+            cursor.execute(
+                "INSERT INTO offers (payout, affiliate_payout) VALUES (1.234567, 0.987654)"
+            )
+            cursor.execute(
+                "SELECT payout_currency, payout_currency_source "
+                "FROM offers WHERE id = LAST_INSERT_ID()"
+            )
+            assert cursor.fetchone() == ("USD", "system_fallback_usd")
+    finally:
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(f"DROP DATABASE IF EXISTS `{schema_name}`")
+        finally:
+            connection.close()

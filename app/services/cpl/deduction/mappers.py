@@ -2,6 +2,7 @@
 转化扣减 API 响应与 Excel 导出行映射。
 """
 from typing import Any, Dict, List
+from decimal import Decimal
 
 from app.models.models import ConversionDeductionConfig, ConversionDeductionLog
 from app.schemas.cpl.deduction import (
@@ -9,6 +10,12 @@ from app.schemas.cpl.deduction import (
     ConversionDeductionLogResponse,
     DeductionStatsResponse,
 )
+
+def _format_amount(value: Any) -> str:
+    """导出金额时保留 Decimal 精度，不固定截断为两位小数。"""
+    amount = value if isinstance(value, Decimal) else Decimal(str(value or 0))
+    return format(amount, 'f')
+
 
 _STRATEGY_LABELS = {
     "random": "随机",
@@ -106,6 +113,12 @@ def log_to_export_row(log: ConversionDeductionLog) -> Dict[str, Any]:
         log_response.deduction_strategy,
         log_response.deduction_strategy or "",
     )
+    currency_source = (log_response.currency_source or "legacy_unknown").strip().lower()
+    currency = (
+        "LEGACY_UNKNOWN"
+        if currency_source == "legacy_unknown" or not log_response.currency
+        else log_response.currency.strip().upper()
+    )
     return {
         "日志ID": log_response.id,
         "转化ID": log_response.conversion_id if log_response.conversion_id else "已扣量",
@@ -118,9 +131,11 @@ def log_to_export_row(log: ConversionDeductionLog) -> Dict[str, Any]:
         "扣减数量": log_response.deducted_volume or 0,
         "最终数量": log_response.final_volume or 0,
         "扣量比例": f"{(log_response.volume_deduction_ratio or 0) * 100:.2f}%",
-        "原始金额": f"${log_response.original_amount or 0:.2f}",
-        "扣减金额": f"${log_response.deducted_amount or 0:.2f}",
-        "最终金额": f"${log_response.final_amount or 0:.2f}",
+        "币种": currency,
+        "币种来源": currency_source,
+        "原始金额": f"{_format_amount(log_response.original_amount)} {currency}",
+        "扣减金额": f"{_format_amount(log_response.deducted_amount)} {currency}",
+        "最终金额": f"{_format_amount(log_response.final_amount)} {currency}",
         "扣金额比例": f"{(log_response.amount_deduction_ratio or 0) * 100:.2f}%",
         "扣减原因": log_response.deduction_reason or "",
         "创建时间": str(log_response.created_at) if log_response.created_at else "",
@@ -128,31 +143,65 @@ def log_to_export_row(log: ConversionDeductionLog) -> Dict[str, Any]:
 
 
 def stats_to_export_rows(stats: DeductionStatsResponse) -> List[Dict[str, Any]]:
-    """将统计数据转为 Excel 导出行列表（首行为汇总，其余为分组项）。"""
+    """导出扣减统计；多币种金额必须按币种分别列示，禁止生成混币总额。"""
+    if stats.original_amount is None:
+        original_total = deducted_total = final_total = "多币种，见分币种明细"
+        ratio_total = "多币种，见分币种明细"
+    else:
+        original_total = _format_amount(stats.original_amount)
+        deducted_total = _format_amount(stats.deducted_amount)
+        final_total = _format_amount(stats.final_amount)
+        ratio_total = f"{(stats.amount_deduction_ratio or 0) * 100:.2f}%"
+
     data = [
         {
             "类型": "汇总",
+            "币种": "多来源/多币种" if stats.original_amount is None else (
+                stats.currency_summaries[0].currency if stats.currency_summaries else "LEGACY_UNKNOWN"
+            ),
+            "币种来源": "多来源" if stats.original_amount is None else (
+                stats.currency_summaries[0].currency_source if stats.currency_summaries else "legacy_unknown"
+            ),
             "原始转化数量": stats.original_volume,
             "扣减转化数量": stats.deducted_volume,
             "最终转化数量": stats.final_volume,
             "扣量比例": f"{(stats.volume_deduction_ratio * 100):.2f}%",
-            "原始转化金额": f"${stats.original_amount:.2f}",
-            "扣减转化金额": f"${stats.deducted_amount:.2f}",
-            "最终转化金额": f"${stats.final_amount:.2f}",
-            "扣金额比例": f"{(stats.amount_deduction_ratio * 100):.2f}%",
+            "原始转化金额": original_total,
+            "扣减转化金额": deducted_total,
+            "最终转化金额": final_total,
+            "扣金额比例": ratio_total,
         }
     ]
-    if stats.items:
-        for item in stats.items:
-            data.append({
-                "类型": item.get("name", "未知"),
-                "原始转化数量": item.get("original_volume", 0),
-                "扣减转化数量": item.get("deducted_volume", 0),
-                "最终转化数量": item.get("final_volume", 0),
-                "扣量比例": f"{(item.get('volume_deduction_ratio', 0) * 100):.2f}%",
-                "原始转化金额": f"${item.get('original_amount', 0):.2f}",
-                "扣减转化金额": f"${item.get('deducted_amount', 0):.2f}",
-                "最终转化金额": f"${item.get('final_amount', 0):.2f}",
-                "扣金额比例": f"{(item.get('amount_deduction_ratio', 0) * 100):.2f}%",
-            })
+    for summary in stats.currency_summaries:
+        currency = summary.currency
+        currency_source = summary.currency_source
+        data.append({
+            "类型": "币种汇总",
+            "币种": currency,
+            "币种来源": currency_source,
+            "原始转化数量": summary.original_volume,
+            "扣减转化数量": summary.deducted_volume,
+            "最终转化数量": summary.final_volume,
+            "扣量比例": "",
+            "原始转化金额": f"{_format_amount(summary.original_amount)} {currency}",
+            "扣减转化金额": f"{_format_amount(summary.deducted_amount)} {currency}",
+            "最终转化金额": f"{_format_amount(summary.final_amount)} {currency}",
+            "扣金额比例": f"{summary.amount_deduction_ratio * 100:.2f}%",
+        })
+    for item in stats.items:
+        currency = item.currency
+        currency_source = item.currency_source
+        data.append({
+            "类型": item.advertiser_id or item.offer_id or item.publisher_id or "分组明细",
+            "币种": currency,
+            "币种来源": currency_source,
+            "原始转化数量": item.original_volume,
+            "扣减转化数量": item.deducted_volume,
+            "最终转化数量": item.final_volume,
+            "扣量比例": f"{(item.volume_deduction_ratio * 100):.2f}%",
+            "原始转化金额": f"{_format_amount(item.original_amount)} {currency}",
+            "扣减转化金额": f"{_format_amount(item.deducted_amount)} {currency}",
+            "最终转化金额": f"{_format_amount(item.final_amount)} {currency}",
+            "扣金额比例": f"{(item.amount_deduction_ratio * 100):.2f}%",
+        })
     return data

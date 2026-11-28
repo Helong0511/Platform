@@ -676,7 +676,7 @@ class Settings(BaseSettings):
     # ====== 时区配置 ======
     # 应用时区（用于调度器、前端显示、数据库时间戳等）
     # 默认：Asia/Shanghai（中国时区，UTC+8）
-    # 可选值：Asia/Shanghai, UTC, America/New_York 等（pytz 支持的时区）
+    # 可选值：Asia/Shanghai, UTC, America/New_York 等（IANA 时区数据库标识，使用标准库 zoneinfo）
     # 注意：
     # - 业务日期字段（如 AdData.date）存储为 DATE（仅日期，无时间部分）
     # - 时间戳字段（如created_at、updated_at）存储为应用配置时区（默认北京时间）的naive datetime
@@ -1240,15 +1240,13 @@ if settings.is_production:
     if settings.USE_TRACKING_TOKEN:
         from app.core.tracking.ad_tracking_codec import AdTrackingCodec
 
-        key_hex = settings.AD_TRACKING_MASTER_KEY_HEX.strip()
-        if not key_hex:
-            logger.error(
-                "生产环境 USE_TRACKING_TOKEN=true 必须设置 AD_TRACKING_MASTER_KEY_HEX"
+        try:
+            AdTrackingCodec.validate_production_master_key(
+                settings.AD_TRACKING_MASTER_KEY_HEX
             )
-        elif key_hex == AdTrackingCodec._DEFAULT_KEY_HEX:
-            logger.error(
-                "生产环境不得使用 AdTrackingCodec 内置开发默认密钥，请配置独立密钥"
-            )
+        except ValueError as exc:
+            # 追踪令牌密钥错误会影响归因真实性，生产环境必须拒绝启动。
+            raise RuntimeError(f"生产环境追踪令牌密钥配置不安全：{exc}") from exc
     if not settings.HUGUANG_API_KEY.strip():
         logger.warning("生产环境未配置 HUGUANG_API_KEY，Huguang 定时任务将跳过")
     if not settings.TQT_APP_KEY.strip():

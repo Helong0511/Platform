@@ -17,6 +17,8 @@ def _pending_record(click_time):
         event_value=None,
         original_payout=10,
         payout=9,
+        currency="USD",
+        currency_source="system_fallback_usd",
         devad_id=None,
         os="Android",
         carrier=None,
@@ -100,7 +102,11 @@ def test_approved_pending_postback_preserves_click_attribution(monkeypatch):
         publisher_id=22,
         advertiser_id=33,
     )
-    fake_db = _install_fake_runtime(monkeypatch, [pending, None, None, click])
+    offer = SimpleNamespace(
+        payout_currency="EUR",
+        payout_currency_source="manual_config",
+    )
+    fake_db = _install_fake_runtime(monkeypatch, [pending, None, None, None, click, offer])
 
     handler = importlib.import_module(
         "app.core.telegram.callback_handlers.postback_approval"
@@ -125,13 +131,15 @@ def test_approved_pending_postback_preserves_click_attribution(monkeypatch):
     assert conversion.offer_id == 11
     assert conversion.publisher_id == 22
     assert conversion.advertiser_id == 33
+    assert conversion.currency == "EUR"
+    assert conversion.currency_source == "offer_config"
     assert "private@example.com" not in conversion.raw_data
     assert "trusted-click-77" in conversion.raw_data
 
 
 def test_telegram_approval_does_not_duplicate_existing_conversion(monkeypatch):
     pending = _pending_record(datetime(2026, 11, 19, 10, 30, 0))
-    fake_db = _install_fake_runtime(monkeypatch, [pending, None, 1234])
+    fake_db = _install_fake_runtime(monkeypatch, [pending, None, None, 1234])
 
     handler = importlib.import_module(
         "app.core.telegram.callback_handlers.postback_approval"
@@ -166,7 +174,11 @@ def test_telegram_approval_uses_signed_click_token_when_click_row_is_not_yet_ava
             "click_time": click_time,
         },
     )
-    fake_db = _install_fake_runtime(monkeypatch, [pending, None, None, None])
+    offer = SimpleNamespace(
+        payout_currency="EUR",
+        payout_currency_source="manual_config",
+    )
+    fake_db = _install_fake_runtime(monkeypatch, [pending, None, None, None, None, offer])
 
     handler = importlib.import_module(
         "app.core.telegram.callback_handlers.postback_approval"
@@ -185,3 +197,28 @@ def test_telegram_approval_uses_signed_click_token_when_click_row_is_not_yet_ava
     assert conversion.offer_id == 41
     assert conversion.publisher_id == 42
     assert conversion.advertiser_id == 43
+
+
+def test_telegram_receipt_only_event_is_not_promoted_to_conversion(monkeypatch):
+    pending = _pending_record(datetime(2026, 11, 19, 10, 30, 0))
+    fake_db = _install_fake_runtime(monkeypatch, [pending, None, 9876])
+    handler = importlib.import_module(
+        "app.core.telegram.callback_handlers.postback_approval"
+    )
+
+    handler.process_pending_conversion(
+        pending_id=77,
+        action="approve",
+        callback_query_id="callback-receipt-77",
+        chat_id=100,
+        message_id=200,
+        actor_telegram_user_id=555129,
+    )
+
+    assert fake_db.committed is True
+    assert pending.status == "pending"
+    assert not any(isinstance(item, PostbackConversion) for item in fake_db.added)
+    audits = [item for item in fake_db.added if item.__class__.__name__ == "TelegramPostbackApprovalAudit"]
+    assert len(audits) == 1
+    assert audits[0].outcome == "event_receipt_exists"
+    assert audits[0].previous_status == audits[0].new_status == "pending"

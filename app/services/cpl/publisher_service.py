@@ -25,8 +25,9 @@ from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.validation import validate_postback_url_placeholders
 from app.core.pagination import calculate_pagination_offset
-from app.models.models import Publisher, Client, User, UserRole, OfferPublisherAssignment
+from app.models.models import Publisher, Client, User, UserRole, OfferPublisherAssignment, ConversionDeductionConfig
 from app.services.base_service import BaseService
+from app.services.cpl.deduction.helpers import lock_deduction_scopes
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +282,19 @@ class PublisherService(BaseService[Publisher]):
 
         # 获取渠道
         publisher = await self.get_publisher_by_id(publisher_id, current_user, include_client=False)
+
+        # 与扣量配置写入口共享 scope 锁，避免级联删除财务配置。
+        await lock_deduction_scopes(self.db, [("publisher", publisher_id)])
+        deduction_count = await self.db.execute(
+            select(func.count(ConversionDeductionConfig.id)).where(
+                ConversionDeductionConfig.publisher_id == publisher_id
+            )
+        )
+        if deduction_count.scalar() > 0:
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail="渠道仍有关联扣量配置，无法删除",
+            )
 
         # 验证Postback URL占位符（如果修改）
         if 'postback_url' in publisher_data and publisher_data['postback_url']:

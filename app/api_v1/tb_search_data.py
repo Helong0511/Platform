@@ -22,6 +22,7 @@
 import logging
 from calendar import monthrange
 from datetime import date
+from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, UploadFile, File
 from sqlalchemy import delete, func, select, and_, or_
@@ -62,6 +63,73 @@ from app.core.country_code import resolve_country_name, find_country_code_by_any
 from app.api_v1.excel.utils import (
     parse_date_value, normalize_date_key, validate_excel_file
 )
+
+def _is_blank_excel_cell(value) -> bool:
+    """识别 Excel 空值；Decimal NaN/Infinity 属于非法数值，不得当作空值。"""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return True
+    if isinstance(value, Decimal):
+        return False
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _parse_decimal_cell(value, field_name: str, default: Decimal = Decimal("0")) -> Decimal:
+    """将 Excel 数值解析为有限 Decimal，避免金额/RPM 经二进制 float 运算。"""
+    if _is_blank_excel_cell(value):
+        return default
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError(f"{field_name}不是有效数字") from exc
+    if not parsed.is_finite():
+        raise ValueError(f"{field_name}必须是有限数字")
+
+    # TBSearchData 的收入为 DECIMAL(12,4)，RPM 为 DECIMAL(10,4)。
+    max_abs = (
+        Decimal("99999999.9999")
+        if field_name.upper() in {"REVENUE", "REVENUE_BEFORE_DEDUCT"}
+        else Decimal("999999.9999")
+    )
+    if abs(parsed) > max_abs:
+        raise ValueError(f"{field_name}超出数据库 DECIMAL 存储范围")
+    if parsed.quantize(Decimal("0.0001")) != parsed:
+        raise ValueError(f"{field_name}最多允许 4 位小数")
+    return parsed
+
+
+
+def _parse_deduct_ratio(value, field_name: str) -> Decimal:
+    """校验产品扣减比例，防止历史脏数据导致负数扣后金额或超额扣减。"""
+    if value is None:
+        return Decimal("0")
+    try:
+        ratio = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError(f"{field_name}不是有效扣减比例") from exc
+    if not ratio.is_finite() or ratio < 0 or ratio > 1:
+        raise ValueError(f"{field_name}必须是 0 到 1 之间的有限比例")
+    if ratio.quantize(Decimal("0.0001")) != ratio:
+        raise ValueError(f"{field_name}最多允许 4 位小数")
+    return ratio
+
+
+def _parse_nonnegative_integer_cell(value, field_name: str) -> int:
+    """严格解析非负计数列，拒绝小数、负数和非有限值。"""
+    if _is_blank_excel_cell(value):
+        return 0
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError(f"{field_name}必须是非负整数") from exc
+    if not parsed.is_finite() or parsed < 0 or parsed != parsed.to_integral_value():
+        raise ValueError(f"{field_name}必须是非负整数")
+    if parsed > Decimal("2147483647"):
+        raise ValueError(f"{field_name}超出数据库整数范围")
+    return int(parsed)
+
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -379,117 +447,124 @@ async def import_tb_search_data(
     for index, row in df.iterrows():
         # ---------- 异常处理 ----------
         try:
-            # 解析日期：使用统一的日期键规范化函数
-            date_val = normalize_date_key(parse_date_value(row["DATE"]))
+            # 每行独立保存点，避免单行数据库异常污染整个 AsyncSession。
+            async with db.begin_nested():
+                # 解析日期：使用统一的日期键规范化函数
+                date_val = normalize_date_key(parse_date_value(row["DATE"]))
+                    
+                # 解析产品名称（SUBID）。同名只保留一条，已存在则复用最小 ID。
+                product_name = normalize_product_name(str(row["SUBID"]) if pd.notna(row.get("SUBID")) else "")
+                if not product_name:
+                    raise ValueError("SUBID(产品名称)不能为空")
+
+                existing_products = await fetch_products_by_name(db, product_name)
+                if existing_products:
+                    product = existing_products[0]
+                else:
+                    client = await find_or_create_default_client(db, current_user.id)
+                    new_product = Product(
+                        client_id=client.id,
+                        name=product_name,
+                        is_active=True,
+                        ecpm_deduct_ratio=0.0,
+                        revenue_deduct_ratio=0.0
+                    )
+                    product, _created = await insert_unique_product(db, new_product)
                 
-            # 解析产品名称（SUBID）。同名只保留一条，已存在则复用最小 ID。
-            product_name = normalize_product_name(str(row["SUBID"]) if pd.notna(row.get("SUBID")) else "")
-            if not product_name:
-                raise ValueError("SUBID(产品名称)不能为空")
-
-            existing_products = await fetch_products_by_name(db, product_name)
-            if existing_products:
-                product = existing_products[0]
-            else:
-                client = await find_or_create_default_client(db, current_user.id)
-                new_product = Product(
-                    client_id=client.id,
-                    name=product_name,
-                    is_active=True,
-                    ecpm_deduct_ratio=0.0,
-                    revenue_deduct_ratio=0.0
-                )
-                product, _created = await insert_unique_product(db, new_product)
-            
-            subid = product.id
+                subid = product.id
+                    
+                # 解析 GEO：能识别则用标准二字码，否则保留原始值（截断至字段长度）
+                geo_raw = str(row["GEO"]).strip() if pd.notna(row.get("GEO")) else ""
+                if geo_raw:
+                    found = await find_country_code_by_any_format(db, geo_raw)
+                    geo = found if found else preserve_unrecognized_country_code(geo_raw)
+                else:
+                    geo = "ZZ"
                 
-            # 解析 GEO：能识别则用标准二字码，否则保留原始值（截断至字段长度）
-            geo_raw = str(row["GEO"]).strip() if pd.notna(row.get("GEO")) else ""
-            if geo_raw:
-                found = await find_country_code_by_any_format(db, geo_raw)
-                geo = found if found else preserve_unrecognized_country_code(geo_raw)
-            else:
-                geo = "ZZ"
-            
-            # 查找是否已存在
-            existing_query = select(TBSearchData).where(
-                and_(
-                    TBSearchData.date == date_val,
-                    TBSearchData.product_id == subid,
-                    TBSearchData.country_code == geo
+                # 查找是否已存在
+                existing_query = select(TBSearchData).where(
+                    and_(
+                        TBSearchData.date == date_val,
+                        TBSearchData.product_id == subid,
+                        TBSearchData.country_code == geo
+                    )
                 )
-            )
-            existing_res = await db.execute(existing_query)
-            existing = existing_res.scalar_one_or_none()
-            
-
-            # 解析数值
-            redirects = int(row.get("REDIRECTS", 0)) if pd.notna(row.get("REDIRECTS")) else 0
-            searches = int(row.get("SEARCHES", 0)) if pd.notna(row.get("SEARCHES")) else 0
-            monetized = int(row.get("MONETIZED", 0)) if pd.notna(row.get("MONETIZED")) else 0
-            clicks = int(row.get("CLICKS", 0)) if pd.notna(row.get("CLICKS")) else 0
-            
-            # 原始收入
-            revenue_origin = float(row.get("REVENUE", 0.0)) if pd.notna(row.get("REVENUE")) else 0.0
-
-            # RPM：只有在单元格为空/NaN时才按公式计算；如果有值（包括0），则直接使用
-            rpm_cell = row.get("RPM", None)
-            rpm_origin: float | None = None
-            # ---------- 条件分支 ----------
-            if rpm_cell is None or (isinstance(rpm_cell, float) and pd.isna(rpm_cell)) or (isinstance(rpm_cell, str) and rpm_cell.strip() == ""):
-                rpm_origin = None
-            else:
-                # ---------- 异常处理 ----------
-                try:
-                    rpm_origin = float(rpm_cell)
-                except Exception:
-                    rpm_origin = None
-
-            # ---------- 条件分支 ----------
-            if rpm_origin is None and searches > 0:
-                rpm_origin = (revenue_origin / searches) * 1000
-            # ---------- 条件分支 ----------
-            if rpm_origin is None:
-                rpm_origin = 0.0
-            
-            # 获取扣减比例
-            revenue_deduct_ratio = product.revenue_deduct_ratio or 0.0
-            ecpm_deduct_ratio = product.ecpm_deduct_ratio or 0.0 # RPM 对应 eCPM 扣减比例
-            
-            # 计算扣减后的值：无扣减保留原始精度，有扣减截断两位小数
-            revenue = apply_deduct_ratio(revenue_origin, revenue_deduct_ratio)
-            rpm = apply_deduct_ratio(rpm_origin, ecpm_deduct_ratio)
-            
-            # ---------- 条件分支 ----------
-            if existing:
-                # 更新
-                existing.redirects = redirects
-                existing.searches = searches
-                existing.monetized = monetized
-                existing.clicks = clicks
-                existing.revenue = revenue
-                existing.rpm = rpm
-                existing.revenue_before_deduct = revenue_origin
-                existing.rpm_before_deduct = rpm_origin
-            else:
-                # 创建
-                new_data = TBSearchData(
-                    date=date_val,
-                    product_id=subid,
-                    country_code=geo,
-                    redirects=redirects,
-                    searches=searches,
-                    monetized=monetized,
-                    clicks=clicks,
-                    revenue=revenue,
-                    rpm=rpm,
-                    revenue_before_deduct=revenue_origin,
-                    rpm_before_deduct=rpm_origin
-                )
-                db.add(new_data)
+                existing_res = await db.execute(existing_query)
+                existing = existing_res.scalar_one_or_none()
                 
+
+                # 解析数值
+                redirects = _parse_nonnegative_integer_cell(row.get("REDIRECTS"), "REDIRECTS")
+                searches = _parse_nonnegative_integer_cell(row.get("SEARCHES"), "SEARCHES")
+                monetized = _parse_nonnegative_integer_cell(row.get("MONETIZED"), "MONETIZED")
+                clicks = _parse_nonnegative_integer_cell(row.get("CLICKS"), "CLICKS")
+                
+                # 原始收入和 RPM 全程使用 Decimal，避免 float 引入二进制误差。
+                revenue_origin = _parse_decimal_cell(
+                    row.get("REVENUE", 0), "REVENUE"
+                )
+
+                # RPM 为空时按公式计算；显式提供但格式错误的值拒绝该行，不静默改算。
+                rpm_cell = row.get("RPM", None)
+                rpm_is_blank = _is_blank_excel_cell(rpm_cell)
+                if rpm_is_blank:
+                    rpm_origin = (
+                        (revenue_origin / Decimal(searches)) * Decimal("1000")
+                        if searches > 0 else Decimal("0")
+                    )
+                else:
+                    rpm_origin = _parse_decimal_cell(rpm_cell, "RPM")
+                
+                # 获取扣减比例
+                revenue_deduct_ratio = _parse_deduct_ratio(
+                    product.revenue_deduct_ratio, "收益扣减比例"
+                )
+                ecpm_deduct_ratio = _parse_deduct_ratio(
+                    product.ecpm_deduct_ratio, "eCPM扣减比例"
+                )  # RPM 对应 eCPM 扣减比例
+                
+                # 计算扣减后的值：无扣减保留原始精度，有扣减截断两位小数
+                # 币种归因尚未接入 TB Search 时，不得按固定两位小数截断金额或 RPM。
+                revenue = apply_deduct_ratio(
+                    revenue_origin, revenue_deduct_ratio, truncate_places=None
+                )
+                rpm = apply_deduct_ratio(
+                    rpm_origin, ecpm_deduct_ratio, truncate_places=None
+                )
+                
+                # ---------- 条件分支 ----------
+                if existing:
+                    # 更新
+                    existing.redirects = redirects
+                    existing.searches = searches
+                    existing.monetized = monetized
+                    existing.clicks = clicks
+                    existing.revenue = revenue
+                    existing.rpm = rpm
+                    existing.revenue_before_deduct = revenue_origin
+                    existing.rpm_before_deduct = rpm_origin
+                else:
+                    # 创建
+                    new_data = TBSearchData(
+                        date=date_val,
+                        product_id=subid,
+                        country_code=geo,
+                        redirects=redirects,
+                        searches=searches,
+                        monetized=monetized,
+                        clicks=clicks,
+                        revenue=revenue,
+                        rpm=rpm,
+                        revenue_before_deduct=revenue_origin,
+                        rpm_before_deduct=rpm_origin
+                    )
+                    db.add(new_data)
+
+                # 在行级保存点内立即 flush，唯一键/字段约束失败只回滚当前行。
+                await db.flush()
+
             success_count += 1
-            
+                
         except Exception as e:
             errors.append(f"行 {index+2}: {str(e)}")
             

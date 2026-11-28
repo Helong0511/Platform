@@ -167,6 +167,13 @@
             {{ scope.row.currency || '-' }}
           </template>
         </el-table-column>
+        <el-table-column v-if="columnVisibility.currency_source" prop="currency_source" label="币种来源" min-width="170" align="center">
+          <template #default="scope">
+            <el-tag :type="getCurrencySourceTag(scope.row.currency_source)" size="small">
+              {{ getCurrencySourceLabel(scope.row.currency_source) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column v-if="columnVisibility.amount" prop="amount" label="支付金额" width="120" align="center">
           <template #default="scope">
             {{ scope.row.amount || '-' }}
@@ -311,6 +318,7 @@
           <el-descriptions-item label="Pixel 目的地">{{ currentLog.destination_pixel_id || '未确认' }}</el-descriptions-item>
           <el-descriptions-item label="转化ID">{{ currentLog.conversion_id || '-' }}</el-descriptions-item>
           <el-descriptions-item label="货币类型">{{ currentLog.currency || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="币种来源">{{ getCurrencySourceLabel(currentLog.currency_source) }}</el-descriptions-item>
           <el-descriptions-item label="支付金额">{{ currentLog.amount || '-' }}</el-descriptions-item>
           <el-descriptions-item label="状态">
             <el-tag :type="getStatusTag(currentLog.status)">
@@ -462,6 +470,7 @@
         <el-checkbox label="event">事件类型</el-checkbox>
         <el-checkbox label="conversion_id">转化ID</el-checkbox>
         <el-checkbox label="currency">货币类型</el-checkbox>
+        <el-checkbox label="currency_source">币种来源</el-checkbox>
         <el-checkbox label="amount">支付金额</el-checkbox>
         <el-checkbox label="status">状态</el-checkbox>
         <el-checkbox label="attempt_count">尝试次数</el-checkbox>
@@ -571,6 +580,24 @@ const getIdentityScopeTag = (scope) => {
   if (scope === 'legacy_unresolved') return 'danger';
   if (scope === 'unscoped') return 'info';
   return 'warning';
+};
+
+// 币种来源必须可见；历史未知来源不能误显示为上游明确币种。
+const getCurrencySourceLabel = (source) => {
+  if (source === 'system_fallback_usd') return '系统兜底 USD';
+  if (source === 'manual_override') return '人工修改';
+  if (source === 'legacy_unknown') return '历史来源未核实';
+  if (source?.startsWith('upstream_field:')) return `上游字段：${source.slice('upstream_field:'.length)}`;
+  if (source?.startsWith('cloak_config:')) return `斗篷配置：${source.slice('cloak_config:'.length)}`;
+  if (source === 'caller_supplied') return '调用方提供';
+  return source || '未记录';
+};
+
+const getCurrencySourceTag = (source) => {
+  if (source === 'legacy_unknown' || !source) return 'danger';
+  if (source === 'system_fallback_usd') return 'warning';
+  if (source === 'manual_override') return 'info';
+  return 'success';
 };
 
 // 根据持久化 Outbox 字段准确展示重试状态，避免将普通失败日志误认为可重试。

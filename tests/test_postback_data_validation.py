@@ -11,10 +11,10 @@ from app.core.postback.bft_handler import BftPostbackHandler
 @pytest.mark.parametrize(
     "payload",
     [
-        {"clk_id": "click-1", "amount": "1.2500"},
-        {"cid": "click-2", "payout": "2.0000"},
+        {"conversion_id": "event-1", "clk_id": "click-1", "amount": "1.2500"},
+        {"conversionId": "event-2", "cid": "click-2", "payout": "2.0000"},
         {"conversionId": "conversion-3", "amount": "3.5000"},
-        {"clickId": "click-4", "payout": "4"},
+        {"conversion_id": "event-4", "clickId": "click-4", "payout": "4"},
     ],
 )
 def test_validator_accepts_all_click_id_and_payout_aliases(payload):
@@ -29,7 +29,7 @@ def test_validator_accepts_all_click_id_and_payout_aliases(payload):
 )
 def test_validator_rejects_non_finite_invalid_precision_and_out_of_range_payout(payout):
     valid, errors = DataValidator.validate(
-        {"click_id": "click-1", "payout": payout},
+        {"conversion_id": "event-1", "click_id": "click-1", "payout": payout},
         "test-platform",
     )
     assert valid is False
@@ -52,6 +52,7 @@ def test_validator_rejects_overlong_event_name_before_database_write():
 def test_normalizer_preserves_explicit_zero_payout_instead_of_falling_back_to_amount():
     normalized = DataNormalizer.normalize(
         {
+            "conversion_id": "event-1",
             "click_id": "click-1",
             "payout": "0",
             "amount": "12.0000",
@@ -86,6 +87,7 @@ async def test_bft_handler_uses_decimal_for_payout_and_event_value():
     handler = BftPostbackHandler()
     payload = {
         "clk_id": "bft-click-1",
+        "conversion_id": "bft-event-1",
         "payout": "1.2345",
         "event_value": "2.3456",
     }
@@ -103,7 +105,7 @@ async def test_bft_handler_uses_decimal_for_payout_and_event_value():
 @pytest.mark.parametrize("payout", ["NaN", "Infinity", "0", "1.12345", "100000000"])
 async def test_bft_handler_rejects_invalid_financial_payouts(payout):
     handler = BftPostbackHandler()
-    valid, error = await handler.validate({"clk_id": "bft-click-1", "payout": payout})
+    valid, error = await handler.validate({"clk_id": "bft-click-1", "conversion_id": "bft-event-1", "payout": payout})
 
     assert valid is False
     assert error is not None
@@ -114,6 +116,7 @@ async def test_bft_handler_does_not_fall_back_when_primary_payout_is_zero():
     handler = BftPostbackHandler()
     payload = {
         "clk_id": "bft-click-1",
+        "conversion_id": "bft-event-1",
         "payout": 0,
         "PayOut": "5.0000",
     }
@@ -131,11 +134,13 @@ async def test_bft_handler_rejects_overlong_conversion_and_event_ids():
     handler = BftPostbackHandler()
 
     valid_id, error_id = await handler.validate({
-        "clk_id": "x" * 201,
+        "clk_id": "click-bft-1",
+        "conversion_id": "x" * 201,
         "payout": "1.0000",
     })
     valid_event, error_event = await handler.validate({
         "clk_id": "bft-click-1",
+        "conversion_id": "bft-event-1",
         "payout": "1.0000",
         "event_name": "x" * 101,
     })
@@ -144,3 +149,112 @@ async def test_bft_handler_rejects_overlong_conversion_and_event_ids():
     assert "过长" in error_id
     assert valid_event is False
     assert "event_name" in error_event
+
+
+
+@pytest.mark.parametrize(
+    "payload, expected_conversion_id",
+    [
+        (
+            {"conversion_id": "", "conversionId": "conversion-camel", "click_id": "click-1", "payout": "1.0000"},
+            "conversion-camel",
+        ),
+        (
+            {"conversion_id": "   ", "conversionId": "conversion-camel-spaces", "click_id": "click-1", "payout": "1.0000"},
+            "conversion-camel-spaces",
+        ),
+        (
+            {"conversion_id": "conversion-explicit", "click_id": "click-1", "payout": "1.0000"},
+            "conversion-explicit",
+        ),
+    ],
+)
+def test_blank_conversion_id_is_ignored_before_fallback(payload, expected_conversion_id):
+    valid, errors = DataValidator.validate(payload, "test-platform")
+    normalized = DataNormalizer.normalize(payload, "test-platform")
+
+    assert valid is True
+    assert errors == []
+    assert normalized["conversion_id"] == expected_conversion_id
+
+
+def test_validator_rejects_blank_conversion_id_without_click_id():
+    valid, errors = DataValidator.validate(
+        {"conversion_id": "   ", "payout": "1.0000"},
+        "test-platform",
+    )
+
+    assert valid is False
+    assert "缺少必填字段：click_id 或 conversion_id" in errors
+
+
+
+def test_normalizer_marks_only_explicit_conversion_id_as_verified_event_identity():
+    explicit = DataNormalizer.normalize(
+        {"conversion_id": "event-1", "click_id": "click-1", "payout": "1.0000"},
+        "test-platform",
+    )
+    legacy = DataNormalizer.normalize(
+        {"click_id": "click-1", "payout": "1.0000"},
+        "test-platform",
+    )
+
+    assert explicit["conversion_id"] == "event-1"
+    assert explicit["click_id"] == "click-1"
+    assert explicit["event_identity_verified"] is True
+    # 保留旧入库字段兼容，但不得将 click_id 回退值视为财务事件身份。
+    assert legacy["conversion_id"] == "click-1"
+    assert legacy["event_identity_verified"] is False
+
+
+@pytest.mark.asyncio
+async def test_bft_handler_keeps_click_and_explicit_conversion_ids_separate():
+    handler = BftPostbackHandler()
+    payload = {
+        "clk_id": "click-bft-1",
+        "conversion_id": "conversion-bft-1",
+        "payout": "1.0000",
+    }
+
+    valid, error = await handler.validate(payload)
+    normalized = await handler.normalize(payload)
+
+    assert valid is True
+    assert error is None
+    assert normalized["click_id"] == "click-bft-1"
+    assert normalized["conversion_id"] == "conversion-bft-1"
+    assert normalized["event_identity_verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_bft_click_alias_without_explicit_conversion_id_is_not_verified():
+    normalized = await BftPostbackHandler().normalize({
+        "clk_id": "click-bft-legacy",
+        "payout": "1.0000",
+    })
+
+    assert normalized["click_id"] == "click-bft-legacy"
+    assert normalized["conversion_id"] == "click-bft-legacy"
+    assert normalized["event_identity_verified"] is False
+
+
+
+def test_validator_rejects_click_id_without_explicit_conversion_id():
+    valid, errors = DataValidator.validate(
+        {"click_id": "click-only", "payout": "1.0000"},
+        "test-platform",
+    )
+
+    assert valid is False
+    assert any("稳定转化事件 ID" in error for error in errors)
+
+
+@pytest.mark.asyncio
+async def test_bft_handler_rejects_click_alias_without_explicit_conversion_id():
+    valid, error = await BftPostbackHandler().validate({
+        "clk_id": "bft-click-only",
+        "payout": "1.0000",
+    })
+
+    assert valid is False
+    assert "稳定转化事件 ID" in error

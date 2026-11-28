@@ -22,6 +22,7 @@
 import logging
 import re
 import uuid
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
@@ -249,7 +250,7 @@ async def record_cloak_click_count(
 def _log_url_report_mismatch(
         request: Request,
         report_event: str,
-        report_value: Optional[float],
+        report_value: Optional[Decimal],
         report_currency: str,
 ) -> None:
     """若桥页 URL 携带 report_* 查询参数但与服务端配置不一致，仅打警告（以服务端为准）。"""
@@ -264,13 +265,13 @@ def _log_url_report_mismatch(
         )
     if report_event == "Purchase" and report_value is not None and q_val is not None:
         try:
-            if abs(float(q_val) - float(report_value)) > 1e-6:
+            if abs(Decimal(q_val) - report_value) > Decimal('0.000001'):
                 logger.warning(
                     "[斗篷点击] URL 中 report_value=%s 与配置金额 %s 不一致，已以服务端配置为准",
                     q_val,
                     report_value,
                 )
-        except (TypeError, ValueError):
+        except (InvalidOperation, TypeError, ValueError):
             logger.warning("[斗篷点击] URL 中 report_value 无法解析: %s", q_val)
     if (
         q_cur
@@ -289,7 +290,7 @@ def _resolve_fb_report_params(
         pixel_config: Optional[Dict[str, Any]],
         resolved_dp: Optional[str],
         dp_param: str,
-) -> tuple[bool, str, Optional[float], str, str, str]:
+) -> tuple[bool, str, Optional[Decimal], str, str, str]:
     """
     根据阶段与像素配置决定是否发送 CAPI，并解析事件名、金额、货币、source 标识。
 
@@ -298,7 +299,7 @@ def _resolve_fb_report_params(
     """
     send_fb = False
     report_event = "ViewContent"
-    report_value: Optional[float] = None
+    report_value: Optional[Decimal] = None
     report_currency = "USD"
     source = "short_link"
     conv_seg = "click"
@@ -316,8 +317,8 @@ def _resolve_fb_report_params(
             rv = pixel_config.get("cloak_load_report_value")
             if rv is not None:
                 try:
-                    report_value = float(rv)
-                except (TypeError, ValueError):
+                    report_value = rv if isinstance(rv, Decimal) else Decimal(str(rv))
+                except (InvalidOperation, TypeError, ValueError):
                     report_value = None
             report_currency = (
                 (pixel_config.get("cloak_load_report_currency") or "USD").strip().upper()
@@ -341,7 +342,7 @@ def _resolve_fb_report_params(
             rv = pixel_config.get("cloak_report_value")
             if rv is not None:
                 try:
-                    report_value = float(rv)
+                    report_value = rv if isinstance(rv, Decimal) else Decimal(str(rv))
                 except (TypeError, ValueError):
                     report_value = None
             report_currency = (
@@ -429,6 +430,12 @@ async def schedule_cloak_facebook_report(
     }
     if report_event == "Purchase":
         report_kwargs["currency"] = report_currency
+        report_kwargs["currency_source"] = (
+            pixel_config.get(
+                "cloak_load_report_currency_source" if report_phase == "load"
+                else "cloak_report_currency_source"
+            ) or "system_fallback_usd"
+        )
         report_kwargs["amount"] = report_value
         report_kwargs["conversion_id"] = f"cloak_{conv_seg}_{short_code}_{fbclid}"[:200]
 

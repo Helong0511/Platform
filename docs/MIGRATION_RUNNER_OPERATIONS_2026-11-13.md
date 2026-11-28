@@ -50,7 +50,7 @@ python -m app.db.migrations apply
 `sql/platform.sql` 是完整 schema 快照，含 `DROP TABLE IF EXISTS` 和客户端 DELIMITER / routine 定义；当前快照不包含 `CREATE DATABASE` 或 `USE`，由 provisioning 预先创建目标库，并通过 MySQL 客户端 `--database=<目标库>` 显式选择。它不是增量 migration，也不是 Runner 的输入。
 
 - 只允许在全新或可丢弃数据库上使用经过审核的初始化流程。
-- 当前 manifest 共 18 条 revision；执行前必须先运行 `validate`，并核对 `status` 与目标环境基线版本。
+- 截至 2026-11-27，本分支 manifest 登记 39 条 revision；执行前必须以目标提交中的 `manifest.py` 和 SQL 文件集合为准，先运行 `validate`，再核对 `status` 与目标环境基线版本。该数量会随新增迁移变化，不应作为永久常量。
 - 绝不能把它用于已有数据库升级。
 - 不要把“ORM 表名覆盖测试通过”误认为所有列、索引、外键、CHECK 和字符集都已完成物理结构核验。
 
@@ -708,7 +708,7 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
 
 ### 35.1 当前 manifest 与执行器状态
 
-- 当前 `app/db/migrations/manifest.py` 明确登记 **18 条**增量 revision，最后三条为：
+- **历史快照（2026-11-21，main SHA `4f0d14f761af7fe4eb097d5c72404aaa469918e6`）**：当时 `app/db/migrations/manifest.py` 登记 **18 条**增量 revision，最后三条为：
   - `20261120_telegram_postback_approval_audit`
   - `20261121_postback_pending_dedupe`
   - `20261121_postback_pending_queue_guard`
@@ -740,7 +740,7 @@ Schema Gate 将 ORM 引用目标 schema 与 SQLAlchemy Inspector 返回的 `refe
 - `main` 的提交 SHA：`4f0d14f761af7fe4eb097d5c72404aaa469918e6`。
 - Full Audit CI：[Run 44887408836](https://github.com/Helong0511/Platform/actions/runs/44887408836)，结论 success。
 - Emergency Security CI：[Run 44887408854](https://github.com/Helong0511/Platform/actions/runs/44887408854)，结论 success。
-- CI 成功只证明该 SHA 在隔离测试环境中的自动检查结果；不代表已对生产数据库执行 18 条迁移，也不代表生产数据备份恢复、目标版本 DDL 算法、真实大表锁等待或故障恢复已演练。
+- CI 成功只证明该 SHA 在隔离测试环境中的自动检查结果；不代表已对生产数据库执行该历史快照中的迁移，也不代表生产数据备份恢复、目标版本 DDL 算法、真实大表锁等待或故障恢复已演练。
 
 ### 35.5 仍然有效的上线阻断项
 
@@ -808,3 +808,24 @@ CI 负责验证 unit 文件契约、CLI credential 读取与文档一致性；�
 - 任一变量设置/核验失败时 fail-closed，不继续执行 DDL；该设置仅作用于迁移连接，不污染应用连接池。
 - 30 秒限制的是等待锁的时间，不是 DDL 执行时长。已获得锁后的大表扫描、索引创建、数据回填、磁盘峰值和复制延迟仍需在目标 MySQL 版本及生产等价数据量副本演练。
 - 若特定迁移确需更长锁等待，必须在代码、测试、变更审批和本手册中同步明确预算；不得依赖 MySQL 默认超长 metadata lock 等待时间。
+
+## 2026-11-27：Offer 历史 PO 币种未知归因
+
+该行为已合并到 revision：`20261127_offer_payout_currency`，确保存量标记与币种列创建在同一迁移中完成。
+
+- 新增 PO 币种列时，历史 Offer 行先得到 USD 占位值；同一迁移紧接着将当时所有存量行标记为 `legacy_unknown`。该默认值只满足新数据兜底，不能证明历史 PO 金额原本就是 USD。
+- 该 UPDATE 不修改 `payout` 或 `affiliate_payout` 金额。迁移必须在 Backend/Scheduler 停止期间执行；业务服务恢复后新建 Offer 才会使用 `USD / system_fallback_usd` 默认来源。
+- `payout_currency='USD'` 且 `payout_currency_source='legacy_unknown'` 时，USD 只是占位值，不得用于历史金额归因、扣减或下游 PO 比较。实时 Postback 对此类 Offer fail-closed，管理员需依据合同、上游结算单等可信凭证确认币种后配置。
+- 新建 Offer 未配置币种时仍按 `USD / system_fallback_usd` 兜底；管理员明确配置时记录 `manual_config`。修改其他 Offer 字段不得顺带清除 `legacy_unknown`。
+- 管理员可先用以下只读查询盘点待确认 Offer：
+
+```sql
+SELECT id, offer_name, payout, affiliate_payout,
+       payout_currency, payout_currency_source
+FROM offers
+WHERE payout_currency_source = 'legacy_unknown'
+ORDER BY id;
+```
+
+- 对历史转化记录的币种归因必须独立处理；确认 Offer 当前配置币种，不代表可以回写或重算历史 Postback、扣减日志和转发记录。
+- 隔离 MySQL 集成测试验证同一迁移把存量 Offer 标为 `legacy_unknown`、原 PO 金额保持不变，并验证迁移后新建 Offer 仍为 `USD / system_fallback_usd`；扣减单元测试验证 `legacy_unknown` Offer 在金额决策前拒绝处理。CI 未通过前不得将这些测试描述为已验证。

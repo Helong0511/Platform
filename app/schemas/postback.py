@@ -66,6 +66,8 @@ class PostbackConversionResponse(BaseSchema):
     event_value: Optional[Decimal]
     original_payout: Optional[Decimal] = Field(None, description="原始支付金额（PO）")
     payout: Optional[Decimal] = Field(None, description="扣后支付金额（PO(扣)），考虑下游PO限制后的实际转发金额")
+    currency: str = Field("USD", description="ISO 4217 payout 币种")
+    currency_source: str = Field("system_fallback_usd", description="payout 币种来源归因")
     devad_id: Optional[str]
     os: Optional[str]
     carrier: Optional[str]
@@ -103,6 +105,7 @@ class PostbackStatsResponse(BaseSchema):
     API 响应数据结构，用于序列化数据库记录或业务计算结果。
     """
     platform: str = Field(..., description="平台名称")
+    currency: str = Field("USD", description="ISO 4217 payout 币种；统计结果按币种分组")
     total_conversions: int = Field(..., description="总转化数")
     total_original_payout: Optional[Decimal] = Field(None, description="原始总支付金额（PO）")
     total_payout: Decimal = Field(..., description="扣后总支付金额（PO(扣)）")
@@ -166,6 +169,8 @@ class PendingPostbackConversionResponse(BaseSchema):
     event_value: Optional[Decimal]
     original_payout: Optional[Decimal]
     payout: Optional[Decimal]
+    currency: str = Field("USD", description="ISO 4217 payout 币种")
+    currency_source: str = Field("system_fallback_usd", description="payout 币种来源归因")
     devad_id: Optional[str]
     os: Optional[str]
     carrier: Optional[str]

@@ -14,7 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.models import PostbackConversion, Click, Product
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive_floor_second
+from app.core.third_party_currency import resolve_currency
 
 logger = logging.getLogger(__name__)
 
@@ -172,12 +173,10 @@ class ConversionSaver:
         db: AsyncSession,
     ) -> tuple[Optional[int], Optional[int]]:
         """仅从服务器侧点击/渠道关系确定客户，并验证产品属于该客户。"""
+        # 只能使用点击时保存/签名的客户归属快照；禁止从 Publisher 当前配置回填历史点击。
         trusted_client_id = (
             click_association.get('client_id') if click_association else None
         )
-        if trusted_client_id is None and click_association:
-            trusted_publisher = click_association.get('publisher')
-            trusted_client_id = getattr(trusted_publisher, 'client_id', None)
 
         supplied_client_id = normalized_data.get('client_id')
         if supplied_client_id is not None:
@@ -295,6 +294,10 @@ class ConversionSaver:
         else:
             raw_data_json = None
 
+        currency, currency_source = resolve_currency(
+            normalized_data.get("currency"),
+            source=normalized_data.get("currency_source"),
+        )
         conversion = PostbackConversion(
             platform=normalized_data['platform'],
             conversion_id=normalized_data['conversion_id'],
@@ -307,6 +310,8 @@ class ConversionSaver:
             event_value=normalized_data['event_value'],
             original_payout=normalized_data['payout'],
             payout=final_payout,
+            currency=currency,
+            currency_source=currency_source,
             devad_id=normalized_data['devad_id'],
             os=normalized_data['os'],
             carrier=normalized_data['carrier'],
@@ -316,7 +321,7 @@ class ConversionSaver:
             client_id=trusted_client_id,
             conversion_status=conversion_status,
             raw_data=raw_data_json,
-            created_at=get_app_now_naive()
+            created_at=get_app_now_naive_floor_second()
         )
         
         db.add(conversion)

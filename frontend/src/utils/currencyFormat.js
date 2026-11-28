@@ -2,39 +2,74 @@
  * 货币与广告表格金额格式化
  * @file utils/currencyFormat.js
  *
- * 统一 USD 货币展示格式，供表格列 formatter 与统计卡片使用。
+ * 默认 USD；支持按记录自身 ISO 4217 币种格式化，避免跨币种金额显示错误。
+ * 后端 Decimal 金额优先以十进制字符串传入，避免经 JavaScript Number 丢失精度。
  */
+
+const formatUsdFixed = (value) => {
+  if (value === null || value === undefined || value === '') return '$0.00';
+  try {
+    // Intl.NumberFormat 在现代浏览器中可直接按十进制字符串格式化，
+    // 不必先转换为 IEEE-754 Number。
+    return '$' + new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(value);
+  } catch {
+    // 极端兼容场景下保留后端原始十进制文本，不用 Number 二次损失精度。
+    return `$${String(value)}`;
+  }
+};
 
 /**
- * 将数值格式化为 USD 货币字符串
- * @param {number} value - 金额数值
+ * 将金额格式化为指定 ISO 4217 币种。
+ * @param {string|number} value - 金额；财务金额优先传十进制字符串
+ * @param {string} currency - ISO 4217 币种代码，缺失时 USD
  * @returns {string} 格式化后的货币文本，空值返回 '-'
  */
-export function formatCurrency(value) {
-  if (!value && value !== 0) return '-';
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(value);
+export function formatCurrency(value, currency = 'USD') {
+  if (value === null || value === undefined || value === '') return '-';
+  const code = String(currency || 'USD').trim().toUpperCase() || 'USD';
+  try {
+    return new Intl.NumberFormat('zh-CN', {
+      style: 'currency',
+      currency: code,
+      currencyDisplay: 'code'
+    }).format(value);
+  } catch {
+    // 不将 Decimal 字符串强制转成 Number，避免大金额精度丢失。
+    return `${String(value)} ${code}`;
+  }
 }
 
-/** Element Plus 表格列 formatter：$0.00 */
+
+/**
+ * 获取 ISO 4217 币种的标准小数位数，用于金额输入控件。
+ * 不手写 KWD/BHD/JOD 等例外列表，跟随运行时 Intl 货币元数据。
+ */
+export function getCurrencyFractionDigits(currency = 'USD') {
+  const code = String(currency || 'USD').trim().toUpperCase() || 'USD';
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: code
+    }).resolvedOptions().maximumFractionDigits;
+  } catch {
+    return 2;
+  }
+}
+
+/** Element Plus 表格列 formatter：USD 固定两位小数 */
 export function formatAdTableCurrency(_row, _column, value) {
   return formatAdTableCurrencyAmount(value);
 }
 
-/** 数值转 $X.XX（合计行等） */
+/** USD 金额格式化（合计行等）；字符串输入可避免 Number 精度损失 */
 export function formatAdTableCurrencyAmount(value) {
-  const numValue = Number(value);
-  if (Number.isNaN(numValue)) {
-    return '$0.00';
-  }
-  return `$${numValue.toFixed(2)}`;
+  return formatUsdFixed(value);
 }
 
-/** TB 搜索数据等简单展示 */
+/** TB 搜索数据等简单 USD 展示 */
 export function formatTbCurrency(val) {
-  return val ? `$${Number(val).toFixed(2)}` : '$0.00';
+  return formatUsdFixed(val);
 }

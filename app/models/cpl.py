@@ -2,7 +2,7 @@
 CPL 广告主、渠道、Offer、Cap、扣量 ORM 模型。
 """
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, Index, \
-    UniqueConstraint, Date, Numeric
+    UniqueConstraint, Date, Numeric, text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -89,8 +89,16 @@ class Offer(Base):
     advertiser_offer_id = Column(String(100), nullable=True, comment='上游系统中的Offer ID（ADV Offer ID）')
     advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="RESTRICT"), nullable=False, index=True, comment='关联的广告主ID')
     preview_link = Column(Text, nullable=True, comment='预览链接')
-    payout = Column(Numeric(10, 2), nullable=True, comment='上游支付金额（PO）')
-    affiliate_payout = Column(Numeric(10, 2), nullable=True, comment='扣价后给渠道的金额（PO扣价后）')
+    payout = Column(Numeric(24, 6), nullable=True, comment='上游支付金额（PO）')
+    affiliate_payout = Column(Numeric(24, 6), nullable=True, comment='扣价后给渠道的金额（PO扣价后）')
+    payout_currency = Column(
+        String(3), nullable=False, default='USD', server_default=text("'USD'"),
+        comment='Offer 上游 PO 与全部渠道下游 PO 共用的 ISO 4217 币种',
+    )
+    payout_currency_source = Column(
+        String(100), nullable=False, default='system_fallback_usd',
+        server_default=text("'system_fallback_usd'"), comment='Offer PO 币种来源归因',
+    )
     country = Column(String(50), nullable=True, index=True, comment='国家')
     category = Column(String(50), nullable=True, comment='分类')
     type = Column(String(50), nullable=True, comment='类型')
@@ -135,7 +143,7 @@ class OfferPublisherAssignment(Base):
     publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="CASCADE"), nullable=False, index=True, comment='渠道ID')
     downstream_cap = Column(Integer, nullable=True, comment='该渠道的下游每天转化个数的限制，如果渠道转化超过了这个值就不通知渠道了。客户登录查看时，也只显示真实的（真实不超过【下游Cap】的）转化')
     affiliate_payout = Column(
-        Numeric(10, 2), nullable=True,
+        Numeric(24, 6), nullable=True,
         comment='该渠道的转化金额（不是金额的扣减比例）。如果上游通知的金额大于这个金额，就按照【下游PO】的金额通知渠道',
     )
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
@@ -167,6 +175,8 @@ class Click(Base):
     click_id = Column(String(255), unique=True, nullable=False, comment='点击ID（系统生成，唯一标识）')
     offer_id = Column(Integer, ForeignKey("offers.id", ondelete="SET NULL"), nullable=True, comment='关联的Offer ID')
     publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="SET NULL"), nullable=True, comment='关联的渠道ID')
+    # 点击时客户归属快照：不设置外键，客户后续变更/删除不得改写历史归属。
+    client_id = Column(Integer, nullable=True, comment='点击时客户ID快照（不可随渠道归属变更）')
     advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="SET NULL"), nullable=True, comment='关联的广告主ID')
     short_link_id = Column(Integer, ForeignKey("short_links.id", ondelete="SET NULL"), nullable=True, comment='关联的短链接ID')
     click_time = Column(DateTime, nullable=False, comment='点击时间')

@@ -7,18 +7,48 @@ import logging
 from decimal import Decimal
 from typing import Any, Dict, Optional, Tuple
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.deduction import apply_deduction, find_deduction_config, log_deduction
 from app.core.discount import calculate_discount
 from app.core.postback.errors import DeductionProcessingError
+from app.core.third_party_currency import resolve_currency, validate_iso_currency
+from app.models.models import Offer
+from app.services.cpl.deduction.helpers import (
+    DeductionScopeLockError,
+    lock_deduction_scopes,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class DiscountChecker:
     """扣量计算器"""
+
+    @staticmethod
+    def _resolve_config_scope(config: Any) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+        """只使用最终命中配置自身的唯一层级 ID 作为扣量统计范围。
+
+        请求归因中的另外两个 ID 仅用于配置查找和审计日志，不能把同一配置
+        的 24 小时统计拆成多个子范围。数据库旧表没有三选一 CHECK 约束，
+        因此遇到零个或多个 scope 时必须 fail-closed，避免静默选错财务口径。
+        """
+        scope = (
+            getattr(config, "advertiser_id", None),
+            getattr(config, "offer_id", None),
+            getattr(config, "publisher_id", None),
+        )
+        populated = [value for value in scope if value is not None]
+        if len(populated) != 1 or any(
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            for value in populated
+        ):
+            raise DeductionProcessingError(
+                "扣量配置层级数据异常：advertiser_id、offer_id、publisher_id 必须且只能设置一个正整数"
+            )
+        return scope
 
     @staticmethod
     async def calculate(
@@ -30,6 +60,9 @@ class DiscountChecker:
         advertiser_id: Optional[int],
         click_id: Optional[str],
         db: AsyncSession,
+        event_identity: Optional[Dict[str, str]] = None,
+        currency: str = "USD",
+        currency_source: str = "system_fallback_usd",
     ) -> Tuple[Decimal, Dict[str, Any], bool]:
         """
         计算扣量后的金额。
@@ -37,11 +70,66 @@ class DiscountChecker:
         Returns:
             (最终金额, 扣量详情, 是否跳过入库与下游转发)
         """
+        currency, currency_source = resolve_currency(
+            currency,
+            source=currency_source,
+        )
+
+        # 全局加锁顺序必须是 scope 锁 -> Offer 行锁。
+        # Offer 删除先锁 offer scope，再执行父行 DELETE；如果 Postback 先锁 Offer
+        # 再等待 scope，会与删除事务形成 Offer <-> scope 的锁环并触发死锁。
+        # 与 find_deduction_config 使用同一候选范围和排序，后续重复获取为事务内重入。
+        candidate_scopes = []
+        if advertiser_id:
+            candidate_scopes.append(("advertiser", advertiser_id))
+        if offer_id:
+            candidate_scopes.append(("offer", offer_id))
+        if publisher_id:
+            candidate_scopes.append(("publisher", publisher_id))
+        try:
+            await lock_deduction_scopes(db, candidate_scopes)
+        except DeductionScopeLockError as exc:
+            raise DeductionProcessingError(
+                "扣量 scope 锁获取失败，拒绝在无锁状态下执行财务决策"
+            ) from exc
+
+        if offer_id:
+            # 在 scope 锁之后取得 Offer 行锁，防止币种变更与入账并发。
+            offer_result = await db.execute(
+                select(Offer)
+                .where(Offer.id == offer_id)
+                .with_for_update()
+            )
+            offer_row = offer_result.scalar_one_or_none()
+            if offer_row is None:
+                raise DeductionProcessingError(
+                    "Postback 关联的 Offer 不存在，无法确认 payout 币种"
+                )
+            offer_currency_source = offer_row.payout_currency_source or "system_fallback_usd"
+            if str(offer_currency_source).strip().casefold() == "legacy_unknown":
+                raise DeductionProcessingError(
+                    "Offer 历史 PO 币种未知，请管理员先明确配置币种后再接收 Postback"
+                )
+            offer_currency = validate_iso_currency(offer_row.payout_currency or "USD")
+            if currency_source.startswith("system_fallback"):
+                currency = offer_currency
+                currency_source = (
+                    "offer_config"
+                    if offer_currency_source != "system_fallback_usd"
+                    else "system_fallback_usd"
+                )
+            elif currency != offer_currency:
+                raise DeductionProcessingError(
+                    f"Postback 币种 {currency} 与 Offer 配置币种 {offer_currency} 不一致"
+                )
+
         deduction_info: Dict[str, Any] = {
             "original_payout": original_payout,
             "offer_discount": None,
             "deduction_config": None,
             "final_payout": original_payout,
+            "currency": currency,
+            "currency_source": currency_source,
         }
         final_payout = Decimal(str(original_payout or 0))
         skip_save_and_forward = False
@@ -84,15 +172,24 @@ class DiscountChecker:
                 publisher_id=publisher_id,
             )
             if config:
-                conversion_data = {"original_payout": final_payout}
+                # 统计范围由最终命中的配置层级决定，不使用请求归因的完整 ID 组合。
+                scope_advertiser_id, scope_offer_id, scope_publisher_id = (
+                    DiscountChecker._resolve_config_scope(config)
+                )
+                conversion_data = {
+                    "original_payout": final_payout,
+                    "currency": currency,
+                    "currency_source": currency_source,
+                }
                 result = await apply_deduction(
                     db=db,
                     conversion_data=conversion_data,
                     config=config,
                     click_id=click_id,
-                    advertiser_id=advertiser_id,
-                    offer_id=offer_id,
-                    publisher_id=publisher_id,
+                    advertiser_id=scope_advertiser_id,
+                    offer_id=scope_offer_id,
+                    publisher_id=scope_publisher_id,
+                    event_identity=event_identity,
                 )
                 deduction_info["deduction_config"] = result
 
@@ -111,11 +208,11 @@ class DiscountChecker:
                             deduction_reason="postback_volume_deduction",
                         )
                     except Exception as log_exc:
-                        logger.warning("记录扣量日志失败：%s", log_exc)
-                        if not settings.DEDUCTION_FAIL_OPEN:
-                            raise DeductionProcessingError(
-                                f"记录扣量日志失败: {log_exc}"
-                            ) from log_exc
+                        # DB 扣量审计日志是财务凭证；Redis fail-open 不能吞掉持久化失败。
+                        logger.error("记录扣量日志失败，回滚本次 Postback：%s", log_exc)
+                        raise DeductionProcessingError(
+                            f"记录扣量日志失败: {log_exc}"
+                        ) from log_exc
                     logger.info(
                         "转化扣量命中：offer_id=%s publisher_id=%s，跳过入库与转发",
                         offer_id,
@@ -136,11 +233,16 @@ class DiscountChecker:
                                 deduction_reason="postback_amount_deduction",
                             )
                         except Exception as log_exc:
-                            logger.warning("记录扣金额日志失败：%s", log_exc)
-                            if not settings.DEDUCTION_FAIL_OPEN:
-                                raise DeductionProcessingError(
-                                    f"记录扣金额日志失败: {log_exc}"
-                                ) from log_exc
+                            # DB 扣金额日志是财务凭证；持久化失败必须回滚并重试。
+                            logger.error("记录扣金额日志失败，回滚本次 Postback：%s", log_exc)
+                            raise DeductionProcessingError(
+                                f"记录扣金额日志失败: {log_exc}"
+                            ) from log_exc
+        except DeductionScopeLockError as exc:
+            # scope 锁不可用时绝不能按 DEDUCTION_FAIL_OPEN 当作“无配置”继续处理。
+            raise DeductionProcessingError(
+                "扣量 scope 锁获取失败，拒绝在无锁状态下执行财务决策"
+            ) from exc
         except DeductionProcessingError:
             raise
         except Exception as exc:

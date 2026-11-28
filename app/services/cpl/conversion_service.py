@@ -13,9 +13,9 @@
 对应路由：app/api_v1/cpl/conversions
 """
 from typing import Optional, List, Dict, Any, Tuple
+from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func, and_, or_, case, cast, Integer
+from sqlalchemy import select, func, and_, or_, case, cast, Integer
 from sqlalchemy.orm import aliased
 
 from app.models.models import (
@@ -45,6 +45,87 @@ _CLIENT_HIDDEN_STATS_KEYS = frozenset({
 })
 
 
+def _build_currency_summaries(stats_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """按币种和币种来源分别汇总；金额全程使用 Decimal 字符串。"""
+    totals: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for item in stats_list:
+        count = int(item.get("conversion_count") or 0)
+        if count <= 0:
+            continue
+
+        raw_currency = item.get("currency")
+        raw_source = item.get("currency_source")
+        currency = str(raw_currency or "legacy_unknown").strip().upper() or "legacy_unknown"
+        source = str(raw_source or "legacy_unknown").strip() or "legacy_unknown"
+        key = (currency, source)
+
+        original_value = item.get("po")
+        downstream_value = item.get("po_after_discount")
+        if original_value is None or downstream_value is None:
+            # 不完整或未知金额不进入可加总的币种财务汇总。
+            continue
+        original = original_value if isinstance(original_value, Decimal) else Decimal(str(original_value))
+        downstream = downstream_value if isinstance(downstream_value, Decimal) else Decimal(str(downstream_value))
+
+        summary = totals.setdefault(
+            key,
+            {
+                "currency": currency,
+                "currency_source": source,
+                "conversion_count": 0,
+                "total_po": Decimal("0"),
+                "total_po_after_discount": Decimal("0"),
+                "total_profit": Decimal("0"),
+            },
+        )
+        summary["conversion_count"] += count
+        summary["total_po"] += original
+        summary["total_po_after_discount"] += downstream
+        summary["total_profit"] += original - downstream
+
+    return [
+        {
+            **summary,
+            "total_po": format(summary["total_po"], "f"),
+            "total_po_after_discount": format(summary["total_po_after_discount"], "f"),
+            "total_profit": format(summary["total_profit"], "f"),
+        }
+        for _, summary in sorted(totals.items())
+    ]
+
+def _build_offer_currency_breakdown(rows: List[Tuple[Any, Any, Any, Any]]) -> Dict[str, Any]:
+    """按转化事实币种/来源聚合 Offer 金额，不回退当前 Offer 配置币种。"""
+    groups = []
+    total_count = 0
+    for currency_value, source_value, count_value, amount_value in rows:
+        currency = str(currency_value or "legacy_unknown").strip().upper() or "legacy_unknown"
+        source = str(source_value or "legacy_unknown").strip() or "legacy_unknown"
+        amount = amount_value if isinstance(amount_value, Decimal) else Decimal(str(amount_value or 0))
+        count = int(count_value or 0)
+        total_count += count
+        groups.append({
+            "currency": currency,
+            "currency_source": source,
+            "amount": format(amount, "f"),
+            "conversion_count": count,
+        })
+    groups.sort(key=lambda item: (item["currency"], item["currency_source"]))
+    # 旧版单金额字段只在唯一且可信的币种/来源组时保留；其余场景显式返回 null。
+    if len(groups) == 1 and groups[0]["currency"] != "LEGACY_UNKNOWN":
+        return {
+            "count": total_count,
+            "po": groups[0]["amount"],
+            "currency": groups[0]["currency"],
+            "currency_groups": groups,
+        }
+    return {
+        "count": total_count,
+        "po": None,
+        "currency": None,
+        "currency_groups": groups,
+    }
+
+
 def _sanitize_conversion_summary_for_client(summary: Dict[str, Any]) -> Dict[str, Any]:
     """剥离转化总览中客户不应看到的上游 PO / 利润 / 广告主信息。"""
     sanitized = {
@@ -61,6 +142,15 @@ def _sanitize_conversion_summary_for_client(summary: Dict[str, Any]) -> Dict[str
         }
         for item in stats_list
     ]
+    if "currency_summaries" in sanitized:
+        sanitized["currency_summaries"] = [
+            {
+                key: value
+                for key, value in item.items()
+                if key not in {"total_po", "total_profit"}
+            }
+            for item in sanitized["currency_summaries"]
+        ]
     return sanitized
 
 
@@ -154,6 +244,7 @@ class ConversionService:
                     "total_po": 0.0,
                     "total_po_after_discount": 0.0,
                     "total_profit": 0.0,
+                    "currency_summaries": [],
                     "stats_list": [],
                     "start_date": start_date or (start_datetime.strftime("%Y-%m-%d")),
                     "end_date": end_date or (end_datetime.strftime("%Y-%m-%d"))
@@ -176,6 +267,7 @@ class ConversionService:
                     "total_po": 0.0,
                     "total_po_after_discount": 0.0,
                     "total_profit": 0.0,
+                    "currency_summaries": [],
                     "stats_list": [],
                     "start_date": start_date or (start_datetime.strftime("%Y-%m-%d")),
                     "end_date": end_date or (end_datetime.strftime("%Y-%m-%d"))
@@ -577,8 +669,9 @@ class ConversionService:
                 "conversion_count": stat["conversion_count"],
                 "cr": round(cr_val, 2),
                 "po": stat["po"],
-                "po_after_discount": round(po_after_discount, 2),
-                "revenue": revenue,
+                "po_after_discount": round(po_after_discount, 4),
+                "revenue": round(revenue, 4),
+                "currency": (offer.payout_currency if offer and offer.payout_currency else "USD"),
                 "adv_po": adv_po,
                 "pub_po": pub_po,
                 "geo": geo
@@ -587,14 +680,24 @@ class ConversionService:
         # 按点击数量排序
         stats_list.sort(key=lambda x: x['click_count'], reverse=True)
 
+        # 多币种必须分别汇总；禁止将 USD/EUR/KWD 等金额直接相加。
+        currency_summaries = _build_currency_summaries(stats_list)
+        has_multiple_currencies = len(currency_summaries) > 1
+        summary_total_po = None if has_multiple_currencies else round(total_po, 4)
+        summary_total_po_after_discount = (
+            None if has_multiple_currencies else round(total_po_after_discount, 4)
+        )
+        summary_total_profit = None if has_multiple_currencies else round(total_profit, 4)
+
         # 返回最终的统计结果
         summary = {
             "total_clicks": total_clicks,
             "total_conversions": total_conversions,
             "cr": round(cr, 2),
-            "total_po": round(total_po, 2),
-            "total_po_after_discount": round(total_po_after_discount, 2),
-            "total_profit": round(total_profit, 2),
+            "total_po": summary_total_po,
+            "total_po_after_discount": summary_total_po_after_discount,
+            "total_profit": summary_total_profit,
+            "currency_summaries": currency_summaries,
             "conversion_cap": conversion_cap,
             "stats_list": stats_list,
             "start_date": start_date or (start_datetime.strftime("%Y-%m-%d")),
@@ -732,6 +835,8 @@ class ConversionService:
         conversion_query = (
             select(
                 Click.offer_id,
+                PostbackConversion.currency,
+                PostbackConversion.currency_source,
                 func.count(PostbackConversion.id).label('conversion_count'),
                 func.sum(PostbackConversion.payout).label('total_po')
             )
@@ -765,16 +870,24 @@ class ConversionService:
                 Click.publisher_id.in_(client_publisher_ids)
             )
 
-        # 按offer_id分组
-        conversion_query = conversion_query.group_by(Click.offer_id)
+        # 金额按转化记录自身币种和来源分组；conversion_count 后续按 Offer 汇总，避免拆分金额重复点击数。
+        conversion_query = conversion_query.group_by(
+            Click.offer_id,
+            PostbackConversion.currency,
+            PostbackConversion.currency_source,
+        )
         conversion_result = await self.db.execute(conversion_query)
-        # 构建转化统计映射
+        grouped_rows = {}
+        for row in conversion_result.all():
+            grouped_rows.setdefault(row.offer_id, []).append((
+                row.currency,
+                row.currency_source,
+                row.conversion_count,
+                row.total_po,
+            ))
         conversion_map = {
-            row.offer_id: {
-                'count': row.conversion_count or 0,
-                'po': float(row.total_po) if row.total_po else 0.0
-            }
-            for row in conversion_result.all()
+            offer_id_value: _build_offer_currency_breakdown(rows)
+            for offer_id_value, rows in grouped_rows.items()
         }
 
         # 构建响应数据
@@ -783,9 +896,12 @@ class ConversionService:
             # 获取点击数量
             click_count = click_map.get(offer.id, 0)
             # 获取转化数据
-            conversion_data = conversion_map.get(offer.id, {'count': 0, 'po': 0.0})
-            conversion_count = conversion_data['count']
-            po = conversion_data['po']
+            conversion_data = conversion_map.get(
+                offer.id,
+                {"count": 0, "po": None, "currency": None, "currency_groups": []},
+            )
+            conversion_count = conversion_data["count"]
+            po = conversion_data["po"]
 
             # 计算转化率
             cr = (conversion_count / click_count * 100) if click_count > 0 else 0.0
@@ -797,7 +913,9 @@ class ConversionService:
                 "click_count": click_count,
                 "conversion_count": conversion_count,
                 "cr": round(cr, 2),
-                "po": po
+                "po": po,
+                "currency": conversion_data["currency"],
+                "currency_breakdown": conversion_data["currency_groups"],
             })
 
         # 按点击数量排序

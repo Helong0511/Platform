@@ -86,14 +86,17 @@ export function useCloakConfigs() {
     load_report_event: 'PageView',
     load_report_value: null,
     load_report_currency: 'USD',
+    load_report_currency_source: 'system_fallback_usd',
     click_report_enabled: true,
     report_event: 'ViewContent',
     report_value: null,
     report_currency: 'USD',
+    report_currency_source: 'system_fallback_usd',
     postback_report_enabled: false,
     postback_report_event: 'Purchase',
     postback_report_value: null,
     postback_report_currency: 'USD',
+    postback_report_currency_source: 'system_fallback_usd',
     is_enabled: true,
   });
 
@@ -177,14 +180,17 @@ export function useCloakConfigs() {
     formData.load_report_event = 'PageView';
     formData.load_report_value = null;
     formData.load_report_currency = 'USD';
+    formData.load_report_currency_source = 'system_fallback_usd';
     formData.click_report_enabled = true;
     formData.report_event = 'ViewContent';
     formData.report_value = null;
     formData.report_currency = 'USD';
+    formData.report_currency_source = 'system_fallback_usd';
     formData.postback_report_enabled = false;
     formData.postback_report_event = 'Purchase';
     formData.postback_report_value = null;
     formData.postback_report_currency = 'USD';
+    formData.postback_report_currency_source = 'system_fallback_usd';
     formData.is_enabled = false;
   };
 
@@ -234,15 +240,18 @@ export function useCloakConfigs() {
     formData.load_report_value =
       row.load_report_value != null ? Number(row.load_report_value) : null;
     formData.load_report_currency = row.load_report_currency || 'USD';
+    formData.load_report_currency_source = row.load_report_currency_source || 'legacy_unknown';
     formData.click_report_enabled = row.click_report_enabled !== false;
     formData.report_event = row.report_event || 'ViewContent';
     formData.report_value = row.report_value != null ? Number(row.report_value) : null;
     formData.report_currency = row.report_currency || 'USD';
+    formData.report_currency_source = row.report_currency_source || 'legacy_unknown';
     formData.postback_report_enabled = !!row.postback_report_enabled;
     formData.postback_report_event = row.postback_report_event || 'Purchase';
     formData.postback_report_value =
       row.postback_report_value != null ? Number(row.postback_report_value) : null;
     formData.postback_report_currency = row.postback_report_currency || 'USD';
+    formData.postback_report_currency_source = row.postback_report_currency_source || 'legacy_unknown';
     formData.is_enabled = row.is_enabled;
     editDialogVisible.value = true;
   };

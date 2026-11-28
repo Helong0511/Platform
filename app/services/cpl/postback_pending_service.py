@@ -14,9 +14,8 @@ import logging
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.errors import ErrorCode
@@ -24,6 +23,7 @@ from app.core.exceptions import raise_api_exception
 from app.core.pagination import calculate_pagination_offset
 from app.core.postback.transformers.click_associator import ClickAssociator
 from app.core.postback_event_name import normalize_event_name
+from app.core.third_party_currency import resolve_currency, validate_iso_currency
 from app.core.tracking.click_token import resolve_click_from_token
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from app.core.postback.pending_lock import build_pending_for_update_statement
@@ -33,7 +33,7 @@ from app.core.postback.approval_audit import (
     persist_postback_approval_audit_independently,
 )
 from app.models.models import (
-    PendingPostbackConversion, PostbackConversion, Product, Client, User
+    PendingPostbackConversion, PostbackConversion, PostbackEventReceipt, Product, Client, User, Offer
 )
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.schemas.postback import PendingPostbackConversionResponse, PostbackConversionResponse
@@ -89,6 +89,26 @@ class PostbackPendingService:
         )
         return existing.scalars().first()
 
+    async def _pending_event_receipt_exists(
+            self, pending: PendingPostbackConversion, db: AsyncSession
+    ) -> bool:
+        """
+        检查 canonical event 是否已有已提交的接收收据。
+
+        volume-deducted 事件可能保留 receipt 而不创建正式 conversion；
+        这种事件不得再由 Pending 审批直接创建正式 conversion。
+        """
+        event_name = normalize_event_name(pending.event_name)
+        pending.event_name = event_name
+        result = await db.execute(
+            select(PostbackEventReceipt.id).where(
+                PostbackEventReceipt.platform == pending.platform,
+                PostbackEventReceipt.conversion_id == pending.conversion_id,
+                PostbackEventReceipt.event_name == event_name,
+            ).limit(1).with_for_update()
+        )
+        return result.scalar_one_or_none() is not None
+
     async def _create_conversion_from_pending(
             self,
             pending: PendingPostbackConversion,
@@ -103,6 +123,32 @@ class PostbackPendingService:
             已 add 至 session 的 PostbackConversion（status=Pending）
         """
         click_assoc = await self._resolve_click_assoc(pending, db)
+        currency, currency_source = resolve_currency(
+            pending.currency,
+            source=pending.currency_source,
+        )
+        offer_id = click_assoc.get("offer_id") if click_assoc else None
+        if offer_id:
+            # 与 Offer 币种修改共用行锁，避免审批转正式记录期间发生币种切换。
+            offer_result = await db.execute(
+                select(Offer).where(Offer.id == offer_id).with_for_update()
+            )
+            offer_row = offer_result.scalar_one_or_none()
+            if offer_row is None:
+                raise ValueError("待审批 Postback 关联的 Offer 不存在，无法确认 payout 币种")
+            offer_currency = validate_iso_currency(offer_row.payout_currency or "USD")
+            offer_currency_source = offer_row.payout_currency_source or "system_fallback_usd"
+            if currency_source.startswith("system_fallback"):
+                currency = offer_currency
+                currency_source = (
+                    "offer_config"
+                    if offer_currency_source != "system_fallback_usd"
+                    else "system_fallback_usd"
+                )
+            elif currency != offer_currency:
+                raise ValueError(
+                    f"待审批 Postback 币种 {currency} 与 Offer 配置币种 {offer_currency} 不一致"
+                )
         event_name = normalize_event_name(pending.event_name)
         pending.event_name = event_name
         conversion = PostbackConversion(
@@ -115,6 +161,8 @@ class PostbackPendingService:
             event_value=pending.event_value,
             original_payout=pending.original_payout,
             payout=pending.payout,
+            currency=currency,
+            currency_source=currency_source,
             devad_id=pending.devad_id,
             os=pending.os,
             carrier=pending.carrier,
@@ -188,8 +236,15 @@ class PostbackPendingService:
                 try:
                     # 每条记录单独建立保存点，避免一次 flush 失败使整个批次事务失效。
                     async with db.begin_nested():
-                        existing_conversion_id = await self._pending_conversion_exists(pending, db)
-                        if existing_conversion_id is not None:
+                        receipt_exists = await self._pending_event_receipt_exists(pending, db)
+                        existing_conversion_id = (
+                            None if receipt_exists
+                            else await self._pending_conversion_exists(pending, db)
+                        )
+                        if receipt_exists:
+                            # 已提交收据可能代表 volume-deducted 终态；保留 Pending 状态并阻止转正。
+                            row_outcome = "event_receipt_exists"
+                        elif existing_conversion_id is not None:
                             pending.status = "approved"
                             pending.approved_at = get_app_now_naive()
                             row_outcome = "already_exists"
@@ -217,7 +272,7 @@ class PostbackPendingService:
                         await db.flush()
 
                     # 只有 SAVEPOINT 成功释放后才更新成功计数。
-                    if row_outcome == "already_exists":
+                    if row_outcome in ("already_exists", "event_receipt_exists"):
                         result["skipped_count"] += 1
                     elif row_outcome == "approved":
                         result["approved_count"] += 1
@@ -455,6 +510,23 @@ class PostbackPendingService:
                 raise_api_exception(
                     ErrorCode.OPERATION_FAILED,
                     detail=f"待确认记录已处理，当前状态：{pending.status}",
+                )
+
+            if await self._pending_event_receipt_exists(pending, db):
+                audit_attempt = {
+                    "pending_conversion_id": pending_id,
+                    "conversion_id": None,
+                    "actor_type": "system_user",
+                    "actor_id": current_user.id,
+                    "source": "web",
+                    "action": "approve",
+                    "outcome": "event_receipt_exists",
+                    "previous_status": pending.status,
+                    "new_status": pending.status,
+                }
+                raise_api_exception(
+                    ErrorCode.OPERATION_FAILED,
+                    detail="该事件已有已提交的 Postback 收据，不能通过待确认审批重新创建正式转化",
                 )
 
             existing_conversion_id = await self._pending_conversion_exists(pending, db)

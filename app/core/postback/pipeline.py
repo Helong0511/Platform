@@ -18,6 +18,7 @@ from app.core.postback.checks.discount_checker import DiscountChecker
 from app.core.postback.savers.conversion_saver import ConversionSaver
 from app.core.postback.transformers.click_associator import ClickAssociator
 from app.core.postback.validators.duplicate_checker import DuplicateChecker
+from app.core.postback_event_name import normalize_event_name
 from app.models.models import Offer, PostbackConversion, ShortLink
 
 logger = logging.getLogger(__name__)
@@ -224,6 +225,26 @@ async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[Decimal, An
         advertiser_id=advertiser_id,
         click_id=ctx.normalized_data.get("click_id"),
         db=ctx.db,
+        # 财务决策身份必须来自显式 conversion_id；click_id 只用于归因。
+        currency=ctx.normalized_data.get("currency") or "USD",
+        currency_source=ctx.normalized_data.get("currency_source") or "system_fallback_usd",
+        event_identity=(
+            {
+                "platform": ctx.platform,
+                "conversion_id": ctx.normalized_data.get("conversion_id"),
+                "event_name": normalize_event_name(ctx.normalized_data.get("event_name")),
+            }
+            if ctx.normalized_data.get("event_identity_verified") is True
+            else None
+        ),
+    )
+    info = info or {}
+    ctx.normalized_data["currency"] = info.get(
+        "currency", ctx.normalized_data.get("currency") or "USD"
+    )
+    ctx.normalized_data["currency_source"] = info.get(
+        "currency_source",
+        ctx.normalized_data.get("currency_source") or "system_fallback_usd",
     )
     ctx.final_payout = final_payout
     ctx.skip_save_and_forward = skip_save

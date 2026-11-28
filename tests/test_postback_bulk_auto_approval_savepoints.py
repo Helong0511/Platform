@@ -16,6 +16,10 @@ class _ScalarRows:
     def all(self):
         return self._rows
 
+    def scalar_one_or_none(self):
+        # 这些用例验证无 receipt 时的审批分支。
+        return None
+
 
 class _FakeNested:
     def __init__(self, db):
@@ -78,6 +82,9 @@ def _pending(row_id):
         approved_at=None,
         rejected_at=None,
         request_ip="203.0.113.20",
+        platform="test",
+        conversion_id=str(row_id),
+        event_name="install",
     )
 
 

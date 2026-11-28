@@ -281,6 +281,20 @@ class AdTrackingCodec:
         return cls._DEFAULT_KEY_HEX
 
     @classmethod
+    def validate_production_master_key(cls, key_hex: str) -> bytes:
+        """严格验证生产追踪密钥；缺失、默认值或非法格式均拒绝启动。"""
+        normalized = (key_hex or "").strip()
+        if not normalized:
+            raise ValueError("AD_TRACKING_MASTER_KEY_HEX 未配置")
+        if normalized.lower() == cls._DEFAULT_KEY_HEX.lower():
+            raise ValueError("不得使用内置开发默认密钥")
+        if len(normalized) != 64:
+            raise ValueError("必须为 64 位十六进制字符（32 字节）")
+        if any(char not in "0123456789abcdefABCDEF" for char in normalized):
+            raise ValueError("必须仅包含十六进制字符")
+        return bytes.fromhex(normalized)
+
+    @classmethod
     def _master_key(cls) -> bytes:
         """
         从环境变量 / settings 读取 32 字节主密钥；均缺失则用开发默认串。

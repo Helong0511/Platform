@@ -312,6 +312,9 @@ async def test_manual_retry_enqueues_only_persisted_outbox_rows(monkeypatch):
     assert "third_party_report_logs.status = %s" in captured["sql"]
     assert "third_party_report_logs.outbox_enqueued is true" in captured["sql"]
     assert "third_party_report_logs.pii_scrubbed_at is null" in captured["sql"]
+    assert "third_party_report_logs.amount > %s" in captured["sql"]
+    assert "third_party_report_logs.amount <= %s" in captured["sql"]
+    assert "third_party_report_logs.currency regexp" in captured["sql"]
     assert "third_party_report_logs.manual_retry_count < %s" in captured["sql"]
     assert "manual_retry_count=(" in captured["sql"]
     assert "3" in captured["params"].values()
@@ -974,8 +977,9 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
             return False
 
         async def post(self, url, *, json, params):
-            state["http_event_ids"].append(json["data"][0]["event_id"])
-            state["http_event_payloads"].append(json["data"][0])
+            payload = json
+            state["http_event_ids"].append(payload["data"][0]["event_id"])
+            state["http_event_payloads"].append(payload["data"][0])
             return Response()
 
     async def claim(report_log_id, **kwargs):
@@ -1922,3 +1926,110 @@ async def test_direct_event_rejects_platform_scope_when_empty_conversion_is_norm
     assert result == 0
     assert "conversion_id is null" in captured["scope_sql"]
     assert "conversion_id = ''" in captured["scope_sql"]
+
+
+def test_meta_event_time_never_falls_back_to_click_time(monkeypatch):
+    monkeypatch.setattr(third_party_report.time, "time", lambda: 1_800_000_000)
+    assert third_party_report._event_time_to_unix_timestamp(None) == 1_800_000_000
+
+
+def test_meta_event_time_uses_actual_event_timestamp_when_provided():
+    event_time = datetime(2026, 11, 11, 10, 5, 0)
+    assert third_party_report._event_time_to_unix_timestamp(event_time) == (
+        third_party_report._app_datetime_to_unix_timestamp(event_time)
+    )
+
+
+def test_fbc_is_not_fabricated_without_real_click_time():
+    assert third_party_report._build_fbc_value("fbclid-1", None) is None
+
+
+def test_fbc_uses_click_time_not_conversion_event_time():
+    click_time = datetime(2026, 11, 11, 10, 0, 0)
+    expected_timestamp = third_party_report._app_datetime_to_unix_timestamp(click_time)
+    assert third_party_report._build_fbc_value("fbclid-1", click_time) == (
+        f"fb.1.{expected_timestamp}.fbclid-1"
+    )
+
+
+def test_fbc_is_omitted_when_click_time_is_dst_ambiguous():
+    from zoneinfo import ZoneInfo
+
+    ambiguous_click_time = datetime(2024, 11, 3, 1, 30, 0)
+    original_timezone = third_party_report.APP_TIMEZONE
+    third_party_report.APP_TIMEZONE = ZoneInfo("America/New_York")
+    try:
+        assert third_party_report._build_fbc_value(
+            "fbclid-ambiguous", ambiguous_click_time
+        ) is None
+    finally:
+        third_party_report.APP_TIMEZONE = original_timezone
+
+
+async def test_remote_acceptance_with_local_success_ack_exception_never_reposts_same_round(monkeypatch):
+    """远端已确认接收后，本地 success ACK 异常必须终止本轮，HTTP POST 只能一次。"""
+    state = {"http_calls": 0, "updates": []}
+
+    class Response:
+        status_code = 200
+        text = '{"events_received":1,"fbtrace_id":"trace-ack-unknown"}'
+
+        @staticmethod
+        def json():
+            return {"events_received": 1, "fbtrace_id": "trace-ack-unknown"}
+
+    class FakeHTTPClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            state["http_calls"] += 1
+            return Response()
+
+    async def existing_log(**kwargs):
+        return 941
+
+    async def claimed(report_log_id, **kwargs):
+        return "lease-941"
+
+    async def renew_claimed_lease(report_log_id, lease_token, **kwargs):
+        return lease_token
+
+    async def fail_local_ack(report_log_id, **kwargs):
+        state["updates"].append(kwargs.get("status"))
+        if kwargs.get("status") == "success":
+            raise RuntimeError("simulated database ACK failure")
+        return True
+
+    monkeypatch.setattr(third_party_report, "create_report_log", existing_log)
+    monkeypatch.setattr(third_party_report, "_claim_report_log", claimed)
+    monkeypatch.setattr(third_party_report, "_renew_report_log_lease", renew_claimed_lease)
+    monkeypatch.setattr(third_party_report, "update_report_log", fail_local_ack)
+    monkeypatch.setattr(third_party_report.httpx, "AsyncClient", FakeHTTPClient)
+
+    result = await third_party_report.send_third_party_report(
+        adsid="ack-unknown-click",
+        event="Lead",
+        email=None,
+        ip=None,
+        phone=None,
+        ua=None,
+        facebook_pixel_id="pixel-ack-unknown",
+        facebook_access_token="token-ack-unknown",
+        source="short_link",
+    )
+
+    assert result == {
+        "success": False,
+        "retryable": True,
+        "reason": "remote_accepted_local_ack_unknown",
+        "report_log_id": 941,
+    }
+    assert state["http_calls"] == 1
+    assert state["updates"] == ["success"]

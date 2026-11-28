@@ -255,6 +255,7 @@ def _build_facebook_payload(
     report_event: str,
     report_value: Optional[float],
     report_currency: Optional[str],
+    currency_source: Optional[str] = None,
 ) -> dict:
     """
     构造 Meta Conversions API POST /{pixel_id}/events 的请求 JSON 体。
@@ -303,7 +304,8 @@ def _build_facebook_payload(
     # Meta 要求 Purchase 必须带 value + currency
     # ---------- 条件分支 ----------
     if report_event == "Purchase" and report_value is not None:
-        cur = (report_currency or "USD").strip().upper() or "USD"
+        from app.core.third_party_currency import resolve_currency
+        cur, _currency_source = resolve_currency(report_currency, source=currency_source)
         event_obj["custom_data"] = {"currency": cur, "value": float(report_value)}
 
     # ---------- 构建响应 ----------
@@ -433,9 +435,26 @@ async def create_cloak_config(
     if exists_result.scalars().first():
         raise_api_exception(ErrorCode.VALIDATION_ERROR, detail=f"斗篷名称已存在：{data.cloak_name}")
 
+    if data.postback_report_enabled and data.postback_report_event == "Purchase":
+        if data.postback_report_value is not None and data.postback_report_value <= 0:
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="postback Purchase 固定金额须大于 0，或留空以使用上游 payout",
+            )
+
     _ensure_enabled_requires_bridge_html(data.cloak_name, data.is_enabled)
 
-    config = CloakConfig(**data.model_dump())
+    config_data = data.model_dump()
+    for currency_field in ("report_currency", "load_report_currency", "postback_report_currency"):
+        configured_value = config_data.get(currency_field)
+        if configured_value is None or not str(configured_value).strip():
+            config_data[currency_field] = "USD"
+            config_data[f"{currency_field}_source"] = "system_fallback_usd"
+        else:
+            config_data[f"{currency_field}_source"] = (
+                "manual_override" if currency_field in data.model_fields_set else "system_fallback_usd"
+            )
+    config = CloakConfig(**config_data)
     db.add(config)
     await db.commit()
     await db.refresh(config)
@@ -505,6 +524,14 @@ async def update_cloak_config(
 
     old_cloak_name = config.cloak_name
     update_data = data.model_dump(exclude_unset=True)
+    for currency_field in ("report_currency", "load_report_currency", "postback_report_currency"):
+        if currency_field in update_data:
+            configured_value = update_data[currency_field]
+            if configured_value is None or not str(configured_value).strip():
+                update_data[currency_field] = "USD"
+                update_data[f"{currency_field}_source"] = "system_fallback_usd"
+            else:
+                update_data[f"{currency_field}_source"] = "manual_override"
     # ---------- 条件分支 ----------
     if "cloak_name" in update_data and update_data["cloak_name"] != config.cloak_name:
         duplicate_result = await db.execute(
@@ -738,6 +765,12 @@ async def test_cloak_report(
     phase = test_data.report_phase
     _validate_test_report_phase(config, phase)
     report_event, report_value, report_currency = _resolve_test_report_params(config, phase)
+    currency_source_field = {
+        "click": "report_currency_source",
+        "load": "load_report_currency_source",
+        "postback": "postback_report_currency_source",
+    }[phase]
+    currency_source = getattr(config, currency_source_field, None) or "legacy_unknown"
 
     client_ip = _resolve_real_client_ip(request)
     client_user_agent = _resolve_real_user_agent(request)
@@ -748,6 +781,7 @@ async def test_cloak_report(
         report_event=report_event,
         report_value=report_value,
         report_currency=report_currency,
+        currency_source=currency_source,
     )
     primary_result = await _send_test_report(config.pixel_id, config.access_token, payload)
 

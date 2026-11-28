@@ -12,8 +12,9 @@ import secrets
 from contextlib import asynccontextmanager
 from typing import Optional
 from datetime import datetime, timedelta
+from decimal import Decimal
 
-from sqlalchemy import select, update, or_
+from sqlalchemy import and_, select, update, or_
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -72,6 +73,29 @@ def _app_datetime_to_unix_timestamp(value: datetime) -> int:
     else:
         localized = value.astimezone(APP_TIMEZONE)
     return int(localized.timestamp())
+
+
+def _event_time_to_unix_timestamp(value: Optional[datetime]) -> int:
+    """Meta event_time 仅使用实际事件时间；缺失时使用当前 Unix 时间。"""
+    return _app_datetime_to_unix_timestamp(value) if value is not None else int(time.time())
+
+
+def _build_fbc_value(fbclid: Optional[str], click_time: Optional[datetime]) -> Optional[str]:
+    """只有真实且无歧义的点击时间才能构造 fbc，绝不借用转化接收时间。"""
+    if not fbclid or click_time is None:
+        return None
+    try:
+        if click_time.tzinfo is None:
+            first = click_time.replace(tzinfo=APP_TIMEZONE, fold=0)
+            second = click_time.replace(tzinfo=APP_TIMEZONE, fold=1)
+            if first.utcoffset() != second.utcoffset():
+                return None
+            timestamp = _app_datetime_to_unix_timestamp(click_time)
+        else:
+            timestamp = _app_datetime_to_unix_timestamp(click_time)
+    except (OverflowError, OSError, ValueError):
+        return None
+    return f"fb.1.{timestamp}.{fbclid}"
 
 
 def sha256_hash(value: Optional[str]) -> str:
@@ -1061,19 +1085,8 @@ async def send_third_party_report(
             fb_event_name = event
 
             # event_time 表示转化实际发生时间；click_time 仅用于 fbc 的点击时间戳。
-            occurred_at = event_time or click_time
-            event_timestamp = (
-                _app_datetime_to_unix_timestamp(occurred_at)
-                if occurred_at is not None
-                else int(time.time())
-            )
-
-            # fbc 中段时间必须与 fbclid 产生时的点击时间一致，不能改用转化接收时间。
-            fbc_ts = (
-                _app_datetime_to_unix_timestamp(click_time)
-                if click_time is not None
-                else event_timestamp
-            )
+            event_timestamp = _event_time_to_unix_timestamp(event_time)
+            fbc_value = _build_fbc_value(adsid, click_time)
 
             # 构建用户数据
             user_data = {}
@@ -1092,8 +1105,8 @@ async def send_third_party_report(
             if ua:
                 user_data["client_user_agent"] = ua
 
-            if adsid:
-                user_data["fbc"] = f"fb.1.{fbc_ts}.{adsid}"
+            if fbc_value:
+                user_data["fbc"] = fbc_value
             event_data = {
                 "event_name": fb_event_name,
                 "event_time": event_timestamp,
@@ -1163,9 +1176,11 @@ async def send_third_party_report(
                 logger.debug("[第三方上报] 响应状态: status=%s", response.status_code)
 
                 if response.status_code == 200:
+                    remote_acceptance_confirmed = False
                     try:
                         response_json = response.json()
                         if response_json.get("events_received"):
+                            remote_acceptance_confirmed = True
                             log_id = response_json.get("fbtrace_id", "")
                             report_success_time = get_app_now_naive()
                             logger.info(
@@ -1185,13 +1200,13 @@ async def send_third_party_report(
                             )
                             if not success_persisted:
                                 logger.warning(
-                                    "[第三方上报] 第三方已接收事件，但当前 Worker 租约已失效：report_log_id=%s",
+                                    "[第三方上报] 第三方已接收事件，但本地 ACK 未能确认：report_log_id=%s",
                                     report_log_id,
                                 )
                                 return {
                                     "success": False,
                                     "retryable": True,
-                                    "reason": "report_lease_lost_after_send",
+                                    "reason": "remote_accepted_local_ack_unknown",
                                     "report_log_id": report_log_id,
                                 }
                             
@@ -1232,7 +1247,21 @@ async def send_third_party_report(
                                 response_status=response.status_code,
                                 response_body=None
                             )
-                    except Exception:
+                    except Exception as response_or_persistence_error:
+                        if remote_acceptance_confirmed:
+                            # 远端已明确接收后，任何本地异常都不能进入同轮 POST 重试。
+                            # 状态保持待核对；后续恢复必须先查询远端/人工对账。
+                            logger.error(
+                                "[第三方上报] 远端已接收但本地 ACK 异常，停止本轮发送：report_log_id=%s error_type=%s",
+                                report_log_id,
+                                type(response_or_persistence_error).__name__,
+                            )
+                            return {
+                                "success": False,
+                                "retryable": True,
+                                "reason": "remote_accepted_local_ack_unknown",
+                                "report_log_id": report_log_id,
+                            }
                         error_msg = "第三方响应 JSON 解析失败"
                         failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
                         logger.warning(
@@ -1369,6 +1398,17 @@ async def retry_report_log(log_id: int, db=None):
                 ThirdPartyReportLog.platform.is_not(None),
                 ThirdPartyReportLog.platform != "",
                 ThirdPartyReportLog.status == "failed",
+                # Purchase 人工重试必须继续满足金额与 ISO 4217 币种契约；
+                # 无效财务载荷只能先修正尚未尝试的 Outbox，不能直接重新发送。
+                or_(
+                    ThirdPartyReportLog.event != "Purchase",
+                    and_(
+                        ThirdPartyReportLog.amount.is_not(None),
+                        ThirdPartyReportLog.amount > 0,
+                        ThirdPartyReportLog.amount <= Decimal("999999999999999999.999999"),
+                        ThirdPartyReportLog.currency.op("REGEXP")(r"^[A-Z]{3}$"),
+                    ),
+                ),
                 ThirdPartyReportLog.manual_retry_count < MAX_MANUAL_REPORT_RETRIES,
                 ThirdPartyReportLog.pii_scrubbed_at.is_(None),
                 or_(
