@@ -125,8 +125,8 @@ def log_to_export_row(log: ConversionDeductionLog) -> Dict[str, Any]:
         "扣减数量": log_response.deducted_volume or 0,
         "最终数量": log_response.final_volume or 0,
         "扣量比例": f"{(log_response.volume_deduction_ratio or 0) * 100:.2f}%",
-        "币种": log_response.currency or "USD",
-        "币种来源": log_response.currency_source or "legacy_unknown",
+        "币种": log_response.currency if log_response.currency else "LEGACY_UNKNOWN",
+        "币种来源": log_response.currency_source if log_response.currency_source else "legacy_unknown",
         "原始金额": f"{_format_amount(log_response.original_amount)} {log_response.currency or 'USD'}",
         "扣减金额": f"{_format_amount(log_response.deducted_amount)} {log_response.currency or 'USD'}",
         "最终金额": f"{_format_amount(log_response.final_amount)} {log_response.currency or 'USD'}",
@@ -150,8 +150,11 @@ def stats_to_export_rows(stats: DeductionStatsResponse) -> List[Dict[str, Any]]:
     data = [
         {
             "类型": "汇总",
-            "币种": "多币种" if stats.original_amount is None else (
-                stats.currency_summaries[0].get("currency", "USD") if stats.currency_summaries else "USD"
+            "币种": "多来源/多币种" if stats.original_amount is None else (
+                stats.currency_summaries[0].currency if stats.currency_summaries else "LEGACY_UNKNOWN"
+            ),
+            "币种来源": "多来源" if stats.original_amount is None else (
+                stats.currency_summaries[0].currency_source if stats.currency_summaries else "legacy_unknown"
             ),
             "原始转化数量": stats.original_volume,
             "扣减转化数量": stats.deducted_volume,
@@ -164,31 +167,35 @@ def stats_to_export_rows(stats: DeductionStatsResponse) -> List[Dict[str, Any]]:
         }
     ]
     for summary in stats.currency_summaries:
-        currency = summary.get("currency", "USD")
+        currency = summary.currency
+        currency_source = summary.currency_source
         data.append({
             "类型": "币种汇总",
             "币种": currency,
-            "原始转化数量": summary.get("original_volume", 0),
-            "扣减转化数量": summary.get("deducted_volume", 0),
-            "最终转化数量": summary.get("final_volume", 0),
+            "币种来源": currency_source,
+            "原始转化数量": summary.original_volume,
+            "扣减转化数量": summary.deducted_volume,
+            "最终转化数量": summary.final_volume,
             "扣量比例": "",
-            "原始转化金额": f"{_format_amount(summary.get('original_amount', 0))} {currency}",
-            "扣减转化金额": f"{_format_amount(summary.get('deducted_amount', 0))} {currency}",
-            "最终转化金额": f"{_format_amount(summary.get('final_amount', 0))} {currency}",
-            "扣金额比例": f"{summary.get('amount_deduction_ratio', 0) * 100:.2f}%",
+            "原始转化金额": f"{_format_amount(summary.original_amount)} {currency}",
+            "扣减转化金额": f"{_format_amount(summary.deducted_amount)} {currency}",
+            "最终转化金额": f"{_format_amount(summary.final_amount)} {currency}",
+            "扣金额比例": f"{summary.amount_deduction_ratio * 100:.2f}%",
         })
     for item in stats.items:
-        currency = item.get("currency", "USD")
+        currency = item.currency
+        currency_source = item.currency_source
         data.append({
-            "类型": item.get("name", "分组明细"),
+            "类型": item.advertiser_id or item.offer_id or item.publisher_id or "分组明细",
             "币种": currency,
-            "原始转化数量": item.get("original_volume", 0),
-            "扣减转化数量": item.get("deducted_volume", 0),
-            "最终转化数量": item.get("final_volume", 0),
-            "扣量比例": f"{(item.get('volume_deduction_ratio', 0) * 100):.2f}%",
-            "原始转化金额": f"{_format_amount(item.get('original_amount', 0))} {currency}",
-            "扣减转化金额": f"{_format_amount(item.get('deducted_amount', 0))} {currency}",
-            "最终转化金额": f"{_format_amount(item.get('final_amount', 0))} {currency}",
-            "扣金额比例": f"{(item.get('amount_deduction_ratio', 0) * 100):.2f}%",
+            "币种来源": currency_source,
+            "原始转化数量": item.original_volume,
+            "扣减转化数量": item.deducted_volume,
+            "最终转化数量": item.final_volume,
+            "扣量比例": f"{(item.volume_deduction_ratio * 100):.2f}%",
+            "原始转化金额": f"{_format_amount(item.original_amount)} {currency}",
+            "扣减转化金额": f"{_format_amount(item.deducted_amount)} {currency}",
+            "最终转化金额": f"{_format_amount(item.final_amount)} {currency}",
+            "扣金额比例": f"{(item.amount_deduction_ratio * 100):.2f}%",
         })
     return data
