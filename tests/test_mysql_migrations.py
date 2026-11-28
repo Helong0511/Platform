@@ -202,7 +202,7 @@ def test_cpl_scope_restrict_migration_rejects_wrong_local_fk_column():
                 ") ENGINE=InnoDB"
             )
 
-            with pytest.raises(pymysql.err.OperationalError) as migration_error:
+            with pytest.raises(pymysql.err.ProgrammingError) as migration_error:
                 _run_sql_file(
                     cursor,
                     "sql/migrations/20261125_cpl_deduction_scope_restrict_fks.sql",
