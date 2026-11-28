@@ -16,7 +16,9 @@ UNKNOWN_CURRENCY = "LEGACY_UNKNOWN"
 UNKNOWN_CURRENCY_SOURCE = "legacy_unknown"
 
 
-def _normalized_currency(value: Optional[str]) -> str:
+def _normalized_currency(value: Optional[str], source: Optional[str] = None) -> str:
+    if _normalized_currency_source(source) == UNKNOWN_CURRENCY_SOURCE:
+        return UNKNOWN_CURRENCY
     return str(value).strip().upper() if value and str(value).strip() else UNKNOWN_CURRENCY
 
 
@@ -100,7 +102,7 @@ class DeductionStatsQuery:
             deducted_volume += row_deducted_volume
             final_volume += row_final_volume
             currency_summaries.append({
-                "currency": _normalized_currency(row.currency),
+                "currency": _normalized_currency(row.currency, row.currency_source),
                 "currency_source": _normalized_currency_source(row.currency_source),
                 "original_amount": row_original_amount,
                 "deducted_amount": row_deducted_amount,
