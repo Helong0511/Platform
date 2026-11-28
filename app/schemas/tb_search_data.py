@@ -37,6 +37,26 @@ class TBSearchDataBase(BaseSchema):
         "rpm",
         "revenue_before_deduct",
         "rpm_before_deduct",
+        mode="before",
+    )
+    @classmethod
+    def reject_non_finite_raw_amounts(cls, value):
+        """在 Pydantic Decimal 解析前拦截 NaN/Infinity，并返回稳定中文错误。"""
+        if value is None:
+            return value
+        try:
+            parsed = Decimal(str(value))
+        except Exception:
+            return value
+        if not parsed.is_finite():
+            raise ValueError("金额和 RPM 必须是有限数字")
+        return value
+
+    @field_validator(
+        "revenue",
+        "rpm",
+        "revenue_before_deduct",
+        "rpm_before_deduct",
     )
     @classmethod
     def validate_finite_amounts(
