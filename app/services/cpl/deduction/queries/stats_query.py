@@ -8,6 +8,7 @@ from sqlalchemy import and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.utils import get_app_now_naive
 from app.models.models import ConversionDeductionLog
 
 
@@ -75,15 +76,17 @@ class DeductionStatsQuery:
         start_date: Optional[str],
         end_date: Optional[str],
     ) -> tuple[datetime, datetime]:
+        # 数据库业务时间使用应用时区的 naive datetime，不能依赖服务器系统时区。
+        app_now = get_app_now_naive()
         if start_date:
             start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         else:
-            start_dt = datetime.now() - timedelta(days=30)
+            start_dt = app_now - timedelta(days=30)
 
         if end_date:
             end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
         else:
-            end_dt = datetime.now()
+            end_dt = app_now
         return start_dt, end_dt
 
     def _build_conditions(
