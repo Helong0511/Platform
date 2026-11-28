@@ -113,6 +113,12 @@ def log_to_export_row(log: ConversionDeductionLog) -> Dict[str, Any]:
         log_response.deduction_strategy,
         log_response.deduction_strategy or "",
     )
+    currency_source = (log_response.currency_source or "legacy_unknown").strip().lower()
+    currency = (
+        "LEGACY_UNKNOWN"
+        if currency_source == "legacy_unknown" or not log_response.currency
+        else log_response.currency.strip().upper()
+    )
     return {
         "日志ID": log_response.id,
         "转化ID": log_response.conversion_id if log_response.conversion_id else "已扣量",
@@ -125,11 +131,11 @@ def log_to_export_row(log: ConversionDeductionLog) -> Dict[str, Any]:
         "扣减数量": log_response.deducted_volume or 0,
         "最终数量": log_response.final_volume or 0,
         "扣量比例": f"{(log_response.volume_deduction_ratio or 0) * 100:.2f}%",
-        "币种": log_response.currency if log_response.currency else "LEGACY_UNKNOWN",
-        "币种来源": log_response.currency_source if log_response.currency_source else "legacy_unknown",
-        "原始金额": f"{_format_amount(log_response.original_amount)} {log_response.currency or 'LEGACY_UNKNOWN'}",
-        "扣减金额": f"{_format_amount(log_response.deducted_amount)} {log_response.currency or 'LEGACY_UNKNOWN'}",
-        "最终金额": f"{_format_amount(log_response.final_amount)} {log_response.currency or 'LEGACY_UNKNOWN'}",
+        "币种": currency,
+        "币种来源": currency_source,
+        "原始金额": f"{_format_amount(log_response.original_amount)} {currency}",
+        "扣减金额": f"{_format_amount(log_response.deducted_amount)} {currency}",
+        "最终金额": f"{_format_amount(log_response.final_amount)} {currency}",
         "扣金额比例": f"{(log_response.amount_deduction_ratio or 0) * 100:.2f}%",
         "扣减原因": log_response.deduction_reason or "",
         "创建时间": str(log_response.created_at) if log_response.created_at else "",
