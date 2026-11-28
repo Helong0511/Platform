@@ -25,4 +25,3 @@ def test_datetime_encoder_attaches_configured_timezone_to_naive_value():
     expected = value.replace(tzinfo=APP_TIMEZONE).isoformat()
 
     assert encoded == expected
-    assert encoded.endswith(value.replace(tzinfo=APP_TIMEZONE).strftime("%:z"))
