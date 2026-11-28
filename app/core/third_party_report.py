@@ -1176,9 +1176,11 @@ async def send_third_party_report(
                 logger.debug("[第三方上报] 响应状态: status=%s", response.status_code)
 
                 if response.status_code == 200:
+                    remote_acceptance_confirmed = False
                     try:
                         response_json = response.json()
                         if response_json.get("events_received"):
+                            remote_acceptance_confirmed = True
                             log_id = response_json.get("fbtrace_id", "")
                             report_success_time = get_app_now_naive()
                             logger.info(
@@ -1198,13 +1200,13 @@ async def send_third_party_report(
                             )
                             if not success_persisted:
                                 logger.warning(
-                                    "[第三方上报] 第三方已接收事件，但当前 Worker 租约已失效：report_log_id=%s",
+                                    "[第三方上报] 第三方已接收事件，但本地 ACK 未能确认：report_log_id=%s",
                                     report_log_id,
                                 )
                                 return {
                                     "success": False,
                                     "retryable": True,
-                                    "reason": "report_lease_lost_after_send",
+                                    "reason": "remote_accepted_local_ack_unknown",
                                     "report_log_id": report_log_id,
                                 }
                             
@@ -1245,7 +1247,21 @@ async def send_third_party_report(
                                 response_status=response.status_code,
                                 response_body=None
                             )
-                    except Exception:
+                    except Exception as response_or_persistence_error:
+                        if remote_acceptance_confirmed:
+                            # 远端已明确接收后，任何本地异常都不能进入同轮 POST 重试。
+                            # 状态保持待核对；后续恢复必须先查询远端/人工对账。
+                            logger.error(
+                                "[第三方上报] 远端已接收但本地 ACK 异常，停止本轮发送：report_log_id=%s error_type=%s",
+                                report_log_id,
+                                type(response_or_persistence_error).__name__,
+                            )
+                            return {
+                                "success": False,
+                                "retryable": True,
+                                "reason": "remote_accepted_local_ack_unknown",
+                                "report_log_id": report_log_id,
+                            }
                         error_msg = "第三方响应 JSON 解析失败"
                         failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
                         logger.warning(
