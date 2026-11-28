@@ -21,7 +21,7 @@ import ipaddress
 import math
 from decimal import Decimal, ROUND_DOWN
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from typing import Any, Optional
 from fastapi import Request
@@ -33,26 +33,6 @@ from app.core.constants import PERCENTAGE_MULTIPLIER
 # 应用时区配置（从统一配置读取）
 
 APP_TIMEZONE = ZoneInfo(settings.TIMEZONE)
-
-
-def localize_app_datetime(value: datetime, tz: ZoneInfo = APP_TIMEZONE) -> datetime:
-    """将 naive DATETIME 严格解释为指定 IANA 时区；拒绝 DST 不存在/歧义时间。"""
-    if value.tzinfo is not None:
-        return value.astimezone(tz)
-
-    first = value.replace(tzinfo=tz, fold=0)
-    second = value.replace(tzinfo=tz, fold=1)
-    first_roundtrip = (
-        first.astimezone(timezone.utc).astimezone(tz).replace(tzinfo=None)
-    )
-    second_roundtrip = (
-        second.astimezone(timezone.utc).astimezone(tz).replace(tzinfo=None)
-    )
-    if first_roundtrip != value or second_roundtrip != value:
-        raise ValueError("naive DATETIME 落在时区夏令时跳跃区间内，不存在对应本地时间")
-    if first.utcoffset() != second.utcoffset():
-        raise ValueError("naive DATETIME 落在时区夏令时回拨区间内，无法唯一确定时间")
-    return first
 
 
 def get_app_now_sql_expression(offset_seconds: int = 0):
@@ -220,29 +200,18 @@ def truncate_to_2_decimal(value: float | int | str | Decimal | None) -> Decimal:
 def apply_deduct_ratio(
     amount: float | int | str | Decimal | None,
     deduct_ratio: float | int | str | Decimal | None,
-    *,
-    truncate_places: int | None = 2,
 ) -> Decimal:
     """
-    按产品扣减比例计算扣后值。
+    按产品扣减比例计算扣后金额。
 
-    默认兼容既有业务：发生扣减时向下截断到两位小数。
-    对币种尚未完成归因的导入链路，可传 None 保留完整 Decimal 精度，
-    避免在未知币种小数位规则下擅自截断；最终精度由字段/迁移约束决定。
+    扣减比例为 0 时保留原始金额的全部小数位；有扣减时截断到两位小数（不四舍五入）。
+    使用 Decimal 运算避免 float 精度误差。
     """
     value = Decimal(str(amount or 0))
     ratio = Decimal(str(deduct_ratio or 0))
-    if not value.is_finite() or not ratio.is_finite():
-        raise ValueError("金额和扣减比例必须是有限 Decimal")
     if ratio <= 0:
         return value
-    result = value * (1 - ratio)
-    if truncate_places is None:
-        return result
-    if truncate_places < 0:
-        raise ValueError("truncate_places 不能小于 0")
-    quantum = Decimal(1).scaleb(-truncate_places)
-    return result.quantize(quantum, rounding=ROUND_DOWN)
+    return truncate_to_2_decimal(value * (1 - ratio))
 
 
 def get_date_range(date_obj: datetime | Any) -> tuple[datetime, datetime]:
@@ -310,16 +279,6 @@ def get_app_now_naive() -> datetime:
         datetime: 应用时区的当前时间（naive，不带时区信息）
     """
     return datetime.now(APP_TIMEZONE).replace(tzinfo=None)
-
-
-def get_app_now_naive_floor_second() -> datetime:
-    """
-    获取应用时区当前时间并向下截断到整秒。
-
-    MySQL DATETIME 默认精度为秒；向上舍入会让刚提交的事件在同一秒内
-    暂时落到统计窗口未来端点之外，导致后续同 scope 决策漏计。
-    """
-    return get_app_now_naive().replace(microsecond=0)
 
 
 def parse_date_to_app_timezone(date_str: str, is_end_date: bool = False) -> datetime:
@@ -451,6 +410,7 @@ async def get_user_name_by_id(
     if not user_id:
         return f"{default_prefix}_None"
     
+    from sqlalchemy.future import select
     from app.models.models import User
     
     try:
