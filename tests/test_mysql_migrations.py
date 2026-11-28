@@ -117,6 +117,65 @@ def _index_columns(cursor, table_name: str, index_name: str) -> list[str]:
 
 
 
+
+def test_cpl_scope_restrict_migration_converts_exact_scope_fks_and_is_repeatable():
+    """只将三条准确的 scope 外键改为 RESTRICT，重复执行保持相同结构。"""
+    connection = _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS conversion_deduction_configs")
+            cursor.execute("DROP TABLE IF EXISTS advertisers")
+            cursor.execute("DROP TABLE IF EXISTS offers")
+            cursor.execute("DROP TABLE IF EXISTS publishers")
+            for table in ("advertisers", "offers", "publishers"):
+                cursor.execute(
+                    f"CREATE TABLE `{table}` (id INT NOT NULL PRIMARY KEY) "
+                    "ENGINE=InnoDB"
+                )
+            cursor.execute(
+                "CREATE TABLE conversion_deduction_configs ("
+                "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "advertiser_id INT NULL, offer_id INT NULL, publisher_id INT NULL, "
+                "KEY idx_cpl_advertiser (advertiser_id), "
+                "KEY idx_cpl_offer (offer_id), KEY idx_cpl_publisher (publisher_id), "
+                "CONSTRAINT fk_test_cpl_advertiser FOREIGN KEY (advertiser_id) "
+                "REFERENCES advertisers(id) ON DELETE CASCADE ON UPDATE RESTRICT, "
+                "CONSTRAINT fk_test_cpl_offer FOREIGN KEY (offer_id) "
+                "REFERENCES offers(id) ON DELETE CASCADE ON UPDATE RESTRICT, "
+                "CONSTRAINT fk_test_cpl_publisher FOREIGN KEY (publisher_id) "
+                "REFERENCES publishers(id) ON DELETE CASCADE ON UPDATE RESTRICT"
+                ") ENGINE=InnoDB"
+            )
+
+            migration = "sql/migrations/20261125_cpl_deduction_scope_restrict_fks.sql"
+            _run_sql_file(cursor, migration)
+            _run_sql_file(cursor, migration)
+
+            cursor.execute(
+                "SELECT k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, r.DELETE_RULE, r.UPDATE_RULE "
+                "FROM information_schema.KEY_COLUMN_USAGE k "
+                "JOIN information_schema.REFERENTIAL_CONSTRAINTS r "
+                "ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA "
+                "AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME AND r.TABLE_NAME = k.TABLE_NAME "
+                "WHERE k.CONSTRAINT_SCHEMA = DATABASE() "
+                "AND k.TABLE_NAME = 'conversion_deduction_configs' "
+                "AND k.REFERENCED_TABLE_NAME IS NOT NULL "
+                "ORDER BY k.COLUMN_NAME"
+            )
+            assert cursor.fetchall() == (
+                ("advertiser_id", "advertisers", "RESTRICT", "RESTRICT"),
+                ("offer_id", "offers", "RESTRICT", "RESTRICT"),
+                ("publisher_id", "publishers", "RESTRICT", "RESTRICT"),
+            )
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS conversion_deduction_configs")
+            cursor.execute("DROP TABLE IF EXISTS advertisers")
+            cursor.execute("DROP TABLE IF EXISTS offers")
+            cursor.execute("DROP TABLE IF EXISTS publishers")
+        connection.close()
+
+
 def test_cpl_scope_restrict_migration_rejects_wrong_local_fk_column():
     """同一父表的错误列外键不能被当作 scope 外键，更不能被静默替换。"""
     connection = _connect()
