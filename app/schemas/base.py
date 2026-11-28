@@ -27,8 +27,8 @@ def datetime_encoder(v: datetime) -> str:
     - 如果没有时区信息，假设是应用时区（用于时间戳字段）
     """
     if v.tzinfo is None:
-        # naive datetime 须用 localize，replace(tzinfo=) 在 pytz 下会得到错误的 +08:06 偏移
-        v = APP_TIMEZONE.localize(v)
+        # 标准库 ZoneInfo 可直接附加应用时区，避免 pytz 的历史 LMT 偏移问题。
+        v = v.replace(tzinfo=APP_TIMEZONE)
     return v.isoformat()
 
 

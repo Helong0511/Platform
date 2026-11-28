@@ -68,7 +68,7 @@ def _app_datetime_to_unix_timestamp(value: datetime) -> int:
     """将应用时区 naive DATETIME 或 aware datetime 转为 Unix 秒时间戳。"""
     if value.tzinfo is None:
         # 数据库 DATETIME 按应用时区存储；不能依赖运行主机的 TZ 环境变量。
-        localized = APP_TIMEZONE.localize(value, is_dst=None)
+        localized = value.replace(tzinfo=APP_TIMEZONE)
     else:
         localized = value.astimezone(APP_TIMEZONE)
     return int(localized.timestamp())

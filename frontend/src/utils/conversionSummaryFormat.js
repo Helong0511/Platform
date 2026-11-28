@@ -51,8 +51,17 @@ function toSafeCsvCell(value, protectFormula = false) {
   let text = value === null || value === undefined ? '' : String(value);
   // 只对非可信文本字段防公式注入，不能把负数金额等合法数值变成文本。
   // 检查前导空白/控制字符后是否为电子表格公式前缀。
-  const formulaPrefix = /^[\u0000-\u0020]*[=+\-@]/;
-  if (protectFormula && formulaPrefix.test(text)) {
+  let firstNonControlIndex = 0;
+  while (
+    firstNonControlIndex < text.length
+    && text.charCodeAt(firstNonControlIndex) <= 0x20
+  ) {
+    firstNonControlIndex += 1;
+  }
+  const startsWithFormulaPrefix = ['=', '+', '-', '@'].includes(
+    text[firstNonControlIndex],
+  );
+  if (protectFormula && startsWithFormulaPrefix) {
     text = `'${text}`;
   }
   // CSV 标准要求字段内双引号写成两个双引号；统一引用所有字段以处理逗号/换行。

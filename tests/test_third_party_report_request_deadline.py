@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 def test_naive_datetime_timestamp_uses_application_timezone():
     value = datetime(2026, 11, 11, 10, 0, 0)
-    expected = int(third_party_report.APP_TIMEZONE.localize(value).timestamp())
+    expected = int(value.replace(tzinfo=third_party_report.APP_TIMEZONE).timestamp())
     assert third_party_report._app_datetime_to_unix_timestamp(value) == expected
 
 
