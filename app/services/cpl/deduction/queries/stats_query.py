@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, Optional
 
-from sqlalchemy import and_, func
+from sqlalchemy import and_, case, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -22,6 +22,30 @@ def _normalized_currency(value: Optional[str]) -> str:
 
 def _normalized_currency_source(value: Optional[str]) -> str:
     return str(value).strip().lower() if value and str(value).strip() else UNKNOWN_CURRENCY_SOURCE
+
+
+def _currency_group_expressions():
+    """未知来源的历史 USD 结构默认值不得被统计成真实 USD。"""
+    source_expr = func.lower(
+        func.trim(
+            func.coalesce(
+                func.nullif(ConversionDeductionLog.currency_source, ""),
+                UNKNOWN_CURRENCY_SOURCE,
+            )
+        )
+    )
+    currency_expr = case(
+        (source_expr == UNKNOWN_CURRENCY_SOURCE, UNKNOWN_CURRENCY),
+        else_=func.upper(
+            func.trim(
+                func.coalesce(
+                    func.nullif(ConversionDeductionLog.currency, ""),
+                    UNKNOWN_CURRENCY,
+                )
+            )
+        ),
+    )
+    return currency_expr, source_expr
 
 
 class DeductionStatsQuery:
@@ -44,11 +68,12 @@ class DeductionStatsQuery:
             start_dt, end_dt, advertiser_id, offer_id, publisher_id
         )
 
+        currency_expr, currency_source_expr = _currency_group_expressions()
         currency_rows = (
             await self.db.execute(
                 select(
-                    func.upper(func.trim(func.coalesce(func.nullif(ConversionDeductionLog.currency, ""), UNKNOWN_CURRENCY))).label("currency"),
-                    func.lower(func.trim(func.coalesce(func.nullif(ConversionDeductionLog.currency_source, ""), UNKNOWN_CURRENCY_SOURCE))).label("currency_source"),
+                    currency_expr.label("currency"),
+                    currency_source_expr.label("currency_source"),
                     func.sum(ConversionDeductionLog.original_volume).label("original_volume"),
                     func.sum(ConversionDeductionLog.deducted_volume).label("deducted_volume"),
                     func.sum(ConversionDeductionLog.final_volume).label("final_volume"),
@@ -57,10 +82,7 @@ class DeductionStatsQuery:
                     func.sum(ConversionDeductionLog.final_amount).label("final_amount"),
                 )
                 .where(and_(*conditions))
-                .group_by(
-                    func.upper(func.trim(func.coalesce(func.nullif(ConversionDeductionLog.currency, ""), UNKNOWN_CURRENCY))),
-                    func.lower(func.trim(func.coalesce(func.nullif(ConversionDeductionLog.currency_source, ""), UNKNOWN_CURRENCY_SOURCE))),
-                )
+                .group_by(currency_expr, currency_source_expr)
                 .order_by("currency", "currency_source")
             )
         ).all()
@@ -170,9 +192,10 @@ class DeductionStatsQuery:
             group_fields = [ConversionDeductionLog.publisher_id]
         if not group_fields:
             return []
+        currency_expr, currency_source_expr = _currency_group_expressions()
         group_fields.extend([
-            func.upper(func.trim(func.coalesce(func.nullif(ConversionDeductionLog.currency, ""), UNKNOWN_CURRENCY))).label("currency"),
-            func.lower(func.trim(func.coalesce(func.nullif(ConversionDeductionLog.currency_source, ""), UNKNOWN_CURRENCY_SOURCE))).label("currency_source"),
+            currency_expr.label("currency"),
+            currency_source_expr.label("currency_source"),
         ])
 
         group_result = await self.db.execute(
