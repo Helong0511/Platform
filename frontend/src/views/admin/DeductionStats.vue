@@ -210,7 +210,8 @@
       <div v-if="stats.currency_summaries?.length" class="table-section">
         <h3>分币种金额统计</h3>
         <el-table :data="stats.currency_summaries" stripe>
-          <el-table-column prop="currency" label="币种" width="100" />
+          <el-table-column prop="currency" label="币种" width="110" />
+          <el-table-column prop="currency_source" label="币种来源" min-width="160" />
           <el-table-column label="原始金额" align="right">
             <template #default="scope">{{ formatCurrency(scope.row.original_amount, scope.row.currency) }}</template>
           </el-table-column>
@@ -279,7 +280,8 @@
           <el-table-column prop="advertiser_name" label="广告主" min-width="150" show-overflow-tooltip />
           <el-table-column prop="offer_name" label="Offer" min-width="150" show-overflow-tooltip />
           <el-table-column prop="publisher_name" label="渠道" min-width="150" show-overflow-tooltip />
-          <el-table-column prop="currency" label="币种" width="90" align="center" />
+          <el-table-column prop="currency" label="币种" width="100" align="center" />
+          <el-table-column prop="currency_source" label="币种来源" min-width="150" align="center" />
           <el-table-column label="扣量统计" align="center">
             <el-table-column prop="original_volume" label="原始数量" width="100" align="right">
               <template #default="scope">
