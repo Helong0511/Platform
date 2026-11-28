@@ -50,7 +50,7 @@ export function buildConversionTableSummaries(param, summaryData, isAdmin) {
 function toSafeCsvCell(value) {
   let text = value === null || value === undefined ? '' : String(value);
   // Excel 可能忽略公式前的空白/控制字符；在原始内容最前面加文本标记。
-  const formulaPrefix = /^[\\u0000-\\u0020]*[=+\\-@]/;
+  const formulaPrefix = /^[\u0000-\u0020]*[=+\-@]/;
   if (formulaPrefix.test(text)) {
     text = `'${text}`;
   }
