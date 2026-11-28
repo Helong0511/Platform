@@ -1772,7 +1772,7 @@ async def get_click_sync_ledger_health(db: AsyncSession = Depends(get_db)):
         if value.tzinfo is not None:
             value = value.astimezone(APP_TIMEZONE)
         else:
-            value = APP_TIMEZONE.localize(value)
+            value = value.replace(tzinfo=APP_TIMEZONE)
         return value.isoformat()
 
     cleanup_status = cleanup_state.status if cleanup_state is not None else "unknown"
