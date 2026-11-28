@@ -91,6 +91,7 @@ class ThirdPartyReportLogListResponse(BaseSchema):
     destination_pixel_id: Optional[str] = Field(None, max_length=100, description="Meta Pixel 目的地 ID")
     conversion_id: Optional[str] = Field(None, max_length=255, description="转化ID")
     currency: Optional[str] = Field(None, max_length=10, description="货币类型")
+    currency_source: Optional[str] = Field(None, max_length=100, description="币种来源归因")
     amount: Optional[Decimal] = Field(None, description="支付金额")
     use_hash: bool = Field(True, description="是否对email、ip、phone进行哈希处理")
     status: str = Field(..., max_length=20, description="状态")
