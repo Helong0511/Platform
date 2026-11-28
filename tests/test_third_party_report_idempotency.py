@@ -1964,3 +1964,72 @@ def test_fbc_is_omitted_when_click_time_is_dst_ambiguous():
         ) is None
     finally:
         third_party_report.APP_TIMEZONE = original_timezone
+
+
+async def test_remote_acceptance_with_local_success_ack_exception_never_reposts_same_round(monkeypatch):
+    """远端已确认接收后，本地 success ACK 异常必须终止本轮，HTTP POST 只能一次。"""
+    state = {"http_calls": 0, "updates": []}
+
+    class Response:
+        status_code = 200
+        text = '{"events_received":1,"fbtrace_id":"trace-ack-unknown"}'
+
+        @staticmethod
+        def json():
+            return {"events_received": 1, "fbtrace_id": "trace-ack-unknown"}
+
+    class FakeHTTPClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            state["http_calls"] += 1
+            return Response()
+
+    async def existing_log(**kwargs):
+        return 941
+
+    async def claimed(report_log_id, **kwargs):
+        return "lease-941"
+
+    async def renew_claimed_lease(report_log_id, lease_token, **kwargs):
+        return lease_token
+
+    async def fail_local_ack(report_log_id, **kwargs):
+        state["updates"].append(kwargs.get("status"))
+        if kwargs.get("status") == "success":
+            raise RuntimeError("simulated database ACK failure")
+        return True
+
+    monkeypatch.setattr(third_party_report, "create_report_log", existing_log)
+    monkeypatch.setattr(third_party_report, "_claim_report_log", claimed)
+    monkeypatch.setattr(third_party_report, "_renew_report_log_lease", renew_claimed_lease)
+    monkeypatch.setattr(third_party_report, "update_report_log", fail_local_ack)
+    monkeypatch.setattr(third_party_report.httpx, "AsyncClient", FakeHTTPClient)
+
+    result = await third_party_report.send_third_party_report(
+        adsid="ack-unknown-click",
+        event="Lead",
+        email=None,
+        ip=None,
+        phone=None,
+        ua=None,
+        facebook_pixel_id="pixel-ack-unknown",
+        facebook_access_token="token-ack-unknown",
+        source="short_link",
+    )
+
+    assert result == {
+        "success": False,
+        "retryable": True,
+        "reason": "remote_accepted_local_ack_unknown",
+        "report_log_id": 941,
+    }
+    assert state["http_calls"] == 1
+    assert state["updates"] == ["success"]
