@@ -1038,7 +1038,7 @@ async def test_remote_acceptance_with_swallowed_db_ack_failure_reuses_event_id(m
     first = await third_party_report.send_third_party_report(**common)
     assert first["success"] is False
     assert first["retryable"] is True
-    assert first["reason"] == "report_lease_lost_after_send"
+    assert first["reason"] == "remote_accepted_local_ack_unknown"
     assert state["status"] == "pending"
 
     # 模拟租约到期后 worker 恢复；数据库仍未确认第一次发送成功。
@@ -2032,4 +2032,4 @@ async def test_remote_acceptance_with_local_success_ack_exception_never_reposts_
         "report_log_id": 941,
     }
     assert state["http_calls"] == 1
-    assert state["updates"] == ["success"]
+    assert state["updates"] == [None, "success"]
