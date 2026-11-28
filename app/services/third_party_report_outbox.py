@@ -422,7 +422,7 @@ async def process_postback_report_outbox_item(report_log_id: int) -> dict:
             "source": row.source,
             "use_hash": row.use_hash,
             "currency": row.currency,
-            "currency_source": row.currency_source,
+            "currency_source": getattr(row, "currency_source", None) or "legacy_unknown",
             "amount": row.amount,
             "click_time": row.click_time,
             "created_at": getattr(row, "created_at", None) or get_app_now_naive(),
