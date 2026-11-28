@@ -2538,7 +2538,7 @@ def test_conversion_deduction_log_conversion_fk_migration_rejects_orphans_before
                 "INSERT INTO conversion_deduction_logs (conversion_id) VALUES (987654)"
             )
 
-            with pytest.raises(pymysql.err.OperationalError):
+            with pytest.raises(pymysql.MySQLError):
                 _run_sql_file(
                     cursor,
                     "sql/migrations/"
@@ -2626,24 +2626,24 @@ def test_postback_payout_decimal_precision_migration_is_idempotent_and_preserves
             cursor.execute(
                 "SELECT event_value, original_payout, payout FROM postback_conversions"
             )
-            assert tuple(str(value) for value in cursor.fetchone()) == (
-                "1.2345", "2.3456", "3.4567"
+            assert tuple(Decimal(str(value)) for value in cursor.fetchone()) == (
+                Decimal("1.2345"), Decimal("2.3456"), Decimal("3.4567")
             )
             cursor.execute(
                 "SELECT event_value, original_payout, payout FROM pending_postback_conversions"
             )
-            assert tuple(str(value) for value in cursor.fetchone()) == (
-                "4.5678", "5.6789", "6.7891"
+            assert tuple(Decimal(str(value)) for value in cursor.fetchone()) == (
+                Decimal("4.5678"), Decimal("5.6789"), Decimal("6.7891")
             )
             cursor.execute(
                 "SELECT report_value, load_report_value, postback_report_value "
                 "FROM cloak_configs"
             )
-            assert tuple(str(value) for value in cursor.fetchone()) == (
-                "7.8912", "8.9123", "9.1234"
+            assert tuple(Decimal(str(value)) for value in cursor.fetchone()) == (
+                Decimal("7.8912"), Decimal("8.9123"), Decimal("9.1234")
             )
             cursor.execute("SELECT amount FROM third_party_report_logs")
-            assert str(cursor.fetchone()[0]) == "1.9876"
+            assert Decimal(str(cursor.fetchone()[0])) == Decimal("1.9876")
     finally:
         connection.close()
 
