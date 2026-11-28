@@ -74,6 +74,29 @@ def _app_datetime_to_unix_timestamp(value: datetime) -> int:
     return int(localized.timestamp())
 
 
+def _event_time_to_unix_timestamp(value: Optional[datetime]) -> int:
+    """Meta event_time 仅使用实际事件时间；缺失时使用当前 Unix 时间。"""
+    return _app_datetime_to_unix_timestamp(value) if value is not None else int(time.time())
+
+
+def _build_fbc_value(fbclid: Optional[str], click_time: Optional[datetime]) -> Optional[str]:
+    """只有真实且无歧义的点击时间才能构造 fbc，绝不借用转化接收时间。"""
+    if not fbclid or click_time is None:
+        return None
+    try:
+        if click_time.tzinfo is None:
+            first = click_time.replace(tzinfo=APP_TIMEZONE, fold=0)
+            second = click_time.replace(tzinfo=APP_TIMEZONE, fold=1)
+            if first.utcoffset() != second.utcoffset():
+                return None
+            timestamp = _app_datetime_to_unix_timestamp(click_time)
+        else:
+            timestamp = _app_datetime_to_unix_timestamp(click_time)
+    except (OverflowError, OSError, ValueError):
+        return None
+    return f"fb.1.{timestamp}.{fbclid}"
+
+
 def sha256_hash(value: Optional[str]) -> str:
     """
     对字符串进行 SHA256 哈希处理
@@ -1061,19 +1084,8 @@ async def send_third_party_report(
             fb_event_name = event
 
             # event_time 表示转化实际发生时间；click_time 仅用于 fbc 的点击时间戳。
-            occurred_at = event_time or click_time
-            event_timestamp = (
-                _app_datetime_to_unix_timestamp(occurred_at)
-                if occurred_at is not None
-                else int(time.time())
-            )
-
-            # fbc 中段时间必须与 fbclid 产生时的点击时间一致，不能改用转化接收时间。
-            fbc_ts = (
-                _app_datetime_to_unix_timestamp(click_time)
-                if click_time is not None
-                else event_timestamp
-            )
+            event_timestamp = _event_time_to_unix_timestamp(event_time)
+            fbc_value = _build_fbc_value(adsid, click_time)
 
             # 构建用户数据
             user_data = {}
@@ -1092,8 +1104,8 @@ async def send_third_party_report(
             if ua:
                 user_data["client_user_agent"] = ua
 
-            if adsid:
-                user_data["fbc"] = f"fb.1.{fbc_ts}.{adsid}"
+            if fbc_value:
+                user_data["fbc"] = fbc_value
             event_data = {
                 "event_name": fb_event_name,
                 "event_time": event_timestamp,
