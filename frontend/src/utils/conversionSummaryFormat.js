@@ -47,13 +47,15 @@ export function buildConversionTableSummaries(param, summaryData, isAdmin) {
  * 将字段安全编码为 CSV 单元格，并防止非可信文本被电子表格解释为公式。
  * CSV 双引号转义与公式注入防护是两件事，必须同时处理。
  */
-function toSafeCsvCell(value) {
+function toSafeCsvCell(value, protectFormula = false) {
   let text = value === null || value === undefined ? '' : String(value);
-  // Excel 可能忽略公式前的空白/控制字符；在原始内容最前面加文本标记。
+  // 只对非可信文本字段防公式注入，不能把负数金额等合法数值变成文本。
+  // 检查前导空白/控制字符后是否为电子表格公式前缀。
   const formulaPrefix = /^[\u0000-\u0020]*[=+\-@]/;
-  if (formulaPrefix.test(text)) {
+  if (protectFormula && formulaPrefix.test(text)) {
     text = `'${text}`;
   }
+  // CSV 标准要求字段内双引号写成两个双引号；统一引用所有字段以处理逗号/换行。
   return `"${text.replace(/"/g, '""')}"`;
 }
 
@@ -95,7 +97,7 @@ export function exportConversionStatsCsv(statsList, isAdmin) {
         isAdmin ? (row.adv_po ?? 0).toFixed(2) : '',
         (row.pub_po ?? 0).toFixed(2),
         row.geo ?? '',
-      ].map(toSafeCsvCell).join(','),
+      ].map((value, index) => toSafeCsvCell(value, [1, 2, 3, 12].includes(index))).join(','),
     );
   });
   const bom = '\ufeff';
